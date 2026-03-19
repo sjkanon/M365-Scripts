@@ -22,11 +22,19 @@ jobs:
           token: ${{ secrets.PAT_GITHUB }}
 
       - name: Sync with upstream
+        env:
+          PAT: ${{ secrets.PAT_GITHUB }}
         run: |
           git config user.name "github@first.eu"
           git config user.email "github@first.eu"
+
+          # Point origin to fork using PAT explicitly
+          git remote set-url origin https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
+
+          # Fetch from upstream (sjkanon source)
           git remote add upstream https://github.com/sjkanon/M365-Scripts.git
           git fetch upstream
+
           git checkout main
           git merge upstream/main --ff-only
-          git push https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/${{ github.repository }}.git main
+          git push origin main
