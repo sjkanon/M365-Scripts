@@ -7,7 +7,7 @@
 
 ## Achtergrond en probleemstelling
 
-Best Next Contact gebruikt **Adversus**, een cloud dialer die via de browser werkt. Medewerkers hoorden achtergrondgeluid tijdens gesprekken terwijl ze een headset (EPOS IMPACT DW / Yealink) ingeplugd hadden.
+Klant gebruikt **Tool X**, een cloud dialer die via de browser werkt. Medewerkers hoorden achtergrondgeluid tijdens gesprekken terwijl ze een headset (EPOS IMPACT DW / Yealink) ingeplugd hadden.
 
 De oorzaak: Windows selecteert soms de **interne laptopmicrofoon** als audiobron in plaats van de headset, ook als de headset correct ingeplugd is. Dit gedrag treedt op in browsergebaseerde applicaties omdat de browser zelf de audiobron kiest op basis van Windows-instellingen, niet op basis van wat de gebruiker verwacht.
 
@@ -83,7 +83,7 @@ Het script maakt een volledige inventaris van alle audio devices op de laptop en
 1. Ga naar NinjaOne → **Administration** → **Library** → **Scripting**
 2. Klik op **Add** → **Script**
 3. Vul in:
-   - **Name**: `BNC - Detect Audio Devices`
+   - **Name**: `KLANT - Detect Audio Devices`
    - **Language**: PowerShell
    - **Operating System**: Windows
    - **Architecture**: 64-bit
@@ -95,10 +95,10 @@ Het script maakt een volledige inventaris van alle audio devices op de laptop en
 #### Script uitrollen op alle laptops
 
 1. Ga naar NinjaOne → **Devices**
-2. Filter op organisatie: **Best Next Contact**
+2. Filter op organisatie: **KLANT**
 3. Selecteer alle Windows laptops (checkboxes)
 4. Klik op **Run Script** (boven in de toolbar)
-5. Kies het script: `BNC - Detect Audio Devices`
+5. Kies het script: `KLANT - Detect Audio Devices`
 6. Klik **Run**
 
 #### Output lezen per laptop
@@ -110,7 +110,7 @@ Het script maakt een volledige inventaris van alle audio devices op de laptop en
 
 Of via overzicht:
 1. NinjaOne → **Administration** → **Activity Log**
-2. Filter op **Script**: `BNC - Detect Audio Devices`
+2. Filter op **Script**: `KLANT - Detect Audio Devices`
 3. Klik per device op **Details** om de output te lezen
 
 #### Resultaten verzamelen
@@ -119,9 +119,9 @@ Maak een eenvoudige tabel van de output per laptop:
 
 | Laptop | Gebruiker | Interne microfoon naam | Headset naam | ConsentStore status |
 |---|---|---|---|---|
-| LAPTOP-001 | Dean | Microfoon (Realtek Audio) | EPOS IMPACT DW | Allow |
-| LAPTOP-002 | Ilias | ... | ... | ... |
-| LAPTOP-003 | Salwa | ... | ... | ... |
+| LAPTOP-001 | Gebruiker 1 | Microfoon (Realtek Audio) | EPOS IMPACT DW | Allow |
+| LAPTOP-002 | Gebruiker 2 | ... | ... | ... |
+| LAPTOP-003 | Gebruiker 5 | ... | ... | ... |
 
 Op basis van deze tabel bepalen we het correcte naampatroon voor het disable script.
 
@@ -131,7 +131,7 @@ De output per laptop ziet er zo uit:
 
 ```
 === AUDIO DEVICE INVENTORY ===
-Hostname   : LAPTOP-BNC-001
+Hostname   : LAPTOP-001
 Datum      : 19/03/2026 09:00:00
 
 --- MICROFOONS (capture devices - 0.0.1) ---
@@ -190,8 +190,8 @@ Op basis van de detect output wordt een disable script gebouwd dat:
 
 ```
 scripts/
-└── audio/
-    └── best-next-contact/
+└── device/
+    └── audio/
         ├── Detect-AudioDevices.ps1     ← fase 1 (dit script)
         ├── Disable-InternalMic.ps1     ← fase 2 (nog te schrijven)
         └── README.md
