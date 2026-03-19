@@ -425,14 +425,15 @@ if ($PSCmdlet.ShouldProcess($DestinationEmail, "Permissies instellen")) {
     if ($DestinationType -eq "Room") {
         # AutoAccept alleen van toepassing op Room Mailboxes
         Set-CalendarProcessing `
-            -Identity              $DestinationEmail `
-            -AutomateProcessing    AutoAccept `
-            -AllowConflicts        $true `
-            -AddOrganizerToSubject $false `
-            -DeleteComments        $false `
-            -DeleteSubject         $false `
-            -BookingWindowInDays   730
-        Write-OK "AutoAccept ingesteld (overlappende verloven toegestaan)"
+            -Identity                  $DestinationEmail `
+            -AutomateProcessing        AutoAccept `
+            -AllowConflicts            $true `
+            -AddOrganizerToSubject     $false `
+            -DeleteComments            $false `
+            -DeleteSubject             $false `
+            -BookingWindowInDays       730 `
+            -MaximumDurationInMinutes  0
+        Write-OK "AutoAccept ingesteld (overlappende verloven toegestaan, geen duurlimiet)"
     } else {
         Write-OK "Shared Mailbox: AutoAccept niet van toepassing"
         Write-Host "    Gebruikers voegen de kalender handmatig toe via Add calendar > Add from directory" -ForegroundColor DarkGray
