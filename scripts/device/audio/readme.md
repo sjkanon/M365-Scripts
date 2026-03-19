@@ -1,7 +1,6 @@
 # Detect-AudioDevices.ps1
 
 > **BraveHub Internal Script**
-> Ticket: #0250981 | Klant: Best Next Contact BVBA
 > Auteur: Sjoerd Kanon | Datum: 19/03/2026
 
 ---
