@@ -431,7 +431,7 @@ if ($PSCmdlet.ShouldProcess($DestinationEmail, "Permissies instellen")) {
             -AddOrganizerToSubject     $false `
             -DeleteComments            $false `
             -DeleteSubject             $false `
-            -BookingWindowInDays       730 `
+            -BookingWindowInDays       0 `
             -MaximumDurationInMinutes  0
         Write-OK "AutoAccept ingesteld (overlappende verloven toegestaan, geen duurlimiet)"
     } else {
