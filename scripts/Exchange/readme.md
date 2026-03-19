@@ -180,14 +180,33 @@ Het script toont aan het einde de `ClientId` en `ClientSecret`. **Sla deze op in
 | `ClientId` | Nee | `""` | AppId van bestaande App Registration. Leeg = automatisch aanmaken |
 | `ClientSecret` | Nee | `""` | Client Secret. Leeg = automatisch aanmaken |
 | `AppName` | Nee | `BraveHub-HolidaysCalendarMigration` | Naam van de App Registration |
-| `SourceGroupMail` | Nee | `holidays@onco3r.com` | E-mail van de bestaande M365 Group |
-| `SourceGroupDisplayName` | Nee | `Holidays` | DisplayName van de M365 Group (fallback) |
-| `RoomDisplayName` | Nee | `Holidays Calendar` | Weergavenaam van de nieuwe Room Mailbox |
-| `RoomAlias` | Nee | `holidays-calendar` | Alias (moet uniek zijn in de tenant) |
-| `RoomEmail` | Nee | `holidays-calendar@onco3r.com` | SMTP-adres van de nieuwe Room Mailbox |
+| `SourceGroupMail` | Nee | `holidays@onco3r.com` | E-mail van de source M365 Group kalender |
+| `SourceGroupDisplayName` | Nee | `Holidays` | DisplayName van de source M365 Group (fallback) |
+| `DestinationType` | Nee | `Room` | Type destination mailbox: `Room` of `Shared` (zie uitleg hieronder) |
+| `DestinationDisplayName` | Nee | `Holidays Calendar` | Weergavenaam van de destination mailbox |
+| `DestinationAlias` | Nee | `holidays-calendar` | Alias van de destination mailbox (moet uniek zijn) |
+| `DestinationEmail` | Nee | `holidays-calendar@onco3r.com` | SMTP-adres van de destination mailbox |
 | `DaysBack` | Nee | `365` | Dagen terug voor afspraken ophalen |
 | `DaysForward` | Nee | `730` | Dagen vooruit voor afspraken ophalen |
 | `DeleteSourceGroup` | Nee | `$false` | M365 Group verwijderen na migratie |
+
+### DestinationType: Room vs Shared
+
+| | Room Mailbox | Shared Mailbox |
+|---|---|---|
+| **Hoe boeken** | Attendee toevoegen aan afspraak (zoals vergaderzaal) | Afspraak aanmaken vanuit de gedeelde kalender zelf |
+| **AutoAccept** | ✅ Automatisch goedgekeurd | ❌ Niet van toepassing |
+| **Notificaties** | ❌ Geen | ❌ Geen |
+| **Zichtbaar voor iedereen** | ✅ Via directory | ✅ Via directory |
+| **Aanbevolen voor verlof** | ✅ | ⚠️ Minder intuïtief |
+
+```powershell
+# Room Mailbox (default, aanbevolen)
+.\Migrate-HolidaysCalendar.ps1 -DestinationType "Room" ...
+
+# Shared Mailbox
+.\Migrate-HolidaysCalendar.ps1 -DestinationType "Shared" ...
+```
 
 ### Tenant ID opzoeken
 
@@ -245,7 +264,7 @@ Als de groep wél bestaat maar niet gevonden wordt via delegated access, is de a
 
 **M365 Admin Center → Groups → Active groups → Holidays → Members → Add members**
 
-### Room Mailbox alias conflict
+### Destination mailbox alias conflict
 
 ```
 New-Mailbox: The alias 'holidays-calendar' is already in use.
@@ -253,8 +272,8 @@ New-Mailbox: The alias 'holidays-calendar' is already in use.
 
 ```powershell
 .\Migrate-HolidaysCalendar.ps1 `
-    -RoomAlias "verlof-kalender" `
-    -RoomEmail "verlof-kalender@onco3r.com"
+    -DestinationAlias "verlof-kalender" `
+    -DestinationEmail "verlof-kalender@onco3r.com"
 ```
 
 ### Graph 403 op groepskalender
@@ -310,3 +329,4 @@ scripts/
 | 19/03/2026 | 1.4 | Dual-auth flow: delegated lezen + app auth schrijven |
 | 19/03/2026 | 1.5 | Fix read-only `$IsWindows`/`$IsMacOS`/`$IsLinux` variabelen |
 | 19/03/2026 | 1.6 | Fix `Get-MgGroupCalendarEvent` 403 via module reload tussen verbindingen |
+| 19/03/2026 | 1.7 | Hernoemd naar Source/Destination, ondersteuning voor Room en Shared Mailbox als destination |

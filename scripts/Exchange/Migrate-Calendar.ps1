@@ -115,21 +115,28 @@ param(
     [string]$AppName = "BraveHub-HolidaysCalendarMigration",
 
     # Bestaande M365 Group
+    # Source: bestaande M365 Group kalender
     [Parameter(Mandatory = $false)]
     [string]$SourceGroupMail = "holidays@onco3r.com",
 
     [Parameter(Mandatory = $false)]
     [string]$SourceGroupDisplayName = "Holidays",
 
-    # Nieuwe Room Mailbox
+    # Destination: type mailbox aanmaken
+    # "Room"   = Resource/Room Mailbox (aanbevolen - werkt als vergaderzaal, geen notificaties)
+    # "Shared" = Shared Mailbox (gebruikers voegen kalender handmatig toe, geen boekingssysteem)
     [Parameter(Mandatory = $false)]
-    [string]$RoomDisplayName = "Holidays Calendar",
+    [ValidateSet("Room", "Shared")]
+    [string]$DestinationType = "Room",
 
     [Parameter(Mandatory = $false)]
-    [string]$RoomAlias = "holidays-calendar",
+    [string]$DestinationDisplayName = "Holidays Calendar",
 
     [Parameter(Mandatory = $false)]
-    [string]$RoomEmail = "holidays-calendar@onco3r.com",
+    [string]$DestinationAlias = "holidays-calendar",
+
+    [Parameter(Mandatory = $false)]
+    [string]$DestinationEmail = "holidays-calendar@onco3r.com",
 
     # Migratie tijdsvenster
     [Parameter(Mandatory = $false)]
@@ -373,20 +380,29 @@ try {
 
 #region Stap 6: Room Mailbox aanmaken
 
-Write-Step "Room Mailbox controleren / aanmaken: $RoomEmail"
+Write-Step "Room Mailbox controleren / aanmaken: $DestinationEmail"
 
-$existingRoom = Get-Mailbox -Identity $RoomEmail -ErrorAction SilentlyContinue
+$existingRoom = Get-Mailbox -Identity $DestinationEmail -ErrorAction SilentlyContinue
 
 if ($existingRoom) {
-    Write-Warn "Mailbox '$RoomEmail' bestaat al - stap overgeslagen"
+    Write-Warn "Mailbox '$DestinationEmail' bestaat al - stap overgeslagen"
 } else {
-    if ($PSCmdlet.ShouldProcess($RoomEmail, "Room Mailbox aanmaken")) {
-        New-Mailbox `
-            -Name               $RoomDisplayName `
-            -Alias              $RoomAlias `
-            -PrimarySmtpAddress $RoomEmail `
-            -Room | Out-Null
-        Write-OK "Room Mailbox aangemaakt: $RoomDisplayName ($RoomEmail)"
+    if ($PSCmdlet.ShouldProcess($DestinationEmail, "$DestinationType Mailbox aanmaken")) {
+        if ($DestinationType -eq "Room") {
+            New-Mailbox `
+                -Name               $DestinationDisplayName `
+                -Alias              $DestinationAlias `
+                -PrimarySmtpAddress $DestinationEmail `
+                -Room | Out-Null
+            Write-OK "Room Mailbox aangemaakt: $DestinationDisplayName ($DestinationEmail)"
+        } else {
+            New-Mailbox `
+                -Name               $DestinationDisplayName `
+                -Alias              $DestinationAlias `
+                -PrimarySmtpAddress $DestinationEmail `
+                -Shared | Out-Null
+            Write-OK "Shared Mailbox aangemaakt: $DestinationDisplayName ($DestinationEmail)"
+        }
         Write-Host "    Wachten 15s op Exchange initialisatie..." -ForegroundColor DarkGray
         Start-Sleep -Seconds 15
     }
@@ -396,25 +412,31 @@ if ($existingRoom) {
 
 #region Stap 7: Permissies en AutoAccept
 
-Write-Step "Kalender permissies instellen op $RoomEmail"
+Write-Step "Kalender permissies instellen op $DestinationEmail"
 
-if ($PSCmdlet.ShouldProcess($RoomEmail, "Permissies instellen")) {
+if ($PSCmdlet.ShouldProcess($DestinationEmail, "Permissies instellen")) {
     Set-MailboxFolderPermission `
-        -Identity     "$($RoomEmail):\Calendar" `
+        -Identity     "$($DestinationEmail):\Calendar" `
         -User         Default `
         -AccessRights Reviewer `
         -ErrorAction  SilentlyContinue
     Write-OK "Default gebruikers: Reviewer (lezen met details)"
 
-    Set-CalendarProcessing `
-        -Identity              $RoomEmail `
-        -AutomateProcessing    AutoAccept `
-        -AllowConflicts        $true `
-        -AddOrganizerToSubject $false `
-        -DeleteComments        $false `
-        -DeleteSubject         $false `
-        -BookingWindowInDays   730
-    Write-OK "AutoAccept ingesteld (overlappende verloven toegestaan)"
+    if ($DestinationType -eq "Room") {
+        # AutoAccept alleen van toepassing op Room Mailboxes
+        Set-CalendarProcessing `
+            -Identity              $DestinationEmail `
+            -AutomateProcessing    AutoAccept `
+            -AllowConflicts        $true `
+            -AddOrganizerToSubject $false `
+            -DeleteComments        $false `
+            -DeleteSubject         $false `
+            -BookingWindowInDays   730
+        Write-OK "AutoAccept ingesteld (overlappende verloven toegestaan)"
+    } else {
+        Write-OK "Shared Mailbox: AutoAccept niet van toepassing"
+        Write-Host "    Gebruikers voegen de kalender handmatig toe via Add calendar > Add from directory" -ForegroundColor DarkGray
+    }
 }
 
 #endregion
@@ -546,7 +568,7 @@ foreach ($event in $events) {
         continue
     }
 
-    if ($PSCmdlet.ShouldProcess($event.Subject, "Event kopieren naar $RoomEmail")) {
+    if ($PSCmdlet.ShouldProcess($event.Subject, "Event kopieren naar $DestinationEmail")) {
         try {
             $tz = if ($event.Start.TimeZone) { $event.Start.TimeZone } else { "Europe/Brussels" }
 
@@ -562,7 +584,7 @@ foreach ($event in $events) {
                 }
             }
 
-            New-MgUserEvent -UserId $RoomEmail -BodyParameter $params | Out-Null
+            New-MgUserEvent -UserId $DestinationEmail -BodyParameter $params | Out-Null
             Write-Host "    [+] $($event.Subject) | $($event.Start.DateTime)" -ForegroundColor DarkGreen
             $successCount++
         } catch {
@@ -604,21 +626,31 @@ Write-Host " SAMENVATTING  -  Ticket 0298048  -  Onco3R Holidays migratie" -Fore
 Write-Host $line -ForegroundColor Cyan
 Write-Host "  Platform            : $(if ($runOnWindows) { 'Windows' } elseif ($runOnMacOS) { 'macOS' } else { 'Linux' })"
 Write-Host "  App Registration    : $ClientId"
-Write-Host "  Nieuwe Room Mailbox : $RoomEmail"
+Write-Host "  Source kalender     : $SourceGroupMail (M365 Group)"
+Write-Host "  Destination type    : $DestinationType Mailbox"
+Write-Host "  Destination mailbox : $DestinationEmail"
 Write-Host "  Afspraken gekopieerd: $successCount"
 Write-Host "  Overgeslagen        : $skippedCount (geannuleerd)"
 Write-Host "  Mislukt             : $failCount"
 Write-Host ""
-Write-Host " HOE VERLOF BOEKEN (uitleg voor eindgebruikers):" -ForegroundColor Yellow
-Write-Host "  1. Maak een afspraak in Outlook (All day, status = Out of office)"
-Write-Host "  2. Voeg '$RoomEmail' toe als attendee (zoals een vergaderzaal)"
-Write-Host "  3. Opslaan - boeking wordt automatisch goedgekeurd"
-Write-Host "  4. Afspraak verschijnt op de gedeelde Holidays Calendar"
-Write-Host ""
 Write-Host " KALENDER TOEVOEGEN IN OUTLOOK (eenmalig per gebruiker):" -ForegroundColor Yellow
 Write-Host "  1. Calendar > Add calendar > Add from directory"
-Write-Host "  2. Zoek: '$RoomDisplayName' of '$RoomEmail'"
+Write-Host "  2. Zoek: '$DestinationDisplayName' of '$DestinationEmail'"
 Write-Host "  3. Toevoegen - daarna altijd zichtbaar onder People's calendars"
+Write-Host ""
+if ($DestinationType -eq "Room") {
+    Write-Host " HOE VERLOF BOEKEN - Room Mailbox:" -ForegroundColor Yellow
+    Write-Host "  1. Maak een afspraak in Outlook (All day, status = Out of office)"
+    Write-Host "  2. Voeg '$DestinationEmail' toe als attendee (zoals een vergaderzaal)"
+    Write-Host "  3. Opslaan - boeking wordt automatisch goedgekeurd"
+    Write-Host "  4. Afspraak verschijnt op de gedeelde kalender voor iedereen"
+} else {
+    Write-Host " HOE VERLOF BOEKEN - Shared Mailbox:" -ForegroundColor Yellow
+    Write-Host "  1. Maak een afspraak in Outlook (All day, status = Out of office)"
+    Write-Host "  2. Sla op in de gedeelde kalender '$DestinationDisplayName'"
+    Write-Host "     (klik op het kalender-icoontje naast je naam en kies '$DestinationDisplayName')"
+    Write-Host "  3. Afspraak verschijnt op de gedeelde kalender voor iedereen"
+}
 Write-Host $line -ForegroundColor Cyan
 
 Disconnect-ExchangeOnline -Confirm:$false
