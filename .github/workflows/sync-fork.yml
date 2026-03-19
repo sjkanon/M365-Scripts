@@ -5,6 +5,12 @@ on:
     - cron: '0 6 * * *'   # Daily at 06:00 UTC
   workflow_dispatch:        # Allow manual trigger
 
+permissions:
+  contents: write           # Required to push back to the fork
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -17,6 +23,8 @@ jobs:
 
       - name: Sync with upstream
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/sjkanon/M365-Scripts.git
           git fetch upstream
           git checkout main
