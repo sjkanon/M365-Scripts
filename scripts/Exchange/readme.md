@@ -190,6 +190,22 @@ Het script toont aan het einde de `ClientId` en `ClientSecret`. **Sla deze op in
 | `DaysForward` | Nee | `730` | Dagen vooruit voor afspraken ophalen |
 | `DeleteSourceGroup` | Nee | `$false` | M365 Group verwijderen na migratie |
 
+### CalendarProcessing instellingen (Room Mailbox)
+
+Het script stelt de volgende instellingen in op de Room Mailbox:
+
+| Instelling | Waarde | Toelichting |
+|---|---|---|
+| `AutomateProcessing` | `AutoAccept` | Boekingen automatisch goedkeuren |
+| `AllowConflicts` | `$true` | Meerdere mensen mogen dezelfde dag boeken |
+| `MaximumDurationInMinutes` | `0` | Geen duurlimiet (standaard 1440 = 1 dag, te kort voor meerdaags verlof) |
+| `BookingWindowInDays` | `0` | Onbeperkt ver vooruit boeken |
+| `AddOrganizerToSubject` | `$false` | Naam organisator niet toevoegen aan onderwerp |
+| `DeleteComments` | `$false` | Opmerkingen behouden |
+| `DeleteSubject` | `$false` | Onderwerp behouden |
+
+> **Let op:** de standaard `MaximumDurationInMinutes` van 1440 (= 24 uur) zorgt ervoor dat meerdaagse verlofboekingen geweigerd worden met de melding *"This resource doesn't accept meetings longer than 1440 minutes."* Daarom wordt dit expliciet op `0` gezet.
+
 ### DestinationType: Room vs Shared
 
 | | Room Mailbox | Shared Mailbox |
@@ -330,3 +346,4 @@ scripts/
 | 19/03/2026 | 1.5 | Fix read-only `$IsWindows`/`$IsMacOS`/`$IsLinux` variabelen |
 | 19/03/2026 | 1.6 | Fix `Get-MgGroupCalendarEvent` 403 via module reload tussen verbindingen |
 | 19/03/2026 | 1.7 | Hernoemd naar Source/Destination, ondersteuning voor Room en Shared Mailbox als destination |
+| 19/03/2026 | 1.8 | MaximumDurationInMinutes en BookingWindowInDays ingesteld op 0 (onbeperkt) |
