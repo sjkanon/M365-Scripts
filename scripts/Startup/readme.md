@@ -7,12 +7,9 @@ Onderdeel van de [M365-Scripts](../../readme.md) repository.
 
 ## Bestanden
 
-| Bestand | Status | Omschrijving |
-|---|---|---|
-| `functies.ps1` | ✅ Actief | Volledige functiebibliotheek — dot-source dit bestand bij opstarten |
-| `f-gettenant2.ps1` | ⛔ Deprecated | Vervangen door `Connect-Tenant` in `functies.ps1` — zie opmerking hieronder |
-
-> **Beveiligingsopmerking `f-gettenant2.ps1`:** dit bestand bevat hardcoded `client_id`, `client_secret` en `tenant_id` in plaintext. Als het ooit in git history heeft gestaan, roteer die credentials direct via **Entra ID → App Registrations → Certificates & secrets**.
+| Bestand | Omschrijving |
+|---|---|
+| `functies.ps1` | Volledige functiebibliotheek — dot-source dit bestand bij opstarten |
 
 ---
 
