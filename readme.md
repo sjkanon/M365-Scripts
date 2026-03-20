@@ -31,6 +31,11 @@ Scripts for managing audio device configuration on endpoints.
 - Disable internal microphone via policy
 - Rollback internal mic changes
 
+### ⏱️ Custom Scripts — Device / Time Sync
+Scripts for managing Windows time synchronization.
+
+- Restart and force Windows Time service sync
+
 ### 🖼️ Custom Scripts — Intune / Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
 
@@ -45,14 +50,14 @@ Run the bootstrap script once to install and import all required modules across 
 
 ```powershell
 # Windows / macOS / Linux
-.\scripts\Install-Modules.ps1
+.\scripts\Startup\Install-Modules.ps1
 ```
 
 Optional flags:
 
 ```powershell
-.\scripts\Install-Modules.ps1 -Force              # Reinstall even if already present
-.\scripts\Install-Modules.ps1 -Scope AllUsers     # Install for all users (requires elevation)
+.\scripts\Startup\Install-Modules.ps1 -Force              # Reinstall even if already present
+.\scripts\Startup\Install-Modules.ps1 -Scope AllUsers     # Install for all users (requires elevation)
 ```
 
 The script detects the current platform and skips Windows-only modules (`AzureAD`, `WindowsAutopilotIntune`) automatically on macOS and Linux.
@@ -89,13 +94,14 @@ M365-Scripts/
 ├── .vscode/
 │   └── settings.json
 ├── scripts/
-│   ├── Install-Modules.ps1              ← Bootstrap: install & import all modules
 │   ├── Custom Scripts/
-│   │   ├── device/audio/
-│   │   │   ├── detect-audiodevices.ps1
-│   │   │   ├── Disable-internalmic.ps1
-│   │   │   ├── Rollback-InternalMic
-│   │   │   └── readme.md
+│   │   ├── device/
+│   │   │   ├── audio/
+│   │   │   │   ├── detect-audiodevices.ps1
+│   │   │   │   ├── Disable-internalmic.ps1
+│   │   │   │   └── readme.md
+│   │   │   └── Time sync/
+│   │   │       └── Restart-Time-Sync.ps1
 │   │   └── Intune/Desktop/
 │   │       ├── Add Lockscreen to start and desktop/
 │   │       └── Background/
@@ -103,9 +109,13 @@ M365-Scripts/
 │   │   ├── Migrate-Calendar.ps1
 │   │   ├── Set-Calendar-rights.ps1
 │   │   └── readme.md
-│   └── Intune/Get-Autopilot/
-│       ├── Get-WindowsAutoPilotInfo.ps1
-│       └── GetAutoPilot.CMD
+│   ├── Intune/Get-Autopilot/
+│   │   ├── Get-WindowsAutoPilotInfo.ps1
+│   │   └── GetAutoPilot.CMD
+│   └── Startup/
+│       ├── functies.ps1                 ← Function library: dot-source at startup
+│       ├── Install-Modules.ps1          ← Bootstrap: install & import all modules
+│       └── readme.md
 └── readme.md
 ```
 
@@ -132,6 +142,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Moved `Install-Modules.ps1` to `scripts/Startup/`; added `Restart-Time-Sync.ps1` |
 | 2026-03-20 | Translated all readme files to English |
 | 2026-03-20 | Rewrote `functies.ps1` — replaced MSOnline/AzureAD with Microsoft Graph, made generic and cross-platform |
 | 2026-03-20 | Added `scripts/Startup/readme.md` |
