@@ -36,6 +36,12 @@ Scripts for managing Windows time synchronization.
 
 - Restart and force Windows Time service sync
 
+### 🧪 Testing Scripts — SMTP
+Scripts for diagnosing SMTP connectivity and authentication.
+
+- One-time SMTP test with interactive credential prompt
+- Recurring SMTP test (every 5 minutes) with saved encrypted password
+
 ### 🖼️ Custom Scripts — Intune / Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
 
@@ -115,6 +121,10 @@ M365-Scripts/
 │   ├── Intune/Get-Autopilot/
 │   │   ├── Get-WindowsAutoPilotInfo.ps1
 │   │   └── GetAutoPilot.CMD
+│   ├── Testing Scripts/SMTP/
+│   │   ├── testsmtp.ps1
+│   │   ├── testsmtp_5min.ps1
+│   │   └── readme.md
 │   └── Startup/
 │       ├── functies.ps1                 ← Function library: dot-source at startup
 │       ├── Install-Modules.ps1          ← Bootstrap: install & import all modules
@@ -145,6 +155,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Added `Test-SmtpRelay` to `functies.ps1` |
+| 2026-03-20 | SMTP scripts v2.1 — cross-platform (Windows: saved DPAPI file, macOS/Linux: prompt once) |
+| 2026-03-20 | Added SMTP test scripts — `testsmtp.ps1` and `testsmtp_5min.ps1` with `param()`, `System.Net.Mail.SmtpClient` |
 | 2026-03-20 | Rewrote `Set-CorporateWallpaper.ps1` to v2.0 — English, `Invoke-WebRequest`, `#Requires -Version 5.1`, generic CDN URL |
 | 2026-03-20 | Added `Set-CorporateWallpaper.ps1` with Intune deployment via PersonalizationCSP |
 | 2026-03-20 | Moved `Install-Modules.ps1` to `scripts/Startup/`; added `Restart-Time-Sync.ps1` |

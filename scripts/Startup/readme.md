@@ -66,6 +66,12 @@ Connect-Tenant -Domain "customer.com"
 | `Test-ExoConnection` | Checks / restores the Exchange Online connection for the selected customer |
 | `Invoke-Menu` | Interactive menu to load service modules (EXO, Entra, Teams, Intune) |
 
+### SMTP Testing
+
+| Function | Description |
+|---|---|
+| `Test-SmtpRelay` | Sends a test email via SMTP — prompts for credentials, supports shared mailbox via `-AuthAs` |
+
 ### Exchange Online
 
 | Function | Description |
