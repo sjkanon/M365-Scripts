@@ -1,36 +1,52 @@
-# SMTP Server Configuration
-$SMTPServer = "smtp.office365.com"  # Adjust if using a different server
-$SMTPPort = 587
+#Requires -Version 5.1
+# ==============================================================================
+# testsmtp.ps1
+# One-time SMTP connectivity test — prompts for credentials interactively.
+#
+# Usage:
+#   .\testsmtp.ps1
+#   Prompts for password at runtime — no credentials stored on disk.
+# ==============================================================================
 
-# Email Configuration
-$From = "smtp-auth0@vias.be"
-$To = "sjoerd.kanon@first.eu"
-$Subject = "Test Email from PowerShell"
-$Body = "This is a test email sent from PowerShell using SMTP with STARTTLS"
+# ==============================================================================
+# CONFIGURATION — change these per test
+# ==============================================================================
 
-# Create secure credential prompt
-$Password = Read-Host -AsSecureString "Enter email password"
-$Credential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $From, $Password
+$SMTPServer = "smtp.office365.com"
+$SMTPPort   = 587
 
-# Configure and send the email
-Try {
-    $SMTPMessage = @{
-        From = $From
-        To = $To
-        Subject = $Subject
-        Body = $Body
-        SmtpServer = $SMTPServer
-        Port = $SMTPPort
-        Credential = $Credential
-        UseSSL = $true
-        ErrorAction = 'Stop'
-    }
-    
+$From    = "sender@domain.com"
+$To      = "recipient@domain.com"
+$Subject = "SMTP Test — PowerShell"
+$Body    = "This is a test email sent from PowerShell via SMTP with STARTTLS."
 
-    Send-MailMessage @SMTPMessage
-    Write-Host "Email sent successfully!" -ForegroundColor Green
-}
-Catch {
-    Write-Host "An error occurred while sending the email:" -ForegroundColor Red
+# ==============================================================================
+# SCRIPT
+# ==============================================================================
+
+$Password   = Read-Host -AsSecureString "Enter SMTP password for $From"
+$Credential = New-Object System.Management.Automation.PSCredential($From, $Password)
+
+Write-Host "Connecting to $SMTPServer`:$SMTPPort ..." -ForegroundColor Cyan
+
+try {
+    $smtp = New-Object System.Net.Mail.SmtpClient($SMTPServer, $SMTPPort)
+    $smtp.EnableSsl             = $true
+    $smtp.Credentials          = $Credential.GetNetworkCredential()
+    $smtp.DeliveryMethod       = [System.Net.Mail.SmtpDeliveryMethod]::Network
+
+    $mail         = New-Object System.Net.Mail.MailMessage
+    $mail.From    = $From
+    $mail.To.Add($To)
+    $mail.Subject = $Subject
+    $mail.Body    = $Body
+
+    $smtp.Send($mail)
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') - Email sent successfully to $To" -ForegroundColor Green
+} catch {
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') - Failed to send email:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+} finally {
+    if ($mail) { $mail.Dispose() }
+    if ($smtp) { $smtp.Dispose() }
 }
