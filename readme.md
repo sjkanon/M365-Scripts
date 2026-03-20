@@ -155,6 +155,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Removed all BraveHub references from scripts and readmes |
 | 2026-03-20 | Added `Test-SmtpRelay` to `functies.ps1` |
 | 2026-03-20 | SMTP scripts v2.1 — cross-platform (Windows: saved DPAPI file, macOS/Linux: prompt once) |
 | 2026-03-20 | Added SMTP test scripts — `testsmtp.ps1` and `testsmtp_5min.ps1` with `param()`, `System.Net.Mail.SmtpClient` |
