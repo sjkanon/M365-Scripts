@@ -16,6 +16,7 @@ This repository contains production-ready PowerShell scripts used by engineers t
 Scripts for calendar and mailbox management.
 
 - Calendar migration between users
+- Set calendar folder permissions (NL/FR/EN locale support)
 
 ### 📱 Intune / Autopilot
 Scripts for device enrollment and Autopilot registration.
@@ -100,6 +101,7 @@ M365-Scripts/
 │   │       └── Background/
 │   ├── Exchange/
 │   │   ├── Migrate-Calendar.ps1
+│   │   ├── Set-Calendar-rights.ps1
 │   │   └── readme.md
 │   └── Intune/Get-Autopilot/
 │       ├── Get-WindowsAutoPilotInfo.ps1
@@ -130,6 +132,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Added `Set-Calendar-rights.ps1` with NL/FR/EN locale support |
 | 2026-03-20 | Added `Install-Modules.ps1` cross-platform bootstrap script |
 | 2026-03-20 | Updated readme structure; added device/audio and Intune/Desktop categories |
 | 2026-03-19 | Added Exchange calendar migration script |
