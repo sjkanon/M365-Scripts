@@ -2,7 +2,7 @@
 #Requires -Modules ExchangeOnlineManagement, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Reports, Microsoft.Graph.Applications
 <#
 .NOTES
-    EOO M365 management functies — herschreven naar Microsoft Graph (MSOnline + AzureAD verwijderd).
+    Generieke MSP M365 management functies via Microsoft Graph en Exchange Online.
     Dot-source dit bestand vanuit je profiel of startup script.
 
     Vereist variabelen die door het startup script worden gezet:
@@ -11,6 +11,8 @@
 
     CSP/partner-operaties: gebruik Connect-Tenant om $global:cid en $global:connectmsoldomain te vullen,
     waarna individuele functies verbinding maken met de klant-tenant via Connect-MgGraph -TenantId $cid.
+
+    MSP-specifieke instellingen aanpassen: zie #region Configuratie hieronder.
 #>
 
 #region Startup
