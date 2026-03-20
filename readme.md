@@ -1,6 +1,6 @@
 # M365-Scripts
 
-> A collection of PowerShell scripts for managing Microsoft 365 environments, maintained by [Sjoerd Kanon].
+> A collection of PowerShell scripts for managing Microsoft 365 environments, maintained by Sjoerd Kanon.
 
 ---
 
