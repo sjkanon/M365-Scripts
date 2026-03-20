@@ -4,16 +4,14 @@
     Recurring SMTP test — sends a test email every N minutes until stopped.
 
 .DESCRIPTION
-    Sends a test email on a fixed interval using a saved encrypted password.
-    Useful for sustained relay testing or reproducing intermittent failures.
+    Sends a test email on a fixed interval. Useful for sustained relay testing
+    or reproducing intermittent failures. Stop with Ctrl+C.
 
-    First run — save password to disk (run once):
+    Windows: uses a saved encrypted password file (DPAPI). Save it once:
         Read-Host -AsSecureString "Enter SMTP password" | ConvertFrom-SecureString | Set-Content "$env:USERPROFILE\smtp_test_password.txt"
 
-    Then run the script normally. Stop with Ctrl+C.
-
-    Note: ConvertFrom-SecureString uses Windows DPAPI — the saved file can only
-    be decrypted by the same user on the same machine.
+    macOS / Linux: DPAPI is not available — prompts for password once at startup
+    and keeps it in memory for the session.
 
 .PARAMETER SmtpServer
     SMTP server hostname. Default: smtp.office365.com
@@ -52,33 +50,43 @@
 
 .NOTES
     Author  : Sjoerd Kanon
-    Version : 2.0
+    Version : 2.1
+    Platform: Windows (saved file), macOS/Linux (interactive prompt once)
 #>
 
 [CmdletBinding()]
 param (
-    [string] $SmtpServer       = "smtp.office365.com",
-    [int]    $Port             = 587,
-    [string] $From             = "sender@domain.com",
-    [string] $AuthAs           = "",
-    [string] $To               = "recipient@domain.com",
-    [string] $Subject          = "SMTP Recurring Test — PowerShell",
-    [string] $Body             = "This is a recurring test email sent from PowerShell via SMTP with STARTTLS.",
-    [int]    $IntervalSeconds  = 300,
-    [string] $SavedKeyPath     = "$env:USERPROFILE\smtp_test_password.txt"
+    [string] $SmtpServer      = "smtp.office365.com",
+    [int]    $Port            = 587,
+    [string] $From            = "sender@domain.com",
+    [string] $AuthAs          = "",
+    [string] $To              = "recipient@domain.com",
+    [string] $Subject         = "SMTP Recurring Test — PowerShell",
+    [string] $Body            = "This is a recurring test email sent from PowerShell via SMTP with STARTTLS.",
+    [int]    $IntervalSeconds = 300,
+    [string] $SavedKeyPath    = "$env:USERPROFILE\smtp_test_password.txt"
 )
 
 if (-not $AuthAs) { $AuthAs = $From }
 
-if (-not (Test-Path $SavedKeyPath)) {
-    Write-Host "No saved password found at: $SavedKeyPath" -ForegroundColor Yellow
-    Write-Host "Run this once to save it:" -ForegroundColor Yellow
-    Write-Host "  Read-Host -AsSecureString 'Enter SMTP password' | ConvertFrom-SecureString | Set-Content `"$SavedKeyPath`"" -ForegroundColor Cyan
-    exit 1
+# Platform detection — $IsWindows is undefined in PS5.1 (Windows only), $true in PS6+ on Windows
+$onWindows = ($IsWindows -eq $true) -or ($null -eq (Get-Variable IsWindows -ErrorAction SilentlyContinue).Value)
+
+if ($onWindows) {
+    if (-not (Test-Path $SavedKeyPath)) {
+        Write-Host "No saved password found at: $SavedKeyPath" -ForegroundColor Yellow
+        Write-Host "Run this once to save it:" -ForegroundColor Yellow
+        Write-Host "  Read-Host -AsSecureString 'Enter SMTP password' | ConvertFrom-SecureString | Set-Content `"$SavedKeyPath`"" -ForegroundColor Cyan
+        exit 1
+    }
+    $SecurePassword = Get-Content $SavedKeyPath | ConvertTo-SecureString
+} else {
+    # macOS / Linux — DPAPI not available, prompt once and keep in memory
+    Write-Host "macOS/Linux detected — password will be prompted once and kept in memory." -ForegroundColor Cyan
+    $SecurePassword = Read-Host -AsSecureString "Enter SMTP password for $AuthAs"
 }
 
-$SecurePassword = Get-Content $SavedKeyPath | ConvertTo-SecureString
-$Credential     = New-Object System.Management.Automation.PSCredential($AuthAs, $SecurePassword)
+$Credential = New-Object System.Management.Automation.PSCredential($AuthAs, $SecurePassword)
 
 function Send-TestEmail {
     try {

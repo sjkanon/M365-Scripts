@@ -436,6 +436,59 @@ function Reset-MspAdminPassword {
 
 #endregion
 
+#region SMTP Testing
+
+function Test-SmtpRelay {
+    <#
+    .SYNOPSIS
+        Sends a test email via SMTP to verify relay connectivity and authentication.
+    .EXAMPLE
+        Test-SmtpRelay -From "sender@domain.com" -To "recipient@domain.com"
+    .EXAMPLE
+        Test-SmtpRelay -From "shared@domain.com" -AuthAs "user@domain.com" -To "recipient@domain.com" -SmtpServer "mail.domain.com" -Port 25
+    #>
+    [CmdletBinding()]
+    param (
+        [string] $SmtpServer = "smtp.office365.com",
+        [int]    $Port       = 587,
+        [string] $From       = "sender@domain.com",
+        [string] $AuthAs     = "",
+        [string] $To         = "recipient@domain.com",
+        [string] $Subject    = "SMTP Test — PowerShell",
+        [string] $Body       = "This is a test email sent from PowerShell via SMTP with STARTTLS."
+    )
+
+    if (-not $AuthAs) { $AuthAs = $From }
+
+    $SecurePassword = Read-Host -AsSecureString "Enter SMTP password for $AuthAs"
+    $Credential     = New-Object System.Management.Automation.PSCredential($AuthAs, $SecurePassword)
+
+    Write-Host "Connecting to $SmtpServer`:$Port ..." -ForegroundColor Cyan
+
+    try {
+        $smtp                = New-Object System.Net.Mail.SmtpClient($SmtpServer, $Port)
+        $smtp.EnableSsl      = $true
+        $smtp.Credentials    = $Credential.GetNetworkCredential()
+        $smtp.DeliveryMethod = [System.Net.Mail.SmtpDeliveryMethod]::Network
+
+        $mail         = New-Object System.Net.Mail.MailMessage
+        $mail.From    = $From
+        $mail.To.Add($To)
+        $mail.Subject = $Subject
+        $mail.Body    = $Body
+
+        $smtp.Send($mail)
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') - Email sent successfully to $To" -ForegroundColor Green
+    } catch {
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') - Failed: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        if ($mail) { $mail.Dispose() }
+        if ($smtp) { $smtp.Dispose() }
+    }
+}
+
+#endregion
+
 #region Navigation
 
 function Set-ImportLocation  { Set-Location $env:import }

@@ -64,15 +64,22 @@ $SavedKeyPath    = "$env:USERPROFILE\smtp_test_password.txt"
 
 > Use `$AuthAs` when sending from a shared mailbox: `$From` = shared mailbox address, `$AuthAs` = the user account that has Send As permission.
 
-### First run — save password
+### Platform behaviour
 
-Run this **once** to save the encrypted password to disk, then remove the line:
+| Platform | Credential handling |
+|---|---|
+| **Windows** | Loads from `$SavedKeyPath` (DPAPI encrypted). Save once, runs unattended. |
+| **macOS / Linux** | DPAPI not available — prompts for password once at startup and keeps it in memory for the session. |
+
+### First run on Windows — save password
+
+Run this **once** to save the encrypted password to disk:
 
 ```powershell
 Read-Host -AsSecureString "Enter SMTP password" | ConvertFrom-SecureString | Set-Content "$env:USERPROFILE\smtp_test_password.txt"
 ```
 
-> The saved file uses Windows DPAPI encryption — it can only be decrypted by the same Windows user on the same machine.
+> The saved file uses Windows DPAPI encryption — it can only be decrypted by the same Windows user on the same machine. On macOS/Linux this step is not needed.
 
 ### Usage
 
@@ -114,4 +121,5 @@ Or via the admin portal: **Exchange Admin Center → Mailboxes → [mailbox] →
 
 | Date | Version | Change |
 |---|---|---|
-| 2026-03-20 | 2.0 | Rewritten to English; `System.Net.Mail.SmtpClient` replaces deprecated `Send-MailMessage`; removed hardcoded addresses; added `$AuthAs` for shared mailbox support; `#Requires -Version 5.1` |
+| 2026-03-20 | 2.1 | Cross-platform: Windows uses saved DPAPI file, macOS/Linux prompts once at startup |
+| 2026-03-20 | 2.0 | Rewritten to English; `System.Net.Mail.SmtpClient` replaces deprecated `Send-MailMessage`; removed hardcoded addresses; added `$AuthAs`, `param()`, `#Requires -Version 5.1` |
