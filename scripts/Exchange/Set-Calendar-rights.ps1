@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     Voegt een MailboxFolderPermission toe op de agendasmap van de opgegeven mailbox.
-    Werkt voor zowel Nederlandstalige (\Agenda) als Engelstalige (\Calendar) mailboxen.
+    Werkt voor Nederlandstalige (\Agenda), Franstalige (\Calendrier) en Engelstalige (\Calendar) mailboxen.
+    Geschikt voor Belgische omgevingen met gemengde NL/FR taalinstellingen.
     De standaarddomeinnaam wordt automatisch opgehaald via Exchange Online.
 
 .PARAMETER User
@@ -57,10 +58,11 @@ if (-not $defaultDomain) {
 $userUPN    = "$User@$defaultDomain"
 $targetUPN  = "$TargetMailbox@$defaultDomain"
 
-# Beide paden om locale-varianten (NL/EN) te dekken
+# Alle paden om locale-varianten (NL/FR/EN) te dekken
 $calendarPaths = @(
-    "$targetUPN`:\Agenda",
-    "$targetUPN`:\Calendar"
+    "$targetUPN`:\Agenda",       # Nederlands
+    "$targetUPN`:\Calendrier",   # Frans (België)
+    "$targetUPN`:\Calendar"      # Engels
 )
 
 Write-Verbose "Gebruiker  : $userUPN"
