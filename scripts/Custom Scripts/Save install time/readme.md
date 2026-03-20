@@ -46,14 +46,19 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | Option | Action | Works in OOBE |
 |---|---|---|
 | `1` | Open Device Manager | ✅ |
-| `2` | Autopilot enrollment | ✅ |
-| `3` | Remove hash file + re-run Autopilot | ✅ |
-| `4` | Install `PSWindowsUpdate` module + run `Install-WindowsUpdate -AcceptAll -AutoReboot` | ✅ (needs internet) |
-| `5` | Install PowerShell 7 via `winget` | ✅ (needs internet) |
-| `6` | Enter product key (`slui.exe`) | ✅ |
-| `7` | Restart (5 second delay) | ✅ |
-| `A` | **Do it all** — Autopilot + Windows Update + restart (30s) | ✅ |
+| `2` | Autopilot enrollment — save hash to `compHash.csv` | ✅ |
+| `3` | Remove hash file + re-run Autopilot (save to CSV) | ✅ |
+| `4` | **Autopilot enrollment online** — upload hash directly to Intune | ✅ (needs internet + admin account) |
+| `5` | Windows Update via `PSWindowsUpdate` (`Install-WindowsUpdate -AcceptAll -AutoReboot`) | ✅ (needs internet) |
+| `6` | Install PowerShell 7 via `winget` | ✅ (needs internet) |
+| `7` | Enter product key (`slui.exe`) | ✅ |
+| `8` | Restart (5 second delay) | ✅ |
+| `A` | **Do it all** — Autopilot online + Windows Update + restart (30s) | ✅ |
 | `0` | Exit | ✅ |
+
+### Autopilot online (option 4)
+
+Runs `Get-WindowsAutoPilotInfo.ps1 -Online` — uploads the hardware hash directly to Intune without generating a CSV file. Prompts for Microsoft 365 admin credentials. Device appears in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** within a few minutes.
 
 > Windows Update Settings panel is not available in OOBE, but `UsoClient` triggers updates directly from the command line and works fine.
 
@@ -81,6 +86,7 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-03-20 | 2.3 | Added Autopilot online option (4) — `Get-WindowsAutoPilotInfo.ps1 -Online`; Do it all now uses online enrollment |
 | 2026-03-20 | 2.2 | Windows Update now uses `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll -AutoReboot`) instead of `UsoClient` |
 | 2026-03-20 | 2.1 | Added Windows Update, PowerShell 7 install (`winget`), and Do it all (`A`) option |
 | 2026-03-20 | 2.0 | Rewritten to English; `cd /d %~dp0` for USB path; self-elevation; OOBE-compatible options only; quoted paths; added `autorun.inf` and readme |

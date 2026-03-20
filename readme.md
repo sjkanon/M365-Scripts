@@ -165,6 +165,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | `start.bat` v2.3 — Autopilot online option (`-Online` uploads directly to Intune); Do it all uses online enrollment |
 | 2026-03-20 | `start.bat` v2.2 — Windows Update via `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll`) |
 | 2026-03-20 | `start.bat` v2.1 — added Windows Update, PowerShell 7 install (`winget`), Do it all option |
 | 2026-03-20 | `start.bat` v2.0 — English, self-elevation, `cd /d %~dp0`, OOBE-compatible; added `autorun.inf` and readme |

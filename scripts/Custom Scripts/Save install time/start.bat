@@ -30,14 +30,15 @@ ECHO   Windows Setup Helper — USB Toolkit
 ECHO  ================================================
 ECHO.
 ECHO   1  - Device Manager
-ECHO   2  - Autopilot enrollment
-ECHO   3  - Remove hash file and re-run Autopilot
-ECHO   4  - Windows Update (scan + download + install)
-ECHO   5  - Install PowerShell 7
-ECHO   6  - Enter product key
-ECHO   7  - Restart
+ECHO   2  - Autopilot enrollment (save to CSV)
+ECHO   3  - Remove hash file and re-run Autopilot (save to CSV)
+ECHO   4  - Autopilot enrollment ONLINE (upload directly to Intune)
+ECHO   5  - Windows Update (PSWindowsUpdate)
+ECHO   6  - Install PowerShell 7
+ECHO   7  - Enter product key
+ECHO   8  - Restart
 ECHO.
-ECHO   A  - DO IT ALL (Autopilot + Update + Restart)
+ECHO   A  - DO IT ALL (Autopilot online + Update + Restart)
 ECHO.
 ECHO   0  - Exit
 ECHO.
@@ -48,10 +49,11 @@ SET /P M=  Select option and press ENTER:
 IF /I "%M%"=="1" GOTO DEVMGMT
 IF /I "%M%"=="2" GOTO AUTOPILOT
 IF /I "%M%"=="3" GOTO COMPHASH
-IF /I "%M%"=="4" GOTO WINUPDATE
-IF /I "%M%"=="5" GOTO INSTALLPS
-IF /I "%M%"=="6" GOTO PRODUCTKEY
-IF /I "%M%"=="7" GOTO RESTART
+IF /I "%M%"=="4" GOTO AUTOPILOT_ONLINE
+IF /I "%M%"=="5" GOTO WINUPDATE
+IF /I "%M%"=="6" GOTO INSTALLPS
+IF /I "%M%"=="7" GOTO PRODUCTKEY
+IF /I "%M%"=="8" GOTO RESTART
 IF /I "%M%"=="A" GOTO DOITALL
 IF /I "%M%"=="0" GOTO EXIT
 
@@ -84,6 +86,20 @@ IF EXIST "%~dp0compHash.csv" (
     ECHO   No hash file found, continuing...
 )
 CALL "%~dp0GetAutoPilot.CMD"
+GOTO MENU
+
+:: ============================================================
+
+:AUTOPILOT_ONLINE
+ECHO.
+ECHO   Autopilot enrollment — uploading directly to Intune...
+ECHO   You will be prompted to sign in with your Microsoft 365 admin account.
+ECHO.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online"
+ECHO.
+ECHO   Upload complete. Device should appear in Intune Autopilot within a few minutes.
+ECHO.
+PAUSE
 GOTO MENU
 
 :: ============================================================
@@ -143,7 +159,7 @@ CLS
 ECHO.
 ECHO  ================================================
 ECHO   DO IT ALL
-ECHO   Step 1: Autopilot enrollment
+ECHO   Step 1: Autopilot enrollment (online - upload to Intune)
 ECHO   Step 2: Windows Update
 ECHO   Step 3: Restart
 ECHO  ================================================
@@ -155,8 +171,9 @@ IF EXIST "%~dp0compHash.csv" (
     ECHO         compHash.csv removed.
 )
 
-ECHO   [1/3] Running Autopilot enrollment...
-CALL "%~dp0GetAutoPilot.CMD"
+ECHO   [1/3] Running Autopilot enrollment (online - upload to Intune)...
+ECHO         Sign in with your Microsoft 365 admin account when prompted.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online"
 
 ECHO.
 ECHO   [2/3] Installing PSWindowsUpdate and running updates...
