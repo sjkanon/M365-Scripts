@@ -347,3 +347,90 @@ scripts/
 | 19/03/2026 | 1.6 | Fix `Get-MgGroupCalendarEvent` 403 via module reload tussen verbindingen |
 | 19/03/2026 | 1.7 | Hernoemd naar Source/Destination, ondersteuning voor Room en Shared Mailbox als destination |
 | 19/03/2026 | 1.8 | MaximumDurationInMinutes en BookingWindowInDays ingesteld op 0 (onbeperkt) |
+
+---
+
+---
+
+# Set-Calendar-rights.ps1
+
+Geeft een gebruiker toegangsrechten op de agendasmap van een andere gebruiker in Exchange Online.
+
+Ondersteunt **NL / FR / EN** mailbox-locales — geschikt voor Belgische omgevingen met gemengde taalinstellingen.
+
+---
+
+## Vereisten
+
+| Vereiste | Waarde |
+|---|---|
+| PowerShell | 7.0 of hoger |
+| Module | `ExchangeOnlineManagement` ≥ 3.0 |
+| Rechten | Exchange Administrator of gedelegeerde mailboxrechten |
+| Verbinding | Actieve sessie via `Connect-ExchangeOnline` |
+
+---
+
+## Parameters
+
+| Parameter | Verplicht | Omschrijving |
+|---|---|---|
+| `-User` | Ja | Gebruikersnaam (zonder domein) die de rechten ontvangt |
+| `-TargetMailbox` | Ja | Gebruikersnaam (zonder domein) van de doelmailbox |
+| `-AccessRights` | Ja | Toegangsniveau (zie tabel hieronder) |
+
+### Toegangsniveaus
+
+| Waarde | Omschrijving |
+|---|---|
+| `Owner` | Volledige controle, inclusief verwijderen en mappen beheren |
+| `PublishingEditor` | Lezen, aanmaken, wijzigen, verwijderen en submappen maken |
+| `Editor` | Lezen, aanmaken, wijzigen en verwijderen |
+| `PublishingAuthor` | Lezen, aanmaken, eigen items wijzigen/verwijderen en submappen maken |
+| `Author` | Lezen en aanmaken, eigen items wijzigen/verwijderen |
+| `NonEditingAuthor` | Lezen en aanmaken, geen wijzigingen |
+| `Reviewer` | Alleen lezen |
+| `Contributor` | Alleen aanmaken (geen inzage) |
+| `AvailabilityOnly` | Alleen vrij/bezet-informatie |
+| `LimitedDetails` | Vrij/bezet met beperkte details |
+
+---
+
+## Gebruik
+
+```powershell
+# Verbinding maken
+Connect-ExchangeOnline
+
+# Reviewer-rechten toekennen
+.\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Reviewer
+
+# Editor-rechten toekennen met WhatIf (droogloop)
+.\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Editor -WhatIf
+
+# Verbose output voor diagnose
+.\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Author -Verbose
+```
+
+---
+
+## Locale-ondersteuning
+
+Het script probeert automatisch de volgende mapnamen:
+
+| Taal | Mapnaam |
+|---|---|
+| Nederlands | `\Agenda` |
+| Frans | `\Calendrier` |
+| Engels | `\Calendar` |
+
+Alleen het pad dat daadwerkelijk bestaat in de mailbox slaagt. De overige worden stilletjes overgeslagen.
+
+---
+
+## Changelog
+
+| Datum | Versie | Wijziging |
+|---|---|---|
+| 20/03/2026 | 1.0 | Initiële versie — vervangt MSOnline door ExchangeOnlineManagement |
+| 20/03/2026 | 1.1 | Franstalige locale (`\Calendrier`) toegevoegd voor België |
