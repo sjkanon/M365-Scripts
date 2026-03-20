@@ -36,7 +36,8 @@ ECHO   4  - Autopilot enrollment ONLINE (upload directly to Intune)
 ECHO   5  - Windows Update (PSWindowsUpdate)
 ECHO   6  - Install PowerShell 7
 ECHO   7  - Enter product key
-ECHO   8  - Restart
+ECHO   8  - Join Active Directory domain
+ECHO   9  - Restart
 ECHO.
 ECHO   A  - DO IT ALL (Autopilot online + Update + Restart)
 ECHO.
@@ -53,7 +54,8 @@ IF /I "%M%"=="4" GOTO AUTOPILOT_ONLINE
 IF /I "%M%"=="5" GOTO WINUPDATE
 IF /I "%M%"=="6" GOTO INSTALLPS
 IF /I "%M%"=="7" GOTO PRODUCTKEY
-IF /I "%M%"=="8" GOTO RESTART
+IF /I "%M%"=="8" GOTO ADJOIN
+IF /I "%M%"=="9" GOTO RESTART
 IF /I "%M%"=="A" GOTO DOITALL
 IF /I "%M%"=="0" GOTO EXIT
 
