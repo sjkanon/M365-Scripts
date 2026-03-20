@@ -1,1 +1,0 @@
-﻿New-AzureADMSGroup -DisplayName "SG - Enable LastPass" -Description "Beveiligingsgroep tbv LastPass" -MailEnabled $False -MailNickName "group" -SecurityEnabled $True 

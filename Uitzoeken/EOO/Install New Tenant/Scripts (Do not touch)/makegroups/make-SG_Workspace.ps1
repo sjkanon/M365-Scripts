@@ -1,1 +1,0 @@
-﻿New-AzureADMSGroup -DisplayName "SG - Enable Workspace" -Description "Beveiligingsgroep tbv Workspace" -MailEnabled $False -MailNickName "group" -SecurityEnabled $True 

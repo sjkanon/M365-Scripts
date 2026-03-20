@@ -1,1 +1,0 @@
-open "odopen://sync/?siteId=2a1e05f6%2D1193%2D4ac0%2D9694%2Dfd77e853f4c3&siteId=%7Ba5ac90b0%2D8f9d%2D4cf2%2Db102%2D02257d991f3b%7D&webId=%7Bcc404d38%2Dc529%2D47e3%2D8205%2D79035c5363eb%7D&listId=300181d0%2Dab1a%2D4a31%2Db3f3%2D1bffa676c05d&webUrl=https%3A%2F%2Fs1727923%2Esharepoint%2Ecom%2Fsites%2FWerk&version=1"
