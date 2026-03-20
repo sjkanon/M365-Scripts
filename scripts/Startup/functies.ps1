@@ -2,18 +2,27 @@
 #Requires -Modules ExchangeOnlineManagement, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Reports, Microsoft.Graph.Applications
 <#
 .NOTES
-    Generieke MSP M365 management functies via Microsoft Graph en Exchange Online.
-    Dot-source dit bestand vanuit je profiel of startup script.
+    Generic MSP M365 management functions via Microsoft Graph and Exchange Online.
+    Dot-source this file from your profile or startup script.
 
-    Vereist variabelen die door het startup script worden gezet:
-        $upn      — UPN van de ingelogde beheerder
-        $realname — weergavenaam (optioneel)
+    Required variables (set by your startup script before dot-sourcing):
+        $upn      — UPN of the logged-in administrator
+        $realname — Display name for greeting (optional)
 
-    CSP/partner-operaties: gebruik Connect-Tenant om $global:cid en $global:connectmsoldomain te vullen,
-    waarna individuele functies verbinding maken met de klant-tenant via Connect-MgGraph -TenantId $cid.
+    CSP/partner operations: use Connect-Tenant to populate $global:cid and
+    $global:connectmsoldomain. Individual functions then connect to the customer
+    tenant via Connect-MgGraph -TenantId $cid.
 
-    MSP-specifieke instellingen aanpassen: zie #region Configuratie hieronder.
+    MSP-specific settings: see #region Configuration below.
 #>
+
+#region Configuration
+# Customise these values for your organisation before dot-sourcing.
+
+$script:MspAdminAlias       = 'msp-admin'
+$script:MspAdminDisplayName = 'MSP - Admin Account'
+
+#endregion
 
 #region Startup
 
@@ -23,8 +32,8 @@ Connect-MgGraph -Scopes `
     'AuditLog.Read.All', 'Application.Read.All', 'Domain.ReadWrite.All' `
     -NoWelcome
 
-if ($realname) { Write-Host "Heey $realname. Succes vandaag!" }
-else           { Write-Host "Heey $upn. Succes vandaag!" }
+if ($realname) { Write-Host "Hey $realname. Good luck today!" }
+else           { Write-Host "Hey $upn. Good luck today!" }
 
 #endregion
 
@@ -82,7 +91,7 @@ function Set-ClipboardCrossPlatform {
     } elseif ($IsLinux) {
         if (Get-Command wl-copy  -ErrorAction SilentlyContinue) { $Text | wl-copy }
         elseif (Get-Command xclip -ErrorAction SilentlyContinue) { $Text | xclip -selection clipboard }
-        else { Write-Warning 'Klembord niet beschikbaar. Installeer xclip of wl-clipboard.' }
+        else { Write-Warning 'Clipboard not available. Install xclip or wl-clipboard.' }
     }
 }
 
@@ -91,38 +100,38 @@ function Set-ClipboardCrossPlatform {
 #region Menu
 
 function Show-Menu {
-    param ([string]$Title = 'Modules laden')
+    param ([string]$Title = 'Load modules')
     Clear-Host
     Write-Host "================ $Title ================"
     Write-Host '1: Exchange Online'
     Write-Host '2: Microsoft Entra ID (Graph)'
     Write-Host '3: Microsoft Teams'
     Write-Host '4: Intune / Graph'
-    Write-Host 'Q: Afsluiten'
+    Write-Host 'Q: Quit'
 }
 
 function Invoke-Menu {
-    Show-Menu -Title 'Modules laden'
-    $selection = Read-Host 'Welke modules wil je laden?'
+    Show-Menu -Title 'Load modules'
+    $selection = Read-Host 'Which modules do you want to load?'
     switch ($selection) {
         '1' {
-            Write-Host 'Verbinding maken met Exchange Online...'
+            Write-Host 'Connecting to Exchange Online...'
             Connect-ExchangeOnline -UserPrincipalName $upn -DelegatedOrganization (Get-DefaultDomain)
         }
         '2' {
-            Write-Host 'Verbinding maken met Microsoft Entra ID...'
+            Write-Host 'Connecting to Microsoft Entra ID...'
             Connect-MgGraph -TenantId $cid -Scopes `
                 'User.ReadWrite.All', 'Group.ReadWrite.All', `
                 'RoleManagement.ReadWrite.Directory', 'Domain.ReadWrite.All' `
                 -NoWelcome
         }
         '3' {
-            Write-Host 'Verbinding maken met Microsoft Teams...'
+            Write-Host 'Connecting to Microsoft Teams...'
             Import-Module MicrosoftTeams
             Connect-MicrosoftTeams -TenantId $cid
         }
         '4' {
-            Write-Host 'Verbinding maken met Intune / Graph...'
+            Write-Host 'Connecting to Intune / Graph...'
             Connect-MgGraph -TenantId $cid -Scopes `
                 'DeviceManagementConfiguration.ReadWrite.All', `
                 'DeviceManagementManagedDevices.ReadWrite.All' `
@@ -134,7 +143,7 @@ function Invoke-Menu {
 
 #endregion
 
-#region Verbinding / tenant selectie
+#region Connection / tenant selection
 
 function Test-ExoConnection {
     try {
@@ -148,13 +157,13 @@ function Test-ExoConnection {
 function Connect-Tenant {
     param ([string]$Domain)
     if (-not $Domain) {
-        $Domain = Read-Host 'Wat is het domein waarmee je wil verbinden?'
+        $Domain = Read-Host 'Enter the domain you want to connect to'
     }
     $global:connectmsoldomain = $Domain
     $contract = Get-MgContract -Filter "defaultDomainName eq '$Domain'" -ErrorAction Stop
-    if (-not $contract) { throw "Geen CSP-contract gevonden voor domein '$Domain'." }
+    if (-not $contract) { throw "No CSP contract found for domain '$Domain'." }
     $global:cid = $contract.CustomerId
-    Write-Host "$($contract.DisplayName) geselecteerd. Gebruik `$cid voor Graph-operaties op deze klant."
+    Write-Host "$($contract.DisplayName) selected. Use `$cid for Graph operations on this customer."
 }
 
 #endregion
@@ -182,16 +191,20 @@ function Add-SharedMailboxAccess {
 }
 
 function Set-MailboxLocale {
+    param (
+        [int]   $Language = 1043,
+        [string]$TimeZone = 'W. Europe Standard Time'
+    )
     Test-ExoConnection
     Get-Mailbox -ResultSize Unlimited |
         Select-Object -ExpandProperty PrimarySmtpAddress |
-        Set-MailboxRegionalConfiguration -Language 1043 -TimeZone 'W. Europe Standard Time' -LocalizeDefaultFolderName
+        Set-MailboxRegionalConfiguration -Language $Language -TimeZone $TimeZone -LocalizeDefaultFolderName
 }
 
 function Add-MailboxAlias {
     Test-ExoConnection
-    $user  = Read-Host 'Aan welke gebruiker wil je een alias toevoegen?'
-    $alias = Read-Host 'Welke alias?'
+    $user  = Read-Host 'Which user do you want to add an alias to?'
+    $alias = Read-Host 'Which alias?'
     Set-Mailbox $user -EmailAddresses @{ add = $alias }
 }
 
@@ -228,7 +241,7 @@ function Export-DistributionGroups {
         }
     } | Export-Csv -Path $csvFile -NoTypeInformation -Encoding UTF8
 
-    Write-Output "Opgeslagen in: $csvFile"
+    Write-Output "Saved to: $csvFile"
 }
 
 function Set-AutoReply {
@@ -236,10 +249,10 @@ function Set-AutoReply {
     $FormatEnumerationLimit = -1
 
     do {
-        $mbname = Read-Host 'Voer het e-mailadres in van de mailbox'
+        $mbname = Read-Host 'Enter the mailbox email address'
     } until ($mbname -like '*@*' -and $mbname -like '*.*')
 
-    $message = Read-Host 'Plak de OOO-tekst hier (leeg laten om uit te schakelen)'
+    $message = Read-Host 'Paste the OOO message here (leave blank to disable)'
     $oooHtml = '<pre>' + $message + '</pre>'
     $mode    = Read-Host '(e)nabled  (d)isabled  (s)cheduled'
     $mbx     = Get-Mailbox -Identity $mbname
@@ -248,8 +261,8 @@ function Set-AutoReply {
         '^e' { $mbx | Set-MailboxAutoReplyConfiguration -AutoReplyState Enabled  -ExternalMessage $oooHtml }
         '^d' { $mbx | Set-MailboxAutoReplyConfiguration -AutoReplyState Disabled }
         '^s' {
-            $startTime = Read-Host 'Starttijd (bijv. 2026-04-01 08:00:00)'
-            $endTime   = Read-Host 'Eindtijd  (bijv. 2026-04-10 18:00:00)'
+            $startTime = Read-Host 'Start time (e.g. 2026-04-01 08:00:00)'
+            $endTime   = Read-Host 'End time   (e.g. 2026-04-10 18:00:00)'
             $mbx | Set-MailboxAutoReplyConfiguration `
                 -AutoReplyState Scheduled `
                 -InternalMessage $oooHtml -ExternalMessage $oooHtml `
@@ -274,13 +287,13 @@ function Get-TenantAdmins {
 }
 
 function Add-TenantDomain {
-    $addDomain = Read-Host 'Welke domeinnaam wil je toevoegen?'
+    $addDomain = Read-Host 'Which domain name do you want to add?'
     New-MgDomain -Id $addDomain
     Start-Sleep -Seconds 5
 
     $txtRecord = Get-MgDomainVerificationDnsRecord -DomainId $addDomain
     Write-Host ($txtRecord | Where-Object { $_.RecordType -eq 'Txt' } | Select-Object -ExpandProperty AdditionalProperties | Out-String)
-    Read-Host 'Druk op Enter zodra je het TXT-record (TTL 1 minuut) hebt toegevoegd'
+    Read-Host 'Press Enter once you have added the TXT record (TTL 1 minute)'
 
     Confirm-MgDomain -DomainId $addDomain
     Start-Sleep -Seconds 5
@@ -294,7 +307,7 @@ function Add-TenantDomain {
 
 function Get-TenantLicenses {
     Get-MgSubscribedSku | Select-Object SkuPartNumber, ConsumedUnits, @{
-        Name       = 'Beschikbaar'
+        Name       = 'Available'
         Expression = { $_.PrepaidUnits.Enabled - $_.ConsumedUnits }
     }
 }
@@ -305,18 +318,18 @@ function Get-TenantUsers {
 }
 
 function Add-TenantAdmin {
-    $setAsAdmin = Read-Host 'Welke gebruiker wil je adminrechten geven? (UPN)'
+    $setAsAdmin = Read-Host 'Which user do you want to grant admin rights? (UPN)'
     $user = Get-MgUser -UserId $setAsAdmin
     Add-GlobalAdminRole -UserId $user.Id
 }
 
 function Get-EntraApplication {
-    $appName = Read-Host 'Naam van de Enterprise App?'
+    $appName = Read-Host 'Name of the Enterprise App?'
     Get-MgApplication -Filter "displayName eq '$appName'"
 }
 
 function Reset-UserPassword {
-    $resetAddress = Read-Host 'Voer het e-mailadres in waarvan je het wachtwoord wilt resetten'
+    $resetAddress = Read-Host 'Enter the email address of the account to reset'
     $domain       = $resetAddress.Split('@')[1]
 
     $contract = Get-MgContract -Filter "defaultDomainName eq '$domain'" -ErrorAction Stop
@@ -330,10 +343,10 @@ function Reset-UserPassword {
     }
 
     Write-Host ''
-    Write-Host "Het tijdelijke wachtwoord van $resetAddress is: $newPassword"
-    Write-Host 'Graag inloggen op https://portal.office.com om een nieuw wachtwoord in te stellen.'
+    Write-Host "The temporary password for $resetAddress is: $newPassword"
+    Write-Host 'Please sign in at https://portal.office.com to set a new password.'
     Write-Host ''
-    Write-Host 'Tip: Open de browser in privémodus als er automatisch een ander account inlogt.'
+    Write-Host 'Tip: Use a private browser window if another account signs in automatically.'
 }
 
 function Export-SignInLogs {
@@ -349,7 +362,6 @@ function Export-SignInLogs {
     $endDate    = (Get-Date).ToString('yyyy-MM-dd')
     $baseFilter = "createdDateTime ge $startDate and createdDateTime le $endDate"
 
-    # Filter server-side to reduce data transfer
     $failLogs = Get-MgAuditLogSignIn -Filter "$baseFilter and status/errorCode ne 0" -All
     $goodLogs = Get-MgAuditLogSignIn -Filter "$baseFilter and status/errorCode eq 0"  -All
     $allLogs  = @($failLogs) + @($goodLogs)
@@ -362,7 +374,7 @@ function Export-SignInLogs {
         'ConditionalAccessStatus'
     )
 
-    $exportPath = Join-Path ([System.IO.Path]::GetTempPath()) 'AzureADSignInAudit'
+    $exportPath = Join-Path ([System.IO.Path]::GetTempPath()) 'SignInAudit'
     New-Item -Path $exportPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
     $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -370,61 +382,61 @@ function Export-SignInLogs {
     $failLogs | Select-Object $selectProps | Export-Csv -Path (Join-Path $exportPath "FailSignIn_${ts}_${connectmsoldomain}.csv") -NoTypeInformation -Encoding UTF8
     $goodLogs | Select-Object $selectProps | Export-Csv -Path (Join-Path $exportPath "GoodSignIn_${ts}_${connectmsoldomain}.csv") -NoTypeInformation -Encoding UTF8
 
-    Write-Output "Logs opgeslagen in: $exportPath"
+    Write-Output "Logs saved to: $exportPath"
 }
 
 #endregion
 
-#region EOO Beheeraccount
+#region MSP Admin Account
 
-function New-EooAdmin {
+function New-MspAdmin {
     $password = New-SecurePassword -Lowercase 13 -Uppercase 2 -Digits 1 -Special 2
 
     Connect-MgGraph -TenantId $cid -Scopes 'User.ReadWrite.All', 'RoleManagement.ReadWrite.Directory' -NoWelcome
 
-    $upnAdmin = "eooadmin@$(Get-DefaultDomain)"
+    $upnAdmin = "$($script:MspAdminAlias)@$(Get-DefaultDomain)"
     $user = New-MgUser `
-        -DisplayName      'Easy Office Online - Beheeraccount' `
+        -DisplayName       $script:MspAdminDisplayName `
         -UserPrincipalName $upnAdmin `
-        -MailNickname     'eooadmin' `
-        -AccountEnabled   `
-        -PasswordProfile  @{ Password = $password; ForceChangePasswordNextSignIn = $false }
+        -MailNickname      $script:MspAdminAlias `
+        -AccountEnabled    `
+        -PasswordProfile   @{ Password = $password; ForceChangePasswordNextSignIn = $false }
 
     Add-GlobalAdminRole -UserId $user.Id
-    Write-Host "Aangemaakt: $upnAdmin"
+    Write-Host "Created: $upnAdmin"
 }
 
-function Set-EooAsGroupOwner {
-    $name = Read-Host 'Wat is de naam van de groep?'
+function Set-MspAdminAsGroupOwner {
+    $name = Read-Host 'What is the name of the group?'
 
     Connect-MgGraph -TenantId $cid -Scopes 'Group.ReadWrite.All', 'User.Read.All' -NoWelcome
 
     $group    = Get-MgGroup -Filter "displayName eq '$name'" | Select-Object -First 1
-    $eooAdmin = Get-MgUser  -Filter "displayName eq 'Easy Office Online - Beheeraccount'" | Select-Object -First 1
+    $mspAdmin = Get-MgUser  -Filter "displayName eq '$($script:MspAdminDisplayName)'" | Select-Object -First 1
 
     New-MgGroupOwner -GroupId $group.Id -BodyParameter @{
-        '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($eooAdmin.Id)"
+        '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($mspAdmin.Id)"
     }
 }
 
-function Reset-EooPassword {
+function Reset-MspAdminPassword {
     $password = New-SecurePassword -Lowercase 4 -Uppercase 2 -Digits 1 -Special 1
 
     Connect-MgGraph -TenantId $cid -Scopes 'User.ReadWrite.All' -NoWelcome
 
-    $eooAdmin = "eooadmin@$(Get-DefaultDomain)"
-    Update-MgUser -UserId $eooAdmin -PasswordProfile @{
+    $adminUpn = "$($script:MspAdminAlias)@$(Get-DefaultDomain)"
+    Update-MgUser -UserId $adminUpn -PasswordProfile @{
         Password                      = $password
         ForceChangePasswordNextSignIn = $false
     }
 
-    Write-Host "$eooAdmin | $password"
+    Write-Host "$adminUpn | $password"
     Set-ClipboardCrossPlatform $password
 }
 
 #endregion
 
-#region Navigatie
+#region Navigation
 
 function Set-ImportLocation  { Set-Location $env:import }
 function Set-ScriptsLocation { Set-Location $env:ps }
