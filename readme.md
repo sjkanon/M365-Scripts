@@ -6,7 +6,7 @@
 
 ## Overview
 
-This repository contains production-ready PowerShell scripts used by BraveHub engineers to automate, manage, and report on Microsoft 365 tenants. Scripts are organized by workload and are actively maintained and expanded over time.
+This repository contains production-ready PowerShell scripts used by engineers to automate, manage, and report on Microsoft 365 tenants. Scripts are organized by workload and are actively maintained and expanded over time.
 
 ---
 
