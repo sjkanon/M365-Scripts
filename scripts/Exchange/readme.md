@@ -1,6 +1,5 @@
 # Migrate-HolidaysCalendar.ps1
 
-> **BraveHub Internal Script**
 > Ticket: #0298048 | Customer: Onco3R Therapeutics
 > Author: Sjoerd Kanon | Date: 19/03/2026
 
@@ -179,7 +178,7 @@ The script displays the `ClientId` and `ClientSecret` at the end. **Store these 
 | `AdminUPN` | Yes | — | UPN of the executing admin |
 | `ClientId` | No | `""` | AppId of existing App Registration. Empty = create automatically |
 | `ClientSecret` | No | `""` | Client Secret. Empty = create automatically |
-| `AppName` | No | `BraveHub-HolidaysCalendarMigration` | Name of the App Registration |
+| `AppName` | No | `HolidaysCalendarMigration` | Name of the App Registration |
 | `SourceGroupMail` | No | `holidays@onco3r.com` | Email of the source M365 Group calendar |
 | `SourceGroupDisplayName` | No | `Holidays` | DisplayName of the source M365 Group (fallback) |
 | `DestinationType` | No | `Room` | Destination mailbox type: `Room` or `Shared` (see below) |
@@ -302,7 +301,7 @@ Reference: https://learn.microsoft.com/en-us/graph/known-issues#group-calendar
 
 Verify that admin consent has been granted correctly in Entra ID:
 
-**Entra ID → App Registrations → BraveHub-HolidaysCalendarMigration → API Permissions**
+**Entra ID → App Registrations → HolidaysCalendarMigration → API Permissions**
 
 All permissions must show status **Granted for Onco3R**. If not, click **Grant admin consent for Onco3R**.
 
@@ -314,7 +313,7 @@ ClientSecretCredential authentication failed
 
 The script automatically attempts a fallback via environment variables. If both methods fail, verify the secret has not expired (expiry date is shown in the summary). Create a new secret if needed:
 
-**Entra ID → App Registrations → BraveHub-HolidaysCalendarMigration → Certificates & secrets → New client secret**
+**Entra ID → App Registrations → HolidaysCalendarMigration → Certificates & secrets → New client secret**
 
 ### Events partially failed
 
@@ -326,6 +325,7 @@ Events that could not be copied are logged as `[WARN]` with an error message. Th
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-03-20 | 2.0 | Rewritten to English; genericised (removed customer-specific defaults); `TenantId`/`AdminUPN` now mandatory; default timezone `UTC`; renamed `$event` → `$calEvent` |
 | 19/03/2026 | 1.0 | Initial version |
 | 19/03/2026 | 1.1 | Platform detection (macOS/Linux device code flow) |
 | 19/03/2026 | 1.2 | Fallback group lookup on displayName and Search |
