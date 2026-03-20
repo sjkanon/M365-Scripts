@@ -40,7 +40,7 @@ Scripts for managing Windows time synchronization.
 Scripts and assets for managing desktop and lockscreen configuration.
 
 - Deploy lockscreen to start and desktop
-- Manage desktop background images
+- Set corporate wallpaper via Intune (PersonalizationCSP + WinAPI + Default User)
 
 ---
 
@@ -105,6 +105,9 @@ M365-Scripts/
 │   │   └── Intune/Desktop/
 │   │       ├── Add Lockscreen to start and desktop/
 │   │       └── Background/
+│   │           └── Desktop/
+│   │               ├── Set-CorporateWallpaper.ps1
+│   │               └── readme.md
 │   ├── Exchange/
 │   │   ├── Migrate-Calendar.ps1
 │   │   ├── Set-Calendar-rights.ps1
@@ -142,6 +145,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Added `Set-CorporateWallpaper.ps1` with Intune deployment via PersonalizationCSP |
 | 2026-03-20 | Moved `Install-Modules.ps1` to `scripts/Startup/`; added `Restart-Time-Sync.ps1` |
 | 2026-03-20 | Translated all readme files to English |
 | 2026-03-20 | Rewrote `functies.ps1` — replaced MSOnline/AzureAD with Microsoft Graph, made generic and cross-platform |
