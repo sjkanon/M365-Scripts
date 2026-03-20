@@ -147,7 +147,7 @@ This repository is actively maintained and expanded. When adding new scripts:
 
 ## Disclaimer
 
-These scripts are provided as-is. Always test in a non-production environment before running against live tenants. BraveHub accepts no liability for unintended changes resulting from misuse or misconfiguration.
+These scripts are provided as-is. Always test in a non-production environment before running against live tenants. The maintainer accepts no liability for unintended changes resulting from misuse or misconfiguration.
 
 ---
 

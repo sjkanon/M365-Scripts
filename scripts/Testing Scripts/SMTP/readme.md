@@ -1,6 +1,5 @@
 # SMTP Test Scripts
 
-> **BraveHub Internal Scripts**
 > Author: Sjoerd Kanon
 
 Scripts for testing SMTP connectivity and authentication against Office 365 (or any SMTP server). Useful for diagnosing mail relay issues, testing shared mailbox credentials, and verifying connector configuration.

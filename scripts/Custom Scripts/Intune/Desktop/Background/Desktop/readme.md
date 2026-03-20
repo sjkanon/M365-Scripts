@@ -1,6 +1,5 @@
 # Set-CorporateWallpaper.ps1
 
-> **BraveHub Internal Script**
 > Author: Sjoerd Kanon
 
 ---

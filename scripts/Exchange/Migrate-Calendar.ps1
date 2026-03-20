@@ -6,7 +6,7 @@
     Maakt automatisch een App Registration aan als geen ClientId/ClientSecret opgegeven is.
 
 .DESCRIPTION
-    Script voor BraveHub - Ticket #0298048 - Onco3R Therapeutics
+    Ticket #0298048 - Onco3R Therapeutics
     Geschreven door: Sjoerd Kanon
     Datum: 19/03/2026
 
@@ -112,7 +112,7 @@ param(
     [string]$ClientSecret = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$AppName = "BraveHub-HolidaysCalendarMigration",
+    [string]$AppName = "HolidaysCalendarMigration",
 
     # Bestaande M365 Group
     # Source: bestaande M365 Group kalender
