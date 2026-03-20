@@ -1,111 +1,116 @@
 # Startup Scripts
 
-Bevat de functiebibliotheken en verbindingslogica voor de EOO M365 managementtoolset.
-Onderdeel van de [M365-Scripts](../../readme.md) repository.
+Generic MSP M365 management function library for multi-tenant Microsoft 365 administration.
+Part of the [M365-Scripts](../../readme.md) repository.
 
 ---
 
-## Bestanden
+## Files
 
-| Bestand | Omschrijving |
+| File | Description |
 |---|---|
-| `functies.ps1` | Volledige functiebibliotheek — dot-source dit bestand bij opstarten |
+| `functies.ps1` | Full function library — dot-source this file at startup |
 
 ---
 
 ## functies.ps1
 
-Centrale functiebibliotheek voor multi-tenant M365 beheer via Microsoft Graph en Exchange Online.
-Volledig herschreven van MSOnline + AzureAD naar Microsoft Graph.
+Central function library for multi-tenant M365 management via Microsoft Graph and Exchange Online.
+Fully rewritten from MSOnline + AzureAD to Microsoft Graph.
 
-### Vereisten
+### Requirements
 
-| Vereiste | Waarde |
+| Requirement | Value |
 |---|---|
-| PowerShell | 7.0 of hoger |
-| Modules | Zie `#Requires` bovenaan het bestand |
-| Verbinding | Wordt automatisch gestart via `Connect-MgGraph` bij dot-sourcing |
+| PowerShell | 7.0 or later |
+| Modules | See `#Requires` at the top of the file |
+| Connection | Started automatically via `Connect-MgGraph` on dot-source |
 
-### Opstarten
+### Configuration
 
-Dot-source het bestand vanuit je PowerShell profiel of startup script:
+Edit the `#region Configuration` block at the top of the file to match your organisation:
 
 ```powershell
+$script:MspAdminAlias       = 'msp-admin'        # Mailbox alias for the MSP admin account
+$script:MspAdminDisplayName = 'MSP - Admin Account'  # Display name for the MSP admin account
+```
+
+### Getting started
+
+Dot-source the file from your PowerShell profile or startup script:
+
+```powershell
+$upn      = "admin@yourdomain.com"   # UPN of the administrator
+$realname = "Sjoerd"                 # Display name for greeting (optional)
+
 . "$PSScriptRoot\scripts\Startup\functies.ps1"
 ```
 
-Stel voor het laden de volgende variabelen in:
+### Select a customer tenant (CSP)
 
 ```powershell
-$upn      = "admin@jouwdomein.nl"   # UPN van de beheerder
-$realname = "Sjoerd"                # Weergavenaam voor begroeting (optioneel)
-```
-
-### Klant selecteren (CSP)
-
-```powershell
-Connect-Tenant -Domain "klant.nl"
-# Vult $global:cid en $global:connectmsoldomain
-# Daarna gebruiken alle functies automatisch de juiste tenant
+Connect-Tenant -Domain "customer.com"
+# Populates $global:cid and $global:connectmsoldomain
+# All subsequent functions automatically target the selected tenant
 ```
 
 ---
 
-## Functies
+## Functions
 
-### Verbinding
+### Connection
 
-| Functie | Omschrijving |
+| Function | Description |
 |---|---|
-| `Connect-Tenant` | CSP-klant selecteren op domeinnaam, vult `$cid` en `$connectmsoldomain` |
-| `Test-ExoConnection` | Controleert/herstelt Exchange Online verbinding voor de geselecteerde klant |
-| `Invoke-Menu` | Interactief menu om modules te laden (EXO, Entra, Teams, Intune) |
+| `Connect-Tenant` | Select a CSP customer by domain name, populates `$cid` and `$connectmsoldomain` |
+| `Test-ExoConnection` | Checks / restores the Exchange Online connection for the selected customer |
+| `Invoke-Menu` | Interactive menu to load service modules (EXO, Entra, Teams, Intune) |
 
 ### Exchange Online
 
-| Functie | Omschrijving |
+| Function | Description |
 |---|---|
-| `Enable-CopyOfSentItems` | Zet "kopie van verzonden items" aan voor alle mailboxen |
-| `Add-SharedMailboxAccess` | Geeft een gebruiker FullAccess + SendAs op een gedeelde mailbox |
-| `Set-MailboxLocale` | Stelt taal (NL) en tijdzone in op alle mailboxen |
-| `Add-MailboxAlias` | Voegt een alias toe aan een mailbox |
-| `Get-MailboxAliases` | Toont alle SMTP-aliassen per mailbox |
-| `Export-DistributionGroups` | Exporteert alle distributiegroepen naar CSV (`%TEMP%\ExportDGs.csv`) |
-| `Set-AutoReply` | Stelt een out-of-office bericht in (enabled / disabled / scheduled) |
+| `Enable-CopyOfSentItems` | Enables copy of sent items for all mailboxes |
+| `Add-SharedMailboxAccess` | Grants a user FullAccess + SendAs on a shared mailbox |
+| `Set-MailboxLocale` | Sets language and timezone on all mailboxes (default: NL / W. Europe) |
+| `Add-MailboxAlias` | Adds an alias to a mailbox |
+| `Get-MailboxAliases` | Lists all SMTP aliases per mailbox |
+| `Export-DistributionGroups` | Exports all distribution groups to CSV (`%TEMP%\ExportDGs.csv`) |
+| `Set-AutoReply` | Configures an out-of-office reply (enabled / disabled / scheduled) |
 
 ### Microsoft Entra ID / Graph
 
-| Functie | Omschrijving |
+| Function | Description |
 |---|---|
-| `Get-TenantAdmins` | Toont alle Global Administrators van de klant-tenant |
-| `Add-TenantDomain` | Voegt een domein toe, loopt door het verificatieproces |
-| `Get-TenantLicenses` | Toont licentieoverzicht met verbruik en beschikbaarheid |
-| `Get-TenantUsers` | Toont alle gebruikers met UPN, naam en licenties |
-| `Add-TenantAdmin` | Geeft een gebruiker Global Administrator rechten |
-| `Get-EntraApplication` | Zoekt een Enterprise App op naam |
-| `Reset-UserPassword` | Reset het wachtwoord van een gebruiker in een CSP-klant-tenant |
-| `Export-SignInLogs` | Exporteert inloglogboeken naar CSV (standaard 30 dagen, max 30) |
+| `Get-TenantAdmins` | Lists all Global Administrators in the customer tenant |
+| `Add-TenantDomain` | Adds a domain and walks through the verification process |
+| `Get-TenantLicenses` | Shows licence overview with usage and availability |
+| `Get-TenantUsers` | Lists all users with UPN, display name, and licences |
+| `Add-TenantAdmin` | Grants a user Global Administrator rights |
+| `Get-EntraApplication` | Finds an Enterprise App by name |
+| `Reset-UserPassword` | Resets a user's password in a CSP customer tenant |
+| `Export-SignInLogs` | Exports sign-in logs to CSV (default 30 days, max 30) |
 
-### EOO Beheeraccount
+### MSP Admin Account
 
-| Functie | Omschrijving |
+| Function | Description |
 |---|---|
-| `New-EooAdmin` | Maakt het EOO beheeraccount aan als Global Admin in de klant-tenant |
-| `Set-EooAsGroupOwner` | Stelt het EOO beheeraccount in als eigenaar van een groep |
-| `Reset-EooPassword` | Reset het wachtwoord van het EOO beheeraccount |
+| `New-MspAdmin` | Creates the MSP admin account as Global Admin in the customer tenant |
+| `Set-MspAdminAsGroupOwner` | Sets the MSP admin account as owner of a group |
+| `Reset-MspAdminPassword` | Resets the MSP admin account password |
 
-### Navigatie
+### Navigation
 
-| Functie | Omschrijving |
+| Function | Description |
 |---|---|
-| `Set-ImportLocation` | Navigeert naar `$env:import` |
-| `Set-ScriptsLocation` | Navigeert naar `$env:ps` |
+| `Set-ImportLocation` | Navigates to `$env:import` |
+| `Set-ScriptsLocation` | Navigates to `$env:ps` |
 
 ---
 
-## Modules installeren
+## Install modules
 
-Gebruik de bootstrap vanuit de root van de repository:
+Use the bootstrap script from the repository root:
 
 ```powershell
 .\scripts\Install-Modules.ps1
@@ -113,4 +118,4 @@ Gebruik de bootstrap vanuit de root van de repository:
 
 ---
 
-*Onderdeel van M365-Scripts — Sjoerd Kanon*
+*Part of M365-Scripts — Sjoerd Kanon*
