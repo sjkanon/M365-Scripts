@@ -39,8 +39,9 @@ ECHO   7  - Enter product key
 ECHO   8  - Join Active Directory domain
 ECHO   9  - Restart
 ECHO.
-ECHO   A  - DO IT ALL (Autopilot online + Update + Restart)
+ECHO   A  - DO IT ALL - Intune (Rename + Autopilot online + Update + Restart)
 ECHO   B  - Rename this device (NAME-SERIALNUMBER)
+ECHO   C  - DO IT ALL - AD (Rename + Domain join + Update + Restart)
 ECHO.
 ECHO   0  - Exit
 ECHO.
@@ -59,6 +60,7 @@ IF /I "%M%"=="8" GOTO ADJOIN
 IF /I "%M%"=="9" GOTO RESTART
 IF /I "%M%"=="A" GOTO DOITALL
 IF /I "%M%"=="B" GOTO RENAMEPC
+IF /I "%M%"=="C" GOTO DOITALL_AD
 IF /I "%M%"=="0" GOTO EXIT
 
 ECHO   Invalid option. Try again.
@@ -174,30 +176,71 @@ GOTO MENU
 CLS
 ECHO.
 ECHO  ================================================
-ECHO   DO IT ALL
-ECHO   Step 1: Autopilot enrollment (online - upload to Intune)
-ECHO   Step 2: Windows Update
-ECHO   Step 3: Restart
+ECHO   DO IT ALL — Intune
+ECHO   Step 1: Rename device (NAME-SERIALNUMBER)
+ECHO   Step 2: Autopilot enrollment (online - upload to Intune)
+ECHO   Step 3: Windows Update
+ECHO   Step 4: Restart
 ECHO  ================================================
 ECHO.
 
-ECHO   [1/3] Removing old hash file...
+ECHO   [1/4] Renaming device...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$serial = (Get-WmiObject Win32_BIOS).SerialNumber.Trim(); $prefix = Read-Host 'Enter device name prefix (e.g. LAPTOP, DESKTOP, NB)'; $newName = ($prefix + '-' + $serial).ToUpper(); if ($newName.Length -gt 15) { Write-Host ('WARNING: name truncated to 15 characters') -ForegroundColor Yellow; $newName = $newName.Substring(0,15) }; Rename-Computer -NewName $newName -Force; Write-Host ('Device renamed to: ' + $newName) -ForegroundColor Green"
+
+ECHO.
+ECHO   [2/4] Removing old hash file...
 IF EXIST "%~dp0compHash.csv" (
     del "%~dp0compHash.csv"
     ECHO         compHash.csv removed.
 )
 
-ECHO   [1/3] Running Autopilot enrollment (online - upload to Intune)...
+ECHO   [2/4] Running Autopilot enrollment (online - upload to Intune)...
 ECHO         Sign in with your Microsoft 365 admin account when prompted.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online"
 
 ECHO.
-ECHO   [2/3] Installing PSWindowsUpdate and running updates...
+ECHO   [3/4] Installing PSWindowsUpdate and running updates...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Install-Module PSWindowsUpdate -Force -Scope CurrentUser; Import-Module PSWindowsUpdate; Install-WindowsUpdate -AcceptAll -AutoReboot"
 ECHO         Windows Update complete.
 
 ECHO.
-ECHO   [3/3] All steps completed.
+ECHO   [4/4] All steps completed.
+ECHO         The device will restart in 30 seconds.
+ECHO         Press Ctrl+C to cancel the restart.
+ECHO.
+shutdown -r -t 30
+PAUSE
+GOTO MENU
+
+:: ============================================================
+
+:DOITALL_AD
+CLS
+ECHO.
+ECHO  ================================================
+ECHO   DO IT ALL — Active Directory
+ECHO   Step 1: Rename device (NAME-SERIALNUMBER)
+ECHO   Step 2: Join Active Directory domain
+ECHO   Step 3: Windows Update
+ECHO   Step 4: Restart
+ECHO  ================================================
+ECHO.
+
+ECHO   [1/4] Renaming device...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$serial = (Get-WmiObject Win32_BIOS).SerialNumber.Trim(); $prefix = Read-Host 'Enter device name prefix (e.g. LAPTOP, DESKTOP, NB)'; $newName = ($prefix + '-' + $serial).ToUpper(); if ($newName.Length -gt 15) { Write-Host ('WARNING: name truncated to 15 characters') -ForegroundColor Yellow; $newName = $newName.Substring(0,15) }; Rename-Computer -NewName $newName -Force; Write-Host ('Device renamed to: ' + $newName) -ForegroundColor Green"
+
+ECHO.
+ECHO   [2/4] Joining Active Directory domain...
+ECHO         Enter the domain name and admin credentials when prompted.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$domain = Read-Host 'Enter domain name (e.g. contoso.local)'; $cred = Get-Credential -Message ('Domain admin credentials for: ' + $domain); Add-Computer -DomainName $domain -Credential $cred -Force; Write-Host ''; Write-Host 'Domain join complete.' -ForegroundColor Green"
+
+ECHO.
+ECHO   [3/4] Installing PSWindowsUpdate and running updates...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Install-Module PSWindowsUpdate -Force -Scope CurrentUser; Import-Module PSWindowsUpdate; Install-WindowsUpdate -AcceptAll -AutoReboot"
+ECHO         Windows Update complete.
+
+ECHO.
+ECHO   [4/4] All steps completed.
 ECHO         The device will restart in 30 seconds.
 ECHO         Press Ctrl+C to cancel the restart.
 ECHO.

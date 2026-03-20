@@ -54,8 +54,9 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | `7` | Enter product key (`slui.exe`) | ✅ |
 | `8` | Join Active Directory domain | ✅ (needs domain connectivity) |
 | `9` | Restart (5 second delay) | ✅ |
-| `A` | **Do it all** — Autopilot online + Windows Update + restart (30s) | ✅ |
+| `A` | **Do it all — Intune** — Rename + Autopilot online + Windows Update + restart | ✅ (needs internet + admin account) |
 | `B` | **Rename device** — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`) | ✅ |
+| `C` | **Do it all — AD** — Rename + Domain join + Windows Update + restart | ✅ (needs domain connectivity) |
 | `0` | Exit | ✅ |
 
 ### Autopilot online (option 4)
@@ -68,12 +69,21 @@ Runs `Get-WindowsAutoPilotInfo.ps1 -Online` — uploads the hardware hash direct
 
 Uses `winget install Microsoft.PowerShell`. Requires internet. If `winget` is not available (older Windows 10), the script shows the manual download URL. After install, launch with `pwsh.exe`.
 
-### Do it all (option A)
+### Do it all — Intune (option A)
 
-Runs in sequence:
-1. Removes existing `compHash.csv`
-2. Runs Autopilot enrollment (`GetAutoPilot.CMD`)
-3. Triggers Windows Update (`UsoClient StartScan` → `StartDownload` → `StartInstall`)
+For Intune/cloud-managed environments. Runs in sequence:
+1. Renames the device — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`)
+2. Removes existing `compHash.csv`
+3. Runs Autopilot enrollment online (`Get-WindowsAutoPilotInfo.ps1 -Online`)
+4. Installs Windows updates via `PSWindowsUpdate`
+5. Restarts after 30 seconds (Ctrl+C to cancel)
+
+### Do it all — Active Directory (option C)
+
+For on-premises AD environments (no Intune). Runs in sequence:
+1. Renames the device — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`)
+2. Joins Active Directory domain — prompts for domain name and admin credentials
+3. Installs Windows updates via `PSWindowsUpdate`
 4. Restarts after 30 seconds (Ctrl+C to cancel)
 
 ---
@@ -88,6 +98,9 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-03-20 | 2.8 | Split Do it all into A (Intune) and C (Active Directory); AD variant skips Autopilot |
+| 2026-03-20 | 2.7 | Do it all updated: AD domain join added as step 3 |
+| 2026-03-20 | 2.6 | Do it all updated: device rename added as first step |
 | 2026-03-20 | 2.5 | Added device rename option (B) — prompts for prefix, appends serial number (`Get-WmiObject Win32_BIOS`), max 15 chars |
 | 2026-03-20 | 2.4 | Added Active Directory domain join option (8) — `Add-Computer` via PowerShell, prompts for domain + credentials |
 | 2026-03-20 | 2.3 | Added Autopilot online option (4) — `Get-WindowsAutoPilotInfo.ps1 -Online`; Do it all now uses online enrollment |

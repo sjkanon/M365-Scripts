@@ -165,6 +165,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | `start.bat` v2.8 — Split Do it all: A = Intune (Rename + Autopilot + Update), C = AD (Rename + Domain join + Update) |
+| 2026-03-20 | `start.bat` v2.7 — Do it all updated: AD domain join added as step 3 |
+| 2026-03-20 | `start.bat` v2.6 — Do it all updated: device rename now first step before Autopilot |
 | 2026-03-20 | `start.bat` v2.5 — Added device rename option (B): prompts for prefix, auto-appends serial number |
 | 2026-03-20 | `start.bat` v2.4 — Added Active Directory domain join option (8); option 9 = restart |
 | 2026-03-20 | `start.bat` v2.3 — Autopilot online option (`-Online` uploads directly to Intune); Do it all uses online enrollment |
