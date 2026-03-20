@@ -325,6 +325,7 @@ Events that could not be copied are logged as `[WARN]` with an error message. Th
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-03-20 | 2.0 | Rewritten to English; genericised (removed customer-specific defaults); `TenantId`/`AdminUPN` now mandatory; default timezone `UTC`; renamed `$event` → `$calEvent` |
 | 19/03/2026 | 1.0 | Initial version |
 | 19/03/2026 | 1.1 | Platform detection (macOS/Linux device code flow) |
 | 19/03/2026 | 1.2 | Fallback group lookup on displayName and Search |

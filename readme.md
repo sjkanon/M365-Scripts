@@ -155,6 +155,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Rewrote `Migrate-Calendar.ps1` to v2.0 — English, generic, mandatory params, linter fixes |
 | 2026-03-20 | Removed all BraveHub references from scripts and readmes |
 | 2026-03-20 | Added `Test-SmtpRelay` to `functies.ps1` |
 | 2026-03-20 | SMTP scripts v2.1 — cross-platform (Windows: saved DPAPI file, macOS/Linux: prompt once) |
