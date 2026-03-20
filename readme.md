@@ -12,39 +12,29 @@ This repository contains production-ready PowerShell scripts used by BraveHub en
 
 ## Categories
 
-### 📧 Exchange Online
-Scripts for mailbox management, permissions, shared mailboxes, distribution groups, and mail flow configuration.
+### 📧 Exchange
+Scripts for calendar and mailbox management.
 
-- Mailbox permission management (Full Access, Send As, Send on Behalf)
-- Shared mailbox provisioning and access delegation
-- Distribution group and mail contact management
-- Message trace and mail flow troubleshooting
-- Calendar permissions
-
-### 👤 Entra ID (Azure AD)
-Scripts for user and group lifecycle management, dynamic groups, and identity governance.
-
-- User provisioning and offboarding
-- Dynamic group creation and rule management
-- Guest access and B2B management
-- Conditional Access policy reporting
-- MFA status reporting and enforcement
+- Calendar migration between users
 
 ### 📱 Intune / Autopilot
-Scripts for device management, Autopilot enrollment, and compliance reporting.
+Scripts for device enrollment and Autopilot registration.
 
-- Autopilot device registration and profile assignment
-- Device compliance status reporting
-- App deployment status
-- Stale device cleanup
+- Retrieve Windows Autopilot hardware info
+- CMD-based Autopilot enrollment helper
 
-### 📊 Licensing & Reporting
-Scripts for license management, usage reporting, and cost optimization.
+### 🖥️ Custom Scripts — Device / Audio
+Scripts for managing audio device configuration on endpoints.
 
-- License assignment and reconciliation (Pax8 / Ingram Micro)
-- Unlicensed user detection
-- Service plan assignment per user
-- License usage overview per tenant
+- Detect connected audio devices
+- Disable internal microphone via policy
+- Rollback internal mic changes
+
+### 🖼️ Custom Scripts — Intune / Desktop
+Scripts and assets for managing desktop and lockscreen configuration.
+
+- Deploy lockscreen to start and desktop
+- Manage desktop background images
 
 ---
 
@@ -86,18 +76,25 @@ Run any script with `-Help` or check the header comment for usage instructions.
 
 ```
 M365-Scripts/
-├── ExchangeOnline/
-│   ├── Set-MailboxPermissions.ps1
-│   └── ...
-├── EntraID/
-│   ├── New-DynamicGroup.ps1
-│   └── ...
-├── Intune/
-│   ├── Get-DeviceComplianceReport.ps1
-│   └── ...
-└── Licensing/
-    ├── Get-LicenseOverview.ps1
-    └── ...
+├── .vscode/
+│   └── settings.json
+├── scripts/
+│   ├── Custom Scripts/
+│   │   ├── device/audio/
+│   │   │   ├── detect-audiodevices.ps1
+│   │   │   ├── Disable-internalmic.ps1
+│   │   │   ├── Rollback-InternalMic
+│   │   │   └── readme.md
+│   │   └── Intune/Desktop/
+│   │       ├── Add Lockscreen to start and desktop/
+│   │       └── Background/
+│   ├── Exchange/
+│   │   ├── Migrate-Calendar.ps1
+│   │   └── readme.md
+│   └── Intune/Get-Autopilot/
+│       ├── Get-WindowsAutoPilotInfo.ps1
+│       └── GetAutoPilot.CMD
+└── readme.md
 ```
 
 ---
@@ -116,6 +113,17 @@ This repository is actively maintained and expanded. When adding new scripts:
 ## Disclaimer
 
 These scripts are provided as-is. Always test in a non-production environment before running against live tenants. BraveHub accepts no liability for unintended changes resulting from misuse or misconfiguration.
+
+---
+
+## Version History
+
+| Date | Change |
+|------|--------|
+| 2026-03-20 | Updated readme structure; added device/audio and Intune/Desktop categories |
+| 2026-03-19 | Added Exchange calendar migration script |
+| 2026-03-19 | Added Intune/Get-Autopilot scripts (`Get-WindowsAutoPilotInfo.ps1`, `GetAutoPilot.CMD`) |
+| 2026-03-19 | Initial repository upload |
 
 ---
 
