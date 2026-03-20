@@ -12,7 +12,6 @@ SETLOCAL
 :: ============================================================
 
 :: Change working directory to the folder containing this script
-:: (ensures GetAutoPilot.CMD is found regardless of USB drive letter)
 cd /d "%~dp0"
 
 :: Self-elevation — relaunch as Administrator if not already elevated
@@ -33,34 +32,48 @@ ECHO.
 ECHO   1  - Device Manager
 ECHO   2  - Autopilot enrollment
 ECHO   3  - Remove hash file and re-run Autopilot
-ECHO   4  - Enter product key
-ECHO   5  - Restart
+ECHO   4  - Windows Update (scan + download + install)
+ECHO   5  - Install PowerShell 7
+ECHO   6  - Enter product key
+ECHO   7  - Restart
+ECHO.
+ECHO   A  - DO IT ALL (Autopilot + Update + Restart)
+ECHO.
 ECHO   0  - Exit
 ECHO.
 ECHO  ================================================
 ECHO.
 SET /P M=  Select option and press ENTER:
 
-IF "%M%"=="1" GOTO DEVMGMT
-IF "%M%"=="2" GOTO AUTOPILOT
-IF "%M%"=="3" GOTO COMPHASH
-IF "%M%"=="4" GOTO PRODUCTKEY
-IF "%M%"=="5" GOTO RESTART
-IF "%M%"=="0" GOTO EXIT
+IF /I "%M%"=="1" GOTO DEVMGMT
+IF /I "%M%"=="2" GOTO AUTOPILOT
+IF /I "%M%"=="3" GOTO COMPHASH
+IF /I "%M%"=="4" GOTO WINUPDATE
+IF /I "%M%"=="5" GOTO INSTALLPS
+IF /I "%M%"=="6" GOTO PRODUCTKEY
+IF /I "%M%"=="7" GOTO RESTART
+IF /I "%M%"=="A" GOTO DOITALL
+IF /I "%M%"=="0" GOTO EXIT
 
 ECHO   Invalid option. Try again.
 TIMEOUT /T 2 /NOBREAK >nul
 GOTO MENU
+
+:: ============================================================
 
 :DEVMGMT
 ECHO   Opening Device Manager...
 start devmgmt.msc
 GOTO MENU
 
+:: ============================================================
+
 :AUTOPILOT
 ECHO   Starting Autopilot enrollment...
 CALL "%~dp0GetAutoPilot.CMD"
 GOTO MENU
+
+:: ============================================================
 
 :COMPHASH
 ECHO   Removing existing hash file and re-running Autopilot...
@@ -73,15 +86,93 @@ IF EXIST "%~dp0compHash.csv" (
 CALL "%~dp0GetAutoPilot.CMD"
 GOTO MENU
 
+:: ============================================================
+
+:WINUPDATE
+ECHO.
+ECHO   Installing PSWindowsUpdate module and running updates...
+ECHO   Requires internet connection.
+ECHO.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Install-Module PSWindowsUpdate -Force -Scope CurrentUser; Import-Module PSWindowsUpdate; Install-WindowsUpdate -AcceptAll -AutoReboot"
+ECHO.
+ECHO   Windows Update complete. Device will reboot if updates were installed.
+ECHO.
+PAUSE
+GOTO MENU
+
+:: ============================================================
+
+:INSTALLPS
+ECHO.
+ECHO   Installing PowerShell 7 via winget...
+ECHO   Requires internet connection.
+ECHO.
+winget install --id Microsoft.PowerShell --source winget --silent --accept-source-agreements --accept-package-agreements
+if %errorlevel% neq 0 (
+    ECHO.
+    ECHO   winget failed or not available on this device.
+    ECHO   Alternative: download PowerShell 7 manually from https://aka.ms/powershell
+    ECHO.
+) ELSE (
+    ECHO.
+    ECHO   PowerShell 7 installed successfully.
+    ECHO   Launch with: pwsh.exe
+    ECHO.
+)
+PAUSE
+GOTO MENU
+
+:: ============================================================
+
 :PRODUCTKEY
 ECHO   Opening product key entry...
 start slui.exe
 GOTO MENU
 
+:: ============================================================
+
 :RESTART
 ECHO   Restarting in 5 seconds... Press Ctrl+C to cancel.
 shutdown -r -t 5
 GOTO MENU
+
+:: ============================================================
+
+:DOITALL
+CLS
+ECHO.
+ECHO  ================================================
+ECHO   DO IT ALL
+ECHO   Step 1: Autopilot enrollment
+ECHO   Step 2: Windows Update
+ECHO   Step 3: Restart
+ECHO  ================================================
+ECHO.
+
+ECHO   [1/3] Removing old hash file...
+IF EXIST "%~dp0compHash.csv" (
+    del "%~dp0compHash.csv"
+    ECHO         compHash.csv removed.
+)
+
+ECHO   [1/3] Running Autopilot enrollment...
+CALL "%~dp0GetAutoPilot.CMD"
+
+ECHO.
+ECHO   [2/3] Installing PSWindowsUpdate and running updates...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Install-Module PSWindowsUpdate -Force -Scope CurrentUser; Import-Module PSWindowsUpdate; Install-WindowsUpdate -AcceptAll -AutoReboot"
+ECHO         Windows Update complete.
+
+ECHO.
+ECHO   [3/3] All steps completed.
+ECHO         The device will restart in 30 seconds.
+ECHO         Press Ctrl+C to cancel the restart.
+ECHO.
+shutdown -r -t 30
+PAUSE
+GOTO MENU
+
+:: ============================================================
 
 :EXIT
 ENDLOCAL

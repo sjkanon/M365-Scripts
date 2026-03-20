@@ -48,11 +48,26 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | `1` | Open Device Manager | ✅ |
 | `2` | Autopilot enrollment | ✅ |
 | `3` | Remove hash file + re-run Autopilot | ✅ |
-| `4` | Enter product key (`slui.exe`) | ✅ |
-| `5` | Restart (5 second delay) | ✅ |
+| `4` | Install `PSWindowsUpdate` module + run `Install-WindowsUpdate -AcceptAll -AutoReboot` | ✅ (needs internet) |
+| `5` | Install PowerShell 7 via `winget` | ✅ (needs internet) |
+| `6` | Enter product key (`slui.exe`) | ✅ |
+| `7` | Restart (5 second delay) | ✅ |
+| `A` | **Do it all** — Autopilot + Windows Update + restart (30s) | ✅ |
 | `0` | Exit | ✅ |
 
-> Windows Update settings are **not** available during OOBE — open them after the first login.
+> Windows Update Settings panel is not available in OOBE, but `UsoClient` triggers updates directly from the command line and works fine.
+
+### PowerShell 7 (option 5)
+
+Uses `winget install Microsoft.PowerShell`. Requires internet. If `winget` is not available (older Windows 10), the script shows the manual download URL. After install, launch with `pwsh.exe`.
+
+### Do it all (option A)
+
+Runs in sequence:
+1. Removes existing `compHash.csv`
+2. Runs Autopilot enrollment (`GetAutoPilot.CMD`)
+3. Triggers Windows Update (`UsoClient StartScan` → `StartDownload` → `StartInstall`)
+4. Restarts after 30 seconds (Ctrl+C to cancel)
 
 ---
 
@@ -66,4 +81,6 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-03-20 | 2.2 | Windows Update now uses `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll -AutoReboot`) instead of `UsoClient` |
+| 2026-03-20 | 2.1 | Added Windows Update, PowerShell 7 install (`winget`), and Do it all (`A`) option |
 | 2026-03-20 | 2.0 | Rewritten to English; `cd /d %~dp0` for USB path; self-elevation; OOBE-compatible options only; quoted paths; added `autorun.inf` and readme |

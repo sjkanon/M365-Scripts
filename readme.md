@@ -165,7 +165,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
-| 2026-03-20 | Rewrote `start.bat` v2.0 — English, self-elevation, `cd /d %~dp0`, OOBE-compatible; added `autorun.inf` and readme |
+| 2026-03-20 | `start.bat` v2.2 — Windows Update via `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll`) |
+| 2026-03-20 | `start.bat` v2.1 — added Windows Update, PowerShell 7 install (`winget`), Do it all option |
+| 2026-03-20 | `start.bat` v2.0 — English, self-elevation, `cd /d %~dp0`, OOBE-compatible; added `autorun.inf` and readme |
 | 2026-03-20 | Rewrote `Migrate-Calendar.ps1` to v2.0 — English, generic, mandatory params, linter fixes |
 | 2026-03-20 | Removed all BraveHub references from scripts and readmes |
 | 2026-03-20 | Added `Test-SmtpRelay` to `functies.ps1` |
