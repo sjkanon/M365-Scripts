@@ -52,8 +52,10 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | `5` | Windows Update via `PSWindowsUpdate` (`Install-WindowsUpdate -AcceptAll -AutoReboot`) | ✅ (needs internet) |
 | `6` | Install PowerShell 7 via `winget` | ✅ (needs internet) |
 | `7` | Enter product key (`slui.exe`) | ✅ |
-| `8` | Restart (5 second delay) | ✅ |
+| `8` | Join Active Directory domain | ✅ (needs domain connectivity) |
+| `9` | Restart (5 second delay) | ✅ |
 | `A` | **Do it all** — Autopilot online + Windows Update + restart (30s) | ✅ |
+| `B` | **Rename device** — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`) | ✅ |
 | `0` | Exit | ✅ |
 
 ### Autopilot online (option 4)
@@ -86,6 +88,8 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-03-20 | 2.5 | Added device rename option (B) — prompts for prefix, appends serial number (`Get-WmiObject Win32_BIOS`), max 15 chars |
+| 2026-03-20 | 2.4 | Added Active Directory domain join option (8) — `Add-Computer` via PowerShell, prompts for domain + credentials |
 | 2026-03-20 | 2.3 | Added Autopilot online option (4) — `Get-WindowsAutoPilotInfo.ps1 -Online`; Do it all now uses online enrollment |
 | 2026-03-20 | 2.2 | Windows Update now uses `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll -AutoReboot`) instead of `UsoClient` |
 | 2026-03-20 | 2.1 | Added Windows Update, PowerShell 7 install (`winget`), and Do it all (`A`) option |

@@ -165,6 +165,8 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | `start.bat` v2.5 — Added device rename option (B): prompts for prefix, auto-appends serial number |
+| 2026-03-20 | `start.bat` v2.4 — Added Active Directory domain join option (8); option 9 = restart |
 | 2026-03-20 | `start.bat` v2.3 — Autopilot online option (`-Online` uploads directly to Intune); Do it all uses online enrollment |
 | 2026-03-20 | `start.bat` v2.2 — Windows Update via `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll`) |
 | 2026-03-20 | `start.bat` v2.1 — added Windows Update, PowerShell 7 install (`winget`), Do it all option |

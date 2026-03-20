@@ -40,6 +40,7 @@ ECHO   8  - Join Active Directory domain
 ECHO   9  - Restart
 ECHO.
 ECHO   A  - DO IT ALL (Autopilot online + Update + Restart)
+ECHO   B  - Rename this device (NAME-SERIALNUMBER)
 ECHO.
 ECHO   0  - Exit
 ECHO.
@@ -57,6 +58,7 @@ IF /I "%M%"=="7" GOTO PRODUCTKEY
 IF /I "%M%"=="8" GOTO ADJOIN
 IF /I "%M%"=="9" GOTO RESTART
 IF /I "%M%"=="A" GOTO DOITALL
+IF /I "%M%"=="B" GOTO RENAMEPC
 IF /I "%M%"=="0" GOTO EXIT
 
 ECHO   Invalid option. Try again.
@@ -149,6 +151,18 @@ GOTO MENU
 
 :: ============================================================
 
+:ADJOIN
+ECHO.
+ECHO   Join Active Directory domain
+ECHO   You will be prompted for the domain name and admin credentials.
+ECHO.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$domain = Read-Host 'Enter domain name (e.g. contoso.local)'; $cred = Get-Credential -Message ('Domain admin credentials for: ' + $domain); Add-Computer -DomainName $domain -Credential $cred -Force; Write-Host ''; Write-Host 'Domain join complete. Restart to apply.' -ForegroundColor Green"
+ECHO.
+PAUSE
+GOTO MENU
+
+:: ============================================================
+
 :RESTART
 ECHO   Restarting in 5 seconds... Press Ctrl+C to cancel.
 shutdown -r -t 5
@@ -188,6 +202,19 @@ ECHO         The device will restart in 30 seconds.
 ECHO         Press Ctrl+C to cancel the restart.
 ECHO.
 shutdown -r -t 30
+PAUSE
+GOTO MENU
+
+:: ============================================================
+
+:RENAMEPC
+ECHO.
+ECHO   Rename this device
+ECHO   The serial number will be appended automatically.
+ECHO   Format: NAME-SERIALNUMBER  (e.g. LAPTOP-ABC123)
+ECHO.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$serial = (Get-WmiObject Win32_BIOS).SerialNumber.Trim(); $prefix = Read-Host 'Enter device name prefix (e.g. LAPTOP, DESKTOP, NB)'; $newName = ($prefix + '-' + $serial).ToUpper(); if ($newName.Length -gt 15) { Write-Host ('WARNING: name is ' + $newName.Length + ' characters — Windows allows max 15. Truncating.') -ForegroundColor Yellow; $newName = $newName.Substring(0,15) }; Rename-Computer -NewName $newName -Force; Write-Host (''); Write-Host ('Device renamed to: ' + $newName) -ForegroundColor Green; Write-Host 'Restart to apply the new name.'"
+ECHO.
 PAUSE
 GOTO MENU
 
