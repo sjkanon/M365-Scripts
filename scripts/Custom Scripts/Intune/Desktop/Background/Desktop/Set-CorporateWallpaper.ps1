@@ -18,8 +18,8 @@
 # ==============================================================================
 
 # URL to the wallpaper image (PNG or JPG)
-# Tip: use https://config.support.bravehub.io/<CUSTOMERNAME>/wallpaper.png
-$ImageUrl = "https://config.support.bravehub.io/CUSTOMERNAME/wallpaper.png"
+# Use a publicly accessible URL hosted by or on behalf of the customer
+$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)

@@ -23,7 +23,7 @@ This ensures the wallpaper is applied regardless of who logs in, both for existi
 Edit the three variables in the `CONFIGURATION` block at the top of the script before uploading to Intune:
 
 ```powershell
-$ImageUrl       = "https://config.support.bravehub.io/CUSTOMERNAME/wallpaper.png"
+$ImageUrl       = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 $ClientName     = "CUSTOMERNAME"
 $WallpaperStyle = "10"
 ```
@@ -111,4 +111,4 @@ Packaging as a Win32 app allows re-run control and detection rules.
 |---|---|---|
 | — | 1.0 | Initial version |
 | — | 1.2 | Made generic for reuse per customer |
-| 2026-03-20 | 2.0 | Translated to English; `Invoke-WebRequest` replaces `WebClient`; `#Requires -Version 5.1`; updated CDN URL to `config.support.bravehub.io` |
+| 2026-03-20 | 2.0 | Translated to English; `Invoke-WebRequest` replaces `WebClient`; `#Requires -Version 5.1`; generic CDN URL placeholder |
