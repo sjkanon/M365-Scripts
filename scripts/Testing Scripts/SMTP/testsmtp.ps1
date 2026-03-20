@@ -1,39 +1,61 @@
 #Requires -Version 5.1
-# ==============================================================================
-# testsmtp.ps1
-# One-time SMTP connectivity test — prompts for credentials interactively.
-#
-# Usage:
-#   .\testsmtp.ps1
-#   Prompts for password at runtime — no credentials stored on disk.
-# ==============================================================================
+<#
+.SYNOPSIS
+    One-time SMTP connectivity test.
 
-# ==============================================================================
-# CONFIGURATION — change these per test
-# ==============================================================================
+.DESCRIPTION
+    Sends a single test email via SMTP with STARTTLS. Prompts for credentials
+    interactively — nothing is stored on disk.
 
-$SMTPServer = "smtp.office365.com"
-$SMTPPort   = 587
+.PARAMETER SmtpServer
+    SMTP server hostname. Default: smtp.office365.com
 
-$From    = "sender@domain.com"
-$To      = "recipient@domain.com"
-$Subject = "SMTP Test — PowerShell"
-$Body    = "This is a test email sent from PowerShell via SMTP with STARTTLS."
+.PARAMETER Port
+    SMTP port. Default: 587
 
-# ==============================================================================
-# SCRIPT
-# ==============================================================================
+.PARAMETER From
+    Sender address (also used as SMTP auth username).
+
+.PARAMETER To
+    Recipient address for the test email.
+
+.PARAMETER Subject
+    Email subject. Default: "SMTP Test — PowerShell"
+
+.PARAMETER Body
+    Email body. Default: generic test message.
+
+.EXAMPLE
+    .\testsmtp.ps1 -From "sender@domain.com" -To "recipient@domain.com"
+
+.EXAMPLE
+    .\testsmtp.ps1 -From "sender@domain.com" -To "recipient@domain.com" -SmtpServer "mail.domain.com" -Port 25
+
+.NOTES
+    Author  : Sjoerd Kanon
+    Version : 2.0
+#>
+
+[CmdletBinding()]
+param (
+    [string] $SmtpServer = "smtp.office365.com",
+    [int]    $Port       = 587,
+    [string] $From       = "sender@domain.com",
+    [string] $To         = "recipient@domain.com",
+    [string] $Subject    = "SMTP Test — PowerShell",
+    [string] $Body       = "This is a test email sent from PowerShell via SMTP with STARTTLS."
+)
 
 $Password   = Read-Host -AsSecureString "Enter SMTP password for $From"
 $Credential = New-Object System.Management.Automation.PSCredential($From, $Password)
 
-Write-Host "Connecting to $SMTPServer`:$SMTPPort ..." -ForegroundColor Cyan
+Write-Host "Connecting to $SmtpServer`:$Port ..." -ForegroundColor Cyan
 
 try {
-    $smtp = New-Object System.Net.Mail.SmtpClient($SMTPServer, $SMTPPort)
-    $smtp.EnableSsl             = $true
-    $smtp.Credentials          = $Credential.GetNetworkCredential()
-    $smtp.DeliveryMethod       = [System.Net.Mail.SmtpDeliveryMethod]::Network
+    $smtp                  = New-Object System.Net.Mail.SmtpClient($SmtpServer, $Port)
+    $smtp.EnableSsl        = $true
+    $smtp.Credentials      = $Credential.GetNetworkCredential()
+    $smtp.DeliveryMethod   = [System.Net.Mail.SmtpDeliveryMethod]::Network
 
     $mail         = New-Object System.Net.Mail.MailMessage
     $mail.From    = $From

@@ -59,6 +59,7 @@ $From            = "sender@domain.com"
 $AuthAs          = "sender@domain.com"   # set to auth account if different from $From
 $To              = "recipient@domain.com"
 $IntervalSeconds = 300                   # 5 minutes
+$SavedKeyPath    = "$env:USERPROFILE\smtp_test_password.txt"
 ```
 
 > Use `$AuthAs` when sending from a shared mailbox: `$From` = shared mailbox address, `$AuthAs` = the user account that has Send As permission.
