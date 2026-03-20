@@ -29,7 +29,7 @@ Only the three parameters at the top of the script need to be changed per custom
     -WallpaperStyle "10"
 ```
 
-For Intune deployment as a script (no parameters passed), edit the defaults directly in the `param()` block:
+**Intune does not pass parameters.** When deploying as a Platform Script, edit the defaults directly in the `param()` block before uploading:
 
 ```powershell
 [string]$ImageUrl       = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
@@ -128,4 +128,4 @@ Use `-WhatIf` to preview all actions without making any changes:
 |---|---|---|
 | — | 1.0 | Initial version |
 | — | 1.2 | Made generic for reuse per customer |
-| 2026-03-20 | 2.0 | Rewritten to English; added `[CmdletBinding]`, `param()`, `-WhatIf` support; `Invoke-WebRequest` replaces `WebClient`; comment-based help |
+| 2026-03-20 | 2.0 | Rewritten to English; `[CmdletBinding]`, `param()`, `-WhatIf`, `#Requires -Version 5.1`; `Invoke-WebRequest` replaces `WebClient`; comment-based help |

@@ -7,9 +7,10 @@
     Sets the wallpaper for the current user (WinAPI + HKCU), all users via MDM
     (PersonalizationCSP), and new user accounts (Default User NTUSER.DAT).
 
-    Deploy via Intune as:
-      - PowerShell script (Run as: SYSTEM, 64-bit: Yes)
-      - Win32 app (.intunewin)
+    Intune deployment (Platform Script):
+      - Run as: SYSTEM
+      - Run in 64-bit PowerShell: Yes
+      - Intune does not pass parameters — set the defaults in the param() block below.
 
 .PARAMETER ImageUrl
     URL to the wallpaper image (PNG or JPG).
@@ -24,9 +25,11 @@
     .\Set-CorporateWallpaper.ps1 -ImageUrl "https://cdn.example.com/acme/wallpaper.png" -ClientName "Acme"
 
 .NOTES
-    Author  : Sjoerd Kanon
-    Version : 2.0
+    Author      : Sjoerd Kanon
+    Version     : 2.0
+    Requires    : Windows PowerShell 5.1 or later
 #>
+#Requires -Version 5.1
 
 [CmdletBinding(SupportsShouldProcess)]
 param (
