@@ -20,22 +20,15 @@ This ensures the wallpaper is applied regardless of who logs in, both for existi
 
 ## Configuration
 
-Only the three parameters at the top of the script need to be changed per customer. Everything else is fixed.
+Edit the three variables in the `CONFIGURATION` block at the top of the script before uploading to Intune:
 
 ```powershell
-.\Set-CorporateWallpaper.ps1 `
-    -ImageUrl      "https://cdn.example.com/acme/wallpaper.png" `
-    -ClientName    "Acme" `
-    -WallpaperStyle "10"
+$ImageUrl       = "https://config.support.bravehub.io/CUSTOMERNAME/wallpaper.png"
+$ClientName     = "CUSTOMERNAME"
+$WallpaperStyle = "10"
 ```
 
-**Intune does not pass parameters.** When deploying as a Platform Script, edit the defaults directly in the `param()` block before uploading:
-
-```powershell
-[string]$ImageUrl       = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
-[string]$ClientName     = "CUSTOMERNAME"
-[string]$WallpaperStyle = "10"
-```
+Replace `CUSTOMERNAME` with the customer's name (e.g. `acme`). Everything else is fixed and does not need to be modified.
 
 ### Wallpaper styles
 
@@ -75,7 +68,7 @@ Readable from Intune Device Diagnostics or locally on the device.
 4. Assign to the desired device group
 5. **Save**
 
-> Note: with this method the script runs as SYSTEM. Step 5 (WinAPI) and Step 6 (HKCU) will apply to the SYSTEM context, not the logged-in user. PersonalizationCSP (Step 4) and Default User (Step 7) will still apply correctly for all users.
+> Note: the script runs as SYSTEM. Steps 5 (WinAPI) and 6 (HKCU) apply to the SYSTEM context, not the logged-in user. PersonalizationCSP (Step 4) and Default User (Step 7) apply correctly for all users regardless.
 
 ### As Win32 app (recommended)
 
@@ -112,20 +105,10 @@ Packaging as a Win32 app allows re-run control and detection rules.
 
 ---
 
-## Dry run
-
-Use `-WhatIf` to preview all actions without making any changes:
-
-```powershell
-.\Set-CorporateWallpaper.ps1 -ImageUrl "https://..." -ClientName "Acme" -WhatIf
-```
-
----
-
 ## Changelog
 
 | Date | Version | Change |
 |---|---|---|
 | — | 1.0 | Initial version |
 | — | 1.2 | Made generic for reuse per customer |
-| 2026-03-20 | 2.0 | Rewritten to English; `[CmdletBinding]`, `param()`, `-WhatIf`, `#Requires -Version 5.1`; `Invoke-WebRequest` replaces `WebClient`; comment-based help |
+| 2026-03-20 | 2.0 | Translated to English; `Invoke-WebRequest` replaces `WebClient`; `#Requires -Version 5.1`; updated CDN URL to `config.support.bravehub.io` |
