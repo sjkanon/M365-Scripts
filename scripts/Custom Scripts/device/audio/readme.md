@@ -1,6 +1,5 @@
 # Audio — Disable Internal Microphone
 
-> **BraveHub Internal Script**
 > Author: Sjoerd Kanon | Date: 19/03/2026
 
 ---

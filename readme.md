@@ -24,6 +24,12 @@ Scripts for device enrollment and Autopilot registration.
 - Retrieve Windows Autopilot hardware info
 - CMD-based Autopilot enrollment helper
 
+### 💾 USB Setup Toolkit
+USB toolkit for Windows setup and Autopilot enrollment during OOBE.
+
+- Interactive menu (Device Manager, Autopilot, product key, restart)
+- Self-elevating, OOBE-compatible via Shift+F10
+
 ### 🖥️ Custom Scripts — Device / Audio
 Scripts for managing audio device configuration on endpoints.
 
@@ -35,6 +41,12 @@ Scripts for managing audio device configuration on endpoints.
 Scripts for managing Windows time synchronization.
 
 - Restart and force Windows Time service sync
+
+### 🧪 Testing Scripts — SMTP
+Scripts for diagnosing SMTP connectivity and authentication.
+
+- One-time SMTP test with interactive credential prompt
+- Recurring SMTP test (every 5 minutes) with saved encrypted password
 
 ### 🖼️ Custom Scripts — Intune / Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
@@ -102,12 +114,16 @@ M365-Scripts/
 │   │   │   │   └── readme.md
 │   │   │   └── Time sync/
 │   │   │       └── Restart-Time-Sync.ps1
-│   │   └── Intune/Desktop/
-│   │       ├── Add Lockscreen to start and desktop/
-│   │       └── Background/
-│   │           └── Desktop/
-│   │               ├── Set-CorporateWallpaper.ps1
-│   │               └── readme.md
+│   │   ├── Intune/Desktop/
+│   │   │   ├── Add Lockscreen to start and desktop/
+│   │   │   └── Background/
+│   │   │       └── Desktop/
+│   │   │           ├── Set-CorporateWallpaper.ps1
+│   │   │           └── readme.md
+│   │   └── Save install time/             ← USB setup toolkit
+│   │       ├── start.bat
+│   │       ├── autorun.inf
+│   │       └── readme.md
 │   ├── Exchange/
 │   │   ├── Migrate-Calendar.ps1
 │   │   ├── Set-Calendar-rights.ps1
@@ -115,6 +131,10 @@ M365-Scripts/
 │   ├── Intune/Get-Autopilot/
 │   │   ├── Get-WindowsAutoPilotInfo.ps1
 │   │   └── GetAutoPilot.CMD
+│   ├── Testing Scripts/SMTP/
+│   │   ├── testsmtp.ps1
+│   │   ├── testsmtp_5min.ps1
+│   │   └── readme.md
 │   └── Startup/
 │       ├── functies.ps1                 ← Function library: dot-source at startup
 │       ├── Install-Modules.ps1          ← Bootstrap: install & import all modules
@@ -137,7 +157,7 @@ This repository is actively maintained and expanded. When adding new scripts:
 
 ## Disclaimer
 
-These scripts are provided as-is. Always test in a non-production environment before running against live tenants. BraveHub accepts no liability for unintended changes resulting from misuse or misconfiguration.
+These scripts are provided as-is. Always test in a non-production environment before running against live tenants. The maintainer accepts no liability for unintended changes resulting from misuse or misconfiguration.
 
 ---
 
@@ -145,6 +165,20 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | `start.bat` v2.8 — Split Do it all: A = Intune (Rename + Autopilot + Update), C = AD (Rename + Domain join + Update) |
+| 2026-03-20 | `start.bat` v2.7 — Do it all updated: AD domain join added as step 3 |
+| 2026-03-20 | `start.bat` v2.6 — Do it all updated: device rename now first step before Autopilot |
+| 2026-03-20 | `start.bat` v2.5 — Added device rename option (B): prompts for prefix, auto-appends serial number |
+| 2026-03-20 | `start.bat` v2.4 — Added Active Directory domain join option (8); option 9 = restart |
+| 2026-03-20 | `start.bat` v2.3 — Autopilot online option (`-Online` uploads directly to Intune); Do it all uses online enrollment |
+| 2026-03-20 | `start.bat` v2.2 — Windows Update via `PSWindowsUpdate` module (`Install-WindowsUpdate -AcceptAll`) |
+| 2026-03-20 | `start.bat` v2.1 — added Windows Update, PowerShell 7 install (`winget`), Do it all option |
+| 2026-03-20 | `start.bat` v2.0 — English, self-elevation, `cd /d %~dp0`, OOBE-compatible; added `autorun.inf` and readme |
+| 2026-03-20 | Rewrote `Migrate-Calendar.ps1` to v2.0 — English, generic, mandatory params, linter fixes |
+| 2026-03-20 | Removed all BraveHub references from scripts and readmes |
+| 2026-03-20 | Added `Test-SmtpRelay` to `functies.ps1` |
+| 2026-03-20 | SMTP scripts v2.1 — cross-platform (Windows: saved DPAPI file, macOS/Linux: prompt once) |
+| 2026-03-20 | Added SMTP test scripts — `testsmtp.ps1` and `testsmtp_5min.ps1` with `param()`, `System.Net.Mail.SmtpClient` |
 | 2026-03-20 | Rewrote `Set-CorporateWallpaper.ps1` to v2.0 — English, `Invoke-WebRequest`, `#Requires -Version 5.1`, generic CDN URL |
 | 2026-03-20 | Added `Set-CorporateWallpaper.ps1` with Intune deployment via PersonalizationCSP |
 | 2026-03-20 | Moved `Install-Modules.ps1` to `scripts/Startup/`; added `Restart-Time-Sync.ps1` |
