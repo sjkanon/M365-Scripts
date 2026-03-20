@@ -1,47 +1,48 @@
+#Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Versie 1.2 - Generieke versie voor hergebruik per klant
+# Version 2.0 - Generic version for reuse per customer
 #
-# Gebruik:
-#   Pas enkel de variabelen in het blok "CONFIGURATIE" hieronder aan.
-#   De rest van het script hoeft niet gewijzigd te worden.
+# Usage:
+#   Only change the variables in the CONFIGURATION block below.
+#   The rest of the script does not need to be modified.
 #
-# Uitrollen via Intune:
-#   - Type: PowerShell script  /  Win32 app
-#   - Uitvoeren als: SYSTEM
-#   - 64-bit PowerShell: Ja
+# Deploy via Intune:
+#   - Type: PowerShell script
+#   - Run as: SYSTEM
+#   - Run in 64-bit PowerShell: Yes
 # ==============================================================================
 
 # ==============================================================================
-# CONFIGURATIE - pas dit aan per klant
+# CONFIGURATION — change these per customer
 # ==============================================================================
 
-# URL naar de achtergrondafbeelding (PNG of JPG)
-# Tip: gebruik https://config.support.bravehub.io/<KLANTNAAM>/wallpaper.png
-$ImageUrl = "https://config.support.bravehub.io/KLANTNAAM/wallpaper.png"
+# URL to the wallpaper image (PNG or JPG)
+# Tip: use https://config.support.bravehub.io/<CUSTOMERNAME>/wallpaper.png
+$ImageUrl = "https://config.support.bravehub.io/CUSTOMERNAME/wallpaper.png"
 
-# Weergavestijl:
-#   10 = Fill (aanbevolen - vult scherm zonder vervorming)
-#    6 = Fit  (past binnen scherm, zwarte randen mogelijk)
-#    2 = Stretch (uitrekken, kan vervormen)
+# Display style:
+#   10 = Fill    (recommended — fills screen without distortion)
+#    6 = Fit     (fits within screen, black borders possible)
+#    2 = Stretch (stretches to fill, may distort)
 #    0 = Tile
-#   22 = Span (multi-monitor)
+#   22 = Span    (spreads across multiple monitors)
 $WallpaperStyle = "10"
 
-# Naam van de klant - wordt gebruikt in logberichten en bestandsnaam
-$ClientName = "KLANTNAAM"
+# Customer name — used in log filename and local image filename
+$ClientName = "CUSTOMERNAME"
 
 # ==============================================================================
-# INTERNE VARIABELEN - niet aanpassen
+# INTERNAL VARIABLES — do not modify
 # ==============================================================================
 
-$WallpaperFolder = "$env:ProgramData\Wallpapers"
+$WallpaperFolder   = "$env:ProgramData\Wallpapers"
 $WallpaperFileName = "corporate-background-$($ClientName.ToLower()).jpg"
-$WallpaperPath    = "$WallpaperFolder\$WallpaperFileName"
-$LogFilePath      = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-$($ClientName.ToUpper()).log"
+$WallpaperPath     = "$WallpaperFolder\$WallpaperFileName"
+$LogFilePath       = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-$($ClientName.ToUpper()).log"
 
 # ==============================================================================
-# FUNCTIES
+# FUNCTIONS
 # ==============================================================================
 
 function Write-Log {
@@ -53,47 +54,45 @@ function Write-Log {
     if (-not (Test-Path -Path $logDir)) {
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     }
-    $timeStamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timeStamp - $Message" | Out-File -FilePath $LogFilePath -Append
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$timestamp - $Message" | Out-File -FilePath $LogFilePath -Append
 }
 
 # ==============================================================================
 # SCRIPT START
 # ==============================================================================
 
-Write-Log "====== Start Set-CorporateWallpaper voor klant: $ClientName ======"
-Write-Log "Bron-URL  : $ImageUrl"
-Write-Log "Doel-pad  : $WallpaperPath"
-Write-Log "Stijl     : $WallpaperStyle"
+Write-Log "====== Start Set-CorporateWallpaper for client: $ClientName ======"
+Write-Log "Source URL : $ImageUrl"
+Write-Log "Target path: $WallpaperPath"
+Write-Log "Style      : $WallpaperStyle"
 
-# Stap 1: Doelmap aanmaken
+# Step 1: Create target folder
 if (-not (Test-Path -Path $WallpaperFolder)) {
     try {
         New-Item -ItemType Directory -Path $WallpaperFolder -Force | Out-Null
-        Write-Log "Wallpapermap aangemaakt: $WallpaperFolder"
+        Write-Log "Wallpaper folder created: $WallpaperFolder"
     } catch {
-        Write-Log "FOUT bij aanmaken map: $_"
+        Write-Log "ERROR creating folder: $_"
         exit 1
     }
 }
 
-# Stap 2: Afbeelding downloaden
+# Step 2: Download image
 try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $webClient = New-Object System.Net.WebClient
-    $webClient.DownloadFile($ImageUrl, $WallpaperPath)
-    Write-Log "Afbeelding gedownload naar: $WallpaperPath"
+    Invoke-WebRequest -Uri $ImageUrl -OutFile $WallpaperPath -UseBasicParsing
+    Write-Log "Image downloaded to: $WallpaperPath"
 } catch {
-    Write-Log "FOUT bij downloaden: $_"
+    Write-Log "ERROR downloading image: $_"
     exit 1
 }
 
 if (-not (Test-Path -Path $WallpaperPath)) {
-    Write-Log "FOUT: Bestand niet aanwezig na download."
+    Write-Log "ERROR: File not present after download."
     exit 1
 }
 
-# Stap 3: Windows API laden
+# Step 3: Load Windows API
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -107,7 +106,7 @@ $SPI_SETDESKWALLPAPER = 0x0014
 $SPIF_UPDATEINIFILE   = 0x01
 $SPIF_SENDCHANGE      = 0x02
 
-# Stap 4: PersonalizationCSP (MDM/Intune - voor alle gebruikers)
+# Step 4: PersonalizationCSP (MDM/Intune — enforces wallpaper for all users)
 try {
     $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP"
     if (-not (Test-Path -Path $regPath)) {
@@ -116,36 +115,36 @@ try {
     New-ItemProperty -Path $regPath -Name "DesktopImagePath"   -Value $WallpaperPath -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $regPath -Name "DesktopImageUrl"    -Value $WallpaperPath -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $regPath -Name "DesktopImageStatus" -Value 1              -PropertyType DWord  -Force | Out-Null
-    Write-Log "PersonalizationCSP registerwaarden bijgewerkt"
+    Write-Log "PersonalizationCSP registry keys updated"
 } catch {
-    Write-Log "FOUT bij PersonalizationCSP: $_"
+    Write-Log "ERROR setting PersonalizationCSP: $_"
 }
 
-# Stap 5: Huidige gebruiker - WinAPI
+# Step 5: Current user — WinAPI (applies immediately)
 try {
     $result = [Wallpaper]::SystemParametersInfo($SPI_SETDESKWALLPAPER, 0, $WallpaperPath, $SPIF_UPDATEINIFILE -bor $SPIF_SENDCHANGE)
     if ($result) {
-        Write-Log "Achtergrond ingesteld via WinAPI voor huidige gebruiker"
+        Write-Log "Wallpaper applied via WinAPI for current user"
     } else {
-        Write-Log "WinAPI retourneerde false - geen kritieke fout"
+        Write-Log "WinAPI returned false — non-critical, PersonalizationCSP will apply the wallpaper"
     }
 } catch {
-    Write-Log "FOUT bij WinAPI: $_"
+    Write-Log "ERROR applying wallpaper via WinAPI: $_"
 }
 
-# Stap 6: Huidige gebruiker - register (HKCU)
+# Step 6: Current user — HKCU registry (persists style setting)
 try {
     $regPath = "HKCU:\Control Panel\Desktop"
     Set-ItemProperty -Path $regPath -Name "Wallpaper"      -Value $WallpaperPath -Force
     Set-ItemProperty -Path $regPath -Name "WallpaperStyle" -Value $WallpaperStyle -Force
     Set-ItemProperty -Path $regPath -Name "TileWallpaper"  -Value "0"            -Force
     RUNDLL32.EXE USER32.DLL,UpdatePerUserSystemParameters 1, $true
-    Write-Log "HKCU registerwaarden bijgewerkt (stijl: $WallpaperStyle)"
+    Write-Log "HKCU registry keys updated (style: $WallpaperStyle)"
 } catch {
-    Write-Log "FOUT bij HKCU register: $_"
+    Write-Log "ERROR updating HKCU registry: $_"
 }
 
-# Stap 7: Default User profiel (voor nieuwe gebruikers)
+# Step 7: Default User profile (applies to new user accounts created after deployment)
 try {
     $defaultUserRegPath = "$env:SystemDrive\Users\Default\NTUSER.DAT"
     $tempRegPath        = "HKLM\DefaultUserTemp"
@@ -158,14 +157,14 @@ try {
         [gc]::Collect()
         Start-Sleep -Seconds 1
         reg unload $tempRegPath | Out-Null
-        Write-Log "Default User profiel bijgewerkt voor nieuwe gebruikers"
+        Write-Log "Default User profile updated for new user accounts"
     } else {
-        Write-Log "Default User NTUSER.DAT niet gevonden - stap overgeslagen"
+        Write-Log "Default User NTUSER.DAT not found — step skipped"
     }
 } catch {
-    Write-Log "FOUT bij Default User profiel: $_"
+    Write-Log "ERROR updating Default User profile: $_"
     try { reg unload $tempRegPath | Out-Null } catch { }
 }
 
-Write-Log "====== Script voltooid voor klant: $ClientName ======"
+Write-Log "====== Script completed for client: $ClientName ======"
 exit 0
