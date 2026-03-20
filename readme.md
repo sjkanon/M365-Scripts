@@ -132,6 +132,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Translated all readme files to English |
+| 2026-03-20 | Rewrote `functies.ps1` — replaced MSOnline/AzureAD with Microsoft Graph, made generic and cross-platform |
+| 2026-03-20 | Added `scripts/Startup/readme.md` |
 | 2026-03-20 | Added `Set-Calendar-rights.ps1` with NL/FR/EN locale support |
 | 2026-03-20 | Added `Install-Modules.ps1` cross-platform bootstrap script |
 | 2026-03-20 | Updated readme structure; added device/audio and Intune/Desktop categories |
