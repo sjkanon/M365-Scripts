@@ -145,6 +145,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Rewrote `Set-CorporateWallpaper.ps1` to v2.0 — English, `param()`, `-WhatIf`, `Invoke-WebRequest` |
 | 2026-03-20 | Added `Set-CorporateWallpaper.ps1` with Intune deployment via PersonalizationCSP |
 | 2026-03-20 | Moved `Install-Modules.ps1` to `scripts/Startup/`; added `Restart-Time-Sync.ps1` |
 | 2026-03-20 | Translated all readme files to English |
