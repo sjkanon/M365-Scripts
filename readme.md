@@ -38,20 +38,29 @@ Scripts and assets for managing desktop and lockscreen configuration.
 
 ---
 
-## Requirements
+## Getting Started
 
-- **PowerShell** 5.1 or later (Windows) / PowerShell 7+ (cross-platform)
-- **Required modules** (install as needed per script):
+Run the bootstrap script once to install and import all required modules across any platform:
 
 ```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
-Install-Module Microsoft.Graph -Scope CurrentUser
-Install-Module AzureAD -Scope CurrentUser          # Legacy, use Graph where possible
-Install-Module Microsoft.Graph.Intune -Scope CurrentUser
+# Windows / macOS / Linux
+.\scripts\Install-Modules.ps1
 ```
 
+Optional flags:
+
+```powershell
+.\scripts\Install-Modules.ps1 -Force              # Reinstall even if already present
+.\scripts\Install-Modules.ps1 -Scope AllUsers     # Install for all users (requires elevation)
+```
+
+The script detects the current platform and skips Windows-only modules (`AzureAD`, `WindowsAutopilotIntune`) automatically on macOS and Linux.
+
+## Requirements
+
+- **PowerShell** 7.0 or later (cross-platform) — 5.1 is supported per-script on Windows but the bootstrap requires PS 7+
 - Appropriate **Microsoft 365 admin permissions** for the target workload
-- Script execution must be enabled:
+- Script execution must be enabled (Windows only):
 
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
@@ -79,6 +88,7 @@ M365-Scripts/
 ├── .vscode/
 │   └── settings.json
 ├── scripts/
+│   ├── Install-Modules.ps1              ← Bootstrap: install & import all modules
 │   ├── Custom Scripts/
 │   │   ├── device/audio/
 │   │   │   ├── detect-audiodevices.ps1
@@ -120,6 +130,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Added `Install-Modules.ps1` cross-platform bootstrap script |
 | 2026-03-20 | Updated readme structure; added device/audio and Intune/Desktop categories |
 | 2026-03-19 | Added Exchange calendar migration script |
 | 2026-03-19 | Added Intune/Get-Autopilot scripts (`Get-WindowsAutoPilotInfo.ps1`, `GetAutoPilot.CMD`) |
