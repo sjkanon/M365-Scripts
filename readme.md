@@ -24,6 +24,12 @@ Scripts for device enrollment and Autopilot registration.
 - Retrieve Windows Autopilot hardware info
 - CMD-based Autopilot enrollment helper
 
+### 💾 USB Setup Toolkit
+USB toolkit for Windows setup and Autopilot enrollment during OOBE.
+
+- Interactive menu (Device Manager, Autopilot, product key, restart)
+- Self-elevating, OOBE-compatible via Shift+F10
+
 ### 🖥️ Custom Scripts — Device / Audio
 Scripts for managing audio device configuration on endpoints.
 
@@ -108,12 +114,16 @@ M365-Scripts/
 │   │   │   │   └── readme.md
 │   │   │   └── Time sync/
 │   │   │       └── Restart-Time-Sync.ps1
-│   │   └── Intune/Desktop/
-│   │       ├── Add Lockscreen to start and desktop/
-│   │       └── Background/
-│   │           └── Desktop/
-│   │               ├── Set-CorporateWallpaper.ps1
-│   │               └── readme.md
+│   │   ├── Intune/Desktop/
+│   │   │   ├── Add Lockscreen to start and desktop/
+│   │   │   └── Background/
+│   │   │       └── Desktop/
+│   │   │           ├── Set-CorporateWallpaper.ps1
+│   │   │           └── readme.md
+│   │   └── Save install time/             ← USB setup toolkit
+│   │       ├── start.bat
+│   │       ├── autorun.inf
+│   │       └── readme.md
 │   ├── Exchange/
 │   │   ├── Migrate-Calendar.ps1
 │   │   ├── Set-Calendar-rights.ps1
@@ -155,6 +165,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-20 | Rewrote `start.bat` v2.0 — English, self-elevation, `cd /d %~dp0`, OOBE-compatible; added `autorun.inf` and readme |
 | 2026-03-20 | Rewrote `Migrate-Calendar.ps1` to v2.0 — English, generic, mandatory params, linter fixes |
 | 2026-03-20 | Removed all BraveHub references from scripts and readmes |
 | 2026-03-20 | Added `Test-SmtpRelay` to `functies.ps1` |

@@ -1,49 +1,88 @@
 @ECHO OFF
-CLS
+SETLOCAL
+
+:: ============================================================
+:: start.bat — Windows setup helper (OOBE / USB)
+:: Place on USB alongside GetAutoPilot.CMD and Get-WindowsAutoPilotInfo.ps1
+::
+:: OOBE usage:
+::   1. Press Shift+F10 to open a command prompt
+::   2. Find the USB drive letter (usually D: or E:)
+::   3. Type:  D:\start.bat
+:: ============================================================
+
+:: Change working directory to the folder containing this script
+:: (ensures GetAutoPilot.CMD is found regardless of USB drive letter)
+cd /d "%~dp0"
+
+:: Self-elevation — relaunch as Administrator if not already elevated
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Requesting administrator privileges...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+
 :MENU
-ECHO
-ECHO Hallo Support,
-ECHO Success met het installeren van de updates
-ECHO
+CLS
 ECHO.
-ECHO ...............................................
-ECHO PRESS 1, 2, 3, 4, 5, 6 to select your task, or 10 to EXIT.
-ECHO ...............................................
+ECHO  ================================================
+ECHO   Windows Setup Helper — USB Toolkit
+ECHO  ================================================
 ECHO.
-ECHO 1 - OPEN DEVMGMT
-ECHO 2 - OPEN SETTINGS
-ECHO 3 - START AUTOPILOT
-ECHO 4 - REMOVE COMPHASH AND START AUTOPILOT
-ECHO 5 - RESTART PC/LAPTOP
-ECHO 6 - VUL PRO PRODUTKEY IN
-ECHO 10 - EXIT CMD
+ECHO   1  - Device Manager
+ECHO   2  - Autopilot enrollment
+ECHO   3  - Remove hash file and re-run Autopilot
+ECHO   4  - Enter product key
+ECHO   5  - Restart
+ECHO   0  - Exit
 ECHO.
-SET /P M=Type 1, 2, 3, or 4 then press ENTER:
-IF %M%==1 GOTO DEVMGMT
-IF %M%==2 GOTO SETTINGS
-IF %M%==3 GOTO AUTOPILOT
-IF %M%==4 GOTO COMPHASH
-IF %M%==5 GOTO RESTART
-IF %M%==6 GOTO SLUI
-IF %M%==10 GOTO exits
+ECHO  ================================================
+ECHO.
+SET /P M=  Select option and press ENTER:
+
+IF "%M%"=="1" GOTO DEVMGMT
+IF "%M%"=="2" GOTO AUTOPILOT
+IF "%M%"=="3" GOTO COMPHASH
+IF "%M%"=="4" GOTO PRODUCTKEY
+IF "%M%"=="5" GOTO RESTART
+IF "%M%"=="0" GOTO EXIT
+
+ECHO   Invalid option. Try again.
+TIMEOUT /T 2 /NOBREAK >nul
+GOTO MENU
+
 :DEVMGMT
+ECHO   Opening Device Manager...
 start devmgmt.msc
 GOTO MENU
-:SETTINGS
-start control.exe /name Microsoft.WindowsUpdate
-GOTO MENU
+
 :AUTOPILOT
-start GetAutoPilot.CMD
+ECHO   Starting Autopilot enrollment...
+CALL "%~dp0GetAutoPilot.CMD"
 GOTO MENU
+
 :COMPHASH
-del comphash.csv
-start GetAutoPilot.CMD
+ECHO   Removing existing hash file and re-running Autopilot...
+IF EXIST "%~dp0compHash.csv" (
+    del "%~dp0compHash.csv"
+    ECHO   compHash.csv removed.
+) ELSE (
+    ECHO   No hash file found, continuing...
+)
+CALL "%~dp0GetAutoPilot.CMD"
 GOTO MENU
-:RESTART
-shutdown -r -t 0
-GOTO MENU
-:SLUI
+
+:PRODUCTKEY
+ECHO   Opening product key entry...
 start slui.exe
 GOTO MENU
-:exits
+
+:RESTART
+ECHO   Restarting in 5 seconds... Press Ctrl+C to cancel.
+shutdown -r -t 5
+GOTO MENU
+
+:EXIT
+ENDLOCAL
 EXIT
