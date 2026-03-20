@@ -1,74 +1,74 @@
 # Migrate-HolidaysCalendar.ps1
 
 > **BraveHub Internal Script**
-> Ticket: #0298048 | Klant: Onco3R Therapeutics
-> Auteur: Sjoerd Kanon | Datum: 19/03/2026
+> Ticket: #0298048 | Customer: Onco3R Therapeutics
+> Author: Sjoerd Kanon | Date: 19/03/2026
 
 ---
 
-## Achtergrond en probleemstelling
+## Background and problem statement
 
-Onco3R wilde een gedeelde kalender waarop medewerkers hun verlof kunnen boeken, zodat iedereen een overzicht heeft van wie wanneer afwezig is. De initiële oplossing gebruikte een **Microsoft 365 Group** als gedeelde kalender. Dit werkte technisch, maar had een groot ongewenst neveneffect: **alle groepsleden ontvingen een e-mailnotificatie bij elke nieuwe afspraak** in de kalender. Bij een bedrijfsbrede kalender betekent dit dat iedereen een mail krijgt telkens iemand verlof boekt.
+Onco3R wanted a shared calendar where employees could book leave, giving everyone an overview of who is absent and when. The initial solution used a **Microsoft 365 Group** as the shared calendar. This worked technically, but had a major unwanted side effect: **all group members received an email notification for every new event** in the calendar. For a company-wide calendar this means everyone receives a mail every time someone books leave.
 
-De oplossing is een **Room/Resource Mailbox** — hetzelfde mechanisme als het boeken van een vergaderzaal in Outlook. Medewerkers voegen de resource toe als attendee bij hun verlofafspraak, de boeking wordt automatisch goedgekeurd, en de afspraak verschijnt op de gedeelde kalender. Geen e-mailnotificaties, geen groepslidmaatschap vereist.
+The solution is a **Room/Resource Mailbox** — the same mechanism used for booking a meeting room in Outlook. Employees add the resource as an attendee to their leave appointment, the booking is automatically approved, and the event appears on the shared calendar. No email notifications, no group membership required.
 
-### Vergelijking M365 Group vs Room Mailbox
+### M365 Group vs Room Mailbox comparison
 
 | | M365 Group | Room Mailbox |
 |---|---|---|
-| Gedeelde kalender | ✅ | ✅ |
-| Zichtbaar voor iedereen | ❌ (alleen leden) | ✅ |
-| E-mailnotificaties bij events | ❌ (altijd, niet uit te zetten) | ✅ (geen) |
-| Werkt als vergaderzaal boeken | ❌ | ✅ |
-| AutoAccept verlof | ❌ | ✅ |
-| Overlappende boekingen mogelijk | ❌ | ✅ (instelbaar) |
+| Shared calendar | ✅ | ✅ |
+| Visible to everyone | ❌ (members only) | ✅ |
+| Email notifications on events | ❌ (always, cannot be disabled) | ✅ (none) |
+| Works like a meeting room | ❌ | ✅ |
+| AutoAccept leave | ❌ | ✅ |
+| Overlapping bookings allowed | ❌ | ✅ (configurable) |
 
 ---
 
-## Wat doet het script
+## What the script does
 
-Het script voert de volledige migratie uit in één keer:
+The script performs the full migration in one run:
 
-1. **Platform detecteren** — kiest de juiste authenticatiemethode (Windows vs macOS/Linux)
-2. **Exchange Online verbinden** — voor het aanmaken en configureren van de Room Mailbox
-3. **App Registration aanmaken** — maakt automatisch een Entra ID app aan met de juiste application permissions (of hergebruikt een bestaande)
-4. **Admin consent verlenen** — geeft automatisch consent voor alle benodigde Graph permissions
-5. **Graph verbinden (app auth)** — verbindt met client credentials voor schrijftoegang tot andere mailboxen
-6. **Room Mailbox aanmaken** — maakt `holidays-calendar@onco3r.com` aan als Room type
-7. **Permissies instellen** — stelt Default op Reviewer zodat iedereen de kalender kan lezen
-8. **AutoAccept instellen** — verlofboekingen worden automatisch goedgekeurd, overlappen toegestaan
-9. **Graph herverbinden (delegated)** — tijdelijk als delegated gebruiker voor het lezen van de groepskalender (Microsoft beperking: groepskalenders zijn niet leesbaar via app auth)
-10. **M365 Group opzoeken** — zoekt de Holidays groep op vier manieren (mail lowercase, mail origineel, displayName, Search)
-11. **Afspraken ophalen** — haalt alle afspraken op uit de groepskalender binnen het opgegeven tijdsvenster
-12. **Terugschakelen naar app auth** — voor het schrijven naar de Room Mailbox
-13. **Afspraken kopieren** — kopieert elke afspraak naar de Room Mailbox kalender met Out of Office status
-14. **M365 Group verwijderen** — optioneel, verwijdert de M365 Group na migratie
-15. **Samenvatting** — toont resultaten en gebruikersinstructies
+1. **Detect platform** — selects the correct authentication method (Windows vs macOS/Linux)
+2. **Connect Exchange Online** — to create and configure the Room Mailbox
+3. **Create App Registration** — automatically creates an Entra ID app with the correct application permissions (or reuses an existing one)
+4. **Grant admin consent** — automatically grants consent for all required Graph permissions
+5. **Connect Graph (app auth)** — connects using client credentials for write access to other mailboxes
+6. **Create Room Mailbox** — creates `holidays-calendar@onco3r.com` as Room type
+7. **Set permissions** — sets Default to Reviewer so everyone can read the calendar
+8. **Configure AutoAccept** — leave bookings are automatically approved, overlaps allowed
+9. **Reconnect Graph (delegated)** — temporarily as a delegated user to read the group calendar (Microsoft limitation: group calendars cannot be read via app auth)
+10. **Find M365 Group** — searches for the Holidays group in four ways (mail lowercase, mail original, displayName, Search)
+11. **Retrieve events** — fetches all events from the group calendar within the specified date range
+12. **Switch back to app auth** — for writing to the Room Mailbox
+13. **Copy events** — copies each event to the Room Mailbox calendar with Out of Office status
+14. **Delete M365 Group** — optional, removes the M365 Group after migration
+15. **Summary** — displays results and user instructions
 
-### Technische opmerking: dual-auth flow
+### Technical note: dual-auth flow
 
-Het script gebruikt bewust **twee Graph verbindingen** tijdens de uitvoering. Dit is nodig omdat Microsoft twee tegenstrijdige beperkingen heeft:
+The script deliberately uses **two Graph connections** during execution. This is required because Microsoft has two conflicting limitations:
 
-- **Groepskalender lezen** vereist *delegated* access (als ingelogde gebruiker) — app auth wordt geblokkeerd met 403
-- **Room Mailbox schrijven** vereist *application* permissions — delegated access geeft 403 op mailboxen van andere gebruikers
+- **Reading a group calendar** requires *delegated* access (as a signed-in user) — app auth is blocked with 403
+- **Writing to a Room Mailbox** requires *application* permissions — delegated access returns 403 on other users' mailboxes
 
-Het script schakelt daarom automatisch tussen beide verbindingen op het juiste moment.
+The script therefore automatically switches between both connections at the right moment.
 
 ---
 
-## Vereisten
+## Requirements
 
-### PowerShell versie
+### PowerShell version
 
-PowerShell 7+ is vereist voor macOS en Linux. Op Windows werkt ook PowerShell 5.1.
+PowerShell 7+ is required for macOS and Linux. On Windows, PowerShell 5.1 is also supported.
 
 ```powershell
-$PSVersionTable.PSVersion  # controleer versie
+$PSVersionTable.PSVersion  # check version
 ```
 
-PowerShell 7 installeren: https://aka.ms/powershell
+Install PowerShell 7: https://aka.ms/powershell
 
-### Modules installeren
+### Install modules
 
 ```powershell
 Install-Module ExchangeOnlineManagement       -Scope CurrentUser
@@ -79,53 +79,53 @@ Install-Module Microsoft.Graph.Groups         -Scope CurrentUser
 Install-Module Microsoft.Graph.Users          -Scope CurrentUser
 ```
 
-Modules updaten indien al geïnstalleerd:
+Update modules if already installed:
 
 ```powershell
 Update-Module ExchangeOnlineManagement
 Update-Module Microsoft.Graph
 ```
 
-### Benodigde rechten
+### Required permissions
 
-De admin die het script uitvoert heeft het volgende nodig:
+The admin running the script needs:
 
-| Recht | Waarvoor |
+| Permission | Purpose |
 |---|---|
-| Exchange Admin of Global Admin | Room Mailbox aanmaken, permissies instellen |
-| Global Admin | App Registration aanmaken + admin consent verlenen |
-| Lid van de Holidays M365 Group | Groepskalender lezen via delegated access |
+| Exchange Admin or Global Admin | Create Room Mailbox, set permissions |
+| Global Admin | Create App Registration + grant admin consent |
+| Member of the Holidays M365 Group | Read group calendar via delegated access |
 
-> **Belangrijk:** de uitvoerende admin moet lid zijn van de Holidays groep. Voeg de admin toe via M365 Admin Center → Groups → Holidays → Members als dat nog niet het geval is.
+> **Important:** the executing admin must be a member of the Holidays group. Add the admin via M365 Admin Center → Groups → Holidays → Members if not already done.
 
 ---
 
 ## Platform support
 
-Het script detecteert automatisch het besturingssysteem:
+The script automatically detects the operating system:
 
-| Platform | Auth methode | Toelichting |
+| Platform | Auth method | Notes |
 |---|---|---|
-| **Windows** | Interactieve browser | Browser opent automatisch |
-| **macOS** | Device code flow | Code + URL verschijnt in terminal |
-| **Linux** | Device code flow | Code + URL verschijnt in terminal |
+| **Windows** | Interactive browser | Browser opens automatically |
+| **macOS** | Device code flow | Code + URL appears in terminal |
+| **Linux** | Device code flow | Code + URL appears in terminal |
 
-Bij device code flow zie je dit in de terminal:
+With device code flow you will see this in the terminal:
 
 ```
 To sign in, use a web browser to open the page https://login.microsoft.com/device
 and enter the code XXXXXXXXX to authenticate.
 ```
 
-Open de URL in je browser, voer de code in, en log in met je admin account. Het script detecteert automatisch wanneer je klaar bent en gaat verder.
+Open the URL in your browser, enter the code, and sign in with your admin account. The script automatically detects when you are done and continues.
 
 ---
 
-## Gebruik
+## Usage
 
-### Eerste keer — volledig automatisch (Modus A)
+### First run — fully automatic (Mode A)
 
-Geen `ClientId` of `ClientSecret` opgeven. Het script maakt zelf een App Registration aan.
+Do not provide `ClientId` or `ClientSecret`. The script creates an App Registration automatically.
 
 ```powershell
 .\Migrate-HolidaysCalendar.ps1 `
@@ -134,9 +134,9 @@ Geen `ClientId` of `ClientSecret` opgeven. Het script maakt zelf een App Registr
     -SourceGroupMail "holidays@onco3r.com"
 ```
 
-Het script toont aan het einde de `ClientId` en `ClientSecret`. **Sla deze op in Vaultwarden** — het secret wordt maar één keer getoond.
+The script displays the `ClientId` and `ClientSecret` at the end. **Store these in Vaultwarden** — the secret is only shown once.
 
-### Volgende keer — bestaande App Registration (Modus B)
+### Subsequent runs — existing App Registration (Mode B)
 
 ```powershell
 .\Migrate-HolidaysCalendar.ps1 `
@@ -147,7 +147,7 @@ Het script toont aan het einde de `ClientId` en `ClientSecret`. **Sla deze op in
     -SourceGroupMail "holidays@onco3r.com"
 ```
 
-### Dry run (geen wijzigingen)
+### Dry run (no changes)
 
 ```powershell
 .\Migrate-HolidaysCalendar.ps1 `
@@ -157,7 +157,7 @@ Het script toont aan het einde de `ClientId` en `ClientSecret`. **Sla deze op in
     -WhatIf
 ```
 
-### Met verwijderen van de M365 Group na migratie
+### With M365 Group deletion after migration
 
 ```powershell
 .\Migrate-HolidaysCalendar.ps1 `
@@ -173,110 +173,110 @@ Het script toont aan het einde de `ClientId` en `ClientSecret`. **Sla deze op in
 
 ## Parameters
 
-| Parameter | Verplicht | Default | Beschrijving |
+| Parameter | Required | Default | Description |
 |---|---|---|---|
-| `TenantId` | Ja | — | Azure AD Tenant ID (Entra ID → Overview) |
-| `AdminUPN` | Ja | — | UPN van de uitvoerende admin |
-| `ClientId` | Nee | `""` | AppId van bestaande App Registration. Leeg = automatisch aanmaken |
-| `ClientSecret` | Nee | `""` | Client Secret. Leeg = automatisch aanmaken |
-| `AppName` | Nee | `BraveHub-HolidaysCalendarMigration` | Naam van de App Registration |
-| `SourceGroupMail` | Nee | `holidays@onco3r.com` | E-mail van de source M365 Group kalender |
-| `SourceGroupDisplayName` | Nee | `Holidays` | DisplayName van de source M365 Group (fallback) |
-| `DestinationType` | Nee | `Room` | Type destination mailbox: `Room` of `Shared` (zie uitleg hieronder) |
-| `DestinationDisplayName` | Nee | `Holidays Calendar` | Weergavenaam van de destination mailbox |
-| `DestinationAlias` | Nee | `holidays-calendar` | Alias van de destination mailbox (moet uniek zijn) |
-| `DestinationEmail` | Nee | `holidays-calendar@onco3r.com` | SMTP-adres van de destination mailbox |
-| `DaysBack` | Nee | `365` | Dagen terug voor afspraken ophalen |
-| `DaysForward` | Nee | `730` | Dagen vooruit voor afspraken ophalen |
-| `DeleteSourceGroup` | Nee | `$false` | M365 Group verwijderen na migratie |
+| `TenantId` | Yes | — | Azure AD Tenant ID (Entra ID → Overview) |
+| `AdminUPN` | Yes | — | UPN of the executing admin |
+| `ClientId` | No | `""` | AppId of existing App Registration. Empty = create automatically |
+| `ClientSecret` | No | `""` | Client Secret. Empty = create automatically |
+| `AppName` | No | `BraveHub-HolidaysCalendarMigration` | Name of the App Registration |
+| `SourceGroupMail` | No | `holidays@onco3r.com` | Email of the source M365 Group calendar |
+| `SourceGroupDisplayName` | No | `Holidays` | DisplayName of the source M365 Group (fallback) |
+| `DestinationType` | No | `Room` | Destination mailbox type: `Room` or `Shared` (see below) |
+| `DestinationDisplayName` | No | `Holidays Calendar` | Display name of the destination mailbox |
+| `DestinationAlias` | No | `holidays-calendar` | Alias of the destination mailbox (must be unique) |
+| `DestinationEmail` | No | `holidays-calendar@onco3r.com` | SMTP address of the destination mailbox |
+| `DaysBack` | No | `365` | Days back for event retrieval |
+| `DaysForward` | No | `730` | Days forward for event retrieval |
+| `DeleteSourceGroup` | No | `$false` | Delete M365 Group after migration |
 
-### CalendarProcessing instellingen (Room Mailbox)
+### CalendarProcessing settings (Room Mailbox)
 
-Het script stelt de volgende instellingen in op de Room Mailbox:
+The script configures the following settings on the Room Mailbox:
 
-| Instelling | Waarde | Toelichting |
+| Setting | Value | Notes |
 |---|---|---|
-| `AutomateProcessing` | `AutoAccept` | Boekingen automatisch goedkeuren |
-| `AllowConflicts` | `$true` | Meerdere mensen mogen dezelfde dag boeken |
-| `MaximumDurationInMinutes` | `0` | Geen duurlimiet (standaard 1440 = 1 dag, te kort voor meerdaags verlof) |
-| `BookingWindowInDays` | `0` | Onbeperkt ver vooruit boeken |
-| `AddOrganizerToSubject` | `$false` | Naam organisator niet toevoegen aan onderwerp |
-| `DeleteComments` | `$false` | Opmerkingen behouden |
-| `DeleteSubject` | `$false` | Onderwerp behouden |
+| `AutomateProcessing` | `AutoAccept` | Automatically approve bookings |
+| `AllowConflicts` | `$true` | Multiple people can book the same day |
+| `MaximumDurationInMinutes` | `0` | No duration limit (default 1440 = 1 day, too short for multi-day leave) |
+| `BookingWindowInDays` | `0` | Book unlimited days in advance |
+| `AddOrganizerToSubject` | `$false` | Do not add organiser name to subject |
+| `DeleteComments` | `$false` | Preserve comments |
+| `DeleteSubject` | `$false` | Preserve subject |
 
-> **Let op:** de standaard `MaximumDurationInMinutes` van 1440 (= 24 uur) zorgt ervoor dat meerdaagse verlofboekingen geweigerd worden met de melding *"This resource doesn't accept meetings longer than 1440 minutes."* Daarom wordt dit expliciet op `0` gezet.
+> **Note:** the default `MaximumDurationInMinutes` of 1440 (= 24 hours) causes multi-day leave bookings to be rejected with *"This resource doesn't accept meetings longer than 1440 minutes."* This is why it is explicitly set to `0`.
 
 ### DestinationType: Room vs Shared
 
 | | Room Mailbox | Shared Mailbox |
 |---|---|---|
-| **Hoe boeken** | Attendee toevoegen aan afspraak (zoals vergaderzaal) | Afspraak aanmaken vanuit de gedeelde kalender zelf |
-| **AutoAccept** | ✅ Automatisch goedgekeurd | ❌ Niet van toepassing |
-| **Notificaties** | ❌ Geen | ❌ Geen |
-| **Zichtbaar voor iedereen** | ✅ Via directory | ✅ Via directory |
-| **Aanbevolen voor verlof** | ✅ | ⚠️ Minder intuïtief |
+| **How to book** | Add as attendee to appointment (like a meeting room) | Create appointment directly from the shared calendar |
+| **AutoAccept** | ✅ Automatically approved | ❌ Not applicable |
+| **Notifications** | ❌ None | ❌ None |
+| **Visible to everyone** | ✅ Via directory | ✅ Via directory |
+| **Recommended for leave** | ✅ | ⚠️ Less intuitive |
 
 ```powershell
-# Room Mailbox (default, aanbevolen)
+# Room Mailbox (default, recommended)
 .\Migrate-HolidaysCalendar.ps1 -DestinationType "Room" ...
 
 # Shared Mailbox
 .\Migrate-HolidaysCalendar.ps1 -DestinationType "Shared" ...
 ```
 
-### Tenant ID opzoeken
+### Find Tenant ID
 
 ```powershell
-# Via Graph (als je al verbonden bent)
+# Via Graph (if already connected)
 (Get-MgOrganization).Id
 ```
 
-Of via Azure Portal: **Entra ID → Overview → Tenant ID**
+Or via Azure Portal: **Entra ID → Overview → Tenant ID**
 
 ---
 
-## Authenticatie tijdens uitvoering
+## Authentication during execution
 
-Afhankelijk van de modus zie je twee of drie login momenten:
+Depending on the mode you will see two or three login prompts:
 
-| Login | Wanneer | Waarvoor |
+| Login | When | Purpose |
 |---|---|---|
-| Login 1 (delegated) | Altijd bij Modus A | App Registration aanmaken + admin consent |
-| Login 2 (delegated) | Altijd | Groepskalender lezen (Microsoft beperking) |
-| Login 3 (automatisch) | Altijd | App auth voor Room Mailbox schrijven — geen interactie nodig |
+| Login 1 (delegated) | Mode A only | Create App Registration + grant admin consent |
+| Login 2 (delegated) | Always | Read group calendar (Microsoft limitation) |
+| Login 3 (automatic) | Always | App auth for writing to Room Mailbox — no interaction needed |
 
-Bij Modus B (bestaande app) vervalt Login 1 en ga je direct naar Login 2.
+With Mode B (existing app) Login 1 is skipped and you go directly to Login 2.
 
 ---
 
-## Na de migratie
+## After migration
 
-### Verlof boeken (eindgebruikers)
+### Booking leave (end users)
 
-1. Maak een afspraak in Outlook
-2. Zet de duur op **All day** en de status op **Out of office**
-3. Voeg `holidays-calendar@onco3r.com` toe als **attendee** (net als een vergaderzaal)
-4. Sla op — de boeking wordt automatisch goedgekeurd
-5. De afspraak verschijnt op de gedeelde Holidays Calendar voor iedereen
+1. Create an appointment in Outlook
+2. Set the duration to **All day** and the status to **Out of office**
+3. Add `holidays-calendar@onco3r.com` as an **attendee** (just like a meeting room)
+4. Save — the booking is automatically approved
+5. The event appears on the shared Holidays Calendar for everyone
 
-### Holidays Calendar toevoegen in Outlook (eenmalig per gebruiker)
+### Add Holidays Calendar in Outlook (once per user)
 
 1. Outlook → Calendar → **Add calendar**
-2. Kies **Add from directory**
-3. Zoek op `Holidays Calendar` of `holidays-calendar@onco3r.com`
-4. Klik **Add** — de kalender verschijnt onder **People's calendars**
+2. Choose **Add from directory**
+3. Search for `Holidays Calendar` or `holidays-calendar@onco3r.com`
+4. Click **Add** — the calendar appears under **People's calendars**
 
 ---
 
 ## Troubleshooting
 
-### Admin is geen lid van de Holidays groep
+### Admin is not a member of the Holidays group
 
 ```
-[FAIL] Groep niet gevonden na 4 pogingen.
+[FAIL] Group not found after 4 attempts.
 ```
 
-Als de groep wél bestaat maar niet gevonden wordt via delegated access, is de admin waarschijnlijk geen lid. Voeg de admin toe:
+If the group exists but is not found via delegated access, the admin is probably not a member. Add the admin:
 
 **M365 Admin Center → Groups → Active groups → Holidays → Members → Add members**
 
@@ -288,65 +288,53 @@ New-Mailbox: The alias 'holidays-calendar' is already in use.
 
 ```powershell
 .\Migrate-HolidaysCalendar.ps1 `
-    -DestinationAlias "verlof-kalender" `
-    -DestinationEmail "verlof-kalender@onco3r.com"
+    -DestinationAlias "leave-calendar" `
+    -DestinationEmail "leave-calendar@onco3r.com"
 ```
 
-### Graph 403 op groepskalender
+### Graph 403 on group calendar
 
-Dit is een bekende Microsoft beperking — `Get-MgGroupCalendarEvent` werkt niet met application permissions. Het script lost dit op via de dual-auth flow (automatisch). Als je dit toch ziet, controleer of de admin lid is van de groep (zie hierboven).
+This is a known Microsoft limitation — `Get-MgGroupCalendarEvent` does not work with application permissions. The script resolves this via the dual-auth flow (automatically). If you still see this, verify the admin is a member of the group (see above).
 
-Referentie: https://learn.microsoft.com/en-us/graph/known-issues#group-calendar
+Reference: https://learn.microsoft.com/en-us/graph/known-issues#group-calendar
 
-### Graph 403 op Room Mailbox schrijven
+### Graph 403 on Room Mailbox write
 
-Controleer in Entra ID of admin consent correct is verleend:
+Verify that admin consent has been granted correctly in Entra ID:
 
 **Entra ID → App Registrations → BraveHub-HolidaysCalendarMigration → API Permissions**
 
-Alle permissions moeten de status **Granted for Onco3R** tonen. Zo niet, klik **Grant admin consent for Onco3R**.
+All permissions must show status **Granted for Onco3R**. If not, click **Grant admin consent for Onco3R**.
 
-### Client credentials auth mislukt
+### Client credentials auth failed
 
 ```
 ClientSecretCredential authentication failed
 ```
 
-Het script probeert automatisch een fallback via environment variables. Als beide methoden falen, controleer of het secret nog geldig is (vervaldatum staat in de samenvatting). Maak zo nodig een nieuw secret aan:
+The script automatically attempts a fallback via environment variables. If both methods fail, verify the secret has not expired (expiry date is shown in the summary). Create a new secret if needed:
 
 **Entra ID → App Registrations → BraveHub-HolidaysCalendarMigration → Certificates & secrets → New client secret**
 
-### Afspraken gedeeltelijk mislukt
+### Events partially failed
 
-Afspraken die niet gekopieerd worden, worden gelogd als `[WARN]` met foutmelding. Het script stopt niet bij een fout op een individuele afspraak maar gaat verder. Controleer de `[WARN]` regels in de output na afloop.
-
----
-
-## Mapstructuur in de repo
-
-```
-scripts/
-└── m365/
-    └── holidays-calendar-migration/
-        ├── Migrate-HolidaysCalendar.ps1
-        └── README.md
-```
+Events that could not be copied are logged as `[WARN]` with an error message. The script does not stop on individual event failures but continues. Check the `[WARN]` lines in the output after completion.
 
 ---
 
 ## Changelog
 
-| Datum | Versie | Wijziging |
+| Date | Version | Change |
 |---|---|---|
-| 19/03/2026 | 1.0 | Initiële versie |
-| 19/03/2026 | 1.1 | Platform detectie (macOS/Linux device code flow) |
-| 19/03/2026 | 1.2 | Fallback groep opzoeken op displayName en Search |
-| 19/03/2026 | 1.3 | App Registration setup geïntegreerd in hoofdscript |
-| 19/03/2026 | 1.4 | Dual-auth flow: delegated lezen + app auth schrijven |
-| 19/03/2026 | 1.5 | Fix read-only `$IsWindows`/`$IsMacOS`/`$IsLinux` variabelen |
-| 19/03/2026 | 1.6 | Fix `Get-MgGroupCalendarEvent` 403 via module reload tussen verbindingen |
-| 19/03/2026 | 1.7 | Hernoemd naar Source/Destination, ondersteuning voor Room en Shared Mailbox als destination |
-| 19/03/2026 | 1.8 | MaximumDurationInMinutes en BookingWindowInDays ingesteld op 0 (onbeperkt) |
+| 19/03/2026 | 1.0 | Initial version |
+| 19/03/2026 | 1.1 | Platform detection (macOS/Linux device code flow) |
+| 19/03/2026 | 1.2 | Fallback group lookup on displayName and Search |
+| 19/03/2026 | 1.3 | App Registration setup integrated into main script |
+| 19/03/2026 | 1.4 | Dual-auth flow: delegated read + app auth write |
+| 19/03/2026 | 1.5 | Fix read-only `$IsWindows`/`$IsMacOS`/`$IsLinux` variables |
+| 19/03/2026 | 1.6 | Fix `Get-MgGroupCalendarEvent` 403 via module reload between connections |
+| 19/03/2026 | 1.7 | Renamed to Source/Destination, support for Room and Shared Mailbox as destination |
+| 19/03/2026 | 1.8 | MaximumDurationInMinutes and BookingWindowInDays set to 0 (unlimited) |
 
 ---
 
@@ -354,83 +342,83 @@ scripts/
 
 # Set-Calendar-rights.ps1
 
-Geeft een gebruiker toegangsrechten op de agendasmap van een andere gebruiker in Exchange Online.
+Grants a user access rights on the calendar folder of another user in Exchange Online.
 
-Ondersteunt **NL / FR / EN** mailbox-locales — geschikt voor Belgische omgevingen met gemengde taalinstellingen.
+Supports **NL / FR / EN** mailbox locales — suitable for Belgian environments with mixed language settings.
 
 ---
 
-## Vereisten
+## Requirements
 
-| Vereiste | Waarde |
+| Requirement | Value |
 |---|---|
-| PowerShell | 7.0 of hoger |
+| PowerShell | 7.0 or later |
 | Module | `ExchangeOnlineManagement` ≥ 3.0 |
-| Rechten | Exchange Administrator of gedelegeerde mailboxrechten |
-| Verbinding | Actieve sessie via `Connect-ExchangeOnline` |
+| Permissions | Exchange Administrator or delegated mailbox permissions |
+| Connection | Active session via `Connect-ExchangeOnline` |
 
 ---
 
 ## Parameters
 
-| Parameter | Verplicht | Omschrijving |
+| Parameter | Required | Description |
 |---|---|---|
-| `-User` | Ja | Gebruikersnaam (zonder domein) die de rechten ontvangt |
-| `-TargetMailbox` | Ja | Gebruikersnaam (zonder domein) van de doelmailbox |
-| `-AccessRights` | Ja | Toegangsniveau (zie tabel hieronder) |
+| `-User` | Yes | Username (without domain) receiving the permissions |
+| `-TargetMailbox` | Yes | Username (without domain) of the target mailbox |
+| `-AccessRights` | Yes | Access level (see table below) |
 
-### Toegangsniveaus
+### Access levels
 
-| Waarde | Omschrijving |
+| Value | Description |
 |---|---|
-| `Owner` | Volledige controle, inclusief verwijderen en mappen beheren |
-| `PublishingEditor` | Lezen, aanmaken, wijzigen, verwijderen en submappen maken |
-| `Editor` | Lezen, aanmaken, wijzigen en verwijderen |
-| `PublishingAuthor` | Lezen, aanmaken, eigen items wijzigen/verwijderen en submappen maken |
-| `Author` | Lezen en aanmaken, eigen items wijzigen/verwijderen |
-| `NonEditingAuthor` | Lezen en aanmaken, geen wijzigingen |
-| `Reviewer` | Alleen lezen |
-| `Contributor` | Alleen aanmaken (geen inzage) |
-| `AvailabilityOnly` | Alleen vrij/bezet-informatie |
-| `LimitedDetails` | Vrij/bezet met beperkte details |
+| `Owner` | Full control, including deletion and folder management |
+| `PublishingEditor` | Read, create, modify, delete and create subfolders |
+| `Editor` | Read, create, modify and delete |
+| `PublishingAuthor` | Read, create, modify/delete own items and create subfolders |
+| `Author` | Read and create, modify/delete own items |
+| `NonEditingAuthor` | Read and create, no modifications |
+| `Reviewer` | Read-only |
+| `Contributor` | Create only (no read access) |
+| `AvailabilityOnly` | Free/busy information only |
+| `LimitedDetails` | Free/busy with limited details |
 
 ---
 
-## Gebruik
+## Usage
 
 ```powershell
-# Verbinding maken
+# Connect
 Connect-ExchangeOnline
 
-# Reviewer-rechten toekennen
+# Grant Reviewer rights
 .\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Reviewer
 
-# Editor-rechten toekennen met WhatIf (droogloop)
+# Grant Editor rights with WhatIf (dry run)
 .\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Editor -WhatIf
 
-# Verbose output voor diagnose
+# Verbose output for diagnostics
 .\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Author -Verbose
 ```
 
 ---
 
-## Locale-ondersteuning
+## Locale support
 
-Het script probeert automatisch de volgende mapnamen:
+The script automatically tries the following folder names:
 
-| Taal | Mapnaam |
+| Language | Folder name |
 |---|---|
-| Nederlands | `\Agenda` |
-| Frans | `\Calendrier` |
-| Engels | `\Calendar` |
+| Dutch | `\Agenda` |
+| French | `\Calendrier` |
+| English | `\Calendar` |
 
-Alleen het pad dat daadwerkelijk bestaat in de mailbox slaagt. De overige worden stilletjes overgeslagen.
+Only the path that actually exists in the mailbox succeeds. The others are silently skipped.
 
 ---
 
 ## Changelog
 
-| Datum | Versie | Wijziging |
+| Date | Version | Change |
 |---|---|---|
-| 20/03/2026 | 1.0 | Initiële versie — vervangt MSOnline door ExchangeOnlineManagement |
-| 20/03/2026 | 1.1 | Franstalige locale (`\Calendrier`) toegevoegd voor België |
+| 20/03/2026 | 1.0 | Initial version — replaces MSOnline with ExchangeOnlineManagement |
+| 20/03/2026 | 1.1 | French locale (`\Calendrier`) added for Belgium |
