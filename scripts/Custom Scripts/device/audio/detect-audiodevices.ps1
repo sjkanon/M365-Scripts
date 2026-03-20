@@ -1,5 +1,5 @@
 # ============================================
-# BraveHub - Audio Device Detection Script
+# Audio Device Detection Script
 # Ticket: #0250981 - Best Next Contact BVBA
 # Doel: Inventariseer alle audio devices op de laptop
 #       zodat we kunnen bepalen welke interne microfoon

@@ -1,5 +1,5 @@
 # ============================================
-# BraveHub - Disable Internal Microphone Script
+# Disable Internal Microphone Script
 # Ticket: #0250981 - Best Next Contact BVBA
 # Auteur: Sjoerd Kanon
 # Datum: 19/03/2026
