@@ -1,67 +1,72 @@
 # M365-Scripts
 
-> A collection of PowerShell scripts for managing Microsoft 365 environments, maintained by [Sjoerd Kanon].
+> A collection of PowerShell scripts for managing Microsoft 365 environments, maintained by Sjoerd Kanon.
 
 ---
 
 ## Overview
 
-This repository contains production-ready PowerShell scripts used by BraveHub engineers to automate, manage, and report on Microsoft 365 tenants. Scripts are organized by workload and are actively maintained and expanded over time.
+This repository contains production-ready PowerShell scripts used by engineers to automate, manage, and report on Microsoft 365 tenants. Scripts are organized by workload and are actively maintained and expanded over time.
 
 ---
 
 ## Categories
 
-### 📧 Exchange Online
-Scripts for mailbox management, permissions, shared mailboxes, distribution groups, and mail flow configuration.
+### 📧 Exchange
+Scripts for calendar and mailbox management.
 
-- Mailbox permission management (Full Access, Send As, Send on Behalf)
-- Shared mailbox provisioning and access delegation
-- Distribution group and mail contact management
-- Message trace and mail flow troubleshooting
-- Calendar permissions
-
-### 👤 Entra ID (Azure AD)
-Scripts for user and group lifecycle management, dynamic groups, and identity governance.
-
-- User provisioning and offboarding
-- Dynamic group creation and rule management
-- Guest access and B2B management
-- Conditional Access policy reporting
-- MFA status reporting and enforcement
+- Calendar migration between users
+- Set calendar folder permissions (NL/FR/EN locale support)
 
 ### 📱 Intune / Autopilot
-Scripts for device management, Autopilot enrollment, and compliance reporting.
+Scripts for device enrollment and Autopilot registration.
 
-- Autopilot device registration and profile assignment
-- Device compliance status reporting
-- App deployment status
-- Stale device cleanup
+- Retrieve Windows Autopilot hardware info
+- CMD-based Autopilot enrollment helper
 
-### 📊 Licensing & Reporting
-Scripts for license management, usage reporting, and cost optimization.
+### 🖥️ Custom Scripts — Device / Audio
+Scripts for managing audio device configuration on endpoints.
 
-- License assignment and reconciliation (Pax8 / Ingram Micro)
-- Unlicensed user detection
-- Service plan assignment per user
-- License usage overview per tenant
+- Detect connected audio devices
+- Disable internal microphone via policy
+- Rollback internal mic changes
+
+### ⏱️ Custom Scripts — Device / Time Sync
+Scripts for managing Windows time synchronization.
+
+- Restart and force Windows Time service sync
+
+### 🖼️ Custom Scripts — Intune / Desktop
+Scripts and assets for managing desktop and lockscreen configuration.
+
+- Deploy lockscreen to start and desktop
+- Set corporate wallpaper via Intune (PersonalizationCSP + WinAPI + Default User)
 
 ---
 
-## Requirements
+## Getting Started
 
-- **PowerShell** 5.1 or later (Windows) / PowerShell 7+ (cross-platform)
-- **Required modules** (install as needed per script):
+Run the bootstrap script once to install and import all required modules across any platform:
 
 ```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
-Install-Module Microsoft.Graph -Scope CurrentUser
-Install-Module AzureAD -Scope CurrentUser          # Legacy, use Graph where possible
-Install-Module Microsoft.Graph.Intune -Scope CurrentUser
+# Windows / macOS / Linux
+.\scripts\Startup\Install-Modules.ps1
 ```
 
+Optional flags:
+
+```powershell
+.\scripts\Startup\Install-Modules.ps1 -Force              # Reinstall even if already present
+.\scripts\Startup\Install-Modules.ps1 -Scope AllUsers     # Install for all users (requires elevation)
+```
+
+The script detects the current platform and skips Windows-only modules (`AzureAD`, `WindowsAutopilotIntune`) automatically on macOS and Linux.
+
+## Requirements
+
+- **PowerShell** 7.0 or later (cross-platform) — 5.1 is supported per-script on Windows but the bootstrap requires PS 7+
 - Appropriate **Microsoft 365 admin permissions** for the target workload
-- Script execution must be enabled:
+- Script execution must be enabled (Windows only):
 
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
@@ -86,18 +91,35 @@ Run any script with `-Help` or check the header comment for usage instructions.
 
 ```
 M365-Scripts/
-├── ExchangeOnline/
-│   ├── Set-MailboxPermissions.ps1
-│   └── ...
-├── EntraID/
-│   ├── New-DynamicGroup.ps1
-│   └── ...
-├── Intune/
-│   ├── Get-DeviceComplianceReport.ps1
-│   └── ...
-└── Licensing/
-    ├── Get-LicenseOverview.ps1
-    └── ...
+├── .vscode/
+│   └── settings.json
+├── scripts/
+│   ├── Custom Scripts/
+│   │   ├── device/
+│   │   │   ├── audio/
+│   │   │   │   ├── detect-audiodevices.ps1
+│   │   │   │   ├── Disable-internalmic.ps1
+│   │   │   │   └── readme.md
+│   │   │   └── Time sync/
+│   │   │       └── Restart-Time-Sync.ps1
+│   │   └── Intune/Desktop/
+│   │       ├── Add Lockscreen to start and desktop/
+│   │       └── Background/
+│   │           └── Desktop/
+│   │               ├── Set-CorporateWallpaper.ps1
+│   │               └── readme.md
+│   ├── Exchange/
+│   │   ├── Migrate-Calendar.ps1
+│   │   ├── Set-Calendar-rights.ps1
+│   │   └── readme.md
+│   ├── Intune/Get-Autopilot/
+│   │   ├── Get-WindowsAutoPilotInfo.ps1
+│   │   └── GetAutoPilot.CMD
+│   └── Startup/
+│       ├── functies.ps1                 ← Function library: dot-source at startup
+│       ├── Install-Modules.ps1          ← Bootstrap: install & import all modules
+│       └── readme.md
+└── readme.md
 ```
 
 ---
@@ -116,6 +138,25 @@ This repository is actively maintained and expanded. When adding new scripts:
 ## Disclaimer
 
 These scripts are provided as-is. Always test in a non-production environment before running against live tenants. BraveHub accepts no liability for unintended changes resulting from misuse or misconfiguration.
+
+---
+
+## Version History
+
+| Date | Change |
+|------|--------|
+| 2026-03-20 | Rewrote `Set-CorporateWallpaper.ps1` to v2.0 — English, `Invoke-WebRequest`, `#Requires -Version 5.1`, generic CDN URL |
+| 2026-03-20 | Added `Set-CorporateWallpaper.ps1` with Intune deployment via PersonalizationCSP |
+| 2026-03-20 | Moved `Install-Modules.ps1` to `scripts/Startup/`; added `Restart-Time-Sync.ps1` |
+| 2026-03-20 | Translated all readme files to English |
+| 2026-03-20 | Rewrote `functies.ps1` — replaced MSOnline/AzureAD with Microsoft Graph, made generic and cross-platform |
+| 2026-03-20 | Added `scripts/Startup/readme.md` |
+| 2026-03-20 | Added `Set-Calendar-rights.ps1` with NL/FR/EN locale support |
+| 2026-03-20 | Added `Install-Modules.ps1` cross-platform bootstrap script |
+| 2026-03-20 | Updated readme structure; added device/audio and Intune/Desktop categories |
+| 2026-03-19 | Added Exchange calendar migration script |
+| 2026-03-19 | Added Intune/Get-Autopilot scripts (`Get-WindowsAutoPilotInfo.ps1`, `GetAutoPilot.CMD`) |
+| 2026-03-19 | Initial repository upload |
 
 ---
 
