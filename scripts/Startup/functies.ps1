@@ -217,7 +217,9 @@ function Get-MailboxAliases {
 }
 
 function Export-DistributionGroups {
-    $csvFile = Join-Path ([System.IO.Path]::GetTempPath()) 'ExportDGs.csv'
+    $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+    if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+    $csvFile = Join-Path $outputDir 'ExportDGs.csv'
 
     Get-DistributionGroup -ResultSize Unlimited | ForEach-Object {
         $members = Get-DistributionGroupMember $_.Name
@@ -374,7 +376,9 @@ function Export-SignInLogs {
         'ConditionalAccessStatus'
     )
 
-    $exportPath = Join-Path ([System.IO.Path]::GetTempPath()) 'SignInAudit'
+    $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+    if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+    $exportPath = Join-Path $outputDir 'SignInAudit'
     New-Item -Path $exportPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
     $ts = Get-Date -Format 'yyyyMMdd_HHmmss'

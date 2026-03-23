@@ -95,7 +95,7 @@ Scripts for calendar and mailbox management.
 - Set calendar folder permissions (NL/FR/EN locale support)
 
 ### ☁️ M365 Management (`functies.ps1`)
-Interactive M365 management functions via Microsoft Graph and Exchange Online. Loaded as a library through the menu.
+Interactive M365 management functions via Microsoft Graph and Exchange Online. Loaded as a library through the menu. CSV and log exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
 
 - **Exchange Online** — shared mailbox access, locale, aliases, distribution groups, auto-reply, sent-items copy
 - **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs, bulk user creation, bulk user removal
@@ -143,7 +143,7 @@ Scripts for diagnosing network and mail connectivity.
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 
 ### 🧪 Testing — Exchange
-Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an existing session or connect automatically.
+Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an existing session or connect automatically. CSV exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
 
 - Audit calendar folder permissions (locale-independent, exports CSV)
 - Audit Full Access, Send As, Send on Behalf delegation (exports CSV)
@@ -153,9 +153,18 @@ Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an e
 - Report mailbox sizes and item counts sorted by storage used (exports CSV)
 
 ### 🧪 Testing — Entra ID / Graph
-Audit scripts for Microsoft 365 groups via Microsoft Graph.
+Audit scripts for Microsoft 365 groups via Microsoft Graph. CSV exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
 
 - Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
+
+### 🌐 DNS Management
+Scripts for managing DNS records in Active Directory-integrated DNS zones.
+
+- Resolve public DNS records via Google DNS (dig) and import them as A or CNAME records into AD DNS
+- Dry-run by default — shows what would be created before applying
+- Idempotent — skips records that already exist
+
+---
 
 ### 🖼️ Intune — Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
@@ -189,6 +198,10 @@ M365-Scripts/
     │   │   └── Background/Desktop/
     │   │       ├── Set-CorporateWallpaper.ps1
     │   │       └── readme.md
+    │   ├── DNS/
+    │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
+    │   │   ├── example-records.csv
+    │   │   └── readme.md
     │   └── Save install time/       ← USB setup toolkit
     │       ├── start.bat
     │       ├── autorun.inf
@@ -260,6 +273,8 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | All CSV exports now go to `C:\Temp\` (Windows) or `~/Downloads/` (macOS/Linux) — no longer written to current directory |
+| 2026-03-23 | Added `scripts/Custom Scripts/DNS/Import-DnsRecords.ps1` — resolve public DNS via dig (Google 8.8.8.8) and import A/CNAME records into AD DNS, dry-run by default |
 | 2026-03-23 | Added `scripts/Entra/New-M365User.ps1` — create single M365 user via Graph, auto-generated password, optional license |
 | 2026-03-23 | Added `scripts/Entra/Import-M365Users.ps1` — bulk user creation from CSV via Graph, dry-run by default, passwords in CSV output |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-ExternalForwards.ps1` — audit external forwarding rules across all mailboxes, CSV export |
