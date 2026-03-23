@@ -148,6 +148,24 @@ $ExchangeSubmenu = @(
         if ($inc -match '^[Yy]') { $p['IncludeMembers'] = $true }
         & "$ROOT\scripts\Testing Scripts\Exchange\Test-DistributionGroupPermissions.ps1" @p
     }}
+    @{ Key='B'; Label='Test-DkimConfig          — validate DKIM signing config and DNS records'; Action={
+        $domain = Read-Host "  Domain (leave blank for all)"
+        $p = @{}
+        if ($domain) { $p['Domain'] = $domain }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-DkimConfig.ps1" @p
+    }}
+    @{ Key='C'; Label='Get-ExternalForwards     — audit mailboxes with external forwarding'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Get-ExternalForwards.ps1" @p
+    }}
+    @{ Key='D'; Label='Get-MailboxSizes         — report mailbox sizes sorted by storage used'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Get-MailboxSizes.ps1" @p
+    }}
 )
 
 $EntraSubmenu = @(
