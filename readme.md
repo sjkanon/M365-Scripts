@@ -188,6 +188,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `load.ps1` — startup loader: asks for UPN + name on first run, saves to gitignored `load.config.ps1`, then launches menu |
 | 2026-03-23 | Extended `menu.ps1` — added M365 section (B–E) with Exchange, Entra ID, MSP Admin submenus; lazy-loads `functies.ps1` on first M365 use |
 | 2026-03-23 | Added `menu.ps1` — interactive launcher for all scripts, number keys + F-keys, cross-platform |
 | 2026-03-23 | Added `scripts/Network/Test-Ports.ps1` — TCP port checker with range/list syntax and multi-target support |

@@ -2,19 +2,36 @@
 <#
 .SYNOPSIS
     Startup loader for M365-Scripts.
-    Sets admin credentials and launches the interactive menu.
+    Asks for your admin UPN and display name on first run, saves them locally,
+    then launches the interactive menu.
 
 .DESCRIPTION
-    Edit the Configuration section below with your admin UPN and display name,
-    then run this file instead of menu.ps1.
-
-    You can also dot-source this file from your PowerShell profile:
-        . C:\path\to\M365-Scripts\load.ps1
+    Configuration is stored in load.config.ps1 (gitignored).
+    Delete that file to re-enter your credentials.
 #>
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-$global:upn      = "admin@contoso.com"   # Your admin UPN
-$global:realname = "Sjoerd"              # Your display name (optional)
-# ─────────────────────────────────────────────────────────────────────────────
+$configFile = Join-Path $PSScriptRoot 'load.config.ps1'
 
+# ── First run: ask and save config ────────────────────────────────────────────
+if (-not (Test-Path $configFile)) {
+    Write-Host ""
+    Write-Host "  First run — enter your admin details." -ForegroundColor Cyan
+    Write-Host "  These will be saved in load.config.ps1 (gitignored)."
+    Write-Host ""
+    $upnInput  = Read-Host "  Admin UPN (e.g. admin@contoso.com)"
+    $nameInput = Read-Host "  Display name (e.g. Sjoerd)"
+    Write-Host ""
+
+    @"
+# M365-Scripts local config — do not commit
+`$global:upn      = "$upnInput"
+`$global:realname = "$nameInput"
+"@ | Set-Content -Path $configFile -Encoding UTF8
+
+    Write-Host "  Config saved. Delete load.config.ps1 to reset." -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+# ── Load config and launch menu ───────────────────────────────────────────────
+. $configFile
 & "$PSScriptRoot\menu.ps1"
