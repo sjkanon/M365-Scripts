@@ -1,1 +1,0 @@
-﻿Add-LocalGroupMember -Group "Administrators" -Member "azuread\wim@safely.nl"

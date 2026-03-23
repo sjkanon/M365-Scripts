@@ -215,6 +215,30 @@ $EntraSubmenu = @(
         if ($grp) { $p['Group'] = $grp }
         & "$ROOT\scripts\Testing Scripts\Entra\Test-M365GroupMembership.ps1" @p
     }}
+    @{ Key='B'; Label='New-M365User             — create a single new user'; Action={
+        $upn  = Read-Host "  UPN (e.g. j.doe@contoso.com)"
+        $dn   = Read-Host "  Display name"
+        $fn   = Read-Host "  First name (optional)"
+        $ln   = Read-Host "  Last name (optional)"
+        $dept = Read-Host "  Department (optional)"
+        $sku  = Read-Host "  License SKU (optional, e.g. ENTERPRISEPACK)"
+        $p = @{ UserPrincipalName = $upn; DisplayName = $dn }
+        if ($fn)   { $p['GivenName']   = $fn }
+        if ($ln)   { $p['Surname']     = $ln }
+        if ($dept) { $p['Department']  = $dept }
+        if ($sku)  { $p['LicenseSkuId'] = $sku }
+        & "$ROOT\scripts\Entra\New-M365User.ps1" @p
+    }}
+    @{ Key='C'; Label='Import-M365Users         — bulk create users from CSV (dry run first)'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\Import-M365Users.ps1'
+        $csv  = Read-Host "  CSV path"
+        $sku  = Read-Host "  Default license SKU for all users (optional)"
+        $p = @{ CsvPath = $csv }
+        if ($sku) { $p['LicenseSkuId'] = $sku }
+        & $path @p
+        $confirm = Read-Host "  Dry run completed. Add -Apply to create accounts? [y/N]"
+        if ($confirm -match '^[Yy]') { & $path @p -Apply }
+    }}
 )
 
 $MspSubmenu = @(
