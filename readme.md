@@ -141,11 +141,14 @@ Scripts for diagnosing network and mail connectivity.
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 
 ### 🧪 Testing — Exchange
-Audit scripts for Exchange Online permissions. Self-connecting — reuse an existing session or connect automatically.
+Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an existing session or connect automatically.
 
-- Audit calendar folder permissions for one or all mailboxes (locale-independent, exports CSV)
-- Audit Full Access, Send As, and Send on Behalf delegation for one or all mailboxes (exports CSV)
-- Audit distribution group managers, Send As, Send on Behalf, member counts, and sender restrictions (exports CSV)
+- Audit calendar folder permissions (locale-independent, exports CSV)
+- Audit Full Access, Send As, Send on Behalf delegation (exports CSV)
+- Audit distribution group managers, Send As, Send on Behalf, member counts (exports CSV)
+- Validate DKIM signing config and DNS CNAME/TXT records; lists required actions
+- Audit mailboxes with external forwarding to non-tenant domains (security audit, exports CSV)
+- Report mailbox sizes and item counts sorted by storage used (exports CSV)
 
 ### 🧪 Testing — Entra ID / Graph
 Audit scripts for Microsoft 365 groups via Microsoft Graph.
@@ -214,7 +217,10 @@ M365-Scripts/
         │   ├── Test-M365GroupMembership.ps1
         │   └── readme.md
         ├── Exchange/
+        │   ├── Get-ExternalForwards.ps1
+        │   ├── Get-MailboxSizes.ps1
         │   ├── Test-CalendarPermissions.ps1
+        │   ├── Test-DkimConfig.ps1
         │   ├── Test-DistributionGroupPermissions.ps1
         │   ├── Test-MailboxPermissions.ps1
         │   └── readme.md
@@ -250,6 +256,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-ExternalForwards.ps1` — audit external forwarding rules across all mailboxes, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-MailboxSizes.ps1` — mailbox size + item count report, sorted by storage, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-DkimConfig.ps1` — DKIM signing config + DNS CNAME/TXT validation with required-actions output |
 | 2026-03-23 | Added `scripts/Testing Scripts/Entra/Test-M365GroupMembership.ps1` — M365 Group / Teams owner and member audit via Graph, CSV export |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-DistributionGroupPermissions.ps1` — DG managers, Send As, Send on Behalf, member counts, CSV export |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-CalendarPermissions.ps1` — locale-independent calendar permission audit, CSV export |
