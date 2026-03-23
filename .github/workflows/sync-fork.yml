@@ -1,18 +1,14 @@
 name: Sync Fork with Upstream
-
 on:
   schedule:
-    - cron: '0 6 * * *'    # Daily at 06:00 UTC
-    - cron: '0 12 * * *'   # Daily at 12:00 UTC
-    - cron: '0 18 * * *'   # Daily at 18:00 UTC
-  workflow_dispatch:        # Allow manual trigger
-
+    - cron: '0 6 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 18 * * *'
+  workflow_dispatch:
 permissions:
   contents: write
-
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -30,13 +26,18 @@ jobs:
           git config user.name "github@first.eu"
           git config user.email "github@first.eu"
 
-          # Point origin to fork using PAT explicitly
           git remote set-url origin https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
-
-          # Fetch from upstream (sjkanon source)
           git remote add upstream https://github.com/sjkanon/M365-Scripts.git
           git fetch upstream
 
           git checkout main
-          git merge upstream/main --ff-only
+
+          # Try fast-forward first, fall back to merge
+          if git merge upstream/main --ff-only; then
+            echo "Fast-forward succeeded"
+          else
+            echo "Fast-forward failed, falling back to merge"
+            git merge upstream/main --no-ff -m "chore: sync with upstream"
+          fi
+
           git push origin main
