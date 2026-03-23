@@ -1,49 +1,62 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Resolve public DNS records and import them into Active Directory DNS.
+    Resolve public DNS records and optionally import them into Active Directory DNS.
 
 .DESCRIPTION
-    Reads a list of FQDNs from a CSV file, resolves each one via Google DNS (8.8.8.8)
-    using dig, and adds the result as an A or CNAME record in Active Directory DNS.
+    Reads a list of FQDNs from a CSV file and resolves each one via Google DNS (8.8.8.8)
+    using dig. Results are shown on screen.
 
-    The script shows what it found and what it would create before doing anything.
-    Pass -Apply to actually write the records.
+    Use -ExportCsv to save the resolved records to a CSV — useful for manual review
+    or importing into AD DNS by hand.
+
+    Use -Apply to automatically write the resolved records into Active Directory DNS.
 
     Required CSV column:
       FQDN    Fully qualified domain name to resolve (e.g. briefings.vias.be)
 
     Resolution logic per FQDN:
-      1. Check for CNAME  → if found, creates a CNAME record in AD DNS
-      2. Check for A      → if found, creates an A record in AD DNS
+      1. Check for CNAME  → if found, records type CNAME + target
+      2. Check for A      → if found, records type A + IP address
       3. No answer        → reported as unresolvable, skipped
 
 .PARAMETER CsvPath
     Path to the CSV file with a FQDN column.
 
 .PARAMETER ZoneName
-    The AD DNS zone to add records to (e.g. vias.be).
+    The AD DNS zone (e.g. vias.be). Used to derive host names and validate FQDNs.
 
-.PARAMETER DnsServer
-    DNS server to create the records on. Default: localhost.
+.PARAMETER ExportCsv
+    Export resolved records to a CSV file for manual review or import.
+    Default path: .\ResolvedRecords_<timestamp>.csv
 
-.PARAMETER Ttl
-    Time-to-live for the records in seconds. Default: 3600 (1 hour).
+.PARAMETER ExportPath
+    Custom path for the exported CSV. Implies -ExportCsv.
 
 .PARAMETER Apply
-    Actually create the DNS records in AD. Without this switch runs in dry-run mode.
+    Write resolved records into Active Directory DNS (requires DnsServer module).
+
+.PARAMETER DnsServer
+    DNS server to write records to. Default: localhost. Only used with -Apply.
+
+.PARAMETER Ttl
+    TTL for created records in seconds. Default: 3600. Only used with -Apply.
 
 .EXAMPLE
-    # Check what would be created (dry run)
-    .\Import-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be
+    # Resolve and show on screen only
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be
 
 .EXAMPLE
-    # Resolve and import into AD DNS
-    .\Import-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be -Apply
+    # Resolve and export to CSV for manual review
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -ExportCsv
+
+.EXAMPLE
+    # Resolve and import directly into AD DNS
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -Apply
 
 .EXAMPLE
     # Remote DNS server
-    .\Import-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param (
@@ -54,14 +67,22 @@ param (
     [Parameter(Mandatory)]
     [string] $ZoneName,
 
+    [switch] $ExportCsv,
+
+    [string] $ExportPath = ".\ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+
+    [switch] $Apply,
+
     [string] $DnsServer = 'localhost',
 
-    [int] $Ttl = 3600,
-
-    [switch] $Apply
+    [int] $Ttl = 3600
 )
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
+if ($ExportPath -ne ".\ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv") {
+    $ExportCsv = $true
+}
+
 $digCmd = Get-Command dig -ErrorAction SilentlyContinue
 if (-not $digCmd) {
     Write-Error "'dig' not found. Install BIND tools: choco install bind-toolsonly"
@@ -76,10 +97,7 @@ if ($Apply -and -not (Get-Module -Name DnsServer -ListAvailable)) {
 # ── Load CSV ──────────────────────────────────────────────────────────────────
 $rows = Import-Csv -Path $CsvPath
 
-if ($rows.Count -eq 0) {
-    Write-Error "CSV is empty."
-    exit 1
-}
+if ($rows.Count -eq 0) { Write-Error "CSV is empty."; exit 1 }
 
 $fqdnCol = $rows[0].PSObject.Properties.Name | Where-Object { $_ -match '^fqdn$' } | Select-Object -First 1
 if (-not $fqdnCol) {
@@ -104,115 +122,96 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host ""
 Write-Host "  CSV        : $CsvPath"
 Write-Host "  Zone       : $ZoneName"
-Write-Host "  DNS server : $DnsServer"
-Write-Host "  TTL        : $Ttl seconds"
 Write-Host "  Records    : $($rows.Count) FQDN(s)"
+if ($Apply)     { Write-Host "  DNS server : $DnsServer" }
+if ($ExportCsv) { Write-Host "  Export to  : $ExportPath" }
+Write-Host ""
+Write-Host "  --- Resolving via Google DNS ($googleDns) ---" -ForegroundColor Cyan
 Write-Host ""
 
-if (-not $Apply) {
-    Write-Host "  ================================================" -ForegroundColor Yellow
-    Write-Host "   DRY RUN MODE — no records will be created" -ForegroundColor Yellow
-    Write-Host "   Add -Apply to write the records to AD DNS." -ForegroundColor Yellow
-    Write-Host "  ================================================" -ForegroundColor Yellow
-    Write-Host ""
-}
-
-Write-Host "  --- Resolving via Google DNS (8.8.8.8) ---" -ForegroundColor Cyan
-Write-Host ""
-
-$ttlSpan     = [System.TimeSpan]::FromSeconds($Ttl)
-$commonParams = @{ ZoneName = $ZoneName; ComputerName = $DnsServer }
-
-$created = 0
-$skipped = 0
-$errors  = 0
+# ── Process records ───────────────────────────────────────────────────────────
+$ttlSpan      = [System.TimeSpan]::FromSeconds($Ttl)
+$commonParams  = @{ ZoneName = $ZoneName; ComputerName = $DnsServer }
+$resolved      = [System.Collections.Generic.List[PSCustomObject]]::new()
+$created       = 0
+$skipped       = 0
+$errors        = 0
 
 foreach ($row in $rows) {
     $fqdn = ($row.$fqdnCol).Trim()
-
     if (-not $fqdn) { continue }
 
-    # Derive host name within zone (strip zone suffix)
+    # Validate FQDN belongs to the zone
     if ($fqdn -notmatch "\.$([regex]::Escape($ZoneName))$") {
-        Write-Host ("  [SKIP] {0,-40} : not in zone '{1}'" -f $fqdn, $ZoneName) -ForegroundColor DarkYellow
+        Write-Host ("  [SKIP]       {0,-42} not in zone '{1}'" -f $fqdn, $ZoneName) -ForegroundColor DarkYellow
         $skipped++
         continue
     }
     $hostName = $fqdn -replace "\.$([regex]::Escape($ZoneName))$", ''
 
-    # ── Resolve: CNAME first, then A ──────────────────────────────────────────
+    # Resolve: CNAME first, then A
     $cnameResult = Resolve-Public -Fqdn $fqdn -Type 'CNAME'
     $aResult     = Resolve-Public -Fqdn $fqdn -Type 'A'
 
     if ($cnameResult) {
-        $target = $cnameResult | Select-Object -First 1
+        $target      = $cnameResult | Select-Object -First 1
         $targetClean = $target.TrimEnd('.')
 
-        Write-Host ("  [CNAME] {0,-40} -> {1}" -f $fqdn, $targetClean) -NoNewline
+        Write-Host ("  [CNAME]      {0,-42} -> {1}" -f $fqdn, $targetClean) -NoNewline
 
-        if (-not $Apply) {
-            Write-Host "  [DRY RUN]" -ForegroundColor DarkYellow
-            $skipped++
-            continue
-        }
+        $resolved.Add([PSCustomObject]@{ FQDN = $fqdn; HostName = $hostName; Type = 'CNAME'; Value = $targetClean })
 
-        $existing = Get-DnsServerResourceRecord @commonParams -Name $hostName -RRType CName -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "  [EXISTS]" -ForegroundColor DarkGray
-            $skipped++
-            continue
-        }
-
-        try {
-            Add-DnsServerResourceRecordCName @commonParams `
-                -Name $hostName `
-                -HostNameAlias $target `
-                -TimeToLive $ttlSpan `
-                -ErrorAction Stop
-            Write-Host "  [CREATED]" -ForegroundColor Green
-            $created++
-        } catch {
+        if ($Apply) {
+            $existing = Get-DnsServerResourceRecord @commonParams -Name $hostName -RRType CName -ErrorAction SilentlyContinue
+            if ($existing) {
+                Write-Host '  [EXISTS]' -ForegroundColor DarkGray; $skipped++
+            } else {
+                try {
+                    Add-DnsServerResourceRecordCName @commonParams -Name $hostName -HostNameAlias $target -TimeToLive $ttlSpan -ErrorAction Stop
+                    Write-Host '  [CREATED]' -ForegroundColor Green; $created++
+                } catch {
+                    Write-Host ""; Write-Host ("  [ERROR] {0}" -f $_.Exception.Message) -ForegroundColor Red; $errors++
+                }
+            }
+        } else {
             Write-Host ""
-            Write-Host ("  [ERROR]   {0}" -f $_.Exception.Message) -ForegroundColor Red
-            $errors++
         }
 
     } elseif ($aResult) {
         $ip = $aResult | Select-Object -First 1
 
-        Write-Host ("  [A]     {0,-40} -> {1}" -f $fqdn, $ip) -NoNewline
+        Write-Host ("  [A]          {0,-42} -> {1}" -f $fqdn, $ip) -NoNewline
 
-        if (-not $Apply) {
-            Write-Host "  [DRY RUN]" -ForegroundColor DarkYellow
-            $skipped++
-            continue
-        }
+        $resolved.Add([PSCustomObject]@{ FQDN = $fqdn; HostName = $hostName; Type = 'A'; Value = $ip })
 
-        $existing = Get-DnsServerResourceRecord @commonParams -Name $hostName -RRType A -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "  [EXISTS]" -ForegroundColor DarkGray
-            $skipped++
-            continue
-        }
-
-        try {
-            Add-DnsServerResourceRecordA @commonParams `
-                -Name $hostName `
-                -IPv4Address $ip `
-                -TimeToLive $ttlSpan `
-                -ErrorAction Stop
-            Write-Host "  [CREATED]" -ForegroundColor Green
-            $created++
-        } catch {
+        if ($Apply) {
+            $existing = Get-DnsServerResourceRecord @commonParams -Name $hostName -RRType A -ErrorAction SilentlyContinue
+            if ($existing) {
+                Write-Host '  [EXISTS]' -ForegroundColor DarkGray; $skipped++
+            } else {
+                try {
+                    Add-DnsServerResourceRecordA @commonParams -Name $hostName -IPv4Address $ip -TimeToLive $ttlSpan -ErrorAction Stop
+                    Write-Host '  [CREATED]' -ForegroundColor Green; $created++
+                } catch {
+                    Write-Host ""; Write-Host ("  [ERROR] {0}" -f $_.Exception.Message) -ForegroundColor Red; $errors++
+                }
+            }
+        } else {
             Write-Host ""
-            Write-Host ("  [ERROR]   {0}" -f $_.Exception.Message) -ForegroundColor Red
-            $errors++
         }
 
     } else {
-        Write-Host ("  [UNRESOLVED] {0,-40} : no public DNS answer" -f $fqdn) -ForegroundColor Red
+        Write-Host ("  [UNRESOLVED] {0,-42} no public DNS answer" -f $fqdn) -ForegroundColor Red
         $errors++
     }
+}
+
+# ── Export CSV ────────────────────────────────────────────────────────────────
+if ($ExportCsv -and $resolved.Count -gt 0) {
+    $resolved | Export-Csv -Path $ExportPath -NoTypeInformation -Encoding UTF8
+    Write-Host ""
+    Write-Host "  Resolved records saved to: $ExportPath" -ForegroundColor Cyan
+    Write-Host "  Columns: FQDN, HostName, Type, Value" -ForegroundColor DarkGray
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -220,12 +219,14 @@ Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host "   Summary" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host "  Resolved    : $($resolved.Count)" -ForegroundColor Green
+Write-Host "  Unresolved  : $errors"             -ForegroundColor $(if ($errors -gt 0) { 'Red' } else { 'DarkGray' })
 if ($Apply) {
-    Write-Host "  Created     : $created" -ForegroundColor Green
-    Write-Host "  Skipped     : $skipped" -ForegroundColor DarkGray
-    Write-Host "  Unresolved  : $errors"  -ForegroundColor $(if ($errors -gt 0) { 'Red' } else { 'DarkGray' })
-} else {
-    Write-Host "  Would process : $($rows.Count) FQDN(s)" -ForegroundColor Yellow
-    Write-Host "  Run with -Apply to write the records to AD DNS." -ForegroundColor DarkYellow
+    Write-Host "  Created     : $created"         -ForegroundColor Green
+    Write-Host "  Skipped     : $skipped (already existed)" -ForegroundColor DarkGray
+} elseif (-not $ExportCsv) {
+    Write-Host ""
+    Write-Host "  Use -ExportCsv to save results for manual import." -ForegroundColor DarkYellow
+    Write-Host "  Use -Apply to import directly into AD DNS." -ForegroundColor DarkYellow
 }
 Write-Host ""
