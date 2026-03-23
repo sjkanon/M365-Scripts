@@ -217,6 +217,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Date | Change |
 |------|--------|
 | 2026-03-23 | Added `scripts/Entra/Remove-M365Users.ps1` — bulk Entra ID user removal, dry-run by default, CSV report |
+| 2026-03-23 | `load.ps1` — auto-imports modules at startup; detects missing modules and offers to run `Install-Modules.ps1` |
 | 2026-03-23 | Added `load.ps1` — first-run setup (UPN + name), saves to gitignored `load.config.ps1`, launches menu |
 | 2026-03-23 | Extended `menu.ps1` with M365 section (B–E): Exchange, Entra ID, MSP Admin submenus via `functies.ps1` |
 | 2026-03-23 | Added `menu.ps1` — interactive launcher, single-keypress, number + F-keys, cross-platform |
