@@ -32,6 +32,32 @@ if (-not (Test-Path $configFile)) {
     Write-Host ""
 }
 
+# ── Check and import required modules ────────────────────────────────────────
+$requiredModules = @(
+    'ExchangeOnlineManagement'
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Users'
+    'Microsoft.Graph.Groups'
+    'Microsoft.Graph.Applications'
+)
+
+$missing = $requiredModules | Where-Object { -not (Get-Module -ListAvailable -Name $_ ) }
+
+if ($missing) {
+    Write-Host ""
+    Write-Host "  Missing modules: $($missing -join ', ')" -ForegroundColor Yellow
+    $install = Read-Host "  Run Install-Modules.ps1 now? [Y/n]"
+    if ($install -notmatch '^[Nn]') {
+        & "$PSScriptRoot\scripts\Startup\Install-Modules.ps1"
+    } else {
+        Write-Host "  M365 functions may not work until modules are installed." -ForegroundColor DarkYellow
+    }
+} else {
+    Write-Host ""
+    Write-Host "  Loading modules..." -ForegroundColor DarkGray
+    $requiredModules | ForEach-Object { Import-Module $_ -ErrorAction SilentlyContinue }
+}
+
 # ── Load config and launch menu ───────────────────────────────────────────────
 . $configFile
 & "$PSScriptRoot\menu.ps1"
