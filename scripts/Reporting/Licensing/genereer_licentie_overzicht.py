@@ -1,31 +1,32 @@
 """
-Gecombineerd Licentie & Azure Kostenrapport
-============================================
-Leest een Pax8 CSV én een Ingram Excel, combineert alle klanten
-en schrijft één Excel met per klant een eigen tabblad.
+Combined Licensing & Azure Cost Report
+=======================================
+Reads a Pax8 CSV and an Ingram Excel, combines all customers,
+and writes one Excel file with a dedicated tab per customer.
 
-Gebruik:
-    python genereer_licentie_overzicht.py <pax8.csv> <ingram.xlsx> [output.xlsx]
+Usage:
+    python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv>
+    python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv> --output report.xlsx
 
-Output (standaard):  Licentie_Overzicht_YYYY-MM.xlsx
+Output (default):  Licensing_Report_YYYY-MM.xlsx
 
-Vereisten:  pip install pandas openpyxl
+Requirements:  pip install pandas openpyxl
 """
 
 import sys
 import re
 
-MONTHS_NL = {
-    1:"Januari", 2:"Februari", 3:"Maart",    4:"April",
-    5:"Mei",     6:"Juni",     7:"Juli",      8:"Augustus",
-    9:"September",10:"Oktober",11:"November", 12:"December"
+MONTHS_EN = {
+    1:"January", 2:"February", 3:"March",    4:"April",
+    5:"May",     6:"June",     7:"July",      8:"August",
+    9:"September",10:"October",11:"November", 12:"December"
 }
 
 def _verbose_period(period_str: str) -> str:
     """'2025-12' -> 'December 2025'"""
     try:
         y, m = period_str[:7].split("-")
-        return f"{MONTHS_NL[int(m)]} {y}"
+        return f"{MONTHS_EN[int(m)]} {y}"
     except Exception:
         return period_str
 
@@ -44,18 +45,18 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# ── Kleuren ───────────────────────────────────────────────────────────────────
+# ── Colours ───────────────────────────────────────────────────────────────────
 DARK_BLUE   = "1F3864"
 MED_BLUE    = "2E75B6"
-AZURE_BLUE  = "4472C4"   # Azure-sectieheader
-LIC_GREEN   = "375623"   # Licenties-sectieheader (donker groen)
-LIC_MED     = "538135"   # Licenties sub-header
+AZURE_BLUE  = "4472C4"   # Azure section header
+LIC_GREEN   = "375623"   # Licenses section header (dark green)
+LIC_MED     = "538135"   # Licenses sub-header
 ROW_LIGHT   = "EAF2FB"
 ROW_WHITE   = "FFFFFF"
 CAT_GREY    = "F2F2F2"
-INGRAM_TEAL = "1F5C6B"   # Ingram sectie
+INGRAM_TEAL = "1F5C6B"   # Ingram section
 
-# ── Stijlhulpfuncties ─────────────────────────────────────────────────────────
+# ── Style helpers ─────────────────────────────────────────────────────────────
 def _side():
     return Side(style="thin", color="C0C0C0")
 
@@ -93,21 +94,21 @@ def _empty_row(ws, row, ncols=7):
     ws.row_dimensions[row].height = 8
 
 
-# ── Pax8 inlezen ─────────────────────────────────────────────────────────────
+# ── Pax8 parser ───────────────────────────────────────────────────────────────
 
 PAX8_AZURE_CATEGORIES = {
     "Virtual Machines":          "Virtual Machines",
     "Virtual Machines Licenses": "Virtual Machines",
     "Storage":                   "Storage",
     "Backup":                    "Backup",
-    "Bandwidth":                 "Netwerk & Trafiek",
-    "Virtual Network":           "Netwerk & Trafiek",
-    "Load Balancer":             "Netwerk & Trafiek",
-    "Azure DNS":                 "Netwerk & Trafiek",
-    "Log Analytics":             "Monitoring & Beheer",
-    "Azure Monitor":             "Monitoring & Beheer",
-    "Key Vault":                 "Monitoring & Beheer",
-    "Logic Apps":                "Monitoring & Beheer",
+    "Bandwidth":                 "Network & Traffic",
+    "Virtual Network":           "Network & Traffic",
+    "Load Balancer":             "Network & Traffic",
+    "Azure DNS":                 "Network & Traffic",
+    "Log Analytics":             "Monitoring & Management",
+    "Azure Monitor":             "Monitoring & Management",
+    "Key Vault":                 "Monitoring & Management",
+    "Logic Apps":                "Monitoring & Management",
     "Azure App Service":         "App Services",
     "SQL Database":              "App Services",
     "Azure DevOps":              "App Services",
@@ -115,7 +116,7 @@ PAX8_AZURE_CATEGORIES = {
 
 AZURE_CATEGORY_ORDER = [
     "Virtual Machines", "Storage", "Backup",
-    "Netwerk & Trafiek", "Monitoring & Beheer", "App Services", "Overig",
+    "Network & Traffic", "Monitoring & Management", "App Services", "Other",
 ]
 
 # Optional: map raw Pax8 subscription IDs to human-readable labels.
@@ -134,8 +135,8 @@ def _parse_pax8_desc(desc):
     desc = re.sub(r'\s*\[options:.*?\]\s*$', '', desc).strip()
     parts = desc.split(" - ")
     sub     = parts[2].strip() if len(parts) > 2 else "Unknown"
-    cat_raw = parts[4].strip() if len(parts) > 4 else "Overig"
-    return sub, PAX8_AZURE_CATEGORIES.get(cat_raw, "Overig")
+    cat_raw = parts[4].strip() if len(parts) > 4 else "Other"
+    return sub, PAX8_AZURE_CATEGORIES.get(cat_raw, "Other")
 
 
 def load_pax8(csv_path: str):
@@ -152,20 +153,20 @@ def load_pax8(csv_path: str):
         lambda x: pd.Series(_parse_pax8_desc(x))
     )
 
-    licenties = df[~is_azure].copy()
-    # Productnaam uit description (alles voor " - " of de hele string)
-    licenties["product"] = licenties["description"].str.split(" - ").str[0].str.strip()
-    licenties["product"] = licenties["product"].str.replace(r'\s*\[options:.*?\]', '', regex=True).str.strip()
-    licenties["product"] = licenties["product"].str.replace(r'^\[Deprecated\]\s*', '', regex=True).str.strip()
+    licenses = df[~is_azure].copy()
+    # Product name from description (everything before " - " or the full string)
+    licenses["product"] = licenses["description"].str.split(" - ").str[0].str.strip()
+    licenses["product"] = licenses["product"].str.replace(r'\s*\[options:.*?\]', '', regex=True).str.strip()
+    licenses["product"] = licenses["product"].str.replace(r'^\[Deprecated\]\s*', '', regex=True).str.strip()
 
-    # Acronis: extraheer eindklant uit description
-    # Formaat: "Product - Product - Eindklant - qty [options:]"
+    # Acronis: extract end-customer from description
+    # Format: "Product - Product - EndCustomer - qty [options:]"
     def _acronis_endcustomer(row):
         if 'acronis' not in str(row['description']).lower():
             return ''
         desc = re.sub(r'\s*\[options:.*?\]\s*$', '', str(row['description'])).strip()
         parts = [p.strip() for p in desc.split(' - ')]
-        # Laatste deel is qty (getal), één daarvoor is eindklant
+        # Last part is qty (number), one before that is the end-customer
         for i in range(len(parts)-1, -1, -1):
             try:
                 float(parts[i])
@@ -175,31 +176,31 @@ def load_pax8(csv_path: str):
                     return parts[i]
                 break
         return ''
-    licenties['acronis_endcustomer'] = licenties.apply(_acronis_endcustomer, axis=1)
-    # Vertaal Acronis eindklant-namen naar klantnamen in het rapport
-    licenties['acronis_endcustomer'] = licenties['acronis_endcustomer'].replace(ACRONIS_ENDCUSTOMER_ALIASES)
+    licenses['acronis_endcustomer'] = licenses.apply(_acronis_endcustomer, axis=1)
+    # Apply end-customer name aliases (see ACRONIS_ENDCUSTOMER_ALIASES at the top)
+    licenses['acronis_endcustomer'] = licenses['acronis_endcustomer'].replace(ACRONIS_ENDCUSTOMER_ALIASES)
 
-    return azure, licenties
+    return azure, licenses
 
 
-# ── Ingram inlezen ────────────────────────────────────────────────────────────
+# ── Ingram parser ─────────────────────────────────────────────────────────────
 
 INGRAM_CATEGORY_MAP = {
     "Virtual Machines":             "Virtual Machines",
     "Virtual Machines Licenses":    "Virtual Machines",
     "Storage":                      "Storage",
     "Backup":                       "Backup",
-    "Bandwidth":                    "Netwerk & Trafiek",
-    "Virtual Network":              "Netwerk & Trafiek",
-    "Load Balancer":                "Netwerk & Trafiek",
-    "Azure DNS":                    "Netwerk & Trafiek",
-    "VPN Gateway":                  "Netwerk & Trafiek",
-    "Network Watcher":              "Netwerk & Trafiek",
-    "Log Analytics":                "Monitoring & Beheer",
-    "Azure Monitor":                "Monitoring & Beheer",
-    "Microsoft Defender for Cloud": "Monitoring & Beheer",
-    "Key Vault":                    "Monitoring & Beheer",
-    "Logic Apps":                   "Monitoring & Beheer",
+    "Bandwidth":                    "Network & Traffic",
+    "Virtual Network":              "Network & Traffic",
+    "Load Balancer":                "Network & Traffic",
+    "Azure DNS":                    "Network & Traffic",
+    "VPN Gateway":                  "Network & Traffic",
+    "Network Watcher":              "Network & Traffic",
+    "Log Analytics":                "Monitoring & Management",
+    "Azure Monitor":                "Monitoring & Management",
+    "Microsoft Defender for Cloud": "Monitoring & Management",
+    "Key Vault":                    "Monitoring & Management",
+    "Logic Apps":                   "Monitoring & Management",
     "Azure App Service":            "App Services",
     "SQL Database":                 "App Services",
     "Azure Databricks":             "App Services",
@@ -210,7 +211,7 @@ INGRAM_CATEGORY_MAP = {
 
 def _parse_ingram_azure_desc(desc):
     """
-    Twee formaten in Ingram:
+    Two formats in Ingram:
       1) '<UUID> <Service Category> from ...'   -> subscription=UUID, cat=service
       2) '# <UUID> Reserved VM Instance, ...'  -> cat=Reserved Instances (RI)
     """
@@ -224,8 +225,8 @@ def _parse_ingram_azure_desc(desc):
     if m:
         sub     = m.group(1)
         cat_raw = m.group(2).strip()
-        return sub, INGRAM_CATEGORY_MAP.get(cat_raw, "Overig")
-    return "Unknown", "Overig"
+        return sub, INGRAM_CATEGORY_MAP.get(cat_raw, "Other")
+    return "Unknown", "Other"
 
 
 def load_ingram(xlsx_path: str):
@@ -244,14 +245,14 @@ def load_ingram(xlsx_path: str):
         lambda x: pd.Series(_parse_ingram_azure_desc(x))
     )
 
-    licenties = df[~is_azure].copy()
-    return azure, licenties
+    licenses = df[~is_azure].copy()
+    return azure, licenses
 
 
-# ── Alle klanten verzamelen ───────────────────────────────────────────────────
+# ── Collect all customers ─────────────────────────────────────────────────────
 
 def gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic):
-    """Geeft een set van alle klantnamen terug."""
+    """Returns a sorted list of all unique customer names across both sources."""
     customers = set()
     for frame, col in [
         (pax8_az,    "company_name"),
@@ -263,28 +264,28 @@ def gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic):
     return sorted(customers)
 
 
-# ── Tabblad schrijven ─────────────────────────────────────────────────────────
+# ── Write customer sheet ──────────────────────────────────────────────────────
 
-# Kolomindeling:
-# A: Bron / Subscription / Product
-# B: Categorie / Detail
-# C: Aantal (#)
-# D: Eenheidsprijs inkoop
-# E: Eenheidsprijs verkoop
-# F: Totaal inkoop
-# G: Totaal verkoop
+# Column layout:
+# A: Description / Subscription / Product
+# B: Category / Detail
+# C: Qty
+# D: Unit purchase price
+# E: Unit sales price
+# F: Total purchase
+# G: Total sales
 
 NCOLS = 7
 
 def _col_headers(ws, row):
     headers = [
-        ("Omschrijving",        "left"),
-        ("Categorie / Detail",  "left"),
-        ("Aantal",              "center"),
-        ("Prijs Inkoop",        "center"),
-        ("Prijs Verkoop",       "center"),
-        ("Totaal Inkoop (€)",   "center"),
-        ("Totaal Verkoop (€)",  "center"),
+        ("Description",         "left"),
+        ("Category / Detail",   "left"),
+        ("Qty",                 "center"),
+        ("Purchase Price",      "center"),
+        ("Sales Price",         "center"),
+        ("Total Purchase (€)",  "center"),
+        ("Total Sales (€)",     "center"),
     ]
     for col, (txt, align) in enumerate(headers, 1):
         c = _styled(ws, row, col, txt, bg=MED_BLUE, size=9)
@@ -315,8 +316,8 @@ def _sub_header(ws, row, label, inkoop_total, verkoop_total, bg, fg="FFFFFF"):
     ws.row_dimensions[row].height = 18
 
 
-def _data_row(ws, row, omschrijving, detail, qty, unit_inkoop, unit_verkoop,
-              tot_inkoop, tot_verkoop, alt=False):
+def _data_row(ws, row, description, detail, qty, unit_purchase, unit_sales,
+              tot_purchase, tot_sales, alt=False):
     bg = ROW_LIGHT if alt else ROW_WHITE
     fg = "333333"
 
@@ -330,13 +331,13 @@ def _data_row(ws, row, omschrijving, detail, qty, unit_inkoop, unit_verkoop,
             c.number_format = fmt
         return c
 
-    _dc(1, omschrijving, "left")
-    _dc(2, detail, "left")
+    _dc(1, description,  "left")
+    _dc(2, detail,       "left")
     _dc(3, qty,          "center", "#,##0")
-    _dc(4, unit_inkoop,  "right",  "€#,##0.00")
-    _dc(5, unit_verkoop, "right",  "€#,##0.00")
-    _dc(6, tot_inkoop,   "right",  "€#,##0.00")
-    _dc(7, tot_verkoop,  "right",  "€#,##0.00")
+    _dc(4, unit_purchase,"right",  "€#,##0.00")
+    _dc(5, unit_sales,   "right",  "€#,##0.00")
+    _dc(6, tot_purchase, "right",  "€#,##0.00")
+    _dc(7, tot_sales,    "right",  "€#,##0.00")
     ws.row_dimensions[row].height = 16
 
 
@@ -360,33 +361,33 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
                          pax8_az, pax8_lic, ingram_az, ingram_lic,
                          pax8_lic_all=None):
 
-    # Tabblad-naam max 31 tekens, geen speciale tekens
+    # Sheet name max 31 chars, no special characters
     sheet_name = re.sub(r'[\\/*?:\[\]]', '', customer)[:31]
     ws = wb.create_sheet(title=sheet_name)
 
-    # Kolombreedte
+    # Column widths
     widths = [32, 26, 8, 13, 13, 15, 15]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     row = 1
 
-    # ── Titelrij ──
+    # ── Title row ──
     _styled(ws, row, 1,
-            f"{customer}  —  Licentie & Diensten Overzicht  |  {_verbose_period(period)}",
+            f"{customer}  —  Licensing & Services Overview  |  {_verbose_period(period)}",
             bg=DARK_BLUE, size=13, merge_to=NCOLS)
     ws.row_dimensions[row].height = 32
     row += 1
 
-    # ── Kolomkoppen ──
+    # ── Column headers ──
     _col_headers(ws, row)
     row += 1
 
-    grand_inkoop  = 0.0
-    grand_verkoop = 0.0
+    grand_purchase = 0.0
+    grand_sales    = 0.0
 
     # ════════════════════════════════════════════════════════
-    # SECTIE 1: PAX8 AZURE
+    # SECTION 1: PAX8 AZURE
     # ════════════════════════════════════════════════════════
     cust_az = pax8_az[pax8_az["company_name"] == customer]
     if not cust_az.empty:
@@ -398,12 +399,12 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
         ordered_subs += [s for s in subs if s not in ordered_subs]
 
         for sub in ordered_subs:
-            sub_data    = cust_az[cust_az["subscription"] == sub]
-            sub_inkoop  = sub_data["cost_total"].sum()
-            sub_verkoop = sub_data["subtotal"].sum()
-            sub_label   = PAX8_SUB_LABELS.get(sub, sub)
+            sub_data     = cust_az[cust_az["subscription"] == sub]
+            sub_purchase = sub_data["cost_total"].sum()
+            sub_sales    = sub_data["subtotal"].sum()
+            sub_label    = PAX8_SUB_LABELS.get(sub, sub)
 
-            _sub_header(ws, row, sub_label, sub_inkoop, sub_verkoop,
+            _sub_header(ws, row, sub_label, sub_purchase, sub_sales,
                         bg="2E5F8E", fg="FFFFFF")
             row += 1
 
@@ -420,35 +421,34 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
                 alt = not alt
                 row += 1
 
-        grand_inkoop  += cust_az["cost_total"].sum()
-        grand_verkoop += cust_az["subtotal"].sum()
+        grand_purchase += cust_az["cost_total"].sum()
+        grand_sales    += cust_az["subtotal"].sum()
 
         _empty_row(ws, row)
         row += 1
 
     # ════════════════════════════════════════════════════════
-    # SECTIE 2: INGRAM AZURE
+    # SECTION 2: INGRAM AZURE
     # ════════════════════════════════════════════════════════
     cust_iaz = ingram_az[ingram_az["CUSTOMER_NAME"] == customer]
     if not cust_iaz.empty:
         start = pd.to_datetime(cust_iaz["RESELLER_DETAIL_START_DATE"]).min()
         end   = pd.to_datetime(cust_iaz["RESELLER_DETAIL_END_DATE"]).max()
         az_period = f"{start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')}"
-        _section_header(ws, row, f"☁  Azure (via Ingram)  —  verbruiksperiode {az_period}", INGRAM_TEAL)
+        _section_header(ws, row, f"☁  Azure (via Ingram)  —  usage period {az_period}", INGRAM_TEAL)
         row += 1
 
         subs = cust_iaz["az_subscription"].unique().tolist()
-        # RI apart als laatste
-        ri_data = cust_iaz[cust_iaz["az_category"] == "Reserved Instances (RI)"]
+        # Reserved Instances shown last
+        ri_data     = cust_iaz[cust_iaz["az_category"] == "Reserved Instances (RI)"]
         normal_subs = [s for s in subs if s != "Reserved Instances (RI)"]
 
         for sub in normal_subs:
-            sub_data    = cust_iaz[cust_iaz["az_subscription"] == sub]
-            sub_inkoop  = sub_data["RESELLER_DETAIL_TOTAL"].sum()
-            sub_verkoop = sub_data["CUSTOMER_DETAIL_TOTAL"].sum()
-            sub_label   = sub  # geen mapping beschikbaar voor Ingram UUIDs
+            sub_data     = cust_iaz[cust_iaz["az_subscription"] == sub]
+            sub_purchase = sub_data["RESELLER_DETAIL_TOTAL"].sum()
+            sub_sales    = sub_data["CUSTOMER_DETAIL_TOTAL"].sum()
 
-            _sub_header(ws, row, sub_label, sub_inkoop, sub_verkoop,
+            _sub_header(ws, row, sub, sub_purchase, sub_sales,
                         bg="2E5F8E", fg="FFFFFF")
             row += 1
 
@@ -465,7 +465,7 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
                 alt = not alt
                 row += 1
 
-        # Reserved Instances als aparte sectie
+        # Reserved Instances as a separate section
         if not ri_data.empty:
             _sub_header(ws, row, "Reserved Instances (RI)",
                         ri_data["RESELLER_DETAIL_TOTAL"].sum(),
@@ -486,49 +486,47 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
                 alt = not alt
                 row += 1
 
-        grand_inkoop  += cust_iaz["RESELLER_DETAIL_TOTAL"].sum()
-        grand_verkoop += cust_iaz["CUSTOMER_DETAIL_TOTAL"].sum()
+        grand_purchase += cust_iaz["RESELLER_DETAIL_TOTAL"].sum()
+        grand_sales    += cust_iaz["CUSTOMER_DETAIL_TOTAL"].sum()
 
         _empty_row(ws, row)
         row += 1
 
     # ════════════════════════════════════════════════════════
-    # SECTIE 3: PAX8 LICENTIES
+    # SECTION 3: PAX8 LICENSES
     # ════════════════════════════════════════════════════════
     cust_pl = pax8_lic[pax8_lic["company_name"] == customer]
     if not cust_pl.empty:
-        _section_header(ws, row, "📋  Licenties (via Pax8)", LIC_GREEN)
+        _section_header(ws, row, "📋  Licenses (via Pax8)", LIC_GREEN)
         row += 1
 
-        # Groepeer per product
-        # Splits Acronis-producten per eindklant, groepeer de rest normaal
+        # Group by product; split Acronis per end-customer, group the rest normally
         non_acronis = cust_pl[cust_pl["acronis_endcustomer"] == ""]
         acronis     = cust_pl[cust_pl["acronis_endcustomer"] != ""]
 
         grp = non_acronis.groupby("product").agg(
             qty=("quantity", "sum"),
-            inkoop=("cost_total", "sum"),
-            verkoop=("subtotal", "sum"),
-            u_ink=("cost", "mean"),
-            u_vk=("price", "mean"),
+            purchase=("cost_total", "sum"),
+            sales=("subtotal", "sum"),
+            u_pur=("cost", "mean"),
+            u_sal=("price", "mean"),
         ).reset_index()
 
         alt = False
         for _, r in grp.iterrows():
             _data_row(ws, row, r["product"], "", r["qty"],
-                      r["u_ink"], r["u_vk"],
-                      r["inkoop"], r["verkoop"], alt=alt)
+                      r["u_pur"], r["u_sal"],
+                      r["purchase"], r["sales"], alt=alt)
             alt = not alt
             row += 1
 
-        # Acronis: per eindklant een subgroep
+        # Acronis: sub-group per end-customer
         if not acronis.empty:
             for endcustomer, ec_data in acronis.groupby("acronis_endcustomer"):
-                # Subheader voor eindklant
-                ec_inkoop  = ec_data["cost_total"].sum()
-                ec_verkoop = ec_data["subtotal"].sum()
+                ec_purchase = ec_data["cost_total"].sum()
+                ec_sales    = ec_data["subtotal"].sum()
                 _sub_header(ws, row, f"Acronis  —  {endcustomer}",
-                            ec_inkoop, ec_verkoop, bg="4A4A8A", fg="FFFFFF")
+                            ec_purchase, ec_sales, bg="4A4A8A", fg="FFFFFF")
                 row += 1
                 alt = False
                 for _, r in ec_data.iterrows():
@@ -538,44 +536,44 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
                     alt = not alt
                     row += 1
 
-        grand_inkoop  += cust_pl["cost_total"].sum()
-        grand_verkoop += cust_pl["subtotal"].sum()
+        grand_purchase += cust_pl["cost_total"].sum()
+        grand_sales    += cust_pl["subtotal"].sum()
 
         _empty_row(ws, row)
         row += 1
 
     # ════════════════════════════════════════════════════════
-    # SECTIE 4: INGRAM LICENTIES
+    # SECTION 4: INGRAM LICENSES
     # ════════════════════════════════════════════════════════
     cust_il = ingram_lic[ingram_lic["CUSTOMER_NAME"] == customer]
     if not cust_il.empty:
-        _section_header(ws, row, "📋  Licenties (via Ingram)", LIC_MED)
+        _section_header(ws, row, "📋  Licenses (via Ingram)", LIC_MED)
         row += 1
 
         grp = cust_il.groupby("product").agg(
             qty=("CUSTOMER_DETAIL_QTY", "sum"),
-            inkoop=("RESELLER_DETAIL_TOTAL", "sum"),
-            verkoop=("CUSTOMER_DETAIL_TOTAL", "sum"),
-            u_ink=("RESELLER_DETAIL_UNIT_PRICE", "mean"),
-            u_vk=("CUSTOMER_DETAIL_UNIT_PRICE", "mean"),
+            purchase=("RESELLER_DETAIL_TOTAL", "sum"),
+            sales=("CUSTOMER_DETAIL_TOTAL", "sum"),
+            u_pur=("RESELLER_DETAIL_UNIT_PRICE", "mean"),
+            u_sal=("CUSTOMER_DETAIL_UNIT_PRICE", "mean"),
         ).reset_index()
 
         alt = False
         for _, r in grp.iterrows():
             _data_row(ws, row, r["product"], "", r["qty"],
-                      r["u_ink"], r["u_vk"],
-                      r["inkoop"], r["verkoop"], alt=alt)
+                      r["u_pur"], r["u_sal"],
+                      r["purchase"], r["sales"], alt=alt)
             alt = not alt
             row += 1
 
-        grand_inkoop  += cust_il["RESELLER_DETAIL_TOTAL"].sum()
-        grand_verkoop += cust_il["CUSTOMER_DETAIL_TOTAL"].sum()
+        grand_purchase += cust_il["RESELLER_DETAIL_TOTAL"].sum()
+        grand_sales    += cust_il["CUSTOMER_DETAIL_TOTAL"].sum()
 
         _empty_row(ws, row)
         row += 1
 
     # ════════════════════════════════════════════════════════
-    # SECTIE 5: ACRONIS (customer is end-customer billed via reseller)
+    # SECTION 5: ACRONIS (customer is end-customer billed via reseller)
     # ════════════════════════════════════════════════════════
     if pax8_lic_all is not None:
         acronis_for_cust = pax8_lic_all[
@@ -592,25 +590,25 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
                           r["cost_total"], r["subtotal"], alt=alt)
                 alt = not alt
                 row += 1
-            grand_inkoop  += acronis_for_cust["cost_total"].sum()
-            grand_verkoop += acronis_for_cust["subtotal"].sum()
+            grand_purchase += acronis_for_cust["cost_total"].sum()
+            grand_sales    += acronis_for_cust["subtotal"].sum()
             _empty_row(ws, row)
             row += 1
 
     # ════════════════════════════════════════════════════════
     # GRAND TOTAL
     # ════════════════════════════════════════════════════════
-    _totaal_row(ws, row, "TOTAAL", grand_inkoop, grand_verkoop)
+    _totaal_row(ws, row, "TOTAL", grand_purchase, grand_sales)
     row += 1
 
-    return grand_inkoop, grand_verkoop
+    return grand_purchase, grand_sales
 
 
-# ── Samenvattingstabblad ──────────────────────────────────────────────────────
+# ── Summary sheet ─────────────────────────────────────────────────────────────
 
 def write_summary_sheet(wb, summary_rows, period):
     ws = wb.active
-    ws.title = "Overzicht"
+    ws.title = "Overview"
 
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 18
@@ -619,21 +617,21 @@ def write_summary_sheet(wb, summary_rows, period):
 
     row = 1
     _styled(ws, row, 1,
-            f"Licentie & Diensten Overzicht — Alle Klanten  |  {_verbose_period(period)}",
+            f"Licensing & Services Overview — All Customers  |  {_verbose_period(period)}",
             bg=DARK_BLUE, size=13, merge_to=4)
     ws.row_dimensions[row].height = 32
     row += 1
 
-    for col, txt in enumerate(["Klant", "Totaal Inkoop (€)", "Totaal Verkoop (€)", "Marge (€)"], 1):
+    for col, txt in enumerate(["Customer", "Total Purchase (€)", "Total Sales (€)", "Margin (€)"], 1):
         _styled(ws, row, col, txt, bg=MED_BLUE, size=10)
     ws.row_dimensions[row].height = 22
     row += 1
 
-    total_ink = total_vk = 0.0
-    for i, (name, ink, vk) in enumerate(summary_rows):
+    total_purchase = total_sales = 0.0
+    for i, (name, purchase, sales) in enumerate(summary_rows):
         bg = ROW_LIGHT if i % 2 else ROW_WHITE
         fg = "333333"
-        marge = vk - ink
+        margin = sales - purchase
 
         def _sc(col, val, fmt=None, bold=False):
             c = ws.cell(row=row, column=col, value=val)
@@ -647,20 +645,20 @@ def write_summary_sheet(wb, summary_rows, period):
             return c
 
         _sc(1, name)
-        _sc(2, ink,   "€#,##0.00")
-        _sc(3, vk,    "€#,##0.00")
-        _sc(4, marge, "€#,##0.00")
+        _sc(2, purchase, "€#,##0.00")
+        _sc(3, sales,    "€#,##0.00")
+        _sc(4, margin,   "€#,##0.00")
         ws.row_dimensions[row].height = 18
-        total_ink += ink
-        total_vk  += vk
+        total_purchase += purchase
+        total_sales    += sales
         row += 1
 
-    # Totaalrij — summary heeft maar 4 kolommen, geen merge nodig
+    # Total row — summary has 4 columns, no merge needed
     for col, (val, align) in enumerate([
-        ("TOTAAL ALLE KLANTEN", "right"),
-        (total_ink,   "right"),
-        (total_vk,    "right"),
-        (total_vk - total_ink, "right"),
+        ("TOTAL ALL CUSTOMERS", "right"),
+        (total_purchase, "right"),
+        (total_sales,    "right"),
+        (total_sales - total_purchase, "right"),
     ], 1):
         c = ws.cell(row=row, column=col, value=val)
         c.font      = Font(name="Arial", bold=True, color="FFFFFF", size=11)
@@ -676,34 +674,33 @@ def write_summary_sheet(wb, summary_rows, period):
 
 def main():
     """
-    Gebruik:
-        Alleen Ingram (dag 1-3):
-            python genereer_licentie_overzicht.py --ingram <ingram.xlsx>
+    Usage:
+        python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv>
+        python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv> --output report.xlsx
 
-        Ingram + Pax8 (dag 4-5, compleet rapport):
-            python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv>
-
-    Output: Licentie_Overzicht_YYYY-MM.xlsx (of opgegeven bestandsnaam)
+    If --ingram / --pax8 are omitted, files are auto-detected from the INGRAM_DIR / PAX8_DIR folders.
+    Output defaults to: Licensing_Report_YYYY-MM.xlsx in EXPORT_DIR.
     """
     import argparse
     import logging
     import shutil
-    from datetime import datetime
     from pathlib import Path
 
-    # ── Paths — update EXPORT_DIR to match your OneDrive folder ──────────────
-    # Example: Path(r"C:\OneDrive\CompanyName\CompanyName - Finance - Licenses")
+    # ── Paths ────────────────────────────────────────────────────────────────
+    # Update EXPORT_DIR to the folder where input files are placed and output is written.
+    # The PowerShell launcher (genereer_rapport.ps1) passes --ingram/--pax8/--output
+    # explicitly, so EXPORT_DIR is only used when running this script directly.
     SCRIPT_DIR  = Path(__file__).parent.resolve()
-    EXPORT_DIR  = Path(r"C:\OneDrive\CompanyName\CompanyName - Finance - Licenses")
+    EXPORT_DIR  = Path(r"C:\Reports\Licensing")
     IMPORT_DIR  = EXPORT_DIR / "Import"
     INGRAM_DIR  = IMPORT_DIR / "Ingram"
     PAX8_DIR    = IMPORT_DIR / "Pax8"
     ARCHIVE_DIR = EXPORT_DIR / "Archive"
     LOG_DIR     = SCRIPT_DIR / "Log"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    LOG_FILE    = LOG_DIR / "licentie_rapport.log"
+    LOG_FILE    = LOG_DIR / "licensing_report.log"
 
-    # ── Logging instellen ──
+    # ── Logging ───────────────────────────────────────────────────────────────
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -715,122 +712,122 @@ def main():
     )
     log = logging.getLogger(__name__)
 
-    # ── Argparse — voor CLI gebruik, anders auto-detect ──
+    # ── Arguments ─────────────────────────────────────────────────────────────
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ingram", required=False, help="Ingram billing Excel (optioneel, anders auto-detect)")
-    parser.add_argument("--pax8",   required=False, help="Pax8 billing CSV (optioneel, anders auto-detect)")
-    parser.add_argument("--output", required=False, help="Output bestandsnaam")
+    parser.add_argument("--ingram", required=False, help="Ingram billing Excel (.xlsx) — auto-detected if omitted")
+    parser.add_argument("--pax8",   required=False, help="Pax8 billing CSV — auto-detected if omitted")
+    parser.add_argument("--output", required=False, help="Output file path (default: Licensing_Report_YYYY-MM.xlsx)")
     args = parser.parse_args()
 
     log.info("========================================")
-    log.info(f"Start licentie rapport generatie")
+    log.info("Starting licensing report generation")
 
-    # ── Controleer OneDrive bereikbaarheid ──
+    # ── Validate export directory ─────────────────────────────────────────────
     if not EXPORT_DIR.exists():
-        log.error(f"OneDrive map niet bereikbaar: {EXPORT_DIR}")
-        log.error("Controleer of je ingelogd bent en OneDrive gesynchroniseerd is.")
-        input("Druk op Enter om af te sluiten...")
+        log.error(f"Export directory not found: {EXPORT_DIR}")
+        log.error("Update the EXPORT_DIR variable in this script.")
+        input("Press Enter to exit...")
         sys.exit(2)
-    log.info("OneDrive map bereikbaar: OK")
+    log.info("Export directory: OK")
 
-    # ── Maak mappen aan ──
+    # ── Create subfolders if missing ──────────────────────────────────────────
     for d in [INGRAM_DIR, PAX8_DIR, ARCHIVE_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # ── Ingram bestand bepalen ──
+    # ── Locate Ingram file ────────────────────────────────────────────────────
     if args.ingram:
         ingram_path = Path(args.ingram)
     else:
-        log.info(f"Zoeken naar Ingram bestand in {INGRAM_DIR} ...")
+        log.info(f"Looking for Ingram file in {INGRAM_DIR} ...")
         ingram_files = list(INGRAM_DIR.glob("*.xlsx"))
         if len(ingram_files) == 0:
-            log.error(f"Geen Excel bestand gevonden in {INGRAM_DIR}")
-            log.error("Plaats het Ingram billing bestand in de Ingram map en probeer opnieuw.")
-            input("Druk op Enter om af te sluiten...")
+            log.error(f"No .xlsx file found in {INGRAM_DIR}")
+            log.error("Place the Ingram billing export in the Ingram folder and try again.")
+            input("Press Enter to exit...")
             sys.exit(2)
         if len(ingram_files) > 1:
-            log.error(f"Meerdere Excel bestanden gevonden in {INGRAM_DIR}:")
+            log.error(f"Multiple .xlsx files found in {INGRAM_DIR}:")
             for f in ingram_files:
                 log.error(f"  {f.name}")
-            log.error("Zorg dat er precies 1 Ingram bestand aanwezig is.")
-            input("Druk op Enter om af te sluiten...")
+            log.error("Ensure exactly 1 Ingram file is present.")
+            input("Press Enter to exit...")
             sys.exit(2)
         ingram_path = ingram_files[0]
-    log.info(f"Ingram bestand: {ingram_path.name}")
+    log.info(f"Ingram file: {ingram_path.name}")
 
-    # ── Pax8 bestand bepalen ──
+    # ── Locate Pax8 file ──────────────────────────────────────────────────────
     if args.pax8:
         pax8_path = Path(args.pax8)
     else:
-        log.info(f"Zoeken naar Pax8 bestand in {PAX8_DIR} ...")
+        log.info(f"Looking for Pax8 file in {PAX8_DIR} ...")
         pax8_files = list(PAX8_DIR.glob("*.csv"))
         if len(pax8_files) == 0:
-            log.error(f"Geen CSV bestand gevonden in {PAX8_DIR}")
-            log.error("Plaats het Pax8 factuur CSV bestand in de Pax8 map en probeer opnieuw.")
-            input("Druk op Enter om af te sluiten...")
+            log.error(f"No .csv file found in {PAX8_DIR}")
+            log.error("Place the Pax8 invoice export in the Pax8 folder and try again.")
+            input("Press Enter to exit...")
             sys.exit(2)
         if len(pax8_files) > 1:
-            log.error(f"Meerdere CSV bestanden gevonden in {PAX8_DIR}:")
+            log.error(f"Multiple .csv files found in {PAX8_DIR}:")
             for f in pax8_files:
                 log.error(f"  {f.name}")
-            log.error("Zorg dat er precies 1 Pax8 bestand aanwezig is.")
-            input("Druk op Enter om af te sluiten...")
+            log.error("Ensure exactly 1 Pax8 file is present.")
+            input("Press Enter to exit...")
             sys.exit(2)
         pax8_path = pax8_files[0]
-    log.info(f"Pax8 bestand:   {pax8_path.name}")
+    log.info(f"Pax8 file:    {pax8_path.name}")
 
-    # ── Ingram laden ──
-    log.info(f"Inlezen Ingram...")
+    # ── Load Ingram ───────────────────────────────────────────────────────────
+    log.info("Loading Ingram data...")
     ingram_az, ingram_lic = load_ingram(str(ingram_path))
-    ingram_df = pd.read_excel(ingram_path)
+    ingram_df     = pd.read_excel(ingram_path)
     ingram_period = str(ingram_df["RESELLER_INVOICE_DATE"].iloc[0])[:7]
-    log.info(f"  Ingram periode (licenties) : {ingram_period}")
+    log.info(f"  Ingram period : {ingram_period}")
 
-    # ── Pax8 laden ──
-    log.info(f"Inlezen Pax8...")
+    # ── Load Pax8 ─────────────────────────────────────────────────────────────
+    log.info("Loading Pax8 data...")
     pax8_az, pax8_lic = load_pax8(str(pax8_path))
     pax8_period = pd.read_csv(str(pax8_path), encoding="utf-8-sig")["invoice_date"].iloc[0][:7]
-    log.info(f"  Pax8 periode               : {pax8_period}")
+    log.info(f"  Pax8 period   : {pax8_period}")
     period = pax8_period
 
-    # ── Maand archief map ──
-    archive_maand = ARCHIVE_DIR / period
-    archive_maand.mkdir(parents=True, exist_ok=True)
+    # ── Archive subfolder for this period ─────────────────────────────────────
+    archive_period = ARCHIVE_DIR / period
+    archive_period.mkdir(parents=True, exist_ok=True)
 
-    # ── Rapport aanmaken ──
+    # ── Generate report ───────────────────────────────────────────────────────
     customers = gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic)
-    log.info(f"Klanten totaal: {len(customers)}")
+    log.info(f"Customers: {len(customers)}")
 
-    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licentie_Overzicht_{period}.xlsx"
+    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}.xlsx"
 
-    wb = Workbook()
+    wb      = Workbook()
     summary = []
 
     for customer in customers:
-        ink, vk = write_customer_sheet(
+        purchase, sales = write_customer_sheet(
             wb, customer, period, ingram_period,
             pax8_az, pax8_lic, ingram_az, ingram_lic,
             pax8_lic_all=pax8_lic
         )
-        summary.append((customer, ink, vk))
-        log.info(f"  [Ingram+Pax8]  {customer:<40} inkoop \u20ac{ink:>9,.2f}  /  verkoop \u20ac{vk:>9,.2f}")
+        summary.append((customer, purchase, sales))
+        log.info(f"  {customer:<40} purchase \u20ac{purchase:>9,.2f}  /  sales \u20ac{sales:>9,.2f}")
 
     write_summary_sheet(wb, summary, period)
     wb.save(str(output_path))
-    log.info(f"Rapport opgeslagen: {output_path}")
+    log.info(f"Report saved: {output_path}")
 
-    # ── Archiveren ──
+    # ── Archive input files ───────────────────────────────────────────────────
     if not args.ingram:
-        shutil.move(str(ingram_path), str(archive_maand / ingram_path.name))
-        log.info(f"Ingram gearchiveerd naar: {archive_maand}")
+        shutil.move(str(ingram_path), str(archive_period / ingram_path.name))
+        log.info(f"Ingram archived to: {archive_period}")
     if not args.pax8:
-        shutil.move(str(pax8_path), str(archive_maand / pax8_path.name))
-        log.info(f"Pax8 gearchiveerd naar: {archive_maand}")
+        shutil.move(str(pax8_path), str(archive_period / pax8_path.name))
+        log.info(f"Pax8 archived to: {archive_period}")
 
-    log.info("Rapport succesvol aangemaakt.")
+    log.info("Report generated successfully.")
     log.info("========================================")
-    print(f"\nKlaar \u2192 {output_path}")
-    input("\nDruk op Enter om af te sluiten...")
+    print(f"\nDone \u2192 {output_path}")
+    input("\nPress Enter to exit...")
 
 
 if __name__ == "__main__":
