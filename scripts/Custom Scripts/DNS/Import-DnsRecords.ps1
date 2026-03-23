@@ -68,7 +68,7 @@ param (
 
     [switch] $ExportCsv,
 
-    [string] $ExportPath = ".\ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [string] $ExportPath = "$([System.IO.Path]::GetTempPath())ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
 
     [switch] $Apply,
 
