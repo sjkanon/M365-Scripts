@@ -60,7 +60,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `A` / `F10` | Reporting | Licensing-Report |
 | `B` | M365 | Connect-Tenant |
 | `C` | M365 | Exchange Online submenu (incl. calendar, mailbox, and DG permission audits) |
-| `D` | M365 | Entra ID / Graph submenu (incl. bulk user removal + M365 group audit) |
+| `D` | M365 | Entra ID / Graph submenu (incl. user create/import/remove + M365 group audit) |
 | `E` | M365 | MSP Admin submenu |
 
 M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
@@ -81,6 +81,8 @@ M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authent
 | Key | Tool |
 |-----|------|
 | `A` | Test-M365GroupMembership — audit M365 Group / Teams owners and members |
+| `B` | New-M365User — create a single new user (auto-generated password, optional license) |
+| `C` | Import-M365Users — bulk create users from CSV, dry-run by default |
 
 ---
 
@@ -96,7 +98,7 @@ Scripts for calendar and mailbox management.
 Interactive M365 management functions via Microsoft Graph and Exchange Online. Loaded as a library through the menu.
 
 - **Exchange Online** — shared mailbox access, locale, aliases, distribution groups, auto-reply, sent-items copy
-- **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs, bulk user removal
+- **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs, bulk user creation, bulk user removal
 - **MSP Admin** — create/manage MSP admin account across customer tenants
 
 ### 📱 Intune / Autopilot
@@ -192,6 +194,8 @@ M365-Scripts/
     │       ├── autorun.inf
     │       └── readme.md
     ├── Entra/
+    │   ├── Import-M365Users.ps1
+    │   ├── New-M365User.ps1
     │   ├── Remove-M365Users.ps1
     │   └── readme.md
     ├── Exchange/
@@ -256,6 +260,8 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Entra/New-M365User.ps1` — create single M365 user via Graph, auto-generated password, optional license |
+| 2026-03-23 | Added `scripts/Entra/Import-M365Users.ps1` — bulk user creation from CSV via Graph, dry-run by default, passwords in CSV output |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-ExternalForwards.ps1` — audit external forwarding rules across all mailboxes, CSV export |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-MailboxSizes.ps1` — mailbox size + item count report, sorted by storage, CSV export |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-DkimConfig.ps1` — DKIM signing config + DNS CNAME/TXT validation with required-actions output |
