@@ -60,7 +60,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `A` / `F10` | Reporting | Licensing-Report |
 | `B` | M365 | Connect-Tenant |
 | `C` | M365 | Exchange Online submenu |
-| `D` | M365 | Entra ID / Graph submenu |
+| `D` | M365 | Entra ID / Graph submenu (incl. bulk user removal) |
 | `E` | M365 | MSP Admin submenu |
 
 M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
@@ -84,7 +84,7 @@ Scripts for calendar and mailbox management.
 Interactive M365 management functions via Microsoft Graph and Exchange Online. Loaded as a library through the menu.
 
 - **Exchange Online** — shared mailbox access, locale, aliases, distribution groups, auto-reply, sent-items copy
-- **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs
+- **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs, bulk user removal
 - **MSP Admin** — create/manage MSP admin account across customer tenants
 
 ### 📱 Intune / Autopilot
@@ -163,6 +163,9 @@ M365-Scripts/
     │       ├── start.bat
     │       ├── autorun.inf
     │       └── readme.md
+    ├── Entra/
+    │   ├── Remove-M365Users.ps1
+    │   └── readme.md
     ├── Exchange/
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
@@ -213,6 +216,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Entra/Remove-M365Users.ps1` — bulk Entra ID user removal, dry-run by default, CSV report |
 | 2026-03-23 | Added `load.ps1` — first-run setup (UPN + name), saves to gitignored `load.config.ps1`, launches menu |
 | 2026-03-23 | Extended `menu.ps1` with M365 section (B–E): Exchange, Entra ID, MSP Admin submenus via `functies.ps1` |
 | 2026-03-23 | Added `menu.ps1` — interactive launcher, single-keypress, number + F-keys, cross-platform |

@@ -156,6 +156,21 @@ $EntraSubmenu = @(
     @{ Key='8'; Label='Get-EntraApplication  — find an Enterprise Application'; Action={
         Get-EntraApplication | Format-List
     }}
+    @{ Key='9'; Label='Remove-M365Users      — bulk delete user accounts'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\Remove-M365Users.ps1'
+        $csv  = Read-Host "  CSV/TXT path (or leave blank for -UserList)"
+        if ($csv) {
+            & $path -CsvPath $csv
+            $confirm = Read-Host "  Dry run completed. Add -Apply to delete? [y/N]"
+            if ($confirm -match '^[Yy]') { & $path -CsvPath $csv -Apply }
+        } else {
+            $users = Read-Host "  UPNs (comma-separated)"
+            $list  = $users -split '\s*,\s*'
+            & $path -UserList $list
+            $confirm = Read-Host "  Dry run completed. Add -Apply to delete? [y/N]"
+            if ($confirm -match '^[Yy]') { & $path -UserList $list -Apply }
+        }
+    }}
 )
 
 $MspSubmenu = @(
