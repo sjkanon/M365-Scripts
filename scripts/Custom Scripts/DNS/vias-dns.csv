@@ -1,0 +1,10 @@
+Name,Type,Value
+briefings,A,
+helpdesk,A,
+meetweek,A,
+mobisafetyscan,A,
+semaindecomptage,A,
+www.briefings,CNAME,briefings.vias.be
+www.meetweek,CNAME,meetweek.vias.be
+www.mobisafetyscan,CNAME,mobisafetyscan.vias.be
+www.semaindecomptage,CNAME,semaindecomptage.vias.be
