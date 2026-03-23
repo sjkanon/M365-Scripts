@@ -190,9 +190,9 @@ $MspSubmenu = @(
 # Action items  : Key, FKey, Category, Label, Action, [NoWait]
 #   NoWait=$true  — item manages its own UI loop (submenus); skip "press any key"
 $menu = @(
-    [PSCustomObject]@{ Key='1'; FKey=[ConsoleKey]::F1; Category='Network'
+    [PSCustomObject]@{ Key='1'; FKey=[ConsoleKey]::F1; Category='Testing'
         Label='Test-Ports          — check open TCP ports on any host'
-        Script="$ROOT\scripts\Network\Test-Ports.ps1"
+        Script="$ROOT\scripts\Testing Scripts\Network\Test-Ports.ps1"
         Params={
             $target  = Read-Host "  Target (IP or hostname)"
             $ports   = Read-Host "  Ports  (e.g. 80,443 or 1294:1494 or 80,1294:1494)"

@@ -48,7 +48,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 
 | Key | Category | Tool |
 |-----|----------|------|
-| `1` / `F1` | Network | Test-Ports — TCP port checker |
+| `1` / `F1` | Testing | Test-Ports — TCP port checker |
 | `2` / `F2` | Exchange | Migrate-Calendar |
 | `3` / `F3` | Exchange | Set-Calendar-rights |
 | `4` / `F4` | Testing | Test-SMTP (one-time) |
@@ -68,11 +68,6 @@ M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authent
 ---
 
 ## Categories
-
-### 🔌 Network
-Scripts for network diagnostics.
-
-- Test TCP port connectivity on any host — single ports, ranges (`1294:1494`), combinations (`80,443,1294:1494`)
 
 ### 📧 Exchange
 Scripts for calendar and mailbox management.
@@ -121,9 +116,10 @@ Monthly licensing and Azure cost report generator.
 - PowerShell launcher with pre-flight validation
 - Optional Windows scheduled task (runs on the 6th of each month)
 
-### 🧪 Testing — SMTP
-Scripts for diagnosing SMTP connectivity and authentication.
+### 🧪 Testing — Connectivity
+Scripts for diagnosing network and mail connectivity.
 
+- Test TCP port connectivity on any host — single ports, ranges (`1294:1494`), combinations (`80,443,1294:1494`)
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 
@@ -173,8 +169,6 @@ M365-Scripts/
     ├── Intune/Get-Autopilot/
     │   ├── Get-WindowsAutoPilotInfo.ps1
     │   └── GetAutoPilot.CMD
-    ├── Network/
-    │   └── Test-Ports.ps1
     ├── Reporting/
     │   └── Licensing/
     │       ├── genereer_licentie_overzicht.py
@@ -186,10 +180,13 @@ M365-Scripts/
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   └── readme.md
-    └── Testing Scripts/SMTP/
-        ├── testsmtp.ps1
-        ├── testsmtp_5min.ps1
-        └── readme.md
+    └── Testing Scripts/
+        ├── Network/
+        │   └── Test-Ports.ps1
+        └── SMTP/
+            ├── testsmtp.ps1
+            ├── testsmtp_5min.ps1
+            └── readme.md
 ```
 
 ---
@@ -216,6 +213,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Moved `Test-Ports.ps1` from `scripts/Network/` to `scripts/Testing Scripts/Network/` |
 | 2026-03-23 | Added `scripts/Entra/Remove-M365Users.ps1` — bulk Entra ID user removal, dry-run by default, CSV report |
 | 2026-03-23 | `load.ps1` — auto-imports modules at startup; detects missing modules and offers to run `Install-Modules.ps1` |
 | 2026-03-23 | Added `load.ps1` — first-run setup (UPN + name), saves to gitignored `load.config.ps1`, launches menu |
