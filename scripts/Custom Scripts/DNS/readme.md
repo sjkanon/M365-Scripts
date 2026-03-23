@@ -22,10 +22,12 @@ Resolves a list of FQDNs via Google DNS (8.8.8.8) and imports the results as A o
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-CsvPath` | Yes | Path to CSV file with a `FQDN` column |
-| `-ZoneName` | Yes | AD DNS zone to add records to (e.g. `vias.be`) |
+| `-ZoneName` | Only with `-Apply` | AD DNS zone to add records to (e.g. `vias.be`) |
+| `-ExportCsv` | No | Save resolved records to CSV for manual import |
+| `-ExportPath` | No | Custom path for the export CSV (implies `-ExportCsv`) |
+| `-Apply` | No | Write records into AD DNS (Windows + DnsServer module required) |
 | `-DnsServer` | No | DNS server to write to (default: `localhost`) |
 | `-Ttl` | No | TTL in seconds (default: `3600`) |
-| `-Apply` | No | Actually create the records (default: dry run) |
 
 **CSV format**
 
@@ -47,10 +49,13 @@ www.semaindecomptage.vias.be
 **Examples**
 
 ```powershell
-# Dry run — resolve and show what would be added
-.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be
+# Resolve and show on screen (works on macOS/Linux)
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv
 
-# Resolve and import into local AD DNS
+# Export resolved records to CSV for manual import (works on macOS/Linux)
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ExportCsv
+
+# Import directly into AD DNS (Windows + DnsServer module required)
 .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -Apply
 
 # Remote DNS server

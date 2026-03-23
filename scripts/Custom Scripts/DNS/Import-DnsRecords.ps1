@@ -24,7 +24,7 @@
     Path to the CSV file with a FQDN column.
 
 .PARAMETER ZoneName
-    The AD DNS zone (e.g. vias.be). Used to derive host names and validate FQDNs.
+    The AD DNS zone (e.g. vias.be). Only required when using -Apply.
 
 .PARAMETER ExportCsv
     Export resolved records to a CSV file for manual review or import.
@@ -64,7 +64,6 @@ param (
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
     [string] $CsvPath,
 
-    [Parameter(Mandatory)]
     [string] $ZoneName,
 
     [switch] $ExportCsv,
@@ -86,6 +85,11 @@ if ($ExportPath -ne ".\ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv
 $digCmd = Get-Command dig -ErrorAction SilentlyContinue
 if (-not $digCmd) {
     Write-Error "'dig' not found. Install BIND tools: choco install bind-toolsonly"
+    exit 1
+}
+
+if ($Apply -and -not $ZoneName) {
+    Write-Error "-ZoneName is required when using -Apply."
     exit 1
 }
 
@@ -121,7 +125,7 @@ Write-Host "   Import-DnsRecords" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  CSV        : $CsvPath"
-Write-Host "  Zone       : $ZoneName"
+if ($ZoneName) { Write-Host "  Zone       : $ZoneName" }
 Write-Host "  Records    : $($rows.Count) FQDN(s)"
 if ($Apply)     { Write-Host "  DNS server : $DnsServer" }
 if ($ExportCsv) { Write-Host "  Export to  : $ExportPath" }
@@ -141,13 +145,16 @@ foreach ($row in $rows) {
     $fqdn = ($row.$fqdnCol).Trim()
     if (-not $fqdn) { continue }
 
-    # Validate FQDN belongs to the zone
-    if ($fqdn -notmatch "\.$([regex]::Escape($ZoneName))$") {
-        Write-Host ("  [SKIP]       {0,-42} not in zone '{1}'" -f $fqdn, $ZoneName) -ForegroundColor DarkYellow
-        $skipped++
-        continue
+    # Derive host name within zone (only needed for -Apply)
+    $hostName = $null
+    if ($ZoneName) {
+        if ($fqdn -notmatch "\.$([regex]::Escape($ZoneName))$") {
+            Write-Host ("  [SKIP]       {0,-42} not in zone '{1}'" -f $fqdn, $ZoneName) -ForegroundColor DarkYellow
+            $skipped++
+            continue
+        }
+        $hostName = $fqdn -replace "\.$([regex]::Escape($ZoneName))$", ''
     }
-    $hostName = $fqdn -replace "\.$([regex]::Escape($ZoneName))$", ''
 
     # Resolve: CNAME first, then A
     $cnameResult = Resolve-Public -Fqdn $fqdn -Type 'CNAME'
