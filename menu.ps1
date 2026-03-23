@@ -13,7 +13,7 @@
 $ROOT = $PSScriptRoot
 $script:FunctiesLoaded = $false
 
-# ── Ask for admin UPN at startup ──────────────────────────────────────────────
+# ── Fallback: ask for UPN if not set by load.ps1 ─────────────────────────────
 if (-not $global:upn) {
     Write-Host ""
     $global:upn = Read-Host "  Admin UPN"
