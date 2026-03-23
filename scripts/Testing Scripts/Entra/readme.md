@@ -17,7 +17,7 @@ Results are exported to CSV with one row per owner/member entry.
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Group` | No | Display name or Object ID of a single group. If omitted, all M365 groups are audited |
-| `-OutputPath` | No | CSV report path (default: `.\M365GroupMembership_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**

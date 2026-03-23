@@ -76,10 +76,15 @@ param (
 
     [switch] $NoPasswordReset,
 
-    [string] $OutputPath = ".\CreatedAccounts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [string] $OutputPath,
 
     [string] $TenantId
 )
+
+# ── Output folder ─────────────────────────────────────────────────────────────
+$outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+if (-not $OutputPath) { $OutputPath = Join-Path $outputDir "CreatedAccounts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" }
 
 # ── Password generator ────────────────────────────────────────────────────────
 function New-RandomPassword {

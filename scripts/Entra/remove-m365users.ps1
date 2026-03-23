@@ -63,12 +63,17 @@ param (
 
     [switch] $SkipSessionRevoke,
 
-    [string] $OutputPath = ".\DeletedAccounts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [string] $OutputPath,
 
     [string] $TenantId
 )
 
 begin {
+    # ── Output folder ─────────────────────────────────────────────────────────
+    $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+    if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+    if (-not $OutputPath) { $OutputPath = Join-Path $outputDir "DeletedAccounts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" }
+
     # ── Module check ──────────────────────────────────────────────────────────
     if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Users)) {
         Write-Error "Microsoft.Graph.Users module not found. Run: Install-Module Microsoft.Graph -Scope CurrentUser"

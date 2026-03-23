@@ -36,6 +36,10 @@ param(
     [string] $TenantId
 )
 
+# ── Output folder ─────────────────────────────────────────────────────────────
+$outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+
 # ── Connection ────────────────────────────────────────────────────────────────
 $script:ConnectedHere = $false
 try {
@@ -103,7 +107,7 @@ if ($results.Count -eq 0) {
 
     if (-not $OutputPath) {
         $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-        $OutputPath = Join-Path (Get-Location) "ExternalForwards_$ts.csv"
+        $OutputPath = Join-Path $outputDir "ExternalForwards_$ts.csv"
     }
 
     $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
