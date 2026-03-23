@@ -1,3 +1,4 @@
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Bulk delete M365 user accounts from a tenant.
@@ -6,15 +7,17 @@
     Removes specified user accounts from Entra ID / Microsoft 365.
     Accepts users via -UserList parameter, a CSV/TXT file, or interactive pipeline.
     Revokes sessions and removes licenses before deletion.
+    Defaults to dry-run mode — pass -DryRun:$false to perform actual deletions.
 
 .PARAMETER UserList
     Array of UPNs to delete. e.g. -UserList "user1@domain.com","user2@domain.com"
 
 .PARAMETER CsvPath
-    Path to a CSV file with a 'UserPrincipalName' column, or a plain TXT file (one UPN per line).
+    Path to a CSV file with a 'UserPrincipalName' or 'UPN' column, or a plain TXT
+    file with one UPN per line.
 
-.PARAMETER DryRun
-    Simulate the deletion without making any changes. Default: $true
+.PARAMETER Apply
+    Actually perform the deletions. Without this switch, the script runs in dry-run mode.
 
 .PARAMETER SkipLicenseRemoval
     Skip removing licenses before deletion.
@@ -26,130 +29,138 @@
     Path for the CSV results report. Default: .\DeletedAccounts_<timestamp>.csv
 
 .PARAMETER TenantId
-    Optional: specify the Entra ID tenant ID or domain to connect to.
+    Optional: Entra ID tenant ID or domain to connect to.
 
 .EXAMPLE
-    # Dry run with inline list
+    # Dry run with inline list (default — no changes made)
     .\Remove-M365Users.ps1 -UserList "user1@domain.com","user2@domain.com"
 
 .EXAMPLE
     # Actual deletion from a CSV file
-    .\Remove-M365Users.ps1 -CsvPath .\users.csv -DryRun:$false
+    .\Remove-M365Users.ps1 -CsvPath .\users.csv -Apply
 
 .EXAMPLE
     # Pipeline input
-    "user1@domain.com","user2@domain.com" | .\Remove-M365Users.ps1 -DryRun:$false
+    "user1@domain.com","user2@domain.com" | .\Remove-M365Users.ps1 -Apply
 
 .EXAMPLE
     # Specific tenant, skip license removal, custom output path
-    .\Remove-M365Users.ps1 -CsvPath .\users.txt -TenantId "bravehub.io" -SkipLicenseRemoval -DryRun:$false -OutputPath "C:\Reports\deleted.csv"
+    .\Remove-M365Users.ps1 -CsvPath .\users.txt -TenantId "contoso.com" -SkipLicenseRemoval -Apply -OutputPath "C:\Reports\deleted.csv"
 #>
 
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'List')]
 param (
     [Parameter(ParameterSetName = 'List', ValueFromPipeline, Position = 0)]
-    [string[]]$UserList,
+    [string[]] $UserList,
 
     [Parameter(ParameterSetName = 'File', Mandatory)]
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
-    [string]$CsvPath,
+    [string] $CsvPath,
 
-    [switch]$DryRun = $true,
+    [switch] $Apply,
 
-    [switch]$SkipLicenseRemoval,
+    [switch] $SkipLicenseRemoval,
 
-    [switch]$SkipSessionRevoke,
+    [switch] $SkipSessionRevoke,
 
-    [string]$OutputPath = ".\DeletedAccounts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [string] $OutputPath = ".\DeletedAccounts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
 
-    [string]$TenantId
+    [string] $TenantId
 )
 
 begin {
-    # ─── MODULE CHECK ─────────────────────────────────────────────────────────
+    # ── Module check ──────────────────────────────────────────────────────────
     if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Users)) {
         Write-Error "Microsoft.Graph.Users module not found. Run: Install-Module Microsoft.Graph -Scope CurrentUser"
         exit 1
     }
 
-    # ─── CONNECT ──────────────────────────────────────────────────────────────
-    Write-Host "`n🔌 Connecting to Microsoft Graph..." -ForegroundColor Cyan
-    $connectParams = @{ Scopes = "User.ReadWrite.All"; NoWelcome = $true }
-    if ($TenantId) { $connectParams.TenantId = $TenantId }
-    Connect-MgGraph @connectParams
+    # ── Connect (only if not already connected) ───────────────────────────────
+    $script:ConnectedHere = $false
+    try {
+        $null = Get-MgContext -ErrorAction Stop
+    } catch {
+        Write-Host ""
+        Write-Host "  Connecting to Microsoft Graph..." -ForegroundColor Cyan
+        $connectParams = @{ Scopes = 'User.ReadWrite.All'; NoWelcome = $true }
+        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+        Connect-MgGraph @connectParams
+        $script:ConnectedHere = $true
+    }
 
-    # ─── LOAD USERS FROM FILE ─────────────────────────────────────────────────
+    # ── Load users from file ──────────────────────────────────────────────────
     $allUsers = [System.Collections.Generic.List[string]]::new()
 
     if ($PSCmdlet.ParameterSetName -eq 'File') {
         $ext = [System.IO.Path]::GetExtension($CsvPath).ToLower()
         if ($ext -eq '.csv') {
             $raw = Import-Csv -Path $CsvPath
-            # Accept 'UserPrincipalName' or 'UPN' column headers
-            $col = ($raw[0].PSObject.Properties.Name | Where-Object { $_ -match 'userprincipalname|^upn$' } | Select-Object -First 1)
+            $col = $raw[0].PSObject.Properties.Name |
+                   Where-Object { $_ -match 'userprincipalname|^upn$' } |
+                   Select-Object -First 1
             if (-not $col) {
                 Write-Error "CSV must have a 'UserPrincipalName' or 'UPN' column. Found: $($raw[0].PSObject.Properties.Name -join ', ')"
                 exit 1
             }
             $raw.$col | Where-Object { $_ -match '@' } | ForEach-Object { $allUsers.Add($_) }
-        }
-        else {
-            # Plain TXT: one UPN per line, skip comments and blanks
+        } else {
             Get-Content -Path $CsvPath |
                 Where-Object { $_ -notmatch '^\s*#' -and $_ -match '@' } |
                 ForEach-Object { $allUsers.Add($_.Trim()) }
         }
     }
 
-    # ─── INIT RESULTS ─────────────────────────────────────────────────────────
+    # ── Init results ──────────────────────────────────────────────────────────
     $results  = [System.Collections.Generic.List[PSCustomObject]]::new()
     $notFound = [System.Collections.Generic.List[string]]::new()
 
-    if ($DryRun) {
-        Write-Host "⚠️  DRY RUN MODE — no changes will be made`n" -ForegroundColor Yellow
+    if (-not $Apply) {
+        Write-Host ""
+        Write-Host "  ================================================" -ForegroundColor Yellow
+        Write-Host "   DRY RUN MODE — no changes will be made" -ForegroundColor Yellow
+        Write-Host "   Add -Apply to perform actual deletions." -ForegroundColor Yellow
+        Write-Host "  ================================================" -ForegroundColor Yellow
     }
 }
 
 process {
-    # Collect pipeline / -UserList input
     if ($PSCmdlet.ParameterSetName -eq 'List' -and $UserList) {
         $UserList | Where-Object { $_ -match '@' } | ForEach-Object { $allUsers.Add($_.Trim()) }
     }
 }
 
 end {
-    # ─── DEDUPLICATE ──────────────────────────────────────────────────────────
-    $upns = $allUsers | Sort-Object -Unique
+    # ── Deduplicate ───────────────────────────────────────────────────────────
+    $uniqueUpns = $allUsers | Sort-Object -Unique
 
-    if ($upns.Count -eq 0) {
+    if ($uniqueUpns.Count -eq 0) {
         Write-Warning "No valid UPNs found. Use -UserList or -CsvPath."
-        Disconnect-MgGraph | Out-Null
+        if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
         return
     }
 
-    Write-Host "Processing $($upns.Count) unique account(s)...`n" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Processing $($uniqueUpns.Count) account(s)..." -ForegroundColor Cyan
+    Write-Host ""
 
-    # ─── PROCESS EACH USER ────────────────────────────────────────────────────
-    foreach ($upn in $upns) {
+    # ── Process each user ─────────────────────────────────────────────────────
+    foreach ($userUpn in $uniqueUpns) {
 
-        Write-Host "  → $upn" -NoNewline
+        Write-Host "  -> $userUpn" -NoNewline
 
         try {
-            $user = Get-MgUser -UserId $upn `
-                -Property "Id,DisplayName,UserPrincipalName,AssignedLicenses,AccountEnabled" `
+            $user = Get-MgUser -UserId $userUpn `
+                -Property 'Id,DisplayName,UserPrincipalName,AssignedLicenses,AccountEnabled' `
                 -ErrorAction Stop
 
-            if ($DryRun) {
+            if (-not $Apply) {
                 Write-Host "  [DRY RUN — $($user.DisplayName)]" -ForegroundColor DarkYellow
-                $status = "DryRun"
-            }
-            else {
-                # 1. Revoke sessions
+                $status = 'DryRun'
+            } else {
                 if (-not $SkipSessionRevoke) {
                     Revoke-MgUserSignInSession -UserId $user.Id | Out-Null
                 }
 
-                # 2. Remove licenses
                 if (-not $SkipLicenseRemoval -and $user.AssignedLicenses.Count -gt 0) {
                     Set-MgUserLicense -UserId $user.Id -BodyParameter @{
                         AddLicenses    = @()
@@ -157,31 +168,29 @@ end {
                     } | Out-Null
                 }
 
-                # 3. Delete (soft-delete → Deleted Users, 30d recoverable)
+                # Soft-delete — account lands in Deleted Users, recoverable for 30 days
                 Remove-MgUser -UserId $user.Id -Confirm:$false
-                Write-Host "  ✅ Deleted ($($user.DisplayName))" -ForegroundColor Green
-                $status = "Deleted"
+                Write-Host "  Deleted ($($user.DisplayName))" -ForegroundColor Green
+                $status = 'Deleted'
             }
 
             $results.Add([PSCustomObject]@{
-                UPN         = $upn
+                UPN         = $userUpn
                 DisplayName = $user.DisplayName
                 Licenses    = ($user.AssignedLicenses.SkuId -join '; ')
                 Status      = $status
                 Timestamp   = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
             })
-        }
-        catch {
-            if ($_.Exception.Message -match "Request_ResourceNotFound|does not exist") {
-                Write-Host "  ⚠️  Not found" -ForegroundColor DarkYellow
-                $notFound.Add($upn)
-            }
-            else {
-                Write-Host "  ❌ ERROR: $($_.Exception.Message)" -ForegroundColor Red
+        } catch {
+            if ($_.Exception.Message -match 'Request_ResourceNotFound|does not exist') {
+                Write-Host "  Not found" -ForegroundColor DarkYellow
+                $notFound.Add($userUpn)
+            } else {
+                Write-Host "  ERROR: $($_.Exception.Message)" -ForegroundColor Red
                 $results.Add([PSCustomObject]@{
-                    UPN         = $upn
-                    DisplayName = "N/A"
-                    Licenses    = ""
+                    UPN         = $userUpn
+                    DisplayName = 'N/A'
+                    Licenses    = ''
                     Status      = "Error: $($_.Exception.Message)"
                     Timestamp   = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
                 })
@@ -189,27 +198,30 @@ end {
         }
     }
 
-    # ─── SUMMARY ──────────────────────────────────────────────────────────────
+    # ── Summary ───────────────────────────────────────────────────────────────
     $deleted = ($results | Where-Object Status -eq 'Deleted').Count
     $errors  = ($results | Where-Object { $_.Status -like 'Error*' }).Count
 
-    Write-Host "`n─────────────────────────────────────────" -ForegroundColor Cyan
-    Write-Host "SUMMARY" -ForegroundColor Cyan
-    Write-Host "─────────────────────────────────────────" -ForegroundColor Cyan
-    Write-Host "  Total     : $($upns.Count)"
-    Write-Host "  Deleted   : $deleted"   -ForegroundColor Green
-    Write-Host "  Not found : $($notFound.Count)" -ForegroundColor DarkYellow
-    Write-Host "  Errors    : $errors"    -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-Host "   Summary" -ForegroundColor Cyan
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-Host "  Total     : $($uniqueUpns.Count)"
+    Write-Host "  Deleted   : $deleted"              -ForegroundColor Green
+    Write-Host "  Not found : $($notFound.Count)"    -ForegroundColor DarkYellow
+    Write-Host "  Errors    : $errors"               -ForegroundColor Red
 
     if ($notFound.Count -gt 0) {
-        Write-Host "`nNot found:" -ForegroundColor DarkYellow
-        $notFound | ForEach-Object { Write-Host "  - $_" }
+        Write-Host ""
+        Write-Host "  Not found:" -ForegroundColor DarkYellow
+        $notFound | ForEach-Object { Write-Host "    - $_" }
     }
 
-    # ─── EXPORT ───────────────────────────────────────────────────────────────
+    # ── Export ────────────────────────────────────────────────────────────────
     $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
-    Write-Host "`n📄 Report saved to: $OutputPath" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Report saved to: $OutputPath" -ForegroundColor Cyan
+    Write-Host ""
 
-    Disconnect-MgGraph | Out-Null
-    Write-Host "✔️  Done.`n" -ForegroundColor Green
+    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
 }
