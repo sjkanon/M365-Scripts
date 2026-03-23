@@ -1,0 +1,39 @@
+{
+    "@odata.type":  "#microsoft.graph.macOSCompliancePolicy",
+    "id":  "fdaf842b-1a4e-46cc-b5ac-49092cb24297",
+    "createdDateTime":  "\/Date(1626263828629)\/",
+    "description":  null,
+    "lastModifiedDateTime":  "\/Date(1626263828629)\/",
+    "displayName":  "BP - macOS Compliance",
+    "version":  1,
+    "passwordRequired":  true,
+    "passwordBlockSimple":  true,
+    "passwordExpirationDays":  65535,
+    "passwordMinimumLength":  4,
+    "passwordMinutesOfInactivityBeforeLock":  15,
+    "passwordPreviousPasswordBlockCount":  12,
+    "passwordMinimumCharacterSetCount":  0,
+    "passwordRequiredType":  "deviceDefault",
+    "osMinimumVersion":  null,
+    "osMaximumVersion":  null,
+    "systemIntegrityProtectionEnabled":  true,
+    "deviceThreatProtectionEnabled":  false,
+    "deviceThreatProtectionRequiredSecurityLevel":  "unavailable",
+    "storageRequireEncryption":  true,
+    "firewallEnabled":  true,
+    "firewallBlockAllIncoming":  true,
+    "firewallEnableStealthMode":  true,
+    "deviceCompliancePolicyId":  "fdaf842b-1a4e-46cc-b5ac-49092cb24297",
+    "deviceCompliancePolicyODataType":  "microsoft.graph.macOSCompliancePolicy",
+    "macOSCompliancePolicyReferenceUrl":  "https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies/fdaf842b-1a4e-46cc-b5ac-49092cb24297",
+    "scheduledActionsForRule":  [
+                                    {
+                                        "scheduledActionConfigurations":  [
+                                                                              {
+                                                                                  "actionType":  "block"
+                                                                              }
+                                                                          ],
+                                        "ruleName":  null
+                                    }
+                                ]
+}
