@@ -157,6 +157,15 @@ Audit scripts for Microsoft 365 groups via Microsoft Graph.
 
 - Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
 
+### 🌐 DNS Management
+Scripts for managing DNS records in Active Directory-integrated DNS zones.
+
+- Resolve public DNS records via Google DNS (dig) and import them as A or CNAME records into AD DNS
+- Dry-run by default — shows what would be created before applying
+- Idempotent — skips records that already exist
+
+---
+
 ### 🖼️ Intune — Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
 
@@ -189,6 +198,10 @@ M365-Scripts/
     │   │   └── Background/Desktop/
     │   │       ├── Set-CorporateWallpaper.ps1
     │   │       └── readme.md
+    │   ├── DNS/
+    │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
+    │   │   ├── example-records.csv
+    │   │   └── readme.md
     │   └── Save install time/       ← USB setup toolkit
     │       ├── start.bat
     │       ├── autorun.inf
@@ -260,6 +273,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Custom Scripts/DNS/Import-DnsRecords.ps1` — resolve public DNS via dig (Google 8.8.8.8) and import A/CNAME records into AD DNS, dry-run by default |
 | 2026-03-23 | Added `scripts/Entra/New-M365User.ps1` — create single M365 user via Graph, auto-generated password, optional license |
 | 2026-03-23 | Added `scripts/Entra/Import-M365Users.ps1` — bulk user creation from CSV via Graph, dry-run by default, passwords in CSV output |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-ExternalForwards.ps1` — audit external forwarding rules across all mailboxes, CSV export |

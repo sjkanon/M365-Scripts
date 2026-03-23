@@ -35,15 +35,15 @@
 
 .EXAMPLE
     # Check what would be created (dry run)
-    .\Add-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be
+    .\Import-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be
 
 .EXAMPLE
     # Resolve and import into AD DNS
-    .\Add-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be -Apply
+    .\Import-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be -Apply
 
 .EXAMPLE
     # Remote DNS server
-    .\Add-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
+    .\Import-DnsRecords.ps1 -CsvPath .\vias-dns.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param (
@@ -99,7 +99,7 @@ function Resolve-Public {
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Add-DnsRecords" -ForegroundColor Cyan
+Write-Host "   Import-DnsRecords" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  CSV        : $CsvPath"
