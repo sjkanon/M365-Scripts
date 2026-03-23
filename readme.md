@@ -42,6 +42,22 @@ Scripts for managing Windows time synchronization.
 
 - Restart and force Windows Time service sync
 
+### 🔌 Network
+
+Scripts for network diagnostics.
+
+- Test TCP port connectivity on any host — supports single ports, ranges (`1294:1494`), and combinations
+
+### 📊 Reporting — Licensing
+
+Monthly licensing and Azure cost report generator.
+
+- Combines Pax8 (CSV) and Ingram (Excel) billing data into one formatted Excel
+- Per-customer tab with Azure consumption, licenses, and Acronis breakdown
+- Summary tab with totals and margin per customer
+- PowerShell launcher with pre-flight validation
+- Optional Windows scheduled task (runs 6th of each month)
+
 ### 🧪 Testing Scripts — SMTP
 Scripts for diagnosing SMTP connectivity and authentication.
 
@@ -106,6 +122,13 @@ M365-Scripts/
 ├── .vscode/
 │   └── settings.json
 ├── scripts/
+│   ├── Reporting/
+│   │   └── Licensing/
+│   │       ├── genereer_licentie_overzicht.py
+│   │       ├── genereer_rapport.ps1
+│   │       ├── genereer_rapport.bat
+│   │       ├── create_scheduled_task.ps1
+│   │       └── readme.md
 │   ├── Custom Scripts/
 │   │   ├── device/
 │   │   │   ├── audio/
@@ -165,6 +188,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `load.ps1` — startup loader: asks for UPN + name on first run, saves to gitignored `load.config.ps1`, then launches menu |
+| 2026-03-23 | Extended `menu.ps1` — added M365 section (B–E) with Exchange, Entra ID, MSP Admin submenus; lazy-loads `functies.ps1` on first M365 use |
+| 2026-03-23 | Added `menu.ps1` — interactive launcher for all scripts, number keys + F-keys, cross-platform |
+| 2026-03-23 | Added `scripts/Network/Test-Ports.ps1` — TCP port checker with range/list syntax and multi-target support |
+| 2026-03-23 | Translated licensing scripts to English; replaced OneDrive path with configurable `C:\Reports\Licensing` |
+| 2026-03-23 | Genericised licensing scripts — removed hardcoded company paths, customer names, subscription labels and BraveHub references |
+| 2026-03-23 | Rewrote `create_scheduled_task.ps1` — admin check, auto-detect Python, dynamic trigger date, update existing task |
+| 2026-03-23 | Added `scripts/Reporting/Licensing/` — licensing report toolkit (Pax8 + Ingram → Excel); added readme |
 | 2026-03-20 | `start.bat` v2.8 — Split Do it all: A = Intune (Rename + Autopilot + Update), C = AD (Rename + Domain join + Update) |
 | 2026-03-20 | `start.bat` v2.7 — Do it all updated: AD domain join added as step 3 |
 | 2026-03-20 | `start.bat` v2.6 — Do it all updated: device rename now first step before Autopilot |
