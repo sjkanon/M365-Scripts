@@ -4,8 +4,9 @@
 
 $ErrorActionPreference = "Stop"
 
-# ── Vaste mappen ──
-$ExportDir   = "C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload"
+# ── Configuration — update this path to match your OneDrive folder ──
+# Example: "C:\OneDrive\CompanyName\CompanyName - Finance - Licenses"
+$ExportDir   = "C:\OneDrive\CompanyName\CompanyName - Finance - Licenses"
 $ImportDir   = Join-Path $ExportDir "Import"
 $IngramDir   = Join-Path $ImportDir "Ingram"
 $Pax8Dir     = Join-Path $ImportDir "Pax8"

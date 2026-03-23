@@ -182,6 +182,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Genericised licensing scripts — removed hardcoded company paths, customer names, subscription labels and BraveHub references |
 | 2026-03-23 | Rewrote `create_scheduled_task.ps1` — admin check, auto-detect Python, dynamic trigger date, update existing task |
 | 2026-03-23 | Added `scripts/Reporting/Licensing/` — licensing report toolkit (Pax8 + Ingram → Excel); added readme |
 | 2026-03-20 | `start.bat` v2.8 — Split Do it all: A = Intune (Rename + Autopilot + Update), C = AD (Rename + Domain join + Update) |

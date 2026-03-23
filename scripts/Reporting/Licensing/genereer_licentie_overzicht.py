@@ -30,9 +30,10 @@ def _verbose_period(period_str: str) -> str:
         return period_str
 
 
-# Mapping: Acronis eindklant-naam in Pax8 -> klantnaam in het rapport
+# Mapping: Acronis end-customer name in Pax8 -> customer name in the report
+# Add entries here if the name in Pax8 differs from the name used elsewhere.
+# Example: "Customer Name in Pax8": "Customer Name in Report"
 ACRONIS_ENDCUSTOMER_ALIASES = {
-    "Tuinbouwbedrijf Marc Pittoors": "Tom Eko - Pittoors",
 }
 
 import pandas as pd
@@ -117,18 +118,15 @@ AZURE_CATEGORY_ORDER = [
     "Netwerk & Trafiek", "Monitoring & Beheer", "App Services", "Overig",
 ]
 
+# Optional: map raw Pax8 subscription IDs to human-readable labels.
+# Add entries here to give subscriptions a friendly display name.
+# Example: "raw-sub-id-001": "Friendly Subscription Name"
 PAX8_SUB_LABELS = {
-    "VIAS-CONN-001":                    "VIAS-CONN-001  (Firewall / Connectiviteit)",
-    "VIAS-IDENT-001":                   "VIAS-IDENT-001  (Domain Controllers)",
-    "VIAS-LANDING-001":                 "VIAS-LANDING-001  (Applicatieservers)",
-    "Microsoft Azure (bivv): #1103503": "Microsoft Azure (bivv)",
-    "Azure subscription 1":             "Azure subscription 1",
-    "Artoos":                           "Artoos",
 }
 
+# Optional: define the display order of subscriptions within an Azure section.
+# Subscriptions not listed here appear after the listed ones, in their original order.
 PAX8_SUB_ORDER = [
-    "VIAS-CONN-001", "VIAS-IDENT-001", "VIAS-LANDING-001",
-    "Microsoft Azure (bivv): #1103503", "Azure subscription 1", "Artoos",
 ]
 
 
@@ -577,7 +575,7 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
         row += 1
 
     # ════════════════════════════════════════════════════════
-    # SECTIE 5: ACRONIS (klant is eindklant bij BraveHub)
+    # SECTIE 5: ACRONIS (customer is end-customer billed via reseller)
     # ════════════════════════════════════════════════════════
     if pax8_lic_all is not None:
         acronis_for_cust = pax8_lic_all[
@@ -585,7 +583,7 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
             (pax8_lic_all["acronis_endcustomer"] != "")
         ]
         if not acronis_for_cust.empty:
-            _section_header(ws, row, "📋  Acronis Backup (via BraveHub)", "4A4A8A")
+            _section_header(ws, row, "📋  Acronis Backup (via Reseller)", "4A4A8A")
             row += 1
             alt = False
             for _, r in acronis_for_cust.iterrows():
@@ -693,9 +691,10 @@ def main():
     from datetime import datetime
     from pathlib import Path
 
-    # ── Vaste paden ──
+    # ── Paths — update EXPORT_DIR to match your OneDrive folder ──────────────
+    # Example: Path(r"C:\OneDrive\CompanyName\CompanyName - Finance - Licenses")
     SCRIPT_DIR  = Path(__file__).parent.resolve()
-    EXPORT_DIR  = Path(r"C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload")
+    EXPORT_DIR  = Path(r"C:\OneDrive\CompanyName\CompanyName - Finance - Licenses")
     IMPORT_DIR  = EXPORT_DIR / "Import"
     INGRAM_DIR  = IMPORT_DIR / "Ingram"
     PAX8_DIR    = IMPORT_DIR / "Pax8"
