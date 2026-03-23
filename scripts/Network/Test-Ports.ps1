@@ -1,4 +1,6 @@
 #Requires -Version 5.1
+# Cross-platform: Windows (PS 5.1+), macOS and Linux (PS 7+)
+# Install PowerShell 7: https://aka.ms/powershell
 <#
 .SYNOPSIS
     Tests TCP connectivity on one or more ports against a target host.
@@ -6,7 +8,8 @@
 .DESCRIPTION
     Checks which ports are open or closed on a given IP address or hostname.
     Supports individual ports, ranges (1294:1494), and comma-separated combinations.
-    Uses parallel TCP connect attempts for speed.
+    Uses TCP connect attempts with a configurable timeout.
+    Works on Windows (PowerShell 5.1+), macOS, and Linux (PowerShell 7+).
 
 .PARAMETER Target
     IP address or hostname to test. Accepts multiple targets.
@@ -77,11 +80,11 @@ function Resolve-Ports {
 
 # ── Test a single TCP port ────────────────────────────────────────────────────
 function Test-TcpPort {
-    param([string] $Host, [int] $Port, [int] $Timeout)
+    param([string] $Hostname, [int] $Port, [int] $Timeout)
 
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
-        $ar = $client.BeginConnect($Host, $Port, $null, $null)
+        $ar = $client.BeginConnect($Hostname, $Port, $null, $null)
         $ok = $ar.AsyncWaitHandle.WaitOne($Timeout, $false)
         if ($ok -and $client.Connected) {
             return $true
@@ -105,11 +108,10 @@ if ($portList.Count -eq 0) {
 $totalPorts = $portList.Count * $Target.Count
 Write-Host ""
 Write-Host "  Target(s) : $($Target -join ', ')"
-Write-Host "  Ports     : $portList" -NoNewline
 if ($portList.Count -gt 10) {
-    Write-Host " ($($portList.Count) ports)"
+    Write-Host "  Ports     : $($portList[0])..$($portList[-1]) ($($portList.Count) ports)"
 } else {
-    Write-Host ""
+    Write-Host "  Ports     : $($portList -join ', ')"
 }
 Write-Host "  Timeout   : ${TimeoutMs}ms per port"
 Write-Host "  Total     : $totalPorts checks"
@@ -122,7 +124,7 @@ foreach ($t in $Target) {
 
     # Resolve hostname to IP once
     try {
-        $resolved = ([System.Net.Dns]::GetHostAddresses($t) | Where-Object { $_.AddressFamily -eq 'InterNetwork' } | Select-Object -First 1).ToString()
+        $resolved = ([System.Net.Dns]::GetHostAddresses($t) | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork } | Select-Object -First 1).ToString()
     } catch {
         $resolved = $t
     }

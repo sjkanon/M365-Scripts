@@ -188,6 +188,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `menu.ps1` — interactive launcher for all scripts, number keys + F-keys, cross-platform |
 | 2026-03-23 | Added `scripts/Network/Test-Ports.ps1` — TCP port checker with range/list syntax and multi-target support |
 | 2026-03-23 | Translated licensing scripts to English; replaced OneDrive path with configurable `C:\Reports\Licensing` |
 | 2026-03-23 | Genericised licensing scripts — removed hardcoded company paths, customer names, subscription labels and BraveHub references |
