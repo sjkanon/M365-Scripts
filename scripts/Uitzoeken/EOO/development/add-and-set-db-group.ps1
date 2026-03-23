@@ -1,0 +1,1 @@
+﻿New-DynamicDistributionGroup -Name "West-Iedereen" -RecipientFilter "(RecipientTypeDetails -eq 'UserMailbox') -and (WindowsEmailAddress -eq '*@westerduinpersoneel.nl') -and (WindowsEmailAddress -eq '*@westerduingroep.nl') -and (WindowsEmailAddress -eq '*@westerduinbv.nl')"

@@ -1,0 +1,1 @@
+﻿New-AzureADMSGroup -DisplayName "SG - Enable Coligo" -Description "Beveiligingsgroep tbv Coligo Desktop" -MailEnabled $False -MailNickName "group" -SecurityEnabled $True 

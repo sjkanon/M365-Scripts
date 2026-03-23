@@ -1,0 +1,24 @@
+{
+    "vpn": {
+            "ipsec": {
+                    "esp-group": {
+                            "ESP_CHANGETHISTOPEERIP": {
+                                    "proposal": {
+                                            "1": {
+                                                    "hash": "sha256"
+                                            }
+                                    }
+                            }
+                    },
+                    "ike-group": {
+                            "IKE_CHANGETHISTOPEERIP": {
+                                    "proposal": {
+                                            "1": {
+                                                    "hash": "sha256"
+                                            }
+                                    }
+                            }
+                    }
+            }
+    }
+}

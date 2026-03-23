@@ -1,0 +1,29 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20210715200953
+Username: AzureAD\TomkleinKoerkamp
+RunAs User: AzureAD\TomkleinKoerkamp
+Configuration Name: 
+Machine: DESKTOP-E09SHF1 (Microsoft Windows NT 10.0.22000.0)
+Host Application: C:\WINDOWS\system32\WindowsPowerShell\v1.0\PowerShell_ISE.exe
+Process ID: 10700
+PSVersion: 5.1.22000.65
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22000.65
+BuildVersion: 10.0.22000.65
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Script started
+Exchange Online PowerShell V2 found
+MS Online PowerShell module found
+Start - Get all domains in tenant
+Finish - Get all domains in tenant
+Start - Configure Inbound Spam filtering
+write-host [005] - Unable to connect to Exchange online The term 'Get-HostedContentFilterPolicy' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+**********************
+Windows PowerShell transcript end
+End time: 20210715201040
+**********************
