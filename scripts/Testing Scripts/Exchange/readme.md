@@ -62,6 +62,37 @@ Inherited and SELF entries are filtered out automatically.
 .\Test-MailboxPermissions.ps1 -Mailbox "shared@contoso.com"
 ```
 
+---
+
+### Test-DistributionGroupPermissions.ps1
+
+Audits distribution groups and mail-enabled security groups:
+
+- **Settings** — member count, join/leave restrictions, external sender policy
+- **ManagedBy** — group owners/managers
+- **Send As** — who can send as the group
+- **Send on Behalf** — `GrantSendOnBehalfTo` delegates
+- **Members** (optional, use `-IncludeMembers`)
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Group` | No | Name, alias, or email of a single group. If omitted, all DGs are audited |
+| `-IncludeMembers` | No | Also list individual group members in the report |
+| `-OutputPath` | No | CSV report path (default: `.\GroupPermissions_<timestamp>.csv`) |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Audit all distribution groups
+.\Test-DistributionGroupPermissions.ps1
+
+# Single group with member list
+.\Test-DistributionGroupPermissions.ps1 -Group "helpdesk@contoso.com" -IncludeMembers
+```
+
 **Required module**
 ```powershell
 Install-Module ExchangeOnlineManagement -Scope CurrentUser

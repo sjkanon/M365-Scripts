@@ -59,18 +59,25 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `9` / `F9` | Startup | Install-Modules |
 | `A` / `F10` | Reporting | Licensing-Report |
 | `B` | M365 | Connect-Tenant |
-| `C` | M365 | Exchange Online submenu (incl. calendar + mailbox permission audits) |
-| `D` | M365 | Entra ID / Graph submenu (incl. bulk user removal) |
+| `C` | M365 | Exchange Online submenu (incl. calendar, mailbox, and DG permission audits) |
+| `D` | M365 | Entra ID / Graph submenu (incl. bulk user removal + M365 group audit) |
 | `E` | M365 | MSP Admin submenu |
 
 M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
 
-**Exchange submenu (`C`)** includes two audit tools at the bottom:
+**Exchange submenu (`C`)** audit tools:
 
 | Key | Tool |
 |-----|------|
 | `8` | Test-CalendarPermissions — audit calendar folder permissions (all or single mailbox) |
 | `9` | Test-MailboxPermissions — audit Full Access, Send As, Send on Behalf |
+| `A` | Test-GroupPermissions — audit DG managers, Send As, Send on Behalf, member counts |
+
+**Entra ID submenu (`D`)** audit tool:
+
+| Key | Tool |
+|-----|------|
+| `A` | Test-M365GroupMembership — audit M365 Group / Teams owners and members |
 
 ---
 
@@ -135,6 +142,12 @@ Audit scripts for Exchange Online permissions. Self-connecting — reuse an exis
 
 - Audit calendar folder permissions for one or all mailboxes (locale-independent, exports CSV)
 - Audit Full Access, Send As, and Send on Behalf delegation for one or all mailboxes (exports CSV)
+- Audit distribution group managers, Send As, Send on Behalf, member counts, and sender restrictions (exports CSV)
+
+### 🧪 Testing — Entra ID / Graph
+Audit scripts for Microsoft 365 groups via Microsoft Graph.
+
+- Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
 
 ### 🖼️ Intune — Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
@@ -194,8 +207,12 @@ M365-Scripts/
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   └── readme.md
     └── Testing Scripts/
+        ├── Entra/
+        │   ├── Test-M365GroupMembership.ps1
+        │   └── readme.md
         ├── Exchange/
         │   ├── Test-CalendarPermissions.ps1
+        │   ├── Test-DistributionGroupPermissions.ps1
         │   ├── Test-MailboxPermissions.ps1
         │   └── readme.md
         ├── Network/
@@ -230,9 +247,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Testing Scripts/Entra/Test-M365GroupMembership.ps1` — M365 Group / Teams owner and member audit via Graph, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-DistributionGroupPermissions.ps1` — DG managers, Send As, Send on Behalf, member counts, CSV export |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-CalendarPermissions.ps1` — locale-independent calendar permission audit, CSV export |
 | 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-MailboxPermissions.ps1` — Full Access / Send As / Send on Behalf audit, CSV export |
-| 2026-03-23 | Exchange submenu (`C`) extended with items 8 and 9: calendar and mailbox permission audit tools |
+| 2026-03-23 | Exchange submenu (`C`) items 8/9/A and Entra submenu (`D`) item A: permission audit tools |
 | 2026-03-23 | Moved `Test-Ports.ps1` from `scripts/Network/` to `scripts/Testing Scripts/Network/` |
 | 2026-03-23 | Added `scripts/Entra/Remove-M365Users.ps1` — bulk Entra ID user removal, dry-run by default, CSV report |
 | 2026-03-23 | `load.ps1` — auto-imports modules at startup; detects missing modules and offers to run `Install-Modules.ps1` |

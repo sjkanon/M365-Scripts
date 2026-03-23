@@ -140,6 +140,14 @@ $ExchangeSubmenu = @(
         if ($mbx) { $p['Mailbox'] = $mbx }
         & "$ROOT\scripts\Testing Scripts\Exchange\Test-MailboxPermissions.ps1" @p
     }}
+    @{ Key='A'; Label='Test-GroupPermissions     — audit DG managers / Send As / Send on Behalf'; Action={
+        $grp = Read-Host "  Group email or name (leave blank for all)"
+        $inc = Read-Host "  Include member list? [y/N]"
+        $p = @{}
+        if ($grp) { $p['Group'] = $grp }
+        if ($inc -match '^[Yy]') { $p['IncludeMembers'] = $true }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-DistributionGroupPermissions.ps1" @p
+    }}
 )
 
 $EntraSubmenu = @(
@@ -182,6 +190,12 @@ $EntraSubmenu = @(
             $confirm = Read-Host "  Dry run completed. Add -Apply to delete? [y/N]"
             if ($confirm -match '^[Yy]') { & $path -UserList $list -Apply }
         }
+    }}
+    @{ Key='A'; Label='Test-M365GroupMembership — audit M365 group owners and members'; Action={
+        $grp = Read-Host "  Group name or ID (leave blank for all)"
+        $p = @{}
+        if ($grp) { $p['Group'] = $grp }
+        & "$ROOT\scripts\Testing Scripts\Entra\Test-M365GroupMembership.ps1" @p
     }}
 )
 
