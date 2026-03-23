@@ -6,7 +6,7 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
 ## Scripts
 
-### Add-DnsRecords.ps1
+### Import-DnsRecords.ps1
 
 Resolves a list of FQDNs via Google DNS (8.8.8.8) and imports the results as A or CNAME records into an Active Directory DNS zone. Defaults to dry-run — pass `-Apply` to write records.
 
@@ -48,13 +48,13 @@ www.semaindecomptage.vias.be
 
 ```powershell
 # Dry run — resolve and show what would be added
-.\Add-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be
 
 # Resolve and import into local AD DNS
-.\Add-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -Apply
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -Apply
 
 # Remote DNS server
-.\Add-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
 ```
 
 **Notes**
