@@ -128,6 +128,44 @@ $ExchangeSubmenu = @(
     @{ Key='7'; Label='Enable-CopyOfSentItems    — enable sent-item copy for all mailboxes'; Action={
         Enable-CopyOfSentItems
     }}
+    @{ Key='8'; Label='Test-CalendarPermissions  — audit calendar folder permissions'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-CalendarPermissions.ps1" @p
+    }}
+    @{ Key='9'; Label='Test-MailboxPermissions   — audit Full Access / Send As / Send on Behalf'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-MailboxPermissions.ps1" @p
+    }}
+    @{ Key='A'; Label='Test-GroupPermissions     — audit DG managers / Send As / Send on Behalf'; Action={
+        $grp = Read-Host "  Group email or name (leave blank for all)"
+        $inc = Read-Host "  Include member list? [y/N]"
+        $p = @{}
+        if ($grp) { $p['Group'] = $grp }
+        if ($inc -match '^[Yy]') { $p['IncludeMembers'] = $true }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-DistributionGroupPermissions.ps1" @p
+    }}
+    @{ Key='B'; Label='Test-DkimConfig          — validate DKIM signing config and DNS records'; Action={
+        $domain = Read-Host "  Domain (leave blank for all)"
+        $p = @{}
+        if ($domain) { $p['Domain'] = $domain }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-DkimConfig.ps1" @p
+    }}
+    @{ Key='C'; Label='Get-ExternalForwards     — audit mailboxes with external forwarding'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Get-ExternalForwards.ps1" @p
+    }}
+    @{ Key='D'; Label='Get-MailboxSizes         — report mailbox sizes sorted by storage used'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Get-MailboxSizes.ps1" @p
+    }}
 )
 
 $EntraSubmenu = @(
@@ -171,6 +209,36 @@ $EntraSubmenu = @(
             if ($confirm -match '^[Yy]') { & $path -UserList $list -Apply }
         }
     }}
+    @{ Key='A'; Label='Test-M365GroupMembership — audit M365 group owners and members'; Action={
+        $grp = Read-Host "  Group name or ID (leave blank for all)"
+        $p = @{}
+        if ($grp) { $p['Group'] = $grp }
+        & "$ROOT\scripts\Testing Scripts\Entra\Test-M365GroupMembership.ps1" @p
+    }}
+    @{ Key='B'; Label='New-M365User             — create a single new user'; Action={
+        $upn  = Read-Host "  UPN (e.g. j.doe@contoso.com)"
+        $dn   = Read-Host "  Display name"
+        $fn   = Read-Host "  First name (optional)"
+        $ln   = Read-Host "  Last name (optional)"
+        $dept = Read-Host "  Department (optional)"
+        $sku  = Read-Host "  License SKU (optional, e.g. ENTERPRISEPACK)"
+        $p = @{ UserPrincipalName = $upn; DisplayName = $dn }
+        if ($fn)   { $p['GivenName']   = $fn }
+        if ($ln)   { $p['Surname']     = $ln }
+        if ($dept) { $p['Department']  = $dept }
+        if ($sku)  { $p['LicenseSkuId'] = $sku }
+        & "$ROOT\scripts\Entra\New-M365User.ps1" @p
+    }}
+    @{ Key='C'; Label='Import-M365Users         — bulk create users from CSV (dry run first)'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\Import-M365Users.ps1'
+        $csv  = Read-Host "  CSV path"
+        $sku  = Read-Host "  Default license SKU for all users (optional)"
+        $p = @{ CsvPath = $csv }
+        if ($sku) { $p['LicenseSkuId'] = $sku }
+        & $path @p
+        $confirm = Read-Host "  Dry run completed. Add -Apply to create accounts? [y/N]"
+        if ($confirm -match '^[Yy]') { & $path @p -Apply }
+    }}
 )
 
 $MspSubmenu = @(
@@ -190,9 +258,9 @@ $MspSubmenu = @(
 # Action items  : Key, FKey, Category, Label, Action, [NoWait]
 #   NoWait=$true  — item manages its own UI loop (submenus); skip "press any key"
 $menu = @(
-    [PSCustomObject]@{ Key='1'; FKey=[ConsoleKey]::F1; Category='Network'
+    [PSCustomObject]@{ Key='1'; FKey=[ConsoleKey]::F1; Category='Testing'
         Label='Test-Ports          — check open TCP ports on any host'
-        Script="$ROOT\scripts\Network\Test-Ports.ps1"
+        Script="$ROOT\scripts\Testing Scripts\Network\Test-Ports.ps1"
         Params={
             $target  = Read-Host "  Target (IP or hostname)"
             $ports   = Read-Host "  Ports  (e.g. 80,443 or 1294:1494 or 80,1294:1494)"
