@@ -107,9 +107,12 @@ Each row shows: description, category, quantity, unit purchase price, unit sales
 
 | Variable | Default | Description |
 |---|---|---|
-| `$TaskName` | `"... Licentie Overzicht Generator"` | Task name in Task Scheduler |
-| `$ScriptPath` | auto (same folder) | Path to `genereer_licentie_overzicht.py` |
-| `$RunAsUser` | `"DOMAIN\sa-halo"` | Service account that runs the task — **update for your domain** |
+| `$TaskName` | `"Licensing Report Generator"` | Task name in Task Scheduler |
+| `$RunAsUser` | `"$env:USERDOMAIN\sa-halo"` | Service account that runs the task — **update for your domain** |
+| `$RunDay` | `6` | Day of month to run |
+| `$RunTime` | `"08:00"` | Time of day |
+
+The script auto-detects `python.exe` from PATH and common install locations. `$ScriptPath` is resolved automatically relative to the script folder.
 
 ### Run once to register:
 
