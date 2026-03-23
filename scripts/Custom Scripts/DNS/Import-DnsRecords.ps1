@@ -68,7 +68,7 @@ param (
 
     [switch] $ExportCsv,
 
-    [string] $ExportPath = "$([System.IO.Path]::GetTempPath())ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv",
+    [string] $ExportPath,
 
     [switch] $Apply,
 
@@ -77,8 +77,13 @@ param (
     [int] $Ttl = 3600
 )
 
-# ── Preflight ─────────────────────────────────────────────────────────────────
-if ($ExportPath -ne ".\ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv") {
+# ── Output folder ─────────────────────────────────────────────────────────────
+$outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+
+if (-not $ExportPath) {
+    $ExportPath = Join-Path $outputDir "ResolvedRecords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+} else {
     $ExportCsv = $true
 }
 
