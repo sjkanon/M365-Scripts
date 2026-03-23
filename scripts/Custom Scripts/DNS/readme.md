@@ -1,0 +1,71 @@
+# DNS Scripts
+
+Scripts for managing DNS records in Active Directory-integrated DNS zones.
+
+---
+
+## Scripts
+
+### Import-DnsRecords.ps1
+
+Resolves a list of FQDNs via Google DNS (8.8.8.8) and imports the results as A or CNAME records into an Active Directory DNS zone. Defaults to dry-run — pass `-Apply` to write records.
+
+**How it works:**
+
+1. Reads a CSV with a `FQDN` column
+2. Resolves each FQDN via `dig @8.8.8.8` (CNAME checked first, then A)
+3. Shows what was found and what would be created
+4. With `-Apply`: writes the records to AD DNS (skips records that already exist)
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-CsvPath` | Yes | Path to CSV file with a `FQDN` column |
+| `-ZoneName` | Only with `-Apply` | AD DNS zone to add records to (e.g. `vias.be`) |
+| `-ExportCsv` | No | Save resolved records to CSV for manual import |
+| `-ExportPath` | No | Custom path for the export CSV (implies `-ExportCsv`) |
+| `-Apply` | No | Write records into AD DNS (Windows + DnsServer module required) |
+| `-DnsServer` | No | DNS server to write to (default: `localhost`) |
+| `-Ttl` | No | TTL in seconds (default: `3600`) |
+
+**CSV format**
+
+The CSV must have a single `FQDN` column with fully qualified domain names:
+
+```csv
+FQDN
+briefings.vias.be
+helpdesk.vias.be
+meetweek.vias.be
+mobisafetyscan.vias.be
+semaindecomptage.vias.be
+www.briefings.vias.be
+www.meetweek.vias.be
+www.mobisafetyscan.vias.be
+www.semaindecomptage.vias.be
+```
+
+**Examples**
+
+```powershell
+# Resolve and show on screen (works on macOS/Linux)
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv
+
+# Export resolved records to CSV for manual import (works on macOS/Linux)
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ExportCsv
+
+# Import directly into AD DNS (Windows + DnsServer module required)
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -Apply
+
+# Remote DNS server
+.\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
+```
+
+**Notes**
+
+- Requires `dig` — install via `choco install bind-toolsonly` or [isc.org/download](https://www.isc.org/download/)
+- Requires the `DnsServer` PowerShell module (RSAT or Windows DNS Server role)
+- Skips records that already exist — safe to re-run
+- FQDNs not matching the `-ZoneName` are skipped with a warning
+- CNAME records are detected first; A records are used as fallback
