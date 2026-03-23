@@ -19,7 +19,7 @@ Bulk-deletes M365 user accounts from a tenant. Revokes sessions and removes lice
 | `-Apply` | No | Actually perform deletions (default: dry run) |
 | `-SkipLicenseRemoval` | No | Skip removing licenses before deletion |
 | `-SkipSessionRevoke` | No | Skip revoking active sessions |
-| `-OutputPath` | No | CSV report path (default: `.\DeletedAccounts_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 *Either `-UserList` or `-CsvPath` is required.
@@ -100,7 +100,7 @@ Bulk-creates M365 users from a CSV file via Microsoft Graph. Defaults to dry-run
 | `-UsageLocation` | No | Default country code for all users (default: `NL`) |
 | `-LicenseSkuId` | No | Assign this license to all users (overrides CSV column) |
 | `-NoPasswordReset` | No | Do not force password change on first sign-in |
-| `-OutputPath` | No | CSV report path (default: `.\CreatedAccounts_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**
