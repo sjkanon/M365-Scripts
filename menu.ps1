@@ -13,6 +13,12 @@
 $ROOT = $PSScriptRoot
 $script:FunctiesLoaded = $false
 
+# ── Ask for admin UPN at startup ──────────────────────────────────────────────
+if (-not $global:upn) {
+    Write-Host ""
+    $global:upn = Read-Host "  Admin UPN"
+}
+
 # ── Lazy-load functies.ps1 ────────────────────────────────────────────────────
 function Import-Functies {
     if ($script:FunctiesLoaded) { return $true }
@@ -26,10 +32,6 @@ function Import-Functies {
         return $false
     }
 
-    Write-Host ""
-    if (-not $global:upn) {
-        $global:upn = Read-Host "  Admin UPN (required for M365 connection)"
-    }
     Write-Host "  Loading M365 functions and connecting to Graph..." -ForegroundColor DarkGray
 
     try {
