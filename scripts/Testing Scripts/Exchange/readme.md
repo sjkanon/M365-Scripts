@@ -16,7 +16,7 @@ Retrieves calendar folder permissions for one or all mailboxes. Uses `FolderType
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Mailbox` | No | UPN of a single mailbox. If omitted, all user and shared mailboxes are checked |
-| `-OutputPath` | No | CSV report path (default: `.\CalendarPermissions_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**
@@ -49,7 +49,7 @@ Inherited and SELF entries are filtered out automatically.
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Mailbox` | No | UPN of a single mailbox. If omitted, all user and shared mailboxes are checked |
-| `-OutputPath` | No | CSV report path (default: `.\MailboxPermissions_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**
@@ -80,7 +80,7 @@ Audits distribution groups and mail-enabled security groups:
 |-----------|----------|-------------|
 | `-Group` | No | Name, alias, or email of a single group. If omitted, all DGs are audited |
 | `-IncludeMembers` | No | Also list individual group members in the report |
-| `-OutputPath` | No | CSV report path (default: `.\GroupPermissions_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**
@@ -140,7 +140,7 @@ Audits all mailboxes for forwarding rules that point to external (non-tenant) do
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Mailbox` | No | UPN of a single mailbox. If omitted, all mailboxes are checked |
-| `-OutputPath` | No | CSV report path (default: `.\ExternalForwards_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**
@@ -164,7 +164,7 @@ Reports mailbox sizes (MB/GB), item counts, and quota status. Sorted by size des
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Mailbox` | No | UPN of a single mailbox. If omitted, all user and shared mailboxes are reported |
-| `-OutputPath` | No | CSV report path (default: `.\MailboxSizes_<timestamp>.csv`) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Entra ID tenant ID or domain |
 
 **Examples**

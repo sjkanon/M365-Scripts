@@ -33,6 +33,10 @@ param(
     [string] $TenantId
 )
 
+# ── Output folder ─────────────────────────────────────────────────────────────
+$outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+
 # ── Connection ────────────────────────────────────────────────────────────────
 $script:ConnectedHere = $false
 try {
@@ -102,7 +106,7 @@ if ($sorted.Count -eq 0) {
 
     if (-not $OutputPath) {
         $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-        $OutputPath = Join-Path (Get-Location) "MailboxSizes_$ts.csv"
+        $OutputPath = Join-Path $outputDir "MailboxSizes_$ts.csv"
     }
 
     $sorted | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
