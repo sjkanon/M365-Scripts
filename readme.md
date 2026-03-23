@@ -12,21 +12,21 @@ This repository contains production-ready tooling used by engineers to automate,
 
 ## Getting Started
 
-**1. Install required modules** (once per machine):
-
-```powershell
-.\scripts\Startup\Install-Modules.ps1
-```
-
-**2. Configure and launch the menu:**
-
 ```powershell
 .\load.ps1
 ```
 
-On first run, `load.ps1` asks for your admin UPN and display name, saves them to a gitignored `load.config.ps1`, and opens the interactive launcher. From then on it starts directly.
+That's it. On first run, `load.ps1` will:
+
+1. Ask for your admin UPN and display name — saved to a gitignored `load.config.ps1`
+2. Detect missing modules and offer to install them automatically
+3. Import all required modules
+4. Open the interactive menu
+
+From then on it starts directly without any prompts.
 
 > You can also run `.\menu.ps1` directly — it will ask for your UPN as a fallback.
+> To reinstall or update modules manually: `.\scripts\Startup\Install-Modules.ps1`
 
 ---
 
@@ -48,7 +48,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 
 | Key | Category | Tool |
 |-----|----------|------|
-| `1` / `F1` | Network | Test-Ports — TCP port checker |
+| `1` / `F1` | Testing | Test-Ports — TCP port checker |
 | `2` / `F2` | Exchange | Migrate-Calendar |
 | `3` / `F3` | Exchange | Set-Calendar-rights |
 | `4` / `F4` | Testing | Test-SMTP (one-time) |
@@ -59,20 +59,34 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `9` / `F9` | Startup | Install-Modules |
 | `A` / `F10` | Reporting | Licensing-Report |
 | `B` | M365 | Connect-Tenant |
-| `C` | M365 | Exchange Online submenu |
-| `D` | M365 | Entra ID / Graph submenu (incl. bulk user removal) |
+| `C` | M365 | Exchange Online submenu (incl. calendar, mailbox, and DG permission audits) |
+| `D` | M365 | Entra ID / Graph submenu (incl. user create/import/remove + M365 group audit) |
 | `E` | M365 | MSP Admin submenu |
 
 M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
 
+**Exchange submenu (`C`)** audit tools:
+
+| Key | Tool |
+|-----|------|
+| `8` | Test-CalendarPermissions — audit calendar folder permissions (all or single mailbox) |
+| `9` | Test-MailboxPermissions — audit Full Access, Send As, Send on Behalf |
+| `A` | Test-GroupPermissions — audit DG managers, Send As, Send on Behalf, member counts |
+| `B` | Test-DkimConfig — validate DKIM signing config and DNS CNAME/TXT records |
+| `C` | Get-ExternalForwards — audit mailboxes with external forwarding configured |
+| `D` | Get-MailboxSizes — mailbox size report sorted by storage used |
+
+**Entra ID submenu (`D`)** audit tool:
+
+| Key | Tool |
+|-----|------|
+| `A` | Test-M365GroupMembership — audit M365 Group / Teams owners and members |
+| `B` | New-M365User — create a single new user (auto-generated password, optional license) |
+| `C` | Import-M365Users — bulk create users from CSV, dry-run by default |
+
 ---
 
 ## Categories
-
-### 🔌 Network
-Scripts for network diagnostics.
-
-- Test TCP port connectivity on any host — single ports, ranges (`1294:1494`), combinations (`80,443,1294:1494`)
 
 ### 📧 Exchange
 Scripts for calendar and mailbox management.
@@ -84,7 +98,7 @@ Scripts for calendar and mailbox management.
 Interactive M365 management functions via Microsoft Graph and Exchange Online. Loaded as a library through the menu.
 
 - **Exchange Online** — shared mailbox access, locale, aliases, distribution groups, auto-reply, sent-items copy
-- **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs, bulk user removal
+- **Entra ID / Graph** — tenant admins, domains, licenses, users, password reset, sign-in logs, bulk user creation, bulk user removal
 - **MSP Admin** — create/manage MSP admin account across customer tenants
 
 ### 📱 Intune / Autopilot
@@ -121,11 +135,27 @@ Monthly licensing and Azure cost report generator.
 - PowerShell launcher with pre-flight validation
 - Optional Windows scheduled task (runs on the 6th of each month)
 
-### 🧪 Testing — SMTP
-Scripts for diagnosing SMTP connectivity and authentication.
+### 🧪 Testing — Connectivity
+Scripts for diagnosing network and mail connectivity.
 
+- Test TCP port connectivity on any host — single ports, ranges (`1294:1494`), combinations (`80,443,1294:1494`)
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
+
+### 🧪 Testing — Exchange
+Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an existing session or connect automatically.
+
+- Audit calendar folder permissions (locale-independent, exports CSV)
+- Audit Full Access, Send As, Send on Behalf delegation (exports CSV)
+- Audit distribution group managers, Send As, Send on Behalf, member counts (exports CSV)
+- Validate DKIM signing config and DNS CNAME/TXT records; lists required actions
+- Audit mailboxes with external forwarding to non-tenant domains (security audit, exports CSV)
+- Report mailbox sizes and item counts sorted by storage used (exports CSV)
+
+### 🧪 Testing — Entra ID / Graph
+Audit scripts for Microsoft 365 groups via Microsoft Graph.
+
+- Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
 
 ### 🖼️ Intune — Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
@@ -164,6 +194,8 @@ M365-Scripts/
     │       ├── autorun.inf
     │       └── readme.md
     ├── Entra/
+    │   ├── Import-M365Users.ps1
+    │   ├── New-M365User.ps1
     │   ├── Remove-M365Users.ps1
     │   └── readme.md
     ├── Exchange/
@@ -173,8 +205,6 @@ M365-Scripts/
     ├── Intune/Get-Autopilot/
     │   ├── Get-WindowsAutoPilotInfo.ps1
     │   └── GetAutoPilot.CMD
-    ├── Network/
-    │   └── Test-Ports.ps1
     ├── Reporting/
     │   └── Licensing/
     │       ├── genereer_licentie_overzicht.py
@@ -186,10 +216,24 @@ M365-Scripts/
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   └── readme.md
-    └── Testing Scripts/SMTP/
-        ├── testsmtp.ps1
-        ├── testsmtp_5min.ps1
-        └── readme.md
+    └── Testing Scripts/
+        ├── Entra/
+        │   ├── Test-M365GroupMembership.ps1
+        │   └── readme.md
+        ├── Exchange/
+        │   ├── Get-ExternalForwards.ps1
+        │   ├── Get-MailboxSizes.ps1
+        │   ├── Test-CalendarPermissions.ps1
+        │   ├── Test-DkimConfig.ps1
+        │   ├── Test-DistributionGroupPermissions.ps1
+        │   ├── Test-MailboxPermissions.ps1
+        │   └── readme.md
+        ├── Network/
+        │   └── Test-Ports.ps1
+        └── SMTP/
+            ├── testsmtp.ps1
+            ├── testsmtp_5min.ps1
+            └── readme.md
 ```
 
 ---
@@ -216,6 +260,17 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Entra/New-M365User.ps1` — create single M365 user via Graph, auto-generated password, optional license |
+| 2026-03-23 | Added `scripts/Entra/Import-M365Users.ps1` — bulk user creation from CSV via Graph, dry-run by default, passwords in CSV output |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-ExternalForwards.ps1` — audit external forwarding rules across all mailboxes, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Get-MailboxSizes.ps1` — mailbox size + item count report, sorted by storage, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-DkimConfig.ps1` — DKIM signing config + DNS CNAME/TXT validation with required-actions output |
+| 2026-03-23 | Added `scripts/Testing Scripts/Entra/Test-M365GroupMembership.ps1` — M365 Group / Teams owner and member audit via Graph, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-DistributionGroupPermissions.ps1` — DG managers, Send As, Send on Behalf, member counts, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-CalendarPermissions.ps1` — locale-independent calendar permission audit, CSV export |
+| 2026-03-23 | Added `scripts/Testing Scripts/Exchange/Test-MailboxPermissions.ps1` — Full Access / Send As / Send on Behalf audit, CSV export |
+| 2026-03-23 | Exchange submenu (`C`) items 8/9/A and Entra submenu (`D`) item A: permission audit tools |
+| 2026-03-23 | Moved `Test-Ports.ps1` from `scripts/Network/` to `scripts/Testing Scripts/Network/` |
 | 2026-03-23 | Added `scripts/Entra/Remove-M365Users.ps1` — bulk Entra ID user removal, dry-run by default, CSV report |
 | 2026-03-23 | `load.ps1` — auto-imports modules at startup; detects missing modules and offers to run `Install-Modules.ps1` |
 | 2026-03-23 | Added `load.ps1` — first-run setup (UPN + name), saves to gitignored `load.config.ps1`, launches menu |
