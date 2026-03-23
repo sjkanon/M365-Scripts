@@ -128,6 +128,18 @@ $ExchangeSubmenu = @(
     @{ Key='7'; Label='Enable-CopyOfSentItems    — enable sent-item copy for all mailboxes'; Action={
         Enable-CopyOfSentItems
     }}
+    @{ Key='8'; Label='Test-CalendarPermissions  — audit calendar folder permissions'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-CalendarPermissions.ps1" @p
+    }}
+    @{ Key='9'; Label='Test-MailboxPermissions   — audit Full Access / Send As / Send on Behalf'; Action={
+        $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = $mbx }
+        & "$ROOT\scripts\Testing Scripts\Exchange\Test-MailboxPermissions.ps1" @p
+    }}
 )
 
 $EntraSubmenu = @(
