@@ -12,21 +12,21 @@ This repository contains production-ready tooling used by engineers to automate,
 
 ## Getting Started
 
-**1. Install required modules** (once per machine):
-
-```powershell
-.\scripts\Startup\Install-Modules.ps1
-```
-
-**2. Configure and launch the menu:**
-
 ```powershell
 .\load.ps1
 ```
 
-On first run, `load.ps1` asks for your admin UPN and display name, saves them to a gitignored `load.config.ps1`, and opens the interactive launcher. From then on it starts directly.
+That's it. On first run, `load.ps1` will:
+
+1. Ask for your admin UPN and display name — saved to a gitignored `load.config.ps1`
+2. Detect missing modules and offer to install them automatically
+3. Import all required modules
+4. Open the interactive menu
+
+From then on it starts directly without any prompts.
 
 > You can also run `.\menu.ps1` directly — it will ask for your UPN as a fallback.
+> To reinstall or update modules manually: `.\scripts\Startup\Install-Modules.ps1`
 
 ---
 
