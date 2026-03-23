@@ -72,6 +72,9 @@ M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authent
 | `8` | Test-CalendarPermissions — audit calendar folder permissions (all or single mailbox) |
 | `9` | Test-MailboxPermissions — audit Full Access, Send As, Send on Behalf |
 | `A` | Test-GroupPermissions — audit DG managers, Send As, Send on Behalf, member counts |
+| `B` | Test-DkimConfig — validate DKIM signing config and DNS CNAME/TXT records |
+| `C` | Get-ExternalForwards — audit mailboxes with external forwarding configured |
+| `D` | Get-MailboxSizes — mailbox size report sorted by storage used |
 
 **Entra ID submenu (`D`)** audit tool:
 

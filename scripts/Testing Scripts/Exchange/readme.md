@@ -1,7 +1,7 @@
 # Testing — Exchange
 
-Audit scripts for diagnosing and reporting on Exchange Online permissions.
-Connect to Exchange Online automatically if no session is active; reuse an existing session if already connected.
+Audit and diagnostic scripts for Exchange Online.
+All scripts connect automatically if no session is active and reuse an existing session if already connected.
 
 ---
 
@@ -96,4 +96,83 @@ Audits distribution groups and mail-enabled security groups:
 **Required module**
 ```powershell
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
+```
+
+---
+
+### Test-DkimConfig.ps1
+
+Validates the DKIM signing configuration for one or all accepted domains:
+
+- Checks whether DKIM signing is enabled
+- Resolves `selector1/2._domainkey.<domain>` CNAME records and compares against Exchange config
+- Resolves Microsoft's TXT public key records and verifies the key matches
+- Lists required actions for any issues found
+
+> DNS lookups use `Resolve-DnsName` (Windows only). On macOS/Linux the Exchange config is shown without DNS validation.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Domain` | No | Domain to validate. If omitted, all domains with a signing config are checked |
+| `-ShowAll` | No | Show full signing config object instead of the summarised view |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Check all domains
+.\Test-DkimConfig.ps1
+
+# Single domain
+.\Test-DkimConfig.ps1 -Domain "contoso.com"
+```
+
+---
+
+### Get-ExternalForwards.ps1
+
+Audits all mailboxes for forwarding rules that point to external (non-tenant) domains. External forwarding is a common security/compliance risk and should be reviewed regularly. Exports to CSV.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Mailbox` | No | UPN of a single mailbox. If omitted, all mailboxes are checked |
+| `-OutputPath` | No | CSV report path (default: `.\ExternalForwards_<timestamp>.csv`) |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Check all mailboxes
+.\Get-ExternalForwards.ps1
+
+# Single mailbox
+.\Get-ExternalForwards.ps1 -Mailbox "user@contoso.com"
+```
+
+---
+
+### Get-MailboxSizes.ps1
+
+Reports mailbox sizes (MB/GB), item counts, and quota status. Sorted by size descending. Exports to CSV.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Mailbox` | No | UPN of a single mailbox. If omitted, all user and shared mailboxes are reported |
+| `-OutputPath` | No | CSV report path (default: `.\MailboxSizes_<timestamp>.csv`) |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Report all mailboxes
+.\Get-MailboxSizes.ps1
+
+# Single mailbox
+.\Get-MailboxSizes.ps1 -Mailbox "user@contoso.com"
 ```
