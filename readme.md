@@ -42,6 +42,12 @@ Scripts for managing Windows time synchronization.
 
 - Restart and force Windows Time service sync
 
+### 🔌 Network
+
+Scripts for network diagnostics.
+
+- Test TCP port connectivity on any host — supports single ports, ranges (`1294:1494`), and combinations
+
 ### 📊 Reporting — Licensing
 
 Monthly licensing and Azure cost report generator.
@@ -182,6 +188,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-23 | Added `scripts/Network/Test-Ports.ps1` — TCP port checker with range/list syntax and multi-target support |
 | 2026-03-23 | Translated licensing scripts to English; replaced OneDrive path with configurable `C:\Reports\Licensing` |
 | 2026-03-23 | Genericised licensing scripts — removed hardcoded company paths, customer names, subscription labels and BraveHub references |
 | 2026-03-23 | Rewrote `create_scheduled_task.ps1` — admin check, auto-detect Python, dynamic trigger date, update existing task |
