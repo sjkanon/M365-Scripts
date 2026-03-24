@@ -353,8 +353,10 @@ function Get-SiteDrives {
                    '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
         do {
             $resp = Invoke-RestMethod -Uri $listUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            # Keep any list that has an associated drive — covers document libraries,
+            # Teams channel libraries, picture libraries, form libraries, etc.
             $resp.value |
-                Where-Object { $_.list.template -eq 'documentLibrary' -and $_.drive } |
+                Where-Object { $_.drive } |
                 ForEach-Object { $drives.Add($_.drive) }
             $listUri = $resp.'@odata.nextLink'
         } while ($listUri)
