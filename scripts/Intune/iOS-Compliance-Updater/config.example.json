@@ -1,0 +1,6 @@
+{
+    "TenantId":           "FILL_IN",
+    "ClientId":           "FILL_IN",
+    "ClientSecret":       "FILL_IN",
+    "CompliancePolicyId": "FILL_IN"
+}
