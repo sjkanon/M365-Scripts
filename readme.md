@@ -243,6 +243,7 @@ M365-Scripts/
         │   ├── Test-MailboxPermissions.ps1
         │   └── readme.md
         ├── Network/
+        │   ├── Test-OpenVpnDiagnostics.ps1
         │   └── Test-Ports.ps1
         └── SMTP/
             ├── testsmtp.ps1
@@ -274,6 +275,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 | Added `scripts/Testing Scripts/Network/Test-OpenVpnDiagnostics.ps1` — OpenVPN Connect diagnostics: PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; txt export to `C:\Temp\` |
 | 2026-03-23 | All CSV exports now go to `C:\Temp\` (Windows) or `~/Downloads/` (macOS/Linux) — no longer written to current directory |
 | 2026-03-23 | Added `scripts/Custom Scripts/DNS/Import-DnsRecords.ps1` — resolve public DNS via dig (Google 8.8.8.8) and import A/CNAME records into AD DNS, dry-run by default |
 | 2026-03-23 | Added `scripts/Entra/New-M365User.ps1` — create single M365 user via Graph, auto-generated password, optional license |
