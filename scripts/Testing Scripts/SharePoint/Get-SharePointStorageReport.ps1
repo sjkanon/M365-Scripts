@@ -343,11 +343,22 @@ function Invoke-GraphGet {
 }
 
 function Get-SiteDrives {
+    # Uses /lists?$expand=drive to return ALL document libraries per site,
+    # including Site Pages, Site Assets, Teams channels, and custom libraries
+    # that may not surface in the /drives endpoint.
     param([string]$SiteId)
     if ($script:AppOnlyHeaders) {
-        $resp = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/sites/$SiteId/drives" `
-            -Headers $script:AppOnlyHeaders -ErrorAction Stop
-        return $resp.value
+        $drives  = [System.Collections.Generic.List[object]]::new()
+        $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
+                   '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
+        do {
+            $resp = Invoke-RestMethod -Uri $listUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $resp.value |
+                Where-Object { $_.list.template -eq 'documentLibrary' -and $_.drive } |
+                ForEach-Object { $drives.Add($_.drive) }
+            $listUri = $resp.'@odata.nextLink'
+        } while ($listUri)
+        return $drives
     } else {
         return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
     }
