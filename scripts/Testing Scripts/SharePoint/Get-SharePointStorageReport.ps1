@@ -238,8 +238,11 @@ try {
             Remove-TempApp; exit 1
         }
 
-        $script:AppOnlyHeaders = @{ Authorization = "Bearer $appOnlyToken" }
-        Write-Host "  [OK]   Token obtained." -ForegroundColor DarkGray
+        $script:AppOnlyHeaders  = @{ Authorization = "Bearer $appOnlyToken" }
+        $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)  # refresh 5 min early
+        $script:TokenBody       = $tokenBody
+        $script:TokenTenantId   = $usedTenantId
+        Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
@@ -331,14 +334,20 @@ function Test-IsFile {
     return $knownExtensions.Contains($ext)
 }
 
-function Invoke-GraphGet {
-    # Unified GET helper: uses app-only REST headers when available, otherwise SDK
-    param([string]$Uri)
-    if ($script:AppOnlyHeaders) {
-        return Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0$Uri" `
-            -Headers $script:AppOnlyHeaders -ErrorAction Stop
-    } else {
-        return Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputType PSObject -ErrorAction Stop
+function Update-AppOnlyToken {
+    # Silently refreshes the app-only token if it expires within 5 minutes
+    if (-not $script:TokenBody) { return }
+    if ((Get-Date) -lt $script:TokenExpiry) { return }
+
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
+            -Body $script:TokenBody
+        $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+        $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+        Write-Host "  [INFO] App-only token refreshed (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -348,6 +357,7 @@ function Get-SiteDrives {
     # that may not surface in the /drives endpoint.
     param([string]$SiteId)
     if ($script:AppOnlyHeaders) {
+        Update-AppOnlyToken
         $drives  = [System.Collections.Generic.List[object]]::new()
         $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
                    '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
@@ -400,6 +410,7 @@ function Get-AllDriveItems {
         $children = [System.Collections.Generic.List[object]]::new()
         try {
             if ($script:AppOnlyHeaders) {
+                Update-AppOnlyToken
                 $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$($current.Id)/children" +
                             '?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200'
                 do {
