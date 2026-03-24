@@ -17,13 +17,15 @@
     Run with -Apply to perform the full recursive scan including version history.
 
     Authentication:
-      By default the script connects interactively, creates a temporary App Registration
-      with Sites.Read.All application permission, runs the report, and deletes the app
-      when done. Enumerating all sites requires app-only auth — delegated is not supported
-      by Microsoft.
+      By default the script connects interactively (delegated), creates a temporary App
+      Registration with Sites.Read.All application permission, fetches a short-lived
+      app-only token for site enumeration, and deletes the app when done. File/drive
+      operations use the delegated session throughout.
+
+      Enumerating all sites requires app-only auth — delegated is not supported by Microsoft.
 
       To skip auto-create and use your own app, pass -ClientId + -TenantId + -ClientSecret
-      (or -CertificateThumbprint).
+      (or -CertificateThumbprint). The script will then connect fully app-only.
 
 .PARAMETER SiteUrl
     Scan a single site. If omitted, all sites in the tenant are scanned.
@@ -94,11 +96,13 @@ $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
 $detailCsv   = Join-Path $outputDir "SharePoint_Detail_$ts.csv"
 
-# ── Temp app tracking ──────────────────────────────────────────────────────────
+# ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
+$script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
 
 function Remove-TempApp {
+    # Delegated session is still open here — Remove-MgApplication works
     if ($script:TempAppObjectId) {
         Write-Host "  Removing temporary App Registration..." -ForegroundColor DarkGray
         try {
@@ -138,7 +142,7 @@ if (-not $Apply) {
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
     if ($ClientId -and $TenantId) {
-        # Use provided app credentials — skip auto-create
+        # ── Provided app credentials → full app-only SDK connection ──────────
         if ($CertificateThumbprint) {
             Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
                 -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
@@ -153,22 +157,26 @@ try {
         }
         $script:ConnectedHere = $true
         Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
+
     } else {
-        # Auto mode: connect interactively → create temp app → reconnect app-only
-        Write-Host "  Connecting interactively to create temporary App Registration..." -ForegroundColor Cyan
+        # ── Auto mode: delegated session stays open throughout ────────────────
+        # The delegated session is used for:  app create/delete, drive ops, file ops
+        # A separate short-lived app-only REST token is used only for getAllSites
+        Write-Host "  Connecting interactively..." -ForegroundColor Cyan
         Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
         Connect-MgGraph -Scopes @(
             'Application.ReadWrite.All'
             'AppRoleAssignment.ReadWrite.All'
+            'Sites.Read.All'
+            'Files.Read.All'
         ) -NoWelcome -ErrorAction Stop
+        $script:ConnectedHere = $true
 
         $ctx          = Get-MgContext
         $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
-
         if (-not $usedTenantId) {
             Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
-            Disconnect-MgGraph -ErrorAction SilentlyContinue
-            exit 1
+            Remove-TempApp; exit 1
         }
 
         # Create temporary App Registration
@@ -177,7 +185,7 @@ try {
         $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
         $script:TempAppObjectId = $app.Id
 
-        # Create Service Principal
+        # Service Principal
         $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
 
         # Assign Sites.Read.All application permission + grant admin consent
@@ -189,7 +197,7 @@ try {
             -ResourceId         $graphSp.Id `
             -AppRoleId          $appRole.Id `
             -ErrorAction Stop | Out-Null
-        Write-Host "  [OK]   Sites.Read.All assigned + admin consent granted." -ForegroundColor DarkGray
+        Write-Host "  [OK]   Sites.Read.All granted." -ForegroundColor DarkGray
 
         # Create short-lived client secret (expires in 1 day)
         $secret = Add-MgApplicationPassword `
@@ -199,41 +207,43 @@ try {
                 endDateTime = (Get-Date).AddDays(1)
             } -ErrorAction Stop
 
-        # Disconnect delegated session before connecting app-only
-        Disconnect-MgGraph -ErrorAction SilentlyContinue
+        # Get app-only OAuth token via REST — no SDK reconnect needed
+        # The delegated session stays open so Remove-MgApplication works at the end
+        Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
+        $tokenBody = @{
+            grant_type    = 'client_credentials'
+            scope         = 'https://graph.microsoft.com/.default'
+            client_id     = $app.AppId
+            client_secret = $secret.SecretText
+        }
 
-        Write-Host "  Connecting with app-only credentials..." -ForegroundColor Cyan
-        $secureSecret = ConvertTo-SecureString $secret.SecretText -AsPlainText -Force
-        $cred = [System.Management.Automation.PSCredential]::new($app.AppId, $secureSecret)
-
-        # Retry — service principal propagation can take a few seconds
-        $connected = $false
+        $appOnlyToken = $null
         for ($i = 1; $i -le 6; $i++) {
             try {
-                Connect-MgGraph -ClientId $app.AppId -TenantId $usedTenantId `
-                    -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
-                $connected = $true
+                $tokenResp    = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                    -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
+                    -Body $tokenBody
+                $appOnlyToken = $tokenResp.access_token
                 break
             } catch {
                 if ($i -lt 6) {
-                    Write-Host ("  [INFO] Waiting for propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                    Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
                     Start-Sleep -Seconds 5
                 }
             }
         }
 
-        if (-not $connected) {
-            Write-Host "  [ERROR] Could not authenticate with temporary app. Try again in a moment." -ForegroundColor Red
-            Remove-TempApp
-            exit 1
+        if (-not $appOnlyToken) {
+            Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
+            Remove-TempApp; exit 1
         }
-        $script:ConnectedHere = $true
-        Write-Host "  [OK]   Connected." -ForegroundColor DarkGray
+
+        $script:AppOnlyHeaders = @{ Authorization = "Bearer $appOnlyToken" }
+        Write-Host "  [OK]   Token obtained." -ForegroundColor DarkGray
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-    Remove-TempApp
-    exit 1
+    Remove-TempApp; exit 1
 }
 
 # ── Get sites ─────────────────────────────────────────────────────────────────
@@ -255,7 +265,39 @@ if ($SiteUrl) {
         Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
+} elseif ($script:AppOnlyHeaders) {
+    # Auto mode: enumerate all sites using app-only REST token
+    # Retry first call — consent may take a few seconds to propagate
+    $sites = [System.Collections.Generic.List[object]]::new()
+    $firstUri = 'https://graph.microsoft.com/v1.0/sites/getAllSites?$select=id,displayName,webUrl&$top=200'
+    $firstDone = $false
+
+    for ($i = 1; $i -le 6; $i++) {
+        try {
+            $response = Invoke-RestMethod -Uri $firstUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
+            $nextUri = $response.'@odata.nextLink'
+            $firstDone = $true
+            break
+        } catch {
+            if ($i -lt 6) {
+                Write-Host ("  [INFO] Waiting for consent propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                Start-Sleep -Seconds 5
+            } else {
+                Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
+        }
+    }
+
+    # Continue pagination
+    while ($firstDone -and $nextUri) {
+        $response = Invoke-RestMethod -Uri $nextUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+        $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
+        $nextUri = $response.'@odata.nextLink'
+    }
 } else {
+    # Provided credentials — app-only SDK connection, use Get-MgAllSite
     try {
         $sites = @(Get-MgAllSite -All -Property 'id,displayName,webUrl' -ErrorAction Stop)
     } catch {
