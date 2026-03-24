@@ -314,16 +314,25 @@ $sites = [System.Collections.Generic.List[object]]::new(
     @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
 )
 
-# Add sub-sites — getAllSites only returns site collections, not nested webs
-# Sub-sites are rare in modern SharePoint but older tenants may have them
+# Add sub-sites at all depths — getAllSites returns site collections only, not nested webs.
+# Standard Teams channels appear as document libraries in the parent site (handled by /lists).
+# Private/shared Teams channels appear as separate site collections (handled by getAllSites).
+# Classic SharePoint sub-webs require explicit enumeration via /sites/{id}/sites.
 if ($script:AppOnlyHeaders) {
-    $subSitesToCheck = @($sites)  # snapshot before we start adding
-    foreach ($parentSite in $subSitesToCheck) {
+    $subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
+    $sites | ForEach-Object { $subSiteQueue.Enqueue($_) }
+
+    while ($subSiteQueue.Count -gt 0) {
+        $parent = $subSiteQueue.Dequeue()
         try {
+            Update-AppOnlyToken
             $subResp = Invoke-RestMethod `
-                -Uri     "https://graph.microsoft.com/v1.0/sites/$($parentSite.id)/sites" `
+                -Uri     "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites" `
                 -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            $subResp.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
+            $subResp.value | Where-Object { $_.id } | ForEach-Object {
+                $sites.Add($_)          # add to scan list
+                $subSiteQueue.Enqueue($_)  # also check its children
+            }
         } catch {
             # Most sites have no sub-sites — silently skip
         }
