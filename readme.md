@@ -162,6 +162,12 @@ Audit scripts for Microsoft 365 groups via Microsoft Graph. CSV exports go to `C
 
 - Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
 
+### 🧪 Testing — SharePoint
+Storage audit scripts for SharePoint Online via Microsoft Graph. CSV exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
+
+- Report storage usage across all sites in a tenant — current file sizes + version history per library and per file
+- Quick mode (quota data only) or full recursive scan with `-Apply`
+
 ### 🌐 DNS Management
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
@@ -251,6 +257,9 @@ M365-Scripts/
         │   └── readme.md
         ├── Network/
         │   └── Test-Ports.ps1
+        ├── SharePoint/
+        │   ├── Get-SharePointStorageReport.ps1
+        │   └── readme.md
         └── SMTP/
             ├── testsmtp.ps1
             ├── testsmtp_5min.ps1
@@ -281,6 +290,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 | Added `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — tenant-wide SharePoint storage report with version history per file; quick mode (quota) and full recursive scan |
 | 2026-03-24 | Added `scripts/Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` — OpenVPN Connect diagnostics: PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; txt export to `C:\Temp\` |
 | 2026-03-23 | All CSV exports now go to `C:\Temp\` (Windows) or `~/Downloads/` (macOS/Linux) — no longer written to current directory |
 | 2026-03-23 | Added `scripts/Custom Scripts/DNS/Import-DnsRecords.ps1` — resolve public DNS via dig (Google 8.8.8.8) and import A/CNAME records into AD DNS, dry-run by default |
