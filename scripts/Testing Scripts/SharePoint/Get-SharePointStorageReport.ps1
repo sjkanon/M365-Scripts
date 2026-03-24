@@ -306,7 +306,10 @@ if ($SiteUrl) {
     }
 }
 
-Write-Host ("  Found {0} site(s)" -f $sites.Count) -ForegroundColor Green
+# Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/)
+$sites = @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
+
+Write-Host ("  Found {0} site(s) (personal sites excluded)" -f $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -328,11 +331,40 @@ function Test-IsFile {
     return $knownExtensions.Contains($ext)
 }
 
+function Invoke-GraphGet {
+    # Unified GET helper: uses app-only REST headers when available, otherwise SDK
+    param([string]$Uri)
+    if ($script:AppOnlyHeaders) {
+        return Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0$Uri" `
+            -Headers $script:AppOnlyHeaders -ErrorAction Stop
+    } else {
+        return Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputType PSObject -ErrorAction Stop
+    }
+}
+
+function Get-SiteDrives {
+    param([string]$SiteId)
+    if ($script:AppOnlyHeaders) {
+        $resp = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/sites/$SiteId/drives" `
+            -Headers $script:AppOnlyHeaders -ErrorAction Stop
+        return $resp.value
+    } else {
+        return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+    }
+}
+
 function Get-VersionSize {
     param([string]$DriveId, [string]$ItemId)
     try {
-        $versions = Get-MgDriveItemVersion -DriveId $DriveId -DriveItemId $ItemId -ErrorAction Stop
-        $size = ($versions | Where-Object { $_.Size } | Measure-Object -Property Size -Sum).Sum
+        if ($script:AppOnlyHeaders) {
+            $resp     = Invoke-RestMethod `
+                -Uri     "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/versions" `
+                -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $versions = $resp.value
+        } else {
+            $versions = Get-MgDriveItemVersion -DriveId $DriveId -DriveItemId $ItemId -ErrorAction Stop
+        }
+        $size = ($versions | Where-Object { $_.size } | Measure-Object -Property size -Sum).Sum
         return @{ Count = $versions.Count; Size = [int64]($size ?? 0) }
     } catch {
         return @{ Count = 0; Size = [int64]0 }
@@ -351,8 +383,21 @@ function Get-AllDriveItems {
     while ($queue.Count -gt 0) {
         $current = $queue.Dequeue()
 
+        # Collect all children (paginated)
+        $children = [System.Collections.Generic.List[object]]::new()
         try {
-            $children = Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $current.Id -All -ErrorAction Stop
+            if ($script:AppOnlyHeaders) {
+                $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$($current.Id)/children" +
+                            '?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200'
+                do {
+                    $resp = Invoke-RestMethod -Uri $childUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp.value | ForEach-Object { $children.Add($_) }
+                    $childUri = $resp.'@odata.nextLink'
+                } while ($childUri)
+            } else {
+                Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $current.Id -All -ErrorAction Stop |
+                    ForEach-Object { $children.Add($_) }
+            }
         } catch {
             Write-Host ("          [ERROR] Cannot read folder '{0}': {1}" -f $current.Path, $_.Exception.Message) -ForegroundColor Red
             continue
@@ -407,7 +452,7 @@ foreach ($site in $sites) {
     # Quick mode: use quota data from drives (no file enumeration)
     if (-not $Apply) {
         try {
-            $drives = Get-MgSiteDrive -SiteId $siteId -ErrorAction Stop
+            $drives = Get-SiteDrives -SiteId $siteId
             foreach ($drive in $drives) {
                 $quota = $drive.quota
                 $summaryRows.Add([PSCustomObject]@{
@@ -434,7 +479,7 @@ foreach ($site in $sites) {
 
     # Full scan mode
     try {
-        $drives = Get-MgSiteDrive -SiteId $siteId -ErrorAction Stop
+        $drives = Get-SiteDrives -SiteId $siteId
     } catch {
         Write-Host "        [ERROR] Cannot access drives: $($_.Exception.Message)" -ForegroundColor Red
         continue
