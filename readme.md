@@ -168,6 +168,14 @@ Storage audit scripts for SharePoint Online via Microsoft Graph. CSV exports go 
 - Report storage usage across all sites in a tenant — current file sizes + version history per library and per file
 - Quick mode (quota data only) or full recursive scan with `-Apply`
 
+### 📊 SAS Batch Monitoring
+Monitor SAS batch job logs and Windows Event Viewer for errors, with optional Zabbix integration and email alerts.
+
+- Detects spawn errors, WORK library auth failures, aborts, disk errors, and general `ERROR:` lines
+- Text, JSON, and Zabbix output formats; configurable look-back period
+- One-time setup script — installs to `C:\Scripts\`, creates daily scheduled task
+- Optional Zabbix UserParameter config for automated alerting
+
 ### 🌐 DNS Management
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
@@ -221,6 +229,12 @@ M365-Scripts/
     │   ├── DNS/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
     │   │   ├── example-records.csv
+    │   │   └── readme.md
+    │   ├── SAS/
+    │   │   ├── Monitor-SASBatchErrors.ps1   ← scan logs + Event Viewer for SAS errors
+    │   │   ├── Setup-SASMonitoring.ps1      ← install script, scheduled task, Zabbix config
+    │   │   ├── Test-SASWorkDirectory.ps1    ← validate WORK directory health
+    │   │   ├── zabbix_sas_monitor.conf
     │   │   └── readme.md
     │   └── Save install time/       ← USB setup toolkit
     │       ├── start.bat
@@ -306,6 +320,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 | Added `scripts/Custom Scripts/SAS/` — SAS batch error monitoring with Zabbix integration, email alerts, and Event Viewer analysis |
 | 2026-03-24 | Added `scripts/Intune/iOS-Compliance-Updater/` — auto-update minimum iOS version in Intune compliance policy via Graph API; weekly scheduled task, dry-run support, one-time Setup.ps1 |
 | 2026-03-24 | Added `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — tenant-wide SharePoint storage report with version history per file; quick mode (quota) and full recursive scan |
 | 2026-03-24 | Added `scripts/Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` — OpenVPN Connect diagnostics: PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; txt export to `C:\Temp\` |

@@ -310,9 +310,27 @@ if ($SiteUrl) {
 }
 
 # Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/)
-$sites = @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
+$sites = [System.Collections.Generic.List[object]]::new(
+    @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
+)
 
-Write-Host ("  Found {0} site(s) (personal sites excluded)" -f $sites.Count) -ForegroundColor Green
+# Add sub-sites — getAllSites only returns site collections, not nested webs
+# Sub-sites are rare in modern SharePoint but older tenants may have them
+if ($script:AppOnlyHeaders) {
+    $subSitesToCheck = @($sites)  # snapshot before we start adding
+    foreach ($parentSite in $subSitesToCheck) {
+        try {
+            $subResp = Invoke-RestMethod `
+                -Uri     "https://graph.microsoft.com/v1.0/sites/$($parentSite.id)/sites" `
+                -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $subResp.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
+        } catch {
+            # Most sites have no sub-sites — silently skip
+        }
+    }
+}
+
+Write-Host ("  Found {0} site(s) (personal sites and sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
