@@ -121,12 +121,20 @@ if ($SiteUrl) {
         exit 1
     }
 } else {
-    # Paginate through all sites
+    # Paginate through all sites (beta search=* works with Sites.Read.All without SharePoint admin)
     $sites = [System.Collections.Generic.List[object]]::new()
-    $uri   = 'https://graph.microsoft.com/v1.0/sites/getAllSites?$select=id,displayName,webUrl&$top=200'
+    $uri   = 'https://graph.microsoft.com/beta/sites?search=*&$select=id,displayName,webUrl&$top=200'
     do {
-        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
-        $response.value | ForEach-Object { $sites.Add($_) }
+        try {
+            $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject -ErrorAction Stop
+        } catch {
+            Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+            if ($script:ConnectedHere) { Disconnect-MgGraph }
+            exit 1
+        }
+        if ($response.value) {
+            $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
+        }
         $uri = $response.'@odata.nextLink'
     } while ($uri)
 }
