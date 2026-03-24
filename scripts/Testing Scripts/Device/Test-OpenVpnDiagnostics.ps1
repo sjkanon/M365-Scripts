@@ -1,258 +1,246 @@
-#Requires -Version 5.1
-#Requires -RunAsAdministrator
-<#
-.SYNOPSIS
-    Diagnose OpenVPN Connect issues on a Windows machine.
+$output = @()
+$issues = @()
+$output += "=== OPENVPN DIAGNOSTICS ==="
+$output += "Datum: $(Get-Date)"
+$output += ""
 
-.DESCRIPTION
-    Collects and evaluates diagnostic information relevant to OpenVPN Connect:
-      - Wintun / TAP adapter status (PnP)
-      - Virtual network adapter visibility
-      - Network profile categories (Public vs Private)
-      - Installed VPN software (conflicting apps)
-      - Hyper-V / WSL / virtualisation features
-      - OpenVPN service status
-      - Active network routes
-      - DNS configuration
-      - Recent OpenVPN entries in the Windows Event Log
-
-    Results are printed to screen. Use -ExportTxt to save the full report to a file.
-
-.PARAMETER ExportTxt
-    Save the full diagnostic report to a text file.
-
-.PARAMETER OutputPath
-    Custom path for the report file. Implies -ExportTxt.
-
-.EXAMPLE
-    .\Test-OpenVpnDiagnostics.ps1
-
-.EXAMPLE
-    .\Test-OpenVpnDiagnostics.ps1 -ExportTxt
-
-.EXAMPLE
-    .\Test-OpenVpnDiagnostics.ps1 -OutputPath "C:\Temp\vpn-report.txt"
-#>
-[CmdletBinding()]
-param (
-    [switch] $ExportTxt,
-    [string] $OutputPath
-)
-
-# ── Output folder ─────────────────────────────────────────────────────────────
-$outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
-if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
-
-if ($OutputPath) {
-    $ExportTxt = $true
-} else {
-    $OutputPath = Join-Path $outputDir "OpenVpnDiagnostics_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-}
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-$output = [System.Collections.Generic.List[string]]::new()
-$issues = [System.Collections.Generic.List[string]]::new()
-
-function Add-Line {
-    param([string]$Text = '')
-    $output.Add($Text)
-    Write-Host $Text
-}
-
-function Add-Section {
-    param([string]$Title)
-    Add-Line
-    Add-Line "--- $Title ---"
-}
-
-function Add-Issue {
-    param([string]$Message, [string]$Level = 'PROBLEEM')
-    $issues.Add("[$Level] $Message")
-}
-
-# ── Header ────────────────────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Test-OpenVpnDiagnostics" -ForegroundColor Cyan
-Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host ""
-
-Add-Line "=== OPENVPN DIAGNOSTICS ==="
-Add-Line "Datum    : $(Get-Date)"
-Add-Line "Computer : $env:COMPUTERNAME"
-
-# ── Wintun / TAP adapters (PnP) ───────────────────────────────────────────────
-Add-Section "Wintun/TAP Adapters (PnP)"
-$wintun = Get-PnpDevice | Where-Object { $_.FriendlyName -like '*Wintun*' -or $_.FriendlyName -like '*TAP*' }
+# --- Wintun/TAP Adapters (PnP) ---
+$output += "--- Wintun/TAP Adapters (PnP) ---"
+$wintun = Get-PnpDevice | Where-Object {$_.FriendlyName -like "*Wintun*" -or $_.FriendlyName -like "*TAP*"}
 if ($wintun) {
     $wintun | ForEach-Object {
-        Add-Line ("  Status: {0,-8} | Naam: {1} | ID: {2}" -f $_.Status, $_.FriendlyName, $_.InstanceId)
-        if ($_.Status -ne 'OK') {
-            Add-Issue "Wintun/TAP adapter '$($_.FriendlyName)' heeft status '$($_.Status)'"
+        $output += "Status: $($_.Status) | Naam: $($_.FriendlyName) | ID: $($_.InstanceId)"
+        if ($_.Status -ne "OK") {
+            $issues += "PROBLEEM: Wintun/TAP adapter '$($_.FriendlyName)' heeft status '$($_.Status)'"
         }
     }
 } else {
-    Add-Line "  GEEN Wintun/TAP adapters gevonden"
-    Add-Issue "Geen Wintun/TAP adapter aanwezig — driver mogelijk niet geïnstalleerd"
+    $output += "GEEN Wintun/TAP adapters gevonden"
+    $issues += "PROBLEEM: Geen Wintun/TAP adapter aanwezig - driver mogelijk niet geinstalleerd"
 }
+$output += ""
 
-# ── Virtual network adapters ──────────────────────────────────────────────────
-Add-Section "Virtual Network Adapters"
-$adapters = Get-NetAdapter | Where-Object {
-    $_.InterfaceDescription -like '*Wintun*' -or
-    $_.InterfaceDescription -like '*TAP*' -or
-    $_.InterfaceDescription -like '*Virtual*' -or
-    $_.InterfaceDescription -like '*VPN*'
-}
+# --- Virtual Network Adapters ---
+$output += "--- Virtual Network Adapters ---"
+$adapters = Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*Wintun*" -or $_.InterfaceDescription -like "*TAP*" -or $_.InterfaceDescription -like "*Virtual*" -or $_.InterfaceDescription -like "*VPN*" -or $_.InterfaceDescription -like "*DCO*"}
 if ($adapters) {
     $adapters | ForEach-Object {
-        Add-Line ("  Naam: {0} | Omschrijving: {1} | Status: {2}" -f $_.Name, $_.InterfaceDescription, $_.Status)
+        $output += "Naam: $($_.Name) | Omschrijving: $($_.InterfaceDescription) | Status: $($_.Status)"
     }
 } else {
-    Add-Line "  GEEN virtuele adapters gevonden"
-    Add-Issue "Geen virtuele netwerkadapter zichtbaar — OpenVPN Connect mogelijk niet actief tijdens scan" "WAARSCHUWING"
+    $output += "GEEN virtuele adapters gevonden"
+    $issues += "WAARSCHUWING: Geen virtuele netwerkadapter zichtbaar"
 }
+$output += ""
 
-# ── Network profiles ──────────────────────────────────────────────────────────
-Add-Section "Network Profiles"
+# --- Network Profiles ---
+$output += "--- Network Profiles ---"
 Get-NetConnectionProfile | ForEach-Object {
-    Add-Line ("  Netwerk: {0} | Adapter: {1} | Categorie: {2}" -f $_.Name, $_.InterfaceAlias, $_.NetworkCategory)
-    if ($_.NetworkCategory -eq 'Public' -and (
-        $_.InterfaceAlias -like '*Wintun*' -or
-        $_.InterfaceAlias -like '*TAP*' -or
-        $_.InterfaceAlias -like '*OpenVPN*')) {
-        Add-Issue "VPN adapter '$($_.InterfaceAlias)' staat op Public netwerk — moet Private zijn"
+    $output += "Netwerk: $($_.Name) | Adapter: $($_.InterfaceAlias) | Categorie: $($_.NetworkCategory)"
+    if ($_.NetworkCategory -eq "Public" -and ($_.InterfaceAlias -like "*Wintun*" -or $_.InterfaceAlias -like "*TAP*" -or $_.InterfaceAlias -like "*OpenVPN*")) {
+        $issues += "PROBLEEM: VPN adapter '$($_.InterfaceAlias)' staat op Public netwerk - moet Private zijn"
     }
 }
+$output += ""
 
-# ── Installed VPN software ────────────────────────────────────────────────────
-Add-Section "VPN Software geïnstalleerd"
-try {
-    $vpnApps = Get-WmiObject -Class Win32_Product -ErrorAction Stop | Where-Object {
-        $_.Name -like '*VPN*' -or
-        $_.Name -like '*Cisco*' -or
-        $_.Name -like '*WireGuard*' -or
-        $_.Name -like '*OpenVPN*'
-    }
-    if ($vpnApps) {
-        $vpnApps | ForEach-Object {
-            Add-Line ("  App: {0} | Versie: {1}" -f $_.Name, $_.Version)
-            if ($_.Name -notlike '*OpenVPN Connect*') {
-                Add-Issue "Mogelijk conflicterende VPN software gevonden: '$($_.Name)'" "WAARSCHUWING"
-            }
-        }
-    } else {
-        Add-Line "  Geen VPN software gevonden"
-        Add-Issue "OpenVPN Connect niet gevonden in geïnstalleerde software"
-    }
-} catch {
-    Add-Line "  WMI query mislukt: $_"
+# --- VPN Software ---
+$output += "--- VPN Software geinstalleerd ---"
+$vpnApps = Get-WmiObject -Class Win32_Product | Where-Object {
+    $_.Name -like "*VPN*" -or 
+    $_.Name -like "*Cisco*" -or 
+    $_.Name -like "*WireGuard*" -or 
+    $_.Name -like "*OpenVPN*"
 }
-
-# ── Hyper-V / WSL / virtualisation ───────────────────────────────────────────
-Add-Section "Hyper-V / WSL / Virtualisatie"
-try {
-    $virtFeatures = Get-WindowsOptionalFeature -Online -ErrorAction Stop | Where-Object {
-        $_.FeatureName -like '*Hyper-V*' -or
-        $_.FeatureName -like '*VirtualMachinePlatform*' -or
-        $_.FeatureName -like '*WSL*'
-    }
-    if ($virtFeatures) {
-        $virtFeatures | ForEach-Object {
-            Add-Line ("  {0,-40} : {1}" -f $_.FeatureName, $_.State)
-            if ($_.State -eq 'Enabled' -and $_.FeatureName -like '*Hyper-V*') {
-                Add-Issue "Hyper-V is ingeschakeld — kan conflicteren met Wintun driver" "WAARSCHUWING"
-            }
-        }
-    } else {
-        Add-Line "  Geen virtualisatie-features gevonden"
-    }
-} catch {
-    Add-Line "  Ophalen Windows features mislukt: $_"
-}
-
-# ── OpenVPN service ───────────────────────────────────────────────────────────
-Add-Section "OpenVPN Service"
-$vpnServices = Get-Service | Where-Object { $_.DisplayName -like '*OpenVPN*' -or $_.Name -like '*OpenVPN*' }
-if ($vpnServices) {
-    $vpnServices | ForEach-Object {
-        Add-Line ("  Service: {0} | Status: {1} | StartType: {2}" -f $_.DisplayName, $_.Status, $_.StartType)
-        if ($_.Status -ne 'Running') {
-            Add-Issue "OpenVPN service '$($_.DisplayName)' is niet actief (status: $($_.Status))"
+if ($vpnApps) {
+    $vpnApps | ForEach-Object {
+        $output += "App: $($_.Name) | Versie: $($_.Version)"
+        if ($_.Name -notlike "*OpenVPN Connect*") {
+            $issues += "WAARSCHUWING: Mogelijk conflicterende VPN software gevonden: '$($_.Name)'"
         }
     }
 } else {
-    Add-Line "  Geen OpenVPN service gevonden"
-    Add-Issue "Geen OpenVPN service aanwezig — OpenVPN Connect mogelijk niet correct geïnstalleerd"
+    $output += "Geen VPN software gevonden"
+    $issues += "PROBLEEM: OpenVPN Connect niet gevonden in geinstalleerde software"
 }
+$output += ""
 
-# ── Active routes ─────────────────────────────────────────────────────────────
-Add-Section "Actieve Routes (VPN-gerelateerd)"
-$vpnAdapterIndices = (Get-NetAdapter | Where-Object {
-    $_.InterfaceDescription -like '*Wintun*' -or
-    $_.InterfaceDescription -like '*TAP*' -or
-    $_.InterfaceDescription -like '*VPN*'
-}).ifIndex
+# --- Hyper-V / WSL / Virtualisatie ---
+$output += "--- Hyper-V / WSL / Virtualisatie ---"
+$virtFeatures = Get-WindowsOptionalFeature -Online | Where-Object {
+    $_.FeatureName -like "*Hyper-V*" -or 
+    $_.FeatureName -like "*VirtualMachinePlatform*" -or 
+    $_.FeatureName -like "*WSL*"
+}
+$virtFeatures | ForEach-Object {
+    $output += "Feature: $($_.FeatureName) | Status: $($_.State)"
+    if ($_.State -eq "Enabled" -and $_.FeatureName -like "*Hyper-V*") {
+        $issues += "WAARSCHUWING: Hyper-V is ingeschakeld - kan conflicteren met Wintun driver"
+    }
+}
+$output += ""
 
-if ($vpnAdapterIndices) {
-    $routes = Get-NetRoute | Where-Object { $vpnAdapterIndices -contains $_.InterfaceIndex }
-    if ($routes) {
-        $routes | ForEach-Object {
-            Add-Line ("  {0,-20} via {1,-16} (metric: {2})" -f $_.DestinationPrefix, $_.NextHop, $_.RouteMetric)
+# --- PnPUtil ---
+$output += "--- Wintun/TAP in PnPUtil ---"
+$pnpOutput = pnputil /enum-drivers 2>&1
+$lines = $pnpOutput -split "`n"
+$foundInPnp = $false
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match "wintun|tap") {
+        $foundInPnp = $true
+        $start = [Math]::Max(0, $i - 1)
+        $end = [Math]::Min($lines.Count - 1, $i + 3)
+        $output += $lines[$start..$end]
+    }
+}
+if (-not $foundInPnp) {
+    $output += "Geen Wintun/TAP driver gevonden in PnPUtil"
+    $issues += "PROBLEEM: Wintun/TAP driver niet geregistreerd in PnPUtil"
+}
+$output += ""
+
+# --- OpenVPN Services ---
+$output += "--- OpenVPN Services ---"
+$services = Get-Service | Where-Object {$_.DisplayName -like "*OpenVPN*" -or $_.DisplayName -like "*Wintun*"}
+if ($services) {
+    $services | ForEach-Object {
+        $output += "Service: $($_.DisplayName) | Status: $($_.Status) | Starttype: $($_.StartType)"
+        if ($_.Status -ne "Running") {
+            $issues += "WAARSCHUWING: Service '$($_.DisplayName)' is niet actief (Status: $($_.Status))"
         }
-    } else {
-        Add-Line "  Geen routes via VPN adapter"
-        Add-Issue "VPN adapter aanwezig maar geen routes — tunnel mogelijk niet actief" "WAARSCHUWING"
     }
 } else {
-    Add-Line "  Geen VPN adapter gevonden — routes overgeslagen"
+    $output += "Geen OpenVPN services gevonden"
+    $issues += "PROBLEEM: Geen OpenVPN service aanwezig"
 }
+$output += ""
 
-# ── DNS configuration ─────────────────────────────────────────────────────────
-Add-Section "DNS Configuratie"
-Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | ForEach-Object {
-    $dns = (Get-DnsClientServerAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses
-    if ($dns) {
-        Add-Line ("  Adapter: {0,-25} | DNS: {1}" -f $_.Name, ($dns -join ', '))
+# --- OpenVPN Connect Logs ---
+$output += "--- OpenVPN Connect Logs ---"
+$logPaths = @(
+    "$env:LOCALAPPDATA\OpenVPN Connect\logs",
+    "C:\Users\*\AppData\Local\OpenVPN Connect\logs"
+)
+
+$logFound = $false
+foreach ($path in $logPaths) {
+    $resolvedPaths = Resolve-Path $path -ErrorAction SilentlyContinue
+    foreach ($resolvedPath in $resolvedPaths) {
+        if (Test-Path $resolvedPath) {
+            $logFiles = Get-ChildItem -Path $resolvedPath -Filter "*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 3
+            foreach ($logFile in $logFiles) {
+                $logFound = $true
+                $output += ""
+                $output += ">> Logbestand: $($logFile.FullName) (Laatst gewijzigd: $($logFile.LastWriteTime))"
+                
+                $logContent = Get-Content $logFile.FullName -Tail 50 -ErrorAction SilentlyContinue
+                $relevantLines = $logContent | Where-Object {
+                    $_ -match "error|warn|fail|timeout|disconnect|connect|tun|tap|wintun|dco|protect|socket|fatal" 
+                }
+                
+                if ($relevantLines) {
+                    $output += "Relevante log regels:"
+                    $relevantLines | ForEach-Object { 
+                        $output += "  $_"
+                        if ($_ -match "protect\(\) method") {
+                            $issues += "PROBLEEM: 'protect() method' fout gevonden in log - TAP/Wintun driver conflict"
+                        }
+                        if ($_ -match "general tun error") {
+                            $issues += "PROBLEEM: 'General tun error' gevonden in log - tunnel interface kan niet aangemaakt worden"
+                        }
+                        if ($_ -match "access.denied|access denied") {
+                            $issues += "PROBLEEM: 'Access Denied' in log - rechtenprobleem op driver of adapter"
+                        }
+                        if ($_ -match "fatal") {
+                            $issues += "PROBLEEM: Fatale fout gevonden in log: $_"
+                        }
+                    }
+                } else {
+                    $output += "Geen relevante foutmeldingen gevonden in laatste 50 regels"
+                }
+            }
+        }
     }
 }
 
-# ── Event log ─────────────────────────────────────────────────────────────────
-Add-Section "Event Log (laatste 20 OpenVPN entries)"
+if (-not $logFound) {
+    $output += "Geen OpenVPN Connect logbestanden gevonden"
+    $issues += "WAARSCHUWING: Geen logbestanden gevonden - OpenVPN Connect mogelijk nooit gestart"
+}
+$output += ""
+
+# --- Windows Event Log laatste 24 uur ---
+$output += "--- Windows Event Log VPN/Driver fouten (laatste 24 uur) ---"
 try {
-    $events = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = '*OpenVPN*' } `
-        -MaxEvents 20 -ErrorAction Stop
-    $events | ForEach-Object {
-        Add-Line ("  [{0}] {1} — {2}" -f $_.LevelDisplayName, $_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'), $_.Message.Split("`n")[0])
+    $events24u = Get-WinEvent -FilterHashtable @{
+        LogName   = 'System'
+        Level     = 1, 2, 3
+        StartTime = (Get-Date).AddHours(-24)
+    } -ErrorAction SilentlyContinue | Where-Object {
+        $_.Message -match "VPN|TAP|Wintun|OpenVPN|tun|network adapter|DCO"
+    } | Select-Object -First 10
+
+    if ($events24u) {
+        $events24u | ForEach-Object {
+            $output += "Tijd: $($_.TimeCreated) | Level: $($_.LevelDisplayName) | Bron: $($_.ProviderName)"
+            $output += "  Bericht: $($_.Message.Substring(0, [Math]::Min(200, $_.Message.Length)))"
+            $output += ""
+            if ($_.Level -le 2) {
+                $issues += "PROBLEEM: Windows Event Log fout van '$($_.ProviderName)' om $($_.TimeCreated)"
+            }
+        }
+    } else {
+        $output += "Geen relevante fouten gevonden in laatste 24 uur"
     }
 } catch {
-    Add-Line "  Geen OpenVPN entries gevonden in Event Log (of toegang geweigerd)"
+    $output += "Kon Windows Event Log niet lezen: $_"
 }
+$output += ""
 
-# ── Issues summary ────────────────────────────────────────────────────────────
-Add-Line
-Add-Line "=== SAMENVATTING ==="
+# --- Windows Event Log laatste maand ---
+$output += "--- Windows Event Log VPN/Driver fouten (laatste maand) ---"
+try {
+    $events1m = Get-WinEvent -FilterHashtable @{
+        LogName   = 'System'
+        Level     = 1, 2, 3
+        StartTime = (Get-Date).AddDays(-30)
+        EndTime   = (Get-Date).AddHours(-24)
+    } -ErrorAction SilentlyContinue | Where-Object {
+        $_.Message -match "VPN|TAP|Wintun|OpenVPN|tun|network adapter|DCO"
+    } | Select-Object -First 20
+
+    if ($events1m) {
+        $output += "Aantal gevonden events: $($events1m.Count)"
+        $output += ""
+        $events1m | ForEach-Object {
+            $output += "Tijd: $($_.TimeCreated) | Level: $($_.LevelDisplayName) | Bron: $($_.ProviderName)"
+            $output += "  Bericht: $($_.Message.Substring(0, [Math]::Min(200, $_.Message.Length)))"
+            $output += ""
+        }
+    } else {
+        $output += "Geen relevante fouten gevonden in laatste maand"
+    }
+} catch {
+    $output += "Kon Windows Event Log niet lezen: $_"
+}
+$output += ""
+
+# --- SAMENVATTING ---
+$output += "=== SAMENVATTING ==="
 if ($issues.Count -eq 0) {
-    Add-Line "  Geen problemen gevonden."
-    Write-Host "  Geen problemen gevonden." -ForegroundColor Green
+    $output += "RESULTAAT: Geen problemen gevonden"
+    $exitCode = 0
 } else {
-    $issues | ForEach-Object {
-        $color = if ($_ -like '*[PROBLEEM]*') { 'Red' } else { 'Yellow' }
-        Add-Line "  $_"
-        Write-Host "  $_" -ForegroundColor $color
+    $output += "RESULTAAT: $($issues.Count) probleem/waarschuwing(en) gevonden:"
+    $issues | ForEach-Object { $output += "  >> $_" }
+    $hardIssues = $issues | Where-Object {$_ -like "PROBLEEM:*"}
+    if ($hardIssues) {
+        $exitCode = 2
+    } else {
+        $exitCode = 1
     }
 }
-Add-Line
+$output += "=== DONE ==="
 
-# ── Export ────────────────────────────────────────────────────────────────────
-if ($ExportTxt) {
-    $output | Set-Content -Path $OutputPath -Encoding UTF8
-    Write-Host ""
-    Write-Host "  Rapport opgeslagen: $OutputPath" -ForegroundColor Cyan
-}
+$output | ForEach-Object { Write-Output $_ }
 
-Write-Host ""
-Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host ("  Gevonden issues : {0}" -f $issues.Count) -ForegroundColor $(if ($issues.Count -gt 0) { 'Yellow' } else { 'Green' })
-Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host ""
+exit $exitCode

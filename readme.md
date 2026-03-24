@@ -247,7 +247,8 @@ M365-Scripts/
         │   ├── Test-MailboxPermissions.ps1
         │   └── readme.md
         ├── Device/
-        │   └── Test-OpenVpnDiagnostics.ps1
+        │   ├── Test-OpenVpnDiagnostics.ps1
+        │   └── readme.md
         ├── Network/
         │   └── Test-Ports.ps1
         └── SMTP/
