@@ -26,7 +26,17 @@
     Override the default output folder.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Required when using app-only auth (-ClientId / -ClientSecret).
+
+.PARAMETER ClientId
+    App Registration client ID. Use together with -TenantId and -ClientSecret for app-only auth.
+    Required to enumerate all sites — delegated auth cannot list all SharePoint sites by design.
+
+.PARAMETER ClientSecret
+    Client secret for app-only auth. Use together with -TenantId and -ClientId.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only auth (alternative to -ClientSecret).
 
 .PARAMETER Apply
     Perform the full recursive file scan. Without this switch, only quota data
@@ -54,6 +64,9 @@ param (
     [switch] $SkipVersions,
     [string] $OutputPath,
     [string] $TenantId,
+    [string] $ClientId,
+    [string] $ClientSecret,
+    [string] $CertificateThumbprint,
     [switch] $Apply
 )
 
@@ -69,14 +82,39 @@ $detailCsv   = Join-Path $outputDir "SharePoint_Detail_$ts.csv"
 
 # ── Connection ────────────────────────────────────────────────────────────────
 $script:ConnectedHere = $false
-try {
-    $null = Get-MgSite -SiteId 'root' -ErrorAction Stop
-} catch {
-    $scopes = @('Sites.Read.All', 'Files.Read.All')
-    $connectParams = @{ Scopes = $scopes; NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
+
+if ($ClientId -and $TenantId) {
+    # App-only auth — required for enumerating all sites
+    $connectParams = @{ ClientId = $ClientId; TenantId = $TenantId; NoWelcome = $true }
+
+    if ($CertificateThumbprint) {
+        $connectParams['CertificateThumbprint'] = $CertificateThumbprint
+    } elseif ($ClientSecret) {
+        $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+        $connectParams['ClientSecretCredential'] = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
+    } else {
+        Write-Host "  [ERROR] App-only auth requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
+        exit 1
+    }
+
+    try {
+        Connect-MgGraph @connectParams -ErrorAction Stop
+        $script:ConnectedHere = $true
+    } catch {
+        Write-Host "  [ERROR] App-only authentication failed: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    # Fall back to existing session or interactive delegated auth
+    # Note: enumerating all sites requires app-only auth — use -ClientId / -TenantId / -ClientSecret
+    try {
+        $null = Get-MgSite -SiteId 'root' -ErrorAction Stop
+    } catch {
+        $connectParams = @{ Scopes = @('Sites.Read.All', 'Files.Read.All'); NoWelcome = $true }
+        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+        Connect-MgGraph @connectParams
+        $script:ConnectedHere = $true
+    }
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -121,22 +159,16 @@ if ($SiteUrl) {
         exit 1
     }
 } else {
-    # Paginate through all sites (beta search=* works with Sites.Read.All without SharePoint admin)
-    $sites = [System.Collections.Generic.List[object]]::new()
-    $uri   = 'https://graph.microsoft.com/beta/sites?search=*&$select=id,displayName,webUrl&$top=200'
-    do {
-        try {
-            $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject -ErrorAction Stop
-        } catch {
-            Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
-            if ($script:ConnectedHere) { Disconnect-MgGraph }
-            exit 1
-        }
-        if ($response.value) {
-            $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
-        }
-        $uri = $response.'@odata.nextLink'
-    } while ($uri)
+    # App-only auth required — Get-MgAllSite enumerates all sites including multi-geo
+    try {
+        $sites = @(Get-MgAllSite -All -Property 'id,displayName,webUrl' -ErrorAction Stop)
+    } catch {
+        Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  [INFO]  Enumerating all sites requires app-only auth." -ForegroundColor Yellow
+        Write-Host "          Use: -ClientId <id> -TenantId <id> -ClientSecret <secret>" -ForegroundColor Yellow
+        if ($script:ConnectedHere) { Disconnect-MgGraph }
+        exit 1
+    }
 }
 
 Write-Host ("  Found {0} site(s)" -f $sites.Count) -ForegroundColor Green
