@@ -123,7 +123,7 @@ if ($SiteUrl) {
 } else {
     # Paginate through all sites
     $sites = [System.Collections.Generic.List[object]]::new()
-    $uri   = 'https://graph.microsoft.com/v1.0/sites?search=*&$top=200&$select=id,displayName,webUrl,name,sharepointIds'
+    $uri   = 'https://graph.microsoft.com/v1.0/sites/getAllSites?$select=id,displayName,webUrl&$top=200'
     do {
         $response = Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType PSObject
         $response.value | ForEach-Object { $sites.Add($_) }
