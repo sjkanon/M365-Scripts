@@ -177,6 +177,15 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
 ---
 
+### 📱 Intune — iOS Compliance Updater
+Automatically keeps the minimum iOS version requirement in an Intune compliance policy up to date.
+
+- Fetches the latest iOS version from Apple's RSS feed (with fallback to Apple Support page)
+- Compares against the current policy minimum and patches via Microsoft Graph API
+- One-time setup via `Setup.ps1` (creates App Registration, assigns permissions, writes `config.json`)
+- Runs weekly as a Windows scheduled task (SYSTEM, every Monday 07:00)
+- Dry-run mode (`-WhatIf`) — shows what would change without applying
+
 ### 🖼️ Intune — Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
 
@@ -226,9 +235,16 @@ M365-Scripts/
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
     │   └── readme.md
-    ├── Intune/Get-Autopilot/
-    │   ├── Get-WindowsAutoPilotInfo.ps1
-    │   └── GetAutoPilot.CMD
+    ├── Intune/
+    │   ├── Get-Autopilot/
+    │   │   ├── Get-WindowsAutoPilotInfo.ps1
+    │   │   └── GetAutoPilot.CMD
+    │   └── iOS-Compliance-Updater/
+    │       ├── Update-iOSCompliancePolicy.ps1   ← main script (run or scheduled task)
+    │       ├── Setup.ps1                        ← one-time: App Registration + config.json
+    │       ├── Install-ScheduledTask.ps1        ← register weekly scheduled task
+    │       ├── config.example.json
+    │       └── readme.md
     ├── Reporting/
     │   └── Licensing/
     │       ├── genereer_licentie_overzicht.py
@@ -290,6 +306,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 | Added `scripts/Intune/iOS-Compliance-Updater/` — auto-update minimum iOS version in Intune compliance policy via Graph API; weekly scheduled task, dry-run support, one-time Setup.ps1 |
 | 2026-03-24 | Added `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — tenant-wide SharePoint storage report with version history per file; quick mode (quota) and full recursive scan |
 | 2026-03-24 | Added `scripts/Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` — OpenVPN Connect diagnostics: PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; txt export to `C:\Temp\` |
 | 2026-03-23 | All CSV exports now go to `C:\Temp\` (Windows) or `~/Downloads/` (macOS/Linux) — no longer written to current directory |
