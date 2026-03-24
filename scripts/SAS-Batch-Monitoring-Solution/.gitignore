@@ -1,0 +1,25 @@
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# PowerShell specific
+*.ps1xml
+
+# Output directories
+Logs/
+Reports/
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Zabbix specific
+zabbix_agentd.log
