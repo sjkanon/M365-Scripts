@@ -164,47 +164,58 @@ function Get-VersionSize {
     }
 }
 
-function Get-ItemsRecursive {
-    param([string]$DriveId, [string]$ItemId = 'root', [string]$FolderPath = '')
+function Get-AllDriveItems {
+    param([string]$DriveId)
 
+    # Iterative breadth-first traversal — no call stack limit, handles any folder depth
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
-    try {
-        $children = Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $ItemId -All -ErrorAction Stop
-    } catch {
-        return $results
-    }
+    $queue   = [System.Collections.Generic.Queue[PSCustomObject]]::new()
 
-    foreach ($child in $children) {
-        $path = if ($FolderPath) { "$FolderPath/$($child.name)" } else { $child.name }
+    # Seed with root
+    $queue.Enqueue([PSCustomObject]@{ Id = 'root'; Path = '' })
 
-        if (Test-IsFile -Item $child) {
-            $fileSize    = [int64]($child.size ?? 0)
-            $verCount    = 0
-            $verSize     = [int64]0
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
 
-            if (-not $SkipVersions) {
-                $ver      = Get-VersionSize -DriveId $DriveId -ItemId $child.id
-                $verCount = $ver.Count
-                $verSize  = $ver.Size
+        try {
+            $children = Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $current.Id -All -ErrorAction Stop
+        } catch {
+            Write-Host ("          [ERROR] Cannot read folder '{0}': {1}" -f $current.Path, $_.Exception.Message) -ForegroundColor Red
+            continue
+        }
+
+        foreach ($child in $children) {
+            $path = if ($current.Path) { "$($current.Path)/$($child.name)" } else { $child.name }
+
+            if (Test-IsFile -Item $child) {
+                $fileSize = [int64]($child.size ?? 0)
+                $verCount = 0
+                $verSize  = [int64]0
+
+                if (-not $SkipVersions) {
+                    $ver      = Get-VersionSize -DriveId $DriveId -ItemId $child.id
+                    $verCount = $ver.Count
+                    $verSize  = $ver.Size
+                }
+
+                $results.Add([PSCustomObject]@{
+                    Path             = $path
+                    SizeBytes        = $fileSize
+                    SizeMB           = [math]::Round($fileSize / 1MB, 3)
+                    VersionCount     = $verCount
+                    VersionSizeBytes = $verSize
+                    VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
+                    TotalSizeBytes   = $fileSize + $verSize
+                    TotalSizeMB      = [math]::Round(($fileSize + $verSize) / 1MB, 3)
+                    Modified         = $child.lastModifiedDateTime
+                }) | Out-Null
+            } else {
+                # Queue folder for processing — no recursion depth limit
+                $queue.Enqueue([PSCustomObject]@{ Id = $child.id; Path = $path })
             }
-
-            $results.Add([PSCustomObject]@{
-                Path            = $path
-                SizeBytes       = $fileSize
-                SizeMB          = [math]::Round($fileSize / 1MB, 3)
-                VersionCount    = $verCount
-                VersionSizeBytes= $verSize
-                VersionSizeMB   = [math]::Round($verSize / 1MB, 3)
-                TotalSizeBytes  = $fileSize + $verSize
-                TotalSizeMB     = [math]::Round(($fileSize + $verSize) / 1MB, 3)
-                Modified        = $child.lastModifiedDateTime
-            }) | Out-Null
-        } else {
-            # Folder — recurse
-            $subItems = Get-ItemsRecursive -DriveId $DriveId -ItemId $child.id -FolderPath $path
-            $subItems | ForEach-Object { $results.Add($_) | Out-Null }
         }
     }
+
     return $results
 }
 
@@ -259,7 +270,7 @@ foreach ($site in $sites) {
     foreach ($drive in $drives) {
         Write-Host ("        Scanning '{0}'..." -f $drive.name) -ForegroundColor DarkGray
 
-        $items = Get-ItemsRecursive -DriveId $drive.id
+        $items = Get-AllDriveItems -DriveId $drive.id
 
         $fileItems   = $items
         $totalFiles  = $fileItems.Count
