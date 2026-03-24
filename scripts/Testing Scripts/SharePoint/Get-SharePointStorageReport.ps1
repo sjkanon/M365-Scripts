@@ -16,6 +16,15 @@
     Run without -Apply for a fast summary (site quota data only, no file enumeration).
     Run with -Apply to perform the full recursive scan including version history.
 
+    Authentication:
+      By default the script connects interactively, creates a temporary App Registration
+      with Sites.Read.All application permission, runs the report, and deletes the app
+      when done. Enumerating all sites requires app-only auth — delegated is not supported
+      by Microsoft.
+
+      To skip auto-create and use your own app, pass -ClientId + -TenantId + -ClientSecret
+      (or -CertificateThumbprint).
+
 .PARAMETER SiteUrl
     Scan a single site. If omitted, all sites in the tenant are scanned.
 
@@ -26,33 +35,38 @@
     Override the default output folder.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Required when using app-only auth (-ClientId / -ClientSecret).
+    Entra ID tenant ID. Detected automatically from the connected account when omitted.
+    Required when using -ClientId.
 
 .PARAMETER ClientId
-    App Registration client ID. Use together with -TenantId and -ClientSecret for app-only auth.
-    Required to enumerate all sites — delegated auth cannot list all SharePoint sites by design.
+    Existing App Registration client ID. Skips auto-create. Use with -TenantId and
+    -ClientSecret or -CertificateThumbprint.
 
 .PARAMETER ClientSecret
-    Client secret for app-only auth. Use together with -TenantId and -ClientId.
+    Client secret for an existing app registration.
 
 .PARAMETER CertificateThumbprint
-    Certificate thumbprint for app-only auth (alternative to -ClientSecret).
+    Certificate thumbprint for an existing app registration.
 
 .PARAMETER Apply
     Perform the full recursive file scan. Without this switch, only quota data
     from the Graph sites API is retrieved (fast, no file enumeration).
 
 .EXAMPLE
-    # Quick summary — site quotas only (no file scan)
-    .\Get-SharePointStorageReport.ps1
+    # Auto mode — creates and deletes a temporary App Registration automatically
+    .\Get-SharePointStorageReport.ps1 -Apply
 
 .EXAMPLE
-    # Full scan — all sites, all files, including version history
-    .\Get-SharePointStorageReport.ps1 -Apply
+    # Quick summary — site quotas only, no file scan
+    .\Get-SharePointStorageReport.ps1
 
 .EXAMPLE
     # Full scan — single site
     .\Get-SharePointStorageReport.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -Apply
+
+.EXAMPLE
+    # Full scan using an existing app registration
+    .\Get-SharePointStorageReport.ps1 -Apply -ClientId "..." -TenantId "..." -ClientSecret "..."
 
 .EXAMPLE
     # Full scan — skip version history (faster)
@@ -80,40 +94,25 @@ $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
 $detailCsv   = Join-Path $outputDir "SharePoint_Detail_$ts.csv"
 
-# ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
+# ── Temp app tracking ──────────────────────────────────────────────────────────
+$script:TempAppObjectId = $null
+$script:ConnectedHere   = $false
 
-if ($ClientId -and $TenantId) {
-    # App-only auth — required for enumerating all sites
-    $connectParams = @{ ClientId = $ClientId; TenantId = $TenantId; NoWelcome = $true }
-
-    if ($CertificateThumbprint) {
-        $connectParams['CertificateThumbprint'] = $CertificateThumbprint
-    } elseif ($ClientSecret) {
-        $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-        $connectParams['ClientSecretCredential'] = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
-    } else {
-        Write-Host "  [ERROR] App-only auth requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
-        exit 1
+function Remove-TempApp {
+    if ($script:TempAppObjectId) {
+        Write-Host "  Removing temporary App Registration..." -ForegroundColor DarkGray
+        try {
+            Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
+            Write-Host "  [OK]   Temporary App Registration removed." -ForegroundColor DarkGray
+        } catch {
+            Write-Host ("  [WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
+            Write-Host "         Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
+        }
+        $script:TempAppObjectId = $null
     }
-
-    try {
-        Connect-MgGraph @connectParams -ErrorAction Stop
-        $script:ConnectedHere = $true
-    } catch {
-        Write-Host "  [ERROR] App-only authentication failed: $($_.Exception.Message)" -ForegroundColor Red
-        exit 1
-    }
-} else {
-    # Fall back to existing session or interactive delegated auth
-    # Note: enumerating all sites requires app-only auth — use -ClientId / -TenantId / -ClientSecret
-    try {
-        $null = Get-MgSite -SiteId 'root' -ErrorAction Stop
-    } catch {
-        $connectParams = @{ Scopes = @('Sites.Read.All', 'Files.Read.All'); NoWelcome = $true }
-        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-        Connect-MgGraph @connectParams
-        $script:ConnectedHere = $true
+    if ($script:ConnectedHere) {
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
+        $script:ConnectedHere = $false
     }
 }
 
@@ -136,38 +135,132 @@ if (-not $Apply) {
     Write-Host "  Mode      : Full scan including version history" -ForegroundColor Cyan
 }
 
+# ── Connection ────────────────────────────────────────────────────────────────
+try {
+    if ($ClientId -and $TenantId) {
+        # Use provided app credentials — skip auto-create
+        if ($CertificateThumbprint) {
+            Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
+                -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+        } elseif ($ClientSecret) {
+            $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+            $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
+            Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
+                -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+        } else {
+            Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
+            exit 1
+        }
+        $script:ConnectedHere = $true
+        Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
+    } else {
+        # Auto mode: connect interactively → create temp app → reconnect app-only
+        Write-Host "  Connecting interactively to create temporary App Registration..." -ForegroundColor Cyan
+        Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
+        Connect-MgGraph -Scopes @(
+            'Application.ReadWrite.All'
+            'AppRoleAssignment.ReadWrite.All'
+        ) -NoWelcome -ErrorAction Stop
+
+        $ctx          = Get-MgContext
+        $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
+
+        if (-not $usedTenantId) {
+            Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
+            Disconnect-MgGraph -ErrorAction SilentlyContinue
+            exit 1
+        }
+
+        # Create temporary App Registration
+        $appName = "SP-StorageReport-Temp-$ts"
+        Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
+        $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
+        $script:TempAppObjectId = $app.Id
+
+        # Create Service Principal
+        $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+
+        # Assign Sites.Read.All application permission + grant admin consent
+        $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Sites.Read.All' }
+        New-MgServicePrincipalAppRoleAssignment `
+            -ServicePrincipalId $sp.Id `
+            -PrincipalId        $sp.Id `
+            -ResourceId         $graphSp.Id `
+            -AppRoleId          $appRole.Id `
+            -ErrorAction Stop | Out-Null
+        Write-Host "  [OK]   Sites.Read.All assigned + admin consent granted." -ForegroundColor DarkGray
+
+        # Create short-lived client secret (expires in 1 day)
+        $secret = Add-MgApplicationPassword `
+            -ApplicationId      $app.Id `
+            -PasswordCredential @{
+                displayName = 'temp'
+                endDateTime = (Get-Date).AddDays(1)
+            } -ErrorAction Stop
+
+        # Disconnect delegated session before connecting app-only
+        Disconnect-MgGraph -ErrorAction SilentlyContinue
+
+        Write-Host "  Connecting with app-only credentials..." -ForegroundColor Cyan
+        $secureSecret = ConvertTo-SecureString $secret.SecretText -AsPlainText -Force
+        $cred = [System.Management.Automation.PSCredential]::new($app.AppId, $secureSecret)
+
+        # Retry — service principal propagation can take a few seconds
+        $connected = $false
+        for ($i = 1; $i -le 6; $i++) {
+            try {
+                Connect-MgGraph -ClientId $app.AppId -TenantId $usedTenantId `
+                    -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+                $connected = $true
+                break
+            } catch {
+                if ($i -lt 6) {
+                    Write-Host ("  [INFO] Waiting for propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                    Start-Sleep -Seconds 5
+                }
+            }
+        }
+
+        if (-not $connected) {
+            Write-Host "  [ERROR] Could not authenticate with temporary app. Try again in a moment." -ForegroundColor Red
+            Remove-TempApp
+            exit 1
+        }
+        $script:ConnectedHere = $true
+        Write-Host "  [OK]   Connected." -ForegroundColor DarkGray
+    }
+} catch {
+    Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    Remove-TempApp
+    exit 1
+}
+
 # ── Get sites ─────────────────────────────────────────────────────────────────
 Write-Host "  Retrieving sites..." -ForegroundColor Cyan
 
 if ($SiteUrl) {
     if ($SiteUrl -notmatch 'https://([^/]+)/sites/([^/]+)') {
         Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/sitename" -ForegroundColor Red
-        if ($script:ConnectedHere) { Disconnect-MgGraph }
-        exit 1
+        Remove-TempApp; exit 1
     }
     try {
         $sites = @(Get-MgSite -Search $Matches[2] -ErrorAction Stop |
                    Where-Object { $_.WebUrl -eq $SiteUrl })
         if ($sites.Count -eq 0) {
             Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
-            if ($script:ConnectedHere) { Disconnect-MgGraph }
-            exit 1
+            Remove-TempApp; exit 1
         }
     } catch {
         Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-        if ($script:ConnectedHere) { Disconnect-MgGraph }
-        exit 1
+        Remove-TempApp; exit 1
     }
 } else {
-    # App-only auth required — Get-MgAllSite enumerates all sites including multi-geo
     try {
         $sites = @(Get-MgAllSite -All -Property 'id,displayName,webUrl' -ErrorAction Stop)
     } catch {
         Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "  [INFO]  Enumerating all sites requires app-only auth." -ForegroundColor Yellow
-        Write-Host "          Use: -ClientId <id> -TenantId <id> -ClientSecret <secret>" -ForegroundColor Yellow
-        if ($script:ConnectedHere) { Disconnect-MgGraph }
-        exit 1
+        Remove-TempApp; exit 1
     }
 }
 
@@ -211,7 +304,6 @@ function Get-AllDriveItems {
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
     $queue   = [System.Collections.Generic.Queue[PSCustomObject]]::new()
 
-    # Seed with root
     $queue.Enqueue([PSCustomObject]@{ Id = 'root'; Path = '' })
 
     while ($queue.Count -gt 0) {
@@ -250,7 +342,6 @@ function Get-AllDriveItems {
                     Modified         = $child.lastModifiedDateTime
                 }) | Out-Null
             } else {
-                # Queue folder for processing — no recursion depth limit
                 $queue.Enqueue([PSCustomObject]@{ Id = $child.id; Path = $path })
             }
         }
@@ -281,8 +372,8 @@ foreach ($site in $sites) {
                     SiteName        = $siteName
                     SiteUrl         = $site.webUrl
                     Library         = $drive.name
-                    UsedGB          = if ($quota.used)  { [math]::Round($quota.used  / 1GB, 3) } else { $null }
-                    TotalGB         = if ($quota.total) { [math]::Round($quota.total / 1GB, 3) } else { $null }
+                    UsedGB          = if ($quota.used)      { [math]::Round($quota.used      / 1GB, 3) } else { $null }
+                    TotalGB         = if ($quota.total)     { [math]::Round($quota.total     / 1GB, 3) } else { $null }
                     RemainingGB     = if ($quota.remaining) { [math]::Round($quota.remaining / 1GB, 3) } else { $null }
                     State           = $quota.state
                     FileCount       = $null
@@ -386,5 +477,5 @@ if ($Apply) {
 }
 Write-Host ""
 
-# ── Disconnect ────────────────────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph }
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+Remove-TempApp
