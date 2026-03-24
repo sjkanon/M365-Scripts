@@ -141,6 +141,7 @@ Scripts for diagnosing network and mail connectivity.
 - Test TCP port connectivity on any host — single ports, ranges (`1294:1494`), combinations (`80,443,1294:1494`)
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
+- OpenVPN Connect diagnostics — PnP adapters, services, routes, DNS, Event Log, conflicting software; exports txt report to `C:\Temp\`
 
 ### 🧪 Testing — Exchange
 Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an existing session or connect automatically. CSV exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
