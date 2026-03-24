@@ -162,6 +162,20 @@ Audit scripts for Microsoft 365 groups via Microsoft Graph. CSV exports go to `C
 
 - Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
 
+### 🧪 Testing — SharePoint
+Storage audit scripts for SharePoint Online via Microsoft Graph. CSV exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
+
+- Report storage usage across all sites in a tenant — current file sizes + version history per library and per file
+- Quick mode (quota data only) or full recursive scan with `-Apply`
+
+### 📊 SAS Batch Monitoring
+Monitor SAS batch job logs and Windows Event Viewer for errors, with optional Zabbix integration and email alerts.
+
+- Detects spawn errors, WORK library auth failures, aborts, disk errors, and general `ERROR:` lines
+- Text, JSON, and Zabbix output formats; configurable look-back period
+- One-time setup script — installs to `C:\Scripts\`, creates daily scheduled task
+- Optional Zabbix UserParameter config for automated alerting
+
 ### 🌐 DNS Management
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
@@ -170,6 +184,15 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 - Idempotent — skips records that already exist
 
 ---
+
+### 📱 Intune — iOS Compliance Updater
+Automatically keeps the minimum iOS version requirement in an Intune compliance policy up to date.
+
+- Fetches the latest iOS version from Apple's RSS feed (with fallback to Apple Support page)
+- Compares against the current policy minimum and patches via Microsoft Graph API
+- One-time setup via `Setup.ps1` (creates App Registration, assigns permissions, writes `config.json`)
+- Runs weekly as a Windows scheduled task (SYSTEM, every Monday 07:00)
+- Dry-run mode (`-WhatIf`) — shows what would change without applying
 
 ### 🖼️ Intune — Desktop
 Scripts and assets for managing desktop and lockscreen configuration.
@@ -207,6 +230,12 @@ M365-Scripts/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
     │   │   ├── example-records.csv
     │   │   └── readme.md
+    │   ├── SAS/
+    │   │   ├── Monitor-SASBatchErrors.ps1   ← scan logs + Event Viewer for SAS errors
+    │   │   ├── Setup-SASMonitoring.ps1      ← install script, scheduled task, Zabbix config
+    │   │   ├── Test-SASWorkDirectory.ps1    ← validate WORK directory health
+    │   │   ├── zabbix_sas_monitor.conf
+    │   │   └── readme.md
     │   └── Save install time/       ← USB setup toolkit
     │       ├── start.bat
     │       ├── autorun.inf
@@ -220,9 +249,16 @@ M365-Scripts/
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
     │   └── readme.md
-    ├── Intune/Get-Autopilot/
-    │   ├── Get-WindowsAutoPilotInfo.ps1
-    │   └── GetAutoPilot.CMD
+    ├── Intune/
+    │   ├── Get-Autopilot/
+    │   │   ├── Get-WindowsAutoPilotInfo.ps1
+    │   │   └── GetAutoPilot.CMD
+    │   └── iOS-Compliance-Updater/
+    │       ├── Update-iOSCompliancePolicy.ps1   ← main script (run or scheduled task)
+    │       ├── Setup.ps1                        ← one-time: App Registration + config.json
+    │       ├── Install-ScheduledTask.ps1        ← register weekly scheduled task
+    │       ├── config.example.json
+    │       └── readme.md
     ├── Reporting/
     │   └── Licensing/
     │       ├── genereer_licentie_overzicht.py
@@ -251,6 +287,9 @@ M365-Scripts/
         │   └── readme.md
         ├── Network/
         │   └── Test-Ports.ps1
+        ├── SharePoint/
+        │   ├── Get-SharePointStorageReport.ps1
+        │   └── readme.md
         └── SMTP/
             ├── testsmtp.ps1
             ├── testsmtp_5min.ps1
@@ -281,6 +320,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-24 | Added `scripts/Custom Scripts/SAS/` — SAS batch error monitoring with Zabbix integration, email alerts, and Event Viewer analysis |
+| 2026-03-24 | Added `scripts/Intune/iOS-Compliance-Updater/` — auto-update minimum iOS version in Intune compliance policy via Graph API; weekly scheduled task, dry-run support, one-time Setup.ps1 |
+| 2026-03-24 | Added `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — tenant-wide SharePoint storage report with version history per file; quick mode (quota) and full recursive scan |
 | 2026-03-24 | Added `scripts/Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` — OpenVPN Connect diagnostics: PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; txt export to `C:\Temp\` |
 | 2026-03-23 | All CSV exports now go to `C:\Temp\` (Windows) or `~/Downloads/` (macOS/Linux) — no longer written to current directory |
 | 2026-03-23 | Added `scripts/Custom Scripts/DNS/Import-DnsRecords.ps1` — resolve public DNS via dig (Google 8.8.8.8) and import A/CNAME records into AD DNS, dry-run by default |
