@@ -168,6 +168,8 @@ Storage audit scripts for SharePoint Online via Microsoft Graph. CSV exports go 
 - Report storage usage across all sites in a tenant — current file sizes + version history per library and per file
 - Quick mode (quota data only) or full recursive scan with `-Apply`
 
+
+
 ### 🌐 DNS Management
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
@@ -221,6 +223,7 @@ M365-Scripts/
     │   ├── DNS/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
     │   │   ├── example-records.csv
+    │   │   └── readme.md
     │   │   └── readme.md
     │   └── Save install time/       ← USB setup toolkit
     │       ├── start.bat
