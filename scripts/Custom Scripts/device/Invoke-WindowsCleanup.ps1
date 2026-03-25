@@ -426,86 +426,67 @@ if ($SkipAppLogs) {
         Add-Result 'App Logs' 'CBS archived logs (CbsPersist*.cab)' $cbsSize (if ($Apply) { 0 } else { $cbsSize })
     }
 
-    # Windows & Microsoft log directories (all archival, recreated automatically)
+    # Fixed Windows system log directories
     $sysLogPaths = @(
-        @{ Path = "$env:SystemRoot\Panther";                    Label = 'Windows Setup logs (Panther)' },
-        @{ Path = "$env:SystemRoot\Logs\DISM";                  Label = 'DISM logs' },
-        @{ Path = "$env:SystemRoot\Logs\WindowsUpdate";         Label = 'Windows Update logs' },
-        @{ Path = "$env:SystemRoot\Logs\MoSetup";               Label = 'Modern Setup logs' },
-        @{ Path = "$env:SystemRoot\Logs\SIH";                   Label = 'Software Inventory logs' },
-        @{ Path = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs"; Label = 'Intune Management Extension logs' },
-        @{ Path = 'C:\inetpub\logs\LogFiles';                   Label = 'IIS logs' }
+        "$env:SystemRoot\Panther",
+        "$env:SystemRoot\Logs\DISM",
+        "$env:SystemRoot\Logs\WindowsUpdate",
+        "$env:SystemRoot\Logs\MoSetup",
+        "$env:SystemRoot\Logs\SIH",
+        'C:\inetpub\logs\LogFiles'
     )
-    foreach ($entry in $sysLogPaths) {
-        $size = Get-FolderSize $entry.Path
+    foreach ($path in $sysLogPaths) {
+        $size = Get-FolderSize $path
         if ($size -eq 0) { continue }
-        if ($Apply) { Invoke-CleanFolder $entry.Path }
-        $after = if ($Apply) { Get-FolderSize $entry.Path } else { $size }
-        Add-Result 'App Logs' $entry.Label $size $after
+        if ($Apply) { Invoke-CleanFolder $path }
+        $after = if ($Apply) { Get-FolderSize $path } else { $size }
+        Add-Result 'App Logs' (Split-Path $path -Leaf) $size $after
     }
 
-    # Third-party system-wide log directories (ProgramData)
-    $appSysLogPaths = @(
-        @{ Path = "$env:ProgramData\Adobe\ARM";                                      Label = 'Adobe ARM logs' },
-        @{ Path = "$env:ProgramData\NVIDIA Corporation\Downloader";                  Label = 'NVIDIA Downloader cache' },
-        @{ Path = "$env:ProgramData\Cisco\Cisco AnyConnect Secure Mobility Client\Temp"; Label = 'Cisco AnyConnect temp' },
-        @{ Path = "$env:ProgramData\Zoom\ZoomLogs";                                  Label = 'Zoom system logs' }
-    )
-    foreach ($entry in $appSysLogPaths) {
-        $size = Get-FolderSize $entry.Path
-        if ($size -eq 0) { continue }
-        if ($Apply) { Invoke-CleanFolder $entry.Path }
-        $after = if ($Apply) { Get-FolderSize $entry.Path } else { $size }
-        Add-Result 'App Logs' $entry.Label $size $after
-    }
+    # Dynamic scan: find all log folders up to 2 levels deep under a given root
+    $logFolderNames = @('logs', 'log', 'Logs', 'Log', 'logging', 'Logging', 'diagnostics', 'DiagnosticLogs')
+    # Skip Windows core dirs at root level to avoid scanning C:\Windows internals
+    $skipAtRoot = @('Windows', 'WindowsApps', 'Package Cache', 'USOShared', 'USOPrivate', 'wsl')
 
-    # Per-user application logs
-    foreach ($up in $userProfiles) {
-        $local   = "$($up.FullName)\AppData\Local"
-        $roaming = "$($up.FullName)\AppData\Roaming"
-
-        # Teams Classic logs
-        $teamsLogFile = "$roaming\Microsoft\Teams\logs.txt"
-        $teamsLogDir  = "$roaming\Microsoft\Teams\logs"
-        foreach ($path in @($teamsLogFile, $teamsLogDir)) {
-            $item = Get-Item $path -Force -ErrorAction SilentlyContinue
-            if (-not $item) { continue }
-            $size = if ($item.PSIsContainer) { Get-FolderSize $path } else { $item.Length -as [int64] }
-            if ($size -eq 0) { continue }
-            if ($Apply) {
-                if ($item.PSIsContainer) { Invoke-CleanFolder $path }
-                else { Remove-Item $path -Force -ErrorAction SilentlyContinue }
+    function Invoke-LogScan {
+        param([string]$Root, [string]$Prefix)
+        if (-not (Test-Path $Root)) { return }
+        $appDirs = Get-ChildItem $Root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin $skipAtRoot }
+        foreach ($app in $appDirs) {
+            # Direct child: Root\AppName\logs
+            foreach ($logName in $logFolderNames) {
+                $path = "$($app.FullName)\$logName"
+                if (-not (Test-Path $path -PathType Container)) { continue }
+                $size = Get-FolderSize $path
+                if ($size -lt 1KB) { continue }
+                if ($Apply) { Invoke-CleanFolder $path }
+                $after = if ($Apply) { Get-FolderSize $path } else { $size }
+                Add-Result 'App Logs' "$Prefix\$($app.Name)\$logName" $size $after
             }
-            Add-Result 'App Logs' "Teams logs ($($up.Name))" $size (if ($Apply) { 0 } else { $size })
+            # One level deeper: Root\AppName\SubName\logs
+            $subDirs = Get-ChildItem $app.FullName -Directory -ErrorAction SilentlyContinue
+            foreach ($sub in $subDirs) {
+                foreach ($logName in $logFolderNames) {
+                    $path = "$($sub.FullName)\$logName"
+                    if (-not (Test-Path $path -PathType Container)) { continue }
+                    $size = Get-FolderSize $path
+                    if ($size -lt 1KB) { continue }
+                    if ($Apply) { Invoke-CleanFolder $path }
+                    $after = if ($Apply) { Get-FolderSize $path } else { $size }
+                    Add-Result 'App Logs' "$Prefix\$($app.Name)\$($sub.Name)\$logName" $size $after
+                }
+            }
         }
+    }
 
-        # Office telemetry
-        $officeTelPath = "$local\Microsoft\Office\16.0\Telemetry"
-        $size = Get-FolderSize $officeTelPath
-        if ($size -gt 0) {
-            if ($Apply) { Invoke-CleanFolder $officeTelPath }
-            $after = if ($Apply) { Get-FolderSize $officeTelPath } else { $size }
-            Add-Result 'App Logs' "Office telemetry ($($up.Name))" $size $after
-        }
+    Write-Host '    [INFO] Scanning ProgramData for log folders...' -ForegroundColor DarkGray
+    Invoke-LogScan -Root $env:ProgramData -Prefix 'ProgramData'
 
-        # Per-user third-party app logs
-        $userAppLogs = @(
-            @{ Path = "$roaming\Code\logs";                           Label = "VS Code logs ($($up.Name))" },
-            @{ Path = "$roaming\Zoom\logs";                           Label = "Zoom logs ($($up.Name))" },
-            @{ Path = "$roaming\Slack\logs";                          Label = "Slack logs ($($up.Name))" },
-            @{ Path = "$local\CiscoSpark\Logs";                       Label = "Webex logs ($($up.Name))" },
-            @{ Path = "$roaming\Sun\Java\Deployment\log";             Label = "Java deployment logs ($($up.Name))" },
-            @{ Path = "$roaming\npm-cache\_logs";                     Label = "npm logs ($($up.Name))" },
-            @{ Path = "$local\Adobe\LogTransport2";                   Label = "Adobe LogTransport ($($up.Name))" },
-            @{ Path = "$local\Google\Software Reporter Tool";         Label = "Chrome Software Reporter ($($up.Name))" }
-        )
-        foreach ($entry in $userAppLogs) {
-            $size = Get-FolderSize $entry.Path
-            if ($size -eq 0) { continue }
-            if ($Apply) { Invoke-CleanFolder $entry.Path }
-            $after = if ($Apply) { Get-FolderSize $entry.Path } else { $size }
-            Add-Result 'App Logs' $entry.Label $size $after
-        }
+    foreach ($up in $userProfiles) {
+        Write-Host "    [INFO] Scanning $($up.Name) AppData for log folders..." -ForegroundColor DarkGray
+        Invoke-LogScan -Root "$($up.FullName)\AppData\Local"   -Prefix $up.Name
+        Invoke-LogScan -Root "$($up.FullName)\AppData\Roaming" -Prefix $up.Name
     }
 }
 
