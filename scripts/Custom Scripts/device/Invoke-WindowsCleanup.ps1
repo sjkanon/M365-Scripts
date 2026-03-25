@@ -142,26 +142,29 @@ function Add-Result {
 
 $diskBefore = (Get-PSDrive -Name C).Used
 
-# ── 1. User temp folders ───────────────────────────────────────────────────────
+# ── Enumerate all local user profiles ──────────────────────────────────────────
+$systemFolders = @('Public', 'Default', 'Default User', 'All Users')
+$userProfiles  = Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notin $systemFolders }
+Write-Host ("  Scanning {0} user profile(s): {1}" -f $userProfiles.Count, ($userProfiles.Name -join ', ')) -ForegroundColor DarkGray
+Write-Host ''
+
+# ── 1. User temp folders (all users) ───────────────────────────────────────────
 Write-Host '  Temp Files' -ForegroundColor Cyan
 
-$userTempPaths = @(
-    $env:TEMP,
-    $env:TMP,
-    "$env:LOCALAPPDATA\Temp"
-) | Select-Object -Unique
-
-foreach ($path in $userTempPaths) {
+foreach ($up in $userProfiles) {
+    $path = "$($up.FullName)\AppData\Local\Temp"
     $size = Get-FolderSize $path
+    if ($size -eq 0) { continue }
     if ($Apply) { Invoke-CleanFolder $path }
     $after = if ($Apply) { Get-FolderSize $path } else { $size }
-    Add-Result 'Temp' "User Temp: $path" $size $after
+    Add-Result 'Temp' "Temp ($($up.Name))" $size $after
 }
 
 $sysTempSize = Get-FolderSize "$env:SystemRoot\Temp"
 if ($Apply) { Invoke-CleanFolder "$env:SystemRoot\Temp" }
 $sysTempAfter = if ($Apply) { Get-FolderSize "$env:SystemRoot\Temp" } else { $sysTempSize }
-Add-Result 'Temp' 'System Temp: C:\Windows\Temp' $sysTempSize $sysTempAfter
+Add-Result 'Temp' 'System Temp (C:\Windows\Temp)' $sysTempSize $sysTempAfter
 
 # ── 2. Windows Update ──────────────────────────────────────────────────────────
 Write-Host ''
