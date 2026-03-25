@@ -344,7 +344,7 @@ for ($i = 1; $i -le $Iterations; $i++) {
                 }
 
                 default {
-                    Write-Log "CAUSE: General I/O error — HResult $('0x{0:X8}' -f $_.Exception.HResult)" 'FAIL'
+                    Write-Log "CAUSE: General I/O error — HResult $('0x{0:X8}' -f $diagErr.Exception.HResult)" 'FAIL'
                 }
             }
         }
