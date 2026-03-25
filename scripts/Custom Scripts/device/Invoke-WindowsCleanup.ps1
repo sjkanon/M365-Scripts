@@ -197,12 +197,11 @@ $prefetchAfter = if ($Apply) { Get-FolderSize "$env:SystemRoot\Prefetch" } else 
 Add-Result 'Prefetch' 'C:\Windows\Prefetch' $prefetchSize $prefetchAfter
 
 # ── 4. Memory dumps ────────────────────────────────────────────────────────────
-$dumpPaths = @(
+$sysDumpPaths = @(
     "$env:SystemRoot\Minidump",
-    "$env:SystemRoot\memory.dmp",
-    "$env:LocalAppData\CrashDumps"
+    "$env:SystemRoot\memory.dmp"
 )
-foreach ($path in $dumpPaths) {
+foreach ($path in $sysDumpPaths) {
     $size = if ((Get-Item $path -Force -ErrorAction SilentlyContinue).PSIsContainer) {
         Get-FolderSize $path
     } else { Get-FileSize $path }
@@ -213,6 +212,15 @@ foreach ($path in $dumpPaths) {
     }
     $after = if ($Apply) { 0 } else { $size }
     Add-Result 'Memory Dumps' (Split-Path $path -Leaf) $size $after
+}
+
+foreach ($up in $userProfiles) {
+    $path = "$($up.FullName)\AppData\Local\CrashDumps"
+    $size = Get-FolderSize $path
+    if ($size -eq 0) { continue }
+    if ($Apply) { Invoke-CleanFolder $path }
+    $after = if ($Apply) { Get-FolderSize $path } else { $size }
+    Add-Result 'Memory Dumps' "CrashDumps ($($up.Name))" $size $after
 }
 
 # ── 5. Windows Error Reporting ─────────────────────────────────────────────────
