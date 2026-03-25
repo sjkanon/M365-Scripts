@@ -361,11 +361,8 @@ if ($RdWebServer) {
         $certInfo = Get-CertExpiry -Server $RdWebServer
         if ($certInfo) {
             Write-Log "Certificate subject : $($certInfo.Subject)" 'INFO'
-            Write-Log "Certificate expires : $($certInfo.Expiry.ToString('yyyy-MM-dd')) ($($certInfo.DaysLeft) days)" (
-                if ($certInfo.DaysLeft -lt 0)  { 'FAIL' }
-                elseif ($certInfo.DaysLeft -lt 30) { 'WARN' }
-                else { 'OK' }
-            )
+            $certLevel = if ($certInfo.DaysLeft -lt 0) { 'FAIL' } elseif ($certInfo.DaysLeft -lt 30) { 'WARN' } else { 'OK' }
+            Write-Log "Certificate expires : $($certInfo.Expiry.ToString('yyyy-MM-dd')) ($($certInfo.DaysLeft) days)" $certLevel
             if ($certInfo.DaysLeft -lt 0)   { Add-Issue "HTTPS certificate on $RdWebServer has EXPIRED" }
             elseif ($certInfo.DaysLeft -lt 30) { Write-Log "Certificate expires in $($certInfo.DaysLeft) days — plan renewal" 'WARN' }
         } else { Write-Log "Could not retrieve HTTPS certificate from $RdWebServer" 'WARN' }
