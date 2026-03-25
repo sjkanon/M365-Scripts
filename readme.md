@@ -264,6 +264,7 @@ M365-Scripts/
 └── scripts/
     ├── Custom Scripts/
     │   ├── device/
+    │   │   ├── Invoke-WindowsActivation.ps1 ← activate Windows, set product key / KMS server
     │   │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   │   ├── audio/
     │   │   │   ├── detect-audiodevices.ps1
