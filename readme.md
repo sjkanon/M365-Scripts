@@ -311,6 +311,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
+| 2026-03-25 | Updated `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — two-phase approach: first enumerate all sites/document libraries, then retrieve storage data |
 | 2026-03-25 | Added `scripts/Testing Scripts/Network/Test-AuthNetworkDiagnostics.ps1` — auth & network diagnostics: Event Viewer (4625/4771/4776/4740/5719), time sync, Kerberos cache, DNS, TCP, UNC shares, optional log scan |
 | 2026-03-24 | Added `scripts/Intune/iOS-Compliance-Updater/` — auto-update minimum iOS version in Intune compliance policy via Graph API; weekly scheduled task, dry-run support, one-time Setup.ps1 |
 | 2026-03-24 | Added `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — tenant-wide SharePoint storage report with version history per file; quick mode (quota) and full recursive scan |

@@ -488,10 +488,14 @@ function Get-AllDriveItems {
     return $results
 }
 
-# ── Process sites ─────────────────────────────────────────────────────────────
-$summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
-$detailRows  = [System.Collections.Generic.List[PSCustomObject]]::new()
-$siteIndex   = 0
+# ── Phase 1: Enumerate all document libraries ─────────────────────────────────
+Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host "   Phase 1: Enumerating document libraries" -ForegroundColor Cyan
+Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host ""
+
+$siteLibraries = [System.Collections.Generic.List[PSCustomObject]]::new()
+$siteIndex     = 0
 
 foreach ($site in $sites) {
     $siteIndex++
@@ -500,86 +504,106 @@ foreach ($site in $sites) {
 
     Write-Host ("  [{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
 
-    # Quick mode: use quota data from drives (no file enumeration)
-    if (-not $Apply) {
-        try {
-            $drives = Get-SiteDrives -SiteId $siteId
-            foreach ($drive in $drives) {
-                $quota = $drive.quota
-                $summaryRows.Add([PSCustomObject]@{
-                    SiteName        = $siteName
-                    SiteUrl         = $site.webUrl
-                    Library         = $drive.name
-                    UsedGB          = if ($quota.used)      { [math]::Round($quota.used      / 1GB, 3) } else { $null }
-                    TotalGB         = if ($quota.total)     { [math]::Round($quota.total     / 1GB, 3) } else { $null }
-                    RemainingGB     = if ($quota.remaining) { [math]::Round($quota.remaining / 1GB, 3) } else { $null }
-                    State           = $quota.state
-                    FileCount       = $null
-                    FolderCount     = $null
-                    VersionSizeMB   = $null
-                    TotalSizeMB     = $null
-                }) | Out-Null
-                Write-Host ("        {0,-30} used: {1} GB" -f $drive.name,
-                    ([math]::Round(($quota.used ?? 0) / 1GB, 2))) -ForegroundColor DarkGray
-            }
-        } catch {
-            Write-Host "        [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-        }
-        continue
-    }
-
-    # Full scan mode
     try {
         $drives = Get-SiteDrives -SiteId $siteId
+        foreach ($drive in $drives) {
+            $siteLibraries.Add([PSCustomObject]@{
+                Site  = $site
+                Drive = $drive
+            }) | Out-Null
+            Write-Host ("        {0}" -f $drive.name) -ForegroundColor DarkGray
+        }
     } catch {
-        Write-Host "        [ERROR] Cannot access drives: $($_.Exception.Message)" -ForegroundColor Red
-        continue
+        Write-Host ("        [ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
     }
+}
 
-    foreach ($drive in $drives) {
-        Write-Host ("        Scanning '{0}'..." -f $drive.name) -ForegroundColor DarkGray
+Write-Host ""
+Write-Host ("  Found {0} document librar{1} across {2} site(s)" -f
+    $siteLibraries.Count,
+    (if ($siteLibraries.Count -eq 1) { 'y' } else { 'ies' }),
+    $sites.Count) -ForegroundColor Green
+Write-Host ""
 
-        $items = Get-AllDriveItems -DriveId $drive.id
+# ── Phase 2: Retrieve storage data ────────────────────────────────────────────
+Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host "   Phase 2: Retrieving storage data" -ForegroundColor Cyan
+Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host ""
 
-        $fileItems   = $items
-        $totalFiles  = $fileItems.Count
-        $currentSize = ($fileItems | Measure-Object -Property SizeBytes -Sum).Sum ?? 0
-        $versionSize = ($fileItems | Measure-Object -Property VersionSizeBytes -Sum).Sum ?? 0
-        $totalSize   = $currentSize + $versionSize
+$summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
+$detailRows  = [System.Collections.Generic.List[PSCustomObject]]::new()
+$libIndex    = 0
 
-        Write-Host ("        {0} files | current: {1} MB | versions: {2} MB | total: {3} MB" -f
-            $totalFiles,
-            [math]::Round($currentSize / 1MB, 1),
-            [math]::Round($versionSize / 1MB, 1),
-            [math]::Round($totalSize   / 1MB, 1)) -ForegroundColor DarkGray
+foreach ($entry in $siteLibraries) {
+    $libIndex++
+    $site     = $entry.Site
+    $drive    = $entry.Drive
+    $siteName = $site.displayName ?? $site.name
 
+    Write-Host ("  [{0}/{1}] {2} › {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
+
+    # Quick mode: use quota data from drives (no file enumeration)
+    if (-not $Apply) {
+        $quota = $drive.quota
         $summaryRows.Add([PSCustomObject]@{
             SiteName        = $siteName
             SiteUrl         = $site.webUrl
             Library         = $drive.name
-            UsedGB          = $null
-            TotalGB         = $null
-            RemainingGB     = $null
-            State           = $null
-            FileCount       = $totalFiles
+            UsedGB          = if ($quota.used)      { [math]::Round($quota.used      / 1GB, 3) } else { $null }
+            TotalGB         = if ($quota.total)     { [math]::Round($quota.total     / 1GB, 3) } else { $null }
+            RemainingGB     = if ($quota.remaining) { [math]::Round($quota.remaining / 1GB, 3) } else { $null }
+            State           = $quota.state
+            FileCount       = $null
             FolderCount     = $null
-            VersionSizeMB   = [math]::Round($versionSize / 1MB, 2)
-            TotalSizeMB     = [math]::Round($totalSize   / 1MB, 2)
+            VersionSizeMB   = $null
+            TotalSizeMB     = $null
         }) | Out-Null
+        Write-Host ("        used: {0} GB" -f ([math]::Round(($quota.used ?? 0) / 1GB, 2))) -ForegroundColor DarkGray
+        continue
+    }
 
-        foreach ($item in $fileItems) {
-            $detailRows.Add([PSCustomObject]@{
-                SiteName         = $siteName
-                SiteUrl          = $site.webUrl
-                Library          = $drive.name
-                Path             = $item.Path
-                SizeMB           = $item.SizeMB
-                VersionCount     = $item.VersionCount
-                VersionSizeMB    = $item.VersionSizeMB
-                TotalSizeMB      = $item.TotalSizeMB
-                Modified         = $item.Modified
-            }) | Out-Null
-        }
+    # Full scan mode
+    $items = Get-AllDriveItems -DriveId $drive.id
+
+    $fileItems   = $items
+    $totalFiles  = $fileItems.Count
+    $currentSize = ($fileItems | Measure-Object -Property SizeBytes -Sum).Sum ?? 0
+    $versionSize = ($fileItems | Measure-Object -Property VersionSizeBytes -Sum).Sum ?? 0
+    $totalSize   = $currentSize + $versionSize
+
+    Write-Host ("        {0} files | current: {1} MB | versions: {2} MB | total: {3} MB" -f
+        $totalFiles,
+        [math]::Round($currentSize / 1MB, 1),
+        [math]::Round($versionSize / 1MB, 1),
+        [math]::Round($totalSize   / 1MB, 1)) -ForegroundColor DarkGray
+
+    $summaryRows.Add([PSCustomObject]@{
+        SiteName        = $siteName
+        SiteUrl         = $site.webUrl
+        Library         = $drive.name
+        UsedGB          = $null
+        TotalGB         = $null
+        RemainingGB     = $null
+        State           = $null
+        FileCount       = $totalFiles
+        FolderCount     = $null
+        VersionSizeMB   = [math]::Round($versionSize / 1MB, 2)
+        TotalSizeMB     = [math]::Round($totalSize   / 1MB, 2)
+    }) | Out-Null
+
+    foreach ($item in $fileItems) {
+        $detailRows.Add([PSCustomObject]@{
+            SiteName         = $siteName
+            SiteUrl          = $site.webUrl
+            Library          = $drive.name
+            Path             = $item.Path
+            SizeMB           = $item.SizeMB
+            VersionCount     = $item.VersionCount
+            VersionSizeMB    = $item.VersionSizeMB
+            TotalSizeMB      = $item.TotalSizeMB
+            Modified         = $item.Modified
+        }) | Out-Null
     }
 }
 
