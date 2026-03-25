@@ -519,10 +519,8 @@ foreach ($site in $sites) {
 }
 
 Write-Host ""
-Write-Host ("  Found {0} document librar{1} across {2} site(s)" -f
-    $siteLibraries.Count,
-    (if ($siteLibraries.Count -eq 1) { 'y' } else { 'ies' }),
-    $sites.Count) -ForegroundColor Green
+Write-Host ("  Found {0} document libraries across {1} site(s)" -f
+    $siteLibraries.Count, $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Phase 2: Retrieve storage data ────────────────────────────────────────────
