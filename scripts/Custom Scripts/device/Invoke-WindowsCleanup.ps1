@@ -480,8 +480,17 @@ if ($SkipAppLogs) {
         }
     }
 
-    Write-Host '    [INFO] Scanning ProgramData for log folders...' -ForegroundColor DarkGray
-    Invoke-LogScan -Root $env:ProgramData -Prefix 'ProgramData'
+    $scanRoots = @(
+        @{ Root = $env:ProgramData;                  Prefix = 'ProgramData' },
+        @{ Root = $env:ProgramFiles;                 Prefix = 'Program Files' },
+        @{ Root = ${env:ProgramFiles(x86)};          Prefix = 'Program Files (x86)' }
+    )
+
+    foreach ($entry in $scanRoots) {
+        if (-not $entry.Root) { continue }
+        Write-Host "    [INFO] Scanning $($entry.Prefix) for log folders..." -ForegroundColor DarkGray
+        Invoke-LogScan -Root $entry.Root -Prefix $entry.Prefix
+    }
 
     foreach ($up in $userProfiles) {
         Write-Host "    [INFO] Scanning $($up.Name) AppData for log folders..." -ForegroundColor DarkGray
