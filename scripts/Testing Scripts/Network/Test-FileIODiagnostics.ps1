@@ -367,8 +367,10 @@ Write-Section 'Summary'
 $total     = $stats.OK + $stats.Fail
 $pct       = if ($total -gt 0) { [math]::Round($stats.OK / $total * 100, 1) } else { 0 }
 Write-Log "Iterations  : $total" 'INFO'
-Write-Log "Passed      : $($stats.OK) ($pct%)" (if ($stats.Fail -eq 0) { 'OK' } else { 'INFO' })
-Write-Log "Failed      : $($stats.Fail)" (if ($stats.Fail -eq 0) { 'OK' } else { 'FAIL' })
+$passedLevel = if ($stats.Fail -eq 0) { 'OK' } else { 'INFO' }
+$failedLevel = if ($stats.Fail -eq 0) { 'OK' } else { 'FAIL' }
+Write-Log "Passed      : $($stats.OK) ($pct%)" $passedLevel
+Write-Log "Failed      : $($stats.Fail)" $failedLevel
 
 if ($errorLog.Count -gt 0) {
     $grouped = $errorLog | Group-Object Category | Sort-Object Count -Descending
