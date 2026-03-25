@@ -426,8 +426,8 @@ if ($SkipAppLogs) {
         Add-Result 'App Logs' 'CBS archived logs (CbsPersist*.cab)' $cbsSize (if ($Apply) { 0 } else { $cbsSize })
     }
 
-    # Other Windows log subdirectories (all archival, recreated automatically)
-    $winLogPaths = @(
+    # Windows & Microsoft log directories (all archival, recreated automatically)
+    $sysLogPaths = @(
         @{ Path = "$env:SystemRoot\Panther";                    Label = 'Windows Setup logs (Panther)' },
         @{ Path = "$env:SystemRoot\Logs\DISM";                  Label = 'DISM logs' },
         @{ Path = "$env:SystemRoot\Logs\WindowsUpdate";         Label = 'Windows Update logs' },
@@ -436,7 +436,22 @@ if ($SkipAppLogs) {
         @{ Path = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs"; Label = 'Intune Management Extension logs' },
         @{ Path = 'C:\inetpub\logs\LogFiles';                   Label = 'IIS logs' }
     )
-    foreach ($entry in $winLogPaths) {
+    foreach ($entry in $sysLogPaths) {
+        $size = Get-FolderSize $entry.Path
+        if ($size -eq 0) { continue }
+        if ($Apply) { Invoke-CleanFolder $entry.Path }
+        $after = if ($Apply) { Get-FolderSize $entry.Path } else { $size }
+        Add-Result 'App Logs' $entry.Label $size $after
+    }
+
+    # Third-party system-wide log directories (ProgramData)
+    $appSysLogPaths = @(
+        @{ Path = "$env:ProgramData\Adobe\ARM";                                      Label = 'Adobe ARM logs' },
+        @{ Path = "$env:ProgramData\NVIDIA Corporation\Downloader";                  Label = 'NVIDIA Downloader cache' },
+        @{ Path = "$env:ProgramData\Cisco\Cisco AnyConnect Secure Mobility Client\Temp"; Label = 'Cisco AnyConnect temp' },
+        @{ Path = "$env:ProgramData\Zoom\ZoomLogs";                                  Label = 'Zoom system logs' }
+    )
+    foreach ($entry in $appSysLogPaths) {
         $size = Get-FolderSize $entry.Path
         if ($size -eq 0) { continue }
         if ($Apply) { Invoke-CleanFolder $entry.Path }
@@ -471,6 +486,25 @@ if ($SkipAppLogs) {
             if ($Apply) { Invoke-CleanFolder $officeTelPath }
             $after = if ($Apply) { Get-FolderSize $officeTelPath } else { $size }
             Add-Result 'App Logs' "Office telemetry ($($up.Name))" $size $after
+        }
+
+        # Per-user third-party app logs
+        $userAppLogs = @(
+            @{ Path = "$roaming\Code\logs";                           Label = "VS Code logs ($($up.Name))" },
+            @{ Path = "$roaming\Zoom\logs";                           Label = "Zoom logs ($($up.Name))" },
+            @{ Path = "$roaming\Slack\logs";                          Label = "Slack logs ($($up.Name))" },
+            @{ Path = "$local\CiscoSpark\Logs";                       Label = "Webex logs ($($up.Name))" },
+            @{ Path = "$roaming\Sun\Java\Deployment\log";             Label = "Java deployment logs ($($up.Name))" },
+            @{ Path = "$roaming\npm-cache\_logs";                     Label = "npm logs ($($up.Name))" },
+            @{ Path = "$local\Adobe\LogTransport2";                   Label = "Adobe LogTransport ($($up.Name))" },
+            @{ Path = "$local\Google\Software Reporter Tool";         Label = "Chrome Software Reporter ($($up.Name))" }
+        )
+        foreach ($entry in $userAppLogs) {
+            $size = Get-FolderSize $entry.Path
+            if ($size -eq 0) { continue }
+            if ($Apply) { Invoke-CleanFolder $entry.Path }
+            $after = if ($Apply) { Get-FolderSize $entry.Path } else { $size }
+            Add-Result 'App Logs' $entry.Label $size $after
         }
     }
 }
