@@ -372,6 +372,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-03-25
 | Change |
 |--------|
+| Fixed `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — fix PS analyzer warnings: rename `$profile` to `$ffProfile`, drop unused `$dismResult` assignment |
 | Fixed `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — replace `??` null-coalescing operator with `-as [int64]` for PowerShell 5.1 compatibility |
 | Added `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — comprehensive Windows disk cleanup: temp files, WU cache, Delivery Optimization, Prefetch, memory dumps, WER, thumbnail/shader cache, Recycle Bin, browser caches, event logs, DISM component store; dry-run by default, `-Apply` to execute |
 | Updated `Get-SharePointStorageReport.ps1` — two-phase approach (enumerate all sites/libraries first, then retrieve storage data); fixed inline `if` syntax error |
