@@ -85,30 +85,38 @@ function Write-Section {
 function Get-ErrorCategory {
     param([System.Management.Automation.ErrorRecord]$Err)
 
-    $msg  = $Err.Exception.Message
-    $type = $Err.Exception.GetType().Name
-    $hres = $Err.Exception.HResult
+    $msg       = $Err.Exception.Message
+    $type      = $Err.Exception.GetType().Name
+    $hres      = $Err.Exception.HResult
+    # PowerShell wraps .NET exceptions in MethodInvocationException — check inner too
+    $innerType = if ($Err.Exception.InnerException) { $Err.Exception.InnerException.GetType().Name } else { '' }
+    $innerHRes = if ($Err.Exception.InnerException) { $Err.Exception.InnerException.HResult } else { 0 }
 
     # Auth / credential failures
-    if ($type -eq 'UnauthorizedAccessException')                        { return 'AUTH'    }
-    if ($msg -imatch 'access.?denied|logon.?fail|not have.?access|credentials|password|privilege') { return 'AUTH' }
+    if ($type -eq 'UnauthorizedAccessException' -or $innerType -eq 'UnauthorizedAccessException') { return 'AUTH' }
+    if ($msg -imatch 'access.*denied|is denied|logon.?fail|not have.?access|credentials|password|privilege') { return 'AUTH' }
     if ($hres -in @(0x80070005, 0x8007052e, 0x8007052f, 0x80070569))   { return 'AUTH'    }
+    if ($innerHRes -in @(0x80070005, 0x8007052e, 0x8007052f, 0x80070569)) { return 'AUTH' }
 
     # Network path / server unreachable
     if ($msg -imatch 'network.?path|network.?name|could not find|server.?not.?found|host.?unreachable') { return 'NETWORK' }
-    if ($hres -in @(0x80070035, 0x80070040, 0x800704cf, 0x80070043))   { return 'NETWORK' }
+    if ($hres -in @(0x80070035, 0x80070040, 0x800704cf, 0x80070043) -or
+        $innerHRes -in @(0x80070035, 0x80070040, 0x800704cf, 0x80070043)) { return 'NETWORK' }
 
     # Timeout
     if ($msg -imatch 'timed? out|timeout|semaphore')                    { return 'TIMEOUT' }
-    if ($hres -in @(0x800705b4, 0x80070079))                            { return 'TIMEOUT' }
+    if ($hres -in @(0x800705b4, 0x80070079) -or
+        $innerHRes -in @(0x800705b4, 0x80070079))                       { return 'TIMEOUT' }
 
     # Disk / quota
     if ($msg -imatch 'disk.?full|not enough.?space|quota|no space')     { return 'DISK'    }
-    if ($hres -in @(0x80070070, 0x80070522))                            { return 'DISK'    }
+    if ($hres -in @(0x80070070, 0x80070522) -or
+        $innerHRes -in @(0x80070070, 0x80070522))                       { return 'DISK'    }
 
     # Path / file not found
     if ($msg -imatch 'path.?not.?found|file.?not.?found|directory.?not') { return 'PATH'  }
-    if ($hres -in @(0x80070002, 0x80070003))                            { return 'PATH'    }
+    if ($hres -in @(0x80070002, 0x80070003) -or
+        $innerHRes -in @(0x80070002, 0x80070003))                       { return 'PATH'    }
 
     return 'IO'
 }
