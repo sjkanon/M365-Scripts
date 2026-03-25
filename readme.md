@@ -405,6 +405,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-03-25
 | Change |
 |--------|
+| Added `scripts/Testing Scripts/RDS/Test-RDSDiagnostics.ps1` — diagnose RDP/RDWeb login failures: services, registry, NLA, session limits, licensing, firewall, HTTPS cert, IIS app pool, user account (enabled/locked/expired/group), event logs (4625/4740/4771/20/40); timestamped log to C:\Temp\ |
 | Added `scripts/Custom Scripts/device/Invoke-WindowsActivation.ps1` — activate Windows, install product key, configure KMS server/port, remove key, ReArm grace period; dry-run safe with confirmation prompts; -Force to skip |
 | Updated `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — add dynamic log folder scan (section 13): recursively scans entire C:\ drive (max depth 7) for folders named logs/log/logging/diagnostics; skips Windows system dirs and dev artifacts (node_modules, .git, venv); fixed Windows system log paths (CBS archived .cab, DISM, WU, Panther, IIS); new `-SkipAppLogs` parameter |
 | Updated `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — scan all user profiles in C:\Users\ for temp, WER, thumbnail/shader cache and browser caches (Edge multi-profile, Chrome multi-profile, Firefox); summary shows reclaimable space per category |
