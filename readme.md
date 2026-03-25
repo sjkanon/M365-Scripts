@@ -1,6 +1,6 @@
 # M365-Scripts
 
-> A collection of PowerShell scripts and M365 management tools for MSP engineers, maintained by Sjoerd Kanon. <!-- test -->
+> A collection of PowerShell scripts and M365 management tools for MSP engineers, maintained by Sjoerd Kanon.
 
 ---
 
