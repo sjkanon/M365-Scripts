@@ -241,6 +241,27 @@ Monitor SAS batch job logs and Windows Event Viewer for errors, with optional Za
 - One-time setup script — installs to `C:\Scripts\`, creates daily scheduled task
 - Optional Zabbix UserParameter config for automated alerting
 
+#### Windows Device Management
+
+Scripts for managing and maintaining Windows devices.
+
+**Invoke-WindowsActivation.ps1** — Activate Windows or manage licensing settings:
+- Install a retail or KMS generic product key (`-ProductKey`)
+- Configure a corporate KMS activation server (`-KmsServer`, `-KmsPort`)
+- Trigger online or KMS-based activation (`-Activate`)
+- Show activation status via WMI and `slmgr /dli` (`-Status`)
+- Remove the product key before reimage or license transfer (`-RemoveKey`)
+- Reset the grace-period counter (`-ReArm`, max ~3-5x per install)
+- Confirmation prompts by default; use `-Force` to skip
+
+**Invoke-WindowsCleanup.ps1** — Scan and optionally remove reclaimable disk space:
+- User + system temp, Windows Update cache, Delivery Optimization, Prefetch
+- Memory dumps, WER queues, thumbnail/DirectX shader cache, font cache
+- Recycle Bin, browser caches (Edge/Chrome multi-profile + Firefox)
+- Event logs, DISM component store (`/StartComponentCleanup /ResetBase`)
+- Application & system logs: dynamic scan of entire C:\ for `logs`/`log`/`logging` folders
+- Dry-run by default; use `-Apply` to delete. Per-category summary with space freed
+
 #### DNS Management
 
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
@@ -264,6 +285,7 @@ M365-Scripts/
 └── scripts/
     ├── Custom Scripts/
     │   ├── device/
+    │   │   ├── Invoke-WindowsActivation.ps1 ← activate Windows, set product key / KMS server
     │   │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   │   ├── audio/
     │   │   │   ├── detect-audiodevices.ps1
@@ -372,6 +394,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-03-25
 | Change |
 |--------|
+| Added `scripts/Custom Scripts/device/Invoke-WindowsActivation.ps1` — activate Windows, install product key, configure KMS server/port, remove key, ReArm grace period; dry-run safe with confirmation prompts; -Force to skip |
 | Updated `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — add dynamic log folder scan (section 13): recursively scans entire C:\ drive (max depth 7) for folders named logs/log/logging/diagnostics; skips Windows system dirs and dev artifacts (node_modules, .git, venv); fixed Windows system log paths (CBS archived .cab, DISM, WU, Panther, IIS); new `-SkipAppLogs` parameter |
 | Updated `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — scan all user profiles in C:\Users\ for temp, WER, thumbnail/shader cache and browser caches (Edge multi-profile, Chrome multi-profile, Firefox); summary shows reclaimable space per category |
 | Fixed `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — fix PS analyzer warnings: rename `$profile` to `$ffProfile`, drop unused `$dismResult` assignment |
