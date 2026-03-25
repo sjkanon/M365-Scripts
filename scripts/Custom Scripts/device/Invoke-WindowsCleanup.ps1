@@ -296,13 +296,13 @@ if ($SkipBrowserCache) {
         if ($browser -eq 'Firefox') {
             # Firefox caches are inside profile folders
             $ffProfiles = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue
-            foreach ($profile in $ffProfiles) {
-                $cachePath = Join-Path $profile.FullName 'cache2'
+            foreach ($ffProfile in $ffProfiles) {
+                $cachePath = Join-Path $ffProfile.FullName 'cache2'
                 $size = Get-FolderSize $cachePath
                 if ($size -eq 0) { continue }
                 if ($Apply) { Invoke-CleanFolder $cachePath }
                 $after = if ($Apply) { Get-FolderSize $cachePath } else { $size }
-                Add-Result 'Browser' "Firefox ($($profile.Name))" $size $after
+                Add-Result 'Browser' "Firefox ($($ffProfile.Name))" $size $after
             }
         } else {
             $size = Get-FolderSize $path
@@ -349,8 +349,8 @@ if ($SkipDism) {
     Write-Host '    [INFO] Running DISM cleanup — this may take several minutes...' -ForegroundColor DarkGray
 
     if ($Apply) {
-        $dismResult = & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase 2>&1
-        $exitCode   = $LASTEXITCODE
+        & dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase 2>&1 | Out-Null
+        $exitCode = $LASTEXITCODE
         if ($exitCode -ne 0) {
             Write-Host '    [WARN] DISM returned exit code {0}' -f $exitCode -ForegroundColor Yellow
         }
