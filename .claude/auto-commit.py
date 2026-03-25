@@ -249,7 +249,9 @@ def main():
         diff, _ = run('git diff --cached')
         message = detect_from_diff(diff, basename)
 
-    run(f'git commit -m "{message}"')
+    _, commit_rc = run(f'git commit -m "{message}"')
+    if commit_rc == 0:
+        run('git push')
 
 
 if __name__ == '__main__':
