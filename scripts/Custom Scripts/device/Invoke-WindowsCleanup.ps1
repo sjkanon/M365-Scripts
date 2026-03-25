@@ -96,14 +96,14 @@ function Get-FolderSize {
     if (-not (Test-Path $Path)) { return [int64]0 }
     try {
         (Get-ChildItem -Path $Path -Recurse -Force -ErrorAction SilentlyContinue |
-            Measure-Object -Property Length -Sum).Sum ?? 0
+            Measure-Object -Property Length -Sum).Sum -as [int64]
     } catch { [int64]0 }
 }
 
 function Get-FileSize {
     param([string]$Path)
     if (-not (Test-Path $Path)) { return [int64]0 }
-    try { (Get-Item -Path $Path -Force -ErrorAction SilentlyContinue).Length ?? 0 }
+    try { (Get-Item -Path $Path -Force -ErrorAction SilentlyContinue).Length -as [int64] }
     catch { [int64]0 }
 }
 
@@ -236,7 +236,7 @@ Write-Host '  Thumbnail & Shader Cache' -ForegroundColor Cyan
 
 $thumbPath  = "$env:LocalAppData\Microsoft\Windows\Explorer"
 $thumbFiles = Get-ChildItem -Path $thumbPath -Filter 'thumbcache_*.db' -Force -ErrorAction SilentlyContinue
-$thumbSize  = ($thumbFiles | Measure-Object -Property Length -Sum).Sum ?? 0
+$thumbSize  = ($thumbFiles | Measure-Object -Property Length -Sum).Sum -as [int64]
 if ($Apply) {
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
     $thumbFiles | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -323,7 +323,7 @@ if ($SkipEventLogs) {
 } else {
     $logRoot  = "$env:SystemRoot\System32\winevt\Logs"
     $logFiles = Get-ChildItem -Path $logRoot -Filter '*.evtx' -ErrorAction SilentlyContinue
-    $logSize  = ($logFiles | Measure-Object -Property Length -Sum).Sum ?? 0
+    $logSize  = ($logFiles | Measure-Object -Property Length -Sum).Sum -as [int64]
 
     if ($Apply) {
         $logs = Get-WinEvent -ListLog * -ErrorAction SilentlyContinue |
@@ -334,7 +334,7 @@ if ($SkipEventLogs) {
             } catch {}
         }
     }
-    $logAfter = if ($Apply) { (Get-ChildItem $logRoot -Filter '*.evtx' -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum ?? 0 } else { $logSize }
+    $logAfter = if ($Apply) { (Get-ChildItem $logRoot -Filter '*.evtx' -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum -as [int64] } else { $logSize }
     Add-Result 'Event Logs' "All event logs ($($logFiles.Count) files)" $logSize $logAfter
 }
 
@@ -373,7 +373,7 @@ if ($Apply) {
 
 # ── Summary ────────────────────────────────────────────────────────────────────
 $diskAfter   = (Get-PSDrive -Name C).Used
-$totalFreed  = ($results | Where-Object { $_.Status -ne 'Skipped' } | Measure-Object -Property FreedBytes -Sum).Sum ?? 0
+$totalFreed  = ($results | Where-Object { $_.Status -ne 'Skipped' } | Measure-Object -Property FreedBytes -Sum).Sum -as [int64]
 $actualFreed = $diskBefore - $diskAfter
 
 Write-Host ''
