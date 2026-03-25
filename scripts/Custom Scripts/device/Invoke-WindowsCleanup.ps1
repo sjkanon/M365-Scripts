@@ -29,6 +29,9 @@
 .PARAMETER Apply
     Perform the actual cleanup. Without this switch, only a scan is performed.
 
+.PARAMETER SkipAppLogs
+    Skip application and system log cleanup (CBS, DISM, WindowsUpdate, Intune, IIS, Teams, Office telemetry).
+
 .PARAMETER SkipBrowserCache
     Skip browser cache cleanup (Edge, Chrome, Firefox).
 
