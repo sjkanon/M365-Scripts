@@ -358,6 +358,8 @@ M365-Scripts/
         ├── Network/
         │   ├── Test-Ports.ps1
         │   └── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
+        ├── RDS/
+        │   └── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
         ├── SharePoint/
         │   ├── Get-SharePointStorageReport.ps1
         │   └── readme.md
