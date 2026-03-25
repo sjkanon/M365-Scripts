@@ -176,6 +176,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 - Auth & network diagnostics — Event Viewer (logon failures, Kerberos, NTLM, DC availability), time sync, DNS, TCP, UNC shares, optional log scan; exports txt report to `C:\Temp\`
+- File I/O diagnostics — write/append/read/delete loop on any path with failure categorisation: auth error, network unreachable, timeout, disk full, path missing; auto-collects Kerberos tickets, net use, SMB port check and event log on first failure
 
 #### Device
 
