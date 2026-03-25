@@ -60,70 +60,74 @@ def detect_from_edit(old, new, basename):
     old = old or ''
     new = new or ''
 
-    # Nieuwe PowerShell functie toegevoegd
+    # New PowerShell function added or removed
     old_funcs = set(re.findall(r'function\s+([\w-]+)\s*[{(]', old, re.I))
     new_funcs = set(re.findall(r'function\s+([\w-]+)\s*[{(]', new, re.I))
     added = new_funcs - old_funcs
     removed = old_funcs - new_funcs
     if added and not removed:
-        return f"Functie '{list(added)[0]}' toegevoegd aan {basename}"
+        return f"{basename}: add function '{list(added)[0]}'"
     if removed and not added:
-        return f"Functie '{list(removed)[0]}' verwijderd uit {basename}"
+        return f"{basename}: remove function '{list(removed)[0]}'"
+    if added and removed:
+        return f"{basename}: rename function '{list(removed)[0]}' to '{list(added)[0]}'"
 
-    # Nieuwe parameter toegevoegd
+    # New parameter added
     old_params = set(re.findall(r'\[(?:string|switch|int|bool|array|object)\]\s*\$([\w]+)', old, re.I))
     new_params = set(re.findall(r'\[(?:string|switch|int|bool|array|object)\]\s*\$([\w]+)', new, re.I))
     added_params = new_params - old_params
-    if added_params:
-        param = list(added_params)[0]
-        return f"Parameter '-{param}' toegevoegd aan {basename}"
+    removed_params = old_params - new_params
+    if added_params and not removed_params:
+        return f"{basename}: add parameter '-{list(added_params)[0]}'"
+    if removed_params and not added_params:
+        return f"{basename}: remove parameter '-{list(removed_params)[0]}'"
 
-    # Twee-fasen structuur toegevoegd
+    # Two-phase structure
     if 'Phase 1' in new and 'Phase 1' not in old:
-        return f"Twee-fasen aanpak toegevoegd aan {basename}"
+        return f"{basename}: add two-phase approach (enumerate first, then retrieve data)"
     if 'Phase 2' in new and 'Phase 2' not in old:
-        return f"Fase 2 toegevoegd aan {basename}"
+        return f"{basename}: add phase 2"
 
-    # Nieuwe Graph API endpoint
+    # New Graph API endpoint
     old_uris = set(re.findall(r'graph\.microsoft\.com/v[\d.]+/([\w/]+)', old))
     new_uris = set(re.findall(r'graph\.microsoft\.com/v[\d.]+/([\w/]+)', new))
     added_uris = new_uris - old_uris
     if added_uris:
         endpoint = list(added_uris)[0].split('/')[0]
-        return f"Graph API endpoint '{endpoint}' toegevoegd aan {basename}"
+        return f"{basename}: add Graph API call to '{endpoint}'"
 
-    # Connect-* of module import
+    # Connect-* or module import
     old_conn = set(re.findall(r'(Connect-\w+|Import-Module\s+[\w.]+)', old, re.I))
     new_conn = set(re.findall(r'(Connect-\w+|Import-Module\s+[\w.]+)', new, re.I))
     added_conn = new_conn - old_conn
     if added_conn:
-        return f"'{list(added_conn)[0]}' toegevoegd aan {basename}"
+        return f"{basename}: add '{list(added_conn)[0]}'"
 
-    # Export / CSV output toegevoegd
+    # CSV export added
     if 'Export-Csv' in new and 'Export-Csv' not in old:
-        return f"CSV export toegevoegd aan {basename}"
+        return f"{basename}: add CSV export"
 
-    # Write-Host sectie / fase header toegevoegd
+    # New section header
     new_headers = re.findall(r'Write-Host\s+".*?={3,}.*?"', new)
     old_headers = re.findall(r'Write-Host\s+".*?={3,}.*?"', old)
     if len(new_headers) > len(old_headers):
-        return f"Nieuwe sectie toegevoegd aan {basename}"
+        return f"{basename}: add new output section"
 
-    # Foutafhandeling toegevoegd
+    # Error handling added
     if 'try {' in new and 'try {' not in old:
-        return f"Foutafhandeling toegevoegd aan {basename}"
+        return f"{basename}: add error handling"
 
-    # Readme: versiegeschiedenis of sectiewijziging
+    # Readme changes
     if basename.lower() == 'readme.md':
-        # Nieuwe versieregel toegevoegd
+        # New version history entry
         new_ver = re.findall(r'\|\s*(202\d-\d{2}-\d{2})\s*\|(.+?)(?:\||$)', new)
         old_ver = re.findall(r'\|\s*(202\d-\d{2}-\d{2})\s*\|(.+?)(?:\||$)', old)
         added_ver = [v for v in new_ver if v not in old_ver]
         if added_ver:
             entry = added_ver[0][1].strip()[:80]
-            return f"Readme versiegeschiedenis: {entry}"
+            return f"readme: update version history — {entry}"
 
-        # Zoek welke sectie gewijzigd is via file context
+        # Find which section changed
         try:
             with open(f'{REPO}/readme.md', 'r') as f:
                 full = f.read()
@@ -131,19 +135,21 @@ def detect_from_edit(old, new, basename):
             if section:
                 summary = short_diff_summary(old, new)
                 if summary:
-                    return f"Readme '{section}': {summary}"
-                return f"Readme sectie '{section}' bijgewerkt"
+                    return f"readme '{section}': {summary}"
+                return f"readme: update section '{section}'"
         except Exception:
             pass
 
         summary = short_diff_summary(old, new)
         if summary:
-            return f"Readme bijgewerkt: {summary}"
-        return "Readme bijgewerkt"
+            return f"readme: {summary}"
+        return "readme: general update"
 
-    # PowerShell/overig: voeg een korte samenvatting toe aan het bericht
+    # Generic PowerShell: short diff summary
     summary = short_diff_summary(old, new)
-    return summary  # None = ga naar diff-detectie
+    if summary:
+        return f"{basename}: {summary}"
+    return None  # fall through to diff-based detection
 
 # ---------- detectie op basis van git diff ----------
 
@@ -153,51 +159,55 @@ def detect_from_diff(diff, basename):
     a = ' '.join(added)
     r = ' '.join(removed)
 
-    # Functies
+    # Functions
     new_funcs = set(re.findall(r'function\s+([\w-]+)\s*[{(]', a, re.I))
     old_funcs = set(re.findall(r'function\s+([\w-]+)\s*[{(]', r, re.I))
     if new_funcs - old_funcs:
-        return f"Functie '{list(new_funcs - old_funcs)[0]}' toegevoegd aan {basename}"
+        return f"{basename}: add function '{list(new_funcs - old_funcs)[0]}'"
 
     # Parameters
     new_params = set(re.findall(r'\[(?:string|switch|int)\]\s*\$([\w]+)', a, re.I))
     old_params = set(re.findall(r'\[(?:string|switch|int)\]\s*\$([\w]+)', r, re.I))
     if new_params - old_params:
-        return f"Parameter '-{list(new_params - old_params)[0]}' toegevoegd aan {basename}"
+        return f"{basename}: add parameter '-{list(new_params - old_params)[0]}'"
 
     # Graph endpoints
     new_uris = set(re.findall(r'graph\.microsoft\.com/v[\d.]+/([\w/]+)', a))
     old_uris = set(re.findall(r'graph\.microsoft\.com/v[\d.]+/([\w/]+)', r))
     if new_uris - old_uris:
         endpoint = list(new_uris - old_uris)[0].split('/')[0]
-        return f"Graph API endpoint '{endpoint}' toegevoegd aan {basename}"
+        return f"{basename}: add Graph API call to '{endpoint}'"
 
-    # Export
+    # CSV export
     if 'Export-Csv' in a and 'Export-Csv' not in r:
-        return f"CSV export toegevoegd aan {basename}"
+        return f"{basename}: add CSV export"
 
     if basename.lower() == 'readme.md':
         meaningful = [l.strip() for l in added if l.strip() and not l.strip().startswith('#') and not l.strip().startswith('|') and len(l.strip()) > 5]
         if meaningful:
-            return f"Readme bijgewerkt: '{meaningful[0][:60]}'"
-        return "Readme bijgewerkt"
+            return f"readme: add '{meaningful[0][:60]}'"
+        return "readme: general update"
 
-    # Fallback op aantal regels + eerste betekenisvolle toevoeging
+    # Fallback: line count + first meaningful addition
     n_add = len([l for l in added   if l.strip()])
     n_rem = len([l for l in removed if l.strip()])
     meaningful_add = [l.strip() for l in added if l.strip() and not re.match(r'^[#<{}\[\]()/*]', l.strip()) and len(l.strip()) > 5]
+    meaningful_rem = [l.strip() for l in removed if l.strip() and not re.match(r'^[#<{}\[\]()/*]', l.strip()) and len(l.strip()) > 5]
 
     if n_rem > 0 and n_add == 0:
-        return f"Code verwijderd uit {basename}"
+        snippet = f" — removed '{meaningful_rem[0][:50]}'" if meaningful_rem else ""
+        return f"{basename}: remove code{snippet}"
     if n_rem > n_add * 2:
-        return f"Code opgeschoond in {basename}"
+        return f"{basename}: clean up code"
     if n_add > 15:
-        snippet = f": {meaningful_add[0][:50]}" if meaningful_add else ""
-        return f"Nieuwe functionaliteit toegevoegd aan {basename}{snippet}"
+        snippet = f" — add '{meaningful_add[0][:50]}'" if meaningful_add else ""
+        return f"{basename}: add new functionality{snippet}"
     if n_add > 0:
-        snippet = f": {meaningful_add[0][:50]}" if meaningful_add else ""
-        return f"Kleine wijziging in {basename}{snippet}"
-    return f"Update {basename}"
+        if meaningful_add and meaningful_rem:
+            return f"{basename}: change '{meaningful_rem[0][:40]}' to '{meaningful_add[0][:40]}'"
+        snippet = f" — '{meaningful_add[0][:50]}'" if meaningful_add else ""
+        return f"{basename}: small update{snippet}"
+    return f"{basename}: update"
 
 
 # ---------- main ----------
