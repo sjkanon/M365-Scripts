@@ -376,9 +376,9 @@ if ($RdWebServer) {
     } else {
         # IIS service
         $iis = Get-Service -Name 'W3SVC' -ErrorAction SilentlyContinue
-        if (-not $iis)                    { Add-Issue "IIS (W3SVC) not found — is RD Web Access installed?" }
+        if (-not $iis)                     { Add-Issue "IIS (W3SVC) not found — is RD Web Access installed?" }
         elseif ($iis.Status -eq 'Running') { Write-Log "IIS (W3SVC): Running" 'OK' }
-        else                              { Add-Issue "IIS (W3SVC) is $($iis.Status)" }
+        else                               { Add-Issue "IIS (W3SVC) is $($iis.Status)" }
 
         # RDWeb app + app pool via WebAdministration
         try {
@@ -415,6 +415,83 @@ if ($RdWebServer) {
             Write-Log "RD Connection Broker (Tssdis): $($broker.Status)" $lvl
         } else {
             Write-Log "RD Connection Broker: not installed on this server" 'INFO'
+        }
+
+        # Event Viewer — RDWeb + IIS + Gateway logs
+        if ($IncludeEventLogs) {
+            $since = (Get-Date).AddHours(-$Hours)
+            Write-Log "--- Event Viewer (last $Hours hours) ---" 'INFO'
+
+            # RD Web Access Admin + Operational
+            $rdWebLogs = @(
+                'Microsoft-Windows-TerminalServices-WebAccess/Admin',
+                'Microsoft-Windows-TerminalServices-WebAccess/Operational'
+            )
+            foreach ($log in $rdWebLogs) {
+                try {
+                    $events = Get-WinEvent -FilterHashtable @{ LogName = $log; StartTime = $since } `
+                        -MaxEvents 30 -ErrorAction Stop |
+                        Where-Object { $_.Level -le 3 }  # Critical, Error, Warning only
+                    if ($events) {
+                        Write-Log "$($events.Count) error/warning event(s) in '$log':" 'WARN'
+                        $events | Select-Object -First 10 | ForEach-Object {
+                            $msg = ($_.Message -replace '\s+', ' ')
+                            $msg = $msg.Substring(0, [Math]::Min(120, $msg.Length))
+                            Write-Log "  [$($_.TimeCreated.ToString('HH:mm:ss'))] ID $($_.Id): $msg" 'WARN'
+                        }
+                    } else {
+                        Write-Log "No errors/warnings in '$log'" 'OK'
+                    }
+                } catch {
+                    Write-Log "Log '$log' not found or empty (RD Web Access may not be installed)" 'INFO'
+                }
+            }
+
+            # RD Gateway Admin + Operational
+            $gwLogs = @(
+                'Microsoft-Windows-TerminalServices-Gateway/Admin',
+                'Microsoft-Windows-TerminalServices-Gateway/Operational'
+            )
+            foreach ($log in $gwLogs) {
+                try {
+                    $events = Get-WinEvent -FilterHashtable @{ LogName = $log; StartTime = $since } `
+                        -MaxEvents 30 -ErrorAction Stop |
+                        Where-Object { $_.Level -le 3 }
+                    if ($events) {
+                        Write-Log "$($events.Count) error/warning event(s) in '$log':" 'WARN'
+                        $events | Select-Object -First 10 | ForEach-Object {
+                            $msg = ($_.Message -replace '\s+', ' ')
+                            $msg = $msg.Substring(0, [Math]::Min(120, $msg.Length))
+                            Write-Log "  [$($_.TimeCreated.ToString('HH:mm:ss'))] ID $($_.Id): $msg" 'WARN'
+                        }
+                    } else {
+                        Write-Log "No errors/warnings in '$log'" 'OK'
+                    }
+                } catch {
+                    Write-Log "Log '$log' not found (RD Gateway not installed on this server)" 'INFO'
+                }
+            }
+
+            # IIS Application log (ASP.NET / application pool crashes)
+            try {
+                $iisErrors = Get-WinEvent -FilterHashtable @{
+                    LogName   = 'Application'
+                    StartTime = $since
+                } -MaxEvents 200 -ErrorAction Stop |
+                    Where-Object { $_.Level -le 2 -and $_.ProviderName -match 'IIS|W3SVC|ASP|HttpErr|WAS' }
+                if ($iisErrors) {
+                    Write-Log "$($iisErrors.Count) IIS/ASP.NET error(s) in Application log:" 'WARN'
+                    $iisErrors | Select-Object -First 10 | ForEach-Object {
+                        $msg = ($_.Message -replace '\s+', ' ')
+                        $msg = $msg.Substring(0, [Math]::Min(120, $msg.Length))
+                        Write-Log "  [$($_.TimeCreated.ToString('HH:mm:ss'))] $($_.ProviderName): $msg" 'WARN'
+                    }
+                } else {
+                    Write-Log "No IIS/ASP.NET errors in Application log" 'OK'
+                }
+            } catch {
+                Write-Log "Could not read Application event log: $_" 'WARN'
+            }
         }
     }
 }
