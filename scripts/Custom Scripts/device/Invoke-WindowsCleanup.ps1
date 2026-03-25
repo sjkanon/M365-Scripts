@@ -376,16 +376,37 @@ $diskAfter   = (Get-PSDrive -Name C).Used
 $totalFreed  = ($results | Where-Object { $_.Status -ne 'Skipped' } | Measure-Object -Property FreedBytes -Sum).Sum -as [int64]
 $actualFreed = $diskBefore - $diskAfter
 
+# Per-category breakdown
+$byCategory = $results |
+    Where-Object { $_.Status -ne 'Skipped' -and $_.FreedBytes -gt 0 } |
+    Group-Object Category |
+    ForEach-Object {
+        [PSCustomObject]@{
+            Category = $_.Name
+            Bytes    = ($_.Group | Measure-Object -Property FreedBytes -Sum).Sum -as [int64]
+        }
+    } | Sort-Object Bytes -Descending
+
 Write-Host ''
 Write-Host '  ================================================' -ForegroundColor Cyan
 Write-Host '   Summary' -ForegroundColor Cyan
 Write-Host '  ================================================' -ForegroundColor Cyan
+Write-Host ''
+
+# Per-category table
+foreach ($row in $byCategory) {
+    Write-Host ('  {0,-30} {1,10}' -f $row.Category, (Format-Bytes $row.Bytes)) -ForegroundColor DarkGray
+}
+
+Write-Host ''
+Write-Host ('  {0,-30} {1}' -f ('─' * 30), ('─' * 10)) -ForegroundColor DarkGray
 
 if ($Apply) {
-    Write-Host ("  Space freed (measured) : {0}" -f (Format-Bytes $actualFreed)) -ForegroundColor Green
-    Write-Host ("  Space freed (reported) : {0}" -f (Format-Bytes $totalFreed))  -ForegroundColor Green
+    Write-Host ('  {0,-30} {1,10}' -f 'Total freed (reported)',  (Format-Bytes $totalFreed))  -ForegroundColor Green
+    Write-Host ('  {0,-30} {1,10}' -f 'Total freed (measured)',  (Format-Bytes $actualFreed)) -ForegroundColor Green
 } else {
-    Write-Host ("  Reclaimable space : {0} (estimate)" -f (Format-Bytes $totalFreed)) -ForegroundColor Yellow
+    Write-Host ('  {0,-30} {1,10}' -f 'Reclaimable (estimate)', (Format-Bytes $totalFreed)) -ForegroundColor Yellow
+    Write-Host ''
     Write-Host '  Run with -Apply to perform the actual cleanup.' -ForegroundColor Yellow
 }
 
