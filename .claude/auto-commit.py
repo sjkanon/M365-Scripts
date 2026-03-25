@@ -8,8 +8,11 @@ import json
 import subprocess
 import os
 import re
+import time
 
-REPO = '/Users/sjoerd/Github2.0/M365-Scripts'
+REPO           = '/Users/sjoerd/Github2.0/M365-Scripts'
+PUSH_INTERVAL  = 15 * 60   # push at most once every 15 minutes
+LAST_PUSH_FILE = os.path.join(REPO, '.claude', 'last-push')
 
 def run(cmd):
     r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=REPO)
@@ -250,8 +253,23 @@ def main():
         message = detect_from_diff(diff, basename)
 
     _, commit_rc = run(f'git commit -m "{message}"')
-    if commit_rc == 0:
-        run('git push')
+    if commit_rc != 0:
+        return
+
+    # Push at most once per PUSH_INTERVAL seconds
+    now = time.time()
+    last_push = 0
+    try:
+        with open(LAST_PUSH_FILE) as f:
+            last_push = float(f.read().strip())
+    except Exception:
+        pass
+
+    if now - last_push >= PUSH_INTERVAL:
+        _, push_rc = run('git push')
+        if push_rc == 0:
+            with open(LAST_PUSH_FILE, 'w') as f:
+                f.write(str(now))
 
 
 if __name__ == '__main__':
