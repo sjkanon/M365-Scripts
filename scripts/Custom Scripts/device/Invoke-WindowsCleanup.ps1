@@ -16,6 +16,7 @@
       - DirectX shader cache
       - Recycle Bin
       - Browser caches (Edge, Chrome, Firefox)
+      - Application & system log files (CBS, DISM, WindowsUpdate, Intune, IIS, Teams, Office)
       - Windows component store (via DISM)
       - Stale event log entries
 
