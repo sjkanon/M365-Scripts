@@ -227,39 +227,51 @@ foreach ($up in $userProfiles) {
 Write-Host ''
 Write-Host '  Windows Error Reporting' -ForegroundColor Cyan
 
-$werPaths = @(
-    "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
-    "$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
-    "$env:LocalAppData\Microsoft\Windows\WER\ReportQueue",
-    "$env:LocalAppData\Microsoft\Windows\WER\ReportArchive"
-)
-foreach ($path in $werPaths) {
+foreach ($subfolder in @('ReportQueue', 'ReportArchive')) {
+    $path = "$env:ProgramData\Microsoft\Windows\WER\$subfolder"
     $size = Get-FolderSize $path
     if ($size -eq 0) { continue }
     if ($Apply) { Invoke-CleanFolder $path }
     $after = if ($Apply) { Get-FolderSize $path } else { $size }
-    Add-Result 'WER' (Split-Path $path -Leaf) $size $after
+    Add-Result 'WER' "System WER\$subfolder" $size $after
 }
 
-# ── 6. Thumbnail & icon cache ──────────────────────────────────────────────────
+foreach ($up in $userProfiles) {
+    foreach ($subfolder in @('ReportQueue', 'ReportArchive')) {
+        $path = "$($up.FullName)\AppData\Local\Microsoft\Windows\WER\$subfolder"
+        $size = Get-FolderSize $path
+        if ($size -eq 0) { continue }
+        if ($Apply) { Invoke-CleanFolder $path }
+        $after = if ($Apply) { Get-FolderSize $path } else { $size }
+        Add-Result 'WER' "WER\$subfolder ($($up.Name))" $size $after
+    }
+}
+
+# ── 6. Thumbnail & shader cache (all users) ────────────────────────────────────
 Write-Host ''
 Write-Host '  Thumbnail & Shader Cache' -ForegroundColor Cyan
 
-$thumbPath  = "$env:LocalAppData\Microsoft\Windows\Explorer"
-$thumbFiles = Get-ChildItem -Path $thumbPath -Filter 'thumbcache_*.db' -Force -ErrorAction SilentlyContinue
-$thumbSize  = ($thumbFiles | Measure-Object -Property Length -Sum).Sum -as [int64]
 if ($Apply) {
     Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
-    $thumbFiles | Remove-Item -Force -ErrorAction SilentlyContinue
-    Start-Process explorer
 }
-Add-Result 'Cache' 'Thumbnail cache (Explorer)' $thumbSize ($thumbSize - $thumbSize * [int]$Apply)
 
-$shaderPath = "$env:LocalAppData\D3DSCache"
-$shaderSize = Get-FolderSize $shaderPath
-if ($Apply) { Invoke-CleanFolder $shaderPath }
-$shaderAfter = if ($Apply) { Get-FolderSize $shaderPath } else { $shaderSize }
-Add-Result 'Cache' 'DirectX shader cache' $shaderSize $shaderAfter
+foreach ($up in $userProfiles) {
+    $thumbPath  = "$($up.FullName)\AppData\Local\Microsoft\Windows\Explorer"
+    $thumbFiles = Get-ChildItem -Path $thumbPath -Filter 'thumbcache_*.db' -Force -ErrorAction SilentlyContinue
+    $thumbSize  = ($thumbFiles | Measure-Object -Property Length -Sum).Sum -as [int64]
+    if ($thumbSize -eq 0) { continue }
+    if ($Apply) { $thumbFiles | Remove-Item -Force -ErrorAction SilentlyContinue }
+    Add-Result 'Cache' "Thumbnail cache ($($up.Name))" $thumbSize (if ($Apply) { 0 } else { $thumbSize })
+
+    $shaderPath = "$($up.FullName)\AppData\Local\D3DSCache"
+    $shaderSize = Get-FolderSize $shaderPath
+    if ($shaderSize -eq 0) { continue }
+    if ($Apply) { Invoke-CleanFolder $shaderPath }
+    $shaderAfter = if ($Apply) { Get-FolderSize $shaderPath } else { $shaderSize }
+    Add-Result 'Cache' "DirectX shader cache ($($up.Name))" $shaderSize $shaderAfter
+}
+
+if ($Apply) { Start-Process explorer }
 
 # ── 7. Font cache ──────────────────────────────────────────────────────────────
 $fontCachePath = "$env:WinDir\ServiceProfiles\LocalService\AppData\Local\FontCache"
