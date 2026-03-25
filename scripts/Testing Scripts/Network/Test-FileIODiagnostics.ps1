@@ -247,6 +247,7 @@ for ($i = 1; $i -le $Iterations; $i++) {
         # Deep diagnostics — only on first failure
         if (-not $diagnosed) {
             $diagnosed = $true
+            $diagErr   = $iterError   # capture before switch overwrites $_
             Write-Section "Failure Diagnostics (first error at iteration $i)"
 
             switch ($category) {
