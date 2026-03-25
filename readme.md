@@ -181,6 +181,15 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 
 - OpenVPN Connect diagnostics — PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; exports txt report to `C:\Temp\`
 
+#### RDS
+
+- RDP + RD Web Access diagnostics (`Test-RDSDiagnostics.ps1`) — diagnose why users cannot log in to an RDP or RDWeb server:
+  - Services (TermService, SessionEnv, UmRdpService), RDP enabled/disabled, NLA, session limits, RD Licensing, firewall rules, active sessions
+  - HTTPS certificate validity and expiry on RDWeb; IIS app pool and RD Gateway status (local only)
+  - User account checks: enabled, locked, password expired, Remote Desktop Users membership
+  - Event log analysis: failed logons (4625), lockouts (4740), Kerberos failures (4771), session disconnect reasons (20/40)
+  - Timestamped log file saved to `C:\Temp\`; `-IncludeEventLogs` for event analysis
+
 ---
 
 ### 📊 Reporting
