@@ -235,6 +235,27 @@ Comprehensive disk space cleanup for Windows endpoints.
 
 
 
+#### Windows Device Management
+
+Scripts for managing and maintaining Windows devices.
+
+**Invoke-WindowsActivation.ps1** — Activate Windows or manage licensing settings:
+- Install a retail or KMS generic product key (`-ProductKey`)
+- Configure a corporate KMS activation server (`-KmsServer`, `-KmsPort`)
+- Trigger online or KMS-based activation (`-Activate`)
+- Show activation status via WMI and `slmgr /dli` (`-Status`)
+- Remove the product key before reimage or license transfer (`-RemoveKey`)
+- Reset the grace-period counter (`-ReArm`, max ~3-5x per install)
+- Confirmation prompts by default; use `-Force` to skip
+
+**Invoke-WindowsCleanup.ps1** — Scan and optionally remove reclaimable disk space:
+- User + system temp, Windows Update cache, Delivery Optimization, Prefetch
+- Memory dumps, WER queues, thumbnail/DirectX shader cache, font cache
+- Recycle Bin, browser caches (Edge/Chrome multi-profile + Firefox)
+- Event logs, DISM component store (`/StartComponentCleanup /ResetBase`)
+- Application & system logs: dynamic scan of entire C:\ for `logs`/`log`/`logging` folders
+- Dry-run by default; use `-Apply` to delete. Per-category summary with space freed
+
 #### DNS Management
 
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
