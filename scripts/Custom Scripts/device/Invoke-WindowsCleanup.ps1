@@ -411,6 +411,70 @@ if ($Apply) {
     Write-Host ("    [SCAN] DNS cache contains {0} entries" -f $dnsEntries) -ForegroundColor DarkGray
 }
 
+# ── 13. Application & System Logs ─────────────────────────────────────────────
+Write-Host ''
+Write-Host '  Application & System Logs' -ForegroundColor Cyan
+
+if ($SkipAppLogs) {
+    Add-Result 'App Logs' 'Skipped' 0 0 -Skipped $true
+} else {
+    # CBS: only archived .cab files — active CBS.log stays
+    $cbsCabs = Get-ChildItem "$env:SystemRoot\Logs\CBS" -Filter 'CbsPersist_*.cab' -ErrorAction SilentlyContinue
+    $cbsSize = ($cbsCabs | Measure-Object -Property Length -Sum).Sum -as [int64]
+    if ($cbsSize -gt 0) {
+        if ($Apply) { $cbsCabs | Remove-Item -Force -ErrorAction SilentlyContinue }
+        Add-Result 'App Logs' 'CBS archived logs (CbsPersist*.cab)' $cbsSize (if ($Apply) { 0 } else { $cbsSize })
+    }
+
+    # Other Windows log subdirectories (all archival, recreated automatically)
+    $winLogPaths = @(
+        @{ Path = "$env:SystemRoot\Panther";                    Label = 'Windows Setup logs (Panther)' },
+        @{ Path = "$env:SystemRoot\Logs\DISM";                  Label = 'DISM logs' },
+        @{ Path = "$env:SystemRoot\Logs\WindowsUpdate";         Label = 'Windows Update logs' },
+        @{ Path = "$env:SystemRoot\Logs\MoSetup";               Label = 'Modern Setup logs' },
+        @{ Path = "$env:SystemRoot\Logs\SIH";                   Label = 'Software Inventory logs' },
+        @{ Path = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs"; Label = 'Intune Management Extension logs' },
+        @{ Path = 'C:\inetpub\logs\LogFiles';                   Label = 'IIS logs' }
+    )
+    foreach ($entry in $winLogPaths) {
+        $size = Get-FolderSize $entry.Path
+        if ($size -eq 0) { continue }
+        if ($Apply) { Invoke-CleanFolder $entry.Path }
+        $after = if ($Apply) { Get-FolderSize $entry.Path } else { $size }
+        Add-Result 'App Logs' $entry.Label $size $after
+    }
+
+    # Per-user application logs
+    foreach ($up in $userProfiles) {
+        $local   = "$($up.FullName)\AppData\Local"
+        $roaming = "$($up.FullName)\AppData\Roaming"
+
+        # Teams Classic logs
+        $teamsLogFile = "$roaming\Microsoft\Teams\logs.txt"
+        $teamsLogDir  = "$roaming\Microsoft\Teams\logs"
+        foreach ($path in @($teamsLogFile, $teamsLogDir)) {
+            $item = Get-Item $path -Force -ErrorAction SilentlyContinue
+            if (-not $item) { continue }
+            $size = if ($item.PSIsContainer) { Get-FolderSize $path } else { $item.Length -as [int64] }
+            if ($size -eq 0) { continue }
+            if ($Apply) {
+                if ($item.PSIsContainer) { Invoke-CleanFolder $path }
+                else { Remove-Item $path -Force -ErrorAction SilentlyContinue }
+            }
+            Add-Result 'App Logs' "Teams logs ($($up.Name))" $size (if ($Apply) { 0 } else { $size })
+        }
+
+        # Office telemetry
+        $officeTelPath = "$local\Microsoft\Office\16.0\Telemetry"
+        $size = Get-FolderSize $officeTelPath
+        if ($size -gt 0) {
+            if ($Apply) { Invoke-CleanFolder $officeTelPath }
+            $after = if ($Apply) { Get-FolderSize $officeTelPath } else { $size }
+            Add-Result 'App Logs' "Office telemetry ($($up.Name))" $size $after
+        }
+    }
+}
+
 # ── Summary ────────────────────────────────────────────────────────────────────
 $diskAfter   = (Get-PSDrive -Name C).Used
 $totalFreed  = ($results | Where-Object { $_.Status -ne 'Skipped' } | Measure-Object -Property FreedBytes -Sum).Sum -as [int64]
