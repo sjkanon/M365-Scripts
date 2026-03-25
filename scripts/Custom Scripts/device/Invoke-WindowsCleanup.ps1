@@ -426,7 +426,7 @@ if ($SkipAppLogs) {
         Add-Result 'App Logs' 'CBS archived logs (CbsPersist*.cab)' $cbsSize (if ($Apply) { 0 } else { $cbsSize })
     }
 
-    # Fixed Windows system log directories
+    # Fixed Windows system log directories (C:\Windows is excluded from the drive scan below)
     $sysLogPaths = @(
         "$env:SystemRoot\Panther",
         "$env:SystemRoot\Logs\DISM",
@@ -443,59 +443,42 @@ if ($SkipAppLogs) {
         Add-Result 'App Logs' (Split-Path $path -Leaf) $size $after
     }
 
-    # Dynamic scan: find all log folders up to 2 levels deep under a given root
+    # Full drive scan — recursively finds all log folders on C:\
+    # Stops recursing into a branch once a log folder is found (no nested scan)
+    # Skips known heavy/system directories that never contain app logs
     $logFolderNames = @('logs', 'log', 'Logs', 'Log', 'logging', 'Logging', 'diagnostics', 'DiagnosticLogs')
-    # Skip Windows core dirs at root level to avoid scanning C:\Windows internals
-    $skipAtRoot = @('Windows', 'WindowsApps', 'Package Cache', 'USOShared', 'USOPrivate', 'wsl')
+    $skipDirNames   = @(
+        'Windows', 'WinSxS', 'System32', 'SysWOW64', 'SystemApps', 'WindowsApps',
+        '$Recycle.Bin', 'System Volume Information', 'Recovery', 'Boot',
+        'Package Cache', 'USOShared', 'USOPrivate', 'wsl',
+        'node_modules', '.git', '.svn', 'venv', '.venv', '__pycache__'
+    )
 
-    function Invoke-LogScan {
-        param([string]$Root, [string]$Prefix)
-        if (-not (Test-Path $Root)) { return }
-        $appDirs = Get-ChildItem $Root -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -notin $skipAtRoot }
-        foreach ($app in $appDirs) {
-            # Direct child: Root\AppName\logs
-            foreach ($logName in $logFolderNames) {
-                $path = "$($app.FullName)\$logName"
-                if (-not (Test-Path $path -PathType Container)) { continue }
-                $size = Get-FolderSize $path
-                if ($size -lt 1KB) { continue }
-                if ($Apply) { Invoke-CleanFolder $path }
-                $after = if ($Apply) { Get-FolderSize $path } else { $size }
-                Add-Result 'App Logs' "$Prefix\$($app.Name)\$logName" $size $after
-            }
-            # One level deeper: Root\AppName\SubName\logs
-            $subDirs = Get-ChildItem $app.FullName -Directory -ErrorAction SilentlyContinue
-            foreach ($sub in $subDirs) {
-                foreach ($logName in $logFolderNames) {
-                    $path = "$($sub.FullName)\$logName"
-                    if (-not (Test-Path $path -PathType Container)) { continue }
-                    $size = Get-FolderSize $path
-                    if ($size -lt 1KB) { continue }
-                    if ($Apply) { Invoke-CleanFolder $path }
-                    $after = if ($Apply) { Get-FolderSize $path } else { $size }
-                    Add-Result 'App Logs' "$Prefix\$($app.Name)\$($sub.Name)\$logName" $size $after
-                }
+    function Find-LogFolders {
+        param([string]$Path, [int]$Depth = 0, [int]$MaxDepth = 7)
+        if ($Depth -ge $MaxDepth) { return }
+        $dirs = Get-ChildItem $Path -Directory -Force -ErrorAction SilentlyContinue
+        foreach ($dir in $dirs) {
+            if ($dir.Name -in $skipDirNames) { continue }
+            if ($dir.Name -in $logFolderNames) {
+                $dir.FullName   # output path; don't recurse into it
+            } else {
+                Find-LogFolders -Path $dir.FullName -Depth ($Depth + 1) -MaxDepth $MaxDepth
             }
         }
     }
 
-    $scanRoots = @(
-        @{ Root = $env:ProgramData;                  Prefix = 'ProgramData' },
-        @{ Root = $env:ProgramFiles;                 Prefix = 'Program Files' },
-        @{ Root = ${env:ProgramFiles(x86)};          Prefix = 'Program Files (x86)' }
-    )
+    Write-Host '    [INFO] Scanning C:\ for log folders (this may take a moment)...' -ForegroundColor DarkGray
+    $foundLogFolders = @(Find-LogFolders -Path 'C:\')
+    Write-Host ("    [INFO] Found {0} log folder(s)" -f $foundLogFolders.Count) -ForegroundColor DarkGray
 
-    foreach ($entry in $scanRoots) {
-        if (-not $entry.Root) { continue }
-        Write-Host "    [INFO] Scanning $($entry.Prefix) for log folders..." -ForegroundColor DarkGray
-        Invoke-LogScan -Root $entry.Root -Prefix $entry.Prefix
-    }
-
-    foreach ($up in $userProfiles) {
-        Write-Host "    [INFO] Scanning $($up.Name) AppData for log folders..." -ForegroundColor DarkGray
-        Invoke-LogScan -Root "$($up.FullName)\AppData\Local"   -Prefix $up.Name
-        Invoke-LogScan -Root "$($up.FullName)\AppData\Roaming" -Prefix $up.Name
+    foreach ($path in $foundLogFolders) {
+        $size = Get-FolderSize $path
+        if ($size -lt 1KB) { continue }
+        $label = $path -replace '^[A-Z]:\\'
+        if ($Apply) { Invoke-CleanFolder $path }
+        $after = if ($Apply) { Get-FolderSize $path } else { $size }
+        Add-Result 'App Logs' $label $size $after
     }
 }
 
