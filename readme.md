@@ -146,6 +146,7 @@ Scripts for diagnosing network and mail connectivity.
 - Test TCP port connectivity on any host — single ports, ranges (`1294:1494`), combinations (`80,443,1294:1494`)
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
+- Auth & network diagnostics — Event Viewer (logon failures, Kerberos, NTLM, DC availability), time sync, Kerberos ticket cache, DNS, TCP connectivity, UNC share access, optional log file scan; exports txt report to `C:\Temp\`
 
 ### 🧪 Testing — Exchange
 Audit and diagnostic scripts for Exchange Online. Self-connecting — reuse an existing session or connect automatically. CSV exports go to `C:\Temp\` on Windows or `~/Downloads/` on macOS.
@@ -286,7 +287,8 @@ M365-Scripts/
         │   ├── Test-OpenVpnDiagnostics.ps1
         │   └── readme.md
         ├── Network/
-        │   └── Test-Ports.ps1
+        │   ├── Test-Ports.ps1
+        │   └── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
         ├── SharePoint/
         │   ├── Get-SharePointStorageReport.ps1
         │   └── readme.md
@@ -320,7 +322,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 | Date | Change |
 |------|--------|
-| 2026-03-24 | Added `scripts/Custom Scripts/SAS/` — SAS batch error monitoring with Zabbix integration, email alerts, and Event Viewer analysis |
+| 2026-03-25 | Updated `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — two-phase approach (enumerate all sites/libraries first, then retrieve storage data); fixed inline `if` syntax error |
+| 2026-03-25 | Added `scripts/Testing Scripts/Network/Test-AuthNetworkDiagnostics.ps1` — auth & network diagnostics: Event Viewer (4625/4771/4776/4740/5719), time sync, Kerberos cache, DNS, TCP, UNC shares, optional log scan |
+| 2026-03-25 | Added `scripts/Custom Scripts/SAS/` — SAS batch error monitoring with Zabbix integration, email alerts, and Event Viewer analysis |
 | 2026-03-24 | Added `scripts/Intune/iOS-Compliance-Updater/` — auto-update minimum iOS version in Intune compliance policy via Graph API; weekly scheduled task, dry-run support, one-time Setup.ps1 |
 | 2026-03-24 | Added `scripts/Testing Scripts/SharePoint/Get-SharePointStorageReport.ps1` — tenant-wide SharePoint storage report with version history per file; quick mode (quota) and full recursive scan |
 | 2026-03-24 | Added `scripts/Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` — OpenVPN Connect diagnostics: PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; txt export to `C:\Temp\` |
