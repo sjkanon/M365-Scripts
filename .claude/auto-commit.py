@@ -23,6 +23,37 @@ def first_match(pattern, text, flags=re.I):
     m = re.search(pattern, text, flags)
     return m.group(1) if m else None
 
+def nearest_section(content, changed_text):
+    """Zoek de dichtstbijzijnde ## of ### header boven de gewijzigde tekst."""
+    pos = content.find(changed_text)
+    if pos == -1:
+        return None
+    before = content[:pos]
+    headers = re.findall(r'^#{1,3} (.+)', before, re.M)
+    return headers[-1].strip() if headers else None
+
+def short_diff_summary(old, new):
+    """Geef een korte samenvatting van wat er inhoudelijk veranderd is."""
+    old_lines = set(l.strip() for l in old.splitlines() if l.strip())
+    new_lines = set(l.strip() for l in new.splitlines() if l.strip())
+    added   = [l for l in (new_lines - old_lines) if len(l) > 4]
+    removed = [l for l in (old_lines - new_lines) if len(l) > 4]
+
+    # Vermijd interne commentaar/technische regels
+    def is_meaningful(l):
+        return not re.match(r'^[#<{}\[\]()/*-]', l) and len(l) < 80
+
+    added   = [l for l in added   if is_meaningful(l)]
+    removed = [l for l in removed if is_meaningful(l)]
+
+    if added and removed:
+        return f"'{removed[0][:40]}' → '{added[0][:40]}'"
+    if added:
+        return f"'{added[0][:60]}' toegevoegd"
+    if removed:
+        return f"'{removed[0][:60]}' verwijderd"
+    return None
+
 # ---------- detectie op basis van old/new string (Edit tool) ----------
 
 def detect_from_edit(old, new, basename):
@@ -82,15 +113,37 @@ def detect_from_edit(old, new, basename):
     if 'try {' in new and 'try {' not in old:
         return f"Foutafhandeling toegevoegd aan {basename}"
 
-    # Versiegeschiedenis bijgewerkt in readme
+    # Readme: versiegeschiedenis of sectiewijziging
     if basename.lower() == 'readme.md':
-        m = re.search(r'\|\s*(202\d-\d{2}-\d{2})\s*\|(.+?)(?:\||$)', new)
-        if m:
-            entry = m.group(2).strip()[:80]
-            return f"Versiegeschiedenis bijgewerkt: {entry}"
+        # Nieuwe versieregel toegevoegd
+        new_ver = re.findall(r'\|\s*(202\d-\d{2}-\d{2})\s*\|(.+?)(?:\||$)', new)
+        old_ver = re.findall(r'\|\s*(202\d-\d{2}-\d{2})\s*\|(.+?)(?:\||$)', old)
+        added_ver = [v for v in new_ver if v not in old_ver]
+        if added_ver:
+            entry = added_ver[0][1].strip()[:80]
+            return f"Readme versiegeschiedenis: {entry}"
+
+        # Zoek welke sectie gewijzigd is via file context
+        try:
+            with open(f'{REPO}/readme.md', 'r') as f:
+                full = f.read()
+            section = nearest_section(full, new[:60]) if new else None
+            if section:
+                summary = short_diff_summary(old, new)
+                if summary:
+                    return f"Readme '{section}': {summary}"
+                return f"Readme sectie '{section}' bijgewerkt"
+        except Exception:
+            pass
+
+        summary = short_diff_summary(old, new)
+        if summary:
+            return f"Readme bijgewerkt: {summary}"
         return "Readme bijgewerkt"
 
-    return None
+    # PowerShell/overig: voeg een korte samenvatting toe aan het bericht
+    summary = short_diff_summary(old, new)
+    return summary  # None = ga naar diff-detectie
 
 # ---------- detectie op basis van git diff ----------
 
@@ -124,19 +177,26 @@ def detect_from_diff(diff, basename):
         return f"CSV export toegevoegd aan {basename}"
 
     if basename.lower() == 'readme.md':
+        meaningful = [l.strip() for l in added if l.strip() and not l.strip().startswith('#') and not l.strip().startswith('|') and len(l.strip()) > 5]
+        if meaningful:
+            return f"Readme bijgewerkt: '{meaningful[0][:60]}'"
         return "Readme bijgewerkt"
 
-    # Fallback op aantal regels
+    # Fallback op aantal regels + eerste betekenisvolle toevoeging
     n_add = len([l for l in added   if l.strip()])
     n_rem = len([l for l in removed if l.strip()])
+    meaningful_add = [l.strip() for l in added if l.strip() and not re.match(r'^[#<{}\[\]()/*]', l.strip()) and len(l.strip()) > 5]
+
     if n_rem > 0 and n_add == 0:
         return f"Code verwijderd uit {basename}"
     if n_rem > n_add * 2:
         return f"Code opgeschoond in {basename}"
     if n_add > 15:
-        return f"Nieuwe functionaliteit toegevoegd aan {basename}"
+        snippet = f": {meaningful_add[0][:50]}" if meaningful_add else ""
+        return f"Nieuwe functionaliteit toegevoegd aan {basename}{snippet}"
     if n_add > 0:
-        return f"Kleine wijziging in {basename}"
+        snippet = f": {meaningful_add[0][:50]}" if meaningful_add else ""
+        return f"Kleine wijziging in {basename}{snippet}"
     return f"Update {basename}"
 
 
