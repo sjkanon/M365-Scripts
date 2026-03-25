@@ -306,33 +306,45 @@ Write-Host ''
 Write-Host '  Browser Cache' -ForegroundColor Cyan
 
 if ($SkipBrowserCache) {
-    Add-Result 'Browser' 'Skipped (use -SkipBrowserCache to include)' 0 0 -Skipped $true
+    Add-Result 'Browser' 'Skipped' 0 0 -Skipped $true
 } else {
-    $browserPaths = @{
-        'Edge'    = "$env:LocalAppData\Microsoft\Edge\User Data\Default\Cache\Cache_Data"
-        'Chrome'  = "$env:LocalAppData\Google\Chrome\User Data\Default\Cache\Cache_Data"
-        'Firefox' = "$env:AppData\Mozilla\Firefox\Profiles"
-    }
+    foreach ($up in $userProfiles) {
+        $local   = "$($up.FullName)\AppData\Local"
+        $roaming = "$($up.FullName)\AppData\Roaming"
 
-    foreach ($browser in $browserPaths.Keys) {
-        $path = $browserPaths[$browser]
-        if ($browser -eq 'Firefox') {
-            # Firefox caches are inside profile folders
-            $ffProfiles = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue
-            foreach ($ffProfile in $ffProfiles) {
-                $cachePath = Join-Path $ffProfile.FullName 'cache2'
-                $size = Get-FolderSize $cachePath
-                if ($size -eq 0) { continue }
-                if ($Apply) { Invoke-CleanFolder $cachePath }
-                $after = if ($Apply) { Get-FolderSize $cachePath } else { $size }
-                Add-Result 'Browser' "Firefox ($($ffProfile.Name))" $size $after
-            }
-        } else {
+        # Edge — multiple profiles (Default, Profile 1, Profile 2, ...)
+        $edgeProfiles = Get-ChildItem "$local\Microsoft\Edge\User Data" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^(Default|Profile \d+)$' }
+        foreach ($ep in $edgeProfiles) {
+            $path = "$($ep.FullName)\Cache\Cache_Data"
             $size = Get-FolderSize $path
             if ($size -eq 0) { continue }
             if ($Apply) { Invoke-CleanFolder $path }
             $after = if ($Apply) { Get-FolderSize $path } else { $size }
-            Add-Result 'Browser' $browser $size $after
+            Add-Result 'Browser' "Edge/$($ep.Name) ($($up.Name))" $size $after
+        }
+
+        # Chrome — multiple profiles
+        $chromeProfiles = Get-ChildItem "$local\Google\Chrome\User Data" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^(Default|Profile \d+)$' }
+        foreach ($cp in $chromeProfiles) {
+            $path = "$($cp.FullName)\Cache\Cache_Data"
+            $size = Get-FolderSize $path
+            if ($size -eq 0) { continue }
+            if ($Apply) { Invoke-CleanFolder $path }
+            $after = if ($Apply) { Get-FolderSize $path } else { $size }
+            Add-Result 'Browser' "Chrome/$($cp.Name) ($($up.Name))" $size $after
+        }
+
+        # Firefox
+        $ffProfiles = Get-ChildItem "$roaming\Mozilla\Firefox\Profiles" -Directory -ErrorAction SilentlyContinue
+        foreach ($ffProfile in $ffProfiles) {
+            $path = "$($ffProfile.FullName)\cache2"
+            $size = Get-FolderSize $path
+            if ($size -eq 0) { continue }
+            if ($Apply) { Invoke-CleanFolder $path }
+            $after = if ($Apply) { Get-FolderSize $path } else { $size }
+            Add-Result 'Browser' "Firefox ($($up.Name))" $size $after
         }
     }
 }
