@@ -217,6 +217,17 @@ USB toolkit for Windows setup and Autopilot enrollment during OOBE.
 
 - Restart and force Windows Time service sync
 
+#### Windows Cleanup
+
+Comprehensive disk space cleanup for Windows endpoints.
+
+- Cleans user/system temp folders, Windows Update download cache, Delivery Optimization cache, Prefetch, memory dumps, WER queues, thumbnail cache, DirectX shader cache, Recycle Bin, browser caches (Edge, Chrome, Firefox), and event logs
+- DISM component store cleanup (`/StartComponentCleanup /ResetBase`) after Windows Updates
+- DNS cache flush
+- Dry-run by default — shows reclaimable space per category without deleting anything
+- Run with `-Apply` to perform the actual cleanup; individual categories can be skipped with `-SkipBrowserCache`, `-SkipEventLogs`, `-SkipDism`, `-SkipRecycleBin`
+- Exports a CSV report with bytes freed per category to `C:\Temp\`
+
 ---
 
 ### 🔧 Custom Tools
