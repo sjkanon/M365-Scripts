@@ -62,6 +62,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param (
     [switch] $Apply,
+    [switch] $SkipAppLogs,
     [switch] $SkipBrowserCache,
     [switch] $SkipEventLogs,
     [switch] $SkipDism,
