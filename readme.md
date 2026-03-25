@@ -258,6 +258,7 @@ M365-Scripts/
 └── scripts/
     ├── Custom Scripts/
     │   ├── device/
+    │   │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   │   ├── audio/
     │   │   │   ├── detect-audiodevices.ps1
     │   │   │   ├── Disable-internalmic.ps1
