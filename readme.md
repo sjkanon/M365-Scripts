@@ -371,7 +371,8 @@ M365-Scripts/
         ├── Network/
         │   ├── Test-Ports.ps1
         │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
-        │   └── Test-FileIODiagnostics.ps1        ← file I/O test with failure categorisation
+        │   ├── Test-FileIODiagnostics.ps1        ← file I/O test with failure categorisation
+        │   └── Test-WorkDirMonitor.ps1           ← real-time directory monitor (follow-up)
         ├── RDS/
         │   └── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
         ├── SharePoint/
