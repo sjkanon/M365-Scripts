@@ -34,13 +34,42 @@ $output.Add("")
 # Alleen microfoons (0.0.1) die matchen op deze namen worden disabled.
 # Headset merknamen worden NOOIT aangeraakt, ook al matchen ze op een patroon.
 $internalPatterns = @(
-    "*Microfoonmatrix*",
-    "*Microphone Array*",
+    # ── Realtek ───────────────────────────────────────────────────────────────
     "*Microphone*Realtek*",
+    "*Microfoon*Realtek*",              # NL
+
+    # ── Conexant ISST / SmartAudio ────────────────────────────────────────────
+    "*Internal Microphone*Conexant*",   # EN
+    "*Microphone interne*Conexant*",    # FR
+    "*Interne microfoon*Conexant*",     # NL
+
+    # ── Synaptics ─────────────────────────────────────────────────────────────
+    "*Microphone*Synaptics*",           # EN
+    "*Microfoon*Synaptics*",            # NL
+
+    # ── Intel Smart Sound Technology ──────────────────────────────────────────
+    "*Microphone*Intel*Smart Sound*",
+    "*Digital Microphone*Intel*",
+
+    # ── IDT High Definition Audio ─────────────────────────────────────────────
+    "*Microphone*IDT*",
+
+    # ── Cirrus Logic ──────────────────────────────────────────────────────────
+    "*Internal Microphone*Cirrus Logic*",
+    "*Digital Microphone*Cirrus Logic*",
+
+    # ── Generiek: High Definition Audio Device (Microsoft/AMD fallback) ───────
     "*Microphone*High Definition Audio*",
-    "*Microfoon*Realtek*",
-    "*Microfoon*Synaptics*",
-    "*Microphone (2-*"
+    "*Microphone (2-*",
+
+    # ── Meertalige array-namen (driver-onafhankelijk) ─────────────────────────
+    "*Microfoonmatrix*",                # NL  (Realtek / Conexant / Synaptics)
+    "*Microphone Array*",               # EN  (alle drivers)
+    "*Réseau de microphones*",          # FR
+    "*Mikrofonfeld*",                   # DE  (microphone array)
+    "*Internes Mikrofon*",              # DE  (internal microphone)
+    "*Matriz de micr*",                 # ES / PT
+    "*Matrice di microfoni*"            # IT
 )
 
 # ── Headset merknamen - NOOIT disablen ───────────────────────────────────────
