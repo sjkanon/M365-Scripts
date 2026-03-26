@@ -176,10 +176,20 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 - Auth & network diagnostics — Event Viewer (logon failures, Kerberos, NTLM, DC availability), time sync, DNS, TCP, UNC shares, optional log scan; exports txt report to `C:\Temp\`
+- File I/O diagnostics — write/append/read/delete loop on any path; classifies failures as AUTH/NETWORK/TIMEOUT/DISK/PATH; on each failure captures FileSystemWatcher events, NTFS permission diff vs baseline, open process handles (Handle.exe auto-downloaded from Sysinternals), new process snapshot, Kerberos tickets, and Security event log; stops after 3 failures
 
 #### Device
 
 - OpenVPN Connect diagnostics — PnP adapters, services, routes, DNS, Event Log, conflicting VPN software; exports txt report to `C:\Temp\`
+
+#### RDS
+
+- RDP + RD Web Access diagnostics (`Test-RDSDiagnostics.ps1`) — diagnose why users cannot log in to an RDP or RDWeb server:
+  - Services (TermService, SessionEnv, UmRdpService), RDP enabled/disabled, NLA, session limits, RD Licensing, firewall rules, active sessions
+  - HTTPS certificate validity and expiry on RDWeb; IIS app pool and RD Gateway status (local only)
+  - User account checks: enabled, locked, password expired, Remote Desktop Users membership
+  - Event log analysis: failed logons (4625), lockouts (4740), Kerberos failures (4771), session disconnect reasons (20/40)
+  - Timestamped log file saved to `C:\Temp\`; `-IncludeEventLogs` for event analysis
 
 ---
 
@@ -359,7 +369,10 @@ M365-Scripts/
         │   └── readme.md
         ├── Network/
         │   ├── Test-Ports.ps1
-        │   └── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
+        │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
+        │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
+        ├── RDS/
+        │   └── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
         ├── SharePoint/
         │   ├── Get-SharePointStorageReport.ps1
         │   └── readme.md
@@ -394,6 +407,10 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-03-25
 | Change |
 |--------|
+| Updated `scripts/Testing Scripts/Network/Test-FileIODiagnostics.ps1` — merged real-time monitor: FileSystemWatcher, NTFS permission diff vs baseline, auto-download Sysinternals Handle.exe, process snapshot diff, Kerberos tickets at failure time, Security audit events (4625/4740/4656/4663/4670); stops after 3 failures |
+| Added `scripts/Testing Scripts/Network/Test-FileIODiagnostics.ps1` — file I/O stress test on any path (local or UNC/mapped drive); categorises failures as AUTH / NETWORK / TIMEOUT / DISK / PATH; auto-collects Kerberos tickets, net use, SMB port check and Security event log on first failure; `-Iterations`, `-StopOnFirstError`, `-DelayMs` parameters |
+| Updated `scripts/Testing Scripts/RDS/Test-RDSDiagnostics.ps1` — add RDWeb Event Viewer analysis: TerminalServices-WebAccess/Admin+Operational, TerminalServices-Gateway/Admin+Operational, IIS/ASP.NET errors from Application log; triggered by -IncludeEventLogs |
+| Added `scripts/Testing Scripts/RDS/Test-RDSDiagnostics.ps1` — diagnose RDP/RDWeb login failures: services, registry, NLA, session limits, licensing, firewall, HTTPS cert, IIS app pool, user account (enabled/locked/expired/group), event logs (4625/4740/4771/20/40); timestamped log to C:\Temp\ |
 | Added `scripts/Custom Scripts/device/Invoke-WindowsActivation.ps1` — activate Windows, install product key, configure KMS server/port, remove key, ReArm grace period; dry-run safe with confirmation prompts; -Force to skip |
 | Updated `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — add dynamic log folder scan (section 13): recursively scans entire C:\ drive (max depth 7) for folders named logs/log/logging/diagnostics; skips Windows system dirs and dev artifacts (node_modules, .git, venv); fixed Windows system log paths (CBS archived .cab, DISM, WU, Panther, IIS); new `-SkipAppLogs` parameter |
 | Updated `scripts/Custom Scripts/device/Invoke-WindowsCleanup.ps1` — scan all user profiles in C:\Users\ for temp, WER, thumbnail/shader cache and browser caches (Edge multi-profile, Chrome multi-profile, Firefox); summary shows reclaimable space per category |
