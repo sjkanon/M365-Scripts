@@ -279,6 +279,27 @@ Scripts for managing and maintaining Windows devices.
 - Reset the grace-period counter (`-ReArm`, max ~3-5x per install)
 - Confirmation prompts by default; use `-Force` to skip
 
+**NinjaOne uitrol:**
+
+| Instelling | Waarde |
+|---|---|
+| Run as | **Administrator** |
+| Custom fields | _(geen — output via console/script log)_ |
+| Exit code | `0` = succes · `1` = fout |
+
+> **Let op:** `-RemoveKey` en `-ReArm` vragen interactieve bevestiging. Voeg altijd `-Force` toe wanneer je deze via NinjaOne uitvoert, anders blijft het script hangen.
+
+Veelgebruikte NinjaOne script parameters:
+
+| Scenario | Parameters |
+|---|---|
+| Status controleren | `-Status` |
+| KMS activatie | `-KmsServer kms.bedrijf.local -Activate -Status` |
+| KMS met afwijkende poort | `-KmsServer kms.bedrijf.local -KmsPort 2500 -Activate` |
+| Retail key installeren + activeren | `-ProductKey XXXXX-XXXXX-XXXXX-XXXXX-XXXXX -Activate -Status` |
+| Key verwijderen (voor reimage) | `-RemoveKey -Force` |
+| Grace period resetten | `-ReArm -Force` |
+
 **Invoke-WindowsCleanup.ps1** — Scan and optionally remove reclaimable disk space:
 - User + system temp, Windows Update cache, Delivery Optimization, Prefetch
 - Memory dumps, WER queues, thumbnail/DirectX shader cache, font cache
