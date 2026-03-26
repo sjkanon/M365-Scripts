@@ -404,6 +404,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-03-26
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/device/audio/Disable-internalmic.ps1` — expanded internal mic patterns: added Conexant language variants (EN/FR/NL), Synaptics EN, Intel SST, IDT, Cirrus Logic drivers, and multilingual microphone array names (FR/DE/ES/PT/IT) |
+
 ### 2026-03-25
 | Change |
 |--------|
