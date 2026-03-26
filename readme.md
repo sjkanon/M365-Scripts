@@ -219,9 +219,24 @@ USB toolkit for Windows setup and Autopilot enrollment during OOBE.
 
 #### Audio Management
 
-- Detect connected audio devices
-- Disable internal microphone via policy
-- Rollback internal mic changes
+Three scripts that work together to detect, disable, and roll back internal microphones on endpoints — deployed via NinjaOne.
+
+| Script | Doel |
+|---|---|
+| `detect-audiodevices.ps1` | Inventory van alle audio endpoints op het toestel |
+| `Disable-internalmic.ps1` | Disable interne microfoon(s), headsets worden overgeslagen |
+| `Rollback-InternalMic.ps1` | Heractiveer eerder uitgeschakelde interne microfoons |
+
+**NinjaOne uitrol (alle drie de scripts):**
+
+| Instelling | Waarde |
+|---|---|
+| Run as | **SYSTEM** |
+| Script parameters | _(geen)_ |
+| Custom field vereist | `AudioDeviceInventory` (device, tekstveld/textarea) |
+| Exit code | `0` = succes · `1` = fout (script gemarkeerd als mislukt) |
+
+> Het custom field `AudioDeviceInventory` moet aangemaakt zijn als device-level custom field in NinjaOne voordat je de scripts uitrolt. De output van elk script wordt daarin weggeschreven via `Ninja-Property-Set AudioDeviceInventory`.
 
 #### Time Sync
 
