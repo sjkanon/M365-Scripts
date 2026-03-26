@@ -219,9 +219,24 @@ USB toolkit for Windows setup and Autopilot enrollment during OOBE.
 
 #### Audio Management
 
-- Detect connected audio devices
-- Disable internal microphone via policy
-- Rollback internal mic changes
+Three scripts that work together to detect, disable, and roll back internal microphones on endpoints — deployed via NinjaOne.
+
+| Script | Doel |
+|---|---|
+| `detect-audiodevices.ps1` | Inventory van alle audio endpoints op het toestel |
+| `Disable-internalmic.ps1` | Disable interne microfoon(s), headsets worden overgeslagen |
+| `Rollback-InternalMic.ps1` | Heractiveer eerder uitgeschakelde interne microfoons |
+
+**NinjaOne uitrol (alle drie de scripts):**
+
+| Instelling | Waarde |
+|---|---|
+| Run as | **SYSTEM** |
+| Script parameters | _(geen)_ |
+| Custom field vereist | `AudioDeviceInventory` (device, tekstveld/textarea) |
+| Exit code | `0` = succes · `1` = fout (script gemarkeerd als mislukt) |
+
+> Het custom field `AudioDeviceInventory` moet aangemaakt zijn als device-level custom field in NinjaOne voordat je de scripts uitrolt. De output van elk script wordt daarin weggeschreven via `Ninja-Property-Set AudioDeviceInventory`.
 
 #### Time Sync
 
@@ -263,6 +278,27 @@ Scripts for managing and maintaining Windows devices.
 - Remove the product key before reimage or license transfer (`-RemoveKey`)
 - Reset the grace-period counter (`-ReArm`, max ~3-5x per install)
 - Confirmation prompts by default; use `-Force` to skip
+
+**NinjaOne uitrol:**
+
+| Instelling | Waarde |
+|---|---|
+| Run as | **Administrator** |
+| Custom fields | _(geen — output via console/script log)_ |
+| Exit code | `0` = succes · `1` = fout |
+
+> **Let op:** `-RemoveKey` en `-ReArm` vragen interactieve bevestiging. Voeg altijd `-Force` toe wanneer je deze via NinjaOne uitvoert, anders blijft het script hangen.
+
+Veelgebruikte NinjaOne script parameters:
+
+| Scenario | Parameters |
+|---|---|
+| Status controleren | `-Status` |
+| KMS activatie | `-KmsServer kms.bedrijf.local -Activate -Status` |
+| KMS met afwijkende poort | `-KmsServer kms.bedrijf.local -KmsPort 2500 -Activate` |
+| Retail key installeren + activeren | `-ProductKey XXXXX-XXXXX-XXXXX-XXXXX-XXXXX -Activate -Status` |
+| Key verwijderen (voor reimage) | `-RemoveKey -Force` |
+| Grace period resetten | `-ReArm -Force` |
 
 **Invoke-WindowsCleanup.ps1** — Scan and optionally remove reclaimable disk space:
 - User + system temp, Windows Update cache, Delivery Optimization, Prefetch
@@ -403,6 +439,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-03-26
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/device/audio/Disable-internalmic.ps1` — expanded internal mic patterns: added Conexant language variants (EN/FR/NL), Synaptics EN, Intel SST, IDT, Cirrus Logic drivers, and multilingual microphone array names (FR/DE/ES/PT/IT) |
+| Updated readme — Audio Management section: added NinjaOne deployment table (Run as SYSTEM, no parameters, `AudioDeviceInventory` custom field, exit codes) for all three audio scripts |
 
 ### 2026-03-25
 | Change |
