@@ -176,8 +176,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - One-time SMTP test with interactive credential prompt
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 - Auth & network diagnostics — Event Viewer (logon failures, Kerberos, NTLM, DC availability), time sync, DNS, TCP, UNC shares, optional log scan; exports txt report to `C:\Temp\`
-- File I/O diagnostics — write/append/read/delete loop on any path with failure categorisation: auth error, network unreachable, timeout, disk full, path missing; auto-collects Kerberos tickets, net use, SMB port check and event log on first failure
-- Work directory monitor — follow-up to File I/O diagnostics; on every failure captures FileSystemWatcher events, NTFS permission diff vs baseline, open process handles (requires Sysinternals Handle.exe), new process snapshot, and Security audit events; stops after 3 failures to preserve data
+- File I/O diagnostics — write/append/read/delete loop on any path; classifies failures as AUTH/NETWORK/TIMEOUT/DISK/PATH; on each failure captures FileSystemWatcher events, NTFS permission diff vs baseline, open process handles (Handle.exe auto-downloaded from Sysinternals), new process snapshot, Kerberos tickets, and Security event log; stops after 3 failures
 
 #### Device
 
