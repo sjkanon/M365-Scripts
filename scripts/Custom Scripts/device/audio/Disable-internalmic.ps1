@@ -3,18 +3,18 @@
 # Ticket: #0250981 - Best Next Contact BVBA
 # Auteur: Sjoerd Kanon
 # Datum: 19/03/2026
+# Bijgewerkt: 26/03/2026
 #
 # Doel: Disable de interne microfoon(s) op de laptop
 #       zonder de headset microfoon aan te raken.
 #
-# Gebaseerd op detect output van 16 devices (19/03/2026)
-# Interne microfoon patronen gevonden:
-#   - Microfoonmatrix (Realtek High Definition Audio)
-#   - Microphone Array (Realtek High Definition Audio)
-#   - Microphone (2- High Definition Audio Device)
-#   - Microphone (Realtek(R) Audio)
-#   - Microfoonmatrix (Realtek(R) Audio)
-#   - Microfoonmatrix (Synaptics Audio)
+# Patronen gebaseerd op detect output (19/03 + 26/03/2026)
+# en online research voor alle gangbare audio drivers.
+#
+# Drivers gedekt: Realtek, Conexant ISST, Synaptics,
+#                 Intel SST, IDT, Cirrus Logic, High Definition Audio
+#
+# Talen gedekt: NL, EN, FR, DE, ES, PT, IT
 #
 # Uitrol: NinjaOne - Run as SYSTEM
 # ============================================
