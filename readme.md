@@ -423,6 +423,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Change |
 |--------|
 | Updated `scripts/Custom Scripts/device/audio/Disable-internalmic.ps1` — expanded internal mic patterns: added Conexant language variants (EN/FR/NL), Synaptics EN, Intel SST, IDT, Cirrus Logic drivers, and multilingual microphone array names (FR/DE/ES/PT/IT) |
+| Updated readme — Audio Management section: added NinjaOne deployment table (Run as SYSTEM, no parameters, `AudioDeviceInventory` custom field, exit codes) for all three audio scripts |
 
 ### 2026-03-25
 | Change |
