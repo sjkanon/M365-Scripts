@@ -117,7 +117,7 @@ $adFilter = if ($IncludeDisabled) { '*' } else { "Enabled -eq 'True'" }
 
 $adProps = @(
     'Name', 'Enabled', 'OperatingSystem', 'OperatingSystemVersion',
-    'lastLogonTimestamp', 'whenCreated', 'DistinguishedName', 'Description', 'IPv4Address'
+    'lastLogonTimestamp', 'PasswordLastSet', 'whenCreated', 'DistinguishedName', 'Description', 'IPv4Address'
 )
 
 $allComputers = [System.Collections.Generic.List[object]]::new()
