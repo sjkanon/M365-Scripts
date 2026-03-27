@@ -191,6 +191,13 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Event log analysis: failed logons (4625), lockouts (4740), Kerberos failures (4771), session disconnect reasons (20/40)
   - Timestamped log file saved to `C:\Temp\`; `-IncludeEventLogs` for event analysis
 
+- Real-time RDS monitor (`Watch-RDSLive.ps1`) — polls event logs every N seconds and streams new events to console + log file:
+  - Session events: logon (21), reconnect (22/25), logoff (23), disconnect (24), logon failed (20), disconnect reason (40) with human-readable reason codes
+  - Security: failed RDP logons (4625 type 10), account lockouts (4740)
+  - Licensing: `TerminalServices-Licensing/Admin` events + System log `TermServLicensing` provider
+  - Heartbeat line per poll showing active session count and new event count
+  - Run directly on each RDS/RDWeb server; `-IntervalSeconds` (default 20), `-NoLogFile` to skip file output
+
 ---
 
 ### 📊 Reporting
