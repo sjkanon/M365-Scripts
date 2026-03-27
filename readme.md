@@ -208,8 +208,9 @@ Report last logon date for all computer objects in one or more OUs and export to
 
 - Queries Active Directory for computers in specified OUs (e.g. `OU=Laptops`, `OU=Computers`)
 - Two accuracy modes: `LastLogonTimestamp` (fast, max 14-day delay) or `-AllDCs` (queries every DC for exact `LastLogon`)
-- Marks each computer as **Active**, **Stale**, **Never**, or **Disabled** based on `-InactiveDays` threshold (default 90)
-- CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, OS, IPv4, OU path, Created, Description
+- Four statuses: **Active** · **Active (pwd recent)** · **Stale** · **Never** · **Disabled**
+- `Active (pwd recent)`: device falsely marked stale due to 14-day replication delay — `PasswordLastSet` < 35 days confirms the machine is online (computer accounts auto-rotate password every ~30 days)
+- CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, PasswordLastSet, DaysSincePasswordSet, OS, IPv4, OU path, Created, Description
 - Supports multiple OUs in one run; `-IncludeDisabled` to include disabled objects
 
 #### Licensing Report
