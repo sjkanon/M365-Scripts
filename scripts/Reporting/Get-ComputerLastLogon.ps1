@@ -186,14 +186,23 @@ $report = foreach ($c in $allComputers) {
         $null
     }
 
-    $daysSince = if ($lastLogon) { [math]::Round(($now - $lastLogon).TotalDays) } else { $null }
+    $daysSince    = if ($lastLogon) { [math]::Round(($now - $lastLogon).TotalDays) } else { $null }
+    $pwdLastSet   = $c.PasswordLastSet
+    $daysSincePwd = if ($pwdLastSet) { [math]::Round(($now - $pwdLastSet).TotalDays) } else { $null }
+
+    # PasswordLastSet: computer accounts auto-rotate every ~30 days when online.
+    # If LastLogonTimestamp looks stale but password was set recently, the device
+    # is still active — the replication delay is misleading.
+    $pwdRecent = $pwdLastSet -and $daysSincePwd -le 35
 
     $status = if (-not $c.Enabled) {
         'Disabled'
-    } elseif (-not $lastLogon) {
+    } elseif (-not $lastLogon -and -not $pwdRecent) {
         'Never'
-    } elseif ($daysSince -le $InactiveDays) {
+    } elseif ($daysSince -le $InactiveDays -or ($null -eq $daysSince -and $pwdRecent)) {
         'Active'
+    } elseif ($pwdRecent) {
+        'Active (pwd recent)'   # LastLogon stale, maar wachtwoord recent vernieuwd → device is online
     } else {
         'Stale'
     }
@@ -204,6 +213,8 @@ $report = foreach ($c in $allComputers) {
         Enabled                = $c.Enabled
         LastLogon              = if ($lastLogon) { $lastLogon.ToString('dd/MM/yyyy HH:mm') } else { 'Never' }
         DaysSinceLogon         = if ($null -ne $daysSince) { $daysSince } else { '' }
+        PasswordLastSet        = if ($pwdLastSet) { $pwdLastSet.ToString('dd/MM/yyyy') } else { '' }
+        DaysSincePasswordSet   = if ($null -ne $daysSincePwd) { $daysSincePwd } else { '' }
         OperatingSystem        = $c.OperatingSystem
         OperatingSystemVersion = $c.OperatingSystemVersion
         IPv4Address            = $c.IPv4Address
