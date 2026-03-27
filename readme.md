@@ -460,6 +460,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-03-27
+| Change |
+|--------|
+| Added `scripts/Reporting/Get-ComputerLastLogon.ps1` — last logon report for computers in one or more OUs; `LastLogonTimestamp` (fast) or `-AllDCs` (accurate) mode; marks Active/Stale/Never/Disabled; exports timestamped CSV to `C:\Temp\`; `-InactiveDays`, `-IncludeDisabled`, `-ExportPath` parameters |
+| Added `scripts/Reporting/readme.md` — documents `Get-ComputerLastLogon.ps1` with parameter table, CSV column reference, and usage examples |
+
 ### 2026-03-26
 | Change |
 |--------|
