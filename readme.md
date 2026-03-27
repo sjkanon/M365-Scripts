@@ -202,6 +202,16 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 
 ### 📊 Reporting
 
+#### Computer Last Logon Report
+
+Report last logon date for all computer objects in one or more OUs and export to CSV.
+
+- Queries Active Directory for computers in specified OUs (e.g. `OU=Laptops`, `OU=Computers`)
+- Two accuracy modes: `LastLogonTimestamp` (fast, max 14-day delay) or `-AllDCs` (queries every DC for exact `LastLogon`)
+- Marks each computer as **Active**, **Stale**, **Never**, or **Disabled** based on `-InactiveDays` threshold (default 90)
+- CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, OS, IPv4, OU path, Created, Description
+- Supports multiple OUs in one run; `-IncludeDisabled` to include disabled objects
+
 #### Licensing Report
 
 Monthly licensing and Azure cost report generator.
