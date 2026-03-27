@@ -191,9 +191,26 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Event log analysis: failed logons (4625), lockouts (4740), Kerberos failures (4771), session disconnect reasons (20/40)
   - Timestamped log file saved to `C:\Temp\`; `-IncludeEventLogs` for event analysis
 
+- Real-time RDS monitor (`Watch-RDSLive.ps1`) — polls event logs every N seconds and streams new events to console + log file:
+  - Session events: logon (21), reconnect (22/25), logoff (23), disconnect (24), logon failed (20), disconnect reason (40) with human-readable reason codes
+  - Security: failed RDP logons (4625 type 10), account lockouts (4740)
+  - Licensing: `TerminalServices-Licensing/Admin` events + System log `TermServLicensing` provider
+  - Heartbeat line per poll showing active session count and new event count
+  - Run directly on each RDS/RDWeb server; `-IntervalSeconds` (default 20), `-NoLogFile` to skip file output
+
 ---
 
 ### 📊 Reporting
+
+#### Computer Last Logon Report
+
+Report last logon date for all computer objects in one or more OUs and export to CSV.
+
+- Queries Active Directory for computers in specified OUs (e.g. `OU=Laptops`, `OU=Computers`)
+- Two accuracy modes: `LastLogonTimestamp` (fast, max 14-day delay) or `-AllDCs` (queries every DC for exact `LastLogon`)
+- Marks each computer as **Active**, **Stale**, **Never**, or **Disabled** based on `-InactiveDays` threshold (default 90)
+- CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, OS, IPv4, OU path, Created, Description
+- Supports multiple OUs in one run; `-IncludeDisabled` to include disabled objects
 
 #### Licensing Report
 
@@ -378,6 +395,8 @@ M365-Scripts/
     │       ├── config.example.json
     │       └── readme.md
     ├── Reporting/
+    │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
+    │   ├── readme.md
     │   └── Licensing/
     │       ├── genereer_licentie_overzicht.py
     │       ├── genereer_rapport.ps1
@@ -408,7 +427,8 @@ M365-Scripts/
         │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
         │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
         ├── RDS/
-        │   └── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+        │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+        │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
         ├── SharePoint/
         │   ├── Get-SharePointStorageReport.ps1
         │   └── readme.md
@@ -440,11 +460,19 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-03-27
+| Change |
+|--------|
+| Added `scripts/Reporting/Get-ComputerLastLogon.ps1` — last logon report for computers in one or more OUs; `LastLogonTimestamp` (fast) or `-AllDCs` (accurate) mode; marks Active/Stale/Never/Disabled; exports timestamped CSV to `C:\Temp\`; `-InactiveDays`, `-IncludeDisabled`, `-ExportPath` parameters |
+| Added `scripts/Reporting/readme.md` — documents `Get-ComputerLastLogon.ps1` with parameter table, CSV column reference, and usage examples |
+
 ### 2026-03-26
 | Change |
 |--------|
 | Updated `scripts/Custom Scripts/device/audio/Disable-internalmic.ps1` — expanded internal mic patterns: added Conexant language variants (EN/FR/NL), Synaptics EN, Intel SST, IDT, Cirrus Logic drivers, and multilingual microphone array names (FR/DE/ES/PT/IT) |
 | Updated readme — Audio Management section: added NinjaOne deployment table (Run as SYSTEM, no parameters, `AudioDeviceInventory` custom field, exit codes) for all three audio scripts |
+| Updated readme — `Invoke-WindowsActivation.ps1`: added NinjaOne deployment table with Run as Administrator, exit codes, and parameter examples per scenario; warning added for `-RemoveKey`/`-ReArm` requiring `-Force` |
+| Added `scripts/Testing Scripts/RDS/Watch-RDSLive.ps1` — real-time RDS monitor: polls session events (20/21/22/23/24/25/40), failed RDP logons (4625), lockouts (4740), and licensing events every 20s; heartbeat per poll with session count; run directly on each RDS server |
 
 ### 2026-03-25
 | Change |
