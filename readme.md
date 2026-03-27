@@ -415,7 +415,8 @@ M365-Scripts/
         │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
         │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
         ├── RDS/
-        │   └── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+        │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+        │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
         ├── SharePoint/
         │   ├── Get-SharePointStorageReport.ps1
         │   └── readme.md
