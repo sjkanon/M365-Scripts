@@ -454,6 +454,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Updated `scripts/Custom Scripts/device/audio/Disable-internalmic.ps1` — expanded internal mic patterns: added Conexant language variants (EN/FR/NL), Synaptics EN, Intel SST, IDT, Cirrus Logic drivers, and multilingual microphone array names (FR/DE/ES/PT/IT) |
 | Updated readme — Audio Management section: added NinjaOne deployment table (Run as SYSTEM, no parameters, `AudioDeviceInventory` custom field, exit codes) for all three audio scripts |
 | Updated readme — `Invoke-WindowsActivation.ps1`: added NinjaOne deployment table with Run as Administrator, exit codes, and parameter examples per scenario; warning added for `-RemoveKey`/`-ReArm` requiring `-Force` |
+| Added `scripts/Testing Scripts/RDS/Watch-RDSLive.ps1` — real-time RDS monitor: polls session events (20/21/22/23/24/25/40), failed RDP logons (4625), lockouts (4740), and licensing events every 20s; heartbeat per poll with session count; run directly on each RDS server |
 
 ### 2026-03-25
 | Change |
