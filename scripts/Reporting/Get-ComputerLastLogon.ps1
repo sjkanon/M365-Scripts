@@ -39,18 +39,25 @@
     Folder where the CSV file is saved. Default: C:\Temp\.
 
 .EXAMPLE
-    # Report all computers in two OUs using LastLogonTimestamp
+    # Vias Institute — Laptops OU
     .\Get-ComputerLastLogon.ps1 `
-        -SearchBase "OU=Laptops,OU=Computers,DC=company,DC=local",
-                    "OU=Desktops,OU=Computers,DC=company,DC=local"
+        -SearchBase "OU=Laptops,OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be"
 
 .EXAMPLE
-    # Most accurate mode — queries all DCs
-    .\Get-ComputerLastLogon.ps1 -SearchBase "OU=Computers,DC=company,DC=local" -AllDCs
+    # Vias Institute — alle computers (Laptops + rest van de Computers OU)
+    .\Get-ComputerLastLogon.ps1 `
+        -SearchBase "OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be"
 
 .EXAMPLE
-    # Include disabled computers, stale threshold 60 days
-    .\Get-ComputerLastLogon.ps1 -SearchBase "OU=Computers,DC=company,DC=local" `
+    # Nauwkeurigste modus — bevraagt alle DC's
+    .\Get-ComputerLastLogon.ps1 `
+        -SearchBase "OU=Laptops,OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be" `
+        -AllDCs
+
+.EXAMPLE
+    # Inclusief uitgeschakelde computers, drempel op 60 dagen
+    .\Get-ComputerLastLogon.ps1 `
+        -SearchBase "OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be" `
         -IncludeDisabled -InactiveDays 60
 #>
 [CmdletBinding()]
