@@ -395,6 +395,8 @@ M365-Scripts/
     │       ├── config.example.json
     │       └── readme.md
     ├── Reporting/
+    │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
+    │   ├── readme.md
     │   └── Licensing/
     │       ├── genereer_licentie_overzicht.py
     │       ├── genereer_rapport.ps1
