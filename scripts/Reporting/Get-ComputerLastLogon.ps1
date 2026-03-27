@@ -233,17 +233,19 @@ $report | Sort-Object DaysSinceLogon -Descending |
 Write-Host ''
 Write-Host '  ── Summary ────────────────────────────────────' -ForegroundColor Cyan
 
-$active   = @($report | Where-Object { $_.Status -eq 'Active'   }).Count
-$stale    = @($report | Where-Object { $_.Status -eq 'Stale'    }).Count
-$never    = @($report | Where-Object { $_.Status -eq 'Never'    }).Count
-$disabled = @($report | Where-Object { $_.Status -eq 'Disabled' }).Count
+$active    = @($report | Where-Object { $_.Status -eq 'Active'           }).Count
+$activePwd = @($report | Where-Object { $_.Status -eq 'Active (pwd recent)' }).Count
+$stale     = @($report | Where-Object { $_.Status -eq 'Stale'            }).Count
+$never     = @($report | Where-Object { $_.Status -eq 'Never'            }).Count
+$disabled  = @($report | Where-Object { $_.Status -eq 'Disabled'         }).Count
 
-Write-Status "Total computers  : $($report.Count)" 'INFO'
-Write-Status "Active           : $active  (logged on within $InactiveDays days)" 'OK'
-Write-Status "Stale            : $stale  (no logon for > $InactiveDays days)" 'WARN'
-Write-Status "Never logged on  : $never" 'WARN'
+Write-Status "Total computers      : $($report.Count)" 'INFO'
+Write-Status "Active               : $active  (LastLogon binnen $InactiveDays dagen)" 'OK'
+Write-Status "Active (pwd recent)  : $activePwd  (LastLogon stale, maar wachtwoord < 35 dagen — device is online)" 'OK'
+Write-Status "Stale                : $stale  (LastLogon én wachtwoord > drempel — vermoedelijk inactief)" 'WARN'
+Write-Status "Never logged on      : $never" 'WARN'
 if ($IncludeDisabled) {
-    Write-Status "Disabled         : $disabled" 'INFO'
+    Write-Status "Disabled             : $disabled" 'INFO'
 }
 
 $accuracyNote = if ($AllDCs) { 'All DCs (accurate)' } else { 'LastLogonTimestamp (up to 14 days behind)' }
