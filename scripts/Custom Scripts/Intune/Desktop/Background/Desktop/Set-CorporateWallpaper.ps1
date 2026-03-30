@@ -126,7 +126,7 @@ try {
     if ($result) {
         Write-Log "Wallpaper applied via WinAPI for current user"
     } else {
-        Write-Log "WinAPI returned false — non-critical, PersonalizationCSP will apply the wallpaper"
+        Write-Log "WinAPI returned false - non-critical, PersonalizationCSP will apply the wallpaper"
     }
 } catch {
     Write-Log "ERROR applying wallpaper via WinAPI: $_"
@@ -159,7 +159,7 @@ try {
         reg unload $tempRegPath | Out-Null
         Write-Log "Default User profile updated for new user accounts"
     } else {
-        Write-Log "Default User NTUSER.DAT not found — step skipped"
+        Write-Log "Default User NTUSER.DAT not found - step skipped"
     }
 } catch {
     Write-Log "ERROR updating Default User profile: $_"
