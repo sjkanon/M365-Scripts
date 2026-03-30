@@ -143,7 +143,18 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
   - One-time setup via `Setup.ps1` (creates App Registration, assigns permissions, writes `config.json`)
   - Runs weekly as a Windows scheduled task (SYSTEM, every Monday 07:00)
   - Dry-run mode (`-WhatIf`) — shows what would change without applying
-- **Desktop** — deploy lockscreen to start and desktop; set corporate wallpaper via Intune (PersonalizationCSP + WinAPI + Default User)
+- **Desktop** — deploy lockscreen to start and desktop; set corporate wallpaper via Intune:
+  - `Set-CorporateWallpaper.ps1` — generic, reusable per customer; only the CONFIGURATION block needs updating
+  - Downloads wallpaper from a public URL; compares SHA256 hash against existing file — skips if already up to date, applies if new or changed
+  - Applies via PersonalizationCSP (MDM enforcement), WinAPI (immediate), HKCU registry (style), and Default User profile (new accounts)
+  - Log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-<CLIENTNAME>.log`
+  - Deploy via Intune: **Run as SYSTEM**, 64-bit PowerShell
+
+  | Variable | Description |
+  |---|---|
+  | `$ImageUrl` | Public URL to the wallpaper image (PNG or JPG) |
+  | `$WallpaperStyle` | `10` = Fill · `6` = Fit · `2` = Stretch · `0` = Tile · `22` = Span |
+  | `$ClientName` | Customer name — used in log filename and local image path |
 
 ---
 
