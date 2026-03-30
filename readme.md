@@ -461,6 +461,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-03-30
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1` — added idempotency check: downloads image to temp, compares SHA256 hash against existing file; skips if hash matches and PersonalizationCSP is correct; applies (without second download) if image is new or changed |
+
 ### 2026-03-27
 | Change |
 |--------|
