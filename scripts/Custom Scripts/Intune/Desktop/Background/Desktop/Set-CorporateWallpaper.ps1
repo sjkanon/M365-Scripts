@@ -67,6 +67,16 @@ Write-Log "Source URL : $ImageUrl"
 Write-Log "Target path: $WallpaperPath"
 Write-Log "Style      : $WallpaperStyle"
 
+# Step 0: Already applied? Skip.
+$cspPath   = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP"
+$cspImage  = (Get-ItemProperty -Path $cspPath -Name "DesktopImagePath" -ErrorAction SilentlyContinue).DesktopImagePath
+$cspStatus = (Get-ItemProperty -Path $cspPath -Name "DesktopImageStatus" -ErrorAction SilentlyContinue).DesktopImageStatus
+
+if ((Test-Path -Path $WallpaperPath) -and ($cspImage -eq $WallpaperPath) -and ($cspStatus -eq 1)) {
+    Write-Log "Wallpaper already applied and PersonalizationCSP is correct — skipping."
+    exit 0
+}
+
 # Step 1: Create target folder
 if (-not (Test-Path -Path $WallpaperFolder)) {
     try {
