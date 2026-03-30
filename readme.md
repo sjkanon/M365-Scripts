@@ -371,7 +371,7 @@ M365-Scripts/
     │   ├── Intune/Desktop/
     │   │   ├── Add Lockscreen to start and desktop/
     │   │   └── Background/Desktop/
-    │   │       ├── Set-CorporateWallpaper.ps1
+    │   │       ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
     │   │       └── readme.md
     │   ├── DNS/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
