@@ -19,7 +19,7 @@
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://github.com/FirstITHub/Wallpaper/blob/main/Onco3R/Spring.png"
+$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
@@ -30,7 +30,7 @@ $ImageUrl = "https://github.com/FirstITHub/Wallpaper/blob/main/Onco3R/Spring.png
 $WallpaperStyle = "10"
 
 # Customer name — used in log filename and local image filename
-$ClientName = "Onco3R"
+$ClientName = "CUSTOMERNAME"
 
 # ==============================================================================
 # INTERNAL VARIABLES — do not modify
@@ -66,40 +66,6 @@ Write-Log "====== Start Set-CorporateWallpaper for client: $ClientName ======"
 Write-Log "Source URL : $ImageUrl"
 Write-Log "Target path: $WallpaperPath"
 Write-Log "Style      : $WallpaperStyle"
-
-# Step 0: Download to temp and compare hash — skip if already up to date
-$TempPath = "$env:TEMP\wallpaper-check-$($ClientName.ToLower()).tmp"
-
-try {
-    Invoke-WebRequest -Uri $ImageUrl -OutFile $TempPath -UseBasicParsing -ErrorAction Stop
-} catch {
-    Write-Log "WARNING: Could not download image for hash check ($_) — continuing with full apply."
-}
-
-if (Test-Path -Path $TempPath) {
-    $newHash      = (Get-FileHash -Path $TempPath -Algorithm SHA256).Hash
-    $existingHash = if (Test-Path -Path $WallpaperPath) {
-        (Get-FileHash -Path $WallpaperPath -Algorithm SHA256).Hash
-    } else { '' }
-
-    $cspPath   = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP"
-    $cspImage  = (Get-ItemProperty -Path $cspPath -Name "DesktopImagePath"   -ErrorAction SilentlyContinue).DesktopImagePath
-    $cspStatus = (Get-ItemProperty -Path $cspPath -Name "DesktopImageStatus" -ErrorAction SilentlyContinue).DesktopImageStatus
-
-    if ($newHash -eq $existingHash -and $cspImage -eq $WallpaperPath -and $cspStatus -eq 1) {
-        Write-Log "Wallpaper is already up to date (SHA256: $newHash) — skipping."
-        Remove-Item -Path $TempPath -Force -ErrorAction SilentlyContinue
-        exit 0
-    }
-
-    Write-Log "New or changed wallpaper detected (old: $existingHash / new: $newHash) — applying."
-
-    # Reuse the downloaded temp file as the actual wallpaper — no second download needed
-    if (-not (Test-Path -Path (Split-Path $WallpaperPath))) {
-        New-Item -ItemType Directory -Path (Split-Path $WallpaperPath) -Force | Out-Null
-    }
-    Move-Item -Path $TempPath -Destination $WallpaperPath -Force
-}
 
 # Step 1: Create target folder
 if (-not (Test-Path -Path $WallpaperFolder)) {
