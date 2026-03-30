@@ -143,7 +143,18 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
   - One-time setup via `Setup.ps1` (creates App Registration, assigns permissions, writes `config.json`)
   - Runs weekly as a Windows scheduled task (SYSTEM, every Monday 07:00)
   - Dry-run mode (`-WhatIf`) — shows what would change without applying
-- **Desktop** — deploy lockscreen to start and desktop; set corporate wallpaper via Intune (PersonalizationCSP + WinAPI + Default User)
+- **Desktop** — deploy lockscreen to start and desktop; set corporate wallpaper via Intune:
+  - `Set-CorporateWallpaper.ps1` — generic, reusable per customer; only the CONFIGURATION block needs updating
+  - Downloads wallpaper from a public URL; compares SHA256 hash against existing file — skips if already up to date, applies if new or changed
+  - Applies via PersonalizationCSP (MDM enforcement), WinAPI (immediate), HKCU registry (style), and Default User profile (new accounts)
+  - Log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-<CLIENTNAME>.log`
+  - Deploy via Intune: **Run as SYSTEM**, 64-bit PowerShell
+
+  | Variable | Description |
+  |---|---|
+  | `$ImageUrl` | Public URL to the wallpaper image (PNG or JPG) |
+  | `$WallpaperStyle` | `10` = Fill · `6` = Fit · `2` = Stretch · `0` = Tile · `22` = Span |
+  | `$ClientName` | Customer name — used in log filename and local image path |
 
 ---
 
@@ -208,8 +219,9 @@ Report last logon date for all computer objects in one or more OUs and export to
 
 - Queries Active Directory for computers in specified OUs (e.g. `OU=Laptops`, `OU=Computers`)
 - Two accuracy modes: `LastLogonTimestamp` (fast, max 14-day delay) or `-AllDCs` (queries every DC for exact `LastLogon`)
-- Marks each computer as **Active**, **Stale**, **Never**, or **Disabled** based on `-InactiveDays` threshold (default 90)
-- CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, OS, IPv4, OU path, Created, Description
+- Four statuses: **Active** · **Active (pwd recent)** · **Stale** · **Never** · **Disabled**
+- `Active (pwd recent)`: device falsely marked stale due to 14-day replication delay — `PasswordLastSet` < 35 days confirms the machine is online (computer accounts auto-rotate password every ~30 days)
+- CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, PasswordLastSet, DaysSincePasswordSet, OS, IPv4, OU path, Created, Description
 - Supports multiple OUs in one run; `-IncludeDisabled` to include disabled objects
 
 #### Licensing Report
@@ -460,11 +472,17 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-03-30
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1` — added idempotency check: downloads image to temp, compares SHA256 hash against existing file; skips if hash matches and PersonalizationCSP is correct; applies (without second download) if image is new or changed |
+
 ### 2026-03-27
 | Change |
 |--------|
 | Added `scripts/Reporting/Get-ComputerLastLogon.ps1` — last logon report for computers in one or more OUs; `LastLogonTimestamp` (fast) or `-AllDCs` (accurate) mode; marks Active/Stale/Never/Disabled; exports timestamped CSV to `C:\Temp\`; `-InactiveDays`, `-IncludeDisabled`, `-ExportPath` parameters |
 | Added `scripts/Reporting/readme.md` — documents `Get-ComputerLastLogon.ps1` with parameter table, CSV column reference, and usage examples |
+| Updated `scripts/Reporting/Get-ComputerLastLogon.ps1` — added `PasswordLastSet` / `DaysSincePasswordSet` columns; new `Active (pwd recent)` status for devices falsely marked stale due to 14-day `LastLogonTimestamp` replication delay |
 
 ### 2026-03-26
 | Change |

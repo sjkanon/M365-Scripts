@@ -50,15 +50,29 @@ Gebruik de standaardmodus voor stale-device rapportages. Gebruik `-AllDCs` als a
     -IncludeDisabled -InactiveDays 60
 ```
 
+### Statuswaarden
+
+| Status | Betekenis |
+|---|---|
+| `Active` | LastLogon binnen de `-InactiveDays` drempel |
+| `Active (pwd recent)` | LastLogon ziet er stale uit door replicatievertraging, maar het computeraccount-wachtwoord werd < 35 dagen geleden vernieuwd — device is online |
+| `Stale` | Zowel LastLogon als PasswordLastSet overschrijden de drempel — vermoedelijk echt inactief |
+| `Never` | Nooit ingelogd én geen recent wachtwoord |
+| `Disabled` | Account uitgeschakeld in AD |
+
+> **Tip:** `Active (pwd recent)` zijn PC's die wél actief zijn maar door de 9-14 daagse replicatievertraging van `LastLogonTimestamp` ten onrechte als stale verschijnen. Gebruik `-AllDCs` voor exacte gegevens als dit onderscheid kritisch is.
+
 ### CSV-kolommen
 
 | Kolom | Omschrijving |
 |---|---|
 | `Name` | Computernaam |
-| `Status` | `Active` / `Stale` / `Never` / `Disabled` |
+| `Status` | Zie statuswaarden hierboven |
 | `Enabled` | True/False |
 | `LastLogon` | Laatste inlogdatum (dd/MM/yyyy HH:mm) |
 | `DaysSinceLogon` | Aantal dagen geleden |
+| `PasswordLastSet` | Datum laatste wachtwoordwijziging computeraccount (dd/MM/yyyy) |
+| `DaysSincePasswordSet` | Dagen geleden dat het wachtwoord vernieuwd werd |
 | `OperatingSystem` | OS-naam |
 | `OperatingSystemVersion` | OS-versie |
 | `IPv4Address` | IP-adres (indien beschikbaar) |
