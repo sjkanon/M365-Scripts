@@ -472,6 +472,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-04-01
+| Change |
+|--------|
+| Updated `scripts/Exchange/Migrate-Calendar.ps1` — fixed Room Mailbox booking issues: increased provisioning wait from 15s to 60s; added retry loop (5×30s) for `Set-CalendarProcessing` with error handling and fallback instructions; changed `BookingWindowInDays 0` to `1825` and added `EnforceSchedulingHorizon $false` to prevent silent booking rejections |
+
 ### 2026-03-30
 | Change |
 |--------|
