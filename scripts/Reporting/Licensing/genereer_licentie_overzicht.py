@@ -260,7 +260,8 @@ def gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic):
         (ingram_az,  "CUSTOMER_NAME"),
         (ingram_lic, "CUSTOMER_NAME"),
     ]:
-        customers.update(frame[col].dropna().unique())
+        if col in frame.columns:
+            customers.update(frame[col].dropna().unique())
     return sorted(customers)
 
 
@@ -735,16 +736,16 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     # ── Locate Ingram file ────────────────────────────────────────────────────
+    ingram_path = None
     if args.ingram:
         ingram_path = Path(args.ingram)
+        if not ingram_path.exists():
+            log.error(f"Ingram file not found: {ingram_path}")
+            input("Press Enter to exit...")
+            sys.exit(2)
     else:
         log.info(f"Looking for Ingram file in {INGRAM_DIR} ...")
         ingram_files = list(INGRAM_DIR.glob("*.xlsx"))
-        if len(ingram_files) == 0:
-            log.error(f"No .xlsx file found in {INGRAM_DIR}")
-            log.error("Place the Ingram billing export in the Ingram folder and try again.")
-            input("Press Enter to exit...")
-            sys.exit(2)
         if len(ingram_files) > 1:
             log.error(f"Multiple .xlsx files found in {INGRAM_DIR}:")
             for f in ingram_files:
@@ -752,20 +753,25 @@ def main():
             log.error("Ensure exactly 1 Ingram file is present.")
             input("Press Enter to exit...")
             sys.exit(2)
-        ingram_path = ingram_files[0]
-    log.info(f"Ingram file: {ingram_path.name}")
+        if len(ingram_files) == 1:
+            ingram_path = ingram_files[0]
+
+    if ingram_path:
+        log.info(f"Ingram file: {ingram_path.name}")
+    else:
+        log.warning("No Ingram input found - continuing without Ingram data.")
 
     # ── Locate Pax8 file ──────────────────────────────────────────────────────
+    pax8_path = None
     if args.pax8:
         pax8_path = Path(args.pax8)
+        if not pax8_path.exists():
+            log.error(f"Pax8 file not found: {pax8_path}")
+            input("Press Enter to exit...")
+            sys.exit(2)
     else:
         log.info(f"Looking for Pax8 file in {PAX8_DIR} ...")
         pax8_files = list(PAX8_DIR.glob("*.csv"))
-        if len(pax8_files) == 0:
-            log.error(f"No .csv file found in {PAX8_DIR}")
-            log.error("Place the Pax8 invoice export in the Pax8 folder and try again.")
-            input("Press Enter to exit...")
-            sys.exit(2)
         if len(pax8_files) > 1:
             log.error(f"Multiple .csv files found in {PAX8_DIR}:")
             for f in pax8_files:
@@ -773,22 +779,49 @@ def main():
             log.error("Ensure exactly 1 Pax8 file is present.")
             input("Press Enter to exit...")
             sys.exit(2)
-        pax8_path = pax8_files[0]
-    log.info(f"Pax8 file:    {pax8_path.name}")
+        if len(pax8_files) == 1:
+            pax8_path = pax8_files[0]
+
+    if pax8_path:
+        log.info(f"Pax8 file:    {pax8_path.name}")
+    else:
+        log.warning("No Pax8 input found - continuing without Pax8 data.")
+
+    if not ingram_path and not pax8_path:
+        log.error("No input files found (Ingram/Pax8). Provide at least one source file.")
+        input("Press Enter to exit...")
+        sys.exit(2)
+
+    empty_pax8_az = pd.DataFrame(columns=["company_name", "subscription", "az_category", "cost_total", "subtotal"])
+    empty_pax8_lic = pd.DataFrame(columns=["company_name", "acronis_endcustomer", "product", "quantity", "cost", "price", "cost_total", "subtotal"])
+    empty_ingram_az = pd.DataFrame(columns=["CUSTOMER_NAME", "az_subscription", "az_category", "RESELLER_DETAIL_TOTAL", "CUSTOMER_DETAIL_TOTAL", "RESELLER_DETAIL_START_DATE", "RESELLER_DETAIL_END_DATE", "CUSTOMER_DETAIL_DESCRIPTION", "CUSTOMER_DETAIL_QTY", "RESELLER_DETAIL_UNIT_PRICE", "CUSTOMER_DETAIL_UNIT_PRICE"])
+    empty_ingram_lic = pd.DataFrame(columns=["CUSTOMER_NAME", "product", "CUSTOMER_DETAIL_QTY", "RESELLER_DETAIL_TOTAL", "CUSTOMER_DETAIL_TOTAL", "RESELLER_DETAIL_UNIT_PRICE", "CUSTOMER_DETAIL_UNIT_PRICE"])
 
     # ── Load Ingram ───────────────────────────────────────────────────────────
-    log.info("Loading Ingram data...")
-    ingram_az, ingram_lic = load_ingram(str(ingram_path))
-    ingram_df     = pd.read_excel(ingram_path)
-    ingram_period = str(ingram_df["RESELLER_INVOICE_DATE"].iloc[0])[:7]
-    log.info(f"  Ingram period : {ingram_period}")
+    ingram_period = None
+    if ingram_path:
+        log.info("Loading Ingram data...")
+        ingram_az, ingram_lic = load_ingram(str(ingram_path))
+        ingram_df = pd.read_excel(ingram_path)
+        if "RESELLER_INVOICE_DATE" in ingram_df.columns and not ingram_df.empty:
+            ingram_period = str(ingram_df["RESELLER_INVOICE_DATE"].iloc[0])[:7]
+            log.info(f"  Ingram period : {ingram_period}")
+    else:
+        ingram_az, ingram_lic = empty_ingram_az.copy(), empty_ingram_lic.copy()
 
     # ── Load Pax8 ─────────────────────────────────────────────────────────────
-    log.info("Loading Pax8 data...")
-    pax8_az, pax8_lic = load_pax8(str(pax8_path))
-    pax8_period = pd.read_csv(str(pax8_path), encoding="utf-8-sig")["invoice_date"].iloc[0][:7]
-    log.info(f"  Pax8 period   : {pax8_period}")
-    period = pax8_period
+    pax8_period = None
+    if pax8_path:
+        log.info("Loading Pax8 data...")
+        pax8_az, pax8_lic = load_pax8(str(pax8_path))
+        pax8_df = pd.read_csv(str(pax8_path), encoding="utf-8-sig")
+        if "invoice_date" in pax8_df.columns and not pax8_df.empty:
+            pax8_period = str(pax8_df["invoice_date"].iloc[0])[:7]
+            log.info(f"  Pax8 period   : {pax8_period}")
+    else:
+        pax8_az, pax8_lic = empty_pax8_az.copy(), empty_pax8_lic.copy()
+
+    period = pax8_period or ingram_period or pd.Timestamp.today().strftime("%Y-%m")
 
     # ── Archive subfolder for this period ─────────────────────────────────────
     archive_period = ARCHIVE_DIR / period
@@ -798,7 +831,8 @@ def main():
     customers = gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic)
     log.info(f"Customers: {len(customers)}")
 
-    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}.xlsx"
+    source_label = "Ingram-Pax8" if (ingram_path and pax8_path) else ("IngramOnly" if ingram_path else "Pax8Only")
+    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}_{source_label}.xlsx"
 
     wb      = Workbook()
     summary = []
