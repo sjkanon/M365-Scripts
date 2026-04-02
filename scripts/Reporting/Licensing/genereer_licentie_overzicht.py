@@ -16,6 +16,13 @@ Requirements:  pip install pandas openpyxl
 import sys
 import re
 
+def _pause_if_interactive(prompt: str = "Press Enter to exit..."):
+    try:
+        if sys.stdin and sys.stdin.isatty():
+            input(prompt)
+    except Exception:
+        pass
+
 MONTHS_EN = {
     1:"January", 2:"February", 3:"March",    4:"April",
     5:"May",     6:"June",     7:"July",      8:"August",
@@ -727,7 +734,7 @@ def main():
     if not EXPORT_DIR.exists():
         log.error(f"Export directory not found: {EXPORT_DIR}")
         log.error("Update the EXPORT_DIR variable in this script.")
-        input("Press Enter to exit...")
+        _pause_if_interactive("Press Enter to exit...")
         sys.exit(2)
     log.info("Export directory: OK")
 
@@ -741,7 +748,7 @@ def main():
         ingram_path = Path(args.ingram)
         if not ingram_path.exists():
             log.error(f"Ingram file not found: {ingram_path}")
-            input("Press Enter to exit...")
+            _pause_if_interactive("Press Enter to exit...")
             sys.exit(2)
     else:
         log.info(f"Looking for Ingram file in {INGRAM_DIR} ...")
@@ -751,7 +758,7 @@ def main():
             for f in ingram_files:
                 log.error(f"  {f.name}")
             log.error("Ensure exactly 1 Ingram file is present.")
-            input("Press Enter to exit...")
+            _pause_if_interactive("Press Enter to exit...")
             sys.exit(2)
         if len(ingram_files) == 1:
             ingram_path = ingram_files[0]
@@ -767,7 +774,7 @@ def main():
         pax8_path = Path(args.pax8)
         if not pax8_path.exists():
             log.error(f"Pax8 file not found: {pax8_path}")
-            input("Press Enter to exit...")
+            _pause_if_interactive("Press Enter to exit...")
             sys.exit(2)
     else:
         log.info(f"Looking for Pax8 file in {PAX8_DIR} ...")
@@ -777,7 +784,7 @@ def main():
             for f in pax8_files:
                 log.error(f"  {f.name}")
             log.error("Ensure exactly 1 Pax8 file is present.")
-            input("Press Enter to exit...")
+            _pause_if_interactive("Press Enter to exit...")
             sys.exit(2)
         if len(pax8_files) == 1:
             pax8_path = pax8_files[0]
@@ -789,7 +796,7 @@ def main():
 
     if not ingram_path and not pax8_path:
         log.error("No input files found (Ingram/Pax8). Provide at least one source file.")
-        input("Press Enter to exit...")
+        _pause_if_interactive("Press Enter to exit...")
         sys.exit(2)
 
     empty_pax8_az = pd.DataFrame(columns=["company_name", "subscription", "az_category", "cost_total", "subtotal"])
@@ -863,7 +870,7 @@ def main():
     log.info("Report generated successfully.")
     log.info("========================================")
     print(f"\nDone \u2192 {output_path}")
-    input("\nPress Enter to exit...")
+    _pause_if_interactive("\nPress Enter to exit...")
 
 
 if __name__ == "__main__":
