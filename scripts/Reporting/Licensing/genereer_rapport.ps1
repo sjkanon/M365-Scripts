@@ -150,7 +150,10 @@ $sourceLabel = if ($IngramFile -and $Pax8File) { "Ingram-Pax8" }
                elseif ($IngramFile) { "IngramOnly" }
                else { "Pax8Only" }
 
-$OutFile = Join-Path $ExportDir "Licensing_Report_${Period}_${sourceLabel}.xlsx"
+$isPreliminary = -not ($IngramFile -and $Pax8File)
+$nameSuffix = if ($isPreliminary) { "_Voorlopig" } else { "" }
+
+$OutFile = Join-Path $ExportDir "Licensing_Report_${Period}_${sourceLabel}${nameSuffix}.xlsx"
 
 # ── Confirmation ──────────────────────────────────────────────────────────────
 Write-Host ""
