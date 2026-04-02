@@ -612,10 +612,31 @@ Write-Host "   Exporting results" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
+$summaryRows = @(
+    if ($Apply) {
+        $summaryRows | Sort-Object `
+            @{ Expression = { if ($null -ne $_.TotalSizeMB) { [double]$_.TotalSizeMB } else { -1 } }; Descending = $true },
+            SiteName,
+            Library
+    } else {
+        $summaryRows | Sort-Object `
+            @{ Expression = { if ($null -ne $_.UsedGB) { [double]$_.UsedGB } else { -1 } }; Descending = $true },
+            SiteName,
+            Library
+    }
+)
+
 $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
 Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
 
 if ($Apply -and $detailRows.Count -gt 0) {
+    $detailRows = @(
+        $detailRows | Sort-Object `
+            @{ Expression = { if ($null -ne $_.TotalSizeMB) { [double]$_.TotalSizeMB } else { -1 } }; Descending = $true },
+            SiteName,
+            Library,
+            Path
+    )
     $detailRows | Export-Csv -Path $detailCsv -NoTypeInformation -Encoding UTF8
     Write-Host ("  Detail   : {0}" -f $detailCsv) -ForegroundColor Green
 }
