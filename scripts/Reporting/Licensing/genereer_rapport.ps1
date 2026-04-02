@@ -208,9 +208,13 @@ if (-not (Test-Path $OutFile)) {
 Write-Log "Output file created: $OutFile"
 
 # ── Archive input files ───────────────────────────────────────────────────────
-if ($IngramFile) { Move-Item -Path $IngramFile -Destination $ArchivePeriod -Force }
-if ($Pax8File)   { Move-Item -Path $Pax8File   -Destination $ArchivePeriod -Force }
-Write-Log "Input files archived to: $ArchivePeriod"
+if ($IngramFile -and $Pax8File) {
+    Move-Item -Path $IngramFile -Destination $ArchivePeriod -Force
+    Move-Item -Path $Pax8File   -Destination $ArchivePeriod -Force
+    Write-Log "Input files archived to: $ArchivePeriod"
+} else {
+    Write-Log "Archive skipped: waiting for complete Ingram + Pax8 set for full overview."
+}
 Write-Log "Report generated successfully."
 Write-Log "========================================"
 
