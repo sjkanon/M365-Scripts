@@ -832,7 +832,9 @@ def main():
     log.info(f"Customers: {len(customers)}")
 
     source_label = "Ingram-Pax8" if (ingram_path and pax8_path) else ("IngramOnly" if ingram_path else "Pax8Only")
-    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}_{source_label}.xlsx"
+    is_preliminary = not (ingram_path and pax8_path)
+    name_suffix = "_Voorlopig" if is_preliminary else ""
+    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}_{source_label}{name_suffix}.xlsx"
 
     wb      = Workbook()
     summary = []
