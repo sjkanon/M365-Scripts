@@ -93,20 +93,21 @@ if (-not (Test-Path -Path $WallpaperPath)) {
 }
 
 # Step 3: Load Windows API
-Add-Type -TypeDefinition @"
+$wallpaperApiTypeDefinition = @'
 using System;
 using System.Runtime.InteropServices;
 public class Wallpaper {
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
 }
-"@ -ErrorAction SilentlyContinue
+'@
+Add-Type -TypeDefinition $wallpaperApiTypeDefinition -ErrorAction SilentlyContinue
 
 $SPI_SETDESKWALLPAPER = 0x0014
 $SPIF_UPDATEINIFILE   = 0x01
 $SPIF_SENDCHANGE      = 0x02
 
-# Step 4: PersonalizationCSP (MDM/Intune — enforces wallpaper for all users)
+# Step 4: PersonalizationCSP (MDM/Intune - enforces wallpaper for all users)
 try {
     $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP"
     if (-not (Test-Path -Path $regPath)) {
@@ -120,7 +121,7 @@ try {
     Write-Log "ERROR setting PersonalizationCSP: $_"
 }
 
-# Step 5: Current user — WinAPI (applies immediately)
+# Step 5: Current user - WinAPI (applies immediately)
 try {
     $result = [Wallpaper]::SystemParametersInfo($SPI_SETDESKWALLPAPER, 0, $WallpaperPath, $SPIF_UPDATEINIFILE -bor $SPIF_SENDCHANGE)
     if ($result) {
@@ -132,7 +133,7 @@ try {
     Write-Log "ERROR applying wallpaper via WinAPI: $_"
 }
 
-# Step 6: Current user — HKCU registry (persists style setting)
+# Step 6: Current user - HKCU registry (persists style setting)
 try {
     $regPath = "HKCU:\Control Panel\Desktop"
     Set-ItemProperty -Path $regPath -Name "Wallpaper"      -Value $WallpaperPath -Force
