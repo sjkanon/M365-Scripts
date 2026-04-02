@@ -27,6 +27,8 @@ $Pax8Dir     = Join-Path $ImportDir "Pax8"
 $ArchiveDir  = Join-Path $ExportDir "Archive"
 $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LogFile     = Join-Path $ScriptDir "licensing_report.log"
+$PythonDetailLog = Join-Path $ScriptDir "python_engine_last_run.log"
+$PythonAppLog    = Join-Path (Join-Path $ScriptDir "Log") "licensing_report.log"
 $Period      = Get-Date -Format "yyyy-MM"
 $ArchivePeriod = Join-Path $ArchiveDir $Period
 $OutFile     = $null
@@ -41,6 +43,9 @@ function Write-Log {
 
 Write-Log "========================================"
 Write-Log "Starting licensing report — $Period"
+if (Test-Path $PythonDetailLog) {
+    Remove-Item -Path $PythonDetailLog -Force -ErrorAction SilentlyContinue
+}
 
 # ── Validate export directory ─────────────────────────────────────────────────
 if (-not (Test-Path $ExportDir)) {
@@ -183,6 +188,7 @@ try {
     $exitCode = $LASTEXITCODE
     $outputLines = @($output | ForEach-Object { $_.ToString() })
 
+    $outputLines | Set-Content -Path $PythonDetailLog -Encoding UTF8
     $outputLines | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
     $outputLines | Where-Object { $_ -notmatch "PerformanceWarning|highly fragmented|frame.insert|pd.concat|newframe" } | Write-Host
 
@@ -197,7 +203,16 @@ try {
     Write-Log "Python engine failed: $_" "ERROR"
     Write-Host ""
     Write-Host "[ERROR] Report generation failed. See log:" -ForegroundColor Red
-    Write-Host "  $LogFile"
+    Write-Host "  Launcher log : $LogFile"
+    Write-Host "  Python run   : $PythonDetailLog"
+    Write-Host "  Python app   : $PythonAppLog"
+
+    if (Test-Path $PythonDetailLog) {
+        Write-Host ""
+        Write-Host "Last Python output lines:" -ForegroundColor Yellow
+        Get-Content -Path $PythonDetailLog -Tail 25 | ForEach-Object { Write-Host "  $_" }
+    }
+
     Read-Host "Press Enter to exit"
     exit 4
 }
