@@ -29,7 +29,7 @@ $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LogFile     = Join-Path $ScriptDir "licensing_report.log"
 $Period      = Get-Date -Format "yyyy-MM"
 $ArchivePeriod = Join-Path $ArchiveDir $Period
-$OutFile     = Join-Path $ExportDir "Licensing_Report_$Period.xlsx"
+$OutFile     = $null
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 function Write-Log {
@@ -80,17 +80,9 @@ Write-Log "Looking for Ingram file in Import\Ingram\ ..."
 $ingramFiles = Get-ChildItem -Path $IngramDir -Filter "*.xlsx" -ErrorAction SilentlyContinue
 
 if ($ingramFiles.Count -eq 0) {
-    Write-Log "No .xlsx file found in Import\Ingram\" "ERROR"
-    Write-Host ""
-    Write-Host "[ERROR] No Ingram file (.xlsx) found in:" -ForegroundColor Red
-    Write-Host "  $IngramDir"
-    Write-Host ""
-    Write-Host "Place the Ingram billing export in the Ingram folder and try again."
-    Read-Host "Press Enter to exit"
-    exit 2
-}
-
-if ($ingramFiles.Count -gt 1) {
+    Write-Log "No .xlsx file found in Import\Ingram\ - continuing without Ingram data." "WARN"
+    $IngramFile = $null
+} elseif ($ingramFiles.Count -gt 1) {
     Write-Log "Multiple .xlsx files found in Import\Ingram\ ($($ingramFiles.Count) files)." "ERROR"
     Write-Host ""
     Write-Host "[ERROR] Multiple .xlsx files found in Import\Ingram\" -ForegroundColor Red
@@ -100,27 +92,19 @@ if ($ingramFiles.Count -gt 1) {
     Write-Host "Remove or archive the extra files and try again."
     Read-Host "Press Enter to exit"
     exit 2
+} else {
+    $IngramFile = $ingramFiles[0].FullName
+    Write-Log "Ingram file: $($ingramFiles[0].Name)"
 }
-
-$IngramFile = $ingramFiles[0].FullName
-Write-Log "Ingram file: $($ingramFiles[0].Name)"
 
 # ── Locate Pax8 file ──────────────────────────────────────────────────────────
 Write-Log "Looking for Pax8 file in Import\Pax8\ ..."
 $pax8Files = Get-ChildItem -Path $Pax8Dir -Filter "*.csv" -ErrorAction SilentlyContinue
 
 if ($pax8Files.Count -eq 0) {
-    Write-Log "No .csv file found in Import\Pax8\" "ERROR"
-    Write-Host ""
-    Write-Host "[ERROR] No Pax8 file (.csv) found in:" -ForegroundColor Red
-    Write-Host "  $Pax8Dir"
-    Write-Host ""
-    Write-Host "Place the Pax8 invoice export in the Pax8 folder and try again."
-    Read-Host "Press Enter to exit"
-    exit 2
-}
-
-if ($pax8Files.Count -gt 1) {
+    Write-Log "No .csv file found in Import\Pax8\ - continuing without Pax8 data." "WARN"
+    $Pax8File = $null
+} elseif ($pax8Files.Count -gt 1) {
     Write-Log "Multiple .csv files found in Import\Pax8\ ($($pax8Files.Count) files)." "ERROR"
     Write-Host ""
     Write-Host "[ERROR] Multiple .csv files found in Import\Pax8\" -ForegroundColor Red
@@ -130,10 +114,28 @@ if ($pax8Files.Count -gt 1) {
     Write-Host "Remove or archive the extra files and try again."
     Read-Host "Press Enter to exit"
     exit 2
+} else {
+    $Pax8File = $pax8Files[0].FullName
+    Write-Log "Pax8 file: $($pax8Files[0].Name)"
 }
 
-$Pax8File = $pax8Files[0].FullName
-Write-Log "Pax8 file: $($pax8Files[0].Name)"
+if (-not $IngramFile -and -not $Pax8File) {
+    Write-Log "No input files found in Import\Ingram\ or Import\Pax8\" "ERROR"
+    Write-Host ""
+    Write-Host "[ERROR] Geen invoerbestand gevonden." -ForegroundColor Red
+    Write-Host "Plaats minimaal 1 bestand in één van deze mappen:"
+    Write-Host "  $IngramDir"
+    Write-Host "  $Pax8Dir"
+    Write-Host ""
+    Read-Host "Press Enter to exit"
+    exit 2
+}
+
+$sourceLabel = if ($IngramFile -and $Pax8File) { "Ingram-Pax8" }
+               elseif ($IngramFile) { "IngramOnly" }
+               else { "Pax8Only" }
+
+$OutFile = Join-Path $ExportDir "Licensing_Report_${Period}_${sourceLabel}.xlsx"
 
 # ── Confirmation ──────────────────────────────────────────────────────────────
 Write-Host ""
@@ -141,8 +143,8 @@ Write-Host "================================================" -ForegroundColor C
 Write-Host "  Licensing Report Generator — $Period" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Ingram : $IngramFile"
-Write-Host "Pax8   : $Pax8File"
+Write-Host "Ingram : $(if ($IngramFile) { $IngramFile } else { 'niet gevonden - overgeslagen' })"
+Write-Host "Pax8   : $(if ($Pax8File) { $Pax8File } else { 'niet gevonden - overgeslagen' })"
 Write-Host "Output : $OutFile"
 Write-Host ""
 
@@ -150,7 +152,11 @@ Write-Host ""
 Write-Log "Starting Python engine..."
 
 try {
-    $output = & python "$ScriptDir\genereer_licentie_overzicht.py" --ingram "$IngramFile" --pax8 "$Pax8File" --output "$OutFile" 2>&1
+    $pythonArgs = @("$ScriptDir\genereer_licentie_overzicht.py", "--output", "$OutFile")
+    if ($IngramFile) { $pythonArgs += @("--ingram", "$IngramFile") }
+    if ($Pax8File)   { $pythonArgs += @("--pax8", "$Pax8File") }
+
+    $output = & python @pythonArgs 2>&1
     $output | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
     $output | Where-Object { $_ -notmatch "PerformanceWarning|highly fragmented|frame.insert|pd.concat|newframe" } | Write-Host
     if ($LASTEXITCODE -ne 0) { throw "Exit code $LASTEXITCODE" }
@@ -172,8 +178,8 @@ if (-not (Test-Path $OutFile)) {
 Write-Log "Output file created: $OutFile"
 
 # ── Archive input files ───────────────────────────────────────────────────────
-Move-Item -Path $IngramFile -Destination $ArchivePeriod -Force
-Move-Item -Path $Pax8File   -Destination $ArchivePeriod -Force
+if ($IngramFile) { Move-Item -Path $IngramFile -Destination $ArchivePeriod -Force }
+if ($Pax8File)   { Move-Item -Path $Pax8File   -Destination $ArchivePeriod -Force }
 Write-Log "Input files archived to: $ArchivePeriod"
 Write-Log "Report generated successfully."
 Write-Log "========================================"
