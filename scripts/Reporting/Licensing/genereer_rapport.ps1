@@ -67,6 +67,21 @@ try {
 }
 Write-Log "Python: OK"
 
+# ── Validate Python modules ──────────────────────────────────────────────────
+try {
+    $null = & python -c "import pandas, openpyxl" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Missing required Python packages" }
+} catch {
+    Write-Log "Required Python packages missing (pandas/openpyxl)." "ERROR"
+    Write-Host ""
+    Write-Host "[ERROR] Python packages ontbreken: pandas en/of openpyxl" -ForegroundColor Red
+    Write-Host "Installeer met: pip install pandas openpyxl"
+    Write-Host ""
+    Read-Host "Press Enter to exit"
+    exit 3
+}
+Write-Log "Python packages: OK"
+
 # ── Create subfolders if missing ──────────────────────────────────────────────
 foreach ($dir in @($IngramDir, $Pax8Dir, $ArchiveDir, $ArchivePeriod)) {
     if (-not (Test-Path $dir)) {
@@ -152,14 +167,29 @@ Write-Host ""
 Write-Log "Starting Python engine..."
 
 try {
-    $pythonArgs = @("$ScriptDir\genereer_licentie_overzicht.py", "--output", "$OutFile")
+    $PythonScript = Join-Path $ScriptDir "genereer_licentie_overzicht.py"
+    if (-not (Test-Path $PythonScript)) {
+        throw "Python script not found: $PythonScript"
+    }
+
+    $pythonArgs = @("$PythonScript", "--output", "$OutFile")
     if ($IngramFile) { $pythonArgs += @("--ingram", "$IngramFile") }
     if ($Pax8File)   { $pythonArgs += @("--pax8", "$Pax8File") }
 
     $output = & python @pythonArgs 2>&1
-    $output | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
-    $output | Where-Object { $_ -notmatch "PerformanceWarning|highly fragmented|frame.insert|pd.concat|newframe" } | Write-Host
-    if ($LASTEXITCODE -ne 0) { throw "Exit code $LASTEXITCODE" }
+    $exitCode = $LASTEXITCODE
+    $outputLines = @($output | ForEach-Object { $_.ToString() })
+
+    $outputLines | ForEach-Object { Add-Content -Path $LogFile -Value $_ }
+    $outputLines | Where-Object { $_ -notmatch "PerformanceWarning|highly fragmented|frame.insert|pd.concat|newframe" } | Write-Host
+
+    if ($exitCode -ne 0) {
+        $tail = ($outputLines | Select-Object -Last 8) -join [Environment]::NewLine
+        if ($tail) {
+            Write-Log "Python error output (last lines):`n$tail" "ERROR"
+        }
+        throw "Exit code $exitCode"
+    }
 } catch {
     Write-Log "Python engine failed: $_" "ERROR"
     Write-Host ""
