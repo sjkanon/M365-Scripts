@@ -851,10 +851,10 @@ def main():
     log.info(f"Report saved: {output_path}")
 
     # ── Archive input files ───────────────────────────────────────────────────
-    if not args.ingram:
+    if ingram_path is not None and not args.ingram:
         shutil.move(str(ingram_path), str(archive_period / ingram_path.name))
         log.info(f"Ingram archived to: {archive_period}")
-    if not args.pax8:
+    if pax8_path is not None and not args.pax8:
         shutil.move(str(pax8_path), str(archive_period / pax8_path.name))
         log.info(f"Pax8 archived to: {archive_period}")
 
