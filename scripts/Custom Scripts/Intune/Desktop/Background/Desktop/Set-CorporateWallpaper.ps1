@@ -19,7 +19,7 @@
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://github.com/FirstITHub/Wallpaper/blob/main/Onco3R/Spring.png"
+$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
@@ -30,7 +30,7 @@ $ImageUrl = "https://github.com/FirstITHub/Wallpaper/blob/main/Onco3R/Spring.png
 $WallpaperStyle = "10"
 
 # Customer name — used in log filename and local image filename
-$ClientName = "Onco3R"
+$ClientName = "CUSTOMERNAME"
 
 # ==============================================================================
 # INTERNAL VARIABLES — do not modify
