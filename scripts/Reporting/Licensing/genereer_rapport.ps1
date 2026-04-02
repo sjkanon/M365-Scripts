@@ -18,7 +18,7 @@ $ErrorActionPreference = "Stop"
 #   │   └── Pax8\      ← place exactly 1 .csv here before running
 #   ├── Archive\       ← input files are moved here automatically
 #   └── Licensing_Report_YYYY-MM.xlsx
-$ExportDir = "C:\Reports\Licensing"
+$ExportDir = "C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload"
 # ─────────────────────────────────────────────────────────────────────────────
 
 $ImportDir   = Join-Path $ExportDir "Import"

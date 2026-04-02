@@ -692,7 +692,7 @@ def main():
     # The PowerShell launcher (genereer_rapport.ps1) passes --ingram/--pax8/--output
     # explicitly, so EXPORT_DIR is only used when running this script directly.
     SCRIPT_DIR  = Path(__file__).parent.resolve()
-    EXPORT_DIR  = Path(r"C:\Reports\Licensing")
+    EXPORT_DIR  = Path(r"C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload")
     IMPORT_DIR  = EXPORT_DIR / "Import"
     INGRAM_DIR  = IMPORT_DIR / "Ingram"
     PAX8_DIR    = IMPORT_DIR / "Pax8"
