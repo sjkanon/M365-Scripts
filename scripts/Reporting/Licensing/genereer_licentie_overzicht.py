@@ -580,21 +580,39 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
         _section_header(ws, row, "📋  Licenses (via Ingram)", LIC_MED)
         row += 1
 
-        grp = cust_il.groupby("product").agg(
-            qty=("CUSTOMER_DETAIL_QTY", "sum"),
-            purchase=("RESELLER_DETAIL_TOTAL", "sum"),
-            sales=("CUSTOMER_DETAIL_TOTAL", "sum"),
-            u_pur=("RESELLER_DETAIL_UNIT_PRICE", "mean"),
-            u_sal=("CUSTOMER_DETAIL_UNIT_PRICE", "mean"),
-        ).reset_index()
+        has_ingram_periods = ("RESELLER_DETAIL_START_DATE" in cust_il.columns and
+                              "RESELLER_DETAIL_END_DATE"   in cust_il.columns)
 
         alt = False
-        for _, r in grp.iterrows():
-            _data_row(ws, row, r["product"], "", r["qty"],
-                      r["u_pur"], r["u_sal"],
-                      r["purchase"], r["sales"], alt=alt)
-            alt = not alt
-            row += 1
+        for product, prod_rows in cust_il.groupby("product"):
+            if has_ingram_periods:
+                period_keys = prod_rows[["RESELLER_DETAIL_START_DATE", "RESELLER_DETAIL_END_DATE"]].drop_duplicates()
+            else:
+                period_keys = None
+
+            if period_keys is not None and len(period_keys) > 1:
+                for _, pk in period_keys.iterrows():
+                    mask = (prod_rows["RESELLER_DETAIL_START_DATE"] == pk["RESELLER_DETAIL_START_DATE"]) & \
+                           (prod_rows["RESELLER_DETAIL_END_DATE"]   == pk["RESELLER_DETAIL_END_DATE"])
+                    p = prod_rows[mask]
+                    _data_row(ws, row, product,
+                              _period_label(pk["RESELLER_DETAIL_START_DATE"], pk["RESELLER_DETAIL_END_DATE"]),
+                              p["CUSTOMER_DETAIL_QTY"].sum(),
+                              p["RESELLER_DETAIL_UNIT_PRICE"].mean(),
+                              p["CUSTOMER_DETAIL_UNIT_PRICE"].mean(),
+                              p["RESELLER_DETAIL_TOTAL"].sum(),
+                              p["CUSTOMER_DETAIL_TOTAL"].sum(), alt=alt)
+                    alt = not alt
+                    row += 1
+            else:
+                _data_row(ws, row, product, "",
+                          prod_rows["CUSTOMER_DETAIL_QTY"].sum(),
+                          prod_rows["RESELLER_DETAIL_UNIT_PRICE"].mean(),
+                          prod_rows["CUSTOMER_DETAIL_UNIT_PRICE"].mean(),
+                          prod_rows["RESELLER_DETAIL_TOTAL"].sum(),
+                          prod_rows["CUSTOMER_DETAIL_TOTAL"].sum(), alt=alt)
+                alt = not alt
+                row += 1
 
         grand_purchase += cust_il["RESELLER_DETAIL_TOTAL"].sum()
         grand_sales    += cust_il["CUSTOMER_DETAIL_TOTAL"].sum()
