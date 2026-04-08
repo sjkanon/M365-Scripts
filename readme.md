@@ -477,6 +477,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 |--------|
 | Updated `scripts/Reporting/Licensing/genereer_licentie_overzicht.py` — when the same product appears with multiple billing periods on one invoice (Pax8 and Ingram), each period is now shown as a separate row with the period range in the Category/Detail column instead of being summed incorrectly |
 | Updated `scripts/Reporting/Licensing/genereer_rapport.ps1` — CMD window now closes automatically when run as a scheduled task; `Read-Host` pauses are skipped when `[Environment]::UserInteractive` is false |
+| Updated `scripts/Reporting/Licensing/genereer_rapport.bat` — pipes stdin from `NUL` so Python's interactive pause is never triggered when run as a scheduled task |
 
 ### 2026-04-01
 | Change |
