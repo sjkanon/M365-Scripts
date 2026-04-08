@@ -472,6 +472,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-04-08
+| Change |
+|--------|
+| Updated `scripts/Reporting/Licensing/genereer_licentie_overzicht.py` — when the same product appears with multiple billing periods on one invoice (Pax8 and Ingram), each period is now shown as a separate row with the period range in the Category/Detail column instead of being summed incorrectly |
+
 ### 2026-04-01
 | Change |
 |--------|
