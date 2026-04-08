@@ -41,6 +41,12 @@ function Write-Log {
     Write-Host $Message
 }
 
+function Pause-IfInteractive {
+    if ([Environment]::UserInteractive) {
+        Read-Host "Press Enter to exit"
+    }
+}
+
 Write-Log "========================================"
 Write-Log "Starting licensing report — $Period"
 if (Test-Path $PythonDetailLog) {
