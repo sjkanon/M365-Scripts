@@ -522,21 +522,33 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
         non_acronis = cust_pl[cust_pl["acronis_endcustomer"] == ""]
         acronis     = cust_pl[cust_pl["acronis_endcustomer"] != ""]
 
-        grp = non_acronis.groupby("product").agg(
-            qty=("quantity", "sum"),
-            purchase=("cost_total", "sum"),
-            sales=("subtotal", "sum"),
-            u_pur=("cost", "mean"),
-            u_sal=("price", "mean"),
-        ).reset_index()
+        has_pax8_periods = "start_period" in non_acronis.columns and "end_period" in non_acronis.columns
 
         alt = False
-        for _, r in grp.iterrows():
-            _data_row(ws, row, r["product"], "", r["qty"],
-                      r["u_pur"], r["u_sal"],
-                      r["purchase"], r["sales"], alt=alt)
-            alt = not alt
-            row += 1
+        for product, prod_rows in non_acronis.groupby("product"):
+            if has_pax8_periods:
+                period_keys = prod_rows[["start_period", "end_period"]].drop_duplicates()
+            else:
+                period_keys = None
+
+            if period_keys is not None and len(period_keys) > 1:
+                for _, pk in period_keys.iterrows():
+                    mask = (prod_rows["start_period"] == pk["start_period"]) & \
+                           (prod_rows["end_period"]   == pk["end_period"])
+                    p = prod_rows[mask]
+                    _data_row(ws, row, product,
+                              _period_label(pk["start_period"], pk["end_period"]),
+                              p["quantity"].sum(), p["cost"].mean(), p["price"].mean(),
+                              p["cost_total"].sum(), p["subtotal"].sum(), alt=alt)
+                    alt = not alt
+                    row += 1
+            else:
+                _data_row(ws, row, product, "",
+                          prod_rows["quantity"].sum(), prod_rows["cost"].mean(),
+                          prod_rows["price"].mean(),
+                          prod_rows["cost_total"].sum(), prod_rows["subtotal"].sum(), alt=alt)
+                alt = not alt
+                row += 1
 
         # Acronis: sub-group per end-customer
         if not acronis.empty:
