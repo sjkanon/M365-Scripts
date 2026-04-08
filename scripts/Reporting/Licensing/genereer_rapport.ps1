@@ -43,7 +43,7 @@ function Write-Log {
 
 function Pause-IfInteractive {
     if ([Environment]::UserInteractive) {
-        Read-Host "Press Enter to exit"
+        Pause-IfInteractive
     }
 }
 
@@ -62,7 +62,7 @@ if (-not (Test-Path $ExportDir)) {
     Write-Host ""
     Write-Host "Update the ExportDir variable at the top of this script."
     Write-Host "See log: $LogFile"
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 2
 }
 Write-Log "Export directory: OK"
@@ -73,7 +73,7 @@ try {
 } catch {
     Write-Log "Python not found in PATH." "ERROR"
     Write-Host "[ERROR] Python not found in PATH." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 3
 }
 Write-Log "Python: OK"
@@ -88,7 +88,7 @@ try {
     Write-Host "[ERROR] Python packages ontbreken: pandas en/of openpyxl" -ForegroundColor Red
     Write-Host "Installeer met: pip install pandas openpyxl"
     Write-Host ""
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 3
 }
 Write-Log "Python packages: OK"
@@ -116,7 +116,7 @@ if ($ingramFiles.Count -eq 0) {
     $ingramFiles | ForEach-Object { Write-Host "  $($_.Name)" }
     Write-Host ""
     Write-Host "Remove or archive the extra files and try again."
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 2
 } else {
     $IngramFile = $ingramFiles[0].FullName
@@ -138,7 +138,7 @@ if ($pax8Files.Count -eq 0) {
     $pax8Files | ForEach-Object { Write-Host "  $($_.Name)" }
     Write-Host ""
     Write-Host "Remove or archive the extra files and try again."
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 2
 } else {
     $Pax8File = $pax8Files[0].FullName
@@ -153,7 +153,7 @@ if (-not $IngramFile -and -not $Pax8File) {
     Write-Host "  $IngramDir"
     Write-Host "  $Pax8Dir"
     Write-Host ""
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 2
 }
 
@@ -219,14 +219,14 @@ try {
         Get-Content -Path $PythonDetailLog -Tail 25 | ForEach-Object { Write-Host "  $_" }
     }
 
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 4
 }
 
 # ── Validate output ───────────────────────────────────────────────────────────
 if (-not (Test-Path $OutFile)) {
     Write-Log "Output file was not created: $OutFile" "ERROR"
-    Read-Host "Press Enter to exit"
+    Pause-IfInteractive
     exit 5
 }
 Write-Log "Output file created: $OutFile"
