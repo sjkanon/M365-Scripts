@@ -95,6 +95,16 @@ def _styled(ws, row, col, value, bg, fg="FFFFFF", bold=True, size=10,
         c.number_format = number_format
     return c
 
+def _period_label(start, end):
+    """Format a billing period as 'dd/mm – dd/mm/yyyy', or '' on failure."""
+    try:
+        s = pd.to_datetime(start)
+        e = pd.to_datetime(end)
+        return f"{s.strftime('%d/%m')} \u2013 {e.strftime('%d/%m/%Y')}"
+    except Exception:
+        return ""
+
+
 def _empty_row(ws, row, ncols=7):
     for col in range(1, ncols + 1):
         ws.cell(row=row, column=col).border = Border()
