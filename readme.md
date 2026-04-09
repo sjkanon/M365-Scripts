@@ -472,6 +472,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-04-09
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1` v2.1 — added `Set-ExecutionPolicy Bypass -Scope Process` at the top to prevent exit code 3 when Intune's execution policy blocks the script |
+
 ### 2026-04-08
 | Change |
 |--------|
