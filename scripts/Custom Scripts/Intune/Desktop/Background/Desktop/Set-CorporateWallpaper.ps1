@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.1 - Generic version for reuse per customer
+# Version 2.0 - Generic version for reuse per customer
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -12,16 +12,14 @@
 #   - Run as: SYSTEM
 #   - Run in 64-bit PowerShell: Yes
 # ==============================================================================
-
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-
 # ==============================================================================
 # CONFIGURATION — change these per customer
 # ==============================================================================
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://github.com/FirstITHub/Wallpaper/blob/main/Vias/background.jpg"
+$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
@@ -32,7 +30,7 @@ $ImageUrl = "https://github.com/FirstITHub/Wallpaper/blob/main/Vias/background.j
 $WallpaperStyle = "10"
 
 # Customer name — used in log filename and local image filename
-$ClientName = "vias"
+$ClientName = "CUSTOMERNAME"
 
 # ==============================================================================
 # INTERNAL VARIABLES — do not modify
