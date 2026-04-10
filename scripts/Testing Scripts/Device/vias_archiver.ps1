@@ -251,12 +251,23 @@ function Grant-DelegatedPermission {
         if ($existing) {
             Write-Host "    Al aanwezig: $scopeName" -ForegroundColor Gray
         } else {
-            New-MgOauth2PermissionGrant `
-                -ClientId    $sp.Id `
-                -ResourceId  $ResourceSp.Id `
-                -Scope       $scopeName `
-                -ConsentType "AllPrincipals" | Out-Null
-            Write-Host "    Toegekend: $scopeName" -ForegroundColor Green
+            try {
+                New-MgOauth2PermissionGrant `
+                    -ClientId    $sp.Id `
+                    -ResourceId  $ResourceSp.Id `
+                    -Scope       $scopeName `
+                    -ConsentType "AllPrincipals" `
+                    -ErrorAction Stop | Out-Null
+                Write-Host "    Toegekend: $scopeName" -ForegroundColor Green
+            } catch {
+                $msg = $_.Exception.Message
+                if ($msg -match "Request_MultipleObjectsWithSameKeyValue|already exists|Status:\s*409") {
+                    Write-Host "    Al aanwezig (conflict 409): $scopeName" -ForegroundColor Gray
+                } else {
+                    Write-Warning "    Fout bij toekennen van '$scopeName': $msg"
+                    throw
+                }
+            }
         }
     }
 }
