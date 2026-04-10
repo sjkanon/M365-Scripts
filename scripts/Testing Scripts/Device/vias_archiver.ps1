@@ -56,7 +56,12 @@ if ($herstart -ne "1") {
     # Alle configuratievariabelen worden via omgevingsvariabelen doorgegeven
     $env:VIAS_ARCHIVER_HERSTART = "1"
     $pwshPath = (Get-Command pwsh).Source
-    & $pwshPath -NoProfile -ExecutionPolicy Bypass -File $MyInvocation.MyCommand.Path
+    $restartArgs = if ($IsWindows) {
+        @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MyInvocation.MyCommand.Path)
+    } else {
+        @("-NoProfile", "-File", $MyInvocation.MyCommand.Path)
+    }
+    & $pwshPath @restartArgs
     exit
 }
 
