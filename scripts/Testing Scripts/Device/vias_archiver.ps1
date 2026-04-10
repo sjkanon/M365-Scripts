@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.3
+# Vias Teams Archivering - Volledig Automatisch Script v8.4
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.3" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.4" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -707,21 +707,26 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
-
-foreach ($teamName in $archiveTeams) {
-    $groupId = $teamMapping[$teamName]
-    if (-not $groupId) { continue }
-    try {
-        Invoke-MgGraphRequest -Method POST `
-            -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/archive" `
-            -Body (@{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json) `
-            -ContentType "application/json"
-        Write-Host "  Gearchiveerd: $teamName" -ForegroundColor Green
-        Start-Sleep -Seconds 2
-    } catch {
-        Write-Warning "  Fout archivering $teamName : $_"
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.4." -ForegroundColor Yellow
+$archiveNu = Read-Host "  Wil je NU toch archiveren? (j/n, standaard n)"
+if ($archiveNu -eq "j") {
+    Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
+    foreach ($teamName in $archiveTeams) {
+        $groupId = $teamMapping[$teamName]
+        if (-not $groupId) { continue }
+        try {
+            Invoke-MgGraphRequest -Method POST `
+                -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/archive" `
+                -Body (@{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json) `
+                -ContentType "application/json"
+            Write-Host "  Gearchiveerd: $teamName" -ForegroundColor Green
+            Start-Sleep -Seconds 2
+        } catch {
+            Write-Warning "  Fout archivering $teamName : $_"
+        }
     }
+} else {
+    Write-Host "  Archiveren overgeslagen. Teams blijven actief." -ForegroundColor Yellow
 }
 #endregion
 
