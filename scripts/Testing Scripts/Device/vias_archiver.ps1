@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8
+# Vias Teams Archivering - Volledig Automatisch Script v8.1
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -81,7 +81,7 @@ $tempDir = [System.IO.Path]::GetTempPath()
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.1" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -457,6 +457,53 @@ foreach ($row in $toArchive) {
 #region STAP 9 - Chat exporteren (VOOR archivering)
 Write-Host "`n[9/12] Chat history exporteren..." -ForegroundColor Cyan
 
+function Invoke-GraphRequestWithRetry {
+    param(
+        [ValidateSet("GET","POST","PATCH","DELETE")]
+        [string]$Method,
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        [int]$MaxRetries = 5
+    )
+
+    $attempt = 0
+    while ($true) {
+        try {
+            return Invoke-MgGraphRequest -Method $Method -Uri $Uri -ErrorAction Stop
+        } catch {
+            $attempt++
+            $message = $_.Exception.Message
+            $isThrottle = $message -match "Status:\s*429|Too Many Requests|throttl"
+            $isTransient = $message -match "Status:\s*5\d\d|timeout|temporar"
+
+            if (($isThrottle -or $isTransient) -and $attempt -lt $MaxRetries) {
+                $waitSeconds = [Math]::Min(30, [Math]::Pow(2, $attempt))
+                Write-Host "    Graph retry na ${waitSeconds}s (poging $attempt/$MaxRetries)..." -ForegroundColor DarkYellow
+                Start-Sleep -Seconds $waitSeconds
+                continue
+            }
+
+            throw
+        }
+    }
+}
+
+function Get-GraphPagedCollection {
+    param([Parameter(Mandatory = $true)][string]$StartUri)
+
+    $all = [System.Collections.Generic.List[object]]::new()
+    $uri = $StartUri
+    do {
+        $result = Invoke-GraphRequestWithRetry -Method GET -Uri $uri
+        if ($result.value) {
+            $all.AddRange($result.value)
+        }
+        $uri = $result.'@odata.nextLink'
+    } while ($uri)
+
+    return $all
+}
+
 if ($chatMethode -eq "a") {
     Write-Host "  Methode: Graph API (automatisch)`n" -ForegroundColor White
 
@@ -477,34 +524,27 @@ if ($chatMethode -eq "a") {
                 continue
             }
 
-            $allMessages = [System.Collections.Generic.List[object]]::new()
-            $uri = "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/messages"
-            do {
-                $result = Invoke-MgGraphRequest -Method GET -Uri $uri
-                if ($result.value) { $allMessages.AddRange($result.value) }
-                $uri = $result.'@odata.nextLink'
-            } while ($uri)
+            $allMessages = Get-GraphPagedCollection -StartUri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/messages"
 
             $allData = [System.Collections.Generic.List[object]]::new()
             foreach ($msg in $allMessages) {
                 $msgObj = [PSCustomObject]@{
                     Id       = $msg.id
                     Datum    = $msg.createdDateTime
-                    Afzender = $msg.from.user.displayName
-                    Email    = $msg.from.user.email
-                    Bericht  = ($msg.body.content -replace '<[^>]+>', '')
+                    Afzender = if ($msg.from.user.displayName) { $msg.from.user.displayName } else { "Onbekend" }
+                    Email    = if ($msg.from.user.email) { $msg.from.user.email } else { "" }
+                    Bericht  = if ($msg.body.content) { ($msg.body.content -replace '<[^>]+>', '') } else { "" }
                     Bijlagen = ($msg.attachments | ForEach-Object { $_.name }) -join ", "
                     Replies  = @()
                 }
                 try {
-                    $rep = Invoke-MgGraphRequest -Method GET `
-                        -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/messages/$($msg.id)/replies"
-                    if ($rep.value) {
-                        $msgObj.Replies = $rep.value | ForEach-Object {
+                    $replyItems = Get-GraphPagedCollection -StartUri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/messages/$($msg.id)/replies"
+                    if ($replyItems.Count -gt 0) {
+                        $msgObj.Replies = $replyItems | ForEach-Object {
                             [PSCustomObject]@{
                                 Datum    = $_.createdDateTime
-                                Afzender = $_.from.user.displayName
-                                Bericht  = ($_.body.content -replace '<[^>]+>', '')
+                                Afzender = if ($_.from.user.displayName) { $_.from.user.displayName } else { "Onbekend" }
+                                Bericht  = if ($_.body.content) { ($_.body.content -replace '<[^>]+>', '') } else { "" }
                             }
                         }
                     }
