@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.6
+# Vias Teams Archivering - Volledig Automatisch Script v8.7
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.6" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.7" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -411,28 +411,32 @@ Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden
 
 #region STAP 6 - Mapstructuur
 Write-Host "`n[6/12] Mapstructuur aanmaken..." -ForegroundColor Cyan
-foreach ($teamName in $archiveTeams) {
-    $safe = $teamName -replace '[\\/:*?"<>|]', '_'
-    New-Item -ItemType Directory -Path (Join-Path $archiveRoot $safe "Files")   -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $archiveRoot $safe "Chat")    -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $archiveRoot $safe "Members") -Force | Out-Null
+foreach ($row in $toArchive) {
+    $safeTeam = $row.TeamName -replace '[\\/:*?"<>|]', '_'
+    $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
+    $channelRoot = Join-Path $archiveRoot $safeTeam $safeChannel
+    New-Item -ItemType Directory -Path (Join-Path $channelRoot "Files")   -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $channelRoot "Chat")    -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $channelRoot "Members") -Force | Out-Null
 }
 Write-Host "  Mappen aangemaakt." -ForegroundColor Green
 #endregion
 
 #region STAP 7 - Ledenlijsten
 Write-Host "`n[7/12] Ledenlijsten exporteren..." -ForegroundColor Cyan
-foreach ($teamName in $archiveTeams) {
+foreach ($row in $toArchive) {
+    $teamName = $row.TeamName
     $groupId = $teamMapping[$teamName]
     if (-not $groupId) { continue }
-    $safe = $teamName -replace '[\\/:*?"<>|]', '_'
+    $safeTeam = $teamName -replace '[\\/:*?"<>|]', '_'
+    $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     try {
         Get-TeamUser -GroupId $groupId |
             Select-Object Name, User, Role |
-            Export-Csv (Join-Path $archiveRoot $safe "Members" "members.csv") -NoTypeInformation -Encoding UTF8
-        Write-Host "  OK: $teamName" -ForegroundColor Green
+            Export-Csv (Join-Path $archiveRoot $safeTeam $safeChannel "Members" "members.csv") -NoTypeInformation -Encoding UTF8
+        Write-Host "  OK: $teamName / $($row.ChannelName)" -ForegroundColor Green
     } catch {
-        Write-Warning "  Fout ledenlijst $teamName : $_"
+        Write-Warning "  Fout ledenlijst $teamName / $($row.ChannelName) : $_"
     }
 }
 #endregion
@@ -598,7 +602,7 @@ foreach ($row in $toArchive) {
 
     $safeteam    = $row.TeamName    -replace '[\\/:*?"<>|]', '_'
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
-    $destPath    = Join-Path $archiveRoot $safeteam "Files" $safechannel
+    $destPath    = Join-Path $archiveRoot $safeteam $safechannel "Files"
     New-Item -ItemType Directory -Path $destPath -Force | Out-Null
 
     try {
@@ -726,7 +730,7 @@ if ($chatMethode -eq "a") {
 
         $safeteam    = $row.TeamName    -replace '[\\/:*?"<>|]', '_'
         $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
-        $chatPath    = Join-Path $archiveRoot $safeteam "Chat"
+        $chatPath    = Join-Path $archiveRoot $safeteam $safechannel "Chat"
 
         try {
             $channel = Get-MgTeamChannel -TeamId $groupId |
@@ -797,14 +801,15 @@ if ($chatMethode -eq "a") {
 # Verificatie chat-mappen
 Write-Host "`n  Chat-verificatie:" -ForegroundColor White
 $chatOntbreekt = 0
-foreach ($teamName in $archiveTeams) {
-    $safe  = $teamName -replace '[\\/:*?"<>|]', '_'
-    $count = (Get-ChildItem (Join-Path $archiveRoot $safe "Chat") -File -ErrorAction SilentlyContinue).Count
+foreach ($row in $toArchive) {
+    $safeTeam  = $row.TeamName -replace '[\\/:*?"<>|]', '_'
+    $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
+    $count = (Get-ChildItem (Join-Path $archiveRoot $safeTeam $safeChannel "Chat") -File -ErrorAction SilentlyContinue).Count
     if ($count -eq 0) {
-        Write-Warning "  Geen chat-export: $teamName"
+        Write-Warning "  Geen chat-export: $($row.TeamName) / $($row.ChannelName)"
         $chatOntbreekt++
     } else {
-        Write-Host "  OK: $teamName ($count bestanden)" -ForegroundColor Green
+        Write-Host "  OK: $($row.TeamName) / $($row.ChannelName) ($count bestanden)" -ForegroundColor Green
     }
 }
 
@@ -820,7 +825,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.6." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.7." -ForegroundColor Yellow
 $archiveNu = Read-Host "  Wil je NU toch archiveren? (j/n, standaard n)"
 if ($archiveNu -eq "j") {
     Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
@@ -853,9 +858,9 @@ foreach ($row in $toArchive) {
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     $groupId     = $teamMapping[$row.TeamName]
 
-    $fileCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam "Files" $safechannel) `
+    $fileCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam $safechannel "Files") `
                      -Recurse -File -ErrorAction SilentlyContinue).Count
-    $chatCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam "Chat") `
+    $chatCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam $safechannel "Chat") `
                      -File -ErrorAction SilentlyContinue).Count
 
     $m365Status = if ($groupId) {
