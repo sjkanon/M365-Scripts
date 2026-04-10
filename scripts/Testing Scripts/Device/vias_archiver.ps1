@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.2
+# Vias Teams Archivering - Volledig Automatisch Script v8.3
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.2" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.3" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -442,6 +442,39 @@ Write-Host "`n[8/12] Bestanden exporteren (SharePoint -> $archiveRoot)..." -Fore
 
 Import-Module PnP.PowerShell -ErrorAction Stop
 
+function Test-IsAccessDeniedError {
+    param([string]$Message)
+    return $Message -match "Access denied|Unauthorized|Forbidden|Status:\s*401|Status:\s*403|Insufficient privileges"
+}
+
+function Ensure-HigherRights {
+    param(
+        [Parameter(Mandatory = $true)][string]$TenantId,
+        [Parameter(Mandatory = $true)][string]$ClientId,
+        [Parameter(Mandatory = $true)]$GraphSp
+    )
+
+    Write-Host "  Hogere rechten nodig gedetecteerd. Extra Graph-rechten worden toegekend..." -ForegroundColor Yellow
+
+    Grant-DelegatedPermission -ResourceSp $GraphSp -ResourceName "Graph" -Scopes @(
+        "Sites.ReadWrite.All",
+        "Sites.FullControl.All"
+    )
+
+    Disconnect-MgGraph -ErrorAction SilentlyContinue
+    Connect-MgGraph `
+        -ClientId $ClientId `
+        -TenantId $TenantId `
+        -Scopes "Group.ReadWrite.All","Sites.Read.All","Sites.ReadWrite.All","Sites.FullControl.All","Files.ReadWrite.All",
+                "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All" `
+        -ContextScope Process `
+        -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
+
+    Write-Host "  Hogere rechten toegekend en nieuwe Graph-sessie actief." -ForegroundColor Green
+}
+
+$higherRightsGranted = $false
+
 # Laatste check op ClientId voor gebruik in PnP
 if ([string]::IsNullOrWhiteSpace($clientId)) {
     $clientId = (Get-Content (Join-Path $tempDir "vias_archiver_clientid.txt") -Raw -ErrorAction SilentlyContinue).Trim()
@@ -488,8 +521,19 @@ foreach ($row in $toArchive) {
             $currentSiteUrl = $siteUrl
         }
 
-        $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive `
-                     -ErrorAction SilentlyContinue
+        try {
+            $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
+        } catch {
+            $errMsg = $_.Exception.Message
+            if ((Test-IsAccessDeniedError -Message $errMsg) -and -not $higherRightsGranted) {
+                Ensure-HigherRights -TenantId $tenantId -ClientId $clientId -GraphSp $graphSp
+                $higherRightsGranted = $true
+                Connect-PnPOnline -Url $siteUrl -Interactive -ClientId $clientId
+                $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
+            } else {
+                throw
+            }
+        }
 
         if (-not $items -or $items.Count -eq 0) {
             Write-Host "  Leeg: $($row.TeamName) / $($row.ChannelName)" -ForegroundColor Gray
