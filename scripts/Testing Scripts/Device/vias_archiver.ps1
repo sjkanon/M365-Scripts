@@ -70,10 +70,9 @@ Write-Host "`n  Schone sessie actief. Modules worden geladen..." -ForegroundColo
 
 Import-Module Microsoft.Graph.Authentication,
               Microsoft.Graph.Applications,
-              Microsoft.Graph.Groups,
-              MicrosoftTeams, PnP.PowerShell, ImportExcel -ErrorAction Stop
+              Microsoft.Graph.Groups -ErrorAction Stop
 
-Write-Host "  Alle modules geladen." -ForegroundColor Green
+Write-Host "  Graph modules geladen." -ForegroundColor Green
 
 # Cross-platform tijdelijke map
 $tempDir = [System.IO.Path]::GetTempPath()
@@ -167,6 +166,7 @@ try {
     Connect-MgGraph `
         -TenantId $tenantId `
         -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All","Directory.ReadWrite.All" `
+    -ContextScope Process `
         -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
 } catch {
     Write-Host "`n  FOUT bij inloggen: $_" -ForegroundColor Red
@@ -285,10 +285,13 @@ try {
         -TenantId $tenantId `
         -Scopes "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
                 "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All" `
+        -ContextScope Process `
         -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
 } catch {
     Write-Host "  FOUT bij tweede login: $_" -ForegroundColor Red; exit
 }
+
+Import-Module MicrosoftTeams -ErrorAction Stop
 
 try {
     Connect-MicrosoftTeams -TenantId $tenantId -ErrorAction Stop
@@ -301,6 +304,8 @@ Write-Host "  Verbonden als: $((Get-MgContext).Account)" -ForegroundColor Green
 
 #region STAP 5 - Excel inlezen en Teams-IDs ophalen
 Write-Host "`n[5/12] Excel inlezen en Teams-IDs ophalen..." -ForegroundColor Cyan
+
+Import-Module ImportExcel -ErrorAction Stop
 
 $data      = Import-Excel -Path $xlPath -WorksheetName "Teams channels Vias"
 $toArchive = $data | Where-Object { $_.Archive -eq "Archive" }
@@ -353,6 +358,8 @@ foreach ($teamName in $archiveTeams) {
 
 #region STAP 8 - Bestanden exporteren
 Write-Host "`n[8/12] Bestanden exporteren (SharePoint -> $archiveRoot)..." -ForegroundColor Cyan
+
+Import-Module PnP.PowerShell -ErrorAction Stop
 
 # Laatste check op ClientId voor gebruik in PnP
 if ([string]::IsNullOrWhiteSpace($clientId)) {
