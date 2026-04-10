@@ -94,7 +94,7 @@ Write-Host "  OK: $xlPath`n" -ForegroundColor Green
 
 # Archief-map
 Write-Host "Stap 2/5 - Archief-map" -ForegroundColor Yellow
-$archiveStandaard = if ($IsWindows) { "N:\Archive\Vias_Teams" } else { Join-Path $HOME "Documents" "Vias_Teams_Archive" }
+$archiveStandaard = if ($IsWindows) { "N:\Archives\Teams" } else { Join-Path $HOME "Documents" "Vias_Teams_Archive" }
 Write-Host "  Standaard: $archiveStandaard"
 Write-Host "  Druk Enter voor standaard, of typ een ander pad.`n"
 $archiveInput = Read-Host "  Archief-map"
