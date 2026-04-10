@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.4
+# Vias Teams Archivering - Volledig Automatisch Script v8.5
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.4" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.5" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -447,6 +447,60 @@ function Test-IsAccessDeniedError {
     return $Message -match "Access denied|Unauthorized|Forbidden|Status:\s*401|Status:\s*403|Insufficient privileges"
 }
 
+function Test-IsNotFoundError {
+    param([string]$Message)
+    return $Message -match "Status:\s*404|NotFound|Item does not exist|bestaat niet"
+}
+
+function Resolve-PnPFolderLocationFromFilesFolder {
+    param([Parameter(Mandatory = $true)][string]$WebUrl)
+
+    if ([string]::IsNullOrWhiteSpace($WebUrl)) { return $null }
+
+    $u = [System.Uri]$WebUrl
+    $decodedPath = [System.Uri]::UnescapeDataString($u.AbsolutePath)
+
+    if ($decodedPath -notmatch '^(?<site>.+?)/Shared Documents(?:/(?<tail>.*))?$') {
+        return $null
+    }
+
+    $sitePath = $Matches.site
+    $tail = $Matches.tail
+    $siteUrl = "$($u.Scheme)://$($u.Host)$sitePath"
+    $folder = if ([string]::IsNullOrWhiteSpace($tail)) { "Shared Documents" } else { "Shared Documents/$tail" }
+
+    return [PSCustomObject]@{
+        SiteUrl = $siteUrl
+        Folder  = $folder
+    }
+}
+
+function Get-TeamChannelCached {
+    param(
+        [Parameter(Mandatory = $true)][string]$GroupId,
+        [Parameter(Mandatory = $true)][string]$ChannelName,
+        [Parameter(Mandatory = $true)][hashtable]$Cache
+    )
+
+    if (-not $Cache.ContainsKey($GroupId)) {
+        $Cache[$GroupId] = @(Get-TeamChannel -GroupId $GroupId -ErrorAction SilentlyContinue)
+    }
+
+    $channel = $Cache[$GroupId] | Where-Object { $_.DisplayName -eq $ChannelName } | Select-Object -First 1
+    if ($channel) { return $channel }
+
+    # Fallback op Graph-lijst als Teams-module niets teruggeeft
+    $uri = "https://graph.microsoft.com/v1.0/teams/$GroupId/channels"
+    $allChannels = [System.Collections.Generic.List[object]]::new()
+    do {
+        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction SilentlyContinue
+        if ($result.value) { $allChannels.AddRange($result.value) }
+        $uri = $result.'@odata.nextLink'
+    } while ($uri)
+
+    return $allChannels | Where-Object { $_.displayName -eq $ChannelName } | Select-Object -First 1
+}
+
 function Ensure-HigherRights {
     param(
         [Parameter(Mandatory = $true)][string]$TenantId,
@@ -474,6 +528,7 @@ function Ensure-HigherRights {
 }
 
 $higherRightsGranted = $false
+$teamChannelCache = @{}
 
 # Laatste check op ClientId voor gebruik in PnP
 if ([string]::IsNullOrWhiteSpace($clientId)) {
@@ -499,22 +554,23 @@ foreach ($row in $toArchive) {
     New-Item -ItemType Directory -Path $destPath -Force | Out-Null
 
     try {
-        if ($row.ChannelType -eq "Standard") {
-            $siteUrl = "$tenantUrl/teams/$($row.TeamName -replace '\s','')"
-            $folder  = "Shared Documents/$($row.ChannelName)"
-        } else {
-            $channel = Get-TeamChannel -GroupId $groupId |
-                       Where-Object { $_.DisplayName -eq $row.ChannelName } |
-                       Select-Object -First 1
-            if (-not $channel) {
-                Write-Warning "  Kanaal niet gevonden: $($row.ChannelName)"
-                continue
-            }
-            $ff = Invoke-MgGraphRequest -Method GET `
-                -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/filesFolder"
-            $siteUrl = $ff.webUrl -replace "(/[^/]+){2}$", ""
-            $folder  = "Shared Documents"
+        $channel = Get-TeamChannelCached -GroupId $groupId -ChannelName $row.ChannelName -Cache $teamChannelCache
+        if (-not $channel) {
+            Write-Warning "  Kanaal niet gevonden: $($row.ChannelName)"
+            continue
         }
+
+        $ff = Invoke-MgGraphRequest -Method GET `
+            -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/filesFolder" `
+            -ErrorAction Stop
+        $loc = Resolve-PnPFolderLocationFromFilesFolder -WebUrl $ff.webUrl
+        if (-not $loc) {
+            Write-Warning "  FilesFolder kon niet vertaald worden: $($row.TeamName) / $($row.ChannelName)"
+            continue
+        }
+
+        $siteUrl = $loc.SiteUrl
+        $folder = $loc.Folder
 
         if ($siteUrl -ne $currentSiteUrl) {
             Connect-PnPOnline -Url $siteUrl -Interactive -ClientId $clientId
@@ -530,6 +586,9 @@ foreach ($row in $toArchive) {
                 $higherRightsGranted = $true
                 Connect-PnPOnline -Url $siteUrl -Interactive -ClientId $clientId
                 $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
+            } elseif (Test-IsNotFoundError -Message $errMsg) {
+                Write-Warning "  Niet gevonden in SharePoint (overgeslagen): $($row.TeamName) / $($row.ChannelName)"
+                continue
             } else {
                 throw
             }
