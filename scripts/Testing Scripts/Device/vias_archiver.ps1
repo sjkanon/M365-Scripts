@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.5
+# Vias Teams Archivering - Volledig Automatisch Script v8.6
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.5" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.6" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -527,6 +527,54 @@ function Ensure-HigherRights {
     Write-Host "  Hogere rechten toegekend en nieuwe Graph-sessie actief." -ForegroundColor Green
 }
 
+function Download-PnPFilesReliable {
+    param(
+        [Parameter(Mandatory = $true)][array]$Items,
+        [Parameter(Mandatory = $true)][string]$DestPath,
+        [Parameter(Mandatory = $true)][string]$SiteUrl,
+        [Parameter(Mandatory = $true)][string]$ClientId,
+        [int]$MaxRetriesPerFile = 3
+    )
+
+    $remaining = [System.Collections.Generic.List[object]]::new()
+    if ($Items) { $remaining.AddRange(@($Items)) }
+
+    for ($pass = 1; $pass -le 2 -and $remaining.Count -gt 0; $pass++) {
+        if ($pass -gt 1) {
+            # Nieuwe PnP-verbinding voor hardnekkige gevallen
+            Connect-PnPOnline -Url $SiteUrl -Interactive -ClientId $ClientId
+        }
+
+        $nextRound = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $remaining) {
+            $ok = $false
+            for ($attempt = 1; $attempt -le $MaxRetriesPerFile; $attempt++) {
+                try {
+                    Get-PnPFile -Url $item.ServerRelativeUrl `
+                        -Path $DestPath -Filename $item.Name -AsFile -Force -ErrorAction Stop
+                    $ok = $true
+                    break
+                } catch {
+                    if ($attempt -lt $MaxRetriesPerFile) {
+                        Start-Sleep -Seconds ([Math]::Min(5, $attempt))
+                    }
+                }
+            }
+
+            if (-not $ok) {
+                $nextRound.Add($item)
+            }
+        }
+
+        $remaining = $nextRound
+    }
+
+    return [PSCustomObject]@{
+        FailedCount = $remaining.Count
+        FailedItems = $remaining
+    }
+}
+
 $higherRightsGranted = $false
 $teamChannelCache = @{}
 
@@ -599,12 +647,18 @@ foreach ($row in $toArchive) {
             continue
         }
 
-        foreach ($item in $items) {
-            Get-PnPFile -Url $item.ServerRelativeUrl `
-                -Path $destPath -Filename $item.Name -AsFile -Force
+        $itemList = @($items)
+        $dl = Download-PnPFilesReliable -Items $itemList -DestPath $destPath -SiteUrl $siteUrl -ClientId $clientId
+        if ($dl.FailedCount -gt 0) {
+            throw "Niet alle bestanden konden gedownload worden ($($itemList.Count - $dl.FailedCount)/$($itemList.Count))."
         }
 
-        Write-Host "  OK [$($row.ChannelType)] $($row.TeamName) / $($row.ChannelName) ($($items.Count) bestanden)" `
+        $localCount = (Get-ChildItem -Path $destPath -Recurse -File -ErrorAction SilentlyContinue).Count
+        if ($localCount -lt $itemList.Count) {
+            throw "Bestandscontrole mislukt: lokaal $localCount van $($itemList.Count) bestanden aanwezig."
+        }
+
+        Write-Host "  OK [$($row.ChannelType)] $($row.TeamName) / $($row.ChannelName) ($($itemList.Count) bestanden)" `
             -ForegroundColor Green
 
     } catch {
@@ -766,7 +820,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.4." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.6." -ForegroundColor Yellow
 $archiveNu = Read-Host "  Wil je NU toch archiveren? (j/n, standaard n)"
 if ($archiveNu -eq "j") {
     Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
