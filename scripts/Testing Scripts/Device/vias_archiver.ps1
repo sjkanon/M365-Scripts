@@ -76,6 +76,35 @@ Write-Host "  Graph modules geladen." -ForegroundColor Green
 
 # Cross-platform tijdelijke map
 $tempDir = [System.IO.Path]::GetTempPath()
+
+# Tijdelijke app-tracking
+$isTempApp = $false
+
+function Remove-TempArchiverApp {
+    param(
+        [Parameter(Mandatory = $false)]$App,
+        [Parameter(Mandatory = $false)]$Sp,
+        [switch]$Silent
+    )
+
+    if (-not $App) { return }
+
+    try {
+        if ($Sp -and $Sp.Id) {
+            Remove-MgServicePrincipal -ServicePrincipalId $Sp.Id -ErrorAction SilentlyContinue
+        }
+        if ($App.Id) {
+            Remove-MgApplication -ApplicationId $App.Id -ErrorAction SilentlyContinue
+        }
+        if (-not $Silent) {
+            Write-Host "  Tijdelijke app verwijderd." -ForegroundColor Yellow
+        }
+    } catch {
+        if (-not $Silent) {
+            Write-Warning "  Kon tijdelijke app niet volledig verwijderen: $_"
+        }
+    }
+}
 #endregion
 
 #region CONFIGURATIE - Interactief opvragen
@@ -165,7 +194,7 @@ Disconnect-MgGraph -ErrorAction SilentlyContinue
 try {
     Connect-MgGraph `
         -TenantId $tenantId `
-        -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All","Directory.ReadWrite.All" `
+        -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All" `
     -ContextScope Process `
         -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
 } catch {
@@ -185,34 +214,27 @@ Write-Host "  Ingelogd als: $account" -ForegroundColor Green
 #endregion
 
 #region STAP 2 - Entra App aanmaken of hergebruiken
-Write-Host "`n[2/12] Entra ID App registreren..." -ForegroundColor Cyan
+Write-Host "`n[2/12] Tijdelijke Entra app registreren..." -ForegroundColor Cyan
 
-$appName = "BraveHub-Vias-Teams-Archiver"
-$app     = Get-MgApplication -Filter "displayName eq '$appName'" -ErrorAction SilentlyContinue |
-           Select-Object -First 1
+$appName = "Temp-Vias-Teams-Archiver-$(Get-Date -Format 'yyyyMMddHHmmss')"
+$isTempApp = $true
 
-if ($app) {
-    Write-Host "  Bestaande app gevonden: $($app.AppId)" -ForegroundColor Yellow
-} else {
-    try {
-        $app = New-MgApplication -DisplayName $appName `
-            -PublicClient @{ RedirectUris = @("http://localhost") } `
-            -IsFallbackPublicClient -ErrorAction Stop
-        Write-Host "  Nieuwe app aangemaakt: $($app.AppId)" -ForegroundColor Green
-    } catch {
-        Write-Host "  FOUT bij aanmaken app: $_" -ForegroundColor Red; exit
-    }
+try {
+    $app = New-MgApplication -DisplayName $appName `
+        -PublicClient @{ RedirectUris = @("http://localhost") } `
+        -IsFallbackPublicClient -ErrorAction Stop
+    Write-Host "  Tijdelijke app aangemaakt: $($app.AppId)" -ForegroundColor Green
+} catch {
+    Write-Host "  FOUT bij aanmaken tijdelijke app: $_" -ForegroundColor Red; exit
 }
 
-$sp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue |
-     Select-Object -First 1
-if (-not $sp) {
-    try {
-        $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-        Write-Host "  Service Principal aangemaakt." -ForegroundColor Green
-    } catch {
-        Write-Host "  FOUT bij aanmaken Service Principal: $_" -ForegroundColor Red; exit
-    }
+try {
+    $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+    Write-Host "  Service Principal aangemaakt." -ForegroundColor Green
+} catch {
+    Write-Host "  FOUT bij aanmaken Service Principal: $_" -ForegroundColor Red
+    Remove-TempArchiverApp -App $app -Sp $sp
+    exit
 }
 
 # ClientId ophalen en valideren
@@ -286,16 +308,22 @@ function Grant-DelegatedPermission {
     }
 }
 
-Write-Host "  Microsoft Graph permissies..." -ForegroundColor White
-Grant-DelegatedPermission -ResourceSp $graphSp -ResourceName "Graph" -Scopes @(
-    "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
-    "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All"
-)
-Write-Host "  SharePoint permissies..." -ForegroundColor White
-Grant-DelegatedPermission -ResourceSp $spSp -ResourceName "SharePoint" -Scopes @(
-    "AllSites.FullControl"
-)
-Write-Host "  Alle permissies ingesteld." -ForegroundColor Green
+try {
+    Write-Host "  Microsoft Graph permissies..." -ForegroundColor White
+    Grant-DelegatedPermission -ResourceSp $graphSp -ResourceName "Graph" -Scopes @(
+        "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
+        "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All"
+    )
+    Write-Host "  SharePoint permissies..." -ForegroundColor White
+    Grant-DelegatedPermission -ResourceSp $spSp -ResourceName "SharePoint" -Scopes @(
+        "AllSites.FullControl"
+    )
+    Write-Host "  Alle permissies ingesteld." -ForegroundColor Green
+} catch {
+    Write-Host "  FOUT bij permissies: $_" -ForegroundColor Red
+    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
+    exit
+}
 #endregion
 
 #region STAP 4 - Opnieuw inloggen met volledige permissies
@@ -313,7 +341,9 @@ try {
         -ContextScope Process `
         -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
 } catch {
-    Write-Host "  FOUT bij tweede login: $_" -ForegroundColor Red; exit
+    Write-Host "  FOUT bij tweede login: $_" -ForegroundColor Red
+    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
+    exit
 }
 
 Import-Module MicrosoftTeams -ErrorAction Stop
@@ -321,7 +351,9 @@ Import-Module MicrosoftTeams -ErrorAction Stop
 try {
     Connect-MicrosoftTeams -TenantId $tenantId -ErrorAction Stop
 } catch {
-    Write-Host "  FOUT bij Teams-verbinding: $_" -ForegroundColor Red; exit
+    Write-Host "  FOUT bij Teams-verbinding: $_" -ForegroundColor Red
+    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
+    exit
 }
 
 Write-Host "  Verbonden als: $((Get-MgContext).Account)" -ForegroundColor Green
@@ -675,15 +707,13 @@ Write-Host "  Rapport: $rapportPad" -ForegroundColor Green
 
 #region STAP 12 - Opruimen
 Write-Host "`n[12/12] Opruimen..." -ForegroundColor Cyan
-$verwijder = Read-Host "Entra app '$appName' verwijderen? (j/n)"
-if ($verwijder -eq "j") {
-    Remove-MgServicePrincipal -ServicePrincipalId $sp.Id -ErrorAction SilentlyContinue
-    Remove-MgApplication -ApplicationId $app.Id
-    Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
-    Write-Host "  App en tijdelijke bestanden verwijderd." -ForegroundColor Yellow
+if ($isTempApp) {
+    Remove-TempArchiverApp -App $app -Sp $sp
 } else {
-    Write-Host "  App behouden. Client ID: $clientId" -ForegroundColor Gray
+    Write-Host "  Niet-tijdelijke app behouden. Client ID: $clientId" -ForegroundColor Gray
 }
+Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
+Write-Host "  Tijdelijke bestanden verwijderd." -ForegroundColor Yellow
 
 # Omgevingsvariabele opruimen
 $env:VIAS_ARCHIVER_HERSTART = $null
