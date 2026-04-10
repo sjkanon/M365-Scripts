@@ -15,15 +15,23 @@ if ($herstart -ne "1") {
     Write-Host "`n[PRE] Conflicterende Graph-modules opkuisen..." -ForegroundColor Cyan
 
     # Verwijder alle Graph-module bestanden van schijf
-    $modulePaden = @(
-        "$env:USERPROFILE\Documents\PowerShell\Modules",
-        "$env:USERPROFILE\Documents\WindowsPowerShell\Modules",
-        "C:\Program Files\PowerShell\Modules",
-        "C:\Program Files\WindowsPowerShell\Modules",
-        "$env:USERPROFILE\.local\share\powershell\Modules"
-    )
+    $modulePaden = if ($IsWindows) {
+        @(
+            "$env:USERPROFILE\Documents\PowerShell\Modules",
+            "$env:USERPROFILE\Documents\WindowsPowerShell\Modules",
+            "C:\Program Files\PowerShell\Modules",
+            "C:\Program Files\WindowsPowerShell\Modules"
+        )
+    } else {
+        @(
+            (Join-Path $HOME ".local" "share" "powershell" "Modules"),
+            (Join-Path $HOME "Documents" "PowerShell" "Modules"),
+            "/usr/local/share/powershell/Modules",
+            "/usr/share/powershell/Modules"
+        )
+    }
     foreach ($pad in $modulePaden) {
-        $gevonden = Get-ChildItem "$pad\Microsoft.Graph*" -ErrorAction SilentlyContinue
+        $gevonden = Get-ChildItem (Join-Path $pad "Microsoft.Graph*") -ErrorAction SilentlyContinue
         foreach ($map in $gevonden) {
             Remove-Item $map.FullName -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host "  Verwijderd: $($map.FullName)" -ForegroundColor Gray
@@ -61,6 +69,9 @@ Import-Module Microsoft.Graph.Authentication,
               MicrosoftTeams, PnP.PowerShell, ImportExcel -ErrorAction Stop
 
 Write-Host "  Alle modules geladen." -ForegroundColor Green
+
+# Cross-platform tijdelijke map
+$tempDir = [System.IO.Path]::GetTempPath()
 #endregion
 
 #region CONFIGURATIE - Interactief opvragen
@@ -71,23 +82,26 @@ Write-Host "============================================`n" -ForegroundColor Cya
 
 # Excel-bestand
 Write-Host "Stap 1/5 - Excel-bestand met de Teams-lijst" -ForegroundColor Yellow
-Write-Host "  Standaard: C:\Temp\Vias_Teams_Channels_JFG.xlsx"
+$xlStandaard = if ($IsWindows) { "C:\Temp\Vias_Teams_Channels_JFG.xlsx" } else { Join-Path $HOME "Downloads" "Vias_Teams_Channels_JFG.xlsx" }
+Write-Host "  Standaard: $xlStandaard"
 Write-Host "  Druk Enter voor standaard, of typ een ander pad.`n"
 $xlInput = Read-Host "  Pad naar Excel-bestand"
-$xlPath  = if ($xlInput.Trim()) { $xlInput.Trim() } else { "C:\Temp\Vias_Teams_Channels_JFG.xlsx" }
+$xlPath  = if ($xlInput.Trim()) { $xlInput.Trim() } else { $xlStandaard }
 if (-not (Test-Path $xlPath)) {
     Write-Host "  FOUT: Bestand niet gevonden: $xlPath" -ForegroundColor Red; exit
 }
 Write-Host "  OK: $xlPath`n" -ForegroundColor Green
 
 # Archief-map
-Write-Host "Stap 2/5 - Archief-map op de netwerkschijf" -ForegroundColor Yellow
-Write-Host "  Standaard: N:\Archive\Vias_Teams"
+Write-Host "Stap 2/5 - Archief-map" -ForegroundColor Yellow
+$archiveStandaard = if ($IsWindows) { "N:\Archive\Vias_Teams" } else { Join-Path $HOME "Documents" "Vias_Teams_Archive" }
+Write-Host "  Standaard: $archiveStandaard"
 Write-Host "  Druk Enter voor standaard, of typ een ander pad.`n"
 $archiveInput = Read-Host "  Archief-map"
-$archiveRoot  = if ($archiveInput.Trim()) { $archiveInput.Trim() } else { "N:\Archive\Vias_Teams" }
-if (-not (Test-Path (Split-Path $archiveRoot -Parent))) {
-    Write-Host "  FOUT: Netwerkschijf niet bereikbaar: $(Split-Path $archiveRoot -Parent)" -ForegroundColor Red; exit
+$archiveRoot  = if ($archiveInput.Trim()) { $archiveInput.Trim() } else { $archiveStandaard }
+$archiveParent = Split-Path $archiveRoot -Parent
+if ($archiveParent -and -not (Test-Path $archiveParent)) {
+    Write-Host "  FOUT: Map niet bereikbaar: $archiveParent" -ForegroundColor Red; exit
 }
 New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null
 Write-Host "  OK: $archiveRoot`n" -ForegroundColor Green
@@ -203,7 +217,7 @@ if ([string]::IsNullOrWhiteSpace($clientId)) {
 }
 
 # Opslaan als fallback
-$clientId | Out-File "$env:TEMP\vias_archiver_clientid.txt" -Force
+$clientId | Out-File (Join-Path $tempDir "vias_archiver_clientid.txt") -Force
 Write-Host "  Client ID: $clientId" -ForegroundColor Green
 #endregion
 
@@ -300,7 +314,7 @@ foreach ($teamName in $archiveTeams) {
     }
 }
 
-$teamMapping | ConvertTo-Json | Out-File "$env:TEMP\vias_team_mapping.json" -Force
+$teamMapping | ConvertTo-Json | Out-File (Join-Path $tempDir "vias_team_mapping.json") -Force
 Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden." -ForegroundColor Green
 #endregion
 
@@ -308,9 +322,9 @@ Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden
 Write-Host "`n[6/12] Mapstructuur aanmaken..." -ForegroundColor Cyan
 foreach ($teamName in $archiveTeams) {
     $safe = $teamName -replace '[\\/:*?"<>|]', '_'
-    New-Item -ItemType Directory "$archiveRoot\$safe\Files"   -Force | Out-Null
-    New-Item -ItemType Directory "$archiveRoot\$safe\Chat"    -Force | Out-Null
-    New-Item -ItemType Directory "$archiveRoot\$safe\Members" -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $archiveRoot $safe "Files")   -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $archiveRoot $safe "Chat")    -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $archiveRoot $safe "Members") -Force | Out-Null
 }
 Write-Host "  Mappen aangemaakt." -ForegroundColor Green
 #endregion
@@ -324,7 +338,7 @@ foreach ($teamName in $archiveTeams) {
     try {
         Get-TeamUser -GroupId $groupId |
             Select-Object Name, User, Role |
-            Export-Csv "$archiveRoot\$safe\Members\members.csv" -NoTypeInformation -Encoding UTF8
+            Export-Csv (Join-Path $archiveRoot $safe "Members" "members.csv") -NoTypeInformation -Encoding UTF8
         Write-Host "  OK: $teamName" -ForegroundColor Green
     } catch {
         Write-Warning "  Fout ledenlijst $teamName : $_"
@@ -337,7 +351,7 @@ Write-Host "`n[8/12] Bestanden exporteren (SharePoint -> $archiveRoot)..." -Fore
 
 # Laatste check op ClientId voor gebruik in PnP
 if ([string]::IsNullOrWhiteSpace($clientId)) {
-    $clientId = (Get-Content "$env:TEMP\vias_archiver_clientid.txt" -Raw -ErrorAction SilentlyContinue).Trim()
+    $clientId = (Get-Content (Join-Path $tempDir "vias_archiver_clientid.txt") -Raw -ErrorAction SilentlyContinue).Trim()
     if ([string]::IsNullOrWhiteSpace($clientId)) {
         Write-Host "  FOUT: ClientId is null. Herstart het script volledig." -ForegroundColor Red; exit
     }
@@ -355,7 +369,7 @@ foreach ($row in $toArchive) {
 
     $safeteam    = $row.TeamName    -replace '[\\/:*?"<>|]', '_'
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
-    $destPath    = "$archiveRoot\$safeteam\Files\$safechannel"
+    $destPath    = Join-Path $archiveRoot $safeteam "Files" $safechannel
     New-Item -ItemType Directory -Path $destPath -Force | Out-Null
 
     try {
@@ -415,7 +429,7 @@ if ($chatMethode -eq "a") {
 
         $safeteam    = $row.TeamName    -replace '[\\/:*?"<>|]', '_'
         $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
-        $chatPath    = "$archiveRoot\$safeteam\Chat"
+        $chatPath    = Join-Path $archiveRoot $safeteam "Chat"
 
         try {
             $channel = Get-MgTeamChannel -TeamId $groupId |
@@ -462,10 +476,10 @@ if ($chatMethode -eq "a") {
             }
 
             $allData | ConvertTo-Json -Depth 10 |
-                Out-File "$chatPath\${safechannel}_chat.json" -Encoding UTF8
+                Out-File (Join-Path $chatPath "${safechannel}_chat.json") -Encoding UTF8
 
             $allData | Select-Object Datum, Afzender, Email, Bericht, Bijlagen |
-                Export-Csv "$chatPath\${safechannel}_chat.csv" -NoTypeInformation -Encoding UTF8
+                Export-Csv (Join-Path $chatPath "${safechannel}_chat.csv") -NoTypeInformation -Encoding UTF8
 
             Write-Host "  OK: $($row.TeamName) / $($row.ChannelName) ($($allMessages.Count) berichten)" `
                 -ForegroundColor Green
@@ -495,7 +509,7 @@ Write-Host "`n  Chat-verificatie:" -ForegroundColor White
 $chatOntbreekt = 0
 foreach ($teamName in $archiveTeams) {
     $safe  = $teamName -replace '[\\/:*?"<>|]', '_'
-    $count = (Get-ChildItem "$archiveRoot\$safe\Chat" -File -ErrorAction SilentlyContinue).Count
+    $count = (Get-ChildItem (Join-Path $archiveRoot $safe "Chat") -File -ErrorAction SilentlyContinue).Count
     if ($count -eq 0) {
         Write-Warning "  Geen chat-export: $teamName"
         $chatOntbreekt++
@@ -544,9 +558,9 @@ foreach ($row in $toArchive) {
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     $groupId     = $teamMapping[$row.TeamName]
 
-    $fileCount = (Get-ChildItem "$archiveRoot\$safeteam\Files\$safechannel" `
+    $fileCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam "Files" $safechannel) `
                      -Recurse -File -ErrorAction SilentlyContinue).Count
-    $chatCount = (Get-ChildItem "$archiveRoot\$safeteam\Chat" `
+    $chatCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam "Chat") `
                      -File -ErrorAction SilentlyContinue).Count
 
     $m365Status = if ($groupId) {
@@ -569,7 +583,7 @@ foreach ($row in $toArchive) {
     })
 }
 
-$rapportPad = "$archiveRoot\Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
+$rapportPad = Join-Path $archiveRoot "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
 $report | Export-Excel -Path $rapportPad `
     -AutoSize -BoldTopRow -FreezeTopRow `
     -TableName "ArchivRapport" -WorksheetName "Archivering" `
@@ -588,7 +602,7 @@ $verwijder = Read-Host "Entra app '$appName' verwijderen? (j/n)"
 if ($verwijder -eq "j") {
     Remove-MgServicePrincipal -ServicePrincipalId $sp.Id -ErrorAction SilentlyContinue
     Remove-MgApplication -ApplicationId $app.Id
-    Remove-Item "$env:TEMP\vias_archiver_clientid.txt" -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
     Write-Host "  App en tijdelijke bestanden verwijderd." -ForegroundColor Yellow
 } else {
     Write-Host "  App behouden. Client ID: $clientId" -ForegroundColor Gray
