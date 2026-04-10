@@ -236,6 +236,7 @@ $spSp    = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000
 
 function Grant-DelegatedPermission {
     param($ResourceSp, [string[]]$Scopes, $ResourceName)
+    $validScopes = @()
     foreach ($scopeName in $Scopes) {
         $permDef = $ResourceSp.Oauth2PermissionScopes |
                    Where-Object { $_.Value -eq $scopeName } | Select-Object -First 1
@@ -243,32 +244,45 @@ function Grant-DelegatedPermission {
             Write-Warning "    Scope '$scopeName' niet gevonden op $ResourceName"
             continue
         }
-        $existing = Get-MgOauth2PermissionGrant `
-            -Filter "clientId eq '$($sp.Id)' and resourceId eq '$($ResourceSp.Id)'" `
-            -ErrorAction SilentlyContinue |
-            Where-Object { $_.Scope -split " " -contains $scopeName }
+        $validScopes += $scopeName
+    }
 
-        if ($existing) {
-            Write-Host "    Al aanwezig: $scopeName" -ForegroundColor Gray
-        } else {
-            try {
-                New-MgOauth2PermissionGrant `
-                    -ClientId    $sp.Id `
-                    -ResourceId  $ResourceSp.Id `
-                    -Scope       $scopeName `
-                    -ConsentType "AllPrincipals" `
-                    -ErrorAction Stop | Out-Null
-                Write-Host "    Toegekend: $scopeName" -ForegroundColor Green
-            } catch {
-                $msg = $_.Exception.Message
-                if ($msg -match "Request_MultipleObjectsWithSameKeyValue|already exists|Status:\s*409") {
-                    Write-Host "    Al aanwezig (conflict 409): $scopeName" -ForegroundColor Gray
-                } else {
-                    Write-Warning "    Fout bij toekennen van '$scopeName': $msg"
-                    throw
-                }
-            }
-        }
+    if (-not $validScopes -or $validScopes.Count -eq 0) {
+        return
+    }
+
+    $grant = Get-MgOauth2PermissionGrant `
+        -Filter "clientId eq '$($sp.Id)' and resourceId eq '$($ResourceSp.Id)' and consentType eq 'AllPrincipals'" `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    $existingScopes = @()
+    if ($grant -and $grant.Scope) {
+        $existingScopes = $grant.Scope -split ' '
+    }
+
+    $missingScopes = $validScopes | Where-Object { $_ -notin $existingScopes }
+    if (-not $missingScopes -or $missingScopes.Count -eq 0) {
+        Write-Host "    Alle scopes al aanwezig op $ResourceName" -ForegroundColor Gray
+        return
+    }
+
+    $mergedScopes = ($existingScopes + $validScopes | Select-Object -Unique) -join ' '
+
+    if ($grant) {
+        Update-MgOauth2PermissionGrant `
+            -OAuth2PermissionGrantId $grant.Id `
+            -Scope $mergedScopes `
+            -ErrorAction Stop | Out-Null
+        Write-Host "    Bijgewerkt op ${ResourceName}: $($missingScopes -join ', ')" -ForegroundColor Green
+    } else {
+        New-MgOauth2PermissionGrant `
+            -ClientId    $sp.Id `
+            -ResourceId  $ResourceSp.Id `
+            -Scope       $mergedScopes `
+            -ConsentType "AllPrincipals" `
+            -ErrorAction Stop | Out-Null
+        Write-Host "    Toegekend op ${ResourceName}: $($missingScopes -join ', ')" -ForegroundColor Green
     }
 }
 
