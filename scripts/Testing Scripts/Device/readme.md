@@ -11,13 +11,15 @@ All scripts require administrator privileges.
 
 Teams archiver with Graph, Teams and SharePoint export flow.
 
-Current behavior (v8.4):
+Current behavior (v8.5):
 - Creates a unique temporary Entra app registration for the run.
 - Grants only required delegated setup permissions during bootstrap.
 - Applies Graph/SharePoint delegated consent to that temporary app.
 - Removes the temporary app and service principal at cleanup (and on key setup failures).
 - Registers an exit cleanup hook so the temporary app is also removed on PowerShell exit/Ctrl+C.
 - Checks Teams/SharePoint folder access first during file export, and conditionally grants higher Graph rights when access is denied.
+- Resolves channel file locations via Graph filesFolder for all channel types (standard/private/shared), with channel caching and fallback lookup.
+- Handles SharePoint NotFound during export as a controlled skip instead of noisy hard failures.
 - Does not archive Teams by default; archiving now requires explicit confirmation during Step 10.
 
 ### Test-OpenVpnDiagnostics.ps1
