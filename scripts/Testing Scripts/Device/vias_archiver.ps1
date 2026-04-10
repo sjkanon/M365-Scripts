@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.1
+# Vias Teams Archivering - Volledig Automatisch Script v8.2
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -76,9 +76,12 @@ Write-Host "  Graph modules geladen." -ForegroundColor Green
 
 # Cross-platform tijdelijke map
 $tempDir = [System.IO.Path]::GetTempPath()
+$cleanupEventName = "ViasArchiverCleanup"
 
 # Tijdelijke app-tracking
 $isTempApp = $false
+$app = $null
+$sp = $null
 
 function Remove-TempArchiverApp {
     param(
@@ -105,12 +108,32 @@ function Remove-TempArchiverApp {
         }
     }
 }
+
+function Register-TempAppCleanupEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$EventName,
+        [Parameter(Mandatory = $true)]$App,
+        [Parameter(Mandatory = $true)]$Sp
+    )
+
+    Unregister-Event -SourceIdentifier $EventName -ErrorAction SilentlyContinue
+    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
+        if ($using:App -and $using:App.Id) {
+            try {
+                if ($using:Sp -and $using:Sp.Id) {
+                    Remove-MgServicePrincipal -ServicePrincipalId $using:Sp.Id -ErrorAction SilentlyContinue
+                }
+                Remove-MgApplication -ApplicationId $using:App.Id -ErrorAction SilentlyContinue
+            } catch { }
+        }
+    } | Out-Null
+}
 #endregion
 
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.1" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.2" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -231,6 +254,7 @@ try {
 try {
     $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
     Write-Host "  Service Principal aangemaakt." -ForegroundColor Green
+    Register-TempAppCleanupEvent -EventName $cleanupEventName -App $app -Sp $sp
 } catch {
     Write-Host "  FOUT bij aanmaken Service Principal: $_" -ForegroundColor Red
     Remove-TempArchiverApp -App $app -Sp $sp
@@ -712,6 +736,7 @@ if ($isTempApp) {
 } else {
     Write-Host "  Niet-tijdelijke app behouden. Client ID: $clientId" -ForegroundColor Gray
 }
+Unregister-Event -SourceIdentifier $cleanupEventName -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
 Write-Host "  Tijdelijke bestanden verwijderd." -ForegroundColor Yellow
 
