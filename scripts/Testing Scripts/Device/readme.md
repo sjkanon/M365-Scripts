@@ -7,6 +7,16 @@ All scripts require administrator privileges.
 
 ## Scripts
 
+### vias_archiver.ps1
+
+Teams archiver with Graph, Teams and SharePoint export flow.
+
+Current behavior (v8.1):
+- Creates a unique temporary Entra app registration for the run.
+- Grants only required delegated setup permissions during bootstrap.
+- Applies Graph/SharePoint delegated consent to that temporary app.
+- Removes the temporary app and service principal at cleanup (and on key setup failures).
+
 ### Test-OpenVpnDiagnostics.ps1
 
 Collects and evaluates diagnostic information for OpenVPN Connect issues on a Windows machine. Checks each relevant layer from driver to network and reports any problems found.
