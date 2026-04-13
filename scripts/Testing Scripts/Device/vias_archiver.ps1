@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.18
+# Vias Teams Archivering - Volledig Automatisch Script v8.19
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -144,7 +144,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.18" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.19" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -444,6 +444,15 @@ function New-ArchiveRowKey {
     return "$TeamName||$ChannelName"
 }
 
+function Normalize-LookupValue {
+    param([Parameter(Mandatory = $false)][string]$Value)
+
+    if ($null -eq $Value) { return "" }
+    $s = [string]$Value
+    $s = $s -replace "\s+", " "
+    return $s.Trim().ToLowerInvariant()
+}
+
 $dryRunFileCounts = @{}
 $dryRunChatCounts = @{}
 
@@ -539,7 +548,14 @@ function Get-TeamChannelCached {
         $Cache[$GroupId] = @(Get-TeamChannel -GroupId $GroupId -ErrorAction SilentlyContinue)
     }
 
+    $targetNormalized = Normalize-LookupValue -Value $ChannelName
+
     $channel = $Cache[$GroupId] | Where-Object { $_.DisplayName -eq $ChannelName } | Select-Object -First 1
+    if ($channel) { return $channel }
+
+    $channel = $Cache[$GroupId] |
+        Where-Object { (Normalize-LookupValue -Value $_.DisplayName) -eq $targetNormalized } |
+        Select-Object -First 1
     if ($channel) { return $channel }
 
     # Fallback op Graph-lijst als Teams-module niets teruggeeft
@@ -551,7 +567,12 @@ function Get-TeamChannelCached {
         $uri = $result.'@odata.nextLink'
     } while ($uri)
 
-    return $allChannels | Where-Object { $_.displayName -eq $ChannelName } | Select-Object -First 1
+    $channel = $allChannels | Where-Object { $_.displayName -eq $ChannelName } | Select-Object -First 1
+    if ($channel) { return $channel }
+
+    return $allChannels |
+        Where-Object { (Normalize-LookupValue -Value $_.displayName) -eq $targetNormalized } |
+        Select-Object -First 1
 }
 
 function Ensure-HigherRights {
@@ -953,7 +974,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.18." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.19." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
 Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
 if ($ChannelFallbackToRename) {
