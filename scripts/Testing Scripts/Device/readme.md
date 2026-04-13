@@ -11,7 +11,7 @@ All scripts require administrator privileges.
 
 Teams archiver with Graph, Teams and SharePoint export flow.
 
-Current behavior (v8.17):
+Current behavior (v8.18):
 - Creates a unique temporary Entra app registration for the run.
 - Grants only required delegated setup permissions during bootstrap.
 - Applies Graph/SharePoint delegated consent to that temporary app.
@@ -19,6 +19,8 @@ Current behavior (v8.17):
 - Registers an exit cleanup hook so the temporary app is also removed on PowerShell exit/Ctrl+C.
 - Checks Teams/SharePoint folder access first during file export, and conditionally grants higher Graph rights when access is denied.
 - Resolves channel file locations via Graph filesFolder for all channel types (standard/private/shared), with channel caching and fallback lookup.
+- Normalizes TeamName/ChannelName values from Excel (trim) to avoid lookup misses caused by trailing spaces.
+- Reuses the same cached channel resolver with Graph fallback in chat export, improving consistency for channel detection in dry-run and normal runs.
 - Handles SharePoint NotFound during export as a controlled skip instead of noisy hard failures.
 - Downloads files with per-file retries, reconnect fallback, and post-download count validation to ensure completeness.
 - Stores output in channel-based structure: `Teams > Team > Channel > Files, Chat, Members`.

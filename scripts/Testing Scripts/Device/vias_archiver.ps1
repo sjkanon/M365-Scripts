@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.17
+# Vias Teams Archivering - Volledig Automatisch Script v8.18
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -144,7 +144,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.17" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.18" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -406,6 +406,13 @@ Import-Module ImportExcel -ErrorAction Stop
 
 $data      = Import-Excel -Path $xlPath -WorksheetName "Teams channels Vias"
 $toArchive = $data | Where-Object { $_.Archive -eq "Archive" }
+
+# Normaliseer Excel-waarden om lookup-missers (bv. trailing spaces) te vermijden.
+foreach ($row in $toArchive) {
+    $row.TeamName = ([string]$row.TeamName).Trim()
+    $row.ChannelName = ([string]$row.ChannelName).Trim()
+}
+
 Write-Host "  $($toArchive.Count) kanalen gevonden." -ForegroundColor Green
 
 $archiveTeams = $toArchive | Select-Object -ExpandProperty TeamName -Unique
@@ -824,9 +831,7 @@ if ($chatMethode -eq "a") {
         $chatPath    = Join-Path $archiveRoot $safeteam $safechannel "Chat"
 
         try {
-            $channel = Get-MgTeamChannel -TeamId $groupId |
-                       Where-Object { $_.DisplayName -eq $row.ChannelName } |
-                       Select-Object -First 1
+            $channel = Get-TeamChannelCached -GroupId $groupId -ChannelName $row.ChannelName -Cache $teamChannelCache
             if (-not $channel) {
                 Write-Warning "  Kanaal niet gevonden voor chat: $($row.ChannelName)"
                 continue
@@ -948,7 +953,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.17." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.18." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
 Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
 if ($ChannelFallbackToRename) {
