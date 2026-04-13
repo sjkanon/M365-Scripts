@@ -11,7 +11,7 @@ All scripts require administrator privileges.
 
 Teams archiver with Graph, Teams and SharePoint export flow.
 
-Current behavior (v8.7):
+Current behavior (v8.9):
 - Creates a unique temporary Entra app registration for the run.
 - Grants only required delegated setup permissions during bootstrap.
 - Applies Graph/SharePoint delegated consent to that temporary app.
@@ -23,6 +23,7 @@ Current behavior (v8.7):
 - Downloads files with per-file retries, reconnect fallback, and post-download count validation to ensure completeness.
 - Stores output in channel-based structure: `Teams > Team > Channel > Files, Chat, Members`.
 - Does not archive Teams by default; archiving now requires explicit confirmation during Step 10.
+- Step 10 also supports undo archiving (`unarchive`) with retry logic.
 
 ### Test-OpenVpnDiagnostics.ps1
 
