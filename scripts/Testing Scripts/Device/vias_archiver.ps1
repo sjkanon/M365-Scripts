@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.7
+# Vias Teams Archivering - Volledig Automatisch Script v8.8
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.7" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.8" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -531,6 +531,28 @@ function Ensure-HigherRights {
     Write-Host "  Hogere rechten toegekend en nieuwe Graph-sessie actief." -ForegroundColor Green
 }
 
+function Grant-SiteAdminAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$SiteUrl,
+        [Parameter(Mandatory = $true)][string]$AdminAccount,
+        [Parameter(Mandatory = $true)][string]$TenantUrl,
+        [Parameter(Mandatory = $true)][string]$ClientId
+    )
+    $spoAdminUrl = $TenantUrl -replace '(https://[^.]+)(\.sharepoint\.com)', '$1-admin$2'
+    try {
+        Write-Host "    Site-admin rechten verlenen via SPO Admin voor: $SiteUrl" -ForegroundColor Yellow
+        Connect-PnPOnline -Url $spoAdminUrl -Interactive -ClientId $ClientId -ErrorAction Stop
+        Set-PnPSite -Identity $SiteUrl -Owners @($AdminAccount) -ErrorAction Stop
+        Write-Host "    Site-admin rechten verleend. Wachten op propagatie..." -ForegroundColor Green
+        Start-Sleep -Seconds 10
+        return $true
+    } catch {
+        Write-Warning "    Kon site-admin rechten niet verlenen voor ${SiteUrl}: $_"
+        Write-Host "    TIP: Voeg '$AdminAccount' handmatig toe als site-beheerder in het SharePoint Admin Center." -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Download-PnPFilesReliable {
     param(
         [Parameter(Mandatory = $true)][array]$Items,
@@ -580,7 +602,8 @@ function Download-PnPFilesReliable {
 }
 
 $higherRightsGranted = $false
-$teamChannelCache = @{}
+$adminGrantedSites   = @{}
+$teamChannelCache    = @{}
 
 # Laatste check op ClientId voor gebruik in PnP
 if ([string]::IsNullOrWhiteSpace($clientId)) {
@@ -633,9 +656,25 @@ foreach ($row in $toArchive) {
             $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
         } catch {
             $errMsg = $_.Exception.Message
-            if ((Test-IsAccessDeniedError -Message $errMsg) -and -not $higherRightsGranted) {
-                Ensure-HigherRights -TenantId $tenantId -ClientId $clientId -GraphSp $graphSp
-                $higherRightsGranted = $true
+            if (Test-IsAccessDeniedError -Message $errMsg) {
+                # Stap 1: eenmalig hogere Graph-rechten proberen
+                if (-not $higherRightsGranted) {
+                    $higherRightsGranted = $true
+                    try {
+                        Ensure-HigherRights -TenantId $tenantId -ClientId $clientId -GraphSp $graphSp
+                    } catch {
+                        Write-Warning "    Hogere Graph-rechten mislukten: $_"
+                    }
+                }
+                # Stap 2: per site eenmalig SPO site-admin rechten toekennen
+                if (-not $adminGrantedSites.ContainsKey($siteUrl)) {
+                    $adminGrantedSites[$siteUrl] = $true
+                    $granted = Grant-SiteAdminAccess -SiteUrl $siteUrl -AdminAccount $account `
+                        -TenantUrl $tenantUrl -ClientId $clientId
+                    if (-not $granted) { throw }
+                } else {
+                    throw
+                }
                 Connect-PnPOnline -Url $siteUrl -Interactive -ClientId $clientId
                 $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
             } elseif (Test-IsNotFoundError -Message $errMsg) {
@@ -825,23 +864,33 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.7." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.8." -ForegroundColor Yellow
 $archiveNu = Read-Host "  Wil je NU toch archiveren? (j/n, standaard n)"
 if ($archiveNu -eq "j") {
     Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
     foreach ($teamName in $archiveTeams) {
         $groupId = $teamMapping[$teamName]
         if (-not $groupId) { continue }
-        try {
-            Invoke-MgGraphRequest -Method POST `
-                -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/archive" `
-                -Body (@{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json) `
-                -ContentType "application/json"
-            Write-Host "  Gearchiveerd: $teamName" -ForegroundColor Green
-            Start-Sleep -Seconds 2
-        } catch {
-            Write-Warning "  Fout archivering $teamName : $_"
+        $gearchiveerd = $false
+        for ($poging = 1; $poging -le 3 -and -not $gearchiveerd; $poging++) {
+            try {
+                Invoke-MgGraphRequest -Method POST `
+                    -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/archive" `
+                    -Body (@{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json) `
+                    -ContentType "application/json"
+                Write-Host "  Gearchiveerd: $teamName" -ForegroundColor Green
+                $gearchiveerd = $true
+            } catch {
+                if ($poging -lt 3) {
+                    $wacht = 30 * $poging
+                    Write-Host "  Wachten ${wacht}s voor retry ($poging/3): $teamName..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds $wacht
+                } else {
+                    Write-Warning "  Fout archivering $teamName : $_"
+                }
+            }
         }
+        if ($gearchiveerd) { Start-Sleep -Seconds 2 }
     }
 } else {
     Write-Host "  Archiveren overgeslagen. Teams blijven actief." -ForegroundColor Yellow
@@ -858,10 +907,14 @@ foreach ($row in $toArchive) {
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     $groupId     = $teamMapping[$row.TeamName]
 
-    $fileCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam $safechannel "Files") `
-                     -Recurse -File -ErrorAction SilentlyContinue).Count
-    $chatCount = (Get-ChildItem (Join-Path $archiveRoot $safeteam $safechannel "Chat") `
-                     -File -ErrorAction SilentlyContinue).Count
+    $fileCount = try {
+        (Get-ChildItem ([System.IO.Path]::Combine($archiveRoot, $safeteam, $safechannel, "Files")) `
+            -Recurse -File -ErrorAction SilentlyContinue).Count
+    } catch { 0 }
+    $chatCount = try {
+        (Get-ChildItem ([System.IO.Path]::Combine($archiveRoot, $safeteam, $safechannel, "Chat")) `
+            -File -ErrorAction SilentlyContinue).Count
+    } catch { 0 }
 
     $m365Status = if ($groupId) {
         try {
@@ -883,7 +936,14 @@ foreach ($row in $toArchive) {
     })
 }
 
-$rapportPad = Join-Path $archiveRoot "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
+$rapportPad = [System.IO.Path]::Combine($archiveRoot, "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx")
+if (-not (Test-Path $archiveRoot -ErrorAction SilentlyContinue)) {
+    $rapportPad = [System.IO.Path]::Combine(
+        [System.IO.Path]::GetTempPath(),
+        "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
+    )
+    Write-Warning "  Archief-locatie niet bereikbaar. Rapport wordt opgeslagen in: $rapportPad"
+}
 $report | Export-Excel -Path $rapportPad `
     -AutoSize -BoldTopRow -FreezeTopRow `
     -TableName "ArchivRapport" -WorksheetName "Archivering" `
