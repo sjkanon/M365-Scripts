@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.16
+# Vias Teams Archivering - Volledig Automatisch Script v8.17
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -144,7 +144,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.16" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.17" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -429,6 +429,17 @@ if ($DryRun) {
 Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden." -ForegroundColor Green
 #endregion
 
+function New-ArchiveRowKey {
+    param(
+        [Parameter(Mandatory = $true)][string]$TeamName,
+        [Parameter(Mandatory = $true)][string]$ChannelName
+    )
+    return "$TeamName||$ChannelName"
+}
+
+$dryRunFileCounts = @{}
+$dryRunChatCounts = @{}
+
 if (-not $Step10Only) {
 
 #region STAP 6 - Mapstructuur
@@ -437,9 +448,13 @@ foreach ($row in $toArchive) {
     $safeTeam = $row.TeamName -replace '[\\/:*?"<>|]', '_'
     $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     $channelRoot = Join-Path $archiveRoot $safeTeam $safeChannel
-    New-Item -ItemType Directory -Path (Join-Path $channelRoot "Files")   -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $channelRoot "Chat")    -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $channelRoot "Members") -Force | Out-Null
+    if ($DryRun) {
+        Write-Host "  [DRYRUN] Structuur gevalideerd: $($row.TeamName) / $($row.ChannelName)" -ForegroundColor Cyan
+    } else {
+        New-Item -ItemType Directory -Path (Join-Path $channelRoot "Files")   -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $channelRoot "Chat")    -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $channelRoot "Members") -Force | Out-Null
+    }
 }
 Write-Host "  Mappen aangemaakt." -ForegroundColor Green
 #endregion
@@ -453,10 +468,15 @@ foreach ($row in $toArchive) {
     $safeTeam = $teamName -replace '[\\/:*?"<>|]', '_'
     $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     try {
-        Get-TeamUser -GroupId $groupId |
-            Select-Object Name, User, Role |
-            Export-Csv (Join-Path $archiveRoot $safeTeam $safeChannel "Members" "members.csv") -NoTypeInformation -Encoding UTF8
-        Write-Host "  OK: $teamName / $($row.ChannelName)" -ForegroundColor Green
+        $members = @(Get-TeamUser -GroupId $groupId)
+        if ($DryRun) {
+            Write-Host "  [DRYRUN] Leden gevonden: $teamName / $($row.ChannelName) ($($members.Count))" -ForegroundColor Cyan
+        } else {
+            $members |
+                Select-Object Name, User, Role |
+                Export-Csv (Join-Path $archiveRoot $safeTeam $safeChannel "Members" "members.csv") -NoTypeInformation -Encoding UTF8
+            Write-Host "  OK: $teamName / $($row.ChannelName)" -ForegroundColor Green
+        }
     } catch {
         Write-Warning "  Fout ledenlijst $teamName / $($row.ChannelName) : $_"
     }
@@ -639,6 +659,7 @@ if ([string]::IsNullOrWhiteSpace($clientId)) {
 $currentSiteUrl = $null
 
 foreach ($row in $toArchive) {
+    $rowKey = New-ArchiveRowKey -TeamName $row.TeamName -ChannelName $row.ChannelName
     $groupId = $teamMapping[$row.TeamName]
     if (-not $groupId) {
         Write-Warning "  Geen GroupId voor: $($row.TeamName) — overgeslagen"
@@ -648,7 +669,9 @@ foreach ($row in $toArchive) {
     $safeteam    = $row.TeamName    -replace '[\\/:*?"<>|]', '_'
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     $destPath    = Join-Path $archiveRoot $safeteam $safechannel "Files"
-    New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+    }
 
     try {
         $channel = Get-TeamChannelCached -GroupId $groupId -ChannelName $row.ChannelName -Cache $teamChannelCache
@@ -708,11 +731,17 @@ foreach ($row in $toArchive) {
         }
 
         if (-not $items -or $items.Count -eq 0) {
+            if ($DryRun) { $dryRunFileCounts[$rowKey] = 0 }
             Write-Host "  Leeg: $($row.TeamName) / $($row.ChannelName)" -ForegroundColor Gray
             continue
         }
 
         $itemList = @($items)
+        if ($DryRun) {
+            $dryRunFileCounts[$rowKey] = $itemList.Count
+            Write-Host "  [DRYRUN] Bestanden gevonden: $($row.TeamName) / $($row.ChannelName) ($($itemList.Count))" -ForegroundColor Cyan
+            continue
+        }
         $dl = Download-PnPFilesReliable -Items $itemList -DestPath $destPath -SiteUrl $siteUrl -ClientId $clientId
         if ($dl.FailedCount -gt 0) {
             throw "Niet alle bestanden konden gedownload worden ($($itemList.Count - $dl.FailedCount)/$($itemList.Count))."
@@ -786,6 +815,7 @@ if ($chatMethode -eq "a") {
     Write-Host "  Methode: Graph API (automatisch)`n" -ForegroundColor White
 
     foreach ($row in $toArchive) {
+        $rowKey = New-ArchiveRowKey -TeamName $row.TeamName -ChannelName $row.ChannelName
         $groupId = $teamMapping[$row.TeamName]
         if (-not $groupId) { continue }
 
@@ -830,6 +860,12 @@ if ($chatMethode -eq "a") {
                 $allData.Add($msgObj)
             }
 
+            if ($DryRun) {
+                $dryRunChatCounts[$rowKey] = $allMessages.Count
+                Write-Host "  [DRYRUN] Chat-berichten gevonden: $($row.TeamName) / $($row.ChannelName) ($($allMessages.Count))" -ForegroundColor Cyan
+                continue
+            }
+
             $allData | ConvertTo-Json -Depth 10 |
                 Out-File (Join-Path $chatPath "${safechannel}_chat.json") -Encoding UTF8
 
@@ -846,6 +882,9 @@ if ($chatMethode -eq "a") {
 
 } else {
     Write-Host "  Methode: Microsoft Purview eDiscovery (manueel)`n" -ForegroundColor White
+    if ($DryRun) {
+        Write-Host "  [DRYRUN] Purview-export wordt niet uitgevoerd; automatische chat-validatie is in deze modus niet mogelijk." -ForegroundColor Yellow
+    }
     Write-Host "  1. Ga naar https://compliance.microsoft.com"
     Write-Host "  2. eDiscovery > Standard > + Create a case"
     Write-Host "     Naam: Vias Teams Archivering $(Get-Date -Format 'yyyy')"
@@ -855,8 +894,10 @@ if ($chatMethode -eq "a") {
     Write-Host "  4. Save & run > wacht tot klaar (5-30 min)"
     Write-Host "  5. Actions > Export results > HTML reports"
     Write-Host "  6. Download en sla op in: $archiveRoot\[Teamnaam]\Chat\`n"
-    Write-Host "  Druk Enter zodra de export gedownload en opgeslagen is." -ForegroundColor Red
-    Read-Host "  Klaar? Druk Enter"
+    if (-not $DryRun) {
+        Write-Host "  Druk Enter zodra de export gedownload en opgeslagen is." -ForegroundColor Red
+        Read-Host "  Klaar? Druk Enter"
+    }
 }
 
 # Verificatie chat-mappen
@@ -865,7 +906,20 @@ $chatOntbreekt = 0
 foreach ($row in $toArchive) {
     $safeTeam  = $row.TeamName -replace '[\\/:*?"<>|]', '_'
     $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
-    $count = (Get-ChildItem (Join-Path $archiveRoot $safeTeam $safeChannel "Chat") -File -ErrorAction SilentlyContinue).Count
+    $rowKey = New-ArchiveRowKey -TeamName $row.TeamName -ChannelName $row.ChannelName
+    $count = if ($DryRun -and $chatMethode -eq "a") {
+        if ($dryRunChatCounts.ContainsKey($rowKey)) { [int]$dryRunChatCounts[$rowKey] } else { 0 }
+    } elseif ($DryRun -and $chatMethode -eq "b") {
+        -1
+    } else {
+        (Get-ChildItem (Join-Path $archiveRoot $safeTeam $safeChannel "Chat") -File -ErrorAction SilentlyContinue).Count
+    }
+
+    if ($count -eq -1) {
+        Write-Host "  [DRYRUN] Purview chat-validatie niet automatisch beschikbaar: $($row.TeamName) / $($row.ChannelName)" -ForegroundColor DarkYellow
+        continue
+    }
+
     if ($count -eq 0) {
         Write-Warning "  Geen chat-export: $($row.TeamName) / $($row.ChannelName)"
         $chatOntbreekt++
@@ -876,10 +930,14 @@ foreach ($row in $toArchive) {
 
 if ($chatOntbreekt -gt 0) {
     Write-Host "`n  $chatOntbreekt Teams zonder chat-export." -ForegroundColor Yellow
-    $doorgaan = Read-Host "  Toch archiveren in M365? (j/n)"
-    if ($doorgaan -ne "j") {
-        Write-Host "  Gepauzeerd. Exporteer de ontbrekende chats en herstart." -ForegroundColor Yellow
-        exit
+    if ($DryRun) {
+        Write-Host "  [DRYRUN] Doorgaan zonder archiveringswijzigingen." -ForegroundColor Yellow
+    } else {
+        $doorgaan = Read-Host "  Toch archiveren in M365? (j/n)"
+        if ($doorgaan -ne "j") {
+            Write-Host "  Gepauzeerd. Exporteer de ontbrekende chats en herstart." -ForegroundColor Yellow
+            exit
+        }
     }
 }
 #endregion
@@ -890,7 +948,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.16." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.17." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
 Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
 if ($ChannelFallbackToRename) {
@@ -1192,15 +1250,26 @@ foreach ($row in $toArchive) {
     $safeteam    = $row.TeamName    -replace '[\\/:*?"<>|]', '_'
     $safechannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     $groupId     = $teamMapping[$row.TeamName]
+    $rowKey = New-ArchiveRowKey -TeamName $row.TeamName -ChannelName $row.ChannelName
 
-    $fileCount = try {
-        (Get-ChildItem ([System.IO.Path]::Combine($archiveRoot, $safeteam, $safechannel, "Files")) `
-            -Recurse -File -ErrorAction SilentlyContinue).Count
-    } catch { 0 }
-    $chatCount = try {
-        (Get-ChildItem ([System.IO.Path]::Combine($archiveRoot, $safeteam, $safechannel, "Chat")) `
-            -File -ErrorAction SilentlyContinue).Count
-    } catch { 0 }
+    $fileCount = if ($DryRun) {
+        if ($dryRunFileCounts.ContainsKey($rowKey)) { [int]$dryRunFileCounts[$rowKey] } else { 0 }
+    } else {
+        try {
+            (Get-ChildItem ([System.IO.Path]::Combine($archiveRoot, $safeteam, $safechannel, "Files")) `
+                -Recurse -File -ErrorAction SilentlyContinue).Count
+        } catch { 0 }
+    }
+    $chatCount = if ($DryRun -and $chatMethode -eq "a") {
+        if ($dryRunChatCounts.ContainsKey($rowKey)) { [int]$dryRunChatCounts[$rowKey] } else { 0 }
+    } elseif ($DryRun -and $chatMethode -eq "b") {
+        0
+    } else {
+        try {
+            (Get-ChildItem ([System.IO.Path]::Combine($archiveRoot, $safeteam, $safechannel, "Chat")) `
+                -File -ErrorAction SilentlyContinue).Count
+        } catch { 0 }
+    }
 
     $m365Status = if ($groupId) {
         try {
