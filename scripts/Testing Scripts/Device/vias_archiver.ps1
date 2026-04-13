@@ -879,30 +879,128 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.11." -ForegroundColor Yellow
-Write-Host "  Let op: archiveren/unarchiven gebeurt op TEAM-niveau (niet per kanaal)." -ForegroundColor Yellow
-Write-Host "  A) Archiveren (read-only)"
-Write-Host "  U) Undo archivering (unarchive)"
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.12." -ForegroundColor Yellow
+Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
+Write-Host "  C/D zijn kanaal soft-archive acties via naammarker." -ForegroundColor Yellow
+Write-Host "  A) Team archiveren (read-only)"
+Write-Host "  U) Team undo archivering (unarchive)"
+Write-Host "  C) Kanaal soft-archive (naam marker toevoegen)"
+Write-Host "  D) Kanaal undo soft-archive (marker verwijderen)"
 Write-Host "  N) Overslaan (standaard)"
 
+function Get-ChannelByNameForStep10 {
+    param(
+        [Parameter(Mandatory = $true)][string]$GroupId,
+        [Parameter(Mandatory = $true)][string]$ChannelName
+    )
+
+    $uri = "https://graph.microsoft.com/v1.0/teams/$GroupId/channels"
+    do {
+        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        if ($result.value) {
+            $found = $result.value | Where-Object { $_.displayName -eq $ChannelName } | Select-Object -First 1
+            if ($found) { return $found }
+        }
+        $uri = $result.'@odata.nextLink'
+    } while ($uri)
+
+    return $null
+}
+
+function Get-ChannelTargetName {
+    param(
+        [Parameter(Mandatory = $true)][string]$CurrentName,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$Tag
+    )
+
+    $prefix = "$Tag "
+    if ($Mode -eq "archive") {
+        if ($CurrentName -like "$prefix*") { return $CurrentName }
+        return "$prefix$CurrentName"
+    }
+
+    if ($CurrentName -like "$prefix*") {
+        return $CurrentName.Substring($prefix.Length)
+    }
+    return $CurrentName
+}
+
+function Set-ChannelArchiveMarker {
+    param(
+        [Parameter(Mandatory = $true)][string]$GroupId,
+        [Parameter(Mandatory = $true)][string]$ChannelName,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$Tag
+    )
+
+    if ($ChannelName -eq "General") {
+        Write-Warning "  General kanaal wordt overgeslagen: $GroupId / $ChannelName"
+        return
+    }
+
+    $channel = Get-ChannelByNameForStep10 -GroupId $GroupId -ChannelName $ChannelName
+    if (-not $channel) {
+        Write-Warning "  Kanaal niet gevonden voor soft-archive: $GroupId / $ChannelName"
+        return
+    }
+
+    $currentName = [string]$channel.displayName
+    $targetName = Get-ChannelTargetName -CurrentName $currentName -Mode $Mode -Tag $Tag
+    if ($targetName -eq $currentName) {
+        Write-Host "  Geen wijziging nodig: $currentName" -ForegroundColor Gray
+        return
+    }
+
+    $body = @{ displayName = $targetName } | ConvertTo-Json
+    for ($poging = 1; $poging -le 3; $poging++) {
+        try {
+            Invoke-MgGraphRequest -Method PATCH `
+                -Uri "https://graph.microsoft.com/v1.0/teams/$GroupId/channels/$($channel.id)" `
+                -Body $body -ContentType "application/json" -ErrorAction Stop
+
+            if ($Mode -eq "archive") {
+                Write-Host "  Kanaal gemarkeerd: $currentName -> $targetName" -ForegroundColor Green
+            } else {
+                Write-Host "  Kanaal hersteld: $currentName -> $targetName" -ForegroundColor Green
+            }
+            return
+        } catch {
+            if ($poging -lt 3) {
+                $wacht = 10 * $poging
+                Start-Sleep -Seconds $wacht
+            } else {
+                Write-Warning "  Fout kanaalwijziging $currentName : $_"
+            }
+        }
+    }
+}
+
+$archiveKeuze = "interactive"
 switch ($Step10Action) {
     "archive" { $archiveKeuze = "a" }
     "undo"    { $archiveKeuze = "u" }
     "skip"    { $archiveKeuze = "n" }
-    default    { $archiveKeuze = "interactive" }
 }
+
+if ($ChannelAction -eq "archive") { $archiveKeuze = "c" }
+if ($ChannelAction -eq "undo")    { $archiveKeuze = "d" }
 
 if ($archiveKeuze -eq "interactive") {
     do {
-        $archiveKeuze = (Read-Host "  Kies actie (a/u/n, standaard n)").Trim().ToLower()
+        $archiveKeuze = (Read-Host "  Kies actie (a/u/c/d/n, standaard n)").Trim().ToLower()
         if ([string]::IsNullOrWhiteSpace($archiveKeuze)) { $archiveKeuze = "n" }
-    } while ($archiveKeuze -notin @("a", "u", "n"))
+    } while ($archiveKeuze -notin @("a", "u", "c", "d", "n"))
 } else {
-    Write-Host "  Step10Action toegepast: $Step10Action" -ForegroundColor Cyan
+    if ($ChannelAction -ne "none") {
+        Write-Host "  ChannelAction toegepast: $ChannelAction" -ForegroundColor Cyan
+    } else {
+        Write-Host "  Step10Action toegepast: $Step10Action" -ForegroundColor Cyan
+    }
 }
 
 if ($archiveKeuze -eq "a") {
-    Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
+    Write-Host "  Team archivering gestart (team-niveau).`n" -ForegroundColor White
     foreach ($teamName in $archiveTeams) {
         $groupId = $teamMapping[$teamName]
         if (-not $groupId) { continue }
@@ -928,7 +1026,7 @@ if ($archiveKeuze -eq "a") {
         if ($gelukt) { Start-Sleep -Seconds 2 }
     }
 } elseif ($archiveKeuze -eq "u") {
-    Write-Host "  Undo archivering gestart. Teams worden opnieuw actief gezet.`n" -ForegroundColor White
+    Write-Host "  Team undo archivering gestart (team-niveau).`n" -ForegroundColor White
     foreach ($teamName in $archiveTeams) {
         $groupId = $teamMapping[$teamName]
         if (-not $groupId) { continue }
@@ -951,6 +1049,14 @@ if ($archiveKeuze -eq "a") {
             }
         }
         if ($gelukt) { Start-Sleep -Seconds 2 }
+    }
+} elseif ($archiveKeuze -in @("c", "d")) {
+    $mode = if ($archiveKeuze -eq "c") { "archive" } else { "undo" }
+    Write-Host "  Kanaal soft-archive mode: $mode met marker '$ChannelArchiveTag'.`n" -ForegroundColor White
+    foreach ($row in $toArchive) {
+        $groupId = $teamMapping[$row.TeamName]
+        if (-not $groupId) { continue }
+        Set-ChannelArchiveMarker -GroupId $groupId -ChannelName $row.ChannelName -Mode $mode -Tag $ChannelArchiveTag
     }
 } else {
     Write-Host "  Archiveren/undo overgeslagen. Teams-status blijft ongewijzigd." -ForegroundColor Yellow
