@@ -476,6 +476,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Change |
 |--------|
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.11 — Step 10 now supports non-interactive mode via `-Step10Only -Step10Action undo|archive|skip`; added explicit warning that archive/unarchive in Teams is a team-level action (not per channel) |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.12 — added per-channel soft-archive mode in Step 10 (rename marker with undo), including quick mode parameters `-Step10Only -ChannelAction archive|undo` and optional `-ChannelArchiveTag` |
 
 ### 2026-04-09
 | Change |
