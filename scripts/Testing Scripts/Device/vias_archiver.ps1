@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.15
+# Vias Teams Archivering - Volledig Automatisch Script v8.16
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -19,7 +19,7 @@ param(
 # nadat conflicterende modules zijn verwijderd. Zonder herstart blijven
 # oude module-versies actief in het geheugen en crashen alle Graph-calls.
 
-$herstart = if ($DryRun) { "1" } else { $env:VIAS_ARCHIVER_HERSTART }
+$herstart = $env:VIAS_ARCHIVER_HERSTART
 
 if ($herstart -ne "1") {
 
@@ -144,7 +144,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.15" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.16" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -253,14 +253,6 @@ Write-Host "`n[2/12] Tijdelijke Entra app registreren..." -ForegroundColor Cyan
 $appName = "Temp-Vias-Teams-Archiver-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $isTempApp = $true
 
-if ($DryRun) {
-    $isTempApp = $false
-    $app = [PSCustomObject]@{ AppId = "DRYRUN-APP"; Id = $null }
-    $sp  = [PSCustomObject]@{ Id = $null }
-    $clientId = "DRYRUN-CLIENT"
-    Write-Host "  [DRYRUN] Tijdelijke app/service principal aanmaak overgeslagen." -ForegroundColor Cyan
-} else {
-
 try {
     $app = New-MgApplication -DisplayName $appName `
         -PublicClient @{ RedirectUris = @("http://localhost") } `
@@ -289,7 +281,6 @@ if ([string]::IsNullOrWhiteSpace($clientId)) {
 # Opslaan als fallback
 $clientId | Out-File (Join-Path $tempDir "vias_archiver_clientid.txt") -Force
 Write-Host "  Client ID: $clientId" -ForegroundColor Green
-}
 #endregion
 
 #region STAP 3 - Permissies instellen en admin consent geven
@@ -352,26 +343,22 @@ function Grant-DelegatedPermission {
     }
 }
 
-if ($DryRun) {
-    Write-Host "  [DRYRUN] API-permissies/consent wijzigingen overgeslagen." -ForegroundColor Cyan
-} else {
-    try {
-        Write-Host "  Microsoft Graph permissies..." -ForegroundColor White
-        Grant-DelegatedPermission -ResourceSp $graphSp -ResourceName "Graph" -Scopes @(
-            "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
-            "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All",
-            "ChannelSettings.ReadWrite.All"
-        )
-        Write-Host "  SharePoint permissies..." -ForegroundColor White
-        Grant-DelegatedPermission -ResourceSp $spSp -ResourceName "SharePoint" -Scopes @(
-            "AllSites.FullControl"
-        )
-        Write-Host "  Alle permissies ingesteld." -ForegroundColor Green
-    } catch {
-        Write-Host "  FOUT bij permissies: $_" -ForegroundColor Red
-        if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
-        exit
-    }
+try {
+    Write-Host "  Microsoft Graph permissies..." -ForegroundColor White
+    Grant-DelegatedPermission -ResourceSp $graphSp -ResourceName "Graph" -Scopes @(
+        "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
+        "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All",
+        "ChannelSettings.ReadWrite.All"
+    )
+    Write-Host "  SharePoint permissies..." -ForegroundColor White
+    Grant-DelegatedPermission -ResourceSp $spSp -ResourceName "SharePoint" -Scopes @(
+        "AllSites.FullControl"
+    )
+    Write-Host "  Alle permissies ingesteld." -ForegroundColor Green
+} catch {
+    Write-Host "  FOUT bij permissies: $_" -ForegroundColor Red
+    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
+    exit
 }
 #endregion
 
@@ -380,16 +367,8 @@ Write-Host "`n[4/12] Opnieuw inloggen met volledige permissies..." -ForegroundCo
 Write-Host "  Gebruik opnieuw het VIAS ADMIN account.`n" -ForegroundColor Yellow
 
 if ($DryRun) {
-    Write-Host "  [DRYRUN] Tweede Graph-login met tijdelijke app overgeslagen." -ForegroundColor Cyan
-    Import-Module MicrosoftTeams -ErrorAction Stop
-    try {
-        Connect-MicrosoftTeams -TenantId $tenantId -ErrorAction Stop
-    } catch {
-        Write-Host "  FOUT bij Teams-verbinding: $_" -ForegroundColor Red
-        exit
-    }
-    Write-Host "  Verbonden als: $((Get-MgContext).Account)" -ForegroundColor Green
-} else {
+    Write-Host "  DRY RUN: login wordt normaal uitgevoerd; alleen mutaties worden gesimuleerd." -ForegroundColor DarkYellow
+}
 
 Disconnect-MgGraph -ErrorAction SilentlyContinue
 
@@ -418,7 +397,6 @@ try {
 }
 
 Write-Host "  Verbonden als: $((Get-MgContext).Account)" -ForegroundColor Green
-}
 #endregion
 
 #region STAP 5 - Excel inlezen en Teams-IDs ophalen
@@ -450,11 +428,6 @@ if ($DryRun) {
 }
 Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden." -ForegroundColor Green
 #endregion
-
-if ($DryRun -and -not $Step10Only) {
-    Write-Host "`n[DRYRUN] Stappen 6 t/m 9 worden overgeslagen (geen lokale export/schrijfacties)." -ForegroundColor Yellow
-    $Step10Only = $true
-}
 
 if (-not $Step10Only) {
 
@@ -917,7 +890,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.15." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.16." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
 Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
 if ($ChannelFallbackToRename) {
@@ -1249,45 +1222,36 @@ foreach ($row in $toArchive) {
     })
 }
 
-if ($DryRun) {
-    $rapportPad = "[DRYRUN] rapport niet aangemaakt"
-    Write-Host "  [DRYRUN] Rapport export overgeslagen." -ForegroundColor Cyan
-} else {
-    $rapportPad = [System.IO.Path]::Combine($archiveRoot, "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx")
-    if (-not (Test-Path $archiveRoot -ErrorAction SilentlyContinue)) {
-        $rapportPad = [System.IO.Path]::Combine(
-            [System.IO.Path]::GetTempPath(),
-            "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
-        )
-        Write-Warning "  Archief-locatie niet bereikbaar. Rapport wordt opgeslagen in: $rapportPad"
-    }
-    $report | Export-Excel -Path $rapportPad `
-        -AutoSize -BoldTopRow -FreezeTopRow `
-        -TableName "ArchivRapport" -WorksheetName "Archivering" `
-        -ConditionalText $(
-            New-ConditionalText "NEE"          -Range "G:G" -BackgroundColor "#FFD7D7" -ConditionalTextColor "#CC0000"
-            New-ConditionalText "Gearchiveerd" -Range "H:H" -BackgroundColor "#D4EDDA" -ConditionalTextColor "#155724"
-            New-ConditionalText "Actief"       -Range "H:H" -BackgroundColor "#FFF3CD" -ConditionalTextColor "#856404"
-        )
+$rapportPad = [System.IO.Path]::Combine($archiveRoot, "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx")
+if (-not (Test-Path $archiveRoot -ErrorAction SilentlyContinue)) {
+    $rapportPad = [System.IO.Path]::Combine(
+        [System.IO.Path]::GetTempPath(),
+        "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
+    )
+    Write-Warning "  Archief-locatie niet bereikbaar. Rapport wordt opgeslagen in: $rapportPad"
 }
+$report | Export-Excel -Path $rapportPad `
+    -AutoSize -BoldTopRow -FreezeTopRow `
+    -TableName "ArchivRapport" -WorksheetName "Archivering" `
+    -ConditionalText $(
+        New-ConditionalText "NEE"          -Range "G:G" -BackgroundColor "#FFD7D7" -ConditionalTextColor "#CC0000"
+        New-ConditionalText "Gearchiveerd" -Range "H:H" -BackgroundColor "#D4EDDA" -ConditionalTextColor "#155724"
+        New-ConditionalText "Actief"       -Range "H:H" -BackgroundColor "#FFF3CD" -ConditionalTextColor "#856404"
+    )
 
 Write-Host "  Rapport: $rapportPad" -ForegroundColor Green
 #endregion
 
 #region STAP 12 - Opruimen
 Write-Host "`n[12/12] Opruimen..." -ForegroundColor Cyan
-if ($DryRun) {
-    Write-Host "  [DRYRUN] Opruimacties overgeslagen." -ForegroundColor Cyan
+if ($isTempApp) {
+    Remove-TempArchiverApp -App $app -Sp $sp
 } else {
-    if ($isTempApp) {
-        Remove-TempArchiverApp -App $app -Sp $sp
-    } else {
-        Write-Host "  Niet-tijdelijke app behouden. Client ID: $clientId" -ForegroundColor Gray
-    }
-    Unregister-Event -SourceIdentifier $cleanupEventName -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
-    Write-Host "  Tijdelijke bestanden verwijderd." -ForegroundColor Yellow
+    Write-Host "  Niet-tijdelijke app behouden. Client ID: $clientId" -ForegroundColor Gray
 }
+Unregister-Event -SourceIdentifier $cleanupEventName -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
+Write-Host "  Tijdelijke bestanden verwijderd." -ForegroundColor Yellow
 
 # Omgevingsvariabele opruimen
 $env:VIAS_ARCHIVER_HERSTART = $null
