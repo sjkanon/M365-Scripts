@@ -482,6 +482,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.15 — expanded `-DryRun` to whole-script behavior: skips mutating setup/export/report/cleanup actions while keeping verification and simulated Step 10 output |
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.16 — `-DryRun` now keeps temporary app creation, permission bootstrap, full login and export/report flow active; only Step 10 archive/unarchive mutations remain simulated |
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.17 — refined `-DryRun` for Steps 6-9 to validate existence/counts (Teams/SharePoint/Graph) without writing exports; Step 11 report now uses these probe counts |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.18 — fixed channel lookup reliability (trimmed Excel Team/Channel values and reused cached Graph-fallback channel resolver in Step 9) to reduce false "Kanaal niet gevonden" in dry-run |
 
 ### 2026-04-09
 | Change |
