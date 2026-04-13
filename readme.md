@@ -479,6 +479,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.12 — added per-channel soft-archive mode in Step 10 (rename marker with undo), including quick mode parameters `-Step10Only -ChannelAction archive|undo` and optional `-ChannelArchiveTag` |
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.13 — switched per-channel flow to real Graph channel archive/unarchive API, added channel scope `ChannelSettings.ReadWrite.All`, and optional rename fallback via `-ChannelFallbackToRename` |
 | Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.14 — added `-DryRun` mode for Step 10 so team/channel archive/unarchive (and optional rename fallback) can be simulated without making changes |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.15 — expanded `-DryRun` to whole-script behavior: skips mutating setup/export/report/cleanup actions while keeping verification and simulated Step 10 output |
 
 ### 2026-04-09
 | Change |
