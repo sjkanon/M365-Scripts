@@ -1,12 +1,15 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.11
+# Vias Teams Archivering - Volledig Automatisch Script v8.12
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
 param(
     [ValidateSet("interactive", "archive", "undo", "skip")]
     [string]$Step10Action = "interactive",
-    [switch]$Step10Only
+    [switch]$Step10Only,
+    [ValidateSet("none", "archive", "undo")]
+    [string]$ChannelAction = "none",
+    [string]$ChannelArchiveTag = "[ARCHIEF]"
 )
 
 #region ZELFHERSTART - Modules opkuisen en sessie hernieuwen
@@ -139,7 +142,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.11" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.12" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
