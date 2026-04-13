@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.8
+# Vias Teams Archivering - Volledig Automatisch Script v8.9
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -133,7 +133,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.8" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.9" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -864,22 +864,29 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.8." -ForegroundColor Yellow
-$archiveNu = Read-Host "  Wil je NU toch archiveren? (j/n, standaard n)"
-if ($archiveNu -eq "j") {
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.9." -ForegroundColor Yellow
+Write-Host "  A) Archiveren (read-only)"
+Write-Host "  U) Undo archivering (unarchive)"
+Write-Host "  N) Overslaan (standaard)"
+do {
+    $archiveKeuze = (Read-Host "  Kies actie (a/u/n, standaard n)").Trim().ToLower()
+    if ([string]::IsNullOrWhiteSpace($archiveKeuze)) { $archiveKeuze = "n" }
+} while ($archiveKeuze -notin @("a", "u", "n"))
+
+if ($archiveKeuze -eq "a") {
     Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
     foreach ($teamName in $archiveTeams) {
         $groupId = $teamMapping[$teamName]
         if (-not $groupId) { continue }
-        $gearchiveerd = $false
-        for ($poging = 1; $poging -le 3 -and -not $gearchiveerd; $poging++) {
+        $gelukt = $false
+        for ($poging = 1; $poging -le 3 -and -not $gelukt; $poging++) {
             try {
                 Invoke-MgGraphRequest -Method POST `
                     -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/archive" `
                     -Body (@{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json) `
                     -ContentType "application/json"
                 Write-Host "  Gearchiveerd: $teamName" -ForegroundColor Green
-                $gearchiveerd = $true
+                $gelukt = $true
             } catch {
                 if ($poging -lt 3) {
                     $wacht = 30 * $poging
@@ -890,10 +897,35 @@ if ($archiveNu -eq "j") {
                 }
             }
         }
-        if ($gearchiveerd) { Start-Sleep -Seconds 2 }
+        if ($gelukt) { Start-Sleep -Seconds 2 }
+    }
+} elseif ($archiveKeuze -eq "u") {
+    Write-Host "  Undo archivering gestart. Teams worden opnieuw actief gezet.`n" -ForegroundColor White
+    foreach ($teamName in $archiveTeams) {
+        $groupId = $teamMapping[$teamName]
+        if (-not $groupId) { continue }
+        $gelukt = $false
+        for ($poging = 1; $poging -le 3 -and -not $gelukt; $poging++) {
+            try {
+                Invoke-MgGraphRequest -Method POST `
+                    -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/unarchive" `
+                    -ContentType "application/json"
+                Write-Host "  Unarchived: $teamName" -ForegroundColor Green
+                $gelukt = $true
+            } catch {
+                if ($poging -lt 3) {
+                    $wacht = 30 * $poging
+                    Write-Host "  Wachten ${wacht}s voor retry ($poging/3): $teamName..." -ForegroundColor Yellow
+                    Start-Sleep -Seconds $wacht
+                } else {
+                    Write-Warning "  Fout undo archivering $teamName : $_"
+                }
+            }
+        }
+        if ($gelukt) { Start-Sleep -Seconds 2 }
     }
 } else {
-    Write-Host "  Archiveren overgeslagen. Teams blijven actief." -ForegroundColor Yellow
+    Write-Host "  Archiveren/undo overgeslagen. Teams-status blijft ongewijzigd." -ForegroundColor Yellow
 }
 #endregion
 
