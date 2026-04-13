@@ -11,7 +11,7 @@ All scripts require administrator privileges.
 
 Teams archiver with Graph, Teams and SharePoint export flow.
 
-Current behavior (v8.15):
+Current behavior (v8.16):
 - Creates a unique temporary Entra app registration for the run.
 - Grants only required delegated setup permissions during bootstrap.
 - Applies Graph/SharePoint delegated consent to that temporary app.
@@ -29,7 +29,7 @@ Current behavior (v8.15):
 - Step 10 supports real per-channel archive/unarchive via Microsoft Graph (`/channels/{id}/archive|unarchive`).
 - Quick per-channel mode: `-Step10Only -ChannelAction archive|undo`.
 - Optional fallback to rename marker on API failure: `-ChannelFallbackToRename` (marker via `-ChannelArchiveTag`).
-- Dry-run mode for the full flow: `-DryRun` avoids mutating actions across setup/export/archive/report/cleanup; Step 10 remains fully simulated with `[DRYRUN]` output.
+- Dry-run mode keeps full authentication/bootstrap and export/report flow active, but simulates archive/unarchive mutations in Step 10 with `[DRYRUN]` output.
 
 ### Test-OpenVpnDiagnostics.ps1
 
