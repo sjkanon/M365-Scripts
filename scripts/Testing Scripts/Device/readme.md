@@ -11,7 +11,7 @@ All scripts require administrator privileges.
 
 Teams archiver with Graph, Teams and SharePoint export flow.
 
-Current behavior (v8.12):
+Current behavior (v8.13):
 - Creates a unique temporary Entra app registration for the run.
 - Grants only required delegated setup permissions during bootstrap.
 - Applies Graph/SharePoint delegated consent to that temporary app.
@@ -26,8 +26,9 @@ Current behavior (v8.12):
 - Step 10 also supports undo archiving (`unarchive`) with retry logic.
 - Step 10 supports non-interactive quick mode: `-Step10Only -Step10Action undo|archive|skip`.
 - Important: archive/unarchive is a team-level action in Microsoft Teams, not channel-level.
-- Step 10 now also supports per-channel soft-archive via channel rename marker (`[ARCHIEF]` by default) and undo.
-- Quick per-channel mode: `-Step10Only -ChannelAction archive|undo` (optional `-ChannelArchiveTag`).
+- Step 10 supports real per-channel archive/unarchive via Microsoft Graph (`/channels/{id}/archive|unarchive`).
+- Quick per-channel mode: `-Step10Only -ChannelAction archive|undo`.
+- Optional fallback to rename marker on API failure: `-ChannelFallbackToRename` (marker via `-ChannelArchiveTag`).
 
 ### Test-OpenVpnDiagnostics.ps1
 
