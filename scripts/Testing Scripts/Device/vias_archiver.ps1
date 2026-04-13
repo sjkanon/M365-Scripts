@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.12
+# Vias Teams Archivering - Volledig Automatisch Script v8.13
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -9,7 +9,8 @@ param(
     [switch]$Step10Only,
     [ValidateSet("none", "archive", "undo")]
     [string]$ChannelAction = "none",
-    [string]$ChannelArchiveTag = "[ARCHIEF]"
+    [string]$ChannelArchiveTag = "[ARCHIEF]",
+    [switch]$ChannelFallbackToRename
 )
 
 #region ZELFHERSTART - Modules opkuisen en sessie hernieuwen
@@ -142,7 +143,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.12" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.13" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -345,7 +346,8 @@ try {
     Write-Host "  Microsoft Graph permissies..." -ForegroundColor White
     Grant-DelegatedPermission -ResourceSp $graphSp -ResourceName "Graph" -Scopes @(
         "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
-        "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All"
+        "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All",
+        "ChannelSettings.ReadWrite.All"
     )
     Write-Host "  SharePoint permissies..." -ForegroundColor White
     Grant-DelegatedPermission -ResourceSp $spSp -ResourceName "SharePoint" -Scopes @(
@@ -370,7 +372,7 @@ try {
         -ClientId $clientId `
         -TenantId $tenantId `
         -Scopes "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
-                "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All" `
+            "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All","ChannelSettings.ReadWrite.All" `
         -ContextScope Process `
         -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
 } catch {
@@ -535,7 +537,7 @@ function Ensure-HigherRights {
         -ClientId $ClientId `
         -TenantId $TenantId `
         -Scopes "Group.ReadWrite.All","Sites.Read.All","Sites.ReadWrite.All","Sites.FullControl.All","Files.ReadWrite.All",
-                "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All" `
+            "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All","ChannelSettings.ReadWrite.All" `
         -ContextScope Process `
         -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
 
@@ -879,13 +881,16 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.12." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.13." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
-Write-Host "  C/D zijn kanaal soft-archive acties via naammarker." -ForegroundColor Yellow
+Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
+if ($ChannelFallbackToRename) {
+    Write-Host "  Fallback actief: bij API-fout wordt kanaalnaam-marker gebruikt." -ForegroundColor Yellow
+}
 Write-Host "  A) Team archiveren (read-only)"
 Write-Host "  U) Team undo archivering (unarchive)"
-Write-Host "  C) Kanaal soft-archive (naam marker toevoegen)"
-Write-Host "  D) Kanaal undo soft-archive (marker verwijderen)"
+Write-Host "  C) Kanaal archiveren"
+Write-Host "  D) Kanaal undo archivering"
 Write-Host "  N) Overslaan (standaard)"
 
 function Get-ChannelByNameForStep10 {
@@ -976,6 +981,92 @@ function Set-ChannelArchiveMarker {
     }
 }
 
+function Wait-ChannelArchiveState {
+    param(
+        [Parameter(Mandatory = $true)][string]$GroupId,
+        [Parameter(Mandatory = $true)][string]$ChannelId,
+        [Parameter(Mandatory = $true)][bool]$DesiredArchived,
+        [int]$MaxChecks = 12,
+        [int]$IntervalSeconds = 5
+    )
+
+    for ($i = 1; $i -le $MaxChecks; $i++) {
+        try {
+            $state = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/teams/$GroupId/channels/$ChannelId" -ErrorAction Stop
+            if ([bool]$state.isArchived -eq $DesiredArchived) {
+                return $true
+            }
+        } catch { }
+        Start-Sleep -Seconds $IntervalSeconds
+    }
+
+    return $false
+}
+
+function Set-ChannelArchiveStateGraph {
+    param(
+        [Parameter(Mandatory = $true)][string]$GroupId,
+        [Parameter(Mandatory = $true)][string]$ChannelName,
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [switch]$FallbackToRename
+    )
+
+    $channel = Get-ChannelByNameForStep10 -GroupId $GroupId -ChannelName $ChannelName
+    if (-not $channel) {
+        Write-Warning "  Kanaal niet gevonden: $GroupId / $ChannelName"
+        return
+    }
+
+    $isArchivedNow = [bool]$channel.isArchived
+    if ($Mode -eq "archive" -and $isArchivedNow) {
+        Write-Host "  Kanaal al gearchiveerd: $($channel.displayName)" -ForegroundColor Gray
+        return
+    }
+    if ($Mode -eq "undo" -and -not $isArchivedNow) {
+        Write-Host "  Kanaal al actief: $($channel.displayName)" -ForegroundColor Gray
+        return
+    }
+
+    $action = if ($Mode -eq "archive") { "archive" } else { "unarchive" }
+    $uri = "https://graph.microsoft.com/v1.0/teams/$GroupId/channels/$($channel.id)/$action"
+    $desiredArchived = ($Mode -eq "archive")
+
+    for ($poging = 1; $poging -le 3; $poging++) {
+        try {
+            if ($Mode -eq "archive") {
+                $body = @{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json
+                Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType "application/json" -ErrorAction Stop
+            } else {
+                Invoke-MgGraphRequest -Method POST -Uri $uri -ContentType "application/json" -ErrorAction Stop
+            }
+
+            if (Wait-ChannelArchiveState -GroupId $GroupId -ChannelId $channel.id -DesiredArchived $desiredArchived) {
+                if ($Mode -eq "archive") {
+                    Write-Host "  Kanaal gearchiveerd: $($channel.displayName)" -ForegroundColor Green
+                } else {
+                    Write-Host "  Kanaal geunarchived: $($channel.displayName)" -ForegroundColor Green
+                }
+                return
+            }
+
+            throw "Kanaal status bevestiging timeout"
+        } catch {
+            if ($poging -lt 3) {
+                Start-Sleep -Seconds (10 * $poging)
+                continue
+            }
+
+            if ($FallbackToRename) {
+                Write-Warning "  API kanaal $action mislukt, fallback naar naammarker: $($channel.displayName)"
+                Set-ChannelArchiveMarker -GroupId $GroupId -ChannelName $ChannelName -Mode $Mode -Tag $Tag
+            } else {
+                Write-Warning "  Fout kanaal $action $($channel.displayName) : $_"
+            }
+        }
+    }
+}
+
 $archiveKeuze = "interactive"
 switch ($Step10Action) {
     "archive" { $archiveKeuze = "a" }
@@ -1052,11 +1143,12 @@ if ($archiveKeuze -eq "a") {
     }
 } elseif ($archiveKeuze -in @("c", "d")) {
     $mode = if ($archiveKeuze -eq "c") { "archive" } else { "undo" }
-    Write-Host "  Kanaal soft-archive mode: $mode met marker '$ChannelArchiveTag'.`n" -ForegroundColor White
+    Write-Host "  Kanaal API mode: $mode.`n" -ForegroundColor White
     foreach ($row in $toArchive) {
         $groupId = $teamMapping[$row.TeamName]
         if (-not $groupId) { continue }
-        Set-ChannelArchiveMarker -GroupId $groupId -ChannelName $row.ChannelName -Mode $mode -Tag $ChannelArchiveTag
+        Set-ChannelArchiveStateGraph -GroupId $groupId -ChannelName $row.ChannelName -Mode $mode `
+            -Tag $ChannelArchiveTag -FallbackToRename:$ChannelFallbackToRename
     }
 } else {
     Write-Host "  Archiveren/undo overgeslagen. Teams-status blijft ongewijzigd." -ForegroundColor Yellow
