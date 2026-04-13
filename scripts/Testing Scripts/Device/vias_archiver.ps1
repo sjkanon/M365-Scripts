@@ -1,7 +1,13 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.9
+# Vias Teams Archivering - Volledig Automatisch Script v8.10
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
+
+param(
+    [ValidateSet("interactive", "archive", "undo", "skip")]
+    [string]$Step10Action = "interactive",
+    [switch]$Step10Only
+)
 
 #region ZELFHERSTART - Modules opkuisen en sessie hernieuwen
 # Dit blok zorgt ervoor dat het script zichzelf herstart in een schone sessie
@@ -133,7 +139,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.9" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.10" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -408,6 +414,8 @@ foreach ($teamName in $archiveTeams) {
 $teamMapping | ConvertTo-Json | Out-File (Join-Path $tempDir "vias_team_mapping.json") -Force
 Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden." -ForegroundColor Green
 #endregion
+
+if (-not $Step10Only) {
 
 #region STAP 6 - Mapstructuur
 Write-Host "`n[6/12] Mapstructuur aanmaken..." -ForegroundColor Cyan
@@ -861,6 +869,10 @@ if ($chatOntbreekt -gt 0) {
     }
 }
 #endregion
+
+} else {
+    Write-Host "`n[QUICK MODE] Step10Only actief: stappen 6 t/m 9 worden overgeslagen." -ForegroundColor Yellow
+}
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
