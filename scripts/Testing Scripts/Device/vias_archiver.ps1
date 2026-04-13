@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.10
+# Vias Teams Archivering - Volledig Automatisch Script v8.11
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -139,7 +139,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.10" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.11" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -876,14 +876,27 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.9." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.11." -ForegroundColor Yellow
+Write-Host "  Let op: archiveren/unarchiven gebeurt op TEAM-niveau (niet per kanaal)." -ForegroundColor Yellow
 Write-Host "  A) Archiveren (read-only)"
 Write-Host "  U) Undo archivering (unarchive)"
 Write-Host "  N) Overslaan (standaard)"
-do {
-    $archiveKeuze = (Read-Host "  Kies actie (a/u/n, standaard n)").Trim().ToLower()
-    if ([string]::IsNullOrWhiteSpace($archiveKeuze)) { $archiveKeuze = "n" }
-} while ($archiveKeuze -notin @("a", "u", "n"))
+
+switch ($Step10Action) {
+    "archive" { $archiveKeuze = "a" }
+    "undo"    { $archiveKeuze = "u" }
+    "skip"    { $archiveKeuze = "n" }
+    default    { $archiveKeuze = "interactive" }
+}
+
+if ($archiveKeuze -eq "interactive") {
+    do {
+        $archiveKeuze = (Read-Host "  Kies actie (a/u/n, standaard n)").Trim().ToLower()
+        if ([string]::IsNullOrWhiteSpace($archiveKeuze)) { $archiveKeuze = "n" }
+    } while ($archiveKeuze -notin @("a", "u", "n"))
+} else {
+    Write-Host "  Step10Action toegepast: $Step10Action" -ForegroundColor Cyan
+}
 
 if ($archiveKeuze -eq "a") {
     Write-Host "  Chat-export voltooid. Teams worden nu read-only gemaakt.`n" -ForegroundColor White
