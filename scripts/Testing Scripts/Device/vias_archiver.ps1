@@ -1109,7 +1109,7 @@ function Set-ChannelArchiveStateGraph {
     for ($poging = 1; $poging -le 3; $poging++) {
         try {
             if ($DryRun) {
-                Write-Host "  [DRYRUN] Kanaal $action: $($channel.displayName)" -ForegroundColor Cyan
+                Write-Host "  [DRYRUN] Kanaal ${action}: $($channel.displayName)" -ForegroundColor Cyan
                 return
             }
             if ($Mode -eq "archive") {
