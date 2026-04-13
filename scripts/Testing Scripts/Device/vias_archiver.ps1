@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.13
+# Vias Teams Archivering - Volledig Automatisch Script v8.14
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -10,7 +10,8 @@ param(
     [ValidateSet("none", "archive", "undo")]
     [string]$ChannelAction = "none",
     [string]$ChannelArchiveTag = "[ARCHIEF]",
-    [switch]$ChannelFallbackToRename
+    [switch]$ChannelFallbackToRename,
+    [switch]$DryRun
 )
 
 #region ZELFHERSTART - Modules opkuisen en sessie hernieuwen
@@ -143,7 +144,7 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.13" -ForegroundColor Cyan
+Write-Host "  Vias Teams Archivering - Setup Wizard v8.14" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -881,11 +882,14 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.13." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.14." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
 Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
 if ($ChannelFallbackToRename) {
     Write-Host "  Fallback actief: bij API-fout wordt kanaalnaam-marker gebruikt." -ForegroundColor Yellow
+}
+if ($DryRun) {
+    Write-Host "  DRY RUN actief: er worden geen wijzigingen uitgevoerd." -ForegroundColor Yellow
 }
 Write-Host "  A) Team archiveren (read-only)"
 Write-Host "  U) Team undo archivering (unarchive)"
@@ -960,6 +964,10 @@ function Set-ChannelArchiveMarker {
     $body = @{ displayName = $targetName } | ConvertTo-Json
     for ($poging = 1; $poging -le 3; $poging++) {
         try {
+            if ($DryRun) {
+                Write-Host "  [DRYRUN] Kanaal marker: $currentName -> $targetName" -ForegroundColor Cyan
+                return
+            }
             Invoke-MgGraphRequest -Method PATCH `
                 -Uri "https://graph.microsoft.com/v1.0/teams/$GroupId/channels/$($channel.id)" `
                 -Body $body -ContentType "application/json" -ErrorAction Stop
@@ -1034,6 +1042,10 @@ function Set-ChannelArchiveStateGraph {
 
     for ($poging = 1; $poging -le 3; $poging++) {
         try {
+            if ($DryRun) {
+                Write-Host "  [DRYRUN] Kanaal $action: $($channel.displayName)" -ForegroundColor Cyan
+                return
+            }
             if ($Mode -eq "archive") {
                 $body = @{ shouldSetSpoSiteReadOnlyForMembers = $true } | ConvertTo-Json
                 Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType "application/json" -ErrorAction Stop
@@ -1095,6 +1107,10 @@ if ($archiveKeuze -eq "a") {
     foreach ($teamName in $archiveTeams) {
         $groupId = $teamMapping[$teamName]
         if (-not $groupId) { continue }
+        if ($DryRun) {
+            Write-Host "  [DRYRUN] Team archiveren: $teamName" -ForegroundColor Cyan
+            continue
+        }
         $gelukt = $false
         for ($poging = 1; $poging -le 3 -and -not $gelukt; $poging++) {
             try {
@@ -1121,6 +1137,10 @@ if ($archiveKeuze -eq "a") {
     foreach ($teamName in $archiveTeams) {
         $groupId = $teamMapping[$teamName]
         if (-not $groupId) { continue }
+        if ($DryRun) {
+            Write-Host "  [DRYRUN] Team unarchive: $teamName" -ForegroundColor Cyan
+            continue
+        }
         $gelukt = $false
         for ($poging = 1; $poging -le 3 -and -not $gelukt; $poging++) {
             try {
