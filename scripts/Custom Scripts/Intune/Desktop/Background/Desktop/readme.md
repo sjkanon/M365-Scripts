@@ -119,3 +119,4 @@ Packaging as a Win32 app allows re-run control and detection rules.
 | 2026-04-14 | 2.3 | Added fallback enforcement for black backgrounds: machine wallpaper policy keys + update of all loaded user hives; `DesktopImageUrl` now uses source URL |
 | 2026-04-14 | 2.4 | Fixed cleanup order bug where temporary `.download` file could be deleted before `Move-Item`, causing path-not-found error |
 | 2026-04-14 | 2.5 | Added `explorer.exe` restart step so wallpaper/theme changes become visible immediately for logged-on users |
+| 2026-04-14 | 2.6 | Restored generic default configuration values (`$ImageUrl`, `$ClientName`) for reusable customer deployments |
