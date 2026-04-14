@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.1 - Safer image validation and dynamic file extension
+# Version 2.2 - GitHub raw URL handling and stricter download validation
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -19,7 +19,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
+$ImageUrl = "https://raw.githubusercontent.com/FirstITHub/Wallpaper/refs/heads/main/Vias/background.jpg"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
@@ -30,7 +30,7 @@ $ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 $WallpaperStyle = "10"
 
 # Customer name — used in log filename and local image filename
-$ClientName = "CUSTOMERNAME"
+$ClientName = "Vias"
 
 # ==============================================================================
 # INTERNAL VARIABLES — do not modify
@@ -88,6 +88,48 @@ function Get-ImageTypeFromHeader {
     return $null
 }
 
+function Resolve-DownloadUrl {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Url
+    )
+
+    try {
+        $uri = [System.Uri]$Url
+    } catch {
+        return $Url
+    }
+
+    if ($uri.Host -ieq "github.com") {
+        if ($uri.AbsolutePath -match '^/([^/]+)/([^/]+)/blob/(.+)$') {
+            return "https://raw.githubusercontent.com/$($matches[1])/$($matches[2])/$($matches[3])"
+        }
+
+        if ($uri.AbsolutePath -match '^/([^/]+)/([^/]+)/raw/(.+)$') {
+            return "https://raw.githubusercontent.com/$($matches[1])/$($matches[2])/$($matches[3])"
+        }
+    }
+
+    return $Url
+}
+
+function Test-FileLooksLikeHtml {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath
+    )
+
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    if ($bytes.Length -eq 0) {
+        return $true
+    }
+
+    $sampleLength = [Math]::Min(512, $bytes.Length)
+    $sampleBytes  = $bytes[0..($sampleLength - 1)]
+    $sampleText   = [System.Text.Encoding]::ASCII.GetString($sampleBytes)
+    return ($sampleText -match '(?i)<!doctype\s+html|<html|<head|<body')
+}
+
 # ==============================================================================
 # SCRIPT START
 # ==============================================================================
@@ -109,10 +151,18 @@ if (-not (Test-Path -Path $WallpaperFolder)) {
 
 # Step 2: Download image to temporary file and validate
 $tempWallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName.download"
+$resolvedImageUrl  = Resolve-DownloadUrl -Url $ImageUrl
+
+if ($resolvedImageUrl -ne $ImageUrl) {
+    Write-Log "Source URL normalized for raw download: $resolvedImageUrl"
+}
 
 try {
-    Invoke-WebRequest -Uri $ImageUrl -OutFile $tempWallpaperPath -UseBasicParsing
+    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempWallpaperPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateWallpaperScript/2.2" }
     Write-Log "Image downloaded to temporary path: $tempWallpaperPath"
+    if ($downloadResponse -and $downloadResponse.BaseResponse -and $downloadResponse.BaseResponse.ResponseUri) {
+        Write-Log "Final response URI: $($downloadResponse.BaseResponse.ResponseUri.AbsoluteUri)"
+    }
 } catch {
     Write-Log "ERROR downloading image: $_"
     exit 1
@@ -124,8 +174,14 @@ if (-not (Test-Path -Path $tempWallpaperPath)) {
 }
 
 $downloadedFile = Get-Item -Path $tempWallpaperPath -ErrorAction SilentlyContinue
-if (-not $downloadedFile -or $downloadedFile.Length -lt 10240) {
-    Write-Log "ERROR: Downloaded file is too small to be a valid wallpaper ($($downloadedFile.Length) bytes)."
+if (-not $downloadedFile -or $downloadedFile.Length -lt 1024) {
+    $fileLength = if ($downloadedFile) { $downloadedFile.Length } else { 0 }
+    Write-Log "ERROR: Downloaded file is too small to be a valid wallpaper ($fileLength bytes)."
+    exit 1
+}
+
+if (Test-FileLooksLikeHtml -FilePath $tempWallpaperPath) {
+    Write-Log "ERROR: Downloaded content appears to be HTML instead of an image (common with non-raw GitHub URLs)."
     exit 1
 }
 
