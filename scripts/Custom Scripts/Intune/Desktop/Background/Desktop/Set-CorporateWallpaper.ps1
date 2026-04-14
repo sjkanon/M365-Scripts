@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.6 - Generic default configuration restored
+# Version 2.7 - Added fail-safe backup to preserve current wallpaper on errors
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -39,6 +39,8 @@ $ClientName = "CUSTOMERNAME"
 $WallpaperFolder   = "$env:ProgramData\Wallpapers"
 $WallpaperBaseName = "corporate-background-$($ClientName.ToLower())"
 $WallpaperPath     = $null
+$BackupWallpaperPath = $null
+$PreviousWallpaperPath = $null
 $LogFilePath       = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-$($ClientName.ToUpper()).log"
 
 # ==============================================================================
@@ -130,6 +132,52 @@ function Test-FileLooksLikeHtml {
     return ($sampleText -match '(?i)<!doctype\s+html|<html|<head|<body')
 }
 
+function Initialize-WallpaperBackup {
+    # Capture current wallpaper path from common registry locations and copy it as backup.
+    $candidatePaths = [System.Collections.Generic.List[string]]::new()
+
+    try {
+        $cspPath = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP" -Name "DesktopImagePath" -ErrorAction SilentlyContinue).DesktopImagePath
+        if ($cspPath) { $candidatePaths.Add($cspPath) }
+    } catch { }
+
+    try {
+        $policyPath = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "Wallpaper" -ErrorAction SilentlyContinue).Wallpaper
+        if ($policyPath) { $candidatePaths.Add($policyPath) }
+    } catch { }
+
+    try {
+        $hkcuPath = (Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "Wallpaper" -ErrorAction SilentlyContinue).Wallpaper
+        if ($hkcuPath) { $candidatePaths.Add($hkcuPath) }
+    } catch { }
+
+    $resolvedCurrent = $candidatePaths |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique |
+        Where-Object { Test-Path -Path $_ -PathType Leaf } |
+        Select-Object -First 1
+
+    if (-not $resolvedCurrent) {
+        Write-Log "No existing wallpaper file found for backup - proceeding without backup copy"
+        return
+    }
+
+    $PreviousWallpaperPath = $resolvedCurrent
+    $extension = [System.IO.Path]::GetExtension($resolvedCurrent)
+    if ([string]::IsNullOrWhiteSpace($extension)) {
+        $extension = ".img"
+    }
+
+    $BackupWallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName-backup$extension"
+
+    try {
+        Copy-Item -Path $resolvedCurrent -Destination $BackupWallpaperPath -Force
+        Write-Log "Backup created from current wallpaper: $BackupWallpaperPath"
+    } catch {
+        Write-Log "WARNING: Could not create wallpaper backup copy: $_"
+    }
+}
+
 # ==============================================================================
 # SCRIPT START
 # ==============================================================================
@@ -152,6 +200,8 @@ if (-not (Test-Path -Path $WallpaperFolder)) {
 # Step 2: Download image to temporary file and validate
 $tempWallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName.download"
 $resolvedImageUrl  = Resolve-DownloadUrl -Url $ImageUrl
+
+Initialize-WallpaperBackup
 
 if ($resolvedImageUrl -ne $ImageUrl) {
     Write-Log "Source URL normalized for raw download: $resolvedImageUrl"
@@ -194,11 +244,16 @@ if (-not $imageType) {
 $WallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName.$imageType"
 
 try {
+    Move-Item -Path $tempWallpaperPath -Destination $WallpaperPath -Force
+
     Get-ChildItem -Path $WallpaperFolder -Filter "$WallpaperBaseName.*" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -ne $WallpaperPath -and $_.FullName -ne $tempWallpaperPath } |
+        Where-Object {
+            $_.FullName -ne $WallpaperPath -and
+            $_.FullName -ne $tempWallpaperPath -and
+            $_.FullName -ne $BackupWallpaperPath
+        } |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
-    Move-Item -Path $tempWallpaperPath -Destination $WallpaperPath -Force
     Write-Log "Validated image type: $imageType"
     Write-Log "Final wallpaper path: $WallpaperPath"
 } catch {
