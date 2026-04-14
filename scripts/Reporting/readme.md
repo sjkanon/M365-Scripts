@@ -102,6 +102,7 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
     - Private/shared channels als aparte site collections
 - Onderliggende mappen en bestanden in document libraries (alleen met `-Apply`)
 - Detailoutput bevat zowel folders als files (`ItemType`) zodat je volledige structuur ziet
+- In `-Apply` mode wordt alles in 1 ranked CSV gezet (grootste folders + files, inclusief version history)
 
 ### Belangrijkste parameters
 
