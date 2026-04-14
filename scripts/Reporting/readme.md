@@ -101,6 +101,7 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
     - Standaard channels als libraries/folders in de parent Teams-site
     - Private/shared channels als aparte site collections
 - Onderliggende mappen en bestanden in document libraries (alleen met `-Apply`)
+- Detailoutput bevat zowel folders als files (`ItemType`) zodat je volledige structuur ziet
 
 ### Belangrijkste parameters
 

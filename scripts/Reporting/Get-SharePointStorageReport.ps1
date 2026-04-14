@@ -500,6 +500,7 @@ function Get-AllDriveItems {
                 }
 
                 $results.Add([PSCustomObject]@{
+                    ItemType         = 'File'
                     Path             = $path
                     SizeBytes        = $fileSize
                     SizeMB           = [math]::Round($fileSize / 1MB, 3)
@@ -511,6 +512,19 @@ function Get-AllDriveItems {
                     Modified         = $child.lastModifiedDateTime
                 }) | Out-Null
             } else {
+                $results.Add([PSCustomObject]@{
+                    ItemType         = 'Folder'
+                    Path             = $path
+                    SizeBytes        = $null
+                    SizeMB           = $null
+                    VersionCount     = $null
+                    VersionSizeBytes = $null
+                    VersionSizeMB    = $null
+                    TotalSizeBytes   = $null
+                    TotalSizeMB      = $null
+                    Modified         = $child.lastModifiedDateTime
+                }) | Out-Null
+
                 $queue.Enqueue([PSCustomObject]@{ Id = $child.id; Path = $path })
             }
         }
@@ -595,13 +609,16 @@ foreach ($entry in $siteLibraries) {
     # Full scan mode
     $items = Get-AllDriveItems -DriveId $drive.id
 
-    $fileItems   = $items
+    $fileItems   = @($items | Where-Object { $_.ItemType -eq 'File' })
+    $folderItems = @($items | Where-Object { $_.ItemType -eq 'Folder' })
     $totalFiles  = $fileItems.Count
+    $totalFolders = $folderItems.Count
     $currentSize = ($fileItems | Measure-Object -Property SizeBytes -Sum).Sum ?? 0
     $versionSize = ($fileItems | Measure-Object -Property VersionSizeBytes -Sum).Sum ?? 0
     $totalSize   = $currentSize + $versionSize
 
-    Write-Host ("        {0} files | current: {1} MB | versions: {2} MB | total: {3} MB" -f
+    Write-Host ("        {0} folders | {1} files | current: {2} MB | versions: {3} MB | total: {4} MB" -f
+        $totalFolders,
         $totalFiles,
         [math]::Round($currentSize / 1MB, 1),
         [math]::Round($versionSize / 1MB, 1),
@@ -616,16 +633,17 @@ foreach ($entry in $siteLibraries) {
         RemainingGB     = $null
         State           = $null
         FileCount       = $totalFiles
-        FolderCount     = $null
+        FolderCount     = $totalFolders
         VersionSizeMB   = [math]::Round($versionSize / 1MB, 2)
         TotalSizeMB     = [math]::Round($totalSize   / 1MB, 2)
     }) | Out-Null
 
-    foreach ($item in $fileItems) {
+    foreach ($item in $items) {
         $detailRows.Add([PSCustomObject]@{
             SiteName         = $siteName
             SiteUrl          = $site.webUrl
             Library          = $drive.name
+            ItemType         = $item.ItemType
             Path             = $item.Path
             SizeMB           = $item.SizeMB
             VersionCount     = $item.VersionCount
@@ -666,6 +684,7 @@ if ($Apply -and $detailRows.Count -gt 0) {
             @{ Expression = { if ($null -ne $_.TotalSizeMB) { [double]$_.TotalSizeMB } else { -1 } }; Descending = $true },
             SiteName,
             Library,
+            ItemType,
             Path
     )
     $detailRows | Export-Csv -Path $detailCsv -NoTypeInformation -Encoding UTF8
