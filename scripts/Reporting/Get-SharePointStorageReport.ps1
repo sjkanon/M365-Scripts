@@ -100,7 +100,7 @@ if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir
 
 $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
-$detailCsv   = Join-Path $outputDir "SharePoint_Detail_$ts.csv"
+$reportCsv   = Join-Path $outputDir "SharePoint_StorageRanked_$ts.csv"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
@@ -611,8 +611,61 @@ foreach ($entry in $siteLibraries) {
 
     $fileItems   = @($items | Where-Object { $_.ItemType -eq 'File' })
     $folderItems = @($items | Where-Object { $_.ItemType -eq 'Folder' })
+
+    # Build per-folder aggregated sizes from descendant files
+    $folderStats = @{}
+    foreach ($folder in $folderItems) {
+        $folderStats[$folder.Path] = [PSCustomObject]@{
+            Path             = $folder.Path
+            Modified         = $folder.Modified
+            SizeBytes        = [int64]0
+            VersionSizeBytes = [int64]0
+            TotalSizeBytes   = [int64]0
+            VersionCount     = 0
+        }
+    }
+
+    foreach ($file in $fileItems) {
+        if ($file.Path -notmatch '/') {
+            continue
+        }
+
+        $parts = $file.Path -split '/'
+        for ($i = 0; $i -lt ($parts.Count - 1); $i++) {
+            $ancestorPath = ($parts[0..$i] -join '/')
+            if (-not $folderStats.ContainsKey($ancestorPath)) {
+                $folderStats[$ancestorPath] = [PSCustomObject]@{
+                    Path             = $ancestorPath
+                    Modified         = $null
+                    SizeBytes        = [int64]0
+                    VersionSizeBytes = [int64]0
+                    TotalSizeBytes   = [int64]0
+                    VersionCount     = 0
+                }
+            }
+
+            $folderStats[$ancestorPath].SizeBytes        += [int64]($file.SizeBytes ?? 0)
+            $folderStats[$ancestorPath].VersionSizeBytes += [int64]($file.VersionSizeBytes ?? 0)
+            $folderStats[$ancestorPath].TotalSizeBytes   += [int64]($file.TotalSizeBytes ?? 0)
+            $folderStats[$ancestorPath].VersionCount     += [int]($file.VersionCount ?? 0)
+        }
+    }
+
+    $folderReportRows = @(
+        $folderStats.Values | ForEach-Object {
+            [PSCustomObject]@{
+                ItemType         = 'Folder'
+                Path             = $_.Path
+                SizeMB           = [math]::Round($_.SizeBytes / 1MB, 3)
+                VersionCount     = $_.VersionCount
+                VersionSizeMB    = [math]::Round($_.VersionSizeBytes / 1MB, 3)
+                TotalSizeMB      = [math]::Round($_.TotalSizeBytes / 1MB, 3)
+                Modified         = $_.Modified
+            }
+        }
+    )
     $totalFiles  = $fileItems.Count
-    $totalFolders = $folderItems.Count
+    $totalFolders = $folderReportRows.Count
     $currentSize = ($fileItems | Measure-Object -Property SizeBytes -Sum).Sum ?? 0
     $versionSize = ($fileItems | Measure-Object -Property VersionSizeBytes -Sum).Sum ?? 0
     $totalSize   = $currentSize + $versionSize
@@ -638,7 +691,22 @@ foreach ($entry in $siteLibraries) {
         TotalSizeMB     = [math]::Round($totalSize   / 1MB, 2)
     }) | Out-Null
 
-    foreach ($item in $items) {
+    foreach ($item in $folderReportRows) {
+        $detailRows.Add([PSCustomObject]@{
+            SiteName         = $siteName
+            SiteUrl          = $site.webUrl
+            Library          = $drive.name
+            ItemType         = $item.ItemType
+            Path             = $item.Path
+            SizeMB           = $item.SizeMB
+            VersionCount     = $item.VersionCount
+            VersionSizeMB    = $item.VersionSizeMB
+            TotalSizeMB      = $item.TotalSizeMB
+            Modified         = $item.Modified
+        }) | Out-Null
+    }
+
+    foreach ($item in $fileItems) {
         $detailRows.Add([PSCustomObject]@{
             SiteName         = $siteName
             SiteUrl          = $site.webUrl
@@ -675,8 +743,10 @@ $summaryRows = @(
     }
 )
 
-$summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
-Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
+if (-not $Apply) {
+    $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
+    Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
+}
 
 if ($Apply -and $detailRows.Count -gt 0) {
     $detailRows = @(
@@ -687,8 +757,8 @@ if ($Apply -and $detailRows.Count -gt 0) {
             ItemType,
             Path
     )
-    $detailRows | Export-Csv -Path $detailCsv -NoTypeInformation -Encoding UTF8
-    Write-Host ("  Detail   : {0}" -f $detailCsv) -ForegroundColor Green
+    $detailRows | Export-Csv -Path $reportCsv -NoTypeInformation -Encoding UTF8
+    Write-Host ("  Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
