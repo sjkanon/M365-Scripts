@@ -343,3 +343,4 @@ try {
 }
 
 Write-Log "====== Script completed for client: $ClientName ======"
+exit 0
