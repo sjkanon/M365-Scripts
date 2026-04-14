@@ -314,28 +314,42 @@ $sites = [System.Collections.Generic.List[object]]::new(
     @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
 )
 
-# Add sub-sites at all depths — getAllSites returns site collections only, not nested webs.
+# Add sub-sites at all depths — getAllSites/Get-MgAllSite primarily return site collections.
 # Standard Teams channels appear as document libraries in the parent site (handled by /lists).
-# Private/shared Teams channels appear as separate site collections (handled by getAllSites).
+# Private/shared Teams channels appear as separate site collections.
 # Classic SharePoint sub-webs require explicit enumeration via /sites/{id}/sites.
-if ($script:AppOnlyHeaders) {
-    $subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
-    $sites | ForEach-Object { $subSiteQueue.Enqueue($_) }
+$subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
+$knownSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
-    while ($subSiteQueue.Count -gt 0) {
-        $parent = $subSiteQueue.Dequeue()
-        try {
+$sites | ForEach-Object {
+    if ($_.id -and $knownSiteIds.Add($_.id)) {
+        $subSiteQueue.Enqueue($_)
+    }
+}
+
+while ($subSiteQueue.Count -gt 0) {
+    $parent = $subSiteQueue.Dequeue()
+    try {
+        $subSites = @()
+
+        if ($script:AppOnlyHeaders) {
             Update-AppOnlyToken
             $subResp = Invoke-RestMethod `
                 -Uri     "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites" `
                 -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            $subResp.value | Where-Object { $_.id } | ForEach-Object {
-                $sites.Add($_)          # add to scan list
-                $subSiteQueue.Enqueue($_)  # also check its children
-            }
-        } catch {
-            # Most sites have no sub-sites — silently skip
+            $subSites = @($subResp.value)
+        } else {
+            $subSites = @(Get-MgSiteSubSite -SiteId $parent.id -All -ErrorAction Stop)
         }
+
+        $subSites | Where-Object { $_.id } | ForEach-Object {
+            if ($knownSiteIds.Add($_.id)) {
+                $sites.Add($_)               # add to scan list
+                $subSiteQueue.Enqueue($_)    # also check its children
+            }
+        }
+    } catch {
+        # Most sites have no sub-sites or may be inaccessible with current permissions.
     }
 }
 
