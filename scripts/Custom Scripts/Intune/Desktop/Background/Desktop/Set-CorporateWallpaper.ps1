@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.4 - Fixed temp download cleanup race before Move-Item
+# Version 2.5 - Added Explorer restart for immediate wallpaper refresh
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -158,7 +158,7 @@ if ($resolvedImageUrl -ne $ImageUrl) {
 }
 
 try {
-    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempWallpaperPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateWallpaperScript/2.2" }
+    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempWallpaperPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateWallpaperScript/2.5" }
     Write-Log "Image downloaded to temporary path: $tempWallpaperPath"
     if ($downloadResponse -and $downloadResponse.BaseResponse -and $downloadResponse.BaseResponse.ResponseUri) {
         Write-Log "Final response URI: $($downloadResponse.BaseResponse.ResponseUri.AbsoluteUri)"
@@ -318,6 +318,19 @@ try {
         }
 } catch {
     Write-Log "ERROR clearing theme cache for loaded users: $_"
+}
+
+# Step 6d: Restart Explorer for active user sessions (forces immediate refresh)
+try {
+    $explorerProcesses = Get-Process -Name "explorer" -ErrorAction SilentlyContinue
+    if ($explorerProcesses) {
+        $explorerProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Log "Explorer processes restarted for active sessions"
+    } else {
+        Write-Log "No explorer.exe process found - restart step skipped"
+    }
+} catch {
+    Write-Log "ERROR restarting explorer.exe: $_"
 }
 
 # Step 7: Default User profile (applies to new user accounts created after deployment)
