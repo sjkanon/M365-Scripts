@@ -16,6 +16,13 @@ Requirements:  pip install pandas openpyxl
 import sys
 import re
 
+def _pause_if_interactive(prompt: str = "Press Enter to exit..."):
+    try:
+        if sys.stdin and sys.stdin.isatty():
+            input(prompt)
+    except Exception:
+        pass
+
 MONTHS_EN = {
     1:"January", 2:"February", 3:"March",    4:"April",
     5:"May",     6:"June",     7:"July",      8:"August",
@@ -87,6 +94,16 @@ def _styled(ws, row, col, value, bg, fg="FFFFFF", bold=True, size=10,
     if number_format:
         c.number_format = number_format
     return c
+
+def _period_label(start, end):
+    """Format a billing period as 'dd/mm – dd/mm/yyyy', or '' on failure."""
+    try:
+        s = pd.to_datetime(start)
+        e = pd.to_datetime(end)
+        return f"{s.strftime('%d/%m')} \u2013 {e.strftime('%d/%m/%Y')}"
+    except Exception:
+        return ""
+
 
 def _empty_row(ws, row, ncols=7):
     for col in range(1, ncols + 1):
@@ -260,7 +277,8 @@ def gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic):
         (ingram_az,  "CUSTOMER_NAME"),
         (ingram_lic, "CUSTOMER_NAME"),
     ]:
-        customers.update(frame[col].dropna().unique())
+        if col in frame.columns:
+            customers.update(frame[col].dropna().unique())
     return sorted(customers)
 
 
@@ -504,21 +522,33 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
         non_acronis = cust_pl[cust_pl["acronis_endcustomer"] == ""]
         acronis     = cust_pl[cust_pl["acronis_endcustomer"] != ""]
 
-        grp = non_acronis.groupby("product").agg(
-            qty=("quantity", "sum"),
-            purchase=("cost_total", "sum"),
-            sales=("subtotal", "sum"),
-            u_pur=("cost", "mean"),
-            u_sal=("price", "mean"),
-        ).reset_index()
+        has_pax8_periods = "start_period" in non_acronis.columns and "end_period" in non_acronis.columns
 
         alt = False
-        for _, r in grp.iterrows():
-            _data_row(ws, row, r["product"], "", r["qty"],
-                      r["u_pur"], r["u_sal"],
-                      r["purchase"], r["sales"], alt=alt)
-            alt = not alt
-            row += 1
+        for product, prod_rows in non_acronis.groupby("product"):
+            if has_pax8_periods:
+                period_keys = prod_rows[["start_period", "end_period"]].drop_duplicates()
+            else:
+                period_keys = None
+
+            if period_keys is not None and len(period_keys) > 1:
+                for _, pk in period_keys.iterrows():
+                    mask = (prod_rows["start_period"] == pk["start_period"]) & \
+                           (prod_rows["end_period"]   == pk["end_period"])
+                    p = prod_rows[mask]
+                    _data_row(ws, row, product,
+                              _period_label(pk["start_period"], pk["end_period"]),
+                              p["quantity"].sum(), p["cost"].mean(), p["price"].mean(),
+                              p["cost_total"].sum(), p["subtotal"].sum(), alt=alt)
+                    alt = not alt
+                    row += 1
+            else:
+                _data_row(ws, row, product, "",
+                          prod_rows["quantity"].sum(), prod_rows["cost"].mean(),
+                          prod_rows["price"].mean(),
+                          prod_rows["cost_total"].sum(), prod_rows["subtotal"].sum(), alt=alt)
+                alt = not alt
+                row += 1
 
         # Acronis: sub-group per end-customer
         if not acronis.empty:
@@ -550,21 +580,39 @@ def write_customer_sheet(wb, customer, period, ingram_lic_period,
         _section_header(ws, row, "📋  Licenses (via Ingram)", LIC_MED)
         row += 1
 
-        grp = cust_il.groupby("product").agg(
-            qty=("CUSTOMER_DETAIL_QTY", "sum"),
-            purchase=("RESELLER_DETAIL_TOTAL", "sum"),
-            sales=("CUSTOMER_DETAIL_TOTAL", "sum"),
-            u_pur=("RESELLER_DETAIL_UNIT_PRICE", "mean"),
-            u_sal=("CUSTOMER_DETAIL_UNIT_PRICE", "mean"),
-        ).reset_index()
+        has_ingram_periods = ("RESELLER_DETAIL_START_DATE" in cust_il.columns and
+                              "RESELLER_DETAIL_END_DATE"   in cust_il.columns)
 
         alt = False
-        for _, r in grp.iterrows():
-            _data_row(ws, row, r["product"], "", r["qty"],
-                      r["u_pur"], r["u_sal"],
-                      r["purchase"], r["sales"], alt=alt)
-            alt = not alt
-            row += 1
+        for product, prod_rows in cust_il.groupby("product"):
+            if has_ingram_periods:
+                period_keys = prod_rows[["RESELLER_DETAIL_START_DATE", "RESELLER_DETAIL_END_DATE"]].drop_duplicates()
+            else:
+                period_keys = None
+
+            if period_keys is not None and len(period_keys) > 1:
+                for _, pk in period_keys.iterrows():
+                    mask = (prod_rows["RESELLER_DETAIL_START_DATE"] == pk["RESELLER_DETAIL_START_DATE"]) & \
+                           (prod_rows["RESELLER_DETAIL_END_DATE"]   == pk["RESELLER_DETAIL_END_DATE"])
+                    p = prod_rows[mask]
+                    _data_row(ws, row, product,
+                              _period_label(pk["RESELLER_DETAIL_START_DATE"], pk["RESELLER_DETAIL_END_DATE"]),
+                              p["CUSTOMER_DETAIL_QTY"].sum(),
+                              p["RESELLER_DETAIL_UNIT_PRICE"].mean(),
+                              p["CUSTOMER_DETAIL_UNIT_PRICE"].mean(),
+                              p["RESELLER_DETAIL_TOTAL"].sum(),
+                              p["CUSTOMER_DETAIL_TOTAL"].sum(), alt=alt)
+                    alt = not alt
+                    row += 1
+            else:
+                _data_row(ws, row, product, "",
+                          prod_rows["CUSTOMER_DETAIL_QTY"].sum(),
+                          prod_rows["RESELLER_DETAIL_UNIT_PRICE"].mean(),
+                          prod_rows["CUSTOMER_DETAIL_UNIT_PRICE"].mean(),
+                          prod_rows["RESELLER_DETAIL_TOTAL"].sum(),
+                          prod_rows["CUSTOMER_DETAIL_TOTAL"].sum(), alt=alt)
+                alt = not alt
+                row += 1
 
         grand_purchase += cust_il["RESELLER_DETAIL_TOTAL"].sum()
         grand_sales    += cust_il["CUSTOMER_DETAIL_TOTAL"].sum()
@@ -691,7 +739,7 @@ def main():
     # The PowerShell launcher (genereer_rapport.ps1) passes --ingram/--pax8/--output
     # explicitly, so EXPORT_DIR is only used when running this script directly.
     SCRIPT_DIR  = Path(__file__).parent.resolve()
-    EXPORT_DIR  = Path(r"C:\Reports\Licensing")
+    EXPORT_DIR  = Path(r"C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload")
     IMPORT_DIR  = EXPORT_DIR / "Import"
     INGRAM_DIR  = IMPORT_DIR / "Ingram"
     PAX8_DIR    = IMPORT_DIR / "Pax8"
@@ -726,7 +774,7 @@ def main():
     if not EXPORT_DIR.exists():
         log.error(f"Export directory not found: {EXPORT_DIR}")
         log.error("Update the EXPORT_DIR variable in this script.")
-        input("Press Enter to exit...")
+        _pause_if_interactive("Press Enter to exit...")
         sys.exit(2)
     log.info("Export directory: OK")
 
@@ -735,60 +783,92 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     # ── Locate Ingram file ────────────────────────────────────────────────────
+    ingram_path = None
     if args.ingram:
         ingram_path = Path(args.ingram)
+        if not ingram_path.exists():
+            log.error(f"Ingram file not found: {ingram_path}")
+            _pause_if_interactive("Press Enter to exit...")
+            sys.exit(2)
     else:
         log.info(f"Looking for Ingram file in {INGRAM_DIR} ...")
         ingram_files = list(INGRAM_DIR.glob("*.xlsx"))
-        if len(ingram_files) == 0:
-            log.error(f"No .xlsx file found in {INGRAM_DIR}")
-            log.error("Place the Ingram billing export in the Ingram folder and try again.")
-            input("Press Enter to exit...")
-            sys.exit(2)
         if len(ingram_files) > 1:
             log.error(f"Multiple .xlsx files found in {INGRAM_DIR}:")
             for f in ingram_files:
                 log.error(f"  {f.name}")
             log.error("Ensure exactly 1 Ingram file is present.")
-            input("Press Enter to exit...")
+            _pause_if_interactive("Press Enter to exit...")
             sys.exit(2)
-        ingram_path = ingram_files[0]
-    log.info(f"Ingram file: {ingram_path.name}")
+        if len(ingram_files) == 1:
+            ingram_path = ingram_files[0]
+
+    if ingram_path:
+        log.info(f"Ingram file: {ingram_path.name}")
+    else:
+        log.warning("No Ingram input found - continuing without Ingram data.")
 
     # ── Locate Pax8 file ──────────────────────────────────────────────────────
+    pax8_path = None
     if args.pax8:
         pax8_path = Path(args.pax8)
+        if not pax8_path.exists():
+            log.error(f"Pax8 file not found: {pax8_path}")
+            _pause_if_interactive("Press Enter to exit...")
+            sys.exit(2)
     else:
         log.info(f"Looking for Pax8 file in {PAX8_DIR} ...")
         pax8_files = list(PAX8_DIR.glob("*.csv"))
-        if len(pax8_files) == 0:
-            log.error(f"No .csv file found in {PAX8_DIR}")
-            log.error("Place the Pax8 invoice export in the Pax8 folder and try again.")
-            input("Press Enter to exit...")
-            sys.exit(2)
         if len(pax8_files) > 1:
             log.error(f"Multiple .csv files found in {PAX8_DIR}:")
             for f in pax8_files:
                 log.error(f"  {f.name}")
             log.error("Ensure exactly 1 Pax8 file is present.")
-            input("Press Enter to exit...")
+            _pause_if_interactive("Press Enter to exit...")
             sys.exit(2)
-        pax8_path = pax8_files[0]
-    log.info(f"Pax8 file:    {pax8_path.name}")
+        if len(pax8_files) == 1:
+            pax8_path = pax8_files[0]
+
+    if pax8_path:
+        log.info(f"Pax8 file:    {pax8_path.name}")
+    else:
+        log.warning("No Pax8 input found - continuing without Pax8 data.")
+
+    if not ingram_path and not pax8_path:
+        log.error("No input files found (Ingram/Pax8). Provide at least one source file.")
+        _pause_if_interactive("Press Enter to exit...")
+        sys.exit(2)
+
+    empty_pax8_az = pd.DataFrame(columns=["company_name", "subscription", "az_category", "cost_total", "subtotal"])
+    empty_pax8_lic = pd.DataFrame(columns=["company_name", "acronis_endcustomer", "product", "quantity", "cost", "price", "cost_total", "subtotal"])
+    empty_ingram_az = pd.DataFrame(columns=["CUSTOMER_NAME", "az_subscription", "az_category", "RESELLER_DETAIL_TOTAL", "CUSTOMER_DETAIL_TOTAL", "RESELLER_DETAIL_START_DATE", "RESELLER_DETAIL_END_DATE", "CUSTOMER_DETAIL_DESCRIPTION", "CUSTOMER_DETAIL_QTY", "RESELLER_DETAIL_UNIT_PRICE", "CUSTOMER_DETAIL_UNIT_PRICE"])
+    empty_ingram_lic = pd.DataFrame(columns=["CUSTOMER_NAME", "product", "CUSTOMER_DETAIL_QTY", "RESELLER_DETAIL_TOTAL", "CUSTOMER_DETAIL_TOTAL", "RESELLER_DETAIL_UNIT_PRICE", "CUSTOMER_DETAIL_UNIT_PRICE"])
 
     # ── Load Ingram ───────────────────────────────────────────────────────────
-    log.info("Loading Ingram data...")
-    ingram_az, ingram_lic = load_ingram(str(ingram_path))
-    ingram_df     = pd.read_excel(ingram_path)
-    ingram_period = str(ingram_df["RESELLER_INVOICE_DATE"].iloc[0])[:7]
-    log.info(f"  Ingram period : {ingram_period}")
+    ingram_period = None
+    if ingram_path:
+        log.info("Loading Ingram data...")
+        ingram_az, ingram_lic = load_ingram(str(ingram_path))
+        ingram_df = pd.read_excel(ingram_path)
+        if "RESELLER_INVOICE_DATE" in ingram_df.columns and not ingram_df.empty:
+            ingram_period = str(ingram_df["RESELLER_INVOICE_DATE"].iloc[0])[:7]
+            log.info(f"  Ingram period : {ingram_period}")
+    else:
+        ingram_az, ingram_lic = empty_ingram_az.copy(), empty_ingram_lic.copy()
 
     # ── Load Pax8 ─────────────────────────────────────────────────────────────
-    log.info("Loading Pax8 data...")
-    pax8_az, pax8_lic = load_pax8(str(pax8_path))
-    pax8_period = pd.read_csv(str(pax8_path), encoding="utf-8-sig")["invoice_date"].iloc[0][:7]
-    log.info(f"  Pax8 period   : {pax8_period}")
-    period = pax8_period
+    pax8_period = None
+    if pax8_path:
+        log.info("Loading Pax8 data...")
+        pax8_az, pax8_lic = load_pax8(str(pax8_path))
+        pax8_df = pd.read_csv(str(pax8_path), encoding="utf-8-sig")
+        if "invoice_date" in pax8_df.columns and not pax8_df.empty:
+            pax8_period = str(pax8_df["invoice_date"].iloc[0])[:7]
+            log.info(f"  Pax8 period   : {pax8_period}")
+    else:
+        pax8_az, pax8_lic = empty_pax8_az.copy(), empty_pax8_lic.copy()
+
+    period = pax8_period or ingram_period or pd.Timestamp.today().strftime("%Y-%m")
 
     # ── Archive subfolder for this period ─────────────────────────────────────
     archive_period = ARCHIVE_DIR / period
@@ -798,7 +878,10 @@ def main():
     customers = gather_customers(pax8_az, pax8_lic, ingram_az, ingram_lic)
     log.info(f"Customers: {len(customers)}")
 
-    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}.xlsx"
+    source_label = "Ingram-Pax8" if (ingram_path and pax8_path) else ("IngramOnly" if ingram_path else "Pax8Only")
+    is_preliminary = not (ingram_path and pax8_path)
+    name_suffix = "_Voorlopig" if is_preliminary else ""
+    output_path = Path(args.output) if args.output else EXPORT_DIR / f"Licensing_Report_{period}_{source_label}{name_suffix}.xlsx"
 
     wb      = Workbook()
     summary = []
@@ -817,17 +900,17 @@ def main():
     log.info(f"Report saved: {output_path}")
 
     # ── Archive input files ───────────────────────────────────────────────────
-    if not args.ingram:
+    if ingram_path is not None and not args.ingram:
         shutil.move(str(ingram_path), str(archive_period / ingram_path.name))
         log.info(f"Ingram archived to: {archive_period}")
-    if not args.pax8:
+    if pax8_path is not None and not args.pax8:
         shutil.move(str(pax8_path), str(archive_period / pax8_path.name))
         log.info(f"Pax8 archived to: {archive_period}")
 
     log.info("Report generated successfully.")
     log.info("========================================")
     print(f"\nDone \u2192 {output_path}")
-    input("\nPress Enter to exit...")
+    _pause_if_interactive("\nPress Enter to exit...")
 
 
 if __name__ == "__main__":

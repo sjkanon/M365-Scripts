@@ -371,7 +371,7 @@ M365-Scripts/
     │   ├── Intune/Desktop/
     │   │   ├── Add Lockscreen to start and desktop/
     │   │   └── Background/Desktop/
-    │   │       ├── Set-CorporateWallpaper.ps1
+    │   │       ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
     │   │       └── readme.md
     │   ├── DNS/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
@@ -472,10 +472,41 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-04-13
+| Change |
+|--------|
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.11 — Step 10 now supports non-interactive mode via `-Step10Only -Step10Action undo|archive|skip`; added explicit warning that archive/unarchive in Teams is a team-level action (not per channel) |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.12 — added per-channel soft-archive mode in Step 10 (rename marker with undo), including quick mode parameters `-Step10Only -ChannelAction archive|undo` and optional `-ChannelArchiveTag` |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.13 — switched per-channel flow to real Graph channel archive/unarchive API, added channel scope `ChannelSettings.ReadWrite.All`, and optional rename fallback via `-ChannelFallbackToRename` |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.14 — added `-DryRun` mode for Step 10 so team/channel archive/unarchive (and optional rename fallback) can be simulated without making changes |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.15 — expanded `-DryRun` to whole-script behavior: skips mutating setup/export/report/cleanup actions while keeping verification and simulated Step 10 output |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.16 — `-DryRun` now keeps temporary app creation, permission bootstrap, full login and export/report flow active; only Step 10 archive/unarchive mutations remain simulated |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.17 — refined `-DryRun` for Steps 6-9 to validate existence/counts (Teams/SharePoint/Graph) without writing exports; Step 11 report now uses these probe counts |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.18 — fixed channel lookup reliability (trimmed Excel Team/Channel values and reused cached Graph-fallback channel resolver in Step 9) to reduce false "Kanaal niet gevonden" in dry-run |
+| Updated `scripts/Testing Scripts/Device/vias_archiver.ps1` to v8.19 — added normalized channel-name matching (trim/whitespace/case) in channel cache + Graph fallback lookup to better handle subtle name differences while dry-running |
+
+### 2026-04-09
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1` v2.1 — added `Set-ExecutionPolicy Bypass -Scope Process` at the top to prevent exit code 3 when Intune's execution policy blocks the script |
+
+### 2026-04-08
+| Change |
+|--------|
+| Updated `scripts/Reporting/Licensing/genereer_licentie_overzicht.py` — when the same product appears with multiple billing periods on one invoice (Pax8 and Ingram), each period is now shown as a separate row with the period range in the Category/Detail column instead of being summed incorrectly |
+| Updated `scripts/Reporting/Licensing/genereer_rapport.ps1` — CMD window now closes automatically when run as a scheduled task; `Read-Host` pauses are skipped when `[Environment]::UserInteractive` is false |
+| Updated `scripts/Reporting/Licensing/genereer_rapport.bat` — pipes stdin from `NUL` so Python's interactive pause is never triggered when run as a scheduled task |
+
+### 2026-04-01
+| Change |
+|--------|
+| Updated `scripts/Exchange/Migrate-Calendar.ps1` — fixed Room Mailbox booking issues: increased provisioning wait from 15s to 60s; added retry loop (5×30s) for `Set-CalendarProcessing` with error handling and fallback instructions; changed `BookingWindowInDays 0` to `1825` and added `EnforceSchedulingHorizon $false` to prevent silent booking rejections |
+
 ### 2026-03-30
 | Change |
 |--------|
 | Updated `scripts/Custom Scripts/Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1` — added idempotency check: downloads image to temp, compares SHA256 hash against existing file; skips if hash matches and PersonalizationCSP is correct; applies (without second download) if image is new or changed |
+| Updated readme — Intune & Autopilot section: expanded `Set-CorporateWallpaper.ps1` documentation with configuration table, deployment steps, log path, and NinjaOne/Intune deploy instructions |
 
 ### 2026-03-27
 | Change |

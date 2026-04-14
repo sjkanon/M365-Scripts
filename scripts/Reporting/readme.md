@@ -86,3 +86,45 @@ Gebruik de standaardmodus voor stale-device rapportages. Gebruik `-AllDCs` als a
 ## Licensing/
 
 Zie [Licensing/](Licensing/) voor het maandelijkse licentie-rapport.
+
+---
+
+## Get-SharePointStorageReport.ps1
+
+Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
+
+### Dekking
+
+- Alle SharePoint site collections (OneDrive personal sites worden uitgesloten)
+- Onderliggende sub-sites op alle niveaus
+- Teams-gerelateerde SharePoint locaties:
+    - Standaard channels als libraries/folders in de parent Teams-site
+    - Private/shared channels als aparte site collections
+- Onderliggende mappen en bestanden in document libraries (alleen met `-Apply`)
+- Detailoutput bevat zowel folders als files (`ItemType`) zodat je volledige structuur ziet
+- In `-Apply` mode wordt alles in 1 ranked CSV gezet (grootste folders + files, inclusief version history)
+- CSV bevat ook `Level` (diepte): root = `0`, topfolder = `1`, etc.
+- CSV bevat ook `ParentPath` voor hiërarchische analyses (Excel/Power BI tree-opbouw)
+
+### Belangrijkste parameters
+
+| Parameter | Omschrijving |
+|---|---|
+| `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting. |
+| `-SkipVersions` | Neemt versiehistorie niet mee (sneller). |
+| `-SiteUrl` | Scan 1 specifieke site (`/sites/...` of `/teams/...`). |
+| `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken. |
+| `-ClientId/-TenantId` | Gebruik eigen app-registratie (met passende Graph application permissions). |
+
+### Voorbeelden
+
+```powershell
+# Volledige tenantscan inclusief sub-sites en bestanden
+.\Get-SharePointStorageReport.ps1 -Apply
+
+# Idem, maar met hogere tijdelijke app-rechten indien nodig
+.\Get-SharePointStorageReport.ps1 -Apply -UseHighPrivilege
+
+# Enkel een specifieke Teams-site
+.\Get-SharePointStorageReport.ps1 -SiteUrl "https://contoso.sharepoint.com/teams/Operations" -Apply
+```
