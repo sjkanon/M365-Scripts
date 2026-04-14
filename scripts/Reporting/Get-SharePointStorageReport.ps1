@@ -54,6 +54,11 @@
     Perform the full recursive file scan. Without this switch, only quota data
     from the Graph sites API is retrieved (fast, no file enumeration).
 
+.PARAMETER UseHighPrivilege
+    Optional. In auto mode, grants Sites.FullControl.All application permission
+    to the temporary app instead of Sites.Read.All. Use this only when stricter
+    tenant settings block read-only enumeration.
+
 .EXAMPLE
     # Auto mode — creates and deletes a temporary App Registration automatically
     .\Get-SharePointStorageReport.ps1 -Apply
@@ -83,7 +88,8 @@ param (
     [string] $ClientId,
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
-    [switch] $Apply
+    [switch] $Apply,
+    [switch] $UseHighPrivilege
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -139,6 +145,12 @@ if (-not $Apply) {
     Write-Host "  Mode      : Full scan including version history" -ForegroundColor Cyan
 }
 
+if ($UseHighPrivilege) {
+    Write-Host "  Privilege : High (Sites.FullControl.All for temporary app)" -ForegroundColor Yellow
+} else {
+    Write-Host "  Privilege : Standard (Sites.Read.All for temporary app)" -ForegroundColor DarkGray
+}
+
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
     if ($ClientId -and $TenantId) {
@@ -174,6 +186,7 @@ try {
 
         $ctx          = Get-MgContext
         $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
+        $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
         if (-not $usedTenantId) {
             Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
             Remove-TempApp; exit 1
@@ -188,16 +201,20 @@ try {
         # Service Principal
         $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
 
-        # Assign Sites.Read.All application permission + grant admin consent
+        # Assign site application permission + grant admin consent
         $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Sites.Read.All' }
+        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
+        if (-not $appRole) {
+            Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
+            Remove-TempApp; exit 1
+        }
         New-MgServicePrincipalAppRoleAssignment `
             -ServicePrincipalId $sp.Id `
             -PrincipalId        $sp.Id `
             -ResourceId         $graphSp.Id `
             -AppRoleId          $appRole.Id `
             -ErrorAction Stop | Out-Null
-        Write-Host "  [OK]   Sites.Read.All granted." -ForegroundColor DarkGray
+        Write-Host ("  [OK]   {0} granted." -f $requiredSiteRole) -ForegroundColor DarkGray
 
         # Create short-lived client secret (expires in 1 day)
         $secret = Add-MgApplicationPassword `
@@ -253,12 +270,12 @@ try {
 Write-Host "  Retrieving sites..." -ForegroundColor Cyan
 
 if ($SiteUrl) {
-    if ($SiteUrl -notmatch 'https://([^/]+)/sites/([^/]+)') {
-        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/sitename" -ForegroundColor Red
+    if ($SiteUrl -notmatch 'https://([^/]+)/(sites|teams)/([^/?#]+)') {
+        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name> or /teams/<name>" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
     try {
-        $sites = @(Get-MgSite -Search $Matches[2] -ErrorAction Stop |
+        $sites = @(Get-MgSite -Search $Matches[3] -ErrorAction Stop |
                    Where-Object { $_.WebUrl -eq $SiteUrl })
         if ($sites.Count -eq 0) {
             Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
@@ -353,7 +370,7 @@ while ($subSiteQueue.Count -gt 0) {
     }
 }
 
-Write-Host ("  Found {0} site(s) (personal sites and sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
+Write-Host ("  Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
