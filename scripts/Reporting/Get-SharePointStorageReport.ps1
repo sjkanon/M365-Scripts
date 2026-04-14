@@ -54,6 +54,11 @@
     Perform the full recursive file scan. Without this switch, only quota data
     from the Graph sites API is retrieved (fast, no file enumeration).
 
+.PARAMETER UseHighPrivilege
+    Optional. In auto mode, grants Sites.FullControl.All application permission
+    to the temporary app instead of Sites.Read.All. Use this only when stricter
+    tenant settings block read-only enumeration.
+
 .EXAMPLE
     # Auto mode — creates and deletes a temporary App Registration automatically
     .\Get-SharePointStorageReport.ps1 -Apply
@@ -83,7 +88,8 @@ param (
     [string] $ClientId,
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
-    [switch] $Apply
+    [switch] $Apply,
+    [switch] $UseHighPrivilege
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -94,7 +100,7 @@ if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir
 
 $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
-$detailCsv   = Join-Path $outputDir "SharePoint_Detail_$ts.csv"
+$reportCsv   = Join-Path $outputDir "SharePoint_StorageRanked_$ts.csv"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
@@ -139,6 +145,12 @@ if (-not $Apply) {
     Write-Host "  Mode      : Full scan including version history" -ForegroundColor Cyan
 }
 
+if ($UseHighPrivilege) {
+    Write-Host "  Privilege : High (Sites.FullControl.All for temporary app)" -ForegroundColor Yellow
+} else {
+    Write-Host "  Privilege : Standard (Sites.Read.All for temporary app)" -ForegroundColor DarkGray
+}
+
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
     if ($ClientId -and $TenantId) {
@@ -174,6 +186,7 @@ try {
 
         $ctx          = Get-MgContext
         $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
+        $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
         if (-not $usedTenantId) {
             Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
             Remove-TempApp; exit 1
@@ -188,16 +201,20 @@ try {
         # Service Principal
         $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
 
-        # Assign Sites.Read.All application permission + grant admin consent
+        # Assign site application permission + grant admin consent
         $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Sites.Read.All' }
+        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
+        if (-not $appRole) {
+            Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
+            Remove-TempApp; exit 1
+        }
         New-MgServicePrincipalAppRoleAssignment `
             -ServicePrincipalId $sp.Id `
             -PrincipalId        $sp.Id `
             -ResourceId         $graphSp.Id `
             -AppRoleId          $appRole.Id `
             -ErrorAction Stop | Out-Null
-        Write-Host "  [OK]   Sites.Read.All granted." -ForegroundColor DarkGray
+        Write-Host ("  [OK]   {0} granted." -f $requiredSiteRole) -ForegroundColor DarkGray
 
         # Create short-lived client secret (expires in 1 day)
         $secret = Add-MgApplicationPassword `
@@ -253,12 +270,12 @@ try {
 Write-Host "  Retrieving sites..." -ForegroundColor Cyan
 
 if ($SiteUrl) {
-    if ($SiteUrl -notmatch 'https://([^/]+)/sites/([^/]+)') {
-        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/sitename" -ForegroundColor Red
+    if ($SiteUrl -notmatch 'https://([^/]+)/(sites|teams)/([^/?#]+)') {
+        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name> or /teams/<name>" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
     try {
-        $sites = @(Get-MgSite -Search $Matches[2] -ErrorAction Stop |
+        $sites = @(Get-MgSite -Search $Matches[3] -ErrorAction Stop |
                    Where-Object { $_.WebUrl -eq $SiteUrl })
         if ($sites.Count -eq 0) {
             Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
@@ -314,32 +331,46 @@ $sites = [System.Collections.Generic.List[object]]::new(
     @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
 )
 
-# Add sub-sites at all depths — getAllSites returns site collections only, not nested webs.
+# Add sub-sites at all depths — getAllSites/Get-MgAllSite primarily return site collections.
 # Standard Teams channels appear as document libraries in the parent site (handled by /lists).
-# Private/shared Teams channels appear as separate site collections (handled by getAllSites).
+# Private/shared Teams channels appear as separate site collections.
 # Classic SharePoint sub-webs require explicit enumeration via /sites/{id}/sites.
-if ($script:AppOnlyHeaders) {
-    $subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
-    $sites | ForEach-Object { $subSiteQueue.Enqueue($_) }
+$subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
+$knownSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 
-    while ($subSiteQueue.Count -gt 0) {
-        $parent = $subSiteQueue.Dequeue()
-        try {
+$sites | ForEach-Object {
+    if ($_.id -and $knownSiteIds.Add($_.id)) {
+        $subSiteQueue.Enqueue($_)
+    }
+}
+
+while ($subSiteQueue.Count -gt 0) {
+    $parent = $subSiteQueue.Dequeue()
+    try {
+        $subSites = @()
+
+        if ($script:AppOnlyHeaders) {
             Update-AppOnlyToken
             $subResp = Invoke-RestMethod `
                 -Uri     "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites" `
                 -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            $subResp.value | Where-Object { $_.id } | ForEach-Object {
-                $sites.Add($_)          # add to scan list
-                $subSiteQueue.Enqueue($_)  # also check its children
-            }
-        } catch {
-            # Most sites have no sub-sites — silently skip
+            $subSites = @($subResp.value)
+        } else {
+            $subSites = @(Get-MgSiteSubSite -SiteId $parent.id -All -ErrorAction Stop)
         }
+
+        $subSites | Where-Object { $_.id } | ForEach-Object {
+            if ($knownSiteIds.Add($_.id)) {
+                $sites.Add($_)               # add to scan list
+                $subSiteQueue.Enqueue($_)    # also check its children
+            }
+        }
+    } catch {
+        # Most sites have no sub-sites or may be inaccessible with current permissions.
     }
 }
 
-Write-Host ("  Found {0} site(s) (personal sites and sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
+Write-Host ("  Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -469,7 +500,10 @@ function Get-AllDriveItems {
                 }
 
                 $results.Add([PSCustomObject]@{
+                    ItemType         = 'File'
                     Path             = $path
+                    Level            = (($path -split '/').Count)
+                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
                     SizeBytes        = $fileSize
                     SizeMB           = [math]::Round($fileSize / 1MB, 3)
                     VersionCount     = $verCount
@@ -480,6 +514,21 @@ function Get-AllDriveItems {
                     Modified         = $child.lastModifiedDateTime
                 }) | Out-Null
             } else {
+                $results.Add([PSCustomObject]@{
+                    ItemType         = 'Folder'
+                    Path             = $path
+                    Level            = (($path -split '/').Count)
+                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
+                    SizeBytes        = $null
+                    SizeMB           = $null
+                    VersionCount     = $null
+                    VersionSizeBytes = $null
+                    VersionSizeMB    = $null
+                    TotalSizeBytes   = $null
+                    TotalSizeMB      = $null
+                    Modified         = $child.lastModifiedDateTime
+                }) | Out-Null
+
                 $queue.Enqueue([PSCustomObject]@{ Id = $child.id; Path = $path })
             }
         }
@@ -564,13 +613,94 @@ foreach ($entry in $siteLibraries) {
     # Full scan mode
     $items = Get-AllDriveItems -DriveId $drive.id
 
-    $fileItems   = $items
+    $fileItems   = @($items | Where-Object { $_.ItemType -eq 'File' })
+    $folderItems = @($items | Where-Object { $_.ItemType -eq 'Folder' })
+
+    # Build per-folder aggregated sizes from descendant files
+    $folderStats = @{}
+    foreach ($folder in $folderItems) {
+        $folderStats[$folder.Path] = [PSCustomObject]@{
+            Path             = $folder.Path
+            Level            = $folder.Level
+            ParentPath       = $folder.ParentPath
+            Modified         = $folder.Modified
+            SizeBytes        = [int64]0
+            VersionSizeBytes = [int64]0
+            TotalSizeBytes   = [int64]0
+            VersionCount     = 0
+        }
+    }
+
+    # Explicit root level per library
+    if (-not $folderStats.ContainsKey('/')) {
+        $folderStats['/'] = [PSCustomObject]@{
+            Path             = '/'
+            Level            = 0
+            ParentPath       = ''
+            Modified         = $null
+            SizeBytes        = [int64]0
+            VersionSizeBytes = [int64]0
+            TotalSizeBytes   = [int64]0
+            VersionCount     = 0
+        }
+    }
+
+    foreach ($file in $fileItems) {
+        $folderStats['/'].SizeBytes        += [int64]($file.SizeBytes ?? 0)
+        $folderStats['/'].VersionSizeBytes += [int64]($file.VersionSizeBytes ?? 0)
+        $folderStats['/'].TotalSizeBytes   += [int64]($file.TotalSizeBytes ?? 0)
+        $folderStats['/'].VersionCount     += [int]($file.VersionCount ?? 0)
+
+        if ($file.Path -notmatch '/') {
+            continue
+        }
+
+        $parts = $file.Path -split '/'
+        for ($i = 0; $i -lt ($parts.Count - 1); $i++) {
+            $ancestorPath = ($parts[0..$i] -join '/')
+            if (-not $folderStats.ContainsKey($ancestorPath)) {
+                $folderStats[$ancestorPath] = [PSCustomObject]@{
+                    Path             = $ancestorPath
+                    Level            = $i + 1
+                    ParentPath       = $(if ($ancestorPath -match '/') { ($ancestorPath -replace '/[^/]+$','') } else { '/' })
+                    Modified         = $null
+                    SizeBytes        = [int64]0
+                    VersionSizeBytes = [int64]0
+                    TotalSizeBytes   = [int64]0
+                    VersionCount     = 0
+                }
+            }
+
+            $folderStats[$ancestorPath].SizeBytes        += [int64]($file.SizeBytes ?? 0)
+            $folderStats[$ancestorPath].VersionSizeBytes += [int64]($file.VersionSizeBytes ?? 0)
+            $folderStats[$ancestorPath].TotalSizeBytes   += [int64]($file.TotalSizeBytes ?? 0)
+            $folderStats[$ancestorPath].VersionCount     += [int]($file.VersionCount ?? 0)
+        }
+    }
+
+    $folderReportRows = @(
+        $folderStats.Values | ForEach-Object {
+            [PSCustomObject]@{
+                ItemType         = 'Folder'
+                Path             = $_.Path
+                Level            = $_.Level
+                ParentPath       = $_.ParentPath
+                SizeMB           = [math]::Round($_.SizeBytes / 1MB, 3)
+                VersionCount     = $_.VersionCount
+                VersionSizeMB    = [math]::Round($_.VersionSizeBytes / 1MB, 3)
+                TotalSizeMB      = [math]::Round($_.TotalSizeBytes / 1MB, 3)
+                Modified         = $_.Modified
+            }
+        }
+    )
     $totalFiles  = $fileItems.Count
+    $totalFolders = $folderReportRows.Count
     $currentSize = ($fileItems | Measure-Object -Property SizeBytes -Sum).Sum ?? 0
     $versionSize = ($fileItems | Measure-Object -Property VersionSizeBytes -Sum).Sum ?? 0
     $totalSize   = $currentSize + $versionSize
 
-    Write-Host ("        {0} files | current: {1} MB | versions: {2} MB | total: {3} MB" -f
+    Write-Host ("        {0} folders | {1} files | current: {2} MB | versions: {3} MB | total: {4} MB" -f
+        $totalFolders,
         $totalFiles,
         [math]::Round($currentSize / 1MB, 1),
         [math]::Round($versionSize / 1MB, 1),
@@ -585,17 +715,37 @@ foreach ($entry in $siteLibraries) {
         RemainingGB     = $null
         State           = $null
         FileCount       = $totalFiles
-        FolderCount     = $null
+        FolderCount     = $totalFolders
         VersionSizeMB   = [math]::Round($versionSize / 1MB, 2)
         TotalSizeMB     = [math]::Round($totalSize   / 1MB, 2)
     }) | Out-Null
+
+    foreach ($item in $folderReportRows) {
+        $detailRows.Add([PSCustomObject]@{
+            SiteName         = $siteName
+            SiteUrl          = $site.webUrl
+            Library          = $drive.name
+            ItemType         = $item.ItemType
+            Path             = $item.Path
+            Level            = $item.Level
+            ParentPath       = $item.ParentPath
+            SizeMB           = $item.SizeMB
+            VersionCount     = $item.VersionCount
+            VersionSizeMB    = $item.VersionSizeMB
+            TotalSizeMB      = $item.TotalSizeMB
+            Modified         = $item.Modified
+        }) | Out-Null
+    }
 
     foreach ($item in $fileItems) {
         $detailRows.Add([PSCustomObject]@{
             SiteName         = $siteName
             SiteUrl          = $site.webUrl
             Library          = $drive.name
+            ItemType         = $item.ItemType
             Path             = $item.Path
+            Level            = $item.Level
+            ParentPath       = $item.ParentPath
             SizeMB           = $item.SizeMB
             VersionCount     = $item.VersionCount
             VersionSizeMB    = $item.VersionSizeMB
@@ -612,12 +762,37 @@ Write-Host "   Exporting results" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
-$summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
-Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
+$summaryRows = @(
+    if ($Apply) {
+        $summaryRows | Sort-Object `
+            @{ Expression = { if ($null -ne $_.TotalSizeMB) { [double]$_.TotalSizeMB } else { -1 } }; Descending = $true },
+            SiteName,
+            Library
+    } else {
+        $summaryRows | Sort-Object `
+            @{ Expression = { if ($null -ne $_.UsedGB) { [double]$_.UsedGB } else { -1 } }; Descending = $true },
+            SiteName,
+            Library
+    }
+)
+
+if (-not $Apply) {
+    $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
+    Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
+}
 
 if ($Apply -and $detailRows.Count -gt 0) {
-    $detailRows | Export-Csv -Path $detailCsv -NoTypeInformation -Encoding UTF8
-    Write-Host ("  Detail   : {0}" -f $detailCsv) -ForegroundColor Green
+    $detailRows = @(
+        $detailRows | Sort-Object `
+            @{ Expression = { if ($null -ne $_.TotalSizeMB) { [double]$_.TotalSizeMB } else { -1 } }; Descending = $true },
+            SiteName,
+            Library,
+            ItemType,
+            Level,
+            Path
+    )
+    $detailRows | Export-Csv -Path $reportCsv -NoTypeInformation -Encoding UTF8
+    Write-Host ("  Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
