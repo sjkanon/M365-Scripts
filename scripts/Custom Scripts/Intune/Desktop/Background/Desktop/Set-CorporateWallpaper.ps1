@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.3 - Added policy and loaded-user fallbacks for black background issue
+# Version 2.4 - Fixed temp download cleanup race before Move-Item
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -195,7 +195,7 @@ $WallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName
 
 try {
     Get-ChildItem -Path $WallpaperFolder -Filter "$WallpaperBaseName.*" -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -ne $WallpaperPath } |
+        Where-Object { $_.FullName -ne $WallpaperPath -and $_.FullName -ne $tempWallpaperPath } |
         Remove-Item -Force -ErrorAction SilentlyContinue
 
     Move-Item -Path $tempWallpaperPath -Destination $WallpaperPath -Force

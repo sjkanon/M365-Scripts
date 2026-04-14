@@ -117,3 +117,4 @@ Packaging as a Win32 app allows re-run control and detection rules.
 | 2026-04-14 | 2.1 | Added image signature validation and dynamic local extension (`.jpg/.png/.bmp`) to prevent invalid wallpaper files |
 | 2026-04-14 | 2.2 | Added GitHub URL normalization (`github.com/.../blob/...` to `raw.githubusercontent.com`) and HTML-response guard to avoid black/empty backgrounds |
 | 2026-04-14 | 2.3 | Added fallback enforcement for black backgrounds: machine wallpaper policy keys + update of all loaded user hives; `DesktopImageUrl` now uses source URL |
+| 2026-04-14 | 2.4 | Fixed cleanup order bug where temporary `.download` file could be deleted before `Move-Item`, causing path-not-found error |
