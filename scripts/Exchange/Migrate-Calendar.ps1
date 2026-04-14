@@ -380,8 +380,8 @@ if ($existingMailbox) {
                 -Shared | Out-Null
             Write-OK "Shared Mailbox created: $DestinationDisplayName ($DestinationEmail)"
         }
-        Write-Host "    Waiting 15s for Exchange provisioning..." -ForegroundColor DarkGray
-        Start-Sleep -Seconds 15
+        Write-Host "    Waiting 60s for Exchange provisioning..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds 60
     }
 }
 
@@ -400,16 +400,38 @@ if ($PSCmdlet.ShouldProcess($DestinationEmail, "Set calendar permissions")) {
     Write-OK "Default: Reviewer (read with details)"
 
     if ($DestinationType -eq "Room") {
-        Set-CalendarProcessing `
-            -Identity                 $DestinationEmail `
-            -AutomateProcessing       AutoAccept `
-            -AllowConflicts           $true `
-            -AddOrganizerToSubject    $false `
-            -DeleteComments           $false `
-            -DeleteSubject            $false `
-            -BookingWindowInDays      0 `
-            -MaximumDurationInMinutes 0
-        Write-OK "AutoAccept configured (overlapping bookings allowed, no duration limit)"
+        # Retry loop: newly created mailboxes can take a while to become ready
+        $calProcSet = $false
+        for ($attempt = 1; $attempt -le 5; $attempt++) {
+            try {
+                Set-CalendarProcessing `
+                    -Identity                 $DestinationEmail `
+                    -AutomateProcessing       AutoAccept `
+                    -AllowConflicts           $true `
+                    -AddOrganizerToSubject    $false `
+                    -DeleteComments           $false `
+                    -DeleteSubject            $false `
+                    -BookingWindowInDays      1825 `
+                    -EnforceSchedulingHorizon $false `
+                    -MaximumDurationInMinutes 0 `
+                    -ErrorAction Stop
+                $calProcSet = $true
+                break
+            } catch {
+                Write-Warn "Set-CalendarProcessing attempt $attempt/5 failed: $_"
+                if ($attempt -lt 5) {
+                    Write-Host "    Retrying in 30s..." -ForegroundColor DarkGray
+                    Start-Sleep -Seconds 30
+                }
+            }
+        }
+
+        if ($calProcSet) {
+            Write-OK "AutoAccept configured (overlapping bookings allowed, no duration limit)"
+        } else {
+            Write-Fail "Set-CalendarProcessing failed after 5 attempts — run manually after provisioning:"
+            Write-Host "    Set-CalendarProcessing -Identity '$DestinationEmail' -AutomateProcessing AutoAccept -AllowConflicts `$true -BookingWindowInDays 1825 -EnforceSchedulingHorizon `$false -MaximumDurationInMinutes 0" -ForegroundColor Yellow
+        }
     } else {
         Write-OK "Shared Mailbox: AutoAccept not applicable"
         Write-Host "    Users add the calendar manually via: Add calendar > Add from directory" -ForegroundColor DarkGray
