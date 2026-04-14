@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.5 - Added Explorer restart for immediate wallpaper refresh
+# Version 2.6 - Generic default configuration restored
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -19,7 +19,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://raw.githubusercontent.com/FirstITHub/Wallpaper/refs/heads/main/Vias/background.jpg"
+$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
@@ -30,7 +30,7 @@ $ImageUrl = "https://raw.githubusercontent.com/FirstITHub/Wallpaper/refs/heads/m
 $WallpaperStyle = "10"
 
 # Customer name — used in log filename and local image filename
-$ClientName = "Vias"
+$ClientName = "CUSTOMERNAME"
 
 # ==============================================================================
 # INTERNAL VARIABLES — do not modify
