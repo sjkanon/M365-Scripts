@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.0 - Generic version for reuse per customer
+# Version 2.1 - Safer image validation and dynamic file extension
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -37,8 +37,8 @@ $ClientName = "CUSTOMERNAME"
 # ==============================================================================
 
 $WallpaperFolder   = "$env:ProgramData\Wallpapers"
-$WallpaperFileName = "corporate-background-$($ClientName.ToLower()).jpg"
-$WallpaperPath     = "$WallpaperFolder\$WallpaperFileName"
+$WallpaperBaseName = "corporate-background-$($ClientName.ToLower())"
+$WallpaperPath     = $null
 $LogFilePath       = "$env:ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-$($ClientName.ToUpper()).log"
 
 # ==============================================================================
@@ -58,13 +58,42 @@ function Write-Log {
     "$timestamp - $Message" | Out-File -FilePath $LogFilePath -Append
 }
 
+function Get-ImageTypeFromHeader {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath
+    )
+
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    if ($bytes.Length -lt 8) {
+        return $null
+    }
+
+    # JPEG: FF D8 FF
+    if ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8 -and $bytes[2] -eq 0xFF) {
+        return "jpg"
+    }
+
+    # PNG: 89 50 4E 47 0D 0A 1A 0A
+    if ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47 -and
+        $bytes[4] -eq 0x0D -and $bytes[5] -eq 0x0A -and $bytes[6] -eq 0x1A -and $bytes[7] -eq 0x0A) {
+        return "png"
+    }
+
+    # BMP: 42 4D
+    if ($bytes[0] -eq 0x42 -and $bytes[1] -eq 0x4D) {
+        return "bmp"
+    }
+
+    return $null
+}
+
 # ==============================================================================
 # SCRIPT START
 # ==============================================================================
 
 Write-Log "====== Start Set-CorporateWallpaper for client: $ClientName ======"
 Write-Log "Source URL : $ImageUrl"
-Write-Log "Target path: $WallpaperPath"
 Write-Log "Style      : $WallpaperStyle"
 
 # Step 1: Create target folder
@@ -78,17 +107,46 @@ if (-not (Test-Path -Path $WallpaperFolder)) {
     }
 }
 
-# Step 2: Download image
+# Step 2: Download image to temporary file and validate
+$tempWallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName.download"
+
 try {
-    Invoke-WebRequest -Uri $ImageUrl -OutFile $WallpaperPath -UseBasicParsing
-    Write-Log "Image downloaded to: $WallpaperPath"
+    Invoke-WebRequest -Uri $ImageUrl -OutFile $tempWallpaperPath -UseBasicParsing
+    Write-Log "Image downloaded to temporary path: $tempWallpaperPath"
 } catch {
     Write-Log "ERROR downloading image: $_"
     exit 1
 }
 
-if (-not (Test-Path -Path $WallpaperPath)) {
+if (-not (Test-Path -Path $tempWallpaperPath)) {
     Write-Log "ERROR: File not present after download."
+    exit 1
+}
+
+$downloadedFile = Get-Item -Path $tempWallpaperPath -ErrorAction SilentlyContinue
+if (-not $downloadedFile -or $downloadedFile.Length -lt 10240) {
+    Write-Log "ERROR: Downloaded file is too small to be a valid wallpaper ($($downloadedFile.Length) bytes)."
+    exit 1
+}
+
+$imageType = Get-ImageTypeFromHeader -FilePath $tempWallpaperPath
+if (-not $imageType) {
+    Write-Log "ERROR: Downloaded file is not a supported image type (expected JPEG/PNG/BMP)."
+    exit 1
+}
+
+$WallpaperPath = Join-Path -Path $WallpaperFolder -ChildPath "$WallpaperBaseName.$imageType"
+
+try {
+    Get-ChildItem -Path $WallpaperFolder -Filter "$WallpaperBaseName.*" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ne $WallpaperPath } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+
+    Move-Item -Path $tempWallpaperPath -Destination $WallpaperPath -Force
+    Write-Log "Validated image type: $imageType"
+    Write-Log "Final wallpaper path: $WallpaperPath"
+} catch {
+    Write-Log "ERROR finalizing wallpaper file: $_"
     exit 1
 }
 
