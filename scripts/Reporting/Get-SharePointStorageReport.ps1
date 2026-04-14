@@ -502,6 +502,8 @@ function Get-AllDriveItems {
                 $results.Add([PSCustomObject]@{
                     ItemType         = 'File'
                     Path             = $path
+                    Level            = (($path -split '/').Count)
+                    ParentPath       = (if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
                     SizeBytes        = $fileSize
                     SizeMB           = [math]::Round($fileSize / 1MB, 3)
                     VersionCount     = $verCount
@@ -515,6 +517,8 @@ function Get-AllDriveItems {
                 $results.Add([PSCustomObject]@{
                     ItemType         = 'Folder'
                     Path             = $path
+                    Level            = (($path -split '/').Count)
+                    ParentPath       = (if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
                     SizeBytes        = $null
                     SizeMB           = $null
                     VersionCount     = $null
@@ -617,6 +621,8 @@ foreach ($entry in $siteLibraries) {
     foreach ($folder in $folderItems) {
         $folderStats[$folder.Path] = [PSCustomObject]@{
             Path             = $folder.Path
+            Level            = $folder.Level
+            ParentPath       = $folder.ParentPath
             Modified         = $folder.Modified
             SizeBytes        = [int64]0
             VersionSizeBytes = [int64]0
@@ -625,7 +631,26 @@ foreach ($entry in $siteLibraries) {
         }
     }
 
+    # Explicit root level per library
+    if (-not $folderStats.ContainsKey('/')) {
+        $folderStats['/'] = [PSCustomObject]@{
+            Path             = '/'
+            Level            = 0
+            ParentPath       = ''
+            Modified         = $null
+            SizeBytes        = [int64]0
+            VersionSizeBytes = [int64]0
+            TotalSizeBytes   = [int64]0
+            VersionCount     = 0
+        }
+    }
+
     foreach ($file in $fileItems) {
+        $folderStats['/'].SizeBytes        += [int64]($file.SizeBytes ?? 0)
+        $folderStats['/'].VersionSizeBytes += [int64]($file.VersionSizeBytes ?? 0)
+        $folderStats['/'].TotalSizeBytes   += [int64]($file.TotalSizeBytes ?? 0)
+        $folderStats['/'].VersionCount     += [int]($file.VersionCount ?? 0)
+
         if ($file.Path -notmatch '/') {
             continue
         }
@@ -636,6 +661,8 @@ foreach ($entry in $siteLibraries) {
             if (-not $folderStats.ContainsKey($ancestorPath)) {
                 $folderStats[$ancestorPath] = [PSCustomObject]@{
                     Path             = $ancestorPath
+                    Level            = $i + 1
+                    ParentPath       = (if ($ancestorPath -match '/') { ($ancestorPath -replace '/[^/]+$','') } else { '/' })
                     Modified         = $null
                     SizeBytes        = [int64]0
                     VersionSizeBytes = [int64]0
@@ -656,6 +683,8 @@ foreach ($entry in $siteLibraries) {
             [PSCustomObject]@{
                 ItemType         = 'Folder'
                 Path             = $_.Path
+                Level            = $_.Level
+                ParentPath       = $_.ParentPath
                 SizeMB           = [math]::Round($_.SizeBytes / 1MB, 3)
                 VersionCount     = $_.VersionCount
                 VersionSizeMB    = [math]::Round($_.VersionSizeBytes / 1MB, 3)
@@ -698,6 +727,8 @@ foreach ($entry in $siteLibraries) {
             Library          = $drive.name
             ItemType         = $item.ItemType
             Path             = $item.Path
+            Level            = $item.Level
+            ParentPath       = $item.ParentPath
             SizeMB           = $item.SizeMB
             VersionCount     = $item.VersionCount
             VersionSizeMB    = $item.VersionSizeMB
@@ -713,6 +744,8 @@ foreach ($entry in $siteLibraries) {
             Library          = $drive.name
             ItemType         = $item.ItemType
             Path             = $item.Path
+            Level            = $item.Level
+            ParentPath       = $item.ParentPath
             SizeMB           = $item.SizeMB
             VersionCount     = $item.VersionCount
             VersionSizeMB    = $item.VersionSizeMB
@@ -755,6 +788,7 @@ if ($Apply -and $detailRows.Count -gt 0) {
             SiteName,
             Library,
             ItemType,
+            Level,
             Path
     )
     $detailRows | Export-Csv -Path $reportCsv -NoTypeInformation -Encoding UTF8
