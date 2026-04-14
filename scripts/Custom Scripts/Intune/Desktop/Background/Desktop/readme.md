@@ -29,6 +29,9 @@ $WallpaperStyle = "10"
 
 Replace `CUSTOMERNAME` with the customer's name (e.g. `acme`). Everything else is fixed and does not need to be modified.
 
+If you host the image on GitHub, use a raw file URL (`raw.githubusercontent.com`) instead of a `github.com/.../blob/...` page URL.
+The script can normalize common GitHub blob/raw page URLs automatically, but using a raw URL directly is best.
+
 ### Wallpaper styles
 
 | Value | Style | Notes |
@@ -84,7 +87,7 @@ Packaging as a Win32 app allows re-run control and detection rules.
 |---|---|
 | **Install command** | `powershell.exe -ExecutionPolicy Bypass -File Set-CorporateWallpaper.ps1` |
 | **Uninstall command** | `cmd.exe /c echo uninstall` |
-| **Detection rule** | File exists: `C:\ProgramData\Wallpapers\corporate-background-<customername>.jpg` |
+| **Detection rule** | File exists: `C:\ProgramData\Wallpapers\corporate-background-<customername>.jpg` (or `.png` if source image is PNG) |
 | **Run as** | System |
 | **Architecture** | 64-bit |
 
@@ -111,3 +114,9 @@ Packaging as a Win32 app allows re-run control and detection rules.
 | — | 1.0 | Initial version |
 | — | 1.2 | Made generic for reuse per customer |
 | 2026-03-20 | 2.0 | Translated to English; `Invoke-WebRequest` replaces `WebClient`; `#Requires -Version 5.1`; generic CDN URL placeholder |
+| 2026-04-14 | 2.1 | Added image signature validation and dynamic local extension (`.jpg/.png/.bmp`) to prevent invalid wallpaper files |
+| 2026-04-14 | 2.2 | Added GitHub URL normalization (`github.com/.../blob/...` to `raw.githubusercontent.com`) and HTML-response guard to avoid black/empty backgrounds |
+| 2026-04-14 | 2.3 | Added fallback enforcement for black backgrounds: machine wallpaper policy keys + update of all loaded user hives; `DesktopImageUrl` now uses source URL |
+| 2026-04-14 | 2.4 | Fixed cleanup order bug where temporary `.download` file could be deleted before `Move-Item`, causing path-not-found error |
+| 2026-04-14 | 2.5 | Added `explorer.exe` restart step so wallpaper/theme changes become visible immediately for logged-on users |
+| 2026-04-14 | 2.6 | Restored generic default configuration values (`$ImageUrl`, `$ClientName`) for reusable customer deployments |
