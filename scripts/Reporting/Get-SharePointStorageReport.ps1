@@ -503,7 +503,7 @@ function Get-AllDriveItems {
                     ItemType         = 'File'
                     Path             = $path
                     Level            = (($path -split '/').Count)
-                    ParentPath       = (if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
+                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
                     SizeBytes        = $fileSize
                     SizeMB           = [math]::Round($fileSize / 1MB, 3)
                     VersionCount     = $verCount
@@ -518,7 +518,7 @@ function Get-AllDriveItems {
                     ItemType         = 'Folder'
                     Path             = $path
                     Level            = (($path -split '/').Count)
-                    ParentPath       = (if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
+                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
                     SizeBytes        = $null
                     SizeMB           = $null
                     VersionCount     = $null
@@ -662,7 +662,7 @@ foreach ($entry in $siteLibraries) {
                 $folderStats[$ancestorPath] = [PSCustomObject]@{
                     Path             = $ancestorPath
                     Level            = $i + 1
-                    ParentPath       = (if ($ancestorPath -match '/') { ($ancestorPath -replace '/[^/]+$','') } else { '/' })
+                    ParentPath       = $(if ($ancestorPath -match '/') { ($ancestorPath -replace '/[^/]+$','') } else { '/' })
                     Modified         = $null
                     SizeBytes        = [int64]0
                     VersionSizeBytes = [int64]0
