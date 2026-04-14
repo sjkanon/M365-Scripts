@@ -19,7 +19,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://raw.githubusercontent.com/FirstITHub/Wallpaper/refs/heads/main/Vias/background.jpg"
+$ImageUrl = "https://raw.githubusercontent.com/FirstITHub/Wallpaper/refs/heads/main/Onco3R/Spring.png"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
@@ -30,7 +30,7 @@ $ImageUrl = "https://raw.githubusercontent.com/FirstITHub/Wallpaper/refs/heads/m
 $WallpaperStyle = "10"
 
 # Customer name — used in log filename and local image filename
-$ClientName = "Vias"
+$ClientName = "Onco3R"
 
 # ==============================================================================
 # INTERNAL VARIABLES — do not modify
