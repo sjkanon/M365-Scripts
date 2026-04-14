@@ -120,3 +120,4 @@ Packaging as a Win32 app allows re-run control and detection rules.
 | 2026-04-14 | 2.4 | Fixed cleanup order bug where temporary `.download` file could be deleted before `Move-Item`, causing path-not-found error |
 | 2026-04-14 | 2.5 | Added `explorer.exe` restart step so wallpaper/theme changes become visible immediately for logged-on users |
 | 2026-04-14 | 2.6 | Restored generic default configuration values (`$ImageUrl`, `$ClientName`) for reusable customer deployments |
+| 2026-04-14 | 2.7 | Added fail-safe backup of current wallpaper and changed replacement order so previous wallpaper stays available if update fails |
