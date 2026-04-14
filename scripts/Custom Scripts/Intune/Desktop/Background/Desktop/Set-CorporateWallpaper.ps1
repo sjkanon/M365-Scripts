@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 # ==============================================================================
 # Set-CorporateWallpaper.ps1
-# Version 2.2 - GitHub raw URL handling and stricter download validation
+# Version 2.3 - Added policy and loaded-user fallbacks for black background issue
 #
 # Usage:
 #   Only change the variables in the CONFIGURATION block below.
@@ -228,11 +228,24 @@ try {
         New-Item -Path $regPath -Force | Out-Null
     }
     New-ItemProperty -Path $regPath -Name "DesktopImagePath"   -Value $WallpaperPath -PropertyType String -Force | Out-Null
-    New-ItemProperty -Path $regPath -Name "DesktopImageUrl"    -Value $WallpaperPath -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $regPath -Name "DesktopImageUrl"    -Value $resolvedImageUrl -PropertyType String -Force | Out-Null
     New-ItemProperty -Path $regPath -Name "DesktopImageStatus" -Value 1              -PropertyType DWord  -Force | Out-Null
     Write-Log "PersonalizationCSP registry keys updated"
 } catch {
     Write-Log "ERROR setting PersonalizationCSP: $_"
+}
+
+# Step 4b: Machine policy fallback (helps when CSP applies late or conflicts)
+try {
+    $policyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+    if (-not (Test-Path -Path $policyPath)) {
+        New-Item -Path $policyPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $policyPath -Name "Wallpaper"      -Value $WallpaperPath  -Force
+    Set-ItemProperty -Path $policyPath -Name "WallpaperStyle" -Value $WallpaperStyle -Force
+    Write-Log "Machine policy wallpaper keys updated"
+} catch {
+    Write-Log "ERROR setting machine policy wallpaper keys: $_"
 }
 
 # Step 5: Current user - WinAPI (applies immediately)
@@ -257,6 +270,54 @@ try {
     Write-Log "HKCU registry keys updated (style: $WallpaperStyle)"
 } catch {
     Write-Log "ERROR updating HKCU registry: $_"
+}
+
+# Step 6b: Update all loaded user hives (existing signed-in users)
+try {
+    Get-ChildItem -Path "Registry::HKEY_USERS" -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSChildName -match '^S-1-5-21-.+-\d+$' } |
+        ForEach-Object {
+            $userDesktopPath = "Registry::HKEY_USERS\$($_.PSChildName)\Control Panel\Desktop"
+            if (Test-Path -Path $userDesktopPath) {
+                Set-ItemProperty -Path $userDesktopPath -Name "Wallpaper"      -Value $WallpaperPath  -Force
+                Set-ItemProperty -Path $userDesktopPath -Name "WallpaperStyle" -Value $WallpaperStyle -Force
+                Set-ItemProperty -Path $userDesktopPath -Name "TileWallpaper"  -Value "0"            -Force
+                Write-Log "Loaded user hive updated: $($_.PSChildName)"
+            }
+        }
+} catch {
+    Write-Log "ERROR updating loaded user hives: $_"
+}
+
+# Step 6c: Clear cached wallpaper files for loaded users (forces re-transcode)
+try {
+    $profileListPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList"
+    Get-ChildItem -Path "Registry::HKEY_USERS" -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSChildName -match '^S-1-5-21-.+-\d+$' } |
+        ForEach-Object {
+            $sid = $_.PSChildName
+            $profilePath = (Get-ItemProperty -Path (Join-Path -Path $profileListPath -ChildPath $sid) -Name "ProfileImagePath" -ErrorAction SilentlyContinue).ProfileImagePath
+
+            if ([string]::IsNullOrWhiteSpace($profilePath)) {
+                return
+            }
+
+            $themesPath = Join-Path -Path $profilePath -ChildPath "AppData\Roaming\Microsoft\Windows\Themes"
+            if (Test-Path -Path $themesPath) {
+                Get-ChildItem -Path $themesPath -Filter "TranscodedWallpaper*" -File -ErrorAction SilentlyContinue |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+
+                $cachedFilesPath = Join-Path -Path $themesPath -ChildPath "CachedFiles"
+                if (Test-Path -Path $cachedFilesPath) {
+                    Get-ChildItem -Path $cachedFilesPath -File -ErrorAction SilentlyContinue |
+                        Remove-Item -Force -ErrorAction SilentlyContinue
+                }
+
+                Write-Log "Theme cache cleared for SID: $sid"
+            }
+        }
+} catch {
+    Write-Log "ERROR clearing theme cache for loaded users: $_"
 }
 
 # Step 7: Default User profile (applies to new user accounts created after deployment)
