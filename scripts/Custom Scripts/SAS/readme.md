@@ -65,9 +65,20 @@ Setup installs `Monitor-SASBatchErrors.ps1` to `C:\Scripts\` and creates a sched
 
 # Save to file
 .\Monitor-SASBatchErrors.ps1 -LogDirectory "E:\SAS\Logs" -OutputFile "C:\Temp\report.txt"
+
+# WORK/USERWORK health check with AV/filter diagnostics
+.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
 ```
 
 **Exit codes:** `0` = no critical/high errors · `1` = high severity · `2` = critical · `-1` = script error
+
+`Test-SASWorkDirectory.ps1` AV diagnostics include:
+
+- Defender status snapshot (real-time protection, behavior monitoring, AV enabled)
+- Defender exclusion check against monitored WORK/USERWORK paths
+- Defender Operational events (blocked/quarantine/denied/CFA/tamper and path-related messages)
+- Filter-driver events from System log (FilterManager/WdFilter)
+- Active minifilter snapshot (`fltmc filters`)
 
 ---
 

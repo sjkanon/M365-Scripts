@@ -19,6 +19,12 @@
 .PARAMETER EphemeralDriveLetters
     Drive letters that should be treated as ephemeral scratch storage
 
+.PARAMETER IncludeAVDiagnostics
+    Include antivirus/filter-driver diagnostics (Defender status, exclusions, and event logs)
+
+.PARAMETER AVLogHours
+    Number of hours to look back for AV/filter event logs (default: same as EventLogHours)
+
 .EXAMPLE
     .\Test-SASWorkDirectory.ps1
 
@@ -41,7 +47,13 @@ param(
     [int]$EventLogHours = 24,
 
     [Parameter(Mandatory=$false)]
-    [string[]]$EphemeralDriveLetters = @("G", "U")
+    [string[]]$EphemeralDriveLetters = @("G", "U"),
+
+    [Parameter(Mandatory=$false)]
+    [bool]$IncludeAVDiagnostics = $true,
+
+    [Parameter(Mandatory=$false)]
+    [int]$AVLogHours = 24
 )
 
 function Write-Log {
@@ -488,6 +500,169 @@ function Get-EventLogErrors {
     return -not $foundIssues
 }
 
+function Get-AVDiagnostics {
+    param(
+        [int]$Hours = 24,
+        [string[]]$MonitoredPaths = @()
+    )
+
+    Write-Log "Checking AV/filter diagnostics (last $Hours hours)..." "INFO"
+
+    $startTime = (Get-Date).AddHours(-$Hours)
+    $foundIssues = $false
+
+    # Build a regex that can detect references to monitored paths or drive letters in event messages.
+    $pathRegexParts = @()
+    foreach ($path in $MonitoredPaths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $pathRegexParts += [regex]::Escape($path)
+        $driveLetter = Get-DriveLetterFromPath -Path $path
+        if ($driveLetter) {
+            $pathRegexParts += [regex]::Escape("$driveLetter`:")
+        }
+    }
+    $pathRegex = if ($pathRegexParts.Count -gt 0) { "(" + ($pathRegexParts -join "|") + ")" } else { $null }
+
+    # Windows Defender status
+    if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+        try {
+            $mpStatus = Get-MpComputerStatus -ErrorAction Stop
+            Write-Log "Windows Defender status:" "INFO"
+            Write-Log "  Real-time protection enabled: $($mpStatus.RealTimeProtectionEnabled)" "INFO"
+            Write-Log "  Behavior monitoring enabled: $($mpStatus.BehaviorMonitorEnabled)" "INFO"
+            Write-Log "  Antivirus enabled: $($mpStatus.AntivirusEnabled)" "INFO"
+        } catch {
+            Write-Log "Could not read Defender status: $_" "WARNING"
+        }
+    } else {
+        Write-Log "Defender cmdlets not available on this host (Get-MpComputerStatus missing)." "INFO"
+    }
+
+    # Defender exclusions (useful to quickly validate WORK/USERWORK exclusions)
+    if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
+        try {
+            $mpPref = Get-MpPreference -ErrorAction Stop
+            $exclusionPaths = @($mpPref.ExclusionPath)
+
+            if ($exclusionPaths.Count -gt 0) {
+                Write-Log "Configured Defender exclusion paths: $($exclusionPaths.Count)" "INFO"
+
+                $matchedExclusions = @()
+                foreach ($ex in $exclusionPaths) {
+                    foreach ($path in $MonitoredPaths) {
+                        if ($ex -like "$path*" -or $path -like "$ex*") {
+                            $matchedExclusions += $ex
+                        }
+                    }
+                }
+
+                $matchedExclusions = @($matchedExclusions | Sort-Object -Unique)
+                if ($matchedExclusions.Count -gt 0) {
+                    Write-Log "Relevant exclusions for monitored SAS paths:" "SUCCESS"
+                    $matchedExclusions | ForEach-Object {
+                        Write-Log "  $_" "SUCCESS"
+                    }
+                } else {
+                    Write-Log "No Defender exclusions found for monitored SAS paths." "WARNING"
+                }
+            } else {
+                Write-Log "No Defender exclusion paths configured." "WARNING"
+            }
+        } catch {
+            Write-Log "Could not read Defender exclusions: $_" "WARNING"
+        }
+    }
+
+    # Defender Operational log: look for blocked/quarantine/CFA events and path-related entries.
+    Write-Log "Scanning Defender Operational log..." "INFO"
+    try {
+        $defenderEvents = Get-WinEvent -FilterHashtable @{
+            LogName = 'Microsoft-Windows-Windows Defender/Operational'
+            StartTime = $startTime
+            Level = 1,2,3
+        } -ErrorAction SilentlyContinue | Where-Object {
+            $_.Message -match 'blocked|quarantine|denied|threat|controlled folder access|ransomware|tamper' -or
+            ($pathRegex -and $_.Message -match $pathRegex)
+        }
+
+        if ($defenderEvents) {
+            $defenderCount = ($defenderEvents | Measure-Object).Count
+            Write-Log "  Found $defenderCount relevant Defender events:" "WARNING"
+
+            $defenderEvents | Select-Object -First 8 | ForEach-Object {
+                Write-Log "  [$($_.TimeCreated)] EventId=$($_.Id) $($_.ProviderName)" "WARNING"
+                $firstLine = ($_.Message -split "`n")[0]
+                Write-Log "    $firstLine" "WARNING"
+            }
+
+            if ($defenderCount -gt 8) {
+                Write-Log "  ... and $($defenderCount - 8) more Defender events" "WARNING"
+            }
+
+            $foundIssues = $true
+        } else {
+            Write-Log "  ✓ No relevant Defender events found" "SUCCESS"
+        }
+    } catch {
+        Write-Log "  Defender Operational log is not accessible or unavailable: $_" "INFO"
+    }
+
+    # Filter driver events in System log
+    Write-Log "Scanning System log for filter driver events..." "INFO"
+    try {
+        $filterEvents = Get-WinEvent -FilterHashtable @{
+            LogName = 'System'
+            StartTime = $startTime
+            Level = 1,2,3
+        } -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProviderName -match 'FilterManager|WdFilter|Microsoft-Windows-FilterManager' -or
+            $_.Message -match 'minifilter|filter driver|wdfilter|access denied|blocked'
+        }
+
+        if ($filterEvents) {
+            $filterCount = ($filterEvents | Measure-Object).Count
+            Write-Log "  Found $filterCount filter-related System events:" "WARNING"
+
+            $filterEvents | Select-Object -First 6 | ForEach-Object {
+                Write-Log "  [$($_.TimeCreated)] EventId=$($_.Id) $($_.ProviderName)" "WARNING"
+                $firstLine = ($_.Message -split "`n")[0]
+                Write-Log "    $firstLine" "WARNING"
+            }
+
+            if ($filterCount -gt 6) {
+                Write-Log "  ... and $($filterCount - 6) more filter-related events" "WARNING"
+            }
+
+            $foundIssues = $true
+        } else {
+            Write-Log "  ✓ No filter-related System events found" "SUCCESS"
+        }
+    } catch {
+        Write-Log "  Could not query filter-related System events: $_" "INFO"
+    }
+
+    # Active minifilter snapshot (fltmc)
+    Write-Log "Collecting active minifilter drivers (fltmc)..." "INFO"
+    try {
+        $fltOutput = & fltmc filters 2>$null
+        if ($LASTEXITCODE -eq 0 -and $fltOutput) {
+            $filterLines = @($fltOutput | Select-Object -Skip 2)
+            if ($filterLines.Count -gt 0) {
+                Write-Log "  Active minifilters (top 10):" "INFO"
+                $filterLines | Select-Object -First 10 | ForEach-Object {
+                    Write-Log "  $_" "INFO"
+                }
+            }
+        } else {
+            Write-Log "  fltmc not available or returned no data." "INFO"
+        }
+    } catch {
+        Write-Log "  Could not run fltmc: $_" "INFO"
+    }
+
+    return -not $foundIssues
+}
+
 # Main execution
 Write-Log "=== SAS Work Directory Health Check ===" "INFO"
 Write-Log ""
@@ -504,6 +679,17 @@ if (-not (Get-EventLogErrors -Hours $EventLogHours)) {
 }
 
 Write-Log ""
+
+if ($IncludeAVDiagnostics) {
+    Write-Log "--- Checking AV / filter diagnostics ---" "INFO"
+    $effectiveAVHours = if ($AVLogHours -gt 0) { $AVLogHours } else { $EventLogHours }
+    if (-not (Get-AVDiagnostics -Hours $effectiveAVHours -MonitoredPaths @($WorkDir, $UserWorkDir))) {
+        Write-Log "AV/filter diagnostics found potentially relevant signals - see details above" "WARNING"
+    } else {
+        Write-Log "AV/filter diagnostics did not find relevant signals" "SUCCESS"
+    }
+    Write-Log ""
+}
 
 # Drive profile context
 Write-Log "--- Drive profile checks ---" "INFO"
