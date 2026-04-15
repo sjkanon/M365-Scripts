@@ -11,6 +11,7 @@ Monitors SAS batch job logs and Windows Event Viewer for errors, with optional Z
 | `Monitor-SASBatchErrors.ps1` | Main script — scans log files and Event Viewer |
 | `Setup-SASMonitoring.ps1` | One-time setup — installs script, scheduled task, Zabbix config |
 | `Test-SASWorkDirectory.ps1` | Validates SAS WORK directory health and permissions |
+| `rca.md` | Root cause analysis for intermittent SAS WORK delete access-denied failures |
 | `zabbix_sas_monitor.conf` | Example Zabbix UserParameter config |
 
 ---

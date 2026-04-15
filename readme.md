@@ -479,6 +479,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Updated `scripts/Custom Scripts/SAS/Test-SASWorkDirectory.ps1` — refined SAS Application event analysis: explicit classification of `hc_disk_delete*` access-denied (`Return code 5`) as actionable failures, de-duplication of repeated SAS events, and informational handling of `ARM Application data not available` telemetry noise |
 | Updated `scripts/Custom Scripts/SAS/Test-SASWorkDirectory.ps1` — added AV/EDR diagnostics: Defender status + exclusions, Defender Operational event scan, FilterManager/WdFilter System event scan, and active minifilter snapshot (`fltmc`) for correlation with intermittent WORK delete access-denied failures |
 | Updated `scripts/Custom Scripts/SAS/readme.md` — documented ephemeral disk behavior for SAS `WORK`/`USERWORK` and clarified why switching between `G:` and `U:` is not a long-term failover strategy when both are ephemeral |
+| Added `scripts/Custom Scripts/SAS/rca.md` — formal root cause analysis for intermittent SAS WORK delete failures, including evidence timeline, AV/ASR findings, root cause assessment, and remediation plan |
 
 ### 2026-04-13
 | Change |
