@@ -81,6 +81,12 @@ If `G:` and `U:` are ephemeral/local scratch disks in your environment:
 
 `Test-SASWorkDirectory.ps1` now logs drive profile context and marks configured ephemeral drive letters explicitly, so failure analysis in redirected logs is clearer.
 
+It also classifies SAS Application events more precisely:
+
+- `hc_disk_delete*` + `Access is denied` / return code `5` are flagged as actionable WORK delete failures.
+- `ARM Application data not available` is logged as informational telemetry noise unless other SAS errors are present.
+- Duplicate SAS event entries with the same timestamp/message are de-duplicated in output.
+
 ---
 
 ## Zabbix Integration

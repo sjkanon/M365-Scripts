@@ -313,6 +313,7 @@ function Get-EventLogErrors {
     
     $startTime = (Get-Date).AddHours(-$Hours)
     $foundIssues = $false
+    $sasDeleteAccessDeniedDetected = $false
     
     # System Event Log - Disk errors
     Write-Log "Scanning System log for disk errors..." "INFO"
@@ -359,19 +360,72 @@ function Get-EventLogErrors {
     
     if ($sasErrors) {
         $sasErrorCount = ($sasErrors | Measure-Object).Count
-        Write-Log "  Found $sasErrorCount SAS-related events:" "WARNING"
-        
-        $sasErrors | Select-Object -First 5 | ForEach-Object {
-            Write-Log "  [$($_.TimeCreated)] $($_.ProviderName) - $($_.LevelDisplayName)" "WARNING"
-            $firstLine = ($_.Message -split "`n")[0]
-            Write-Log "    $firstLine" "WARNING"
+
+        $sasDeleteErrors = $sasErrors | Where-Object {
+            $_.Message -match 'hc_disk_delete_library:\s*Access is denied' -or
+            $_.Message -match 'hc_disk_delete:.*Return code from system:\s*5' -or
+            $_.Message -match 'Directory cannot be deleted'
         }
-        
-        if ($sasErrorCount -gt 5) {
-            Write-Log "  ... and $($sasErrorCount - 5) more SAS errors" "WARNING"
+
+        $sasArmNoise = $sasErrors | Where-Object {
+            $_.Message -match 'ARM Application data not available'
         }
-        
-        $foundIssues = $true
+
+        if ($sasDeleteErrors) {
+            $sasDeleteAccessDeniedDetected = $true
+
+            # De-duplicate repeated SAS entries with the same timestamp and first message line.
+            $dedupedDeleteEvents = $sasDeleteErrors |
+                Select-Object @{Name='TimeKey';Expression={$_.TimeCreated.ToString('s')}}, @{Name='FirstLine';Expression={(($_.Message -split "`n")[0]).Trim()}}, ProviderName, LevelDisplayName |
+                Group-Object TimeKey, FirstLine |
+                ForEach-Object { $_.Group | Select-Object -First 1 }
+
+            $deleteCount = ($dedupedDeleteEvents | Measure-Object).Count
+            Write-Log "  Found $deleteCount SAS WORK delete access-denied events (Return code 5 / directory cannot be deleted):" "WARNING"
+
+            $dedupedDeleteEvents | Select-Object -First 5 | ForEach-Object {
+                Write-Log "  [$($_.TimeKey)] $($_.ProviderName) - $($_.LevelDisplayName)" "WARNING"
+                Write-Log "    $($_.FirstLine)" "WARNING"
+            }
+
+            if ($deleteCount -gt 5) {
+                Write-Log "  ... and $($deleteCount - 5) more delete access-denied SAS events" "WARNING"
+            }
+
+            $foundIssues = $true
+        }
+
+        $otherSasErrors = @($sasErrors | Where-Object {
+            $_.Message -notmatch 'ARM Application data not available' -and
+            $_.Message -notmatch 'hc_disk_delete_library:\s*Access is denied' -and
+            $_.Message -notmatch 'hc_disk_delete:.*Return code from system:\s*5' -and
+            $_.Message -notmatch 'Directory cannot be deleted'
+        })
+
+        if ($otherSasErrors.Count -gt 0) {
+            Write-Log "  Found $($otherSasErrors.Count) other SAS-related error events:" "WARNING"
+
+            $otherSasErrors | Select-Object -First 3 | ForEach-Object {
+                Write-Log "  [$($_.TimeCreated)] $($_.ProviderName) - $($_.LevelDisplayName)" "WARNING"
+                $firstLine = ($_.Message -split "`n")[0]
+                Write-Log "    $firstLine" "WARNING"
+            }
+
+            if ($otherSasErrors.Count -gt 3) {
+                Write-Log "  ... and $($otherSasErrors.Count - 3) more SAS-related error events" "WARNING"
+            }
+
+            $foundIssues = $true
+        }
+
+        if ($sasArmNoise) {
+            $armCount = ($sasArmNoise | Measure-Object).Count
+            Write-Log "  Found $armCount SAS ARM telemetry events ('ARM Application data not available') - tracked as informational noise unless accompanied by delete/access errors." "INFO"
+        }
+
+        if (-not $sasDeleteErrors -and $otherSasErrors.Count -eq 0) {
+            Write-Log "  SAS errors found are informational telemetry only." "INFO"
+        }
     } else {
         Write-Log "  ✓ No SAS errors found" "SUCCESS"
     }
@@ -400,6 +454,9 @@ function Get-EventLogErrors {
             $foundIssues = $true
         } else {
             Write-Log "  ✓ No access denied events found" "SUCCESS"
+            if ($sasDeleteAccessDeniedDetected) {
+                Write-Log "  NOTE: SAS reported Access Denied, but Security log has no matching events. This is common when Object Access auditing/SACL is not enabled on the WORK path." "INFO"
+            }
         }
     } catch {
         Write-Log "  (Security log check requires admin privileges)" "INFO"

@@ -476,6 +476,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Change |
 |--------|
 | Updated `scripts/Custom Scripts/SAS/Test-SASWorkDirectory.ps1` — added drive profile diagnostics with explicit ephemeral drive awareness (`G:`/`U:`), improved I/O failure detail logging (exception type, inner exception, HResult), and adaptive low-space warning threshold for ephemeral scratch disks |
+| Updated `scripts/Custom Scripts/SAS/Test-SASWorkDirectory.ps1` — refined SAS Application event analysis: explicit classification of `hc_disk_delete*` access-denied (`Return code 5`) as actionable failures, de-duplication of repeated SAS events, and informational handling of `ARM Application data not available` telemetry noise |
 | Updated `scripts/Custom Scripts/SAS/readme.md` — documented ephemeral disk behavior for SAS `WORK`/`USERWORK` and clarified why switching between `G:` and `U:` is not a long-term failover strategy when both are ephemeral |
 
 ### 2026-04-13
