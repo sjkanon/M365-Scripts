@@ -145,9 +145,12 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
   - Dry-run mode (`-WhatIf`) — shows what would change without applying
 - **Desktop** — deploy lockscreen to start and desktop; set corporate wallpaper via Intune:
   - `Set-CorporateWallpaper.ps1` — generic, reusable per customer; only the CONFIGURATION block needs updating
+  - `Make-lockscreen.ps1` — applies the same corporate image as Windows lockscreen via PersonalizationCSP
   - Downloads wallpaper from a public URL; compares SHA256 hash against existing file — skips if already up to date, applies if new or changed
+  - Lockscreen flow downloads from internet via `Invoke-WebRequest`, validates image headers (`jpg/png/bmp`), blocks HTML responses, and normalizes common GitHub blob/raw URLs
   - Applies via PersonalizationCSP (MDM enforcement), WinAPI (immediate), HKCU registry (style), and Default User profile (new accounts)
   - Log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-<CLIENTNAME>.log`
+  - Lockscreen log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateLockscreen-<CLIENTNAME>.log`
   - Deploy via Intune: **Run as SYSTEM**, 64-bit PowerShell
 
   | Variable | Description |
@@ -370,9 +373,13 @@ M365-Scripts/
     │   │       └── Restart-Time-Sync.ps1
     │   ├── Intune/Desktop/
     │   │   ├── Add Lockscreen to start and desktop/
-    │   │   └── Background/Desktop/
-    │   │       ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
-    │   │       └── readme.md
+    │   │   └── Background/
+    │   │       ├── Desktop/
+    │   │       │   ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
+    │   │       │   └── readme.md
+    │   │       └── Lockscreen/
+    │   │           ├── Make-lockscreen.ps1         ← corporate lockscreen via Intune (validated download, PersonalizationCSP)
+    │   │           └── readme.md
     │   ├── DNS/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
     │   │   ├── example-records.csv
@@ -471,6 +478,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-04-16
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Intune/Desktop/Background/Lockscreen/Make-lockscreen.ps1` to v2.0 — aligned lockscreen source with corporate wallpaper config (`$ImageUrl`, `$ClientName`), replaced direct `WebClient` with validated internet download flow (`Invoke-WebRequest`), added GitHub blob/raw URL normalization, image signature checks (`jpg/png/bmp`), HTML-response guard, structured Intune logging, and safer temporary download handling |
+| Added `scripts/Custom Scripts/Intune/Desktop/Background/Lockscreen/readme.md` — documentation for configuration, deployment, logging, workflow, and lockscreen-specific version history |
+| Updated root `readme.md` — expanded Intune Desktop/Background documentation and repository structure to include the lockscreen script and docs |
 
 ### 2026-04-15
 | Change |
