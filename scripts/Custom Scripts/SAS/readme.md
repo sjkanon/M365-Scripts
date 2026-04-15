@@ -71,6 +71,18 @@ Setup installs `Monitor-SASBatchErrors.ps1` to `C:\Scripts\` and creates a sched
 
 ---
 
+## Ephemeral Disk Note (G: / U:)
+
+If `G:` and `U:` are ephemeral/local scratch disks in your environment:
+
+- They are suitable for SAS `WORK`/`USERWORK` temporary data, but not as persistent storage.
+- Moving workload from `G:` to `U:` is not a structural failover if both are ephemeral.
+- Intermittent `Access is denied` during high I/O loops is often caused by transient locking/filter activity (AV, backup, indexing, EDR) instead of Kerberos expiry.
+
+`Test-SASWorkDirectory.ps1` now logs drive profile context and marks configured ephemeral drive letters explicitly, so failure analysis in redirected logs is clearer.
+
+---
+
 ## Zabbix Integration
 
 Copy `zabbix_sas_monitor.conf` to `C:\Program Files\Zabbix Agent 2\zabbix_agent2.d\`, then restart the Zabbix Agent service. Or use `Setup-SASMonitoring.ps1 -InstallZabbix` to do this automatically.

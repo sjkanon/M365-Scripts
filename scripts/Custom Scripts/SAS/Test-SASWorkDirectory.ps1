@@ -5,6 +5,7 @@
 .DESCRIPTION
     Validates that G:\sas\work and U:\sas\userwork are accessible and functioning
     Performs basic I/O tests without interfering with running SAS jobs
+    Includes drive-profile checks for ephemeral/local scratch disks
     
 .PARAMETER WorkDir
     SAS WORK directory to test (default: G:\sas\work)
@@ -14,6 +15,9 @@
 
 .PARAMETER Iterations
     Number of test iterations (default: 10, not 1000!)
+
+.PARAMETER EphemeralDriveLetters
+    Drive letters that should be treated as ephemeral scratch storage
 
 .EXAMPLE
     .\Test-SASWorkDirectory.ps1
@@ -34,7 +38,10 @@ param(
     [int]$Iterations = 10,
     
     [Parameter(Mandatory=$false)]
-    [int]$EventLogHours = 24
+    [int]$EventLogHours = 24,
+
+    [Parameter(Mandatory=$false)]
+    [string[]]$EphemeralDriveLetters = @("G", "U")
 )
 
 function Write-Log {
@@ -85,6 +92,16 @@ function Test-DirectoryAccess {
         
     } catch {
         Write-Log "  ✗ I/O test failed: $_" "ERROR"
+        Write-Log "  Exception type: $($_.Exception.GetType().FullName)" "ERROR"
+
+        if ($_.Exception.InnerException) {
+            Write-Log "  Inner exception: $($_.Exception.InnerException.Message)" "ERROR"
+        }
+
+        if ($_.Exception.HResult) {
+            $hex = ('0x{0:X8}' -f [uint32]$_.Exception.HResult)
+            Write-Log "  HResult: $hex" "ERROR"
+        }
         
         # Cleanup if file exists
         if (Test-Path $testFile) {
@@ -145,6 +162,11 @@ function Test-DirectoryPerformance {
         } catch {
             $results.Failed++
             Write-Log "  Iteration $i failed: $_" "WARNING"
+
+            if ($_.Exception.HResult) {
+                $hex = ('0x{0:X8}' -f [uint32]$_.Exception.HResult)
+                Write-Log "  Iteration $i HResult: $hex" "WARNING"
+            }
             
             # Cleanup
             if (Test-Path $testFile) {
@@ -177,8 +199,83 @@ function Test-DirectoryPerformance {
     return $results
 }
 
-function Get-DiskSpace {
+function Get-DriveLetterFromPath {
     param([string]$Path)
+
+    try {
+        $qualifier = [System.IO.Path]::GetPathRoot($Path)
+        if ($qualifier -and $qualifier.Length -ge 1) {
+            return $qualifier.Substring(0,1).ToUpperInvariant()
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Get-DriveProfile {
+    param(
+        [string]$Path,
+        [string[]]$EphemeralLetters
+    )
+
+    $driveLetter = Get-DriveLetterFromPath -Path $Path
+    if (-not $driveLetter) {
+        Write-Log "Could not determine drive letter for path: $Path" "WARNING"
+        return [pscustomobject]@{
+            Path = $Path
+            DriveLetter = $null
+            IsEphemeral = $false
+        }
+    }
+
+    $isEphemeral = $EphemeralLetters -contains $driveLetter
+    $driveTypeText = "Unknown"
+    $fileSystem = $null
+
+    try {
+        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$driveLetter`:'" -ErrorAction Stop
+        if ($disk) {
+            $driveTypeText = switch ($disk.DriveType) {
+                2 { "Removable" }
+                3 { "Fixed" }
+                4 { "Network" }
+                5 { "CD-ROM" }
+                6 { "RAM Disk" }
+                default { "Unknown" }
+            }
+            $fileSystem = $disk.FileSystem
+        }
+    } catch {
+        Write-Log "Could not query logical disk info for $driveLetter`: $_" "WARNING"
+    }
+
+    Write-Log "Drive profile for $Path" "INFO"
+    Write-Log "  Drive: $driveLetter`:" "INFO"
+    Write-Log "  Type: $driveTypeText" "INFO"
+    if ($fileSystem) {
+        Write-Log "  File system: $fileSystem" "INFO"
+    }
+
+    if ($isEphemeral) {
+        Write-Log "  NOTE: $driveLetter`: is configured as ephemeral scratch storage" "WARNING"
+    }
+
+    return [pscustomobject]@{
+        Path = $Path
+        DriveLetter = $driveLetter
+        IsEphemeral = $isEphemeral
+        DriveType = $driveTypeText
+        FileSystem = $fileSystem
+    }
+}
+
+function Get-DiskSpace {
+    param(
+        [string]$Path,
+        [bool]$IsEphemeral = $false
+    )
     
     $drive = (Get-Item $Path).PSDrive.Name
     $disk = Get-PSDrive -Name $drive
@@ -193,8 +290,13 @@ function Get-DiskSpace {
     Write-Log "  Used: $usedGB GB"
     Write-Log "  Free: $freeGB GB ($pctFree%)"
     
-    if ($pctFree -lt 10) {
-        Write-Log "  WARNING: Low disk space (<10%)" "WARNING"
+    $threshold = if ($IsEphemeral) { 20 } else { 10 }
+
+    if ($pctFree -lt $threshold) {
+        Write-Log "  WARNING: Low disk space (<$threshold%)" "WARNING"
+        if ($IsEphemeral) {
+            Write-Log "  Ephemeral scratch disks are sensitive to low free space under sustained SAS temp I/O" "WARNING"
+        }
         return $false
     }
     
@@ -346,12 +448,23 @@ if (-not (Get-EventLogErrors -Hours $EventLogHours)) {
 
 Write-Log ""
 
+# Drive profile context
+Write-Log "--- Drive profile checks ---" "INFO"
+$workProfile = Get-DriveProfile -Path $WorkDir -EphemeralLetters $EphemeralDriveLetters
+$userProfile = Get-DriveProfile -Path $UserWorkDir -EphemeralLetters $EphemeralDriveLetters
+
+if ($workProfile.IsEphemeral -and $userProfile.IsEphemeral) {
+    Write-Log "Both WORK and USERWORK are on ephemeral drives. Treat them as scratch only; moving jobs between them is not a long-term failover strategy." "WARNING"
+}
+
+Write-Log ""
+
 # Test G:\sas\work
 Write-Log "--- Testing WORK directory ---" "INFO"
 if (-not (Test-DirectoryAccess -Path $WorkDir)) {
     $allTestsPassed = $false
 } else {
-    if (-not (Get-DiskSpace -Path $WorkDir)) {
+    if (-not (Get-DiskSpace -Path $WorkDir -IsEphemeral $workProfile.IsEphemeral)) {
         $allTestsPassed = $false
     }
     
@@ -370,7 +483,7 @@ Write-Log "--- Testing USERWORK directory ---" "INFO"
 if (-not (Test-DirectoryAccess -Path $UserWorkDir)) {
     $allTestsPassed = $false
 } else {
-    if (-not (Get-DiskSpace -Path $UserWorkDir)) {
+    if (-not (Get-DiskSpace -Path $UserWorkDir -IsEphemeral $userProfile.IsEphemeral)) {
         $allTestsPassed = $false
     }
     
