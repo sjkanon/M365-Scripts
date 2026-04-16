@@ -5,6 +5,7 @@
 .DESCRIPTION
     Validates that G:\sas\work and U:\sas\userwork are accessible and functioning
     Performs basic I/O tests without interfering with running SAS jobs
+    Includes drive-profile checks for ephemeral/local scratch disks
     
 .PARAMETER WorkDir
     SAS WORK directory to test (default: G:\sas\work)
@@ -14,6 +15,15 @@
 
 .PARAMETER Iterations
     Number of test iterations (default: 10, not 1000!)
+
+.PARAMETER EphemeralDriveLetters
+    Drive letters that should be treated as ephemeral scratch storage
+
+.PARAMETER IncludeAVDiagnostics
+    Include antivirus/filter-driver diagnostics (Defender status, exclusions, and event logs)
+
+.PARAMETER AVLogHours
+    Number of hours to look back for AV/filter event logs (default: same as EventLogHours)
 
 .EXAMPLE
     .\Test-SASWorkDirectory.ps1
@@ -34,7 +44,16 @@ param(
     [int]$Iterations = 10,
     
     [Parameter(Mandatory=$false)]
-    [int]$EventLogHours = 24
+    [int]$EventLogHours = 24,
+
+    [Parameter(Mandatory=$false)]
+    [string[]]$EphemeralDriveLetters = @("G", "U"),
+
+    [Parameter(Mandatory=$false)]
+    [bool]$IncludeAVDiagnostics = $true,
+
+    [Parameter(Mandatory=$false)]
+    [int]$AVLogHours = 24
 )
 
 function Write-Log {
@@ -85,6 +104,16 @@ function Test-DirectoryAccess {
         
     } catch {
         Write-Log "  ✗ I/O test failed: $_" "ERROR"
+        Write-Log "  Exception type: $($_.Exception.GetType().FullName)" "ERROR"
+
+        if ($_.Exception.InnerException) {
+            Write-Log "  Inner exception: $($_.Exception.InnerException.Message)" "ERROR"
+        }
+
+        if ($_.Exception.HResult) {
+            $hex = ('0x{0:X8}' -f [uint32]$_.Exception.HResult)
+            Write-Log "  HResult: $hex" "ERROR"
+        }
         
         # Cleanup if file exists
         if (Test-Path $testFile) {
@@ -145,6 +174,11 @@ function Test-DirectoryPerformance {
         } catch {
             $results.Failed++
             Write-Log "  Iteration $i failed: $_" "WARNING"
+
+            if ($_.Exception.HResult) {
+                $hex = ('0x{0:X8}' -f [uint32]$_.Exception.HResult)
+                Write-Log "  Iteration $i HResult: $hex" "WARNING"
+            }
             
             # Cleanup
             if (Test-Path $testFile) {
@@ -177,8 +211,83 @@ function Test-DirectoryPerformance {
     return $results
 }
 
-function Get-DiskSpace {
+function Get-DriveLetterFromPath {
     param([string]$Path)
+
+    try {
+        $qualifier = [System.IO.Path]::GetPathRoot($Path)
+        if ($qualifier -and $qualifier.Length -ge 1) {
+            return $qualifier.Substring(0,1).ToUpperInvariant()
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Get-DriveProfile {
+    param(
+        [string]$Path,
+        [string[]]$EphemeralLetters
+    )
+
+    $driveLetter = Get-DriveLetterFromPath -Path $Path
+    if (-not $driveLetter) {
+        Write-Log "Could not determine drive letter for path: $Path" "WARNING"
+        return [pscustomobject]@{
+            Path = $Path
+            DriveLetter = $null
+            IsEphemeral = $false
+        }
+    }
+
+    $isEphemeral = $EphemeralLetters -contains $driveLetter
+    $driveTypeText = "Unknown"
+    $fileSystem = $null
+
+    try {
+        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$driveLetter`:'" -ErrorAction Stop
+        if ($disk) {
+            $driveTypeText = switch ($disk.DriveType) {
+                2 { "Removable" }
+                3 { "Fixed" }
+                4 { "Network" }
+                5 { "CD-ROM" }
+                6 { "RAM Disk" }
+                default { "Unknown" }
+            }
+            $fileSystem = $disk.FileSystem
+        }
+    } catch {
+        Write-Log "Could not query logical disk info for $driveLetter`: $_" "WARNING"
+    }
+
+    Write-Log "Drive profile for $Path" "INFO"
+    Write-Log "  Drive: $driveLetter`:" "INFO"
+    Write-Log "  Type: $driveTypeText" "INFO"
+    if ($fileSystem) {
+        Write-Log "  File system: $fileSystem" "INFO"
+    }
+
+    if ($isEphemeral) {
+        Write-Log "  NOTE: $driveLetter`: is configured as ephemeral scratch storage" "WARNING"
+    }
+
+    return [pscustomobject]@{
+        Path = $Path
+        DriveLetter = $driveLetter
+        IsEphemeral = $isEphemeral
+        DriveType = $driveTypeText
+        FileSystem = $fileSystem
+    }
+}
+
+function Get-DiskSpace {
+    param(
+        [string]$Path,
+        [bool]$IsEphemeral = $false
+    )
     
     $drive = (Get-Item $Path).PSDrive.Name
     $disk = Get-PSDrive -Name $drive
@@ -193,8 +302,13 @@ function Get-DiskSpace {
     Write-Log "  Used: $usedGB GB"
     Write-Log "  Free: $freeGB GB ($pctFree%)"
     
-    if ($pctFree -lt 10) {
-        Write-Log "  WARNING: Low disk space (<10%)" "WARNING"
+    $threshold = if ($IsEphemeral) { 20 } else { 10 }
+
+    if ($pctFree -lt $threshold) {
+        Write-Log "  WARNING: Low disk space (<$threshold%)" "WARNING"
+        if ($IsEphemeral) {
+            Write-Log "  Ephemeral scratch disks are sensitive to low free space under sustained SAS temp I/O" "WARNING"
+        }
         return $false
     }
     
@@ -211,6 +325,7 @@ function Get-EventLogErrors {
     
     $startTime = (Get-Date).AddHours(-$Hours)
     $foundIssues = $false
+    $sasDeleteAccessDeniedDetected = $false
     
     # System Event Log - Disk errors
     Write-Log "Scanning System log for disk errors..." "INFO"
@@ -257,19 +372,72 @@ function Get-EventLogErrors {
     
     if ($sasErrors) {
         $sasErrorCount = ($sasErrors | Measure-Object).Count
-        Write-Log "  Found $sasErrorCount SAS-related events:" "WARNING"
-        
-        $sasErrors | Select-Object -First 5 | ForEach-Object {
-            Write-Log "  [$($_.TimeCreated)] $($_.ProviderName) - $($_.LevelDisplayName)" "WARNING"
-            $firstLine = ($_.Message -split "`n")[0]
-            Write-Log "    $firstLine" "WARNING"
+
+        $sasDeleteErrors = $sasErrors | Where-Object {
+            $_.Message -match 'hc_disk_delete_library:\s*Access is denied' -or
+            $_.Message -match 'hc_disk_delete:.*Return code from system:\s*5' -or
+            $_.Message -match 'Directory cannot be deleted'
         }
-        
-        if ($sasErrorCount -gt 5) {
-            Write-Log "  ... and $($sasErrorCount - 5) more SAS errors" "WARNING"
+
+        $sasArmNoise = $sasErrors | Where-Object {
+            $_.Message -match 'ARM Application data not available'
         }
-        
-        $foundIssues = $true
+
+        if ($sasDeleteErrors) {
+            $sasDeleteAccessDeniedDetected = $true
+
+            # De-duplicate repeated SAS entries with the same timestamp and first message line.
+            $dedupedDeleteEvents = $sasDeleteErrors |
+                Select-Object @{Name='TimeKey';Expression={$_.TimeCreated.ToString('s')}}, @{Name='FirstLine';Expression={(($_.Message -split "`n")[0]).Trim()}}, ProviderName, LevelDisplayName |
+                Group-Object TimeKey, FirstLine |
+                ForEach-Object { $_.Group | Select-Object -First 1 }
+
+            $deleteCount = ($dedupedDeleteEvents | Measure-Object).Count
+            Write-Log "  Found $deleteCount SAS WORK delete access-denied events (Return code 5 / directory cannot be deleted):" "WARNING"
+
+            $dedupedDeleteEvents | Select-Object -First 5 | ForEach-Object {
+                Write-Log "  [$($_.TimeKey)] $($_.ProviderName) - $($_.LevelDisplayName)" "WARNING"
+                Write-Log "    $($_.FirstLine)" "WARNING"
+            }
+
+            if ($deleteCount -gt 5) {
+                Write-Log "  ... and $($deleteCount - 5) more delete access-denied SAS events" "WARNING"
+            }
+
+            $foundIssues = $true
+        }
+
+        $otherSasErrors = @($sasErrors | Where-Object {
+            $_.Message -notmatch 'ARM Application data not available' -and
+            $_.Message -notmatch 'hc_disk_delete_library:\s*Access is denied' -and
+            $_.Message -notmatch 'hc_disk_delete:.*Return code from system:\s*5' -and
+            $_.Message -notmatch 'Directory cannot be deleted'
+        })
+
+        if ($otherSasErrors.Count -gt 0) {
+            Write-Log "  Found $($otherSasErrors.Count) other SAS-related error events:" "WARNING"
+
+            $otherSasErrors | Select-Object -First 3 | ForEach-Object {
+                Write-Log "  [$($_.TimeCreated)] $($_.ProviderName) - $($_.LevelDisplayName)" "WARNING"
+                $firstLine = ($_.Message -split "`n")[0]
+                Write-Log "    $firstLine" "WARNING"
+            }
+
+            if ($otherSasErrors.Count -gt 3) {
+                Write-Log "  ... and $($otherSasErrors.Count - 3) more SAS-related error events" "WARNING"
+            }
+
+            $foundIssues = $true
+        }
+
+        if ($sasArmNoise) {
+            $armCount = ($sasArmNoise | Measure-Object).Count
+            Write-Log "  Found $armCount SAS ARM telemetry events ('ARM Application data not available') - tracked as informational noise unless accompanied by delete/access errors." "INFO"
+        }
+
+        if (-not $sasDeleteErrors -and $otherSasErrors.Count -eq 0) {
+            Write-Log "  SAS errors found are informational telemetry only." "INFO"
+        }
     } else {
         Write-Log "  ✓ No SAS errors found" "SUCCESS"
     }
@@ -298,6 +466,9 @@ function Get-EventLogErrors {
             $foundIssues = $true
         } else {
             Write-Log "  ✓ No access denied events found" "SUCCESS"
+            if ($sasDeleteAccessDeniedDetected) {
+                Write-Log "  NOTE: SAS reported Access Denied, but Security log has no matching events. This is common when Object Access auditing/SACL is not enabled on the WORK path." "INFO"
+            }
         }
     } catch {
         Write-Log "  (Security log check requires admin privileges)" "INFO"
@@ -329,6 +500,169 @@ function Get-EventLogErrors {
     return -not $foundIssues
 }
 
+function Get-AVDiagnostics {
+    param(
+        [int]$Hours = 24,
+        [string[]]$MonitoredPaths = @()
+    )
+
+    Write-Log "Checking AV/filter diagnostics (last $Hours hours)..." "INFO"
+
+    $startTime = (Get-Date).AddHours(-$Hours)
+    $foundIssues = $false
+
+    # Build a regex that can detect references to monitored paths or drive letters in event messages.
+    $pathRegexParts = @()
+    foreach ($path in $MonitoredPaths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $pathRegexParts += [regex]::Escape($path)
+        $driveLetter = Get-DriveLetterFromPath -Path $path
+        if ($driveLetter) {
+            $pathRegexParts += [regex]::Escape("$driveLetter`:")
+        }
+    }
+    $pathRegex = if ($pathRegexParts.Count -gt 0) { "(" + ($pathRegexParts -join "|") + ")" } else { $null }
+
+    # Windows Defender status
+    if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
+        try {
+            $mpStatus = Get-MpComputerStatus -ErrorAction Stop
+            Write-Log "Windows Defender status:" "INFO"
+            Write-Log "  Real-time protection enabled: $($mpStatus.RealTimeProtectionEnabled)" "INFO"
+            Write-Log "  Behavior monitoring enabled: $($mpStatus.BehaviorMonitorEnabled)" "INFO"
+            Write-Log "  Antivirus enabled: $($mpStatus.AntivirusEnabled)" "INFO"
+        } catch {
+            Write-Log "Could not read Defender status: $_" "WARNING"
+        }
+    } else {
+        Write-Log "Defender cmdlets not available on this host (Get-MpComputerStatus missing)." "INFO"
+    }
+
+    # Defender exclusions (useful to quickly validate WORK/USERWORK exclusions)
+    if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
+        try {
+            $mpPref = Get-MpPreference -ErrorAction Stop
+            $exclusionPaths = @($mpPref.ExclusionPath)
+
+            if ($exclusionPaths.Count -gt 0) {
+                Write-Log "Configured Defender exclusion paths: $($exclusionPaths.Count)" "INFO"
+
+                $matchedExclusions = @()
+                foreach ($ex in $exclusionPaths) {
+                    foreach ($path in $MonitoredPaths) {
+                        if ($ex -like "$path*" -or $path -like "$ex*") {
+                            $matchedExclusions += $ex
+                        }
+                    }
+                }
+
+                $matchedExclusions = @($matchedExclusions | Sort-Object -Unique)
+                if ($matchedExclusions.Count -gt 0) {
+                    Write-Log "Relevant exclusions for monitored SAS paths:" "SUCCESS"
+                    $matchedExclusions | ForEach-Object {
+                        Write-Log "  $_" "SUCCESS"
+                    }
+                } else {
+                    Write-Log "No Defender exclusions found for monitored SAS paths." "WARNING"
+                }
+            } else {
+                Write-Log "No Defender exclusion paths configured." "WARNING"
+            }
+        } catch {
+            Write-Log "Could not read Defender exclusions: $_" "WARNING"
+        }
+    }
+
+    # Defender Operational log: look for blocked/quarantine/CFA events and path-related entries.
+    Write-Log "Scanning Defender Operational log..." "INFO"
+    try {
+        $defenderEvents = Get-WinEvent -FilterHashtable @{
+            LogName = 'Microsoft-Windows-Windows Defender/Operational'
+            StartTime = $startTime
+            Level = 1,2,3
+        } -ErrorAction SilentlyContinue | Where-Object {
+            $_.Message -match 'blocked|quarantine|denied|threat|controlled folder access|ransomware|tamper' -or
+            ($pathRegex -and $_.Message -match $pathRegex)
+        }
+
+        if ($defenderEvents) {
+            $defenderCount = ($defenderEvents | Measure-Object).Count
+            Write-Log "  Found $defenderCount relevant Defender events:" "WARNING"
+
+            $defenderEvents | Select-Object -First 8 | ForEach-Object {
+                Write-Log "  [$($_.TimeCreated)] EventId=$($_.Id) $($_.ProviderName)" "WARNING"
+                $firstLine = ($_.Message -split "`n")[0]
+                Write-Log "    $firstLine" "WARNING"
+            }
+
+            if ($defenderCount -gt 8) {
+                Write-Log "  ... and $($defenderCount - 8) more Defender events" "WARNING"
+            }
+
+            $foundIssues = $true
+        } else {
+            Write-Log "  ✓ No relevant Defender events found" "SUCCESS"
+        }
+    } catch {
+        Write-Log "  Defender Operational log is not accessible or unavailable: $_" "INFO"
+    }
+
+    # Filter driver events in System log
+    Write-Log "Scanning System log for filter driver events..." "INFO"
+    try {
+        $filterEvents = Get-WinEvent -FilterHashtable @{
+            LogName = 'System'
+            StartTime = $startTime
+            Level = 1,2,3
+        } -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProviderName -match 'FilterManager|WdFilter|Microsoft-Windows-FilterManager' -or
+            $_.Message -match 'minifilter|filter driver|wdfilter|access denied|blocked'
+        }
+
+        if ($filterEvents) {
+            $filterCount = ($filterEvents | Measure-Object).Count
+            Write-Log "  Found $filterCount filter-related System events:" "WARNING"
+
+            $filterEvents | Select-Object -First 6 | ForEach-Object {
+                Write-Log "  [$($_.TimeCreated)] EventId=$($_.Id) $($_.ProviderName)" "WARNING"
+                $firstLine = ($_.Message -split "`n")[0]
+                Write-Log "    $firstLine" "WARNING"
+            }
+
+            if ($filterCount -gt 6) {
+                Write-Log "  ... and $($filterCount - 6) more filter-related events" "WARNING"
+            }
+
+            $foundIssues = $true
+        } else {
+            Write-Log "  ✓ No filter-related System events found" "SUCCESS"
+        }
+    } catch {
+        Write-Log "  Could not query filter-related System events: $_" "INFO"
+    }
+
+    # Active minifilter snapshot (fltmc)
+    Write-Log "Collecting active minifilter drivers (fltmc)..." "INFO"
+    try {
+        $fltOutput = & fltmc filters 2>$null
+        if ($LASTEXITCODE -eq 0 -and $fltOutput) {
+            $filterLines = @($fltOutput | Select-Object -Skip 2)
+            if ($filterLines.Count -gt 0) {
+                Write-Log "  Active minifilters (top 10):" "INFO"
+                $filterLines | Select-Object -First 10 | ForEach-Object {
+                    Write-Log "  $_" "INFO"
+                }
+            }
+        } else {
+            Write-Log "  fltmc not available or returned no data." "INFO"
+        }
+    } catch {
+        Write-Log "  Could not run fltmc: $_" "INFO"
+    }
+
+    return -not $foundIssues
+}
+
 # Main execution
 Write-Log "=== SAS Work Directory Health Check ===" "INFO"
 Write-Log ""
@@ -346,12 +680,34 @@ if (-not (Get-EventLogErrors -Hours $EventLogHours)) {
 
 Write-Log ""
 
+if ($IncludeAVDiagnostics) {
+    Write-Log "--- Checking AV / filter diagnostics ---" "INFO"
+    $effectiveAVHours = if ($AVLogHours -gt 0) { $AVLogHours } else { $EventLogHours }
+    if (-not (Get-AVDiagnostics -Hours $effectiveAVHours -MonitoredPaths @($WorkDir, $UserWorkDir))) {
+        Write-Log "AV/filter diagnostics found potentially relevant signals - see details above" "WARNING"
+    } else {
+        Write-Log "AV/filter diagnostics did not find relevant signals" "SUCCESS"
+    }
+    Write-Log ""
+}
+
+# Drive profile context
+Write-Log "--- Drive profile checks ---" "INFO"
+$workProfile = Get-DriveProfile -Path $WorkDir -EphemeralLetters $EphemeralDriveLetters
+$userProfile = Get-DriveProfile -Path $UserWorkDir -EphemeralLetters $EphemeralDriveLetters
+
+if ($workProfile.IsEphemeral -and $userProfile.IsEphemeral) {
+    Write-Log "Both WORK and USERWORK are on ephemeral drives. Treat them as scratch only; moving jobs between them is not a long-term failover strategy." "WARNING"
+}
+
+Write-Log ""
+
 # Test G:\sas\work
 Write-Log "--- Testing WORK directory ---" "INFO"
 if (-not (Test-DirectoryAccess -Path $WorkDir)) {
     $allTestsPassed = $false
 } else {
-    if (-not (Get-DiskSpace -Path $WorkDir)) {
+    if (-not (Get-DiskSpace -Path $WorkDir -IsEphemeral $workProfile.IsEphemeral)) {
         $allTestsPassed = $false
     }
     
@@ -370,7 +726,7 @@ Write-Log "--- Testing USERWORK directory ---" "INFO"
 if (-not (Test-DirectoryAccess -Path $UserWorkDir)) {
     $allTestsPassed = $false
 } else {
-    if (-not (Get-DiskSpace -Path $UserWorkDir)) {
+    if (-not (Get-DiskSpace -Path $UserWorkDir -IsEphemeral $userProfile.IsEphemeral)) {
         $allTestsPassed = $false
     }
     
