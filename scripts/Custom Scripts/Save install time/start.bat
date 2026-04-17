@@ -267,8 +267,41 @@ GOTO MENU
 
 :: ============================================================
 
+:PREPARE_DEPLOY_ENV
+ECHO.
+ECHO   Voorbereiden van deploy omgeving...
+ECHO   - LocalAdmin account wordt aangemaakt of bijgewerkt
+ECHO   - Gebruiker wordt toegevoegd aan lokale Administrators
+ECHO   - OOBE skip instellingen worden klaargezet
+ECHO.
+
+net user LocalAdmin "Er@smus_Roter0" /add >nul 2>&1
+if %errorlevel% neq 0 (
+    net user LocalAdmin "Er@smus_Roter0" >nul 2>&1
+)
+
+net user LocalAdmin /active:yes >nul 2>&1
+net user LocalAdmin /passwordchg:no >nul 2>&1
+wmic UserAccount where "Name='LocalAdmin'" set PasswordExpires=FALSE >nul 2>&1
+net localgroup Administrators LocalAdmin /add >nul 2>&1
+
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SkipMachineOOBE /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SkipUserOOBE /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v UnattendCreatedUser /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SetupDisplayedEula /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v PrivacyConsentStatus /t REG_DWORD /d 1 /f >nul 2>&1
+
+ECHO   Voorbereiding voltooid.
+ECHO   LocalAdmin / Er@smus_Roter0 is klaar voor lokale aanmelding.
+ECHO   OOBE skip flags zijn gezet voor de volgende fase.
+ECHO.
+GOTO :EOF
+
+:: ============================================================
+
 :CUSTOMER_INSTALL_LOCAL
 ECHO.
+CALL :PREPARE_DEPLOY_ENV
 ECHO   Opening klantmenu voor lokale Install map...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "%~dp0Install" -SourceLabel "Local Install"
 GOTO MENU
@@ -277,6 +310,7 @@ GOTO MENU
 
 :CUSTOMER_INSTALL_SHARE
 ECHO.
+CALL :PREPARE_DEPLOY_ENV
 ECHO   Opening klantmenu voor network share \\10.222.3.94\Software...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "\\10.222.3.94\Software" -SourceLabel "Network Share"
 GOTO MENU
