@@ -1,3 +1,22 @@
+#Requires -Version 5.1
+# ==============================================================================
+# Make-lockscreen.ps1
+# Version 2.0 - Uses the same corporate wallpaper source with validated internet download and logging
+#
+# Usage:
+#   Only change the variables in the CONFIGURATION block below.
+#   The rest of the script does not need to be modified.
+#
+# Deploy via Intune:
+#   - Type: PowerShell script or Win32 app
+#   - Run as: SYSTEM
+#   - Run in 64-bit PowerShell: Yes
+#
+# Changelog:
+#   1.0 - Original lockscreen script using direct WebClient download
+#   2.0 - Reworked to match corporate wallpaper configuration, added URL normalization,
+#         image validation, HTML detection, structured logging, and safer download handling
+# ==============================================================================
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # ==============================================================================
