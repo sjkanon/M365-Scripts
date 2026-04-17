@@ -68,6 +68,11 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 
 - Option `D` needs local files: `Browse-InstallScripts.ps1` and the complete `Install` folder next to `start.bat`.
 - Option `E` reads customer folders from `\\10.222.3.94\Software` and needs network access.
+- Before option `D` or `E` opens the deploy browser, `start.bat` prepares the device for deployment:
+   - Creates or updates local admin user `LocalAdmin`
+   - Password: `Er@smus_Roter0`
+   - Adds `LocalAdmin` to the local `Administrators` group
+   - Sets OOBE skip registry flags so the remaining OOBE flow can be skipped more easily
 
 ### Autopilot online (option 4)
 
@@ -108,7 +113,7 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
-| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens `\\10.222.3.94\Software`; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts; documented that option `D` requires copying both `Browse-InstallScripts.ps1` and the full `Install` folder |
+| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens `\\10.222.3.94\Software`; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts; documented that option `D` requires copying both `Browse-InstallScripts.ps1` and the full `Install` folder; options `D` and `E` now create/update local admin `LocalAdmin` (`Er@smus_Roter0`) and set OOBE skip flags before deployment starts |
 
 | Date | Version | Change |
 |---|---|---|
