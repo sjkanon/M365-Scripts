@@ -57,6 +57,8 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | `A` | **Do it all — Intune** — Rename + Autopilot online + Windows Update + restart | ✅ (needs internet + admin account) |
 | `B` | **Rename device** — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`) | ✅ |
 | `C` | **Do it all — AD** — Rename + Domain join + Windows Update + restart | ✅ (needs domain connectivity) |
+| `D` | **Customer install scripts (local)** — open customer menu from local `Install` folder | ✅ |
+| `E` | **Customer install scripts (network share)** — open customer menu from `\\10.222.3.94\Software` | ✅ (needs network access) |
 | `0` | Exit | ✅ |
 
 ### Autopilot online (option 4)
@@ -95,6 +97,10 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 ---
 
 ## Changelog
+
+| Date | Version | Change |
+|---|---|---|
+| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens `\\10.222.3.94\Software`; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts |
 
 | Date | Version | Change |
 |---|---|---|

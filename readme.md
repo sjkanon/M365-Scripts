@@ -246,6 +246,9 @@ Monthly licensing and Azure cost report generator.
 USB toolkit for Windows setup and Autopilot enrollment during OOBE.
 
 - Interactive menu (Device Manager, Autopilot, AD join, device rename, product key, Windows Update, restart)
+- Customer install browser from USB toolkit menu:
+  - Local `Install` folder by customer (`D`)
+  - Network share `\\10.222.3.94\Software` by customer (`E`)
 - Self-elevating, OOBE-compatible via Shift+F10
 - Split "Do it all": `A` = Intune (Rename + Autopilot + Update), `C` = AD (Rename + Domain join + Update)
 
@@ -478,6 +481,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-04-17
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Save install time/start.bat` — added option `D` (customer install scripts from local `Install` folder) and option `E` (customer install scripts from `\\10.222.3.94\Software`) |
+| Added `scripts/Custom Scripts/Save install time/Browse-InstallScripts.ps1` — customer-first browser that lists customer folders as menu items and launches `.ps1`, `.bat`, and `.cmd` scripts |
+| Updated `scripts/Custom Scripts/Save install time/readme.md` — documented new `D`/`E` menu options and changelog entry |
 
 ### 2026-04-16
 | Change |
