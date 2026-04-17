@@ -145,9 +145,12 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
   - Dry-run mode (`-WhatIf`) — shows what would change without applying
 - **Desktop** — deploy lockscreen to start and desktop; set corporate wallpaper via Intune:
   - `Set-CorporateWallpaper.ps1` — generic, reusable per customer; only the CONFIGURATION block needs updating
+  - `Make-lockscreen.ps1` — applies the same corporate image as Windows lockscreen via PersonalizationCSP
   - Downloads wallpaper from a public URL; compares SHA256 hash against existing file — skips if already up to date, applies if new or changed
+  - Lockscreen flow downloads from internet via `Invoke-WebRequest`, validates image headers (`jpg/png/bmp`), blocks HTML responses, and normalizes common GitHub blob/raw URLs
   - Applies via PersonalizationCSP (MDM enforcement), WinAPI (immediate), HKCU registry (style), and Default User profile (new accounts)
   - Log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-<CLIENTNAME>.log`
+  - Lockscreen log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateLockscreen-<CLIENTNAME>.log`
   - Deploy via Intune: **Run as SYSTEM**, 64-bit PowerShell
 
   | Variable | Description |
@@ -243,6 +246,9 @@ Monthly licensing and Azure cost report generator.
 USB toolkit for Windows setup and Autopilot enrollment during OOBE.
 
 - Interactive menu (Device Manager, Autopilot, AD join, device rename, product key, Windows Update, restart)
+- Customer install browser from USB toolkit menu:
+  - Local `Install` folder by customer (`D`)
+  - Network share `\\10.222.3.94\Software` by customer (`E`)
 - Self-elevating, OOBE-compatible via Shift+F10
 - Split "Do it all": `A` = Intune (Rename + Autopilot + Update), `C` = AD (Rename + Domain join + Update)
 
@@ -370,9 +376,13 @@ M365-Scripts/
     │   │       └── Restart-Time-Sync.ps1
     │   ├── Intune/Desktop/
     │   │   ├── Add Lockscreen to start and desktop/
-    │   │   └── Background/Desktop/
-    │   │       ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
-    │   │       └── readme.md
+    │   │   └── Background/
+    │   │       ├── Desktop/
+    │   │       │   ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
+    │   │       │   └── readme.md
+    │   │       └── Lockscreen/
+    │   │           ├── Make-lockscreen.ps1         ← corporate lockscreen via Intune (validated download, PersonalizationCSP)
+    │   │           └── readme.md
     │   ├── DNS/
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
     │   │   ├── example-records.csv
@@ -471,6 +481,20 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-04-17
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Save install time/start.bat` — added option `D` (customer install scripts from local `Install` folder) and option `E` (customer install scripts from `\\10.222.3.94\Software`) |
+| Added `scripts/Custom Scripts/Save install time/Browse-InstallScripts.ps1` — customer-first browser that lists customer folders as menu items and launches `.ps1`, `.bat`, and `.cmd` scripts |
+| Updated `scripts/Custom Scripts/Save install time/readme.md` — documented new `D`/`E` menu options and changelog entry |
+
+### 2026-04-16
+| Change |
+|--------|
+| Updated `scripts/Custom Scripts/Intune/Desktop/Background/Lockscreen/Make-lockscreen.ps1` to v2.0 — aligned lockscreen source with corporate wallpaper config (`$ImageUrl`, `$ClientName`), replaced direct `WebClient` with validated internet download flow (`Invoke-WebRequest`), added GitHub blob/raw URL normalization, image signature checks (`jpg/png/bmp`), HTML-response guard, structured Intune logging, and safer temporary download handling |
+| Added `scripts/Custom Scripts/Intune/Desktop/Background/Lockscreen/readme.md` — documentation for configuration, deployment, logging, workflow, and lockscreen-specific version history |
+| Updated root `readme.md` — expanded Intune Desktop/Background documentation and repository structure to include the lockscreen script and docs |
 
 ### 2026-04-15
 | Change |

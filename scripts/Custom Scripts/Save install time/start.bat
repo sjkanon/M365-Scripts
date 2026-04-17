@@ -42,6 +42,8 @@ ECHO.
 ECHO   A  - DO IT ALL - Intune (Rename + Autopilot online + Update + Restart)
 ECHO   B  - Rename this device (NAME-SERIALNUMBER)
 ECHO   C  - DO IT ALL - AD (Rename + Domain join + Update + Restart)
+ECHO   D  - Klant install scripts (lokale Install map)
+ECHO   E  - Klant install scripts (network share \\10.222.3.94\Software)
 ECHO.
 ECHO   0  - Exit
 ECHO.
@@ -61,6 +63,8 @@ IF /I "%M%"=="9" GOTO RESTART
 IF /I "%M%"=="A" GOTO DOITALL
 IF /I "%M%"=="B" GOTO RENAMEPC
 IF /I "%M%"=="C" GOTO DOITALL_AD
+IF /I "%M%"=="D" GOTO CUSTOMER_INSTALL_LOCAL
+IF /I "%M%"=="E" GOTO CUSTOMER_INSTALL_SHARE
 IF /I "%M%"=="0" GOTO EXIT
 
 ECHO   Invalid option. Try again.
@@ -259,6 +263,22 @@ ECHO.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$serial = (Get-WmiObject Win32_BIOS).SerialNumber.Trim(); $prefix = Read-Host 'Enter device name prefix (e.g. LAPTOP, DESKTOP, NB)'; $newName = ($prefix + '-' + $serial).ToUpper(); if ($newName.Length -gt 15) { Write-Host ('WARNING: name is ' + $newName.Length + ' characters — Windows allows max 15. Truncating.') -ForegroundColor Yellow; $newName = $newName.Substring(0,15) }; Rename-Computer -NewName $newName -Force; Write-Host (''); Write-Host ('Device renamed to: ' + $newName) -ForegroundColor Green; Write-Host 'Restart to apply the new name.'"
 ECHO.
 PAUSE
+GOTO MENU
+
+:: ============================================================
+
+:CUSTOMER_INSTALL_LOCAL
+ECHO.
+ECHO   Opening klantmenu voor lokale Install map...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "%~dp0Install" -SourceLabel "Local Install"
+GOTO MENU
+
+:: ============================================================
+
+:CUSTOMER_INSTALL_SHARE
+ECHO.
+ECHO   Opening klantmenu voor network share \\10.222.3.94\Software...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "\\10.222.3.94\Software" -SourceLabel "Network Share"
 GOTO MENU
 
 :: ============================================================
