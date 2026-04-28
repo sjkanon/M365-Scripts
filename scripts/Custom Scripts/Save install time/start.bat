@@ -42,6 +42,8 @@ ECHO.
 ECHO   A  - DO IT ALL - Intune (Rename + Autopilot online + Update + Restart)
 ECHO   B  - Rename this device (NAME-SERIALNUMBER)
 ECHO   C  - DO IT ALL - AD (Rename + Domain join + Update + Restart)
+ECHO   D  - Klant install scripts (lokale Install map)
+ECHO   E  - Klant install scripts (network share \\10.222.3.94\Software)
 ECHO.
 ECHO   0  - Exit
 ECHO.
@@ -61,6 +63,8 @@ IF /I "%M%"=="9" GOTO RESTART
 IF /I "%M%"=="A" GOTO DOITALL
 IF /I "%M%"=="B" GOTO RENAMEPC
 IF /I "%M%"=="C" GOTO DOITALL_AD
+IF /I "%M%"=="D" GOTO CUSTOMER_INSTALL_LOCAL
+IF /I "%M%"=="E" GOTO CUSTOMER_INSTALL_SHARE
 IF /I "%M%"=="0" GOTO EXIT
 
 ECHO   Invalid option. Try again.
@@ -259,6 +263,56 @@ ECHO.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$serial = (Get-WmiObject Win32_BIOS).SerialNumber.Trim(); $prefix = Read-Host 'Enter device name prefix (e.g. LAPTOP, DESKTOP, NB)'; $newName = ($prefix + '-' + $serial).ToUpper(); if ($newName.Length -gt 15) { Write-Host ('WARNING: name is ' + $newName.Length + ' characters — Windows allows max 15. Truncating.') -ForegroundColor Yellow; $newName = $newName.Substring(0,15) }; Rename-Computer -NewName $newName -Force; Write-Host (''); Write-Host ('Device renamed to: ' + $newName) -ForegroundColor Green; Write-Host 'Restart to apply the new name.'"
 ECHO.
 PAUSE
+GOTO MENU
+
+:: ============================================================
+
+:PREPARE_DEPLOY_ENV
+ECHO.
+ECHO   Voorbereiden van deploy omgeving...
+ECHO   - LocalAdmin account wordt aangemaakt of bijgewerkt
+ECHO   - Gebruiker wordt toegevoegd aan lokale Administrators
+ECHO   - OOBE skip instellingen worden klaargezet
+ECHO.
+
+net user LocalAdmin "Er@smus_Roter0" /add >nul 2>&1
+if %errorlevel% neq 0 (
+    net user LocalAdmin "Er@smus_Roter0" >nul 2>&1
+)
+
+net user LocalAdmin /active:yes >nul 2>&1
+net user LocalAdmin /passwordchg:no >nul 2>&1
+wmic UserAccount where "Name='LocalAdmin'" set PasswordExpires=FALSE >nul 2>&1
+net localgroup Administrators LocalAdmin /add >nul 2>&1
+
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SkipMachineOOBE /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SkipUserOOBE /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v UnattendCreatedUser /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SetupDisplayedEula /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v PrivacyConsentStatus /t REG_DWORD /d 1 /f >nul 2>&1
+
+ECHO   Voorbereiding voltooid.
+ECHO   LocalAdmin / Er@smus_Roter0 is klaar voor lokale aanmelding.
+ECHO   OOBE skip flags zijn gezet voor de volgende fase.
+ECHO.
+GOTO :EOF
+
+:: ============================================================
+
+:CUSTOMER_INSTALL_LOCAL
+ECHO.
+CALL :PREPARE_DEPLOY_ENV
+ECHO   Opening klantmenu voor lokale Install map...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "%~dp0Install" -SourceLabel "Local Install"
+GOTO MENU
+
+:: ============================================================
+
+:CUSTOMER_INSTALL_SHARE
+ECHO.
+CALL :PREPARE_DEPLOY_ENV
+ECHO   Opening klantmenu voor network share \\10.222.3.94\Software...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "\\10.222.3.94\Software" -SourceLabel "Network Share"
 GOTO MENU
 
 :: ============================================================
