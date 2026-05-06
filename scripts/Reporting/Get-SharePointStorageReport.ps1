@@ -101,6 +101,7 @@ if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir
 $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
 $reportCsv   = Join-Path $outputDir "SharePoint_StorageRanked_$ts.csv"
+$reportMd    = Join-Path $outputDir "SharePoint_VersionReport_$ts.md"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
@@ -425,7 +426,12 @@ function Get-SiteDrives {
             # Teams channel libraries, picture libraries, form libraries, etc.
             $resp.value |
                 Where-Object { $_.drive } |
-                ForEach-Object { $drives.Add($_.drive) }
+                ForEach-Object {
+                    $driveObj = $_.drive
+                    $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $_.list.enableVersioning  -Force -ErrorAction SilentlyContinue
+                    $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $_.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
+                    $drives.Add($driveObj)
+                }
             $listUri = $resp.'@odata.nextLink'
         } while ($listUri)
         return $drives
@@ -594,17 +600,19 @@ foreach ($entry in $siteLibraries) {
     if (-not $Apply) {
         $quota = $drive.quota
         $summaryRows.Add([PSCustomObject]@{
-            SiteName        = $siteName
-            SiteUrl         = $site.webUrl
-            Library         = $drive.name
-            UsedGB          = if ($quota.used)      { [math]::Round($quota.used      / 1GB, 3) } else { $null }
-            TotalGB         = if ($quota.total)     { [math]::Round($quota.total     / 1GB, 3) } else { $null }
-            RemainingGB     = if ($quota.remaining) { [math]::Round($quota.remaining / 1GB, 3) } else { $null }
-            State           = $quota.state
-            FileCount       = $null
-            FolderCount     = $null
-            VersionSizeMB   = $null
-            TotalSizeMB     = $null
+            SiteName           = $siteName
+            SiteUrl            = $site.webUrl
+            Library            = $drive.name
+            VersioningEnabled  = $drive.VersioningEnabled
+            MajorVersionLimit  = if ($drive.MajorVersionLimit -eq 0) { 'Unlimited' } else { $drive.MajorVersionLimit }
+            UsedGB             = if ($quota.used)      { [math]::Round($quota.used      / 1GB, 3) } else { $null }
+            TotalGB            = if ($quota.total)     { [math]::Round($quota.total     / 1GB, 3) } else { $null }
+            RemainingGB        = if ($quota.remaining) { [math]::Round($quota.remaining / 1GB, 3) } else { $null }
+            State              = $quota.state
+            FileCount          = $null
+            FolderCount        = $null
+            VersionSizeMB      = $null
+            TotalSizeMB        = $null
         }) | Out-Null
         Write-Host ("        used: {0} GB" -f ([math]::Round(($quota.used ?? 0) / 1GB, 2))) -ForegroundColor DarkGray
         continue
@@ -707,50 +715,59 @@ foreach ($entry in $siteLibraries) {
         [math]::Round($totalSize   / 1MB, 1)) -ForegroundColor DarkGray
 
     $summaryRows.Add([PSCustomObject]@{
-        SiteName        = $siteName
-        SiteUrl         = $site.webUrl
-        Library         = $drive.name
-        UsedGB          = $null
-        TotalGB         = $null
-        RemainingGB     = $null
-        State           = $null
-        FileCount       = $totalFiles
-        FolderCount     = $totalFolders
-        VersionSizeMB   = [math]::Round($versionSize / 1MB, 2)
-        TotalSizeMB     = [math]::Round($totalSize   / 1MB, 2)
+        SiteName          = $siteName
+        SiteUrl           = $site.webUrl
+        Library           = $drive.name
+        VersioningEnabled = $drive.VersioningEnabled
+        MajorVersionLimit = if ($drive.MajorVersionLimit -eq 0) { 'Unlimited' } else { $drive.MajorVersionLimit }
+        UsedGB            = $null
+        TotalGB           = $null
+        RemainingGB       = $null
+        State             = $null
+        FileCount         = $totalFiles
+        FolderCount       = $totalFolders
+        VersionSizeMB     = [math]::Round($versionSize / 1MB, 2)
+        TotalSizeMB       = [math]::Round($totalSize   / 1MB, 2)
     }) | Out-Null
+
+    $verEnabled = $drive.VersioningEnabled
+    $verLimit   = if ($drive.MajorVersionLimit -eq 0) { 'Unlimited' } else { $drive.MajorVersionLimit }
 
     foreach ($item in $folderReportRows) {
         $detailRows.Add([PSCustomObject]@{
-            SiteName         = $siteName
-            SiteUrl          = $site.webUrl
-            Library          = $drive.name
-            ItemType         = $item.ItemType
-            Path             = $item.Path
-            Level            = $item.Level
-            ParentPath       = $item.ParentPath
-            SizeMB           = $item.SizeMB
-            VersionCount     = $item.VersionCount
-            VersionSizeMB    = $item.VersionSizeMB
-            TotalSizeMB      = $item.TotalSizeMB
-            Modified         = $item.Modified
+            SiteName          = $siteName
+            SiteUrl           = $site.webUrl
+            Library           = $drive.name
+            VersioningEnabled = $verEnabled
+            MajorVersionLimit = $verLimit
+            ItemType          = $item.ItemType
+            Path              = $item.Path
+            Level             = $item.Level
+            ParentPath        = $item.ParentPath
+            SizeMB            = $item.SizeMB
+            VersionCount      = $item.VersionCount
+            VersionSizeMB     = $item.VersionSizeMB
+            TotalSizeMB       = $item.TotalSizeMB
+            Modified          = $item.Modified
         }) | Out-Null
     }
 
     foreach ($item in $fileItems) {
         $detailRows.Add([PSCustomObject]@{
-            SiteName         = $siteName
-            SiteUrl          = $site.webUrl
-            Library          = $drive.name
-            ItemType         = $item.ItemType
-            Path             = $item.Path
-            Level            = $item.Level
-            ParentPath       = $item.ParentPath
-            SizeMB           = $item.SizeMB
-            VersionCount     = $item.VersionCount
-            VersionSizeMB    = $item.VersionSizeMB
-            TotalSizeMB      = $item.TotalSizeMB
-            Modified         = $item.Modified
+            SiteName          = $siteName
+            SiteUrl           = $site.webUrl
+            Library           = $drive.name
+            VersioningEnabled = $verEnabled
+            MajorVersionLimit = $verLimit
+            ItemType          = $item.ItemType
+            Path              = $item.Path
+            Level             = $item.Level
+            ParentPath        = $item.ParentPath
+            SizeMB            = $item.SizeMB
+            VersionCount      = $item.VersionCount
+            VersionSizeMB     = $item.VersionSizeMB
+            TotalSizeMB       = $item.TotalSizeMB
+            Modified          = $item.Modified
         }) | Out-Null
     }
 }
@@ -793,6 +810,79 @@ if ($Apply -and $detailRows.Count -gt 0) {
     )
     $detailRows | Export-Csv -Path $reportCsv -NoTypeInformation -Encoding UTF8
     Write-Host ("  Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
+
+    # ── Markdown version report ───────────────────────────────────────────────
+    if (-not $SkipVersions) {
+        $top10Files = @(
+            $detailRows |
+                Where-Object { $_.ItemType -eq 'File' -and $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
+                Sort-Object { [double]$_.VersionSizeMB } -Descending |
+                Select-Object -First 10
+        )
+        $top5Libs = @(
+            $summaryRows |
+                Where-Object { $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
+                Sort-Object { [double]$_.VersionSizeMB } -Descending |
+                Select-Object -First 5
+        )
+
+        $mdLines = [System.Collections.Generic.List[string]]::new()
+        $mdLines.Add('# SharePoint Version History Report')
+        $mdLines.Add('')
+        $mdLines.Add("> Gegenereerd op: $(Get-Date -Format 'dd MMMM yyyy HH:mm')")
+        if ($SiteUrl) { $mdLines.Add("> Site: ``$SiteUrl``") }
+        $mdLines.Add('')
+        $mdLines.Add('---')
+        $mdLines.Add('')
+        $mdLines.Add('## Samenvatting')
+        $mdLines.Add('')
+        $mdLines.Add("| | |")
+        $mdLines.Add("|---|---|")
+        $mdLines.Add(("| Sites gescand | {0} |" -f $sites.Count))
+        $mdLines.Add(("| Totaal bestanden | {0} |" -f $grandFiles))
+        $mdLines.Add(("| Versiedata | {0} MB ({1} GB) |" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)))
+        $mdLines.Add(("| Totaal (huidig + versies) | {0} MB ({1} GB) |" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)))
+        $mdLines.Add('')
+        $mdLines.Add('---')
+        $mdLines.Add('')
+        $mdLines.Add('## Top 5 libraries op versiegrootte')
+        $mdLines.Add('')
+        $mdLines.Add('| # | Versiegrootte (MB) | Versiebeheer | Max. versies | Site | Library |')
+        $mdLines.Add('|---|-------------------:|:------------:|:------------:|------|---------|')
+        $i = 0
+        foreach ($lib in $top5Libs) {
+            $i++
+            $mdLines.Add(("| {0} | {1} | {2} | {3} | {4} | {5} |" -f
+                $i,
+                [math]::Round($lib.VersionSizeMB, 1),
+                $(if ($lib.VersioningEnabled) { 'Aan' } else { 'Uit' }),
+                $(if ($lib.MajorVersionLimit) { $lib.MajorVersionLimit } else { '—' }),
+                $lib.SiteName,
+                $lib.Library))
+        }
+        $mdLines.Add('')
+        $mdLines.Add('---')
+        $mdLines.Add('')
+        $mdLines.Add('## Top 10 bestanden op versiegrootte')
+        $mdLines.Add('')
+        $mdLines.Add('| # | Versiegrootte (MB) | Versies | Library | Pad | Site |')
+        $mdLines.Add('|---|-------------------:|--------:|---------|-----|------|')
+        $i = 0
+        foreach ($f in $top10Files) {
+            $i++
+            $mdLines.Add(("| {0} | {1} | {2} | {3} | {4} | {5} |" -f
+                $i,
+                [math]::Round($f.VersionSizeMB, 1),
+                $f.VersionCount,
+                $f.Library,
+                $f.Path,
+                $f.SiteName))
+        }
+        $mdLines.Add('')
+
+        $mdLines | Set-Content -Path $reportMd -Encoding UTF8
+        Write-Host ("  Rapport  : {0}" -f $reportMd) -ForegroundColor Green
+    }
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
@@ -809,6 +899,42 @@ if ($Apply) {
     Write-Host ("  Total files   : {0}"    -f $grandFiles)
     Write-Host ("  Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
     Write-Host ("  Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
+
+    # ── Top libraries by version history size ─────────────────────────────────
+    Write-Host ""
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-Host "   Top 5 libraries by version history size" -ForegroundColor Cyan
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    $summaryRows |
+        Where-Object { $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
+        Sort-Object { [double]$_.VersionSizeMB } -Descending |
+        Select-Object -First 5 |
+        ForEach-Object {
+            Write-Host ("  {0} MB  [{1}] › {2}" -f
+                [math]::Round($_.VersionSizeMB, 1),
+                $_.SiteName,
+                $_.Library) -ForegroundColor Yellow
+        }
+
+    # ── Top files by version history size ─────────────────────────────────────
+    if (-not $SkipVersions -and $detailRows.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  ================================================" -ForegroundColor Cyan
+        Write-Host "   Top 10 files by version history size" -ForegroundColor Cyan
+        Write-Host "  ================================================" -ForegroundColor Cyan
+        $detailRows |
+            Where-Object { $_.ItemType -eq 'File' -and $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
+            Sort-Object { [double]$_.VersionSizeMB } -Descending |
+            Select-Object -First 10 |
+            ForEach-Object {
+                Write-Host ("  {0} MB  ({1} versies)  {2} › {3}" -f
+                    [math]::Round($_.VersionSizeMB, 1),
+                    $_.VersionCount,
+                    $_.Library,
+                    $_.Path) -ForegroundColor Yellow
+                Write-Host ("          Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
+            }
+    }
 }
 Write-Host ""
 
