@@ -790,7 +790,12 @@ if ($Apply) {
         $siteId   = $site.id
         $siteName = $site.displayName ?? $site.name
 
-        # One recycle bin per site collection — skip sub-sites that share the same collection root
+        # Only root site collections have their own recycle bin.
+        # Sub-webs (URLs with extra path segments beyond /sites/<name>) share the root's bin.
+        # Root patterns: https://tenant.sharepoint.com  or  .../sites/name  or  .../teams/name
+        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
+        if (-not $isRootSiteCollection) { continue }
+
         if (-not $processedRbSiteIds.Add($siteId)) { continue }
 
         Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
