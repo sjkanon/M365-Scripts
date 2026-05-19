@@ -772,6 +772,96 @@ foreach ($entry in $siteLibraries) {
     }
 }
 
+# ── Phase 2b: Recycle bins ───────────────────────────────────────────────────
+if ($Apply) {
+    Write-Host ""
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-Host "   Phase 2b: Recycle bins" -ForegroundColor Cyan
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  NOTE: Recycle bin items count towards SharePoint storage quota." -ForegroundColor DarkGray
+    Write-Host ""
+
+    # SharePoint has two stages: first-stage (user) and second-stage (site collection admin).
+    # The Graph recycleBin/items endpoint returns items from both stages.
+    $processedRbSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($site in $sites) {
+        $siteId   = $site.id
+        $siteName = $site.displayName ?? $site.name
+
+        # One recycle bin per site collection — skip sub-sites that share the same collection root
+        if (-not $processedRbSiteIds.Add($siteId)) { continue }
+
+        Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
+
+        try {
+            $rbItems = [System.Collections.Generic.List[object]]::new()
+
+            if ($script:AppOnlyHeaders) {
+                Update-AppOnlyToken
+                $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
+                         '?$select=id,name,size,deletedDateTime&$top=200'
+                do {
+                    $resp = Invoke-RestMethod -Uri $rbUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp.value | ForEach-Object { $rbItems.Add($_) }
+                    $rbUri = $resp.'@odata.nextLink'
+                } while ($rbUri)
+            } else {
+                # SDK fallback — cmdlet available in Microsoft.Graph.Sites >= 2.x
+                Get-MgSiteRecycleBinItem -SiteId $siteId -All `
+                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
+                    ForEach-Object { $rbItems.Add($_) }
+            }
+
+            $rbSizeBytes = [int64](($rbItems | Where-Object { $_.size } |
+                               Measure-Object -Property size -Sum).Sum ?? 0)
+            $rbCount     = $rbItems.Count
+
+            Write-Host ("        {0} item(s) | {1} MB" -f
+                $rbCount, [math]::Round($rbSizeBytes / 1MB, 1)) -ForegroundColor DarkGray
+
+            $summaryRows.Add([PSCustomObject]@{
+                SiteName          = $siteName
+                SiteUrl           = $site.webUrl
+                Library           = 'Recycle Bin (stage 1 + 2)'
+                VersioningEnabled = $null
+                MajorVersionLimit = $null
+                UsedGB            = $null
+                TotalGB           = $null
+                RemainingGB       = $null
+                State             = $null
+                FileCount         = $rbCount
+                FolderCount       = $null
+                VersionSizeMB     = $null
+                TotalSizeMB       = [math]::Round($rbSizeBytes / 1MB, 2)
+            }) | Out-Null
+
+            foreach ($rbItem in $rbItems) {
+                $detailRows.Add([PSCustomObject]@{
+                    SiteName          = $siteName
+                    SiteUrl           = $site.webUrl
+                    Library           = 'Recycle Bin (stage 1 + 2)'
+                    VersioningEnabled = $null
+                    MajorVersionLimit = $null
+                    ItemType          = 'Deleted'
+                    Path              = $rbItem.name
+                    Level             = $null
+                    ParentPath        = $null
+                    SizeMB            = [math]::Round([int64]($rbItem.size ?? 0) / 1MB, 3)
+                    VersionCount      = $null
+                    VersionSizeMB     = $null
+                    TotalSizeMB       = [math]::Round([int64]($rbItem.size ?? 0) / 1MB, 3)
+                    Modified          = $rbItem.deletedDateTime
+                }) | Out-Null
+            }
+
+        } catch {
+            Write-Host ("        [WARN] Cannot read recycle bin: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+}
+
 # ── Export ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
@@ -893,11 +983,13 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host ("  Sites scanned : {0}" -f $sites.Count)
 
 if ($Apply) {
+    $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
+    $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
+    $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
     $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
-    $grandVer   = ($summaryRows | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
-    $grandFiles = ($summaryRows | Measure-Object -Property FileCount -Sum).Sum ?? 0
     Write-Host ("  Total files   : {0}"    -f $grandFiles)
     Write-Host ("  Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
+    Write-Host ("  Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
     Write-Host ("  Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
 
     # ── Top libraries by version history size ─────────────────────────────────
