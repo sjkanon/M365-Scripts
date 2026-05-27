@@ -277,6 +277,87 @@ try {
     Remove-TempApp; exit 1
 }
 
+function Update-AppOnlyToken {
+    # Silently refreshes the app-only token if it expires within 5 minutes
+    if (-not $script:TokenBody) { return }
+    if ((Get-Date) -lt $script:TokenExpiry) { return }
+
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
+            -Body $script:TokenBody
+        $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+        $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+        Write-Host "  [INFO] App-only token refreshed (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Get-GraphRetryDelaySeconds {
+    param(
+        [int]$Attempt,
+        [object]$ErrorRecord
+    )
+
+    $retryAfter = $null
+    try {
+        $resp = $ErrorRecord.Exception.Response
+        if ($resp -and $resp.Headers) {
+            $retryHeader = $resp.Headers['Retry-After']
+            if ($retryHeader) {
+                [void][int]::TryParse([string]$retryHeader, [ref]$retryAfter)
+            }
+        }
+    } catch {}
+
+    if ($retryAfter -and $retryAfter -gt 0) {
+        return [Math]::Min($retryAfter, 120)
+    }
+
+    return [Math]::Min([int][Math]::Pow(2, [Math]::Max(1, $Attempt)), 60)
+}
+
+function Invoke-GraphGet {
+    param(
+        [string]$Uri,
+        [hashtable]$Headers
+    )
+
+    for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
+        try {
+            Update-AppOnlyToken
+            return Invoke-RestMethod -Uri $Uri -Headers $Headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+        } catch {
+            $statusCode = $null
+            try {
+                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                    $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+            } catch {}
+
+            $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
+            if (-not $isRetryable -and -not $statusCode) {
+                $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
+            }
+
+            if (-not $isRetryable -or $attempt -eq $MaxGraphRetry) {
+                throw
+            }
+
+            $delay = Get-GraphRetryDelaySeconds -Attempt $attempt -ErrorRecord $_
+            Write-Host (
+                "  [INFO] Graph request retry ({0}/{1}) in {2}s: {3}" -f
+                $attempt,
+                $MaxGraphRetry,
+                $delay,
+                $Uri
+            ) -ForegroundColor DarkGray
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 # ── Get sites ─────────────────────────────────────────────────────────────────
 Write-Host "  Retrieving sites..." -ForegroundColor Cyan
 
@@ -400,87 +481,6 @@ function Test-IsFile {
     if ($null -ne $Item.folder) { return $false }
     $ext = if ($Item.name -match '\.([^.]+)$') { ".$($Matches[1].ToLower())" } else { '' }
     return $knownExtensions.Contains($ext)
-}
-
-function Update-AppOnlyToken {
-    # Silently refreshes the app-only token if it expires within 5 minutes
-    if (-not $script:TokenBody) { return }
-    if ((Get-Date) -lt $script:TokenExpiry) { return }
-
-    try {
-        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
-            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
-            -Body $script:TokenBody
-        $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
-        $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
-        Write-Host "  [INFO] App-only token refreshed (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
-    } catch {
-        Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-}
-
-function Get-GraphRetryDelaySeconds {
-    param(
-        [int]$Attempt,
-        [object]$ErrorRecord
-    )
-
-    $retryAfter = $null
-    try {
-        $resp = $ErrorRecord.Exception.Response
-        if ($resp -and $resp.Headers) {
-            $retryHeader = $resp.Headers['Retry-After']
-            if ($retryHeader) {
-                [void][int]::TryParse([string]$retryHeader, [ref]$retryAfter)
-            }
-        }
-    } catch {}
-
-    if ($retryAfter -and $retryAfter -gt 0) {
-        return [Math]::Min($retryAfter, 120)
-    }
-
-    return [Math]::Min([int][Math]::Pow(2, [Math]::Max(1, $Attempt)), 60)
-}
-
-function Invoke-GraphGet {
-    param(
-        [string]$Uri,
-        [hashtable]$Headers
-    )
-
-    for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
-        try {
-            Update-AppOnlyToken
-            return Invoke-RestMethod -Uri $Uri -Headers $Headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-        } catch {
-            $statusCode = $null
-            try {
-                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-                    $statusCode = [int]$_.Exception.Response.StatusCode
-                }
-            } catch {}
-
-            $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
-            if (-not $isRetryable -and -not $statusCode) {
-                $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
-            }
-
-            if (-not $isRetryable -or $attempt -eq $MaxGraphRetry) {
-                throw
-            }
-
-            $delay = Get-GraphRetryDelaySeconds -Attempt $attempt -ErrorRecord $_
-            Write-Host (
-                "  [INFO] Graph request retry ({0}/{1}) in {2}s: {3}" -f
-                $attempt,
-                $MaxGraphRetry,
-                $delay,
-                $Uri
-            ) -ForegroundColor DarkGray
-            Start-Sleep -Seconds $delay
-        }
-    }
 }
 
 function Get-SiteDrives {
