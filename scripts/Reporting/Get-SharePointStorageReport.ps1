@@ -94,7 +94,9 @@ param (
     [string] $CertificateThumbprint,
     [switch] $Apply,
     [switch] $UseHighPrivilege,
-    [switch] $RecycleBinOnly
+    [switch] $RecycleBinOnly,
+    [int] $GraphTimeoutSec = 120,
+    [int] $MaxGraphRetry = 6
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -303,7 +305,7 @@ if ($SiteUrl) {
 
     for ($i = 1; $i -le 6; $i++) {
         try {
-            $response = Invoke-RestMethod -Uri $firstUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $response = Invoke-GraphGet -Uri $firstUri -Headers $script:AppOnlyHeaders
             $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
             $nextUri = $response.'@odata.nextLink'
             $firstDone = $true
@@ -321,7 +323,7 @@ if ($SiteUrl) {
 
     # Continue pagination
     while ($firstDone -and $nextUri) {
-        $response = Invoke-RestMethod -Uri $nextUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+        $response = Invoke-GraphGet -Uri $nextUri -Headers $script:AppOnlyHeaders
         $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
         $nextUri = $response.'@odata.nextLink'
     }
@@ -359,10 +361,9 @@ while ($subSiteQueue.Count -gt 0) {
         $subSites = @()
 
         if ($script:AppOnlyHeaders) {
-            Update-AppOnlyToken
-            $subResp = Invoke-RestMethod `
+            $subResp = Invoke-GraphGet `
                 -Uri     "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites" `
-                -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                -Headers $script:AppOnlyHeaders
             $subSites = @($subResp.value)
         } else {
             $subSites = @(Get-MgSiteSubSite -SiteId $parent.id -All -ErrorAction Stop)
@@ -418,6 +419,70 @@ function Update-AppOnlyToken {
     }
 }
 
+function Get-GraphRetryDelaySeconds {
+    param(
+        [int]$Attempt,
+        [object]$ErrorRecord
+    )
+
+    $retryAfter = $null
+    try {
+        $resp = $ErrorRecord.Exception.Response
+        if ($resp -and $resp.Headers) {
+            $retryHeader = $resp.Headers['Retry-After']
+            if ($retryHeader) {
+                [void][int]::TryParse([string]$retryHeader, [ref]$retryAfter)
+            }
+        }
+    } catch {}
+
+    if ($retryAfter -and $retryAfter -gt 0) {
+        return [Math]::Min($retryAfter, 120)
+    }
+
+    return [Math]::Min([int][Math]::Pow(2, [Math]::Max(1, $Attempt)), 60)
+}
+
+function Invoke-GraphGet {
+    param(
+        [string]$Uri,
+        [hashtable]$Headers
+    )
+
+    for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
+        try {
+            Update-AppOnlyToken
+            return Invoke-RestMethod -Uri $Uri -Headers $Headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+        } catch {
+            $statusCode = $null
+            try {
+                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                    $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+            } catch {}
+
+            $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
+            if (-not $isRetryable -and -not $statusCode) {
+                $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
+            }
+
+            if (-not $isRetryable -or $attempt -eq $MaxGraphRetry) {
+                throw
+            }
+
+            $delay = Get-GraphRetryDelaySeconds -Attempt $attempt -ErrorRecord $_
+            Write-Host (
+                "  [INFO] Graph request retry ({0}/{1}) in {2}s: {3}" -f
+                $attempt,
+                $MaxGraphRetry,
+                $delay,
+                $Uri
+            ) -ForegroundColor DarkGray
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Get-SiteDrives {
     # Uses /lists?$expand=drive to return ALL document libraries per site,
     # including Site Pages, Site Assets, Teams channels, and custom libraries
@@ -429,7 +494,7 @@ function Get-SiteDrives {
         $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
                    '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
         do {
-            $resp = Invoke-RestMethod -Uri $listUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
             # Keep any list that has an associated drive — covers document libraries,
             # Teams channel libraries, picture libraries, form libraries, etc.
             $resp.value |
@@ -452,10 +517,14 @@ function Get-VersionSize {
     param([string]$DriveId, [string]$ItemId)
     try {
         if ($script:AppOnlyHeaders) {
-            $resp     = Invoke-RestMethod `
-                -Uri     "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/versions" `
-                -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            $versions = $resp.value
+            $versions = [System.Collections.Generic.List[object]]::new()
+            $versionUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/versions" +
+                          '?$select=id,size,lastModifiedDateTime&$top=200'
+            do {
+                $resp = Invoke-GraphGet -Uri $versionUri -Headers $script:AppOnlyHeaders
+                $resp.value | ForEach-Object { $versions.Add($_) }
+                $versionUri = $resp.'@odata.nextLink'
+            } while ($versionUri)
         } else {
             $versions = Get-MgDriveItemVersion -DriveId $DriveId -DriveItemId $ItemId -ErrorAction Stop
         }
@@ -472,21 +541,30 @@ function Get-AllDriveItems {
     # Iterative breadth-first traversal — no call stack limit, handles any folder depth
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
     $queue   = [System.Collections.Generic.Queue[PSCustomObject]]::new()
+    $processedFolders = 0
+    $processedFiles   = 0
 
     $queue.Enqueue([PSCustomObject]@{ Id = 'root'; Path = '' })
 
     while ($queue.Count -gt 0) {
         $current = $queue.Dequeue()
+        $processedFolders++
+        if ($processedFolders % 25 -eq 0) {
+            Write-Host (
+                "          progress: {0} folders, {1} files scanned..." -f
+                $processedFolders,
+                $processedFiles
+            ) -ForegroundColor DarkGray
+        }
 
         # Collect all children (paginated)
         $children = [System.Collections.Generic.List[object]]::new()
         try {
             if ($script:AppOnlyHeaders) {
-                Update-AppOnlyToken
                 $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$($current.Id)/children" +
                             '?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200'
                 do {
-                    $resp = Invoke-RestMethod -Uri $childUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp = Invoke-GraphGet -Uri $childUri -Headers $script:AppOnlyHeaders
                     $resp.value | ForEach-Object { $children.Add($_) }
                     $childUri = $resp.'@odata.nextLink'
                 } while ($childUri)
@@ -503,6 +581,7 @@ function Get-AllDriveItems {
             $path = if ($current.Path) { "$($current.Path)/$($child.name)" } else { $child.name }
 
             if (Test-IsFile -Item $child) {
+                $processedFiles++
                 $fileSize = [int64]($child.size ?? 0)
                 $verCount = 0
                 $verSize  = [int64]0
@@ -582,11 +661,10 @@ if ($RecycleBinOnly) {
             $rbItems = [System.Collections.Generic.List[object]]::new()
 
             if ($script:AppOnlyHeaders) {
-                Update-AppOnlyToken
                 $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
                          '?$select=id,name,size,deletedDateTime&$top=200'
                 do {
-                    $resp = Invoke-RestMethod -Uri $rbUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
                     $resp.value | ForEach-Object { $rbItems.Add($_) }
                     $rbUri = $resp.'@odata.nextLink'
                 } while ($rbUri)
@@ -942,11 +1020,10 @@ if ($Apply) {
             $rbItems = [System.Collections.Generic.List[object]]::new()
 
             if ($script:AppOnlyHeaders) {
-                Update-AppOnlyToken
                 $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
                          '?$select=id,name,size,deletedDateTime&$top=200'
                 do {
-                    $resp = Invoke-RestMethod -Uri $rbUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
                     $resp.value | ForEach-Object { $rbItems.Add($_) }
                     $rbUri = $resp.'@odata.nextLink'
                 } while ($rbUri)
