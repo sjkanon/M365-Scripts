@@ -47,6 +47,15 @@
 .PARAMETER InstallMissingModules
     If set, installs missing required Microsoft Graph modules in CurrentUser scope.
 
+.PARAMETER BaselineProvider
+    Select baseline source:
+    j0eyv  : JSON import from ConditionalAccessBaseline repo
+    Daniel : DCToolbox baseline deployment (Daniel Chronlund)
+
+.PARAMETER BaselinePrefix
+    Optional prefix for policy names. For Daniel provider this maps to
+    Deploy-DCConditionalAccessBaselinePoC -AddCustomPrefix.
+
 .PARAMETER PolicyName
     Display name of the conditional access policy to remove (Action=RemovePolicy).
 
@@ -84,6 +93,9 @@
 
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1 -RemoveAllBaselinePolicies -RemoveAssociatedGroups -RemoveAssociatedNamedLocations -Force
+
+.EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -BaselineProvider Daniel -PolicyStateOnImport disabled -BaselinePrefix 'PILOT - '
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param (
@@ -108,6 +120,11 @@ param (
 
     [switch]$InstallMissingModules,
 
+    [ValidateSet('j0eyv', 'Daniel')]
+    [string]$BaselineProvider = 'j0eyv',
+
+    [string]$BaselinePrefix = '',
+
     [string]$PolicyName,
 
     [switch]$RemoveAllBaselinePolicies,
@@ -127,7 +144,10 @@ function Write-Warn { param([string]$Message) Write-Host "[WARN] $Message" -Fore
 function Write-Err { param([string]$Message) Write-Host "[ERR]  $Message" -ForegroundColor Red }
 
 function Ensure-RequiredModules {
-    param([switch]$InstallMissing)
+    param(
+        [switch]$InstallMissing,
+        [string]$Provider
+    )
 
     Write-Step 'Checking required modules'
 
@@ -137,6 +157,10 @@ function Ensure-RequiredModules {
         @{ Name = 'Microsoft.Graph.Applications'; MinimumVersion = '2.0.0' }
         @{ Name = 'Microsoft.Graph.Groups'; MinimumVersion = '2.0.0' }
     )
+
+    if ($Provider -eq 'Daniel') {
+        $requiredModules += @{ Name = 'DCToolbox'; MinimumVersion = $null }
+    }
 
     $missing = @()
 
@@ -184,6 +208,64 @@ function Ensure-RequiredModules {
         ) -join "`n"
         throw $hint
     }
+}
+
+function Get-TargetPolicyMatchPattern {
+    param(
+        [string]$Provider,
+        [string]$Prefix
+    )
+
+    if ($Provider -eq 'Daniel') {
+        if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
+            return '^' + [Regex]::Escape($Prefix)
+        }
+        return '^(GLOBAL|OVERRIDE)\s-\s'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
+        return '^' + [Regex]::Escape($Prefix)
+    }
+
+    return '^CA\d{3}-'
+}
+
+function Deploy-DanielBaseline {
+    param(
+        [string]$DesiredState,
+        [string]$Prefix,
+        [switch]$ForceInstallModules
+    )
+
+    Write-Step 'Deploying Daniel Chronlund baseline (DCToolbox)'
+
+    if ($PSVersionTable.PSVersion.Major -lt 7) {
+        throw 'Daniel baseline deployment requires PowerShell 7+ (Linux compatible path).'
+    }
+
+    if ($ForceInstallModules -or -not (Get-Module -ListAvailable -Name DCToolbox)) {
+        Write-Warn 'Installing DCToolbox module...'
+        Install-Module -Name DCToolbox -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+    }
+
+    Import-Module DCToolbox -ErrorAction Stop
+
+    # DCToolbox defaults to report-only unless -SkipReportOnlyMode is used.
+    if ([string]::IsNullOrWhiteSpace($Prefix)) {
+        Deploy-DCConditionalAccessBaselinePoC
+    } else {
+        Deploy-DCConditionalAccessBaselinePoC -AddCustomPrefix $Prefix
+    }
+
+    # Align final state with this script's convention.
+    $pattern = Get-TargetPolicyMatchPattern -Provider 'Daniel' -Prefix $Prefix
+    $targets = Get-MgIdentityConditionalAccessPolicy -All | Where-Object { $_.DisplayName -match $pattern }
+
+    foreach ($policy in $targets) {
+        Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $policy.Id -BodyParameter @{ state = $DesiredState } | Out-Null
+    }
+
+    Write-Ok "Daniel baseline deployed. Policies matched by '$pattern' set to state '$DesiredState'."
 }
 
 function New-MailNickname {
@@ -783,7 +865,9 @@ function Import-ConditionalAccessPolicies {
 function Set-BaselinePolicyState {
     param(
         [string]$State,
-        [string[]]$PolicyNames
+        [string[]]$PolicyNames,
+        [string]$Provider,
+        [string]$Prefix
     )
 
     Write-Step "Setting policy state to $State"
@@ -793,7 +877,8 @@ function Set-BaselinePolicyState {
     if ($PolicyNames -and $PolicyNames.Count -gt 0) {
         $targets = $allPolicies | Where-Object { $PolicyNames -contains $_.DisplayName }
     } else {
-        $targets = $allPolicies | Where-Object { $_.DisplayName -match '^CA\d{3}-' }
+        $pattern = Get-TargetPolicyMatchPattern -Provider $Provider -Prefix $Prefix
+        $targets = $allPolicies | Where-Object { $_.DisplayName -match $pattern }
     }
 
     $changed = 0
@@ -821,7 +906,9 @@ function Remove-ConditionalAccessPolicies {
         [string]$SinglePolicyName,
         [string[]]$PolicyNames,
         [switch]$RemoveAll,
-        [switch]$ForceDelete
+        [switch]$ForceDelete,
+        [string]$Provider,
+        [string]$Prefix
     )
 
     Write-Step 'Removing Conditional Access policies'
@@ -835,7 +922,8 @@ function Remove-ConditionalAccessPolicies {
         if ($PolicyNames -and $PolicyNames.Count -gt 0) {
             $targets = $allPolicies | Where-Object { $PolicyNames -contains $_.DisplayName }
         } else {
-            $targets = $allPolicies | Where-Object { $_.DisplayName -match '^CA\d{3}-' }
+            $pattern = Get-TargetPolicyMatchPattern -Provider $Provider -Prefix $Prefix
+            $targets = $allPolicies | Where-Object { $_.DisplayName -match $pattern }
         }
     } else {
         throw 'For Action=RemovePolicy, use -PolicyName or -RemoveAllBaselinePolicies.'
@@ -1025,7 +1113,7 @@ function Remove-BaselineNamedLocations {
 
 try {
     Write-Step 'Conditional Access Baseline Import'
-    Ensure-RequiredModules -InstallMissing:$InstallMissingModules
+    Ensure-RequiredModules -InstallMissing:$InstallMissingModules -Provider $BaselineProvider
     Connect-GraphIfNeeded -Tenant $TenantId
 
     # Backward-compatible convenience:
@@ -1058,7 +1146,7 @@ try {
             }
         }
 
-        Set-BaselinePolicyState -State $TargetState -PolicyNames $policyNames
+        Set-BaselinePolicyState -State $TargetState -PolicyNames $policyNames -Provider $BaselineProvider -Prefix $BaselinePrefix
         return
     }
 
@@ -1084,7 +1172,7 @@ try {
             }
         }
 
-        Remove-ConditionalAccessPolicies -SinglePolicyName $PolicyName -PolicyNames $policyNames -RemoveAll:$RemoveAllBaselinePolicies -ForceDelete:$Force
+        Remove-ConditionalAccessPolicies -SinglePolicyName $PolicyName -PolicyNames $policyNames -RemoveAll:$RemoveAllBaselinePolicies -ForceDelete:$Force -Provider $BaselineProvider -Prefix $BaselinePrefix
 
         if ($RemoveAssociatedGroups) {
             $groupNames = Get-BaselineGroupNames -RootPath $baselineRootForRemoval
@@ -1096,6 +1184,13 @@ try {
             Remove-BaselineNamedLocations -LocationNames $locationNames
         }
 
+        return
+    }
+
+    if ($Action -eq 'Import' -and $BaselineProvider -eq 'Daniel') {
+        Deploy-DanielBaseline -DesiredState $PolicyStateOnImport -Prefix $BaselinePrefix -ForceInstallModules:$InstallMissingModules
+        Write-Host ''
+        Write-Host 'Done. Daniel baseline deployed (Linux-compatible via PowerShell 7 + DCToolbox).' -ForegroundColor Green
         return
     }
 
