@@ -55,6 +55,12 @@
     Config/ConditionalAccess are removed. Without SourcePath, all policies with
     display name matching ^CA\d{3}- are removed.
 
+.PARAMETER RemoveAssociatedGroups
+    Also remove baseline groups associated with the CA baseline.
+
+.PARAMETER RemoveAssociatedNamedLocations
+    Also remove baseline named locations associated with the CA baseline.
+
 .PARAMETER Force
     Skip confirmation prompts for removals.
 
@@ -75,6 +81,9 @@
 
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1 -Action RemovePolicy -RemoveAllBaselinePolicies -Force
+
+.EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -RemoveAllBaselinePolicies -RemoveAssociatedGroups -RemoveAssociatedNamedLocations -Force
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param (
@@ -102,6 +111,10 @@ param (
     [string]$PolicyName,
 
     [switch]$RemoveAllBaselinePolicies,
+
+    [switch]$RemoveAssociatedGroups,
+
+    [switch]$RemoveAssociatedNamedLocations,
 
     [switch]$Force
 )
@@ -866,10 +879,167 @@ function Remove-ConditionalAccessPolicies {
     Write-Host "  Failed  : $failed"
 }
 
+function Get-BaselineGroupNames {
+    param([string]$RootPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($RootPath)) {
+        $groupsPath = Join-Path $RootPath 'Config/Groups'
+        if (Test-Path -Path $groupsPath -PathType Container) {
+            $names = Get-ChildItem -Path $groupsPath -Filter '*.json' -File |
+                ForEach-Object {
+                    try {
+                        (Get-JsonFileObject -Path $_.FullName).displayName
+                    } catch {
+                        $null
+                    }
+                } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            if ($names) { return @($names | Select-Object -Unique) }
+        }
+    }
+
+    return @(
+        'APP_Microsoft365_E5'
+        'CA-ServiceAccounts'
+        'CA-BreakGlassAccounts - Exclude'
+    )
+}
+
+function Get-BaselineNamedLocationNames {
+    param([string]$RootPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($RootPath)) {
+        $locationsPath = Join-Path $RootPath 'Config/NamedLocations'
+        if (Test-Path -Path $locationsPath -PathType Container) {
+            $names = Get-ChildItem -Path $locationsPath -Filter '*.json' -File |
+                ForEach-Object {
+                    try {
+                        (Get-JsonFileObject -Path $_.FullName).displayName
+                    } catch {
+                        $null
+                    }
+                } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            if ($names) { return @($names | Select-Object -Unique) }
+        }
+    }
+
+    return @(
+        'ALLOWED COUNTRIES'
+        'ALLOWED COUNTRIES - SERVICE ACCOUNTS'
+    )
+}
+
+function Remove-BaselineGroups {
+    param(
+        [string[]]$GroupNames,
+        [switch]$ForceDelete
+    )
+
+    Write-Step 'Removing baseline groups'
+
+    $allGroups = Get-MgGroup -All
+    $targets = @()
+
+    if ($GroupNames -and $GroupNames.Count -gt 0) {
+        $targets += $allGroups | Where-Object { $GroupNames -contains $_.DisplayName }
+    }
+
+    # Fallback pattern for CA exclusion groups
+    $targets += $allGroups | Where-Object { $_.DisplayName -match '^CA\d{3}-.* - Exclude$' }
+    $targets = @($targets | Sort-Object Id -Unique)
+
+    if (-not $targets -or $targets.Count -eq 0) {
+        Write-Warn 'No matching groups found to remove.'
+        return
+    }
+
+    if (-not $ForceDelete) {
+        Write-Warn 'Group removal requested without -Force; groups will still require YES confirmation in remove action.'
+    }
+
+    $removed = 0
+    $failed = 0
+
+    foreach ($group in $targets) {
+        try {
+            if ($PSCmdlet.ShouldProcess($group.DisplayName, 'Remove group')) {
+                Remove-MgGroup -GroupId $group.Id
+                Write-Ok "Removed group: $($group.DisplayName)"
+                $removed++
+            }
+        } catch {
+            Write-Warn "Failed to remove group '$($group.DisplayName)': $($_.Exception.Message)"
+            $failed++
+        }
+    }
+
+    Write-Host ''
+    Write-Host 'Group removal summary:' -ForegroundColor Cyan
+    Write-Host "  Removed : $removed"
+    Write-Host "  Failed  : $failed"
+}
+
+function Remove-BaselineNamedLocations {
+    param([string[]]$LocationNames)
+
+    Write-Step 'Removing baseline named locations'
+
+    $allLocations = Get-MgIdentityConditionalAccessNamedLocation -All
+    $targets = @()
+
+    if ($LocationNames -and $LocationNames.Count -gt 0) {
+        $targets += $allLocations | Where-Object { $LocationNames -contains $_.DisplayName }
+    }
+
+    # Fallback pattern
+    $targets += $allLocations | Where-Object { $_.DisplayName -match '^ALLOWED COUNTRIES' }
+    $targets = @($targets | Sort-Object Id -Unique)
+
+    if (-not $targets -or $targets.Count -eq 0) {
+        Write-Warn 'No matching named locations found to remove.'
+        return
+    }
+
+    $removed = 0
+    $failed = 0
+
+    foreach ($location in $targets) {
+        try {
+            if ($PSCmdlet.ShouldProcess($location.DisplayName, 'Remove named location')) {
+                Remove-MgIdentityConditionalAccessNamedLocation -NamedLocationId $location.Id
+                Write-Ok "Removed named location: $($location.DisplayName)"
+                $removed++
+            }
+        } catch {
+            Write-Warn "Failed to remove named location '$($location.DisplayName)': $($_.Exception.Message)"
+            $failed++
+        }
+    }
+
+    Write-Host ''
+    Write-Host 'Named location removal summary:' -ForegroundColor Cyan
+    Write-Host "  Removed : $removed"
+    Write-Host "  Failed  : $failed"
+}
+
 try {
     Write-Step 'Conditional Access Baseline Import'
     Ensure-RequiredModules -InstallMissing:$InstallMissingModules
     Connect-GraphIfNeeded -Tenant $TenantId
+
+    # Backward-compatible convenience:
+    # allow remove switches without explicitly setting -Action RemovePolicy.
+    if (
+        $Action -eq 'Import' -and (
+            -not [string]::IsNullOrWhiteSpace($PolicyName) -or
+            $RemoveAllBaselinePolicies -or
+            $RemoveAssociatedGroups -or
+            $RemoveAssociatedNamedLocations
+        )
+    ) {
+        $Action = 'RemovePolicy'
+    }
 
     if ($Action -eq 'SetState') {
         $policyNames = @()
@@ -893,9 +1063,14 @@ try {
     }
 
     if ($Action -eq 'RemovePolicy') {
-        $policyNames = @()
+        $baselineRootForRemoval = $null
         if ($SourcePath) {
-            $caPath = Join-Path $SourcePath 'Config/ConditionalAccess'
+            $baselineRootForRemoval = Resolve-BaselinePath -PathFromParam $SourcePath
+        }
+
+        $policyNames = @()
+        if ($baselineRootForRemoval) {
+            $caPath = Join-Path $baselineRootForRemoval 'Config/ConditionalAccess'
             if (Test-Path -Path $caPath -PathType Container) {
                 $policyNames = Get-ChildItem -Path $caPath -Filter '*.json' -File |
                     ForEach-Object {
@@ -910,6 +1085,17 @@ try {
         }
 
         Remove-ConditionalAccessPolicies -SinglePolicyName $PolicyName -PolicyNames $policyNames -RemoveAll:$RemoveAllBaselinePolicies -ForceDelete:$Force
+
+        if ($RemoveAssociatedGroups) {
+            $groupNames = Get-BaselineGroupNames -RootPath $baselineRootForRemoval
+            Remove-BaselineGroups -GroupNames $groupNames -ForceDelete:$Force
+        }
+
+        if ($RemoveAssociatedNamedLocations) {
+            $locationNames = Get-BaselineNamedLocationNames -RootPath $baselineRootForRemoval
+            Remove-BaselineNamedLocations -LocationNames $locationNames
+        }
+
         return
     }
 
