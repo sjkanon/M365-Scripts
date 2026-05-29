@@ -1,5 +1,5 @@
 #Requires -Version 5.1
-<#!
+<#
 .SYNOPSIS
     Import the latest Conditional Access Baseline into a tenant.
 

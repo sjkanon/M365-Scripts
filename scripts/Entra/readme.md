@@ -120,3 +120,47 @@ Bulk-creates M365 users from a CSV file via Microsoft Graph. Defaults to dry-run
 - Dry-run always writes a results CSV — check it before running with `-Apply`
 - Generated passwords are in the results CSV — share securely
 - A license requires `UsageLocation` to be set; the script handles this automatically
+
+---
+
+### Import-ConditionalAccessBaseline.ps1
+
+Imports the latest [ConditionalAccessBaseline](https://github.com/j0eyv/ConditionalAccessBaseline) into your tenant using Microsoft Graph.
+
+What it does:
+- Downloads the latest baseline (or uses `-SourcePath`)
+- Creates/reuses required CA exclusion groups
+- Creates/reuses named locations
+- Remaps old baseline IDs to your tenant IDs
+- Imports Conditional Access policies for all personas/platforms
+- Imports policies as **Off** by default (`state = disabled`)
+
+It also supports a follow-up action to switch imported policies to report-only or enabled.
+
+**Parameters (most used)**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Action` | No | `Import` (default) or `SetState` |
+| `-PolicyStateOnImport` | No | `disabled` (default) or `enabledForReportingButNotEnforced` |
+| `-TargetState` | No | For `SetState`: `disabled`, `enabledForReportingButNotEnforced`, or `enabled` |
+| `-SourcePath` | No | Local baseline folder containing `Config\...` |
+| `-TenantId` | No | Tenant ID or domain |
+| `-UpdateExisting` | No | Update existing policies with matching display names |
+
+**Examples**
+
+```powershell
+# Import latest baseline and keep all CA policies OFF
+.\Import-ConditionalAccessBaseline.ps1
+
+# Import baseline in report-only mode
+.\Import-ConditionalAccessBaseline.ps1 -PolicyStateOnImport enabledForReportingButNotEnforced
+
+# Later: enable imported baseline policies
+.\Import-ConditionalAccessBaseline.ps1 -Action SetState -TargetState enabled
+```
+
+**Notes**
+- Keep at least one break-glass account excluded before enabling policies
+- Review exclusion groups and named locations after import
