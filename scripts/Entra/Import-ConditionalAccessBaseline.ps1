@@ -56,6 +56,15 @@
     Optional prefix for policy names. For Daniel provider this maps to
     Deploy-DCConditionalAccessBaselinePoC -AddCustomPrefix.
 
+.PARAMETER DanielAutoDeployIds
+    Optional list of template IDs for Daniel provider. If set, deployment uses
+    Invoke-DCConditionalAccessGallery -AutoDeployIds instead of
+    Deploy-DCConditionalAccessBaselinePoC.
+
+.PARAMETER DanielUseRecommendedIds
+    For Daniel provider, deploy a curated recommended list of baseline template
+    IDs via Invoke-DCConditionalAccessGallery.
+
 .PARAMETER PolicyName
     Display name of the conditional access policy to remove (Action=RemovePolicy).
 
@@ -96,6 +105,9 @@
 
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1 -BaselineProvider Daniel -PolicyStateOnImport disabled -BaselinePrefix 'PILOT - '
+
+.EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -BaselineProvider Daniel -DanielUseRecommendedIds -BaselinePrefix 'PILOT - '
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param (
@@ -124,6 +136,10 @@ param (
     [string]$BaselineProvider = 'j0eyv',
 
     [string]$BaselinePrefix = '',
+
+    [int[]]$DanielAutoDeployIds,
+
+    [switch]$DanielUseRecommendedIds,
 
     [string]$PolicyName,
 
@@ -231,11 +247,18 @@ function Get-TargetPolicyMatchPattern {
     return '^CA\d{3}-'
 }
 
+function Get-DanielRecommendedTemplateIds {
+    # Version 15 baseline set from Daniel Chronlund's baseline (unique IDs).
+    return @(1010, 1020, 1030, 1040, 1050, 1060, 1070, 1080, 1090, 1100, 2010, 2020, 2040, 2050, 2055, 2060, 2070, 3010, 3020, 3030, 3040, 1)
+}
+
 function Deploy-DanielBaseline {
     param(
         [string]$DesiredState,
         [string]$Prefix,
-        [switch]$ForceInstallModules
+        [switch]$ForceInstallModules,
+        [int[]]$AutoDeployIds,
+        [switch]$UseRecommendedIds
     )
 
     Write-Step 'Deploying Daniel Chronlund baseline (DCToolbox)'
@@ -251,11 +274,29 @@ function Deploy-DanielBaseline {
 
     Import-Module DCToolbox -ErrorAction Stop
 
+    $effectiveIds = $null
+
+    if ($AutoDeployIds -and $AutoDeployIds.Count -gt 0) {
+        $effectiveIds = @($AutoDeployIds | Select-Object -Unique)
+    } elseif ($UseRecommendedIds) {
+        $effectiveIds = Get-DanielRecommendedTemplateIds
+    }
+
     # DCToolbox defaults to report-only unless -SkipReportOnlyMode is used.
-    if ([string]::IsNullOrWhiteSpace($Prefix)) {
-        Deploy-DCConditionalAccessBaselinePoC
+    if ($effectiveIds -and $effectiveIds.Count -gt 0) {
+        Write-Ok "Using Invoke-DCConditionalAccessGallery with AutoDeployIds: $($effectiveIds -join ', ')"
+
+        if ([string]::IsNullOrWhiteSpace($Prefix)) {
+            Invoke-DCConditionalAccessGallery -AutoDeployIds $effectiveIds -SkipDocumentation | Out-Null
+        } else {
+            Invoke-DCConditionalAccessGallery -AddCustomPrefix $Prefix -AutoDeployIds $effectiveIds -SkipDocumentation | Out-Null
+        }
     } else {
-        Deploy-DCConditionalAccessBaselinePoC -AddCustomPrefix $Prefix
+        if ([string]::IsNullOrWhiteSpace($Prefix)) {
+            Deploy-DCConditionalAccessBaselinePoC
+        } else {
+            Deploy-DCConditionalAccessBaselinePoC -AddCustomPrefix $Prefix
+        }
     }
 
     # Align final state with this script's convention.
@@ -264,6 +305,17 @@ function Deploy-DanielBaseline {
 
     foreach ($policy in $targets) {
         Update-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $policy.Id -BodyParameter @{ state = $DesiredState } | Out-Null
+    }
+
+    if ($effectiveIds -and $effectiveIds.Count -gt 0) {
+        $expectedCount = ($effectiveIds | Select-Object -Unique).Count
+        $actualCount = @($targets).Count
+        if ($actualCount -lt $expectedCount) {
+            Write-Warn "Daniel deployment may be incomplete. Expected around $expectedCount policies for selected IDs, found $actualCount matching '$pattern'."
+            Write-Warn 'Possible causes: missing permissions, missing dependencies, or template creation failures in DCToolbox output.'
+        } else {
+            Write-Ok "Daniel deployment completeness check passed: found $actualCount policies for selected IDs."
+        }
     }
 
     Write-Ok "Daniel baseline deployed. Policies matched by '$pattern' set to state '$DesiredState'."
@@ -1189,7 +1241,7 @@ try {
     }
 
     if ($Action -eq 'Import' -and $BaselineProvider -eq 'Daniel') {
-        Deploy-DanielBaseline -DesiredState $PolicyStateOnImport -Prefix $BaselinePrefix -ForceInstallModules:$InstallMissingModules
+        Deploy-DanielBaseline -DesiredState $PolicyStateOnImport -Prefix $BaselinePrefix -ForceInstallModules:$InstallMissingModules -AutoDeployIds $DanielAutoDeployIds -UseRecommendedIds:$DanielUseRecommendedIds
         Write-Host ''
         Write-Host 'Done. Daniel baseline deployed (Linux-compatible via PowerShell 7 + DCToolbox).' -ForegroundColor Green
         return
