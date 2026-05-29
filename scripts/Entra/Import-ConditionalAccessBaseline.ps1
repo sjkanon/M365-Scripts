@@ -160,6 +160,7 @@ function Ensure-RequiredModules {
 
     if ($Provider -eq 'Daniel') {
         $requiredModules += @{ Name = 'DCToolbox'; MinimumVersion = $null }
+        $requiredModules += @{ Name = 'Microsoft.Graph.Identity.Governance'; MinimumVersion = '2.0.0' }
     }
 
     $missing = @()
