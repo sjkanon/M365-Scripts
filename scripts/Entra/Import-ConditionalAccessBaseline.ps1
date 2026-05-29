@@ -43,6 +43,9 @@
 .PARAMETER EnsureIntuneEnrollmentServicePrincipal
     Ensures Microsoft Intune Enrollment service principal exists (recommended).
 
+.PARAMETER InstallMissingModules
+    If set, installs missing required Microsoft Graph modules in CurrentUser scope.
+
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1
 
@@ -51,6 +54,9 @@
 
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1 -Action SetState -TargetState enabled
+
+.EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -InstallMissingModules
 #>
 [CmdletBinding()]
 param (
@@ -71,7 +77,9 @@ param (
 
     [switch]$CreateMissingServicePrincipals,
 
-    [switch]$EnsureIntuneEnrollmentServicePrincipal = $true
+    [switch]$EnsureIntuneEnrollmentServicePrincipal = $true,
+
+    [switch]$InstallMissingModules
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,6 +88,66 @@ function Write-Step { param([string]$Message) Write-Host "`n=== $Message ===" -F
 function Write-Ok { param([string]$Message) Write-Host "[OK]   $Message" -ForegroundColor Green }
 function Write-Warn { param([string]$Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow }
 function Write-Err { param([string]$Message) Write-Host "[ERR]  $Message" -ForegroundColor Red }
+
+function Ensure-RequiredModules {
+    param([switch]$InstallMissing)
+
+    Write-Step 'Checking required modules'
+
+    $requiredModules = @(
+        @{ Name = 'Microsoft.Graph.Authentication'; MinimumVersion = '2.0.0' }
+        @{ Name = 'Microsoft.Graph.Identity.SignIns'; MinimumVersion = '2.0.0' }
+        @{ Name = 'Microsoft.Graph.Applications'; MinimumVersion = '2.0.0' }
+        @{ Name = 'Microsoft.Graph.Groups'; MinimumVersion = '2.0.0' }
+    )
+
+    $missing = @()
+
+    foreach ($mod in $requiredModules) {
+        $available = Get-Module -ListAvailable -Name $mod.Name | Sort-Object Version -Descending | Select-Object -First 1
+        $needsInstall = $false
+
+        if (-not $available) {
+            $needsInstall = $true
+        } elseif ($mod.MinimumVersion -and $available.Version -lt [Version]$mod.MinimumVersion) {
+            $needsInstall = $true
+        }
+
+        if ($needsInstall) {
+            if ($InstallMissing) {
+                try {
+                    Write-Warn "Installing missing module: $($mod.Name)"
+                    Install-Module -Name $mod.Name -MinimumVersion $mod.MinimumVersion -Scope CurrentUser -AllowClobber -Force -ErrorAction Stop
+                    $available = Get-Module -ListAvailable -Name $mod.Name | Sort-Object Version -Descending | Select-Object -First 1
+                } catch {
+                    Write-Warn "Install failed for module '$($mod.Name)': $($_.Exception.Message)"
+                }
+            }
+        }
+
+        if (-not $available) {
+            $missing += "$($mod.Name) (min $($mod.MinimumVersion))"
+            continue
+        }
+
+        if ($mod.MinimumVersion -and $available.Version -lt [Version]$mod.MinimumVersion) {
+            $missing += "$($mod.Name) (installed: $($available.Version), required: $($mod.MinimumVersion))"
+            continue
+        }
+
+        Import-Module -Name $mod.Name -ErrorAction SilentlyContinue
+        Write-Ok "$($mod.Name) $($available.Version)"
+    }
+
+    if ($missing.Count -gt 0) {
+        $hint = @(
+            'Missing required modules:'
+            ($missing | ForEach-Object { " - $_" })
+            'Run scripts/Startup/Install-Modules.ps1 or rerun with -InstallMissingModules.'
+        ) -join "`n"
+        throw $hint
+    }
+}
 
 function New-MailNickname {
     param([string]$DisplayName)
@@ -478,7 +546,7 @@ function Ensure-ServicePrincipalsFromPolicies {
                 New-MgServicePrincipal -AppId $appId | Out-Null
                 Write-Ok "Created service principal for AppId $appId"
             } catch {
-                Write-Warn "Could not create service principal for AppId $appId: $($_.Exception.Message)"
+                Write-Warn "Could not create service principal for AppId ${appId}: $($_.Exception.Message)"
             }
         }
     }
@@ -629,6 +697,7 @@ function Set-BaselinePolicyState {
 
 try {
     Write-Step 'Conditional Access Baseline Import'
+    Ensure-RequiredModules -InstallMissing:$InstallMissingModules
     Connect-GraphIfNeeded -Tenant $TenantId
 
     if ($Action -eq 'SetState') {
