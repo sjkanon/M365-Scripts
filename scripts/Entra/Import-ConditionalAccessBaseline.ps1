@@ -256,6 +256,69 @@ function Remap-IdArray {
     return $result
 }
 
+function Resolve-GroupIds {
+    param(
+        [array]$Ids,
+        [hashtable]$IdMap,
+        [string]$PolicyName
+    )
+
+    if ($null -eq $Ids) { return $Ids }
+
+    $resolved = @()
+    foreach ($id in $Ids) {
+        $value = [string]$id
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+        if ($IdMap.ContainsKey($value)) {
+            $resolved += [string]$IdMap[$value]
+            continue
+        }
+
+        if (Test-Guid -Value $value) {
+            Write-Warn "Policy '$PolicyName': unmapped group ID removed: $value"
+            continue
+        }
+    }
+
+    return @($resolved | Select-Object -Unique)
+}
+
+function Resolve-LocationIds {
+    param(
+        [array]$Ids,
+        [hashtable]$IdMap,
+        [string]$PolicyName
+    )
+
+    if ($null -eq $Ids) { return $Ids }
+
+    $allowedKeywords = @('All', 'AllTrusted')
+    $resolved = @()
+
+    foreach ($id in $Ids) {
+        $value = [string]$id
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+        if ($allowedKeywords -contains $value) {
+            $resolved += $value
+            continue
+        }
+
+        if ($IdMap.ContainsKey($value)) {
+            $resolved += [string]$IdMap[$value]
+            continue
+        }
+
+        if (Test-Guid -Value $value) {
+            Write-Warn "Policy '$PolicyName': unmapped named location ID removed: $value"
+            continue
+        }
+    }
+
+    return @($resolved | Select-Object -Unique)
+}
+
 function Test-Guid {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
@@ -556,7 +619,8 @@ function Build-PolicyBody {
     param(
         [hashtable]$RawPolicy,
         [string]$State,
-        [hashtable]$IdMap
+        [hashtable]$IdMap,
+        [string]$PolicyName
     )
 
     $policy = Remove-GraphMetadata -Object $RawPolicy
@@ -567,20 +631,20 @@ function Build-PolicyBody {
     # Remap group IDs
     if ($policy.conditions -and $policy.conditions.users) {
         if ($policy.conditions.users.includeGroups) {
-            $policy.conditions.users.includeGroups = Remap-IdArray -Ids $policy.conditions.users.includeGroups -IdMap $IdMap
+            $policy.conditions.users.includeGroups = Resolve-GroupIds -Ids $policy.conditions.users.includeGroups -IdMap $IdMap -PolicyName $PolicyName
         }
         if ($policy.conditions.users.excludeGroups) {
-            $policy.conditions.users.excludeGroups = Remap-IdArray -Ids $policy.conditions.users.excludeGroups -IdMap $IdMap
+            $policy.conditions.users.excludeGroups = Resolve-GroupIds -Ids $policy.conditions.users.excludeGroups -IdMap $IdMap -PolicyName $PolicyName
         }
     }
 
     # Remap named location IDs
     if ($policy.conditions -and $policy.conditions.locations) {
         if ($policy.conditions.locations.includeLocations) {
-            $policy.conditions.locations.includeLocations = Remap-IdArray -Ids $policy.conditions.locations.includeLocations -IdMap $IdMap
+            $policy.conditions.locations.includeLocations = Resolve-LocationIds -Ids $policy.conditions.locations.includeLocations -IdMap $IdMap -PolicyName $PolicyName
         }
         if ($policy.conditions.locations.excludeLocations) {
-            $policy.conditions.locations.excludeLocations = Remap-IdArray -Ids $policy.conditions.locations.excludeLocations -IdMap $IdMap
+            $policy.conditions.locations.excludeLocations = Resolve-LocationIds -Ids $policy.conditions.locations.excludeLocations -IdMap $IdMap -PolicyName $PolicyName
         }
     }
 
@@ -627,7 +691,7 @@ function Import-ConditionalAccessPolicies {
                 continue
             }
 
-            $body = Build-PolicyBody -RawPolicy $rawHash -State $State -IdMap $IdMap
+            $body = Build-PolicyBody -RawPolicy $rawHash -State $State -IdMap $IdMap -PolicyName $displayName
             $existing = $existingPolicies | Where-Object DisplayName -eq $displayName | Select-Object -First 1
 
             if ($existing) {
