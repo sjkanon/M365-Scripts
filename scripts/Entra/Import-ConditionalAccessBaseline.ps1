@@ -160,6 +160,22 @@ function New-MailNickname {
     return "$nick$suffix"
 }
 
+function Get-SafeGroupDescription {
+    param([string]$Description)
+
+    if ([string]::IsNullOrWhiteSpace($Description)) { return $null }
+
+    # Remove non-printable control characters that Graph can reject.
+    $clean = ($Description -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', '').Trim()
+    if ([string]::IsNullOrWhiteSpace($clean)) { return $null }
+
+    if ($clean.Length -gt 1024) {
+        $clean = $clean.Substring(0, 1024)
+    }
+
+    return $clean
+}
+
 function ConvertTo-Hashtable {
     param([Parameter(ValueFromPipeline = $true)]$InputObject)
 
@@ -447,13 +463,17 @@ function Import-BaselineGroups {
         $mailEnabled = [bool]$groupObj.mailEnabled
         $securityEnabled = [bool]$groupObj.securityEnabled
         $mailNickname = if ($groupObj.mailNickname) { [string]$groupObj.mailNickname } else { New-MailNickname -DisplayName $displayName }
+        $safeDescription = Get-SafeGroupDescription -Description $description
 
         $createBody = @{
             displayName = $displayName
             mailEnabled = $mailEnabled
             mailNickname = $mailNickname
             securityEnabled = $securityEnabled
-            description = $description
+        }
+
+        if ($safeDescription) {
+            $createBody['description'] = $safeDescription
         }
 
         if ($groupObj.groupTypes -and $groupObj.groupTypes.Count -gt 0) {
