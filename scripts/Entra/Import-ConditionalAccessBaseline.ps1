@@ -18,6 +18,7 @@
 .PARAMETER Action
     Import   : download + import baseline (default)
     SetState : change state of already imported CA baseline policies
+    RemovePolicy : remove one specific CA policy or all baseline CA policies
 
 .PARAMETER PolicyStateOnImport
     State used during Action=Import.
@@ -46,6 +47,17 @@
 .PARAMETER InstallMissingModules
     If set, installs missing required Microsoft Graph modules in CurrentUser scope.
 
+.PARAMETER PolicyName
+    Display name of the conditional access policy to remove (Action=RemovePolicy).
+
+.PARAMETER RemoveAllBaselinePolicies
+    Remove all baseline CA policies. If SourcePath is provided, only names from
+    Config/ConditionalAccess are removed. Without SourcePath, all policies with
+    display name matching ^CA\d{3}- are removed.
+
+.PARAMETER Force
+    Skip confirmation prompts for removals.
+
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1
 
@@ -57,10 +69,16 @@
 
 .EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1 -InstallMissingModules
+
+.EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -Action RemovePolicy -PolicyName "CA402-GuestUsers-IdentityProtection-AllApps-AnyPlatform-SigninFrequency"
+
+.EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -Action RemovePolicy -RemoveAllBaselinePolicies -Force
 #>
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param (
-    [ValidateSet('Import', 'SetState')]
+    [ValidateSet('Import', 'SetState', 'RemovePolicy')]
     [string]$Action = 'Import',
 
     [ValidateSet('disabled', 'enabledForReportingButNotEnforced')]
@@ -79,7 +97,13 @@ param (
 
     [switch]$EnsureIntuneEnrollmentServicePrincipal = $true,
 
-    [switch]$InstallMissingModules
+    [switch]$InstallMissingModules,
+
+    [string]$PolicyName,
+
+    [switch]$RemoveAllBaselinePolicies,
+
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -779,6 +803,69 @@ function Set-BaselinePolicyState {
     Write-Host "  Failed  : $failed"
 }
 
+function Remove-ConditionalAccessPolicies {
+    param(
+        [string]$SinglePolicyName,
+        [string[]]$PolicyNames,
+        [switch]$RemoveAll,
+        [switch]$ForceDelete
+    )
+
+    Write-Step 'Removing Conditional Access policies'
+
+    $allPolicies = Get-MgIdentityConditionalAccessPolicy -All
+    $targets = @()
+
+    if (-not [string]::IsNullOrWhiteSpace($SinglePolicyName)) {
+        $targets = $allPolicies | Where-Object { $_.DisplayName -eq $SinglePolicyName }
+    } elseif ($RemoveAll) {
+        if ($PolicyNames -and $PolicyNames.Count -gt 0) {
+            $targets = $allPolicies | Where-Object { $PolicyNames -contains $_.DisplayName }
+        } else {
+            $targets = $allPolicies | Where-Object { $_.DisplayName -match '^CA\d{3}-' }
+        }
+    } else {
+        throw 'For Action=RemovePolicy, use -PolicyName or -RemoveAllBaselinePolicies.'
+    }
+
+    if (-not $targets -or $targets.Count -eq 0) {
+        Write-Warn 'No matching conditional access policies found to remove.'
+        return
+    }
+
+    if (-not $ForceDelete) {
+        Write-Host ''
+        Write-Warn 'About to remove the following policies:'
+        $targets | Sort-Object DisplayName | ForEach-Object { Write-Host " - $($_.DisplayName)" }
+        $confirm = Read-Host 'Type YES to continue'
+        if ($confirm -ne 'YES') {
+            Write-Warn 'Removal cancelled.'
+            return
+        }
+    }
+
+    $removed = 0
+    $failed = 0
+
+    foreach ($policy in $targets) {
+        try {
+            if ($PSCmdlet.ShouldProcess($policy.DisplayName, 'Remove conditional access policy')) {
+                Remove-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $policy.Id
+                Write-Ok "Removed policy: $($policy.DisplayName)"
+                $removed++
+            }
+        } catch {
+            Write-Warn "Failed to remove policy '$($policy.DisplayName)': $($_.Exception.Message)"
+            $failed++
+        }
+    }
+
+    Write-Host ''
+    Write-Host 'Removal summary:' -ForegroundColor Cyan
+    Write-Host "  Removed : $removed"
+    Write-Host "  Failed  : $failed"
+}
+
 try {
     Write-Step 'Conditional Access Baseline Import'
     Ensure-RequiredModules -InstallMissing:$InstallMissingModules
@@ -802,6 +889,27 @@ try {
         }
 
         Set-BaselinePolicyState -State $TargetState -PolicyNames $policyNames
+        return
+    }
+
+    if ($Action -eq 'RemovePolicy') {
+        $policyNames = @()
+        if ($SourcePath) {
+            $caPath = Join-Path $SourcePath 'Config/ConditionalAccess'
+            if (Test-Path -Path $caPath -PathType Container) {
+                $policyNames = Get-ChildItem -Path $caPath -Filter '*.json' -File |
+                    ForEach-Object {
+                        try {
+                            (Get-JsonFileObject -Path $_.FullName).displayName
+                        } catch {
+                            $null
+                        }
+                    } |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            }
+        }
+
+        Remove-ConditionalAccessPolicies -SinglePolicyName $PolicyName -PolicyNames $policyNames -RemoveAll:$RemoveAllBaselinePolicies -ForceDelete:$Force
         return
     }
 
