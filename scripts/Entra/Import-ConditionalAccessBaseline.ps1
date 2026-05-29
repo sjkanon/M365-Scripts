@@ -56,6 +56,10 @@
     Optional prefix for policy names. For Daniel provider this maps to
     Deploy-DCConditionalAccessBaselinePoC -AddCustomPrefix.
 
+.PARAMETER RemovePrefixes
+    Optional list of policy name prefixes used for Action=RemovePolicy.
+    Example: 'PILOT - ', 'GLOBAL - '
+
 .PARAMETER DanielAutoDeployIds
     Optional list of template IDs for Daniel provider. If set, deployment uses
     Invoke-DCConditionalAccessGallery -AutoDeployIds instead of
@@ -107,6 +111,9 @@
     .\Import-ConditionalAccessBaseline.ps1 -BaselineProvider Daniel -PolicyStateOnImport disabled -BaselinePrefix 'PILOT - '
 
 .EXAMPLE
+    .\Import-ConditionalAccessBaseline.ps1 -Action RemovePolicy -RemoveAllBaselinePolicies -RemovePrefixes 'PILOT - ','GLOBAL - ' -Force
+
+.EXAMPLE
     .\Import-ConditionalAccessBaseline.ps1 -BaselineProvider Daniel -DanielUseRecommendedIds -BaselinePrefix 'PILOT - '
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
@@ -136,6 +143,8 @@ param (
     [string]$BaselineProvider = 'j0eyv',
 
     [string]$BaselinePrefix = '',
+
+    [string[]]$RemovePrefixes,
 
     [int[]]$DanielAutoDeployIds,
 
@@ -237,7 +246,7 @@ function Get-TargetPolicyMatchPattern {
         if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
             return '^' + [Regex]::Escape($Prefix)
         }
-        return '^(GLOBAL|OVERRIDE)\s-\s'
+        return '^(GLOBAL|PILOT|OVERRIDE)\s-\s'
     }
 
     if (-not [string]::IsNullOrWhiteSpace($Prefix)) {
@@ -961,7 +970,8 @@ function Remove-ConditionalAccessPolicies {
         [switch]$RemoveAll,
         [switch]$ForceDelete,
         [string]$Provider,
-        [string]$Prefix
+        [string]$Prefix,
+        [string[]]$Prefixes
     )
 
     Write-Step 'Removing Conditional Access policies'
@@ -974,6 +984,17 @@ function Remove-ConditionalAccessPolicies {
     } elseif ($RemoveAll) {
         if ($PolicyNames -and $PolicyNames.Count -gt 0) {
             $targets = $allPolicies | Where-Object { $PolicyNames -contains $_.DisplayName }
+        } elseif ($Prefixes -and $Prefixes.Count -gt 0) {
+            $targets = foreach ($candidate in $allPolicies) {
+                foreach ($p in $Prefixes) {
+                    if ([string]::IsNullOrWhiteSpace($p)) { continue }
+                    if ($candidate.DisplayName.StartsWith($p)) {
+                        $candidate
+                        break
+                    }
+                }
+            }
+            $targets = @($targets | Sort-Object Id -Unique)
         } else {
             $pattern = Get-TargetPolicyMatchPattern -Provider $Provider -Prefix $Prefix
             $targets = $allPolicies | Where-Object { $_.DisplayName -match $pattern }
@@ -1225,7 +1246,7 @@ try {
             }
         }
 
-        Remove-ConditionalAccessPolicies -SinglePolicyName $PolicyName -PolicyNames $policyNames -RemoveAll:$RemoveAllBaselinePolicies -ForceDelete:$Force -Provider $BaselineProvider -Prefix $BaselinePrefix
+        Remove-ConditionalAccessPolicies -SinglePolicyName $PolicyName -PolicyNames $policyNames -RemoveAll:$RemoveAllBaselinePolicies -ForceDelete:$Force -Provider $BaselineProvider -Prefix $BaselinePrefix -Prefixes $RemovePrefixes
 
         if ($RemoveAssociatedGroups) {
             $groupNames = Get-BaselineGroupNames -RootPath $baselineRootForRemoval
