@@ -6,6 +6,47 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 
 ## Scripts
 
+### Distributionlist.ps1
+
+Resolves members from a Dynamic Distribution Group (Exchange Online) and copies them into a regular Distribution Group.
+Also exports the resolved recipient list to CSV.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-DynamicGroupIdentity` | Yes | Source dynamic distribution group identity |
+| `-TargetGroupIdentity` | Yes | Target regular distribution group identity |
+| `-TargetDisplayName` | No | Display name for new target group |
+| `-TargetAlias` | No | Alias for new target group |
+| `-TargetPrimarySmtpAddress` | No | SMTP address for new target group |
+| `-ClearTargetMembers` | No | Remove existing target members first |
+| `-ExportCsvPath` | No | CSV output path for resolved members |
+| `-SkipMemberAdd` | No | Only export members, do not update target group |
+| `-RenameDynamicGroupTo` | No | Rename source dynamic distribution group after processing |
+
+**Examples**
+
+```powershell
+# Resolve dynamic group and populate regular group
+.\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static"
+
+# Full refresh of target group members
+.\Distributionlist.ps1 -DynamicGroupIdentity sales@contoso.com -TargetGroupIdentity sales-static@contoso.com -ClearTargetMembers
+
+# Dry run
+.\Distributionlist.ps1 -DynamicGroupIdentity "All Staff" -TargetGroupIdentity "All Staff Static" -WhatIf
+
+# Convert and rename the original dynamic group
+.\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static" -RenameDynamicGroupTo "All Sales (Legacy Dynamic)"
+```
+
+**Notes**
+- Requires Exchange Online PowerShell module and active EXO session (`Connect-ExchangeOnline`)
+- Dynamic Distribution Groups are Exchange objects; this script uses Exchange cmdlets
+
+---
+
 ### Remove-M365Users.ps1
 
 Bulk-deletes M365 user accounts from a tenant. Revokes sessions and removes licenses before deletion. Defaults to dry-run mode — pass `-Apply` to perform actual deletions.
@@ -120,6 +161,46 @@ Bulk-creates M365 users from a CSV file via Microsoft Graph. Defaults to dry-run
 - Dry-run always writes a results CSV — check it before running with `-Apply`
 - Generated passwords are in the results CSV — share securely
 - A license requires `UsageLocation` to be set; the script handles this automatically
+
+---
+
+### Get-M365UserLicenses.ps1
+
+Checks assigned licenses for a list of users via Microsoft Graph and exports a CSV report. Supports inline list, CSV, TXT, and pipeline input.
+
+**Input options**
+- `-UserList` with UPNs/emails
+- `-CsvPath` to `.csv` (column: `UserPrincipalName`, `UPN`, or `Mail`)
+- `-CsvPath` to `.txt` (one UPN/email per line)
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-UserList` | * | Array of UPNs/emails |
+| `-CsvPath` | * | Path to CSV/TXT with users |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\UserLicenseReport_<timestamp>.csv`) |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+*Either `-UserList` or `-CsvPath` is required.
+
+**Examples**
+
+```powershell
+# Check specific users
+.\Get-M365UserLicenses.ps1 -UserList "user1@contoso.com","user2@contoso.com"
+
+# Check users from CSV
+.\Get-M365UserLicenses.ps1 -CsvPath .\users.csv
+
+# Pipeline input
+"user1@contoso.com","user2@contoso.com" | .\Get-M365UserLicenses.ps1
+```
+
+**Report output**
+- One row per user-license assignment
+- Unlicensed users are included with `LicenseStatus = Unlicensed`
+- Not found users are included with `LicenseStatus = NotFound`
 
 ---
 
