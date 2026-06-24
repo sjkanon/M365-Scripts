@@ -116,6 +116,7 @@ Assert-ExchangeConnection
 
 Write-Host "Resolving dynamic distribution group: $DynamicGroupIdentity" -ForegroundColor Cyan
 $dynamicGroup = Get-DynamicDistributionGroup -Identity $DynamicGroupIdentity -ErrorAction Stop
+$originalDynamicDisplayName = $dynamicGroup.DisplayName
 
 $resolvedMembers = Get-Recipient -ResultSize Unlimited -RecipientPreviewFilter $dynamicGroup.RecipientFilter |
     Sort-Object -Property PrimarySmtpAddress -Unique
@@ -143,11 +144,25 @@ if ($SkipMemberAdd) {
     return
 }
 
+$renamedDynamicGroup = $false
+if (-not [string]::IsNullOrWhiteSpace($RenameDynamicGroupTo)) {
+    if ($PSCmdlet.ShouldProcess($dynamicGroup.Identity, "Rename dynamic distribution group to $RenameDynamicGroupTo")) {
+        Set-DynamicDistributionGroup -Identity $dynamicGroup.Identity -Name $RenameDynamicGroupTo -DisplayName $RenameDynamicGroupTo -ErrorAction Stop
+        $renamedDynamicGroup = $true
+        Write-Host "Renamed dynamic group to: $RenameDynamicGroupTo" -ForegroundColor Green
+    }
+}
+
 $targetGroup = Get-DistributionGroup -Identity $TargetGroupIdentity -ErrorAction SilentlyContinue
 
 if (-not $targetGroup) {
     if (-not $TargetDisplayName) {
-        $TargetDisplayName = "$($dynamicGroup.DisplayName) Static"
+        if ($renamedDynamicGroup) {
+            $TargetDisplayName = $originalDynamicDisplayName
+        }
+        else {
+            $TargetDisplayName = "$($dynamicGroup.DisplayName) Static"
+        }
     }
 
     if (-not $TargetAlias) {
@@ -223,13 +238,6 @@ foreach ($member in $resolvedMembers) {
     catch {
         $failed++
         Write-Warning "Failed to add $($member.Identity): $($_.Exception.Message)"
-    }
-}
-
-if (-not [string]::IsNullOrWhiteSpace($RenameDynamicGroupTo)) {
-    if ($PSCmdlet.ShouldProcess($dynamicGroup.Identity, "Rename dynamic distribution group to $RenameDynamicGroupTo")) {
-        Set-DynamicDistributionGroup -Identity $dynamicGroup.Identity -Name $RenameDynamicGroupTo -DisplayName $RenameDynamicGroupTo -ErrorAction Stop
-        Write-Host "Renamed dynamic group to: $RenameDynamicGroupTo" -ForegroundColor Green
     }
 }
 
