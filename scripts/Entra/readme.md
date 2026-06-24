@@ -39,6 +39,10 @@ Also exports the resolved recipient list to CSV.
 
 # Convert and rename the original dynamic group
 .\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static" -RenameDynamicGroupTo "All Sales (Legacy Dynamic)"
+
+# Keep the original name on the static group:
+# 1) dynamic group is renamed first, 2) static group is created with the original display name
+.\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales" -RenameDynamicGroupTo "All Sales (Legacy Dynamic)"
 ```
 
 **Notes**
