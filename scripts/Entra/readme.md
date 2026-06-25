@@ -21,7 +21,7 @@ Also exports the resolved recipient list to CSV.
 | `-TargetAlias` | No | Alias for new target group |
 | `-TargetPrimarySmtpAddress` | No | SMTP address for new target group |
 | `-ClearTargetMembers` | No | Remove existing target members first |
-| `-ExportCsvPath` | No | CSV output path for resolved members |
+| `-ExportCsvPath` | No | CSV output path for resolved members (default: `C:\Temp\DynamicGroupMembers_<timestamp>.csv` on Windows, `~/Downloads` on Linux/macOS) |
 | `-SkipMemberAdd` | No | Only export members, do not update target group |
 | `-RenameDynamicGroupTo` | No | Rename source dynamic distribution group after processing |
 

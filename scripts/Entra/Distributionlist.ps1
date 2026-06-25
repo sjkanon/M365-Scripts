@@ -36,6 +36,8 @@
 
 .PARAMETER ExportCsvPath
     CSV export path for resolved members.
+    Default: C:\Temp\DynamicGroupMembers_<timestamp>.csv (Windows)
+             ~/Downloads/DynamicGroupMembers_<timestamp>.csv (Linux/macOS)
 
 .PARAMETER SkipMemberAdd
     Only resolve and export members, do not modify the target group.
@@ -122,8 +124,12 @@ $resolvedMembers = Get-Recipient -ResultSize Unlimited -RecipientPreviewFilter $
     Sort-Object -Property PrimarySmtpAddress -Unique
 
 if (-not $ExportCsvPath) {
+    $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
+    if (-not (Test-Path -LiteralPath $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    }
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $ExportCsvPath = Join-Path -Path (Get-Location) -ChildPath "DynamicGroupMembers_$timestamp.csv"
+    $ExportCsvPath = Join-Path -Path $outputDir -ChildPath "DynamicGroupMembers_$timestamp.csv"
 }
 
 $resolvedMembers |

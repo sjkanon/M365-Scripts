@@ -8,10 +8,40 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 
 | Script | Description |
 |--------|-------------|
+| [`Clear-TempFiles.ps1`](#clear-tempfilesps1) | Clear the shared script temp folder (`C:\Temp` on Windows, `/tmp` on Linux/macOS) |
 | [`Invoke-WindowsActivation.ps1`](#invoke-windowsactivationps1) | Activate Windows, manage product keys and KMS settings |
 | [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
 | [`Time sync/Restart-Time-Sync.ps1`](#time-syncrestart-time-syncps1) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
+
+---
+
+### Clear-TempFiles.ps1
+
+Clears only the shared script temp folder.
+Default target path is `C:\Temp` on Windows and `/tmp` on Linux/macOS.
+Runs in dry-run mode by default and only removes files when `-Apply` is provided.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Apply` | Perform actual deletion (default is dry-run) |
+| `-TempPath` | Override target temp path |
+| `-OlderThanDays` | Only target items older than N days (default: `1`) |
+
+**Examples**
+
+```powershell
+# Dry run
+.\Clear-TempFiles.ps1
+
+# Delete only temp files older than 7 days
+.\Clear-TempFiles.ps1 -Apply -OlderThanDays 7
+
+# Override temp path (example Linux/macOS)
+.\Clear-TempFiles.ps1 -Apply -TempPath /var/tmp
+```
 
 ---
 
