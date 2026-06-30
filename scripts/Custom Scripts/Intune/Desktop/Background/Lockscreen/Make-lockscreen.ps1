@@ -17,6 +17,7 @@
 #   2.0 - Reworked to match corporate wallpaper configuration, added URL normalization,
 #         image validation, HTML detection, structured logging, and safer download handling
 #   2.1 - Added explicit lockscreen refresh step (ShellExperienceHost/LockApp) for faster apply
+#   2.2 - Added no-cache download headers and hash comparison logging for same-URL image updates
 # ==============================================================================
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
@@ -178,7 +179,7 @@ if ($resolvedImageUrl -ne $ImageUrl) {
 
 try {
     Write-Log "Downloading lockscreen image from: $resolvedImageUrl"
-    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempLockScreenPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateLockscreenScript/1.0" }
+    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempLockScreenPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateLockscreenScript/1.0"; "Cache-Control" = "no-cache, no-store, must-revalidate"; "Pragma" = "no-cache"; "Expires" = "0" }
     Write-Log "Image downloaded to temporary path: $tempLockScreenPath"
 } catch {
     Write-Log "ERROR downloading image: $_"
@@ -210,10 +211,30 @@ if (-not $imageType) {
 
 $LockScreenImageValue = Join-Path -Path $LockScreenFolder -ChildPath "$LockScreenBaseName.$imageType"
 
+$newImageHash = (Get-FileHash -Path $tempLockScreenPath -Algorithm SHA256).Hash
+$oldImageHash = $null
+
+if (Test-Path -Path $LockScreenImageValue) {
+    try {
+        $oldImageHash = (Get-FileHash -Path $LockScreenImageValue -Algorithm SHA256).Hash
+    } catch {
+        Write-Log "WARNING: Could not read hash of existing lockscreen image: $_"
+    }
+}
+
 try {
     Move-Item -Path $tempLockScreenPath -Destination $LockScreenImageValue -Force
     Write-Log "Validated image type: $imageType"
     Write-Log "Final lockscreen path: $LockScreenImageValue"
+    if ($oldImageHash) {
+        if ($oldImageHash -eq $newImageHash) {
+            Write-Log "Image content hash unchanged (same URL returned same image)."
+        } else {
+            Write-Log "Image content hash changed (same URL returned updated image)."
+        }
+    } else {
+        Write-Log "No previous image found for hash comparison."
+    }
 } catch {
     Write-Log "ERROR finalizing lockscreen file: $_"
     exit 1
