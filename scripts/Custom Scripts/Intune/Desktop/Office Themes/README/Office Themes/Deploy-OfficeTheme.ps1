@@ -2,7 +2,7 @@
 # Deploy Office Theme
 # ============================================================================
 
-$Source = "C:\temp\VIAS\hosting\2026 Vias institute colours.thmx"
+$Source = "C:\temp\VIAS\hosting\2026 Vias institute colours (2).thmx"
 
 $DestinationFolder = Join-Path $env:APPDATA "Microsoft\Templates\Document Themes"
 $DestinationFile = Join-Path $DestinationFolder "2026 Vias institute colours.thmx"
