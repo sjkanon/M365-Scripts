@@ -1,22 +1,18 @@
-# ============================================================================
-# Deploy Office Theme
-# ============================================================================
+$ThemeName = "2026 Vias institute colours.thmx"
 
-$Source = "C:\temp\VIAS\hosting\2026 Vias institute colours (2).thmx"
+$Source = "C:\ProgramData\FirstIT\OfficeThemes\$ThemeName"
 
 $DestinationFolder = Join-Path $env:APPDATA "Microsoft\Templates\Document Themes"
-$DestinationFile = Join-Path $DestinationFolder "2026 Vias institute colours.thmx"
+$DestinationFile = Join-Path $DestinationFolder $ThemeName
 
-# Maak de doelmap aan indien nodig
 if (!(Test-Path $DestinationFolder)) {
     New-Item -ItemType Directory -Path $DestinationFolder -Force | Out-Null
 }
 
-# Controleer of het bronbestand bestaat
 if (Test-Path $Source) {
-    Copy-Item -Path $Source -Destination $DestinationFile -Force
-    Write-Output "Office theme succesvol gedeployed."
-} else {
-    Write-Error "Bronbestand niet gevonden: $Source"
-    exit 1
+    Copy-Item $Source $DestinationFile -Force
+    Write-Output "Office Theme deployed."
+}
+else {
+    throw "Theme not found: $Source"
 }
