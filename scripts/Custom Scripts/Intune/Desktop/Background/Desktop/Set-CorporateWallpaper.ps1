@@ -19,7 +19,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
 # URL to the wallpaper image (PNG or JPG)
 # Use a publicly accessible URL hosted by or on behalf of the customer
-$ImageUrl = "https://raw.githubusercontent.com/sjkanon/Wallpapers/refs/heads/main/HRL/BACKGROUND.PNG
+$ImageUrl = "https://raw.githubusercontent.com/sjkanon/Wallpapers/refs/heads/main/HRL/BACKGROUND.PNG"
 
 # Display style:
 #   10 = Fill    (recommended — fills screen without distortion)
