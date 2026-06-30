@@ -16,6 +16,7 @@
 #   1.0 - Original lockscreen script using direct WebClient download
 #   2.0 - Reworked to match corporate wallpaper configuration, added URL normalization,
 #         image validation, HTML detection, structured logging, and safer download handling
+#   2.1 - Added explicit lockscreen refresh step (ShellExperienceHost/LockApp) for faster apply
 # ==============================================================================
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
@@ -131,6 +132,25 @@ function Resolve-DownloadUrl {
     return $Url
 }
 
+function Invoke-LockscreenRefresh {
+    # Restart lockscreen-related shell processes so the new image is picked up faster.
+    $processNames = @("ShellExperienceHost", "LockApp")
+
+    foreach ($processName in $processNames) {
+        try {
+            $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
+            if ($processes) {
+                $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+                Write-Log "Refreshed process: $processName"
+            } else {
+                Write-Log "Process not running (skip refresh): $processName"
+            }
+        } catch {
+            Write-Log "WARNING: Could not refresh process $processName : $_"
+        }
+    }
+}
+
 # ==============================================================================
 # SCRIPT START
 # ==============================================================================
@@ -223,9 +243,12 @@ try {
 # Step 4: Apply lockscreen immediately
 try {
     RUNDLL32.EXE USER32.DLL, UpdatePerUserSystemParameters 1, True
-    Write-Log "Lockscreen applied successfully"
+    Write-Log "Lockscreen apply signal sent successfully"
 } catch {
     Write-Log "WARNING: Could not apply immediate update: $_"
 }
+
+# Step 5: Force a lockscreen shell refresh for active sessions
+Invoke-LockscreenRefresh
 
 Write-Log "====== Make-Lockscreen completed successfully ======"
