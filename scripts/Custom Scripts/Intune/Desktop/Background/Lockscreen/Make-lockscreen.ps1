@@ -24,8 +24,8 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 # ==============================================================================
 
 # URL to the lockscreen image (PNG or JPG) - same as Set-CorporateWallpaper.ps1
-$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
-$ClientName = "CUSTOMERNAME"
+$ImageUrl = "https://raw.githubusercontent.com/sjkanon/Wallpapers/refs/heads/main/HRL/LOCKSCREEN.PNG"
+$ClientName = "HRL"
 
 # ==============================================================================
 # INTERNAL VARIABLES
