@@ -1,18 +1,28 @@
-$ThemeName = "2026 Vias institute colours.thmx"
+# ==============================================================================
+# Deploy Office Theme
+# FirstIT
+# ==============================================================================
 
-$Source = "C:\ProgramData\FirstIT\OfficeThemes\$ThemeName"
+# CONFIGURATION
+$ThemeUrl  = "https://raw.githubusercontent.com/FirstITHub/M365-Scripts/refs/heads/main/scripts/Custom%20Scripts/Intune/Desktop/2026%20Vias%20institute%20colours%20(2).thmx"
+$ThemeName = "2026 Vias institute colours (2).thmx"
 
-$DestinationFolder = Join-Path $env:APPDATA "Microsoft\Templates\Document Themes"
-$DestinationFile = Join-Path $DestinationFolder $ThemeName
+# Local storage
+$LocalFolder = "$env:ProgramData\FirstIT\OfficeThemes"
+$LocalFile   = Join-Path $LocalFolder $ThemeName
 
-if (!(Test-Path $DestinationFolder)) {
-    New-Item -ItemType Directory -Path $DestinationFolder -Force | Out-Null
-}
+# Office Theme folder
+$OfficeThemeFolder = Join-Path $env:APPDATA "Microsoft\Templates\Document Themes"
+$OfficeThemeFile   = Join-Path $OfficeThemeFolder $ThemeName
 
-if (Test-Path $Source) {
-    Copy-Item $Source $DestinationFile -Force
-    Write-Output "Office Theme deployed."
-}
-else {
-    throw "Theme not found: $Source"
-}
+# Create folders
+New-Item -ItemType Directory -Path $LocalFolder -Force | Out-Null
+New-Item -ItemType Directory -Path $OfficeThemeFolder -Force | Out-Null
+
+# Download theme
+Invoke-WebRequest -Uri $ThemeUrl -OutFile $LocalFile
+
+# Copy to Office Themes
+Copy-Item -Path $LocalFile -Destination $OfficeThemeFile -Force
+
+Write-Host "Office Theme deployed successfully."
