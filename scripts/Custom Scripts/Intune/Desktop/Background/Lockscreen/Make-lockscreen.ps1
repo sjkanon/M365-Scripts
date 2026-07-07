@@ -16,6 +16,8 @@
 #   1.0 - Original lockscreen script using direct WebClient download
 #   2.0 - Reworked to match corporate wallpaper configuration, added URL normalization,
 #         image validation, HTML detection, structured logging, and safer download handling
+#   2.1 - Added explicit lockscreen refresh step (ShellExperienceHost/LockApp) for faster apply
+#   2.2 - Added no-cache download headers and hash comparison logging for same-URL image updates
 # ==============================================================================
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
@@ -24,8 +26,8 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 # ==============================================================================
 
 # URL to the lockscreen image (PNG or JPG) - same as Set-CorporateWallpaper.ps1
-$ImageUrl = "https://your-cdn.com/CUSTOMERNAME/wallpaper.png"
-$ClientName = "CUSTOMERNAME"
+$ImageUrl = "https://raw.githubusercontent.com/sjkanon/Wallpapers/refs/heads/main/HRL/LOCKSCREEN.PNG"
+$ClientName = "HRL"
 
 # ==============================================================================
 # INTERNAL VARIABLES
@@ -131,6 +133,25 @@ function Resolve-DownloadUrl {
     return $Url
 }
 
+function Invoke-LockscreenRefresh {
+    # Restart lockscreen-related shell processes so the new image is picked up faster.
+    $processNames = @("ShellExperienceHost", "LockApp")
+
+    foreach ($processName in $processNames) {
+        try {
+            $processes = Get-Process -Name $processName -ErrorAction SilentlyContinue
+            if ($processes) {
+                $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+                Write-Log "Refreshed process: $processName"
+            } else {
+                Write-Log "Process not running (skip refresh): $processName"
+            }
+        } catch {
+            Write-Log "WARNING: Could not refresh process $processName : $_"
+        }
+    }
+}
+
 # ==============================================================================
 # SCRIPT START
 # ==============================================================================
@@ -158,7 +179,7 @@ if ($resolvedImageUrl -ne $ImageUrl) {
 
 try {
     Write-Log "Downloading lockscreen image from: $resolvedImageUrl"
-    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempLockScreenPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateLockscreenScript/1.0" }
+    $downloadResponse = Invoke-WebRequest -Uri $resolvedImageUrl -OutFile $tempLockScreenPath -UseBasicParsing -MaximumRedirection 10 -Headers @{ "Accept" = "image/*,*/*;q=0.8"; "User-Agent" = "CorporateLockscreenScript/1.0"; "Cache-Control" = "no-cache, no-store, must-revalidate"; "Pragma" = "no-cache"; "Expires" = "0" }
     Write-Log "Image downloaded to temporary path: $tempLockScreenPath"
 } catch {
     Write-Log "ERROR downloading image: $_"
@@ -190,10 +211,30 @@ if (-not $imageType) {
 
 $LockScreenImageValue = Join-Path -Path $LockScreenFolder -ChildPath "$LockScreenBaseName.$imageType"
 
+$newImageHash = (Get-FileHash -Path $tempLockScreenPath -Algorithm SHA256).Hash
+$oldImageHash = $null
+
+if (Test-Path -Path $LockScreenImageValue) {
+    try {
+        $oldImageHash = (Get-FileHash -Path $LockScreenImageValue -Algorithm SHA256).Hash
+    } catch {
+        Write-Log "WARNING: Could not read hash of existing lockscreen image: $_"
+    }
+}
+
 try {
     Move-Item -Path $tempLockScreenPath -Destination $LockScreenImageValue -Force
     Write-Log "Validated image type: $imageType"
     Write-Log "Final lockscreen path: $LockScreenImageValue"
+    if ($oldImageHash) {
+        if ($oldImageHash -eq $newImageHash) {
+            Write-Log "Image content hash unchanged (same URL returned same image)."
+        } else {
+            Write-Log "Image content hash changed (same URL returned updated image)."
+        }
+    } else {
+        Write-Log "No previous image found for hash comparison."
+    }
 } catch {
     Write-Log "ERROR finalizing lockscreen file: $_"
     exit 1
@@ -223,9 +264,12 @@ try {
 # Step 4: Apply lockscreen immediately
 try {
     RUNDLL32.EXE USER32.DLL, UpdatePerUserSystemParameters 1, True
-    Write-Log "Lockscreen applied successfully"
+    Write-Log "Lockscreen apply signal sent successfully"
 } catch {
     Write-Log "WARNING: Could not apply immediate update: $_"
 }
+
+# Step 5: Force a lockscreen shell refresh for active sessions
+Invoke-LockscreenRefresh
 
 Write-Log "====== Make-Lockscreen completed successfully ======"
