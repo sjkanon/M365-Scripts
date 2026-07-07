@@ -112,7 +112,7 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
 |---|---|
 | `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting. |
 | `-SkipVersions` | Neemt versiehistorie niet mee (sneller). |
-| `-SiteUrl` | Scan 1 specifieke site (`/sites/...` of `/teams/...`). |
+| `-SiteUrl` | Scan 1 specifieke site (`/sites/...` of `/teams/...`). Geef je de tenant-root URL op (bijv. `https://contoso.sharepoint.com`), dan doet het script automatisch een tenantbrede scan. |
 | `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken. |
 | `-ClientId/-TenantId` | Gebruik eigen app-registratie (met passende Graph application permissions). |
 

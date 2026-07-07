@@ -362,19 +362,29 @@ function Invoke-GraphGet {
 Write-Host "  Retrieving sites..." -ForegroundColor Cyan
 
 if ($SiteUrl) {
-    if ($SiteUrl -notmatch 'https://([^/]+)/(sites|teams)/([^/?#]+)') {
-        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name> or /teams/<name>" -ForegroundColor Red
-        Remove-TempApp; exit 1
-    }
-    try {
-        $sites = @(Get-MgSite -Search $Matches[3] -ErrorAction Stop |
-                   Where-Object { $_.WebUrl -eq $SiteUrl })
-        if ($sites.Count -eq 0) {
-            Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
+    $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
+
+    # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
+    if ($normalizedSiteUrl -match '^https://[^/]+$') {
+        Write-Host "  [INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
+        $SiteUrl = $null
+    } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/([^?#]+)$') {
+        $SiteUrl = $normalizedSiteUrl
+        $siteSearchTerm = ($Matches[2] -split '/')[-1]
+
+        try {
+            $sites = @(Get-MgSite -Search $siteSearchTerm -ErrorAction Stop |
+                       Where-Object { $_.WebUrl.TrimEnd('/') -eq $SiteUrl })
+            if ($sites.Count -eq 0) {
+                Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
+        } catch {
+            Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
             Remove-TempApp; exit 1
         }
-    } catch {
-        Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    } else {
+        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
         Remove-TempApp; exit 1
     }
 } elseif ($script:AppOnlyHeaders) {
