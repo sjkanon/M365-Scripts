@@ -115,16 +115,25 @@ $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
 
+function Write-ProgressHost {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::DarkGray
+    )
+    Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) -ForegroundColor $ForegroundColor
+}
+
 function Remove-TempApp {
     # Delegated session is still open here — Remove-MgApplication works
     if ($script:TempAppObjectId) {
-        Write-Host "  Removing temporary App Registration..." -ForegroundColor DarkGray
+        Write-ProgressHost -Message "Removing temporary App Registration..." -ForegroundColor DarkGray
         try {
             Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
-            Write-Host "  [OK]   Temporary App Registration removed." -ForegroundColor DarkGray
+            Write-ProgressHost -Message "[OK] Temporary App Registration removed." -ForegroundColor DarkGray
         } catch {
-            Write-Host ("  [WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
-            Write-Host "         Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
+            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
+            Write-ProgressHost -Message "[WARN] Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
         }
         $script:TempAppObjectId = $null
     }
@@ -346,8 +355,8 @@ function Invoke-GraphGet {
             }
 
             $delay = Get-GraphRetryDelaySeconds -Attempt $attempt -ErrorRecord $_
-            Write-Host (
-                "  [INFO] Graph request retry ({0}/{1}) in {2}s: {3}" -f
+            Write-ProgressHost -Message (
+                "[INFO] Graph request retry ({0}/{1}) in {2}s: {3}" -f
                 $attempt,
                 $MaxGraphRetry,
                 $delay,
@@ -359,7 +368,7 @@ function Invoke-GraphGet {
 }
 
 # ── Get sites ─────────────────────────────────────────────────────────────────
-Write-Host "  Retrieving sites..." -ForegroundColor Cyan
+Write-ProgressHost -Message "Retrieving sites..." -ForegroundColor Cyan
 
 $scanAllSites = $false
 
@@ -368,7 +377,7 @@ if ($SiteUrl) {
 
     # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
     if ($normalizedSiteUrl -match '^https://[^/]+$') {
-        Write-Host "  [INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
+        Write-ProgressHost -Message "[INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
         $scanAllSites = $true
     } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/([^?#]+)$') {
         $SiteUrl = $normalizedSiteUrl
@@ -378,15 +387,15 @@ if ($SiteUrl) {
             $sites = @(Get-MgSite -Search $siteSearchTerm -ErrorAction Stop |
                        Where-Object { $_.WebUrl.TrimEnd('/') -eq $SiteUrl })
             if ($sites.Count -eq 0) {
-                Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
+                Write-ProgressHost -Message "[ERROR] Site not found: $SiteUrl" -ForegroundColor Red
                 Remove-TempApp; exit 1
             }
         } catch {
-            Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+            Write-ProgressHost -Message "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
             Remove-TempApp; exit 1
         }
     } else {
-        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
+        Write-ProgressHost -Message "[ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
         Remove-TempApp; exit 1
     }
 }
@@ -408,10 +417,10 @@ if ((-not $SiteUrl) -or $scanAllSites) {
             break
         } catch {
             if ($i -lt 6) {
-                Write-Host ("  [INFO] Waiting for consent propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                Write-ProgressHost -Message ("[INFO] Waiting for consent propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
                 Start-Sleep -Seconds 5
             } else {
-                Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+                Write-ProgressHost -Message "[ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
                 Remove-TempApp; exit 1
             }
         }
@@ -428,7 +437,7 @@ if ((-not $SiteUrl) -or $scanAllSites) {
     try {
         $sites = @(Get-MgAllSite -All -Property 'id,displayName,webUrl' -ErrorAction Stop)
     } catch {
-        Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+        Write-ProgressHost -Message "[ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
     }
@@ -484,7 +493,7 @@ while ($subSiteQueue.Count -gt 0) {
     }
 }
 
-Write-Host ("  Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
+Write-ProgressHost -Message ("Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -625,8 +634,8 @@ function Get-AllDriveItems {
         $current = $queue.Dequeue()
         $processedFolders++
         if ($processedFolders % 25 -eq 0) {
-            Write-Host (
-                "          progress: {0} folders, {1} files scanned..." -f
+            Write-ProgressHost -Message (
+                "progress: {0} folders, {1} files scanned..." -f
                 $processedFolders,
                 $processedFiles
             ) -ForegroundColor DarkGray
@@ -840,7 +849,7 @@ if ($RecycleBinOnly) {
 
 # ── Phase 1: Enumerate all document libraries ─────────────────────────────────
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Phase 1: Enumerating document libraries" -ForegroundColor Cyan
+Write-ProgressHost -Message "Phase 1: Enumerating document libraries" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -852,10 +861,10 @@ foreach ($site in $sites) {
     $siteName = $site.displayName ?? $site.name
     $siteId   = $site.id
 
-    Write-Host ("  [{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
+    Write-ProgressHost -Message ("[{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
 
     if ([string]::IsNullOrWhiteSpace([string]$siteId)) {
-        Write-Host "        [WARN] Skipping site without valid id." -ForegroundColor Yellow
+        Write-ProgressHost -Message "[WARN] Skipping site without valid id." -ForegroundColor Yellow
         continue
     }
 
@@ -866,21 +875,21 @@ foreach ($site in $sites) {
                 Site  = $site
                 Drive = $drive
             }) | Out-Null
-            Write-Host ("        {0}" -f $drive.name) -ForegroundColor DarkGray
+            Write-ProgressHost -Message ("{0}" -f $drive.name) -ForegroundColor DarkGray
         }
     } catch {
-        Write-Host ("        [ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-ProgressHost -Message ("[ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
     }
 }
 
 Write-Host ""
-Write-Host ("  Found {0} document libraries across {1} site(s)" -f
+Write-ProgressHost -Message ("Found {0} document libraries across {1} site(s)" -f
     $siteLibraries.Count, $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Phase 2: Retrieve storage data ────────────────────────────────────────────
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Phase 2: Retrieving storage data" -ForegroundColor Cyan
+Write-ProgressHost -Message "Phase 2: Retrieving storage data" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -892,7 +901,7 @@ foreach ($entry in $siteLibraries) {
     $drive    = $entry.Drive
     $siteName = $site.displayName ?? $site.name
 
-    Write-Host ("  [{0}/{1}] {2} › {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
+    Write-ProgressHost -Message ("[{0}/{1}] {2} > {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
 
     # Quick mode: use quota data from drives (no file enumeration)
     if (-not $Apply) {
@@ -1167,7 +1176,7 @@ if ($Apply) {
 # ── Export ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Exporting results" -ForegroundColor Cyan
+Write-ProgressHost -Message "Exporting results" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -1187,7 +1196,7 @@ $summaryRows = @(
 
 if (-not $Apply) {
     $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
-    Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
+    Write-ProgressHost -Message ("Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
 }
 
 if ($Apply -and $detailRows.Count -gt 0) {
@@ -1201,7 +1210,7 @@ if ($Apply -and $detailRows.Count -gt 0) {
             Path
     )
     $detailRows | Export-Csv -Path $reportCsv -NoTypeInformation -Encoding UTF8
-    Write-Host ("  Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
+    Write-ProgressHost -Message ("Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
 
     # ── Markdown version report ───────────────────────────────────────────────
     if (-not $SkipVersions) {
@@ -1273,38 +1282,38 @@ if ($Apply -and $detailRows.Count -gt 0) {
         $mdLines.Add('')
 
         $mdLines | Set-Content -Path $reportMd -Encoding UTF8
-        Write-Host ("  Rapport  : {0}" -f $reportMd) -ForegroundColor Green
+        Write-ProgressHost -Message ("Rapport  : {0}" -f $reportMd) -ForegroundColor Green
     }
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Summary" -ForegroundColor Cyan
+Write-ProgressHost -Message "Summary" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host ("  Sites scanned : {0}" -f $sites.Count)
+Write-ProgressHost -Message ("Sites scanned : {0}" -f $sites.Count)
 
 if ($Apply) {
     $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
     $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
     $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
     $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
-    Write-Host ("  Total files   : {0}"    -f $grandFiles)
-    Write-Host ("  Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
-    Write-Host ("  Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
-    Write-Host ("  Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
+    Write-ProgressHost -Message ("Total files   : {0}"    -f $grandFiles)
+    Write-ProgressHost -Message ("Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
+    Write-ProgressHost -Message ("Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
+    Write-ProgressHost -Message ("Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
 
     # ── Top libraries by version history size ─────────────────────────────────
     Write-Host ""
     Write-Host "  ================================================" -ForegroundColor Cyan
-    Write-Host "   Top 5 libraries by version history size" -ForegroundColor Cyan
+    Write-ProgressHost -Message "Top 5 libraries by version history size" -ForegroundColor Cyan
     Write-Host "  ================================================" -ForegroundColor Cyan
     $summaryRows |
         Where-Object { $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
         Sort-Object { [double]$_.VersionSizeMB } -Descending |
         Select-Object -First 5 |
         ForEach-Object {
-            Write-Host ("  {0} MB  [{1}] › {2}" -f
+            Write-ProgressHost -Message ("{0} MB  [{1}] > {2}" -f
                 [math]::Round($_.VersionSizeMB, 1),
                 $_.SiteName,
                 $_.Library) -ForegroundColor Yellow
@@ -1314,19 +1323,19 @@ if ($Apply) {
     if (-not $SkipVersions -and $detailRows.Count -gt 0) {
         Write-Host ""
         Write-Host "  ================================================" -ForegroundColor Cyan
-        Write-Host "   Top 10 files by version history size" -ForegroundColor Cyan
+        Write-ProgressHost -Message "Top 10 files by version history size" -ForegroundColor Cyan
         Write-Host "  ================================================" -ForegroundColor Cyan
         $detailRows |
             Where-Object { $_.ItemType -eq 'File' -and $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
             Sort-Object { [double]$_.VersionSizeMB } -Descending |
             Select-Object -First 10 |
             ForEach-Object {
-                Write-Host ("  {0} MB  ({1} versies)  {2} › {3}" -f
+                Write-ProgressHost -Message ("{0} MB  ({1} versies)  {2} > {3}" -f
                     [math]::Round($_.VersionSizeMB, 1),
                     $_.VersionCount,
                     $_.Library,
                     $_.Path) -ForegroundColor Yellow
-                Write-Host ("          Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
+                Write-ProgressHost -Message ("Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
             }
     }
 }
