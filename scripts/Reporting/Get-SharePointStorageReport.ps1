@@ -361,13 +361,15 @@ function Invoke-GraphGet {
 # ── Get sites ─────────────────────────────────────────────────────────────────
 Write-Host "  Retrieving sites..." -ForegroundColor Cyan
 
+$scanAllSites = $false
+
 if ($SiteUrl) {
     $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
 
     # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
     if ($normalizedSiteUrl -match '^https://[^/]+$') {
         Write-Host "  [INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
-        $SiteUrl = $null
+        $scanAllSites = $true
     } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/([^?#]+)$') {
         $SiteUrl = $normalizedSiteUrl
         $siteSearchTerm = ($Matches[2] -split '/')[-1]
@@ -387,7 +389,10 @@ if ($SiteUrl) {
         Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
         Remove-TempApp; exit 1
     }
-} elseif ($script:AppOnlyHeaders) {
+}
+
+if ((-not $SiteUrl) -or $scanAllSites) {
+    if ($script:AppOnlyHeaders) {
     # Auto mode: enumerate all sites using app-only REST token
     # Retry first call — consent may take a few seconds to propagate
     $sites = [System.Collections.Generic.List[object]]::new()
@@ -418,7 +423,7 @@ if ($SiteUrl) {
         $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
         $nextUri = $response.'@odata.nextLink'
     }
-} else {
+    } else {
     # Provided credentials — app-only SDK connection, use Get-MgAllSite
     try {
         $sites = @(Get-MgAllSite -All -Property 'id,displayName,webUrl' -ErrorAction Stop)
@@ -426,11 +431,15 @@ if ($SiteUrl) {
         Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
+    }
 }
 
 # Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/)
 $sites = [System.Collections.Generic.List[object]]::new(
-    @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
+    @($sites | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_.id) -and
+        ($_.webUrl -notmatch '-my\.sharepoint\.com/personal/')
+    })
 )
 
 # Add sub-sites at all depths — getAllSites/Get-MgAllSite primarily return site collections.
@@ -452,10 +461,14 @@ while ($subSiteQueue.Count -gt 0) {
         $subSites = @()
 
         if ($script:AppOnlyHeaders) {
-            $subResp = Invoke-GraphGet `
-                -Uri     "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites" `
-                -Headers $script:AppOnlyHeaders
-            $subSites = @($subResp.value)
+            $subSitesList = [System.Collections.Generic.List[object]]::new()
+            $subSitesUri = "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites`?$select=id,displayName,webUrl&`$top=200"
+            do {
+                $subResp = Invoke-GraphGet -Uri $subSitesUri -Headers $script:AppOnlyHeaders
+                $subResp.value | Where-Object { $_.id } | ForEach-Object { $subSitesList.Add($_) }
+                $subSitesUri = $subResp.'@odata.nextLink'
+            } while ($subSitesUri)
+            $subSites = @($subSitesList)
         } else {
             $subSites = @(Get-MgSiteSubSite -SiteId $parent.id -All -ErrorAction Stop)
         }
@@ -521,7 +534,50 @@ function Get-SiteDrives {
             return $drives
         } catch {
             # Some tenants/sites return 400 on /lists?$expand=drive in app-only mode.
-            # Fall back to delegated SDK drives call when available (auto mode).
+            # Fallback 1: enumerate document-library lists, then resolve /lists/{id}/drive.
+            # This preserves broader coverage versus using /drives directly.
+            try {
+                Update-AppOnlyToken
+                $drives = [System.Collections.Generic.List[object]]::new()
+                $seenDriveIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
+                           '?$select=id,displayName,list&$top=200'
+
+                do {
+                    $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
+                    $docLibLists = @(
+                        $resp.value | Where-Object {
+                            $_.id -and $_.list -and $_.list.template -eq 'documentLibrary'
+                        }
+                    )
+
+                    foreach ($list in $docLibLists) {
+                        try {
+                            $driveObj = Invoke-GraphGet `
+                                -Uri ("https://graph.microsoft.com/v1.0/sites/$SiteId/lists/{0}/drive" -f $list.id) `
+                                -Headers $script:AppOnlyHeaders
+
+                            if ($driveObj.id -and $seenDriveIds.Add($driveObj.id)) {
+                                $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $list.list.enableVersioning  -Force -ErrorAction SilentlyContinue
+                                $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $list.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
+                                $drives.Add($driveObj)
+                            }
+                        } catch {
+                            # Not every list exposes a drive endpoint in every tenant configuration.
+                        }
+                    }
+
+                    $listUri = $resp.'@odata.nextLink'
+                } while ($listUri)
+
+                if ($drives.Count -gt 0) {
+                    return $drives
+                }
+            } catch {
+                # Continue to final fallback below.
+            }
+
+            # Fallback 2: delegated SDK drives call when available (auto mode).
             if ($script:ConnectedHere) {
                 return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
             }
@@ -668,6 +724,8 @@ if ($RecycleBinOnly) {
         $siteId   = $site.id
         $siteName = $site.displayName ?? $site.name
 
+        if ([string]::IsNullOrWhiteSpace([string]$siteId)) { continue }
+
         # Only root site collections have their own recycle bin.
         $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
@@ -795,6 +853,11 @@ foreach ($site in $sites) {
     $siteId   = $site.id
 
     Write-Host ("  [{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
+
+    if ([string]::IsNullOrWhiteSpace([string]$siteId)) {
+        Write-Host "        [WARN] Skipping site without valid id." -ForegroundColor Yellow
+        continue
+    }
 
     try {
         $drives = Get-SiteDrives -SiteId $siteId
