@@ -499,25 +499,34 @@ function Get-SiteDrives {
     # that may not surface in the /drives endpoint.
     param([string]$SiteId)
     if ($script:AppOnlyHeaders) {
-        Update-AppOnlyToken
-        $drives  = [System.Collections.Generic.List[object]]::new()
-        $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
-                   '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
-        do {
-            $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
-            # Keep any list that has an associated drive — covers document libraries,
-            # Teams channel libraries, picture libraries, form libraries, etc.
-            $resp.value |
-                Where-Object { $_.drive } |
-                ForEach-Object {
-                    $driveObj = $_.drive
-                    $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $_.list.enableVersioning  -Force -ErrorAction SilentlyContinue
-                    $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $_.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
-                    $drives.Add($driveObj)
-                }
-            $listUri = $resp.'@odata.nextLink'
-        } while ($listUri)
-        return $drives
+        try {
+            Update-AppOnlyToken
+            $drives  = [System.Collections.Generic.List[object]]::new()
+            $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
+                       '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
+            do {
+                $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
+                # Keep any list that has an associated drive — covers document libraries,
+                # Teams channel libraries, picture libraries, form libraries, etc.
+                $resp.value |
+                    Where-Object { $_.drive } |
+                    ForEach-Object {
+                        $driveObj = $_.drive
+                        $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $_.list.enableVersioning  -Force -ErrorAction SilentlyContinue
+                        $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $_.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
+                        $drives.Add($driveObj)
+                    }
+                $listUri = $resp.'@odata.nextLink'
+            } while ($listUri)
+            return $drives
+        } catch {
+            # Some tenants/sites return 400 on /lists?$expand=drive in app-only mode.
+            # Fall back to delegated SDK drives call when available (auto mode).
+            if ($script:ConnectedHere) {
+                return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+            }
+            throw
+        }
     } else {
         return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
     }
