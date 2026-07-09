@@ -1,4 +1,4 @@
-# Testing — RDS
+# RDS
 
 Diagnostic and monitoring scripts for RDP / RD Web Access infrastructure. Run directly on the RDS/RDWeb server for full results — remote targets only get connectivity-level checks.
 

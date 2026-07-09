@@ -1,4 +1,4 @@
-# Testing — Network
+# Network
 
 Network and connectivity diagnostic scripts. Cross-platform where noted; the rest require Windows + Administrator.
 
