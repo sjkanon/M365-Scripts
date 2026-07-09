@@ -1,6 +1,6 @@
 # Intune (Custom Scripts)
 
-Customer-specific Intune deployment scripts. For generic/reusable Intune tooling (Autopilot, iOS compliance) see [`scripts/Intune/`](../../Intune/readme.md).
+Office theme/color deployment — kept separate from [`scripts/Intune/`](../../Intune/readme.md) because `Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` hardcode their download URL to this repo path.
 
 ---
 
@@ -8,4 +8,4 @@ Customer-specific Intune deployment scripts. For generic/reusable Intune tooling
 
 | Folder | Description |
 |--------|-------------|
-| [`Desktop/`](Desktop/readme.md) | Office theme, corporate wallpaper/lockscreen, taskbar lock shortcut |
+| [`Desktop/`](Desktop/readme.md) | Office theme (`Deploy-OfficeTheme.ps1`) and color palette (`Office Themes/Deploy-Officecolors.ps1`) |
