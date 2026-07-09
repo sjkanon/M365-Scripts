@@ -527,6 +527,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-07-09 (4)
+| Change |
+|--------|
+| Optimized `scripts/Reporting/Get-SharePointStorageReport.ps1` version-history lookups, which were the main cause of the script appearing to hang on large libraries (one sequential Graph call per file, each eligible for up to 6 retries with backoff up to ~2 minutes on throttling): (1) skip the lookup entirely when a library is positively known to have versioning disabled, (2) batch up to 20 file version lookups per HTTP call via Graph's `$batch` endpoint instead of one call per file, (3) use a short, cheap 3-attempt retry for these specific calls instead of the main retry/backoff policy, since a failed lookup safely falls back to "0 versions" |
+| Removed the now-unused `Get-VersionSize` function, replaced by `Invoke-GraphBatchGet` + batched resolution in `Get-AllDriveItems` |
+| Updated `scripts/Reporting/readme.md` with a "Performance" section documenting the above |
+
 ### 2026-07-09 (3)
 | Change |
 |--------|
