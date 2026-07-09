@@ -132,13 +132,13 @@ $ExchangeSubmenu = @(
         $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
         $p = @{}
         if ($mbx) { $p['Mailbox'] = $mbx }
-        & "$ROOT\scripts\Testing Scripts\Exchange\Test-CalendarPermissions.ps1" @p
+        & "$ROOT\scripts\Exchange\Test-CalendarPermissions.ps1" @p
     }}
     @{ Key='9'; Label='Test-MailboxPermissions   — audit Full Access / Send As / Send on Behalf'; Action={
         $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
         $p = @{}
         if ($mbx) { $p['Mailbox'] = $mbx }
-        & "$ROOT\scripts\Testing Scripts\Exchange\Test-MailboxPermissions.ps1" @p
+        & "$ROOT\scripts\Exchange\Test-MailboxPermissions.ps1" @p
     }}
     @{ Key='A'; Label='Test-GroupPermissions     — audit DG managers / Send As / Send on Behalf'; Action={
         $grp = Read-Host "  Group email or name (leave blank for all)"
@@ -146,25 +146,25 @@ $ExchangeSubmenu = @(
         $p = @{}
         if ($grp) { $p['Group'] = $grp }
         if ($inc -match '^[Yy]') { $p['IncludeMembers'] = $true }
-        & "$ROOT\scripts\Testing Scripts\Exchange\Test-DistributionGroupPermissions.ps1" @p
+        & "$ROOT\scripts\Exchange\Test-DistributionGroupPermissions.ps1" @p
     }}
     @{ Key='B'; Label='Test-DkimConfig          — validate DKIM signing config and DNS records'; Action={
         $domain = Read-Host "  Domain (leave blank for all)"
         $p = @{}
         if ($domain) { $p['Domain'] = $domain }
-        & "$ROOT\scripts\Testing Scripts\Exchange\Test-DkimConfig.ps1" @p
+        & "$ROOT\scripts\Exchange\Test-DkimConfig.ps1" @p
     }}
     @{ Key='C'; Label='Get-ExternalForwards     — audit mailboxes with external forwarding'; Action={
         $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
         $p = @{}
         if ($mbx) { $p['Mailbox'] = $mbx }
-        & "$ROOT\scripts\Testing Scripts\Exchange\Get-ExternalForwards.ps1" @p
+        & "$ROOT\scripts\Exchange\Get-ExternalForwards.ps1" @p
     }}
     @{ Key='D'; Label='Get-MailboxSizes         — report mailbox sizes sorted by storage used'; Action={
         $mbx = Read-Host "  Mailbox UPN (leave blank for all)"
         $p = @{}
         if ($mbx) { $p['Mailbox'] = $mbx }
-        & "$ROOT\scripts\Testing Scripts\Exchange\Get-MailboxSizes.ps1" @p
+        & "$ROOT\scripts\Exchange\Get-MailboxSizes.ps1" @p
     }}
 )
 
@@ -213,7 +213,7 @@ $EntraSubmenu = @(
         $grp = Read-Host "  Group name or ID (leave blank for all)"
         $p = @{}
         if ($grp) { $p['Group'] = $grp }
-        & "$ROOT\scripts\Testing Scripts\Entra\Test-M365GroupMembership.ps1" @p
+        & "$ROOT\scripts\Entra\Test-M365GroupMembership.ps1" @p
     }}
     @{ Key='B'; Label='New-M365User             — create a single new user'; Action={
         $upn  = Read-Host "  UPN (e.g. j.doe@contoso.com)"
@@ -260,7 +260,7 @@ $MspSubmenu = @(
 $menu = @(
     [PSCustomObject]@{ Key='1'; FKey=[ConsoleKey]::F1; Category='Testing'
         Label='Test-Ports          — check open TCP ports on any host'
-        Script="$ROOT\scripts\Testing Scripts\Network\Test-Ports.ps1"
+        Script="$ROOT\scripts\Network\Test-Ports.ps1"
         Params={
             $target  = Read-Host "  Target (IP or hostname)"
             $ports   = Read-Host "  Ports  (e.g. 80,443 or 1294:1494 or 80,1294:1494)"
@@ -294,7 +294,7 @@ $menu = @(
     }
     [PSCustomObject]@{ Key='4'; FKey=[ConsoleKey]::F4; Category='Testing'
         Label='Test-SMTP           — one-time SMTP connectivity test'
-        Script="$ROOT\scripts\Testing Scripts\SMTP\testsmtp.ps1"
+        Script="$ROOT\scripts\SMTP\testsmtp.ps1"
         Params={
             $server = Read-Host "  SMTP server [smtp.office365.com]"
             $from   = Read-Host "  From address"
@@ -308,7 +308,7 @@ $menu = @(
     }
     [PSCustomObject]@{ Key='5'; FKey=[ConsoleKey]::F5; Category='Testing'
         Label='Test-SMTP (5 min)   — recurring SMTP test every 5 minutes'
-        Script="$ROOT\scripts\Testing Scripts\SMTP\testsmtp_5min.ps1"
+        Script="$ROOT\scripts\SMTP\testsmtp_5min.ps1"
         Params={
             $server = Read-Host "  SMTP server [smtp.office365.com]"
             $from   = Read-Host "  From address"

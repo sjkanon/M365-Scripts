@@ -376,12 +376,19 @@ M365-Scripts/
     │   ├── New-M365User.ps1
     │   ├── Import-M365Users.ps1
     │   ├── Get-M365UserLicenses.ps1
-    │   └── Import-ConditionalAccessBaseline.ps1
+    │   ├── Import-ConditionalAccessBaseline.ps1
+    │   └── Test-M365GroupMembership.ps1   ← audit M365 Group / Teams owners and members
     ├── Exchange/
     │   ├── readme.md
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
-    │   └── Set-Distributionlist-dynamic-static.ps1
+    │   ├── Set-Distributionlist-dynamic-static.ps1
+    │   ├── Test-CalendarPermissions.ps1
+    │   ├── Test-MailboxPermissions.ps1
+    │   ├── Test-DistributionGroupPermissions.ps1
+    │   ├── Test-DkimConfig.ps1
+    │   ├── Get-ExternalForwards.ps1
+    │   └── Get-MailboxSizes.ps1
     ├── Graph/
     │   ├── readme.md
     │   └── logic-permissies.ps1     ← grant a Graph app role to a Logic App managed identity
@@ -417,6 +424,7 @@ M365-Scripts/
     │   ├── Invoke-WindowsActivation.ps1 ← activate Windows, set product key / KMS server
     │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   ├── Clear-TempFiles.ps1
+    │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -425,6 +433,19 @@ M365-Scripts/
     │   └── Time sync/
     │       ├── readme.md
     │       └── Restart-Time-Sync.ps1
+    ├── Network/
+    │   ├── readme.md
+    │   ├── Test-Ports.ps1
+    │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
+    │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
+    ├── RDS/
+    │   ├── readme.md
+    │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+    │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
+    ├── SMTP/
+    │   ├── readme.md
+    │   ├── testsmtp.ps1
+    │   └── testsmtp_5min.ps1
     ├── Deployment/                   ← USB setup toolkit (OOBE / Autopilot)
     │   ├── readme.md
     │   ├── start.bat
@@ -460,35 +481,6 @@ M365-Scripts/
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
     │   └── Test-PowerShellSyntax.ps1
-    ├── Testing Scripts/
-    │   ├── readme.md                ← Index of this folder
-    │   ├── Entra/
-    │   │   ├── readme.md
-    │   │   └── Test-M365GroupMembership.ps1
-    │   ├── Exchange/
-    │   │   ├── readme.md
-    │   │   ├── Get-ExternalForwards.ps1
-    │   │   ├── Get-MailboxSizes.ps1
-    │   │   ├── Test-CalendarPermissions.ps1
-    │   │   ├── Test-DkimConfig.ps1
-    │   │   ├── Test-DistributionGroupPermissions.ps1
-    │   │   └── Test-MailboxPermissions.ps1
-    │   ├── Device/
-    │   │   ├── readme.md
-    │   │   └── Test-OpenVpnDiagnostics.ps1
-    │   ├── Network/
-    │   │   ├── readme.md
-    │   │   ├── Test-Ports.ps1
-    │   │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
-    │   │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
-    │   ├── RDS/
-    │   │   ├── readme.md
-    │   │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
-    │   │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
-    │   └── SMTP/
-    │       ├── readme.md
-    │       ├── testsmtp.ps1
-    │       └── testsmtp_5min.ps1
     └── Custom Scripts/                 ← path-pinned scripts (see note above)
         ├── readme.md
         └── Intune/
@@ -526,6 +518,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-07-09 (6)
+| Change |
+|--------|
+| Removed the `Testing Scripts/` wrapper folder entirely — its subfolders duplicated existing top-level category names by verb (`Test-`/`Get-` prefix) rather than by domain. Merged its contents into the matching domain folder: `Testing Scripts/Entra/Test-M365GroupMembership.ps1` → `Entra/`, `Testing Scripts/Exchange/*` (6 scripts) → `Exchange/`, `Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` → `Device/`. `Network/`, `RDS/`, and `SMTP/` (no existing top-level counterpart) were promoted to their own top-level category folders instead |
+| Merged the corresponding readmes into each destination folder's existing readme.md rather than keeping separate "Testing —" docs |
+| Updated 10 `menu.ps1` script paths (Exchange audit submenu, Entra audit submenu, Test-Ports, SMTP tests) for the new locations |
 
 ### 2026-07-09 (5)
 | Change |

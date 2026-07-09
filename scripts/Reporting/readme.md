@@ -93,7 +93,6 @@ Zie [Licensing/](Licensing/) voor het maandelijkse licentie-rapport.
 
 Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard connecteert het script delegated en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd.
 
-> Dit script wordt ook aangehaald in [`Testing Scripts/SharePoint/`](../Testing%20Scripts/SharePoint/readme.md) — functioneel een audit/rapportage-taak, maar het bestand leeft hier in `Reporting/`.
 
 ### Dekking
 
