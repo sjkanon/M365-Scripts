@@ -1,0 +1,44 @@
+name: Sync Fork with Upstream
+on:
+  schedule:
+    - cron: '0 6 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 15 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_GITHUB }}
+
+      - name: Sync with upstream
+        env:
+          PAT: ${{ secrets.PAT_GITHUB }}
+        run: |
+          git config user.name "github@first.eu"
+          git config user.email "github@first.eu"
+
+          git remote set-url origin https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
+          git remote add upstream https://github.com/sjkanon/M365-Scripts.git
+          git fetch upstream
+
+          git checkout main
+
+          # Try fast-forward first, fall back to merge
+          if git merge upstream/main --ff-only; then
+            echo "Fast-forward succeeded"
+          else
+            echo "Fast-forward failed, falling back to merge"
+            git merge upstream/main --no-ff -m "chore: sync with upstream"
+          fi
+
+          git push origin main
