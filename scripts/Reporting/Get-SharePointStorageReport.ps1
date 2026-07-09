@@ -9,9 +9,12 @@
     recursively. Version history is included by default.
 
     Output:
-      - Summary CSV  : one row per site with totals
-      - Detail CSV   : one row per file with size + version info
-      - Both saved to C:\Temp\ (Windows) or ~/Downloads/ (macOS)
+      - Summary CSV           : one row per site with totals (quick mode only)
+      - Detail CSV            : one row per file/folder with size + version info (-Apply)
+      - Site collection totals: one row per root site collection — sub-sites/channels and
+                                 the recycle bin rolled up together, comparable 1:1 with the
+                                 SharePoint admin center's per-site storage figure (-Apply)
+      - All saved to C:\Temp\ (Windows) or ~/Downloads/ (macOS)
 
     Run without -Apply for a fast summary (site quota data only, no file enumeration).
     Run with -Apply to perform the full recursive scan including version history.
@@ -109,6 +112,7 @@ $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
 $reportCsv   = Join-Path $outputDir "SharePoint_StorageRanked_$ts.csv"
 $reportMd    = Join-Path $outputDir "SharePoint_VersionReport_$ts.md"
+$collectionCsv = Join-Path $outputDir "SharePoint_SiteCollectionTotals_$ts.csv"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
@@ -443,7 +447,8 @@ if ((-not $SiteUrl) -or $scanAllSites) {
     }
 }
 
-# Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/)
+# Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/) — from both the
+# storage/library scan and the recycle bin phases. Only real SharePoint site collections count.
 $sites = [System.Collections.Generic.List[object]]::new(
     @($sites | Where-Object {
         -not [string]::IsNullOrWhiteSpace([string]$_.id) -and
@@ -515,6 +520,19 @@ function Test-IsFile {
     return $knownExtensions.Contains($ext)
 }
 
+function Get-SiteCollectionKey {
+    # Resolves a site's webUrl to its root site collection URL, so sub-sites and
+    # classic sub-webs can be grouped back with the root they share a storage quota
+    # with. Private/shared Teams channels are genuine separate site collections
+    # (own /sites/<name> or /teams/<name> segment) and correctly form their own key —
+    # only extra path segments beyond that (classic sub-webs) collapse into the root.
+    param([string]$WebUrl)
+    if ($WebUrl -match '^(https://[^/]+(?:/sites/[^/]+|/teams/[^/]+)?)') {
+        return $Matches[1].TrimEnd('/')
+    }
+    return $WebUrl.TrimEnd('/')
+}
+
 function Get-SiteDrives {
     # Uses /lists?$expand=drive to return ALL document libraries per site,
     # including Site Pages, Site Assets, Teams channels, and custom libraries
@@ -525,7 +543,7 @@ function Get-SiteDrives {
             Update-AppOnlyToken
             $drives  = [System.Collections.Generic.List[object]]::new()
             $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
-                       '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
+                       '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl,quota)&$top=200'
             do {
                 $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
                 # Keep any list that has an associated drive — covers document libraries,
@@ -1247,6 +1265,84 @@ if ($Apply) {
     }
 }
 
+# ── Phase 2c: Site collection totals ─────────────────────────────────────────
+# Sub-sites and classic sub-webs share their root's storage quota in the SharePoint
+# admin center, but are scanned here as separate site entries — and the recycle bin
+# is tracked separately from the library scan. Neither is directly comparable to the
+# single "storage used" figure the admin center shows per site collection. This phase
+# regroups everything (all sub-sites' libraries + that collection's recycle bin) back
+# to its root site collection so the grand total lines up 1:1 with the admin portal.
+$siteCollectionRows = @()
+if ($Apply) {
+    $collectionMap = [System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($site in $sites) {
+        $key = Get-SiteCollectionKey -WebUrl $site.webUrl
+        if (-not $collectionMap.ContainsKey($key)) {
+            $collectionMap[$key] = [PSCustomObject]@{
+                CollectionKey = $key
+                DisplayName   = $null
+                LibrariesMB   = 0.0
+                RecycleBinMB  = 0.0
+                FileCount     = 0
+                LibraryCount  = 0
+                SiteCount     = 0
+            }
+        }
+        $entry = $collectionMap[$key]
+        $entry.SiteCount++
+        if ($site.webUrl.TrimEnd('/') -eq $key) {
+            $entry.DisplayName = $site.displayName ?? $site.name
+        }
+    }
+
+    foreach ($row in $summaryRows) {
+        if ([string]::IsNullOrWhiteSpace([string]$row.SiteUrl)) { continue }
+        $key = Get-SiteCollectionKey -WebUrl $row.SiteUrl
+        if (-not $collectionMap.ContainsKey($key)) { continue }
+        $entry = $collectionMap[$key]
+        if ($row.Library -eq 'Recycle Bin (stage 1 + 2)') {
+            $entry.RecycleBinMB += [double]($row.TotalSizeMB ?? 0)
+        } else {
+            $entry.LibrariesMB += [double]($row.TotalSizeMB ?? 0)
+            $entry.FileCount   += [int]($row.FileCount ?? 0)
+            $entry.LibraryCount++
+        }
+    }
+
+    $siteCollectionRows = @(
+        $collectionMap.Values | ForEach-Object {
+            [PSCustomObject]@{
+                SiteCollection    = $(if ($_.DisplayName) { $_.DisplayName } else { $_.CollectionKey })
+                SiteCollectionUrl = $_.CollectionKey
+                SubSiteCount      = $_.SiteCount
+                LibraryCount      = $_.LibraryCount
+                FileCount         = $_.FileCount
+                LibrariesMB       = [math]::Round($_.LibrariesMB, 2)
+                RecycleBinMB      = [math]::Round($_.RecycleBinMB, 2)
+                GrandTotalMB      = [math]::Round($_.LibrariesMB + $_.RecycleBinMB, 2)
+                GrandTotalGB      = [math]::Round(($_.LibrariesMB + $_.RecycleBinMB) / 1024, 3)
+            }
+        } | Sort-Object GrandTotalMB -Descending
+    )
+
+    $siteCollectionRows | Export-Csv -Path $collectionCsv -NoTypeInformation -Encoding UTF8
+    Write-ProgressHost -Message ("Site collections : {0}" -f $collectionCsv) -ForegroundColor Green
+
+    Write-Host ""
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-ProgressHost -Message "Top 10 site collections (libraries + recycle bin, sub-sites combined)" -ForegroundColor Cyan
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    $siteCollectionRows | Select-Object -First 10 | ForEach-Object {
+        Write-ProgressHost -Message ("{0} GB  [{1}]  (libraries: {2} MB, prullenbak: {3} MB, {4} sub-site(n)/kanalen)" -f
+            [math]::Round($_.GrandTotalGB, 2),
+            $_.SiteCollection,
+            [math]::Round($_.LibrariesMB, 0),
+            [math]::Round($_.RecycleBinMB, 0),
+            $_.SubSiteCount) -ForegroundColor Green
+    }
+}
+
 # ── Export ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
@@ -1267,6 +1363,13 @@ $summaryRows = @(
             Library
     }
 )
+
+if ($Apply) {
+    $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
+    $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
+    $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
+    $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
+}
 
 if (-not $Apply) {
     $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
@@ -1368,10 +1471,7 @@ Write-Host "  ================================================" -ForegroundColor
 Write-ProgressHost -Message ("Sites scanned : {0}" -f $sites.Count)
 
 if ($Apply) {
-    $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
-    $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
-    $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
-    $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
+    Write-ProgressHost -Message ("Site collections : {0}" -f $siteCollectionRows.Count)
     Write-ProgressHost -Message ("Total files   : {0}"    -f $grandFiles)
     Write-ProgressHost -Message ("Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
     Write-ProgressHost -Message ("Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta

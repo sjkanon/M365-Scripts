@@ -1,3 +1,9 @@
 {
-    "gitdoc.enabled": true
+    "gitdoc.enabled": true,
+    "chat.tools.terminal.autoApprove": {
+        "/^powershell -NoLogo -NoProfile -Command \"& \\{ \\$path = 'C:\\\\Users\\\\SjoerdKanon\\\\Git\\\\M365-Scripts\\\\scripts\\\\Exchange\\\\Test-MailboxPermissions\\.ps1'; \\[ScriptBlock\\]::Create\\(\\(Get-Content -Raw -Path \\$path\\)\\) \\| Out-Null; 'parse ok' \\}\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
 }
