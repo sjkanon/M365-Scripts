@@ -11,7 +11,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Clear-TempFiles.ps1`](#clear-tempfilesps1) | Clear the shared script temp folder (`C:\Temp` on Windows, `/tmp` on Linux/macOS) |
 | [`Invoke-WindowsActivation.ps1`](#invoke-windowsactivationps1) | Activate Windows, manage product keys and KMS settings |
 | [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
-| [`Time sync/Restart-Time-Sync.ps1`](#time-syncrestart-time-syncps1) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
+| [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 
 ---
@@ -129,16 +129,6 @@ A CSV report with per-category results is saved to `C:\Temp\` after each run.
 
 ---
 
-## Time sync/Restart-Time-Sync.ps1
+## Time sync/
 
-Fixes Windows time synchronisation issues by:
-1. Setting `W32tm` service startup type to Automatic and starting it
-2. Configuring Dutch NTP pool servers (`0.nl.pool.ntp.org`, `1.nl.pool.ntp.org`)
-3. Forcing an immediate resync
-4. Registering a scheduled task that reruns the sync every 59 minutes
-
-```powershell
-.\Restart-Time-Sync.ps1
-```
-
-> Run once per device. The scheduled task ensures time stays in sync going forward.
+Fixes Windows time synchronisation issues by restarting `W32tm` against Dutch NTP pool servers and registering a scheduled task that reruns the sync every 59 minutes. See [`Time sync/readme.md`](Time%20sync/readme.md) for full details.
