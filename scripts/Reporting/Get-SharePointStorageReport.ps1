@@ -118,6 +118,7 @@ $collectionCsv = Join-Path $outputDir "SharePoint_SiteCollectionTotals_$ts.csv"
 $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
+$script:SpoHostTokenCache = @{}
 
 function Write-ProgressHost {
     param(
@@ -187,6 +188,15 @@ try {
             $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
             Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
                 -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+
+            # Keep raw app credentials for non-Graph fallback token requests (for example SPO REST).
+            $script:TokenBody = @{
+                grant_type    = 'client_credentials'
+                scope         = 'https://graph.microsoft.com/.default'
+                client_id     = $ClientId
+                client_secret = $ClientSecret
+            }
+            $script:TokenTenantId = $TenantId
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
@@ -238,7 +248,25 @@ try {
             -ResourceId         $graphSp.Id `
             -AppRoleId          $appRole.Id `
             -ErrorAction Stop | Out-Null
-        Write-Host ("  [OK]   {0} granted." -f $requiredSiteRole) -ForegroundColor DarkGray
+        Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
+
+        # Also grant Sites.Read.All on the SharePoint service principal so the app
+        # can obtain a SharePoint-scoped token for SPO REST calls (recycle bin, etc.).
+        try {
+            $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
+            $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -in @('Sites.Read.All', 'AllSites.Read') } | Select-Object -First 1
+            if ($spoRole) {
+                New-MgServicePrincipalAppRoleAssignment `
+                    -ServicePrincipalId $sp.Id `
+                    -PrincipalId        $sp.Id `
+                    -ResourceId         $spoSp.Id `
+                    -AppRoleId          $spoRole.Id `
+                    -ErrorAction Stop | Out-Null
+                Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
+        }
 
         # Create short-lived client secret (expires in 1 day)
         $secret = Add-MgApplicationPassword `
@@ -574,7 +602,18 @@ function Get-SiteDrives {
                     $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
                     $docLibLists = @(
                         $resp.value | Where-Object {
-                            $_.id -and $_.list -and $_.list.template -eq 'documentLibrary'
+                            $_.id -and $_.list -and
+                            # Include all list templates that can have an associated drive.
+                            # documentLibrary is the most common, but picture libraries, form
+                            # libraries and wiki libraries also expose a drive endpoint.
+                            $_.list.template -in @(
+                                'documentLibrary',
+                                'pictureLibrary',
+                                'webPageLibrary',
+                                'htmlFormLibrary',
+                                'homePageLibrary',
+                                'assetLibrary'
+                            )
                         }
                     )
 
@@ -798,6 +837,125 @@ function Get-AllDriveItems {
     return $results
 }
 
+function Get-SpoAppOnlyTokenForHost {
+    param([string]$HostName)
+
+    if ([string]::IsNullOrWhiteSpace($HostName)) { return $null }
+
+    if ($script:SpoHostTokenCache.ContainsKey($HostName)) {
+        return $script:SpoHostTokenCache[$HostName]
+    }
+
+    if (-not $script:TokenBody -or -not $script:TokenTenantId) {
+        return $null
+    }
+
+    $body = @{
+        grant_type    = 'client_credentials'
+        scope         = "https://$HostName/.default"
+        client_id     = $script:TokenBody.client_id
+        client_secret = $script:TokenBody.client_secret
+    }
+
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
+            -Body $body
+
+        if ($resp.access_token) {
+            $script:SpoHostTokenCache[$HostName] = $resp.access_token
+            return $resp.access_token
+        }
+    } catch {}
+
+    return $null
+}
+
+function Get-SiteRecycleBinItems {
+    param(
+        [string]$SiteId,
+        [string]$SiteWebUrl
+    )
+
+    $items = [System.Collections.Generic.List[object]]::new()
+
+    if ($script:AppOnlyHeaders) {
+        # NOTE: Graph /sites/{id}/recycleBin/items is ONLY for SharePoint Embedded
+        # fileStorageContainers and always returns 400 for regular SharePoint sites.
+        # The correct API is SharePoint REST /_api/site/RecycleBin, which requires
+        # a SharePoint-scoped token (not a Graph token).
+        # SPO REST is therefore tried first; Graph is only kept as a last-resort fallback.
+
+        # Primary: SharePoint REST with an app-only token for the specific site host.
+        if ($SiteWebUrl) {
+            try {
+                $siteUri  = [Uri]$SiteWebUrl
+                $hostName = $siteUri.Host
+                $basePath = $siteUri.AbsolutePath.TrimEnd('/')
+                if ($basePath -eq '/') { $basePath = '' }
+
+                $spoToken = Get-SpoAppOnlyTokenForHost -HostName $hostName
+                if ($spoToken) {
+                    $spoHeaders = @{
+                        Authorization = "Bearer $spoToken"
+                        Accept        = 'application/json;odata=nometadata'
+                    }
+
+                    $spoUri = "https://$hostName$basePath/_api/site/RecycleBin?`$select=Id,Title,Size,DeletedDate,ItemState&`$top=5000"
+                    do {
+                        $resp = Invoke-RestMethod -Method GET -Uri $spoUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+
+                        $rows = @()
+                        if ($resp.value) {
+                            $rows = @($resp.value)
+                        } elseif ($resp.d -and $resp.d.results) {
+                            $rows = @($resp.d.results)
+                        }
+
+                        foreach ($row in $rows) {
+                            $items.Add([PSCustomObject]@{
+                                id              = $row.Id
+                                name            = $row.Title
+                                size            = [int64]($row.Size ?? 0)
+                                deletedDateTime = $row.DeletedDate
+                            }) | Out-Null
+                        }
+
+                        if ($resp.'@odata.nextLink') {
+                            $spoUri = $resp.'@odata.nextLink'
+                        } elseif ($resp.d -and $resp.d.__next) {
+                            $spoUri = $resp.d.__next
+                        } else {
+                            $spoUri = $null
+                        }
+                    } while ($spoUri)
+
+                    return $items
+                }
+            } catch {}
+        }
+
+        # Final fallback: Graph SDK cmdlet (works in delegated mode only; returns 400
+        # app-only for regular sites, but try anyway for delegated sessions).
+        if ($script:ConnectedHere) {
+            try {
+                Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
+                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
+                    ForEach-Object { $items.Add($_) }
+                return $items
+            } catch {}
+        }
+
+        throw "Recycle bin: all retrieval methods failed for this site."
+    }
+
+    Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
+        -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
+        ForEach-Object { $items.Add($_) }
+
+    return $items
+}
+
 $summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
 $detailRows  = [System.Collections.Generic.List[PSCustomObject]]::new()
 
@@ -828,21 +986,7 @@ if ($RecycleBinOnly) {
         Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
 
         try {
-            $rbItems = [System.Collections.Generic.List[object]]::new()
-
-            if ($script:AppOnlyHeaders) {
-                $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
-                         '?$select=id,name,size,deletedDateTime&$top=200'
-                do {
-                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
-                    $resp.value | ForEach-Object { $rbItems.Add($_) }
-                    $rbUri = $resp.'@odata.nextLink'
-                } while ($rbUri)
-            } else {
-                Get-MgSiteRecycleBinItem -SiteId $siteId -All `
-                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-                    ForEach-Object { $rbItems.Add($_) }
-            }
+            $rbItems = Get-SiteRecycleBinItems -SiteId $siteId -SiteWebUrl $site.webUrl
 
             $rbSizeBytes = [int64](($rbItems | Where-Object { $_.size } |
                                Measure-Object -Property size -Sum).Sum ?? 0)
@@ -1200,22 +1344,7 @@ if ($Apply) {
         Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
 
         try {
-            $rbItems = [System.Collections.Generic.List[object]]::new()
-
-            if ($script:AppOnlyHeaders) {
-                $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
-                         '?$select=id,name,size,deletedDateTime&$top=200'
-                do {
-                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
-                    $resp.value | ForEach-Object { $rbItems.Add($_) }
-                    $rbUri = $resp.'@odata.nextLink'
-                } while ($rbUri)
-            } else {
-                # SDK fallback — cmdlet available in Microsoft.Graph.Sites >= 2.x
-                Get-MgSiteRecycleBinItem -SiteId $siteId -All `
-                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-                    ForEach-Object { $rbItems.Add($_) }
-            }
+            $rbItems = Get-SiteRecycleBinItems -SiteId $siteId -SiteWebUrl $site.webUrl
 
             $rbSizeBytes = [int64](($rbItems | Where-Object { $_.size } |
                                Measure-Object -Property size -Sum).Sum ?? 0)
