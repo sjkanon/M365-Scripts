@@ -366,7 +366,6 @@ M365-Scripts/
 │   └── settings.json
 ├── load.ps1                         ← Entry point: first-run setup + launches menu
 ├── menu.ps1                         ← Interactive launcher (all scripts + M365 functions)
-├── Update-modules.ps1
 ├── readme.md
 └── scripts/
     ├── readme.md                    ← Index of all categories below
@@ -442,6 +441,9 @@ M365-Scripts/
     │   ├── Setup-SASMonitoring.ps1      ← install script, scheduled task, Zabbix config
     │   ├── Test-SASWorkDirectory.ps1    ← validate WORK directory health
     │   └── zabbix_sas_monitor.conf
+    ├── Teams/
+    │   ├── readme.md
+    │   └── vias_archiver.ps1        ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
     ├── Reporting/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
@@ -456,6 +458,7 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
+    │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
     │   └── Test-PowerShellSyntax.ps1
     ├── Testing Scripts/
     │   ├── readme.md                ← Index of this folder
@@ -472,8 +475,7 @@ M365-Scripts/
     │   │   └── Test-MailboxPermissions.ps1
     │   ├── Device/
     │   │   ├── readme.md
-    │   │   ├── Test-OpenVpnDiagnostics.ps1
-    │   │   └── vias_archiver.ps1
+    │   │   └── Test-OpenVpnDiagnostics.ps1
     │   ├── Network/
     │   │   ├── readme.md
     │   │   ├── Test-Ports.ps1
@@ -483,8 +485,6 @@ M365-Scripts/
     │   │   ├── readme.md
     │   │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
     │   │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
-    │   ├── SharePoint/
-    │   │   └── readme.md             ← pointer — script actually lives in Reporting/
     │   └── SMTP/
     │       ├── readme.md
     │       ├── testsmtp.ps1
@@ -526,6 +526,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-07-09 (5)
+| Change |
+|--------|
+| Tidied `Testing Scripts/` and the repo root: moved `vias_archiver.ps1` out of `Testing Scripts/Device/` into a new `scripts/Teams/` category — it's a Teams/SharePoint export & archiving tool, not a diagnostic script, so it didn't belong under "Testing" |
+| Moved root-level `Update-modules.ps1` into `scripts/Startup/` (renamed `Update-Modules.ps1` for naming consistency) — it's a module-maintenance script like `Install-Modules.ps1`, not a repo entry point like `load.ps1`/`menu.ps1` |
+| Removed the `Testing Scripts/SharePoint/` folder (it held only a pointer readme, no script) — that pointer now lives directly in `Testing Scripts/readme.md` |
+| Documented `Test-PowerShellSyntax.ps1` in `scripts/Startup/readme.md`, which had no docs before |
 
 ### 2026-07-09 (4)
 | Change |
