@@ -11,8 +11,12 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 | [`Entra/`](Entra/readme.md) | User lifecycle, manager assignment, license reporting, Conditional Access baseline (Microsoft Graph) |
 | [`Exchange/`](Exchange/readme.md) | Calendar migration/permissions, dynamic → static distribution groups |
 | [`Graph/`](Graph/readme.md) | Microsoft Graph application permission management |
-| [`Intune/`](Intune/readme.md) | Autopilot hardware hash collection, iOS compliance policy updater |
+| [`Intune/`](Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
 | [`Reporting/`](Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
+| [`Device/`](Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio |
+| [`Deployment/`](Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
+| [`DNS/`](DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
+| [`SAS/`](SAS/readme.md) | SAS batch job error monitoring with Zabbix integration |
 | [`Startup/`](Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap, dot-sourced by the menu |
 | [`Testing Scripts/`](Testing%20Scripts/readme.md) | Audit and diagnostic scripts by workload (Exchange, Entra, Network, RDS, SMTP, Device, SharePoint) |
-| [`Custom Scripts/`](Custom%20Scripts/readme.md) | Customer-specific tooling — device maintenance, Intune desktop, DNS, SAS monitoring, USB setup toolkit |
+| [`Custom Scripts/`](Custom%20Scripts/readme.md) | Path-pinned scripts — Office theme deployment (hardcodes its download URL to this repo path) |
