@@ -1,10 +1,18 @@
 # Exchange Scripts
 
-Scripts for Exchange Online calendar and mailbox management.
+Scripts for Exchange Online calendar, mailbox, and distribution group management.
 
 ---
 
 ## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Migrate-Calendar.ps1`](#migrate-calendarps1) | Migrate a shared M365 Group calendar to a Room Mailbox |
+| [`Set-Calendar-rights.ps1`](#set-calendar-rightsps1) | Grant calendar folder permissions to a user |
+| [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
+
+---
 
 ### Migrate-Calendar.ps1
 
@@ -125,3 +133,50 @@ Grants a user access rights on another user's calendar folder in Exchange Online
 ```powershell
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
 ```
+
+---
+
+### Set-Distributionlist-dynamic-static.ps1
+
+Resolves the members currently matching a Dynamic Distribution Group's filter and copies them into a regular (static) distribution group — creating the target group if it doesn't exist. Also exports the resolved member list to CSV. Requires an active Exchange Online session (`Connect-ExchangeOnline`).
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-DynamicGroupIdentity` | Yes | Source dynamic distribution group (name, alias, DN, or SMTP address) |
+| `-TargetGroupIdentity` | Yes | Target regular distribution group — created if it doesn't exist |
+| `-TargetDisplayName` | No | Display name for a new target group (default: `<DynamicDisplayName> Static`) |
+| `-TargetAlias` | No | Alias for a new target group (default: `<DynamicAlias>-static`) |
+| `-TargetPrimarySmtpAddress` | No | SMTP address for a new target group (default: dynamic group's current primary SMTP) |
+| `-CopyManagersFromDynamic` | No | Copy `ManagedBy` owners from the dynamic group to the target group (default: on) |
+| `-DisableCopyManagersFromDynamic` | No | Disable copying `ManagedBy` owners |
+| `-MakeDynamicAddressTemporary` | No | Give the dynamic group a temporary primary SMTP first, freeing its address for the target group (default: on) |
+| `-DisableMakeDynamicAddressTemporary` | No | Disable the automatic temporary SMTP change |
+| `-ClearTargetMembers` | No | Remove existing target members before adding the resolved dynamic members |
+| `-ExportCsvPath` | No | CSV export path for resolved members (default: `C:\Temp\DynamicGroupMembers_<timestamp>.csv` on Windows, `~/Downloads` on Linux/macOS) |
+| `-SkipMemberAdd` | No | Only resolve and export members, do not modify the target group |
+| `-RenameDynamicGroupTo` | No | Rename the source dynamic distribution group after processing |
+
+**Examples**
+
+```powershell
+# Resolve dynamic group and populate regular group
+.\Set-Distributionlist-dynamic-static.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static"
+
+# Full refresh of target group members
+.\Set-Distributionlist-dynamic-static.ps1 -DynamicGroupIdentity sales@contoso.com -TargetGroupIdentity sales-static@contoso.com -ClearTargetMembers
+
+# Dry run
+.\Set-Distributionlist-dynamic-static.ps1 -DynamicGroupIdentity "All Staff" -TargetGroupIdentity "All Staff Static" -WhatIf
+
+# Convert and rename the original dynamic group
+.\Set-Distributionlist-dynamic-static.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static" -RenameDynamicGroupTo "All Sales (Legacy Dynamic)"
+
+# Free up the dynamic group's SMTP address for the new static group
+.\Set-Distributionlist-dynamic-static.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static" -MakeDynamicAddressTemporary
+```
+
+**Notes**
+- Requires Exchange Online PowerShell module and active EXO session (`Connect-ExchangeOnline`)
+- Dynamic Distribution Groups are Exchange objects; this script uses Exchange cmdlets, not Graph

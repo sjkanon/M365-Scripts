@@ -357,6 +357,8 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
 ## Repository Structure
 
+Every folder has its own `readme.md` — this tree is a map; follow the links for full parameter/usage docs.
+
 ```
 M365-Scripts/
 ├── .gitignore
@@ -364,102 +366,139 @@ M365-Scripts/
 │   └── settings.json
 ├── load.ps1                         ← Entry point: first-run setup + launches menu
 ├── menu.ps1                         ← Interactive launcher (all scripts + M365 functions)
+├── Update-modules.ps1
 ├── readme.md
 └── scripts/
+    ├── readme.md                    ← Index of all categories below
     ├── Custom Scripts/
+    │   ├── readme.md                ← Index of this folder
     │   ├── device/
+    │   │   ├── readme.md
     │   │   ├── Invoke-WindowsActivation.ps1 ← activate Windows, set product key / KMS server
     │   │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
+    │   │   ├── Clear-TempFiles.ps1
     │   │   ├── audio/
+    │   │   │   ├── readme.md
     │   │   │   ├── detect-audiodevices.ps1
     │   │   │   ├── Disable-internalmic.ps1
-    │   │   │   └── readme.md
+    │   │   │   └── Rollback-InternalMic.ps1
     │   │   └── Time sync/
+    │   │       ├── readme.md
     │   │       └── Restart-Time-Sync.ps1
-    │   ├── Intune/Desktop/
-    │   │   ├── Add Lockscreen to start and desktop/
-    │   │   └── Background/
-    │   │       ├── Desktop/
-    │   │       │   ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
-    │   │       │   └── readme.md
-    │   │       └── Lockscreen/
-    │   │           ├── Make-lockscreen.ps1         ← corporate lockscreen via Intune (validated download, PersonalizationCSP)
-    │   │           └── readme.md
+    │   ├── Intune/                  ← customer-specific Intune deployment (see also scripts/Intune/)
+    │   │   ├── readme.md
+    │   │   └── Desktop/
+    │   │       ├── readme.md
+    │   │       ├── Deploy-OfficeTheme.ps1        ← installs the full VIAS .thmx Office theme
+    │   │       ├── 2026 Vias institute colours (2).thmx
+    │   │       ├── Office Themes/
+    │   │       │   ├── readme.md
+    │   │       │   ├── Deploy-Officecolors.ps1   ← installs just the color scheme
+    │   │       │   └── Test VIAS.xml
+    │   │       ├── Add Lockscreen to start and desktop/
+    │   │       │   ├── readme.md
+    │   │       │   ├── add-lock.ps1               ← taskbar "Lock Workstation" shortcut
+    │   │       │   └── add-shortcut-lock.ps1
+    │   │       └── Background/
+    │   │           ├── readme.md
+    │   │           ├── Desktop/
+    │   │           │   ├── readme.md
+    │   │           │   ├── Set-CorporateWallpaper.ps1  ← corporate wallpaper via Intune (hash check, PersonalizationCSP)
+    │   │           │   └── Remove-CorporateWallpaper.ps1
+    │   │           └── Lockscreen/
+    │   │               ├── readme.md
+    │   │               └── Make-lockscreen.ps1         ← corporate lockscreen via Intune (validated download, PersonalizationCSP)
     │   ├── DNS/
+    │   │   ├── readme.md
     │   │   ├── Import-DnsRecords.ps1   ← resolve via Google DNS + import into AD DNS
-    │   │   ├── example-records.csv
-    │   │   └── readme.md
+    │   │   └── example-records.csv
     │   ├── SAS/
+    │   │   ├── readme.md
+    │   │   ├── rca.md
     │   │   ├── Monitor-SASBatchErrors.ps1   ← scan logs + Event Viewer for SAS errors
     │   │   ├── Setup-SASMonitoring.ps1      ← install script, scheduled task, Zabbix config
     │   │   ├── Test-SASWorkDirectory.ps1    ← validate WORK directory health
-    │   │   ├── zabbix_sas_monitor.conf
-    │   │   └── readme.md
+    │   │   └── zabbix_sas_monitor.conf
     │   └── Save install time/       ← USB setup toolkit
+    │       ├── readme.md
     │       ├── start.bat
     │       ├── autorun.inf
-    │       └── readme.md
+    │       └── Browse-InstallScripts.ps1
     ├── Entra/
-    │   ├── Import-M365Users.ps1
-    │   ├── New-M365User.ps1
+    │   ├── readme.md
+    │   ├── Set-UserManager.ps1
     │   ├── Remove-M365Users.ps1
-    │   └── readme.md
+    │   ├── New-M365User.ps1
+    │   ├── Import-M365Users.ps1
+    │   ├── Get-M365UserLicenses.ps1
+    │   └── Import-ConditionalAccessBaseline.ps1
     ├── Exchange/
+    │   ├── readme.md
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
-    │   └── readme.md
-    ├── Intune/
+    │   └── Set-Distributionlist-dynamic-static.ps1
+    ├── Graph/
+    │   ├── readme.md
+    │   └── logic-permissies.ps1     ← grant a Graph app role to a Logic App managed identity
+    ├── Intune/                      ← generic/reusable Intune tooling (see also Custom Scripts/Intune/)
+    │   ├── readme.md
     │   ├── Get-Autopilot/
+    │   │   ├── readme.md
     │   │   ├── Get-WindowsAutoPilotInfo.ps1
     │   │   └── GetAutoPilot.CMD
     │   └── iOS-Compliance-Updater/
+    │       ├── readme.md
     │       ├── Update-iOSCompliancePolicy.ps1   ← main script (run or scheduled task)
     │       ├── Setup.ps1                        ← one-time: App Registration + config.json
     │       ├── Install-ScheduledTask.ps1        ← register weekly scheduled task
-    │       ├── config.example.json
-    │       └── readme.md
+    │       └── config.example.json
     ├── Reporting/
-    │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
     │   ├── readme.md
+    │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
+    │   ├── Get-SharePointStorageReport.ps1  ← tenant-wide SharePoint storage report
     │   └── Licensing/
+    │       ├── readme.md
     │       ├── genereer_licentie_overzicht.py
     │       ├── genereer_rapport.ps1
     │       ├── genereer_rapport.bat
-    │       ├── create_scheduled_task.ps1
-    │       └── readme.md
+    │       └── create_scheduled_task.ps1
     ├── Startup/
+    │   ├── readme.md
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
-    │   └── readme.md
+    │   └── Test-PowerShellSyntax.ps1
     └── Testing Scripts/
+        ├── readme.md                ← Index of this folder
         ├── Entra/
-        │   ├── Test-M365GroupMembership.ps1
-        │   └── readme.md
+        │   ├── readme.md
+        │   └── Test-M365GroupMembership.ps1
         ├── Exchange/
+        │   ├── readme.md
         │   ├── Get-ExternalForwards.ps1
         │   ├── Get-MailboxSizes.ps1
         │   ├── Test-CalendarPermissions.ps1
         │   ├── Test-DkimConfig.ps1
         │   ├── Test-DistributionGroupPermissions.ps1
-        │   ├── Test-MailboxPermissions.ps1
-        │   └── readme.md
+        │   └── Test-MailboxPermissions.ps1
         ├── Device/
+        │   ├── readme.md
         │   ├── Test-OpenVpnDiagnostics.ps1
-        │   └── readme.md
+        │   └── vias_archiver.ps1
         ├── Network/
+        │   ├── readme.md
         │   ├── Test-Ports.ps1
         │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
         │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
         ├── RDS/
+        │   ├── readme.md
         │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
         │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
         ├── SharePoint/
-        │   ├── Get-SharePointStorageReport.ps1
-        │   └── readme.md
+        │   └── readme.md             ← pointer — script actually lives in Reporting/
         └── SMTP/
+            ├── readme.md
             ├── testsmtp.ps1
-            ├── testsmtp_5min.ps1
-            └── readme.md
+            └── testsmtp_5min.ps1
 ```
 
 ---
@@ -483,6 +522,17 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-07-09
+| Change |
+|--------|
+| Added `readme.md` to every folder that lacked one: `scripts/`, `scripts/Custom Scripts/`, `scripts/Custom Scripts/Intune/` (+ `Desktop/`, `Office Themes/`, `Add Lockscreen to start and desktop/`, `Background/`), `scripts/Custom Scripts/device/Time sync/`, `scripts/Graph/`, `scripts/Intune/` (+ `Get-Autopilot/`), `scripts/Testing Scripts/`, `scripts/Testing Scripts/Network/`, `scripts/Testing Scripts/RDS/` — each with a file list and parameter/usage docs |
+| Fixed `scripts/Custom Scripts/device/audio/Rollback-InternalMic` — file was missing its `.ps1` extension |
+| Renamed `scripts/Entra/remove-m365users.ps1` → `Remove-M365Users.ps1` for naming consistency (menu.ps1 and readmes already referenced the PascalCase form) |
+| Fixed `scripts/Entra/readme.md` — removed a stale `Distributionlist.ps1` entry that actually documented `scripts/Exchange/Set-Distributionlist-dynamic-static.ps1`; moved accurate docs to `scripts/Exchange/readme.md`; added missing `Set-UserManager.ps1` docs |
+| Fixed `scripts/Testing Scripts/SharePoint/readme.md` — was a stale duplicate of `Get-SharePointStorageReport.ps1` docs (script doesn't live in this folder); replaced with a pointer to `scripts/Reporting/readme.md`, which now documents the script's full current parameter set (`-ClientId`, `-ClientSecret`, `-CertificateThumbprint`, `-RecycleBinOnly`, `-GraphTimeoutSec`, `-MaxGraphRetry` were previously undocumented) |
+| Fixed `scripts/Custom Scripts/device/audio/readme.md` — corrected script name casing to match the actual files on disk |
+| Removed tracked `.DS_Store` files from git and added `.DS_Store` to `.gitignore` |
 
 ### 2026-04-17
 | Change |
