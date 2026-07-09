@@ -6,48 +6,58 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 
 ## Scripts
 
-### Distributionlist.ps1
+| Script | Description |
+|--------|-------------|
+| [`Set-UserManager.ps1`](#set-usermanagerps1) | Report and optionally bulk-set the manager for a set of Entra ID users |
+| [`Remove-M365Users.ps1`](#remove-m365usersps1) | Bulk-delete M365 user accounts (dry-run by default) |
+| [`New-M365User.ps1`](#new-m365userps1) | Create a single M365 user, optional license |
+| [`Import-M365Users.ps1`](#import-m365usersps1) | Bulk-create M365 users from CSV (dry-run by default) |
+| [`Get-M365UserLicenses.ps1`](#get-m365userlicensesps1) | Report assigned licenses for a list of users |
+| [`Import-ConditionalAccessBaseline.ps1`](#import-conditionalaccessbaselineps1) | Import the community Conditional Access baseline |
 
-Resolves members from a Dynamic Distribution Group (Exchange Online) and copies them into a regular Distribution Group.
-Also exports the resolved recipient list to CSV.
+> Dynamic-to-static distribution group conversion (`Set-Distributionlist-dynamic-static.ps1`) lives in [`scripts/Exchange/`](../Exchange/readme.md) — it uses Exchange Online cmdlets, not Graph.
+
+---
+
+### Set-UserManager.ps1
+
+Reports and optionally bulk-sets the manager for a set of Entra ID users. Users can be selected by group, department, current manager, or an explicit UPN list; when `-NewManager` is omitted the script only reports each user's current manager.
 
 **Parameters**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `-DynamicGroupIdentity` | Yes | Source dynamic distribution group identity |
-| `-TargetGroupIdentity` | Yes | Target regular distribution group identity |
-| `-TargetDisplayName` | No | Display name for new target group |
-| `-TargetAlias` | No | Alias for new target group |
-| `-TargetPrimarySmtpAddress` | No | SMTP address for new target group |
-| `-ClearTargetMembers` | No | Remove existing target members first |
-| `-ExportCsvPath` | No | CSV output path for resolved members (default: `C:\Temp\DynamicGroupMembers_<timestamp>.csv` on Windows, `~/Downloads` on Linux/macOS) |
-| `-SkipMemberAdd` | No | Only export members, do not update target group |
-| `-RenameDynamicGroupTo` | No | Rename source dynamic distribution group after processing |
+| `-GroupId` | * | Object ID of an Entra ID group whose members should be processed |
+| `-GroupName` | * | Display name of an Entra ID group (resolved to an ID automatically; errors if ambiguous) |
+| `-Department` | * | Department string to filter users by (exact match via OData) |
+| `-CurrentManager` | * | UPN or object ID of a manager — processes all their direct reports tenant-wide |
+| `-UserList` | * | Explicit array of UPNs or object IDs |
+| `-NewManager` | No | UPN or object ID to set as manager for all resolved users. Omit to only report current managers |
+| `-OutputPath` | No | CSV export path |
+| `-TenantId` | No | Entra ID tenant ID or domain for `Connect-MgGraph` |
+
+*Exactly one of `-GroupId` / `-GroupName` / `-Department` / `-CurrentManager` / `-UserList` selects the user source.
 
 **Examples**
 
 ```powershell
-# Resolve dynamic group and populate regular group
-.\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static"
+# Show managers for all members of a group
+.\Set-UserManager.ps1 -GroupName "Sales Team"
 
-# Full refresh of target group members
-.\Distributionlist.ps1 -DynamicGroupIdentity sales@contoso.com -TargetGroupIdentity sales-static@contoso.com -ClearTargetMembers
+# Bulk-set manager for a group
+.\Set-UserManager.ps1 -GroupName "Sales Team" -NewManager "jane.doe@contoso.com"
 
-# Dry run
-.\Distributionlist.ps1 -DynamicGroupIdentity "All Staff" -TargetGroupIdentity "All Staff Static" -WhatIf
+# Bulk-set manager for a department, export report
+.\Set-UserManager.ps1 -Department "Logistics" -NewManager "jane.doe@contoso.com" -OutputPath C:\Temp\ManagerReport.csv
 
-# Convert and rename the original dynamic group
-.\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static" -RenameDynamicGroupTo "All Sales (Legacy Dynamic)"
+# Find all direct reports of a manager
+.\Set-UserManager.ps1 -CurrentManager "old.boss@contoso.com"
 
-# Keep the original name on the static group:
-# 1) dynamic group is renamed first, 2) static group is created with the original display name
-.\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales" -RenameDynamicGroupTo "All Sales (Legacy Dynamic)"
+# Re-assign all direct reports of one manager to another
+.\Set-UserManager.ps1 -CurrentManager "old.boss@contoso.com" -NewManager "new.boss@contoso.com"
 ```
 
-**Notes**
-- Requires Exchange Online PowerShell module and active EXO session (`Connect-ExchangeOnline`)
-- Dynamic Distribution Groups are Exchange objects; this script uses Exchange cmdlets
+Supports `-WhatIf` (`SupportsShouldProcess`).
 
 ---
 
