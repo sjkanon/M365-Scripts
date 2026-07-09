@@ -16,6 +16,7 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 | [`Device/`](Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio |
 | [`Deployment/`](Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
 | [`DNS/`](DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
-| [`Startup/`](Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap, dot-sourced by the menu |
-| [`Testing Scripts/`](Testing%20Scripts/readme.md) | Audit and diagnostic scripts by workload (Exchange, Entra, Network, RDS, SMTP, Device, SharePoint) |
+| [`Teams/`](Teams/readme.md) | Microsoft Teams / SharePoint export and archiving |
+| [`Startup/`](Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap + syntax checker, dot-sourced by the menu |
+| [`Testing Scripts/`](Testing%20Scripts/readme.md) | Audit and diagnostic scripts by workload (Exchange, Entra, Network, RDS, SMTP, Device) |
 | [`Custom Scripts/`](Custom%20Scripts/readme.md) | Path-pinned scripts — Office theme deployment (hardcodes its download URL to this repo path) |
