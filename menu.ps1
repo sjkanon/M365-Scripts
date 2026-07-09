@@ -322,17 +322,17 @@ $menu = @(
     }
     [PSCustomObject]@{ Key='6'; FKey=[ConsoleKey]::F6; Category='Device'
         Label='Restart-Time-Sync   — force Windows time service sync'
-        Script="$ROOT\scripts\Custom Scripts\device\Time sync\Restart-Time-Sync.ps1"
+        Script="$ROOT\scripts\Device\Time sync\Restart-Time-Sync.ps1"
         Params={ return @{} }
     }
     [PSCustomObject]@{ Key='7'; FKey=[ConsoleKey]::F7; Category='Device'
         Label='Detect-AudioDevices — list connected audio devices'
-        Script="$ROOT\scripts\Custom Scripts\device\audio\detect-audiodevices.ps1"
+        Script="$ROOT\scripts\Device\audio\detect-audiodevices.ps1"
         Params={ return @{} }
     }
     [PSCustomObject]@{ Key='8'; FKey=[ConsoleKey]::F8; Category='Device'
         Label='Disable-InternalMic — disable internal microphone via policy'
-        Script="$ROOT\scripts\Custom Scripts\device\audio\Disable-internalmic.ps1"
+        Script="$ROOT\scripts\Device\audio\Disable-internalmic.ps1"
         Params={ return @{} }
     }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'

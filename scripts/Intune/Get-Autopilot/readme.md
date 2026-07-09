@@ -1,6 +1,6 @@
 # Get-Autopilot
 
-Windows Autopilot hardware hash collection — for USB/OOBE enrollment, see also [`Custom Scripts/Save install time/`](../../Custom%20Scripts/Save%20install%20time/readme.md), which copies these two files onto its USB toolkit.
+Windows Autopilot hardware hash collection — for USB/OOBE enrollment, see also [`Deployment/`](../../Deployment/readme.md), which copies these two files onto its USB toolkit.
 
 ---
 
