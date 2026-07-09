@@ -94,7 +94,9 @@ param (
     [string] $CertificateThumbprint,
     [switch] $Apply,
     [switch] $UseHighPrivilege,
-    [switch] $RecycleBinOnly
+    [switch] $RecycleBinOnly,
+    [int] $GraphTimeoutSec = 120,
+    [int] $MaxGraphRetry = 6
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -113,16 +115,25 @@ $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
 
+function Write-ProgressHost {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::DarkGray
+    )
+    Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) -ForegroundColor $ForegroundColor
+}
+
 function Remove-TempApp {
     # Delegated session is still open here — Remove-MgApplication works
     if ($script:TempAppObjectId) {
-        Write-Host "  Removing temporary App Registration..." -ForegroundColor DarkGray
+        Write-ProgressHost -Message "Removing temporary App Registration..." -ForegroundColor DarkGray
         try {
             Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
-            Write-Host "  [OK]   Temporary App Registration removed." -ForegroundColor DarkGray
+            Write-ProgressHost -Message "[OK] Temporary App Registration removed." -ForegroundColor DarkGray
         } catch {
-            Write-Host ("  [WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
-            Write-Host "         Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
+            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
+            Write-ProgressHost -Message "[WARN] Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
         }
         $script:TempAppObjectId = $null
     }
@@ -275,26 +286,122 @@ try {
     Remove-TempApp; exit 1
 }
 
+function Update-AppOnlyToken {
+    # Silently refreshes the app-only token if it expires within 5 minutes
+    if (-not $script:TokenBody) { return }
+    if ((Get-Date) -lt $script:TokenExpiry) { return }
+
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
+            -Body $script:TokenBody
+        $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+        $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+        Write-Host "  [INFO] App-only token refreshed (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Get-GraphRetryDelaySeconds {
+    param(
+        [int]$Attempt,
+        [object]$ErrorRecord
+    )
+
+    $retryAfter = $null
+    try {
+        $resp = $ErrorRecord.Exception.Response
+        if ($resp -and $resp.Headers) {
+            $retryHeader = $resp.Headers['Retry-After']
+            if ($retryHeader) {
+                [void][int]::TryParse([string]$retryHeader, [ref]$retryAfter)
+            }
+        }
+    } catch {}
+
+    if ($retryAfter -and $retryAfter -gt 0) {
+        return [Math]::Min($retryAfter, 120)
+    }
+
+    return [Math]::Min([int][Math]::Pow(2, [Math]::Max(1, $Attempt)), 60)
+}
+
+function Invoke-GraphGet {
+    param(
+        [string]$Uri,
+        [hashtable]$Headers
+    )
+
+    for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
+        try {
+            Update-AppOnlyToken
+            return Invoke-RestMethod -Uri $Uri -Headers $Headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+        } catch {
+            $statusCode = $null
+            try {
+                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                    $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+            } catch {}
+
+            $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
+            if (-not $isRetryable -and -not $statusCode) {
+                $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
+            }
+
+            if (-not $isRetryable -or $attempt -eq $MaxGraphRetry) {
+                throw
+            }
+
+            $delay = Get-GraphRetryDelaySeconds -Attempt $attempt -ErrorRecord $_
+            Write-ProgressHost -Message (
+                "[INFO] Graph request retry ({0}/{1}) in {2}s: {3}" -f
+                $attempt,
+                $MaxGraphRetry,
+                $delay,
+                $Uri
+            ) -ForegroundColor DarkGray
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 # ── Get sites ─────────────────────────────────────────────────────────────────
-Write-Host "  Retrieving sites..." -ForegroundColor Cyan
+Write-ProgressHost -Message "Retrieving sites..." -ForegroundColor Cyan
+
+$scanAllSites = $false
 
 if ($SiteUrl) {
-    if ($SiteUrl -notmatch 'https://([^/]+)/(sites|teams)/([^/?#]+)') {
-        Write-Host "  [ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name> or /teams/<name>" -ForegroundColor Red
-        Remove-TempApp; exit 1
-    }
-    try {
-        $sites = @(Get-MgSite -Search $Matches[3] -ErrorAction Stop |
-                   Where-Object { $_.WebUrl -eq $SiteUrl })
-        if ($sites.Count -eq 0) {
-            Write-Host "  [ERROR] Site not found: $SiteUrl" -ForegroundColor Red
+    $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
+
+    # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
+    if ($normalizedSiteUrl -match '^https://[^/]+$') {
+        Write-ProgressHost -Message "[INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
+        $scanAllSites = $true
+    } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/([^?#]+)$') {
+        $SiteUrl = $normalizedSiteUrl
+        $siteSearchTerm = ($Matches[2] -split '/')[-1]
+
+        try {
+            $sites = @(Get-MgSite -Search $siteSearchTerm -ErrorAction Stop |
+                       Where-Object { $_.WebUrl.TrimEnd('/') -eq $SiteUrl })
+            if ($sites.Count -eq 0) {
+                Write-ProgressHost -Message "[ERROR] Site not found: $SiteUrl" -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
+        } catch {
+            Write-ProgressHost -Message "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
             Remove-TempApp; exit 1
         }
-    } catch {
-        Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    } else {
+        Write-ProgressHost -Message "[ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
         Remove-TempApp; exit 1
     }
-} elseif ($script:AppOnlyHeaders) {
+}
+
+if ((-not $SiteUrl) -or $scanAllSites) {
+    if ($script:AppOnlyHeaders) {
     # Auto mode: enumerate all sites using app-only REST token
     # Retry first call — consent may take a few seconds to propagate
     $sites = [System.Collections.Generic.List[object]]::new()
@@ -303,17 +410,17 @@ if ($SiteUrl) {
 
     for ($i = 1; $i -le 6; $i++) {
         try {
-            $response = Invoke-RestMethod -Uri $firstUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+            $response = Invoke-GraphGet -Uri $firstUri -Headers $script:AppOnlyHeaders
             $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
             $nextUri = $response.'@odata.nextLink'
             $firstDone = $true
             break
         } catch {
             if ($i -lt 6) {
-                Write-Host ("  [INFO] Waiting for consent propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                Write-ProgressHost -Message ("[INFO] Waiting for consent propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
                 Start-Sleep -Seconds 5
             } else {
-                Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+                Write-ProgressHost -Message "[ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
                 Remove-TempApp; exit 1
             }
         }
@@ -321,23 +428,27 @@ if ($SiteUrl) {
 
     # Continue pagination
     while ($firstDone -and $nextUri) {
-        $response = Invoke-RestMethod -Uri $nextUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+        $response = Invoke-GraphGet -Uri $nextUri -Headers $script:AppOnlyHeaders
         $response.value | Where-Object { $_.id } | ForEach-Object { $sites.Add($_) }
         $nextUri = $response.'@odata.nextLink'
     }
-} else {
+    } else {
     # Provided credentials — app-only SDK connection, use Get-MgAllSite
     try {
         $sites = @(Get-MgAllSite -All -Property 'id,displayName,webUrl' -ErrorAction Stop)
     } catch {
-        Write-Host "  [ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
+        Write-ProgressHost -Message "[ERROR] Failed to retrieve sites: $($_.Exception.Message)" -ForegroundColor Red
         Remove-TempApp; exit 1
+    }
     }
 }
 
 # Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/)
 $sites = [System.Collections.Generic.List[object]]::new(
-    @($sites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
+    @($sites | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_.id) -and
+        ($_.webUrl -notmatch '-my\.sharepoint\.com/personal/')
+    })
 )
 
 # Add sub-sites at all depths — getAllSites/Get-MgAllSite primarily return site collections.
@@ -359,11 +470,14 @@ while ($subSiteQueue.Count -gt 0) {
         $subSites = @()
 
         if ($script:AppOnlyHeaders) {
-            Update-AppOnlyToken
-            $subResp = Invoke-RestMethod `
-                -Uri     "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites" `
-                -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            $subSites = @($subResp.value)
+            $subSitesList = [System.Collections.Generic.List[object]]::new()
+            $subSitesUri = "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites`?$select=id,displayName,webUrl&`$top=200"
+            do {
+                $subResp = Invoke-GraphGet -Uri $subSitesUri -Headers $script:AppOnlyHeaders
+                $subResp.value | Where-Object { $_.id } | ForEach-Object { $subSitesList.Add($_) }
+                $subSitesUri = $subResp.'@odata.nextLink'
+            } while ($subSitesUri)
+            $subSites = @($subSitesList)
         } else {
             $subSites = @(Get-MgSiteSubSite -SiteId $parent.id -All -ErrorAction Stop)
         }
@@ -379,7 +493,7 @@ while ($subSiteQueue.Count -gt 0) {
     }
 }
 
-Write-Host ("  Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
+Write-ProgressHost -Message ("Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -401,48 +515,83 @@ function Test-IsFile {
     return $knownExtensions.Contains($ext)
 }
 
-function Update-AppOnlyToken {
-    # Silently refreshes the app-only token if it expires within 5 minutes
-    if (-not $script:TokenBody) { return }
-    if ((Get-Date) -lt $script:TokenExpiry) { return }
-
-    try {
-        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
-            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
-            -Body $script:TokenBody
-        $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
-        $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
-        Write-Host "  [INFO] App-only token refreshed (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
-    } catch {
-        Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-}
-
 function Get-SiteDrives {
     # Uses /lists?$expand=drive to return ALL document libraries per site,
     # including Site Pages, Site Assets, Teams channels, and custom libraries
     # that may not surface in the /drives endpoint.
     param([string]$SiteId)
     if ($script:AppOnlyHeaders) {
-        Update-AppOnlyToken
-        $drives  = [System.Collections.Generic.List[object]]::new()
-        $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
-                   '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
-        do {
-            $resp = Invoke-RestMethod -Uri $listUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            # Keep any list that has an associated drive — covers document libraries,
-            # Teams channel libraries, picture libraries, form libraries, etc.
-            $resp.value |
-                Where-Object { $_.drive } |
-                ForEach-Object {
-                    $driveObj = $_.drive
-                    $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $_.list.enableVersioning  -Force -ErrorAction SilentlyContinue
-                    $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $_.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
-                    $drives.Add($driveObj)
+        try {
+            Update-AppOnlyToken
+            $drives  = [System.Collections.Generic.List[object]]::new()
+            $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
+                       '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
+            do {
+                $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
+                # Keep any list that has an associated drive — covers document libraries,
+                # Teams channel libraries, picture libraries, form libraries, etc.
+                $resp.value |
+                    Where-Object { $_.drive } |
+                    ForEach-Object {
+                        $driveObj = $_.drive
+                        $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $_.list.enableVersioning  -Force -ErrorAction SilentlyContinue
+                        $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $_.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
+                        $drives.Add($driveObj)
+                    }
+                $listUri = $resp.'@odata.nextLink'
+            } while ($listUri)
+            return $drives
+        } catch {
+            # Some tenants/sites return 400 on /lists?$expand=drive in app-only mode.
+            # Fallback 1: enumerate document-library lists, then resolve /lists/{id}/drive.
+            # This preserves broader coverage versus using /drives directly.
+            try {
+                Update-AppOnlyToken
+                $drives = [System.Collections.Generic.List[object]]::new()
+                $seenDriveIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
+                           '?$select=id,displayName,list&$top=200'
+
+                do {
+                    $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
+                    $docLibLists = @(
+                        $resp.value | Where-Object {
+                            $_.id -and $_.list -and $_.list.template -eq 'documentLibrary'
+                        }
+                    )
+
+                    foreach ($list in $docLibLists) {
+                        try {
+                            $driveObj = Invoke-GraphGet `
+                                -Uri ("https://graph.microsoft.com/v1.0/sites/$SiteId/lists/{0}/drive" -f $list.id) `
+                                -Headers $script:AppOnlyHeaders
+
+                            if ($driveObj.id -and $seenDriveIds.Add($driveObj.id)) {
+                                $driveObj | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $list.list.enableVersioning  -Force -ErrorAction SilentlyContinue
+                                $driveObj | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $list.list.majorVersionLimit -Force -ErrorAction SilentlyContinue
+                                $drives.Add($driveObj)
+                            }
+                        } catch {
+                            # Not every list exposes a drive endpoint in every tenant configuration.
+                        }
+                    }
+
+                    $listUri = $resp.'@odata.nextLink'
+                } while ($listUri)
+
+                if ($drives.Count -gt 0) {
+                    return $drives
                 }
-            $listUri = $resp.'@odata.nextLink'
-        } while ($listUri)
-        return $drives
+            } catch {
+                # Continue to final fallback below.
+            }
+
+            # Fallback 2: delegated SDK drives call when available (auto mode).
+            if ($script:ConnectedHere) {
+                return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+            }
+            throw
+        }
     } else {
         return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
     }
@@ -452,10 +601,14 @@ function Get-VersionSize {
     param([string]$DriveId, [string]$ItemId)
     try {
         if ($script:AppOnlyHeaders) {
-            $resp     = Invoke-RestMethod `
-                -Uri     "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/versions" `
-                -Headers $script:AppOnlyHeaders -ErrorAction Stop
-            $versions = $resp.value
+            $versions = [System.Collections.Generic.List[object]]::new()
+            $versionUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/versions" +
+                          '?$select=id,size,lastModifiedDateTime&$top=200'
+            do {
+                $resp = Invoke-GraphGet -Uri $versionUri -Headers $script:AppOnlyHeaders
+                $resp.value | ForEach-Object { $versions.Add($_) }
+                $versionUri = $resp.'@odata.nextLink'
+            } while ($versionUri)
         } else {
             $versions = Get-MgDriveItemVersion -DriveId $DriveId -DriveItemId $ItemId -ErrorAction Stop
         }
@@ -472,21 +625,30 @@ function Get-AllDriveItems {
     # Iterative breadth-first traversal — no call stack limit, handles any folder depth
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
     $queue   = [System.Collections.Generic.Queue[PSCustomObject]]::new()
+    $processedFolders = 0
+    $processedFiles   = 0
 
     $queue.Enqueue([PSCustomObject]@{ Id = 'root'; Path = '' })
 
     while ($queue.Count -gt 0) {
         $current = $queue.Dequeue()
+        $processedFolders++
+        if ($processedFolders % 25 -eq 0) {
+            Write-ProgressHost -Message (
+                "progress: {0} folders, {1} files scanned..." -f
+                $processedFolders,
+                $processedFiles
+            ) -ForegroundColor DarkGray
+        }
 
         # Collect all children (paginated)
         $children = [System.Collections.Generic.List[object]]::new()
         try {
             if ($script:AppOnlyHeaders) {
-                Update-AppOnlyToken
                 $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$($current.Id)/children" +
                             '?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200'
                 do {
-                    $resp = Invoke-RestMethod -Uri $childUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp = Invoke-GraphGet -Uri $childUri -Headers $script:AppOnlyHeaders
                     $resp.value | ForEach-Object { $children.Add($_) }
                     $childUri = $resp.'@odata.nextLink'
                 } while ($childUri)
@@ -503,6 +665,7 @@ function Get-AllDriveItems {
             $path = if ($current.Path) { "$($current.Path)/$($child.name)" } else { $child.name }
 
             if (Test-IsFile -Item $child) {
+                $processedFiles++
                 $fileSize = [int64]($child.size ?? 0)
                 $verCount = 0
                 $verSize  = [int64]0
@@ -570,6 +733,8 @@ if ($RecycleBinOnly) {
         $siteId   = $site.id
         $siteName = $site.displayName ?? $site.name
 
+        if ([string]::IsNullOrWhiteSpace([string]$siteId)) { continue }
+
         # Only root site collections have their own recycle bin.
         $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
@@ -582,11 +747,10 @@ if ($RecycleBinOnly) {
             $rbItems = [System.Collections.Generic.List[object]]::new()
 
             if ($script:AppOnlyHeaders) {
-                Update-AppOnlyToken
                 $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
                          '?$select=id,name,size,deletedDateTime&$top=200'
                 do {
-                    $resp = Invoke-RestMethod -Uri $rbUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
                     $resp.value | ForEach-Object { $rbItems.Add($_) }
                     $rbUri = $resp.'@odata.nextLink'
                 } while ($rbUri)
@@ -685,7 +849,7 @@ if ($RecycleBinOnly) {
 
 # ── Phase 1: Enumerate all document libraries ─────────────────────────────────
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Phase 1: Enumerating document libraries" -ForegroundColor Cyan
+Write-ProgressHost -Message "Phase 1: Enumerating document libraries" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -697,7 +861,12 @@ foreach ($site in $sites) {
     $siteName = $site.displayName ?? $site.name
     $siteId   = $site.id
 
-    Write-Host ("  [{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
+    Write-ProgressHost -Message ("[{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
+
+    if ([string]::IsNullOrWhiteSpace([string]$siteId)) {
+        Write-ProgressHost -Message "[WARN] Skipping site without valid id." -ForegroundColor Yellow
+        continue
+    }
 
     try {
         $drives = Get-SiteDrives -SiteId $siteId
@@ -706,21 +875,21 @@ foreach ($site in $sites) {
                 Site  = $site
                 Drive = $drive
             }) | Out-Null
-            Write-Host ("        {0}" -f $drive.name) -ForegroundColor DarkGray
+            Write-ProgressHost -Message ("{0}" -f $drive.name) -ForegroundColor DarkGray
         }
     } catch {
-        Write-Host ("        [ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-ProgressHost -Message ("[ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
     }
 }
 
 Write-Host ""
-Write-Host ("  Found {0} document libraries across {1} site(s)" -f
+Write-ProgressHost -Message ("Found {0} document libraries across {1} site(s)" -f
     $siteLibraries.Count, $sites.Count) -ForegroundColor Green
 Write-Host ""
 
 # ── Phase 2: Retrieve storage data ────────────────────────────────────────────
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Phase 2: Retrieving storage data" -ForegroundColor Cyan
+Write-ProgressHost -Message "Phase 2: Retrieving storage data" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -732,7 +901,7 @@ foreach ($entry in $siteLibraries) {
     $drive    = $entry.Drive
     $siteName = $site.displayName ?? $site.name
 
-    Write-Host ("  [{0}/{1}] {2} › {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
+    Write-ProgressHost -Message ("[{0}/{1}] {2} > {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
 
     # Quick mode: use quota data from drives (no file enumeration)
     if (-not $Apply) {
@@ -942,11 +1111,10 @@ if ($Apply) {
             $rbItems = [System.Collections.Generic.List[object]]::new()
 
             if ($script:AppOnlyHeaders) {
-                Update-AppOnlyToken
                 $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
                          '?$select=id,name,size,deletedDateTime&$top=200'
                 do {
-                    $resp = Invoke-RestMethod -Uri $rbUri -Headers $script:AppOnlyHeaders -ErrorAction Stop
+                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
                     $resp.value | ForEach-Object { $rbItems.Add($_) }
                     $rbUri = $resp.'@odata.nextLink'
                 } while ($rbUri)
@@ -1008,7 +1176,7 @@ if ($Apply) {
 # ── Export ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Exporting results" -ForegroundColor Cyan
+Write-ProgressHost -Message "Exporting results" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -1028,7 +1196,7 @@ $summaryRows = @(
 
 if (-not $Apply) {
     $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
-    Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
+    Write-ProgressHost -Message ("Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
 }
 
 if ($Apply -and $detailRows.Count -gt 0) {
@@ -1042,7 +1210,7 @@ if ($Apply -and $detailRows.Count -gt 0) {
             Path
     )
     $detailRows | Export-Csv -Path $reportCsv -NoTypeInformation -Encoding UTF8
-    Write-Host ("  Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
+    Write-ProgressHost -Message ("Ranked   : {0}" -f $reportCsv) -ForegroundColor Green
 
     # ── Markdown version report ───────────────────────────────────────────────
     if (-not $SkipVersions) {
@@ -1114,38 +1282,38 @@ if ($Apply -and $detailRows.Count -gt 0) {
         $mdLines.Add('')
 
         $mdLines | Set-Content -Path $reportMd -Encoding UTF8
-        Write-Host ("  Rapport  : {0}" -f $reportMd) -ForegroundColor Green
+        Write-ProgressHost -Message ("Rapport  : {0}" -f $reportMd) -ForegroundColor Green
     }
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host "   Summary" -ForegroundColor Cyan
+Write-ProgressHost -Message "Summary" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
-Write-Host ("  Sites scanned : {0}" -f $sites.Count)
+Write-ProgressHost -Message ("Sites scanned : {0}" -f $sites.Count)
 
 if ($Apply) {
     $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
     $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
     $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
     $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
-    Write-Host ("  Total files   : {0}"    -f $grandFiles)
-    Write-Host ("  Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
-    Write-Host ("  Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
-    Write-Host ("  Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
+    Write-ProgressHost -Message ("Total files   : {0}"    -f $grandFiles)
+    Write-ProgressHost -Message ("Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
+    Write-ProgressHost -Message ("Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
+    Write-ProgressHost -Message ("Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
 
     # ── Top libraries by version history size ─────────────────────────────────
     Write-Host ""
     Write-Host "  ================================================" -ForegroundColor Cyan
-    Write-Host "   Top 5 libraries by version history size" -ForegroundColor Cyan
+    Write-ProgressHost -Message "Top 5 libraries by version history size" -ForegroundColor Cyan
     Write-Host "  ================================================" -ForegroundColor Cyan
     $summaryRows |
         Where-Object { $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
         Sort-Object { [double]$_.VersionSizeMB } -Descending |
         Select-Object -First 5 |
         ForEach-Object {
-            Write-Host ("  {0} MB  [{1}] › {2}" -f
+            Write-ProgressHost -Message ("{0} MB  [{1}] > {2}" -f
                 [math]::Round($_.VersionSizeMB, 1),
                 $_.SiteName,
                 $_.Library) -ForegroundColor Yellow
@@ -1155,19 +1323,19 @@ if ($Apply) {
     if (-not $SkipVersions -and $detailRows.Count -gt 0) {
         Write-Host ""
         Write-Host "  ================================================" -ForegroundColor Cyan
-        Write-Host "   Top 10 files by version history size" -ForegroundColor Cyan
+        Write-ProgressHost -Message "Top 10 files by version history size" -ForegroundColor Cyan
         Write-Host "  ================================================" -ForegroundColor Cyan
         $detailRows |
             Where-Object { $_.ItemType -eq 'File' -and $null -ne $_.VersionSizeMB -and $_.VersionSizeMB -gt 0 } |
             Sort-Object { [double]$_.VersionSizeMB } -Descending |
             Select-Object -First 10 |
             ForEach-Object {
-                Write-Host ("  {0} MB  ({1} versies)  {2} › {3}" -f
+                Write-ProgressHost -Message ("{0} MB  ({1} versies)  {2} > {3}" -f
                     [math]::Round($_.VersionSizeMB, 1),
                     $_.VersionCount,
                     $_.Library,
                     $_.Path) -ForegroundColor Yellow
-                Write-Host ("          Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
+                Write-ProgressHost -Message ("Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
             }
     }
 }
