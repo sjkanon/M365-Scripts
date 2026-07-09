@@ -14,6 +14,7 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 | [`Import-M365Users.ps1`](#import-m365usersps1) | Bulk-create M365 users from CSV (dry-run by default) |
 | [`Get-M365UserLicenses.ps1`](#get-m365userlicensesps1) | Report assigned licenses for a list of users |
 | [`Import-ConditionalAccessBaseline.ps1`](#import-conditionalaccessbaselineps1) | Import the community Conditional Access baseline |
+| [`Test-M365GroupMembership.ps1`](#test-m365groupmembershipps1) | Audit M365 Group / Teams owners and members |
 
 > Dynamic-to-static distribution group conversion (`Set-Distributionlist-dynamic-static.ps1`) lives in [`scripts/Exchange/`](../Exchange/readme.md) — it uses Exchange Online cmdlets, not Graph.
 
@@ -259,3 +260,39 @@ It also supports a follow-up action to switch imported policies to report-only o
 **Notes**
 - Keep at least one break-glass account excluded before enabling policies
 - Review exclusion groups and named locations after import
+
+---
+
+### Test-M365GroupMembership.ps1
+
+Lists all owners and members of Microsoft 365 Groups (including Teams-backed groups). Results are exported to CSV with one row per owner/member entry. Connects to Graph automatically if no session is active; reuses an existing session if already connected.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Group` | No | Display name or Object ID of a single group. If omitted, all M365 groups are audited |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Audit all M365 groups
+.\Test-M365GroupMembership.ps1
+
+# Single group by display name
+.\Test-M365GroupMembership.ps1 -Group "Team Finance"
+
+# Single group by Object ID
+.\Test-M365GroupMembership.ps1 -Group "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+**Required scopes**
+- `Group.Read.All`
+- `Directory.Read.All`
+
+**Required module**
+```powershell
+Install-Module Microsoft.Graph -Scope CurrentUser
+```
