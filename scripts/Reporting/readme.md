@@ -93,7 +93,6 @@ Zie [Licensing/](Licensing/) voor het maandelijkse licentie-rapport.
 
 Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard connecteert het script delegated en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd.
 
-> Dit script wordt ook aangehaald in [`Testing Scripts/SharePoint/`](../Testing%20Scripts/SharePoint/readme.md) — functioneel een audit/rapportage-taak, maar het bestand leeft hier in `Reporting/`.
 
 ### Dekking
 
@@ -107,6 +106,16 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Stand
 - In `-Apply` mode wordt alles in 1 ranked CSV gezet (grootste folders + files, inclusief version history)
 - CSV bevat ook `Level` (diepte): root = `0`, topfolder = `1`, etc.
 - CSV bevat ook `ParentPath` voor hiërarchische analyses (Excel/Power BI tree-opbouw)
+
+### Performance (version history lookups)
+
+Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie optimalisaties beperken dat:
+
+- **Overgeslagen wanneer versiebeheer uit staat** — is voor een library met zekerheid bekend dat versiebeheer uitstaat, dan wordt er geen version-call per bestand gedaan (0 versies is dan toch het antwoord). Bij onbekende status (fallback via `Get-MgSiteDrive`) wordt uit voorzichtigheid altijd nog opgehaald.
+- **Batched via Graph's `$batch`-endpoint** — version-lookups voor bestanden in een library worden nu in groepen van 20 in 1 HTTP-call opgehaald, in plaats van 1 losse call per bestand.
+- **Kortere retry voor deze specifieke calls** — max. 3 pogingen met een korte backoff (in plaats van de standaard `-MaxGraphRetry`/backoff die voor kritieke calls tot ~2 minuten per poging kan oplopen). Een mislukte version-lookup valt terug op "0 versies" in plaats van de hele scan op te houden.
+
+`-SkipVersions` blijft de snelste optie als versiehistorie niet nodig is — dan wordt er helemaal geen version-call gedaan.
 
 ### Parameters
 

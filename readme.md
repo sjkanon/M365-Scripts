@@ -366,7 +366,6 @@ M365-Scripts/
 │   └── settings.json
 ├── load.ps1                         ← Entry point: first-run setup + launches menu
 ├── menu.ps1                         ← Interactive launcher (all scripts + M365 functions)
-├── Update-modules.ps1
 ├── readme.md
 └── scripts/
     ├── readme.md                    ← Index of all categories below
@@ -377,12 +376,19 @@ M365-Scripts/
     │   ├── New-M365User.ps1
     │   ├── Import-M365Users.ps1
     │   ├── Get-M365UserLicenses.ps1
-    │   └── Import-ConditionalAccessBaseline.ps1
+    │   ├── Import-ConditionalAccessBaseline.ps1
+    │   └── Test-M365GroupMembership.ps1   ← audit M365 Group / Teams owners and members
     ├── Exchange/
     │   ├── readme.md
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
-    │   └── Set-Distributionlist-dynamic-static.ps1
+    │   ├── Set-Distributionlist-dynamic-static.ps1
+    │   ├── Test-CalendarPermissions.ps1
+    │   ├── Test-MailboxPermissions.ps1
+    │   ├── Test-DistributionGroupPermissions.ps1
+    │   ├── Test-DkimConfig.ps1
+    │   ├── Get-ExternalForwards.ps1
+    │   └── Get-MailboxSizes.ps1
     ├── Graph/
     │   ├── readme.md
     │   └── logic-permissies.ps1     ← grant a Graph app role to a Logic App managed identity
@@ -418,6 +424,7 @@ M365-Scripts/
     │   ├── Invoke-WindowsActivation.ps1 ← activate Windows, set product key / KMS server
     │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   ├── Clear-TempFiles.ps1
+    │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -426,6 +433,19 @@ M365-Scripts/
     │   └── Time sync/
     │       ├── readme.md
     │       └── Restart-Time-Sync.ps1
+    ├── Network/
+    │   ├── readme.md
+    │   ├── Test-Ports.ps1
+    │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
+    │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
+    ├── RDS/
+    │   ├── readme.md
+    │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+    │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
+    ├── SMTP/
+    │   ├── readme.md
+    │   ├── testsmtp.ps1
+    │   └── testsmtp_5min.ps1
     ├── Deployment/                   ← USB setup toolkit (OOBE / Autopilot)
     │   ├── readme.md
     │   ├── start.bat
@@ -442,6 +462,9 @@ M365-Scripts/
     │   ├── Setup-SASMonitoring.ps1      ← install script, scheduled task, Zabbix config
     │   ├── Test-SASWorkDirectory.ps1    ← validate WORK directory health
     │   └── zabbix_sas_monitor.conf
+    ├── Teams/
+    │   ├── readme.md
+    │   └── vias_archiver.ps1        ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
     ├── Reporting/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
@@ -456,39 +479,8 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
+    │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
     │   └── Test-PowerShellSyntax.ps1
-    ├── Testing Scripts/
-    │   ├── readme.md                ← Index of this folder
-    │   ├── Entra/
-    │   │   ├── readme.md
-    │   │   └── Test-M365GroupMembership.ps1
-    │   ├── Exchange/
-    │   │   ├── readme.md
-    │   │   ├── Get-ExternalForwards.ps1
-    │   │   ├── Get-MailboxSizes.ps1
-    │   │   ├── Test-CalendarPermissions.ps1
-    │   │   ├── Test-DkimConfig.ps1
-    │   │   ├── Test-DistributionGroupPermissions.ps1
-    │   │   └── Test-MailboxPermissions.ps1
-    │   ├── Device/
-    │   │   ├── readme.md
-    │   │   ├── Test-OpenVpnDiagnostics.ps1
-    │   │   └── vias_archiver.ps1
-    │   ├── Network/
-    │   │   ├── readme.md
-    │   │   ├── Test-Ports.ps1
-    │   │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
-    │   │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
-    │   ├── RDS/
-    │   │   ├── readme.md
-    │   │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
-    │   │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
-    │   ├── SharePoint/
-    │   │   └── readme.md             ← pointer — script actually lives in Reporting/
-    │   └── SMTP/
-    │       ├── readme.md
-    │       ├── testsmtp.ps1
-    │       └── testsmtp_5min.ps1
     └── Custom Scripts/                 ← path-pinned scripts (see note above)
         ├── readme.md
         └── Intune/
@@ -526,6 +518,28 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+### 2026-07-09 (6)
+| Change |
+|--------|
+| Removed the `Testing Scripts/` wrapper folder entirely — its subfolders duplicated existing top-level category names by verb (`Test-`/`Get-` prefix) rather than by domain. Merged its contents into the matching domain folder: `Testing Scripts/Entra/Test-M365GroupMembership.ps1` → `Entra/`, `Testing Scripts/Exchange/*` (6 scripts) → `Exchange/`, `Testing Scripts/Device/Test-OpenVpnDiagnostics.ps1` → `Device/`. `Network/`, `RDS/`, and `SMTP/` (no existing top-level counterpart) were promoted to their own top-level category folders instead |
+| Merged the corresponding readmes into each destination folder's existing readme.md rather than keeping separate "Testing —" docs |
+| Updated 10 `menu.ps1` script paths (Exchange audit submenu, Entra audit submenu, Test-Ports, SMTP tests) for the new locations |
+
+### 2026-07-09 (5)
+| Change |
+|--------|
+| Tidied `Testing Scripts/` and the repo root: moved `vias_archiver.ps1` out of `Testing Scripts/Device/` into a new `scripts/Teams/` category — it's a Teams/SharePoint export & archiving tool, not a diagnostic script, so it didn't belong under "Testing" |
+| Moved root-level `Update-modules.ps1` into `scripts/Startup/` (renamed `Update-Modules.ps1` for naming consistency) — it's a module-maintenance script like `Install-Modules.ps1`, not a repo entry point like `load.ps1`/`menu.ps1` |
+| Removed the `Testing Scripts/SharePoint/` folder (it held only a pointer readme, no script) — that pointer now lives directly in `Testing Scripts/readme.md` |
+| Documented `Test-PowerShellSyntax.ps1` in `scripts/Startup/readme.md`, which had no docs before |
+
+### 2026-07-09 (4)
+| Change |
+|--------|
+| Optimized `scripts/Reporting/Get-SharePointStorageReport.ps1` version-history lookups, which were the main cause of the script appearing to hang on large libraries (one sequential Graph call per file, each eligible for up to 6 retries with backoff up to ~2 minutes on throttling): (1) skip the lookup entirely when a library is positively known to have versioning disabled, (2) batch up to 20 file version lookups per HTTP call via Graph's `$batch` endpoint instead of one call per file, (3) use a short, cheap 3-attempt retry for these specific calls instead of the main retry/backoff policy, since a failed lookup safely falls back to "0 versions" |
+| Removed the now-unused `Get-VersionSize` function, replaced by `Invoke-GraphBatchGet` + batched resolution in `Get-AllDriveItems` |
+| Updated `scripts/Reporting/readme.md` with a "Performance" section documenting the above |
 
 ### 2026-07-09 (3)
 | Change |

@@ -597,34 +597,69 @@ function Get-SiteDrives {
     }
 }
 
-function Get-VersionSize {
-    param([string]$DriveId, [string]$ItemId)
-    try {
-        if ($script:AppOnlyHeaders) {
-            $versions = [System.Collections.Generic.List[object]]::new()
-            $versionUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/versions" +
-                          '?$select=id,size,lastModifiedDateTime&$top=200'
-            do {
-                $resp = Invoke-GraphGet -Uri $versionUri -Headers $script:AppOnlyHeaders
-                $resp.value | ForEach-Object { $versions.Add($_) }
-                $versionUri = $resp.'@odata.nextLink'
-            } while ($versionUri)
-        } else {
-            $versions = Get-MgDriveItemVersion -DriveId $DriveId -DriveItemId $ItemId -ErrorAction Stop
+function Invoke-GraphBatchGet {
+    # Resolves a set of GET requests via Microsoft Graph's $batch endpoint (max 20 per call).
+    # Used for per-file version lookups — non-critical data, so retries here are few and cheap:
+    # a failed lookup just falls back to "0 versions" instead of stalling the whole scan the
+    # way the main Invoke-GraphGet retry/backoff (built for critical calls) would.
+    param(
+        [System.Collections.Generic.List[object]] $Requests   # each: @{ Id = 'string'; Url = '/relative/path' }
+    )
+
+    $results = @{}
+    if ($Requests.Count -eq 0) { return $results }
+
+    for ($i = 0; $i -lt $Requests.Count; $i += 20) {
+        $end   = [Math]::Min($i + 19, $Requests.Count - 1)
+        $chunk = $Requests.GetRange($i, $end - $i + 1)
+
+        $batchBody = @{
+            requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+        } | ConvertTo-Json -Depth 6
+
+        $done = $false
+        for ($attempt = 1; $attempt -le 3 -and -not $done; $attempt++) {
+            try {
+                if ($script:AppOnlyHeaders) {
+                    Update-AppOnlyToken
+                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                        -Headers $script:AppOnlyHeaders -ContentType 'application/json' `
+                        -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                } else {
+                    $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                        -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                }
+                foreach ($r in $resp.responses) {
+                    $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
+                }
+                $done = $true
+            } catch {
+                if ($attempt -eq 3) {
+                    # Give up on this chunk — mark every item as unresolved (falls back to 0 versions).
+                    foreach ($req in $chunk) { $results[$req.Id] = $null }
+                } else {
+                    Start-Sleep -Seconds ($attempt * 3)
+                }
+            }
         }
-        $size = ($versions | Where-Object { $_.size } | Measure-Object -Property size -Sum).Sum
-        return @{ Count = $versions.Count; Size = [int64]($size ?? 0) }
-    } catch {
-        return @{ Count = 0; Size = [int64]0 }
     }
+
+    return $results
 }
 
 function Get-AllDriveItems {
-    param([string]$DriveId)
+    param(
+        [string]$DriveId,
+        [bool]$FetchVersions = $true
+    )
 
-    # Iterative breadth-first traversal — no call stack limit, handles any folder depth
+    # Iterative breadth-first traversal — no call stack limit, handles any folder depth.
+    # File records are created with zeroed version fields; if $FetchVersions is set, their
+    # version history is resolved afterwards in batches of 20 via Invoke-GraphBatchGet
+    # instead of one Graph call per file during the traversal.
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
     $queue   = [System.Collections.Generic.Queue[PSCustomObject]]::new()
+    $pendingVersions  = [System.Collections.Generic.List[PSCustomObject]]::new()
     $processedFolders = 0
     $processedFiles   = 0
 
@@ -667,29 +702,26 @@ function Get-AllDriveItems {
             if (Test-IsFile -Item $child) {
                 $processedFiles++
                 $fileSize = [int64]($child.size ?? 0)
-                $verCount = 0
-                $verSize  = [int64]0
 
-                if (-not $SkipVersions) {
-                    $ver      = Get-VersionSize -DriveId $DriveId -ItemId $child.id
-                    $verCount = $ver.Count
-                    $verSize  = $ver.Size
-                }
-
-                $results.Add([PSCustomObject]@{
+                $fileRecord = [PSCustomObject]@{
                     ItemType         = 'File'
                     Path             = $path
                     Level            = (($path -split '/').Count)
                     ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
                     SizeBytes        = $fileSize
                     SizeMB           = [math]::Round($fileSize / 1MB, 3)
-                    VersionCount     = $verCount
-                    VersionSizeBytes = $verSize
-                    VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
-                    TotalSizeBytes   = $fileSize + $verSize
-                    TotalSizeMB      = [math]::Round(($fileSize + $verSize) / 1MB, 3)
+                    VersionCount     = 0
+                    VersionSizeBytes = [int64]0
+                    VersionSizeMB    = 0.0
+                    TotalSizeBytes   = $fileSize
+                    TotalSizeMB      = [math]::Round($fileSize / 1MB, 3)
                     Modified         = $child.lastModifiedDateTime
-                }) | Out-Null
+                }
+                $results.Add($fileRecord) | Out-Null
+
+                if ($FetchVersions) {
+                    $pendingVersions.Add([PSCustomObject]@{ ItemId = $child.id; Record = $fileRecord }) | Out-Null
+                }
             } else {
                 $results.Add([PSCustomObject]@{
                     ItemType         = 'Folder'
@@ -708,6 +740,40 @@ function Get-AllDriveItems {
 
                 $queue.Enqueue([PSCustomObject]@{ Id = $child.id; Path = $path })
             }
+        }
+    }
+
+    # ── Resolve version history in batches of 20 (Graph $batch limit) ──────────
+    if ($pendingVersions.Count -gt 0) {
+        Write-ProgressHost -Message ("resolving version history for {0} file(s)..." -f $pendingVersions.Count) -ForegroundColor DarkGray
+
+        $batchRequests = [System.Collections.Generic.List[object]]::new()
+        $byId  = @{}
+        $reqId = 0
+        foreach ($pending in $pendingVersions) {
+            $reqId++
+            $rid = [string]$reqId
+            $byId[$rid] = $pending.Record
+            $batchRequests.Add([PSCustomObject]@{
+                Id  = $rid
+                Url = "/drives/$DriveId/items/$($pending.ItemId)/versions?`$select=id,size"
+            }) | Out-Null
+        }
+
+        $batchResults = Invoke-GraphBatchGet -Requests $batchRequests
+
+        foreach ($rid in $byId.Keys) {
+            $record = $byId[$rid]
+            $body   = $batchResults[$rid]
+            if ($body -and $body.value) {
+                $verSize = [int64](($body.value | Where-Object { $_.size } | Measure-Object -Property size -Sum).Sum ?? 0)
+                $record.VersionCount     = $body.value.Count
+                $record.VersionSizeBytes = $verSize
+                $record.VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
+                $record.TotalSizeBytes   = $record.SizeBytes + $verSize
+                $record.TotalSizeMB      = [math]::Round($record.TotalSizeBytes / 1MB, 3)
+            }
+            # else: lookup failed after retries — record keeps its zeroed version defaults.
         }
     }
 
@@ -926,7 +992,15 @@ foreach ($entry in $siteLibraries) {
     }
 
     # Full scan mode
-    $items = Get-AllDriveItems -DriveId $drive.id
+    # Skip per-file version lookups only when we positively know versioning is off for this
+    # library — $drive.VersioningEnabled is $null (unknown) for the Get-MgSiteDrive fallback,
+    # in which case we still fetch to avoid silently under-reporting.
+    $versioningKnownOff = ($null -ne $drive.VersioningEnabled) -and (-not [bool]$drive.VersioningEnabled)
+    $fetchVersions      = (-not $SkipVersions) -and (-not $versioningKnownOff)
+    if (-not $SkipVersions -and $versioningKnownOff) {
+        Write-Host "        versioning disabled on this library — skipping version lookups" -ForegroundColor DarkGray
+    }
+    $items = Get-AllDriveItems -DriveId $drive.id -FetchVersions $fetchVersions
 
     $fileItems   = @($items | Where-Object { $_.ItemType -eq 'File' })
     $folderItems = @($items | Where-Object { $_.ItemType -eq 'Folder' })

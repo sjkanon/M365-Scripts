@@ -10,6 +10,8 @@ Entry-point scripts and the core M365 function library.
 |------|-------------|
 | `functies.ps1` | M365 function library — dot-sourced by `menu.ps1` on first use |
 | `Install-Modules.ps1` | Bootstrap script — installs and imports all required PowerShell modules |
+| `Update-Modules.ps1` | Updates every installed PowerShell module to its latest version |
+| `Test-PowerShellSyntax.ps1` | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
 
 ---
 
@@ -87,3 +89,43 @@ Installs and imports all PowerShell modules required by this repository. Run onc
 ```
 
 Modules installed: `ExchangeOnlineManagement`, `Microsoft.Graph`, `ImportExcel`, `PSWindowsUpdate`
+
+---
+
+## Update-Modules.ps1
+
+Updates every installed PowerShell module to its latest version. Run as administrator for system-wide modules.
+
+Also ensures a minimum version for the specific Graph submodules this repo depends on (`Microsoft.Graph.Authentication`, `Identity.SignIns`, `Identity.Governance`, `Applications`, `Groups`) before updating everything else installed on the machine.
+
+```powershell
+.\scripts\Startup\Update-Modules.ps1
+```
+
+> No parameters. Iterates every module returned by `Get-InstalledModule`, so it can take a while on a machine with many modules installed.
+
+---
+
+## Test-PowerShellSyntax.ps1
+
+Parse-checks `.ps1` (and optionally `.psm1`) files for syntax errors without executing them — uses `[System.Management.Automation.Language.Parser]::ParseFile()`.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Path` | No | File or folder to check (default: repo root) |
+| `-Recurse` | No | Recurse into subfolders when `-Path` is a folder |
+| `-IncludePsm1` | No | Also check `.psm1` module files |
+
+**Examples**
+
+```powershell
+# Check the whole repo
+.\Test-PowerShellSyntax.ps1 -Recurse
+
+# Check a single file
+.\Test-PowerShellSyntax.ps1 -Path .\scripts\Entra\New-M365User.ps1
+```
+
+Exit codes: `0` = no errors, `1` = syntax errors found, `2` = path/argument error.
