@@ -126,6 +126,112 @@ function Test-PrincipalMatch {
     return $false
 }
 
+function Test-UserIsInTrusteeGroup {
+    param(
+        [object] $Trustee,
+        [string[]] $Needles
+    )
+
+    if (-not $Needles -or $Needles.Count -eq 0) { return $false }
+
+    $trusteeIdentity = Get-PrincipalDisplayValue $Trustee
+    if ([string]::IsNullOrWhiteSpace($trusteeIdentity)) { return $false }
+
+    if (-not $script:GroupMembershipCache) {
+        $script:GroupMembershipCache = @{}
+    }
+
+    if ($script:GroupMembershipCache.ContainsKey($trusteeIdentity)) {
+        return [bool]$script:GroupMembershipCache[$trusteeIdentity]
+    }
+
+    $isMember = $false
+
+    try {
+        $groupRecipient = Get-EXORecipient -Identity $trusteeIdentity -ErrorAction Stop
+        $groupType = [string]$groupRecipient.RecipientTypeDetails
+
+        $memberResults = @()
+        if ($groupType -eq 'GroupMailbox') {
+            try {
+                $memberResults = @(Get-UnifiedGroupLinks -Identity $groupRecipient.Identity -LinkType Members -ResultSize Unlimited -ErrorAction Stop)
+            } catch {
+                $memberResults = @()
+            }
+        } elseif ($groupType -in @('MailUniversalSecurityGroup', 'MailUniversalDistributionGroup', 'MailNonUniversalGroup')) {
+            try {
+                $memberResults = @(Get-DistributionGroupMember -Identity $groupRecipient.Identity -ResultSize Unlimited -ErrorAction Stop)
+            } catch {
+                $memberResults = @()
+            }
+        }
+
+        foreach ($member in $memberResults) {
+            if (Test-PrincipalMatch -Principal $member -Needles $Needles) {
+                $isMember = $true
+                break
+            }
+        }
+    } catch {
+        $isMember = $false
+    }
+
+    $script:GroupMembershipCache[$trusteeIdentity] = $isMember
+    return $isMember
+}
+
+function Test-UserMatchesTrustee {
+    param(
+        [object] $Trustee,
+        [string[]] $Needles
+    )
+
+    if (-not $Needles -or $Needles.Count -eq 0) { return $false }
+
+    if (Test-PrincipalMatch -Principal $Trustee -Needles $Needles) {
+        return $true
+    }
+
+    return (Test-UserIsInTrusteeGroup -Trustee $Trustee -Needles $Needles)
+}
+
+function Get-ReverseMailboxPermissions {
+    param(
+        [string] $MailboxIdentity,
+        [string] $UserIdentity
+    )
+
+    $permissionRows = [System.Collections.Generic.List[object]]::new()
+
+    try {
+        Get-MailboxPermission -Identity $MailboxIdentity -User $UserIdentity -IncludeUnresolvedPermissions -IncludeUserWithDisplayName -ErrorAction SilentlyContinue |
+            Where-Object { $_.IsInherited -eq $false -and $_.Deny -eq $false } |
+            ForEach-Object {
+                $permissionRows.Add([PSCustomObject]@{
+                    PermissionType = 'FullAccess'
+                    GrantedTo      = Get-PrincipalDisplayValue $_.User
+                    Rights         = ($_.AccessRights -join ', ')
+                    Deny           = $_.Deny
+                }) | Out-Null
+            }
+    } catch {}
+
+    try {
+        Get-RecipientPermission -Identity $MailboxIdentity -Trustee $UserIdentity -IncludeTrusteeWithPrimarySmtpAddress -ErrorAction SilentlyContinue |
+            Where-Object { $_.AccessRights -contains 'SendAs' } |
+            ForEach-Object {
+                $permissionRows.Add([PSCustomObject]@{
+                    PermissionType = 'SendAs'
+                    GrantedTo      = Get-PrincipalDisplayValue $_.Trustee
+                    Rights         = ($_.AccessRights -join ', ')
+                    Deny           = $false
+                }) | Out-Null
+            }
+    } catch {}
+
+    return @($permissionRows)
+}
+
 # -- Connection ---------------------------------------------------------------
 $script:ConnectedHere = $false
 try {
@@ -171,7 +277,7 @@ if ($Mailbox) {
 } else {
     Write-Host "  Retrieving mailboxes..." -ForegroundColor DarkGray
     if ($User) {
-        $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -Properties GrantSendOnBehalfTo)
+        $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox, SharedMailbox -Properties GrantSendOnBehalfTo)
     } else {
         $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox, SharedMailbox -Properties GrantSendOnBehalfTo)
     }
@@ -189,12 +295,42 @@ $results = [System.Collections.Generic.List[PSObject]]::new()
 foreach ($mbx in $mailboxes) {
     $mbxUpn = $mbx.UserPrincipalName
 
+    if ($User) {
+        $reverseMatches = Get-ReverseMailboxPermissions -MailboxIdentity $mbxUpn -UserIdentity $User
+
+        foreach ($match in $reverseMatches) {
+            $results.Add([PSCustomObject]@{
+                Mailbox        = $mbxUpn
+                PermissionType = $match.PermissionType
+                GrantedTo      = $match.GrantedTo
+                Rights         = $match.Rights
+                Deny           = $match.Deny
+            })
+        }
+
+        if ($mbx.GrantSendOnBehalfTo) {
+            foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
+                if (Test-UserMatchesTrustee -Trustee $delegate -Needles $targetUserValues) {
+                    $results.Add([PSCustomObject]@{
+                        Mailbox        = $mbxUpn
+                        PermissionType = 'SendOnBehalf'
+                        GrantedTo      = Get-PrincipalDisplayValue $delegate
+                        Rights         = 'SendOnBehalf'
+                        Deny           = $false
+                    }) | Out-Null
+                }
+            }
+        }
+
+        continue
+    }
+
     # Full Access
     try {
         Get-MailboxPermission -Identity $mbxUpn -ErrorAction SilentlyContinue |
             Where-Object { $_.IsInherited -eq $false -and $_.User -notlike '*SELF*' } |
             ForEach-Object {
-                if (-not $User -or (Test-PrincipalMatch -Principal $_.User -Needles $targetUserValues)) {
+                if (-not $User -or (Test-UserMatchesTrustee -Trustee $_.User -Needles $targetUserValues)) {
                     $results.Add([PSCustomObject]@{
                         Mailbox        = $mbxUpn
                         PermissionType = 'FullAccess'
@@ -213,7 +349,7 @@ foreach ($mbx in $mailboxes) {
         Get-RecipientPermission -Identity $mbxUpn -ErrorAction SilentlyContinue |
             Where-Object { $_.Trustee -notlike '*SELF*' -and $_.Trustee -notlike 'NT AUTHORITY*' } |
             ForEach-Object {
-                if (-not $User -or (Test-PrincipalMatch -Principal $_.Trustee -Needles $targetUserValues)) {
+                if (-not $User -or (Test-UserMatchesTrustee -Trustee $_.Trustee -Needles $targetUserValues)) {
                     $results.Add([PSCustomObject]@{
                         Mailbox        = $mbxUpn
                         PermissionType = 'SendAs'
@@ -230,7 +366,7 @@ foreach ($mbx in $mailboxes) {
     # Send on Behalf
     if ($mbx.GrantSendOnBehalfTo) {
         foreach ($delegate in $mbx.GrantSendOnBehalfTo) {
-            if ($User -and -not (Test-PrincipalMatch -Principal $delegate -Needles $targetUserValues)) {
+            if ($User -and -not (Test-UserMatchesTrustee -Trustee $delegate -Needles $targetUserValues)) {
                 continue
             }
             $results.Add([PSCustomObject]@{
