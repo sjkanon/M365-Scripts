@@ -91,7 +91,9 @@ Zie [Licensing/](Licensing/) voor het maandelijkse licentie-rapport.
 
 ## Get-SharePointStorageReport.ps1
 
-Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
+Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard connecteert het script delegated en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd.
+
+> Dit script wordt ook aangehaald in [`Testing Scripts/SharePoint/`](../Testing%20Scripts/SharePoint/readme.md) — functioneel een audit/rapportage-taak, maar het bestand leeft hier in `Reporting/`.
 
 ### Dekking
 
@@ -106,20 +108,30 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
 - CSV bevat ook `Level` (diepte): root = `0`, topfolder = `1`, etc.
 - CSV bevat ook `ParentPath` voor hiërarchische analyses (Excel/Power BI tree-opbouw)
 
-### Belangrijkste parameters
+### Parameters
 
 | Parameter | Omschrijving |
 |---|---|
-| `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting. |
-| `-SkipVersions` | Neemt versiehistorie niet mee (sneller). |
-| `-SiteUrl` | Scan 1 specifieke site (`/sites/...` of `/teams/...`). Geef je de tenant-root URL op (bijv. `https://contoso.sharepoint.com`), dan doet het script automatisch een tenantbrede scan. |
-| `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken. |
-| `-ClientId/-TenantId` | Gebruik eigen app-registratie (met passende Graph application permissions). |
+| `-SiteUrl` | Scan 1 specifieke site. Tenant-root URL (bijv. `https://contoso.sharepoint.com`) triggert automatisch een tenantbrede scan |
+| `-SkipVersions` | Neemt versiehistorie niet mee (sneller) |
+| `-OutputPath` | Overschrijft de standaard outputmap (`C:\Temp\` / `~/Downloads/`) |
+| `-TenantId` | Entra ID tenant ID — automatisch gedetecteerd indien niet opgegeven; verplicht in combinatie met `-ClientId` |
+| `-ClientId` | Bestaande App Registration client ID — slaat auto-create over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
+| `-ClientSecret` | Client secret voor een bestaande app registration |
+| `-CertificateThumbprint` | Certificate thumbprint voor een bestaande app registration |
+| `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting |
+| `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken |
+| `-RecycleBinOnly` | Slaat storage/library scanning over — leest alleen recycle bin items (stage 1 + stage 2) per site collection |
+| `-GraphTimeoutSec` | Timeout in seconden per Graph-call (standaard: `120`) |
+| `-MaxGraphRetry` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
 
 ### Voorbeelden
 
 ```powershell
-# Volledige tenantscan inclusief sub-sites en bestanden
+# Snelle samenvatting — alleen site quota, geen file scan
+.\Get-SharePointStorageReport.ps1
+
+# Volledige tenantscan inclusief sub-sites en bestanden (auto app registration)
 .\Get-SharePointStorageReport.ps1 -Apply
 
 # Idem, maar met hogere tijdelijke app-rechten indien nodig
@@ -127,4 +139,7 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan.
 
 # Enkel een specifieke Teams-site
 .\Get-SharePointStorageReport.ps1 -SiteUrl "https://contoso.sharepoint.com/teams/Operations" -Apply
+
+# Volledige scan met een bestaande app registration
+.\Get-SharePointStorageReport.ps1 -Apply -ClientId "..." -TenantId "..." -ClientSecret "..."
 ```
