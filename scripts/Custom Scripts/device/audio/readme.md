@@ -12,13 +12,13 @@ Scripts for detecting and disabling the internal microphone on Windows laptops w
 
 | File | Description |
 |------|-------------|
-| `Detect-AudioDevices.ps1` | Phase 1 — inventory all audio devices and classify as internal or headset |
-| `Disable-InternalMic.ps1` | Phase 2 — disable internal microphone based on detection patterns |
+| `detect-audiodevices.ps1` | Phase 1 — inventory all audio devices and classify as internal or headset |
+| `Disable-internalmic.ps1` | Phase 2 — disable internal microphone based on detection patterns |
 | `Rollback-InternalMic.ps1` | Emergency — re-enable the microphone if something goes wrong |
 
 ---
 
-## Detect-AudioDevices.ps1
+## detect-audiodevices.ps1
 
 Creates a full inventory of all audio devices on the endpoint and classifies them as internal microphone or headset. Output can be written to a RMM custom field or printed to screen.
 
@@ -36,12 +36,12 @@ Microphones are classified based on name patterns:
 Run as SYSTEM with administrator privileges. Compatible with NinjaOne, Datto RMM, or manual execution.
 
 ```powershell
-.\Detect-AudioDevices.ps1
+.\detect-audiodevices.ps1
 ```
 
 ---
 
-## Disable-InternalMic.ps1
+## Disable-internalmic.ps1
 
 Disables internal microphone devices based on the patterns from the detect analysis. The headset safelist is always checked first — headsets are never disabled.
 
@@ -96,7 +96,7 @@ Re-enables the internal microphone on a specific device. Deploy immediately if a
 
 When a new laptop model is added to the environment:
 
-1. Run `Detect-AudioDevices.ps1` to identify the internal microphone name
-2. Check if the name matches an existing pattern in `Disable-InternalMic.ps1`
+1. Run `detect-audiodevices.ps1` to identify the internal microphone name
+2. Check if the name matches an existing pattern in `Disable-internalmic.ps1`
 3. If yes: deploy the disable script
 4. If no: add the new pattern to `$internalPatterns` in the disable script
