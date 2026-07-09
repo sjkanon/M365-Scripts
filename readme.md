@@ -398,14 +398,8 @@ M365-Scripts/
     │   │   ├── Setup.ps1                        ← one-time: App Registration + config.json
     │   │   ├── Install-ScheduledTask.ps1        ← register weekly scheduled task
     │   │   └── config.example.json
-    │   └── Desktop/                  ← customer desktop customization
+    │   └── Desktop/                  ← corporate wallpaper/lockscreen (Office theme lives in Custom Scripts/, see below)
     │       ├── readme.md
-    │       ├── Deploy-OfficeTheme.ps1        ← installs the full VIAS .thmx Office theme
-    │       ├── 2026 Vias institute colours (2).thmx
-    │       ├── Office Themes/
-    │       │   ├── readme.md
-    │       │   ├── Deploy-Officecolors.ps1   ← installs just the color scheme
-    │       │   └── Test VIAS.xml
     │       ├── Add Lockscreen to start and desktop/
     │       │   ├── readme.md
     │       │   ├── add-lock.ps1               ← taskbar "Lock Workstation" shortcut
@@ -463,39 +457,53 @@ M365-Scripts/
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   └── Test-PowerShellSyntax.ps1
-    └── Testing Scripts/
-        ├── readme.md                ← Index of this folder
-        ├── Entra/
-        │   ├── readme.md
-        │   └── Test-M365GroupMembership.ps1
-        ├── Exchange/
-        │   ├── readme.md
-        │   ├── Get-ExternalForwards.ps1
-        │   ├── Get-MailboxSizes.ps1
-        │   ├── Test-CalendarPermissions.ps1
-        │   ├── Test-DkimConfig.ps1
-        │   ├── Test-DistributionGroupPermissions.ps1
-        │   └── Test-MailboxPermissions.ps1
-        ├── Device/
-        │   ├── readme.md
-        │   ├── Test-OpenVpnDiagnostics.ps1
-        │   └── vias_archiver.ps1
-        ├── Network/
-        │   ├── readme.md
-        │   ├── Test-Ports.ps1
-        │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
-        │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
-        ├── RDS/
-        │   ├── readme.md
-        │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
-        │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
-        ├── SharePoint/
-        │   └── readme.md             ← pointer — script actually lives in Reporting/
-        └── SMTP/
+    ├── Testing Scripts/
+    │   ├── readme.md                ← Index of this folder
+    │   ├── Entra/
+    │   │   ├── readme.md
+    │   │   └── Test-M365GroupMembership.ps1
+    │   ├── Exchange/
+    │   │   ├── readme.md
+    │   │   ├── Get-ExternalForwards.ps1
+    │   │   ├── Get-MailboxSizes.ps1
+    │   │   ├── Test-CalendarPermissions.ps1
+    │   │   ├── Test-DkimConfig.ps1
+    │   │   ├── Test-DistributionGroupPermissions.ps1
+    │   │   └── Test-MailboxPermissions.ps1
+    │   ├── Device/
+    │   │   ├── readme.md
+    │   │   ├── Test-OpenVpnDiagnostics.ps1
+    │   │   └── vias_archiver.ps1
+    │   ├── Network/
+    │   │   ├── readme.md
+    │   │   ├── Test-Ports.ps1
+    │   │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
+    │   │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
+    │   ├── RDS/
+    │   │   ├── readme.md
+    │   │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
+    │   │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
+    │   ├── SharePoint/
+    │   │   └── readme.md             ← pointer — script actually lives in Reporting/
+    │   └── SMTP/
+    │       ├── readme.md
+    │       ├── testsmtp.ps1
+    │       └── testsmtp_5min.ps1
+    └── Custom Scripts/                 ← path-pinned scripts (see note above)
+        ├── readme.md
+        └── Intune/
             ├── readme.md
-            ├── testsmtp.ps1
-            └── testsmtp_5min.ps1
+            └── Desktop/
+                ├── readme.md
+                ├── Deploy-OfficeTheme.ps1        ← installs the full VIAS .thmx Office theme
+                ├── 2026 Vias institute colours (2).thmx
+                └── Office Themes/
+                    ├── readme.md
+                    ├── Deploy-Officecolors.ps1   ← installs just the color scheme
+                    └── Test VIAS.xml
 ```
+
+`Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` hardcode their download URL to this exact repo path (`main` branch) — they stay here rather than under `Intune/Desktop/` so the URL keeps resolving.
 
 ---
 
@@ -519,13 +527,19 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-07-09 (3)
+| Change |
+|--------|
+| Moved `Deploy-OfficeTheme.ps1`, `Deploy-Officecolors.ps1`, and their theme assets (`2026 Vias institute colours (2).thmx`, `Office Themes/`) back to `Custom Scripts/Intune/Desktop/` — both scripts hardcode their download URL to that exact repo path, so this keeps the URL valid instead of requiring a script update + Intune redeploy. Recreated `Custom Scripts/` and `Custom Scripts/Intune/` as minimal path-pinned folders (just this one item) rather than the full former category |
+| `scripts/Intune/Desktop/` now holds only wallpaper/lockscreen/taskbar-shortcut deployment; both `Intune/readme.md` and `Intune/Desktop/readme.md` cross-reference `Custom Scripts/Intune/Desktop/` for the Office theme scripts |
+
 ### 2026-07-09 (2)
 | Change |
 |--------|
 | Removed the `Custom Scripts/` wrapper folder — it mixed generic tooling with customer-specific scripts under one confusing label, and duplicated the `Intune/` category. Contents redistributed to proper top-level categories: `Custom Scripts/device/` → `Device/`, `Custom Scripts/DNS/` → `DNS/`, `Custom Scripts/SAS/` → `SAS/`, `Custom Scripts/Save install time/` → `Deployment/` (renamed), `Custom Scripts/Intune/Desktop/` → merged into `Intune/Desktop/` |
 | Updated `menu.ps1` script paths for `Restart-Time-Sync.ps1`, `detect-audiodevices.ps1`, `Disable-internalmic.ps1` to their new `scripts/Device/` location |
 | Updated cross-references in `scripts/Intune/readme.md`, `scripts/Intune/Get-Autopilot/readme.md`, and `scripts/readme.md` for the new folder locations |
-| **Known issue (intentional):** `Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` still hardcode their download URL to the old `scripts/Custom%20Scripts/Intune/Desktop/...` path on `main` — left unchanged on request. Once this merges to `main`, those URLs will 404 until updated; the currently Intune-deployed versions of these scripts are unaffected until redeployed |
+| ~~**Known issue (intentional):** `Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` still hardcode their download URL to the old path — left unchanged on request.~~ **Resolved above** — the scripts moved back to match their hardcoded URL instead. |
 
 ### 2026-07-09
 | Change |
