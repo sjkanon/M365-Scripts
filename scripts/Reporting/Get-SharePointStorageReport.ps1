@@ -9,9 +9,12 @@
     recursively. Version history is included by default.
 
     Output:
-      - Summary CSV  : one row per site with totals
-      - Detail CSV   : one row per file with size + version info
-      - Both saved to C:\Temp\ (Windows) or ~/Downloads/ (macOS)
+      - Summary CSV           : one row per site with totals (quick mode only)
+      - Detail CSV            : one row per file/folder with size + version info (-Apply)
+      - Site collection totals: one row per root site collection — sub-sites/channels and
+                                 the recycle bin rolled up together, comparable 1:1 with the
+                                 SharePoint admin center's per-site storage figure (-Apply)
+      - All saved to C:\Temp\ (Windows) or ~/Downloads/ (macOS)
 
     Run without -Apply for a fast summary (site quota data only, no file enumeration).
     Run with -Apply to perform the full recursive scan including version history.
@@ -63,6 +66,11 @@
     Skip storage/library scanning and only read SharePoint recycle bin items
     (stage 1 + stage 2) for each site collection.
 
+.PARAMETER IncludeOneDriveUsers
+    One or more user principal names whose OneDrive personal site should be included
+    in the scan alongside SharePoint sites (e.g. dilara.beerten@d-build.be).
+    OneDrive personal sites are excluded by default.
+
 .EXAMPLE
     # Auto mode — creates and deletes a temporary App Registration automatically
     .\Get-SharePointStorageReport.ps1 -Apply
@@ -95,6 +103,7 @@ param (
     [switch] $Apply,
     [switch] $UseHighPrivilege,
     [switch] $RecycleBinOnly,
+    [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6
 )
@@ -109,11 +118,13 @@ $ts          = Get-Date -Format 'yyyyMMdd_HHmmss'
 $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
 $reportCsv   = Join-Path $outputDir "SharePoint_StorageRanked_$ts.csv"
 $reportMd    = Join-Path $outputDir "SharePoint_VersionReport_$ts.md"
+$collectionCsv = Join-Path $outputDir "SharePoint_SiteCollectionTotals_$ts.csv"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
+$script:SpoHostTokenCache = @{}
 
 function Write-ProgressHost {
     param(
@@ -183,6 +194,15 @@ try {
             $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
             Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
                 -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+
+            # Keep raw app credentials for non-Graph fallback token requests (for example SPO REST).
+            $script:TokenBody = @{
+                grant_type    = 'client_credentials'
+                scope         = 'https://graph.microsoft.com/.default'
+                client_id     = $ClientId
+                client_secret = $ClientSecret
+            }
+            $script:TokenTenantId = $TenantId
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
@@ -234,7 +254,25 @@ try {
             -ResourceId         $graphSp.Id `
             -AppRoleId          $appRole.Id `
             -ErrorAction Stop | Out-Null
-        Write-Host ("  [OK]   {0} granted." -f $requiredSiteRole) -ForegroundColor DarkGray
+        Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
+
+        # Also grant Sites.Read.All on the SharePoint service principal so the app
+        # can obtain a SharePoint-scoped token for SPO REST calls (recycle bin, etc.).
+        try {
+            $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
+            $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -in @('Sites.Read.All', 'AllSites.Read') } | Select-Object -First 1
+            if ($spoRole) {
+                New-MgServicePrincipalAppRoleAssignment `
+                    -ServicePrincipalId $sp.Id `
+                    -PrincipalId        $sp.Id `
+                    -ResourceId         $spoSp.Id `
+                    -AppRoleId          $spoRole.Id `
+                    -ErrorAction Stop | Out-Null
+                Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
+        }
 
         # Create short-lived client secret (expires in 1 day)
         $secret = Add-MgApplicationPassword `
@@ -443,7 +481,8 @@ if ((-not $SiteUrl) -or $scanAllSites) {
     }
 }
 
-# Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/)
+# Exclude personal OneDrive sites (URLs contain -my.sharepoint.com/personal/) — from both the
+# storage/library scan and the recycle bin phases. Only real SharePoint site collections count.
 $sites = [System.Collections.Generic.List[object]]::new(
     @($sites | Where-Object {
         -not [string]::IsNullOrWhiteSpace([string]$_.id) -and
@@ -493,26 +532,63 @@ while ($subSiteQueue.Count -gt 0) {
     }
 }
 
-Write-ProgressHost -Message ("Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
+# ── Add explicitly requested OneDrive personal sites ─────────────────────────
+if ($IncludeOneDriveUsers.Count -gt 0) {
+    Write-ProgressHost -Message "Resolving OneDrive sites for specified users..." -ForegroundColor Cyan
+    foreach ($upn in $IncludeOneDriveUsers) {
+        try {
+            $idsUri = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($upn))/drive/root/sharepointIds"
+
+            if ($script:AppOnlyHeaders) {
+                $ids = Invoke-GraphGet -Uri $idsUri -Headers $script:AppOnlyHeaders
+            } else {
+                $ids = Invoke-MgGraphRequest -Method GET -Uri $idsUri -OutputType PSObject -ErrorAction Stop
+            }
+
+            $odUri    = [System.Uri]$ids.siteUrl
+            $odHost   = $odUri.Host
+            $odPath   = $odUri.AbsolutePath.TrimEnd('/')
+            $siteGraphUri = "https://graph.microsoft.com/v1.0/sites/${odHost}:${odPath}?`$select=id,displayName,webUrl,name"
+
+            if ($script:AppOnlyHeaders) {
+                $odSite = Invoke-GraphGet -Uri $siteGraphUri -Headers $script:AppOnlyHeaders
+            } else {
+                $odSite = Invoke-MgGraphRequest -Method GET -Uri $siteGraphUri -OutputType PSObject -ErrorAction Stop
+            }
+
+            if ($odSite -and $odSite.id -and $knownSiteIds.Add($odSite.id)) {
+                $sites.Add($odSite) | Out-Null
+                Write-ProgressHost -Message ("[OK] Added OneDrive: {0} ({1})" -f $upn, $odSite.webUrl) -ForegroundColor DarkGray
+            } else {
+                Write-ProgressHost -Message ("[INFO] OneDrive for {0} is already in the scan list." -f $upn) -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-ProgressHost -Message ("[WARN] Could not resolve OneDrive for {0}: {1}" -f $upn, $_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+}
+
+$oneDriveNote = if ($IncludeOneDriveUsers.Count -gt 0) { ", $($IncludeOneDriveUsers.Count) OneDrive user(s) included" } else { ', OneDrive excluded' }
+Write-ProgressHost -Message ("Found {0} site(s) (site collections + sub-sites included{1})" -f $sites.Count, $oneDriveNote) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-$knownExtensions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-@(
-    '.doc','.docx','.docm','.odt','.rtf','.txt','.xls','.xlsx','.xlsm','.xlsb','.ods','.csv',
-    '.ppt','.pptx','.pptm','.odp','.pdf','.jpg','.jpeg','.png','.gif','.bmp','.tif','.tiff',
-    '.svg','.webp','.psd','.ai','.mp4','.avi','.mkv','.mov','.wmv','.mp3','.wav','.flac',
-    '.aac','.zip','.rar','.7z','.tar','.gz','.html','.htm','.css','.js','.ts','.json','.xml',
-    '.yaml','.yml','.py','.cs','.java','.cpp','.go','.rs','.sh','.exe','.dll','.msi','.sql',
-    '.db','.dwg','.stl','.ttf','.otf','.epub','.msg','.eml','.md','.log','.bak','.ndpi','.prism'
-) | ForEach-Object { $knownExtensions.Add($_) | Out-Null }
-
 function Test-IsFile {
     param([object]$Item)
-    if ($null -ne $Item.file) { return $true }
-    if ($null -ne $Item.folder) { return $false }
-    $ext = if ($Item.name -match '\.([^.]+)$') { ".$($Matches[1].ToLower())" } else { '' }
-    return $knownExtensions.Contains($ext)
+    return $null -ne $Item.file
+}
+
+function Get-SiteCollectionKey {
+    # Resolves a site's webUrl to its root site collection URL, so sub-sites and
+    # classic sub-webs can be grouped back with the root they share a storage quota
+    # with. Private/shared Teams channels are genuine separate site collections
+    # (own /sites/<name> or /teams/<name> segment) and correctly form their own key —
+    # only extra path segments beyond that (classic sub-webs) collapse into the root.
+    param([string]$WebUrl)
+    if ($WebUrl -match '^(https://[^/]+(?:/sites/[^/]+|/teams/[^/]+)?)') {
+        return $Matches[1].TrimEnd('/')
+    }
+    return $WebUrl.TrimEnd('/')
 }
 
 function Get-SiteDrives {
@@ -525,7 +601,7 @@ function Get-SiteDrives {
             Update-AppOnlyToken
             $drives  = [System.Collections.Generic.List[object]]::new()
             $listUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/lists" +
-                       '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl)&$top=200'
+                       '?$select=id,displayName,list&$expand=drive($select=id,name,webUrl,quota)&$top=200'
             do {
                 $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
                 # Keep any list that has an associated drive — covers document libraries,
@@ -556,7 +632,18 @@ function Get-SiteDrives {
                     $resp = Invoke-GraphGet -Uri $listUri -Headers $script:AppOnlyHeaders
                     $docLibLists = @(
                         $resp.value | Where-Object {
-                            $_.id -and $_.list -and $_.list.template -eq 'documentLibrary'
+                            $_.id -and $_.list -and
+                            # Include all list templates that can have an associated drive.
+                            # documentLibrary is the most common, but picture libraries, form
+                            # libraries and wiki libraries also expose a drive endpoint.
+                            $_.list.template -in @(
+                                'documentLibrary',
+                                'pictureLibrary',
+                                'webPageLibrary',
+                                'htmlFormLibrary',
+                                'homePageLibrary',
+                                'assetLibrary'
+                            )
                         }
                     )
 
@@ -780,6 +867,125 @@ function Get-AllDriveItems {
     return $results
 }
 
+function Get-SpoAppOnlyTokenForHost {
+    param([string]$HostName)
+
+    if ([string]::IsNullOrWhiteSpace($HostName)) { return $null }
+
+    if ($script:SpoHostTokenCache.ContainsKey($HostName)) {
+        return $script:SpoHostTokenCache[$HostName]
+    }
+
+    if (-not $script:TokenBody -or -not $script:TokenTenantId) {
+        return $null
+    }
+
+    $body = @{
+        grant_type    = 'client_credentials'
+        scope         = "https://$HostName/.default"
+        client_id     = $script:TokenBody.client_id
+        client_secret = $script:TokenBody.client_secret
+    }
+
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token" `
+            -Body $body
+
+        if ($resp.access_token) {
+            $script:SpoHostTokenCache[$HostName] = $resp.access_token
+            return $resp.access_token
+        }
+    } catch {}
+
+    return $null
+}
+
+function Get-SiteRecycleBinItems {
+    param(
+        [string]$SiteId,
+        [string]$SiteWebUrl
+    )
+
+    $items = [System.Collections.Generic.List[object]]::new()
+
+    if ($script:AppOnlyHeaders) {
+        # NOTE: Graph /sites/{id}/recycleBin/items is ONLY for SharePoint Embedded
+        # fileStorageContainers and always returns 400 for regular SharePoint sites.
+        # The correct API is SharePoint REST /_api/site/RecycleBin, which requires
+        # a SharePoint-scoped token (not a Graph token).
+        # SPO REST is therefore tried first; Graph is only kept as a last-resort fallback.
+
+        # Primary: SharePoint REST with an app-only token for the specific site host.
+        if ($SiteWebUrl) {
+            try {
+                $siteUri  = [Uri]$SiteWebUrl
+                $hostName = $siteUri.Host
+                $basePath = $siteUri.AbsolutePath.TrimEnd('/')
+                if ($basePath -eq '/') { $basePath = '' }
+
+                $spoToken = Get-SpoAppOnlyTokenForHost -HostName $hostName
+                if ($spoToken) {
+                    $spoHeaders = @{
+                        Authorization = "Bearer $spoToken"
+                        Accept        = 'application/json;odata=nometadata'
+                    }
+
+                    $spoUri = "https://$hostName$basePath/_api/site/RecycleBin?`$select=Id,Title,Size,DeletedDate,ItemState&`$top=5000"
+                    do {
+                        $resp = Invoke-RestMethod -Method GET -Uri $spoUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+
+                        $rows = @()
+                        if ($resp.value) {
+                            $rows = @($resp.value)
+                        } elseif ($resp.d -and $resp.d.results) {
+                            $rows = @($resp.d.results)
+                        }
+
+                        foreach ($row in $rows) {
+                            $items.Add([PSCustomObject]@{
+                                id              = $row.Id
+                                name            = $row.Title
+                                size            = [int64]($row.Size ?? 0)
+                                deletedDateTime = $row.DeletedDate
+                            }) | Out-Null
+                        }
+
+                        if ($resp.'@odata.nextLink') {
+                            $spoUri = $resp.'@odata.nextLink'
+                        } elseif ($resp.d -and $resp.d.__next) {
+                            $spoUri = $resp.d.__next
+                        } else {
+                            $spoUri = $null
+                        }
+                    } while ($spoUri)
+
+                    return $items
+                }
+            } catch {}
+        }
+
+        # Final fallback: Graph SDK cmdlet (works in delegated mode only; returns 400
+        # app-only for regular sites, but try anyway for delegated sessions).
+        if ($script:ConnectedHere) {
+            try {
+                Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
+                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
+                    ForEach-Object { $items.Add($_) }
+                return $items
+            } catch {}
+        }
+
+        throw "Recycle bin: all retrieval methods failed for this site."
+    }
+
+    Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
+        -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
+        ForEach-Object { $items.Add($_) }
+
+    return $items
+}
+
 $summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
 $detailRows  = [System.Collections.Generic.List[PSCustomObject]]::new()
 
@@ -802,7 +1008,7 @@ if ($RecycleBinOnly) {
         if ([string]::IsNullOrWhiteSpace([string]$siteId)) { continue }
 
         # Only root site collections have their own recycle bin.
-        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
+        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+|/personal/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
 
         if (-not $processedRbSiteIds.Add($siteId)) { continue }
@@ -810,21 +1016,7 @@ if ($RecycleBinOnly) {
         Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
 
         try {
-            $rbItems = [System.Collections.Generic.List[object]]::new()
-
-            if ($script:AppOnlyHeaders) {
-                $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
-                         '?$select=id,name,size,deletedDateTime&$top=200'
-                do {
-                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
-                    $resp.value | ForEach-Object { $rbItems.Add($_) }
-                    $rbUri = $resp.'@odata.nextLink'
-                } while ($rbUri)
-            } else {
-                Get-MgSiteRecycleBinItem -SiteId $siteId -All `
-                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-                    ForEach-Object { $rbItems.Add($_) }
-            }
+            $rbItems = Get-SiteRecycleBinItems -SiteId $siteId -SiteWebUrl $site.webUrl
 
             $rbSizeBytes = [int64](($rbItems | Where-Object { $_.size } |
                                Measure-Object -Property size -Sum).Sum ?? 0)
@@ -1173,8 +1365,8 @@ if ($Apply) {
 
         # Only root site collections have their own recycle bin.
         # Sub-webs (URLs with extra path segments beyond /sites/<name>) share the root's bin.
-        # Root patterns: https://tenant.sharepoint.com  or  .../sites/name  or  .../teams/name
-        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
+        # Root patterns: https://tenant.sharepoint.com  or  .../sites/name  or  .../teams/name  or  .../personal/name
+        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+|/personal/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
 
         if (-not $processedRbSiteIds.Add($siteId)) { continue }
@@ -1182,22 +1374,7 @@ if ($Apply) {
         Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
 
         try {
-            $rbItems = [System.Collections.Generic.List[object]]::new()
-
-            if ($script:AppOnlyHeaders) {
-                $rbUri = "https://graph.microsoft.com/v1.0/sites/$siteId/recycleBin/items" +
-                         '?$select=id,name,size,deletedDateTime&$top=200'
-                do {
-                    $resp = Invoke-GraphGet -Uri $rbUri -Headers $script:AppOnlyHeaders
-                    $resp.value | ForEach-Object { $rbItems.Add($_) }
-                    $rbUri = $resp.'@odata.nextLink'
-                } while ($rbUri)
-            } else {
-                # SDK fallback — cmdlet available in Microsoft.Graph.Sites >= 2.x
-                Get-MgSiteRecycleBinItem -SiteId $siteId -All `
-                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-                    ForEach-Object { $rbItems.Add($_) }
-            }
+            $rbItems = Get-SiteRecycleBinItems -SiteId $siteId -SiteWebUrl $site.webUrl
 
             $rbSizeBytes = [int64](($rbItems | Where-Object { $_.size } |
                                Measure-Object -Property size -Sum).Sum ?? 0)
@@ -1247,6 +1424,84 @@ if ($Apply) {
     }
 }
 
+# ── Phase 2c: Site collection totals ─────────────────────────────────────────
+# Sub-sites and classic sub-webs share their root's storage quota in the SharePoint
+# admin center, but are scanned here as separate site entries — and the recycle bin
+# is tracked separately from the library scan. Neither is directly comparable to the
+# single "storage used" figure the admin center shows per site collection. This phase
+# regroups everything (all sub-sites' libraries + that collection's recycle bin) back
+# to its root site collection so the grand total lines up 1:1 with the admin portal.
+$siteCollectionRows = @()
+if ($Apply) {
+    $collectionMap = [System.Collections.Generic.Dictionary[string,object]]::new([StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($site in $sites) {
+        $key = Get-SiteCollectionKey -WebUrl $site.webUrl
+        if (-not $collectionMap.ContainsKey($key)) {
+            $collectionMap[$key] = [PSCustomObject]@{
+                CollectionKey = $key
+                DisplayName   = $null
+                LibrariesMB   = 0.0
+                RecycleBinMB  = 0.0
+                FileCount     = 0
+                LibraryCount  = 0
+                SiteCount     = 0
+            }
+        }
+        $entry = $collectionMap[$key]
+        $entry.SiteCount++
+        if ($site.webUrl.TrimEnd('/') -eq $key) {
+            $entry.DisplayName = $site.displayName ?? $site.name
+        }
+    }
+
+    foreach ($row in $summaryRows) {
+        if ([string]::IsNullOrWhiteSpace([string]$row.SiteUrl)) { continue }
+        $key = Get-SiteCollectionKey -WebUrl $row.SiteUrl
+        if (-not $collectionMap.ContainsKey($key)) { continue }
+        $entry = $collectionMap[$key]
+        if ($row.Library -eq 'Recycle Bin (stage 1 + 2)') {
+            $entry.RecycleBinMB += [double]($row.TotalSizeMB ?? 0)
+        } else {
+            $entry.LibrariesMB += [double]($row.TotalSizeMB ?? 0)
+            $entry.FileCount   += [int]($row.FileCount ?? 0)
+            $entry.LibraryCount++
+        }
+    }
+
+    $siteCollectionRows = @(
+        $collectionMap.Values | ForEach-Object {
+            [PSCustomObject]@{
+                SiteCollection    = $(if ($_.DisplayName) { $_.DisplayName } else { $_.CollectionKey })
+                SiteCollectionUrl = $_.CollectionKey
+                SubSiteCount      = $_.SiteCount
+                LibraryCount      = $_.LibraryCount
+                FileCount         = $_.FileCount
+                LibrariesMB       = [math]::Round($_.LibrariesMB, 2)
+                RecycleBinMB      = [math]::Round($_.RecycleBinMB, 2)
+                GrandTotalMB      = [math]::Round($_.LibrariesMB + $_.RecycleBinMB, 2)
+                GrandTotalGB      = [math]::Round(($_.LibrariesMB + $_.RecycleBinMB) / 1024, 3)
+            }
+        } | Sort-Object GrandTotalMB -Descending
+    )
+
+    $siteCollectionRows | Export-Csv -Path $collectionCsv -NoTypeInformation -Encoding UTF8
+    Write-ProgressHost -Message ("Site collections : {0}" -f $collectionCsv) -ForegroundColor Green
+
+    Write-Host ""
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-ProgressHost -Message "Top 10 site collections (libraries + recycle bin, sub-sites combined)" -ForegroundColor Cyan
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    $siteCollectionRows | Select-Object -First 10 | ForEach-Object {
+        Write-ProgressHost -Message ("{0} GB  [{1}]  (libraries: {2} MB, prullenbak: {3} MB, {4} sub-site(n)/kanalen)" -f
+            [math]::Round($_.GrandTotalGB, 2),
+            $_.SiteCollection,
+            [math]::Round($_.LibrariesMB, 0),
+            [math]::Round($_.RecycleBinMB, 0),
+            $_.SubSiteCount) -ForegroundColor Green
+    }
+}
+
 # ── Export ────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
@@ -1267,6 +1522,13 @@ $summaryRows = @(
             Library
     }
 )
+
+if ($Apply) {
+    $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
+    $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
+    $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
+    $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
+}
 
 if (-not $Apply) {
     $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
@@ -1368,10 +1630,7 @@ Write-Host "  ================================================" -ForegroundColor
 Write-ProgressHost -Message ("Sites scanned : {0}" -f $sites.Count)
 
 if ($Apply) {
-    $grandFiles = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property FileCount -Sum).Sum ?? 0
-    $grandVer   = ($summaryRows | Where-Object { $_.Library -ne 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property VersionSizeMB -Sum).Sum ?? 0
-    $grandRB    = ($summaryRows | Where-Object { $_.Library -eq 'Recycle Bin (stage 1 + 2)' } | Measure-Object -Property TotalSizeMB  -Sum).Sum ?? 0
-    $grandTotal = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
+    Write-ProgressHost -Message ("Site collections : {0}" -f $siteCollectionRows.Count)
     Write-ProgressHost -Message ("Total files   : {0}"    -f $grandFiles)
     Write-ProgressHost -Message ("Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
     Write-ProgressHost -Message ("Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta

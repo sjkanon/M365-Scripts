@@ -107,6 +107,34 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Stand
 - CSV bevat ook `Level` (diepte): root = `0`, topfolder = `1`, etc.
 - CSV bevat ook `ParentPath` voor hiërarchische analyses (Excel/Power BI tree-opbouw)
 
+### Prullenbak (recycle bin)
+
+De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt daarom **apart** van de library-scan opgehaald, alleen voor echte SharePoint site collections (geen OneDrive):
+
+- Standaard (`-Apply`, als Phase 2b) of los via **`-RecycleBinOnly`** (slaat de library-scan helemaal over, alleen prullenbak)
+- Alleen root site collections hebben een eigen prullenbak (sub-webs delen die van de root)
+- Output: extra rij per site in de summary-CSV (`Library = "Recycle Bin (stage 1 + 2)"`) plus een rij per verwijderd item in de detail-CSV
+
+```powershell
+# Alleen prullenbak
+.\Get-SharePointStorageReport.ps1 -RecycleBinOnly
+
+# Volledige scan + prullenbak als extra fase
+.\Get-SharePointStorageReport.ps1 -Apply
+```
+
+### Site collection totalen (vergelijken met het adminportaal)
+
+Sub-sites en Teams-kanalen delen de opslagquota van hun root site collection, maar worden in de scan als **losse site-rijen** gerapporteerd; de prullenbak wordt weer in een **eigen rij** bijgehouden. Los van elkaar zijn die cijfers dus niet 1-op-1 te vergelijken met het ene "storage used"-getal dat het SharePoint-adminportaal per site collection toont.
+
+Bij `-Apply` (Phase 2c) telt het script daarom alles automatisch weer bij elkaar op per root site collection: de library-totalen van alle onderliggende sub-sites/kanalen + de prullenbak van die site collection. Output: `SharePoint_SiteCollectionTotals_<timestamp>.csv`, met per site collection `LibrariesMB`, `RecycleBinMB`, `GrandTotalMB`/`GrandTotalGB` en het aantal sub-sites/kanalen dat is meegeteld. De console toont ook de top 10.
+
+Wijkt `GrandTotalGB` voor een site nog steeds af van het adminportaal-cijfer, dan is de meest waarschijnlijke oorzaak een van:
+- **Timing** — het adminportaal-cijfer kan tot 24u vertraagd zijn t.o.v. een live scan
+- **Stil overgeslagen mappen** — een `[ERROR] Cannot read folder`-melding in de console betekent dat die submap-boom (permissieprobleem) niet is meegeteld
+- **Mislukte version-lookups** — vallen terug op "0 versies" bij herhaalde Graph-fouten (zeldzaam, alleen na 3 mislukte retries)
+- Vergelijk eerst zonder `-Apply` (quick mode) — dat gebruikt hetzelfde officiële `quota.used`-cijfer als het adminportaal, dus wijkt dat ook al af, dan zit het verschil niet in de `-Apply`-telling zelf
+
 ### Performance (version history lookups)
 
 Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie optimalisaties beperken dat:
