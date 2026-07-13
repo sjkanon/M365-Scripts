@@ -519,6 +519,18 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 ## Version History
 
+### 2026-07-09 (8)
+| Change |
+|--------|
+| `scripts/Reporting/Get-SharePointStorageReport.ps1` — added a "site collection totals" phase (`-Apply` only, Phase 2c): sub-sites/Teams-kanalen and the recycle bin are now automatically rolled up per root site collection into `SharePoint_SiteCollectionTotals_<timestamp>.csv`, so the grand total is directly comparable to the single "storage used" figure shown per site in the SharePoint admin center |
+| Documented the new output and the most likely causes of a remaining mismatch with the admin portal figure (timing lag, silently skipped folders on permission errors, failed version lookups) in `scripts/Reporting/readme.md` |
+
+### 2026-07-09 (7)
+| Change |
+|--------|
+| `scripts/Reporting/Get-SharePointStorageReport.ps1` — briefly extended recycle bin lookups (`-Apply`'s Phase 2b and `-RecycleBinOnly`) to also cover OneDrive personal sites, then reverted the same day on request — recycle bin scope stays SharePoint site collections only, OneDrive stays fully excluded (both storage scan and recycle bin) |
+| Added a "Prullenbak (recycle bin)" section to `scripts/Reporting/readme.md` documenting the (SharePoint-only) recycle bin scope |
+
 ### 2026-07-09 (6)
 | Change |
 |--------|
