@@ -66,6 +66,11 @@
     Skip storage/library scanning and only read SharePoint recycle bin items
     (stage 1 + stage 2) for each site collection.
 
+.PARAMETER IncludeOneDriveUsers
+    One or more user principal names whose OneDrive personal site should be included
+    in the scan alongside SharePoint sites (e.g. dilara.beerten@d-build.be).
+    OneDrive personal sites are excluded by default.
+
 .EXAMPLE
     # Auto mode — creates and deletes a temporary App Registration automatically
     .\Get-SharePointStorageReport.ps1 -Apply
@@ -98,6 +103,7 @@ param (
     [switch] $Apply,
     [switch] $UseHighPrivilege,
     [switch] $RecycleBinOnly,
+    [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6
 )
@@ -526,26 +532,50 @@ while ($subSiteQueue.Count -gt 0) {
     }
 }
 
-Write-ProgressHost -Message ("Found {0} site(s) (site collections + sub-sites included, OneDrive excluded)" -f $sites.Count) -ForegroundColor Green
+# ── Add explicitly requested OneDrive personal sites ─────────────────────────
+if ($IncludeOneDriveUsers.Count -gt 0) {
+    Write-ProgressHost -Message "Resolving OneDrive sites for specified users..." -ForegroundColor Cyan
+    foreach ($upn in $IncludeOneDriveUsers) {
+        try {
+            $idsUri = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($upn))/drive/root/sharepointIds"
+
+            if ($script:AppOnlyHeaders) {
+                $ids = Invoke-GraphGet -Uri $idsUri -Headers $script:AppOnlyHeaders
+            } else {
+                $ids = Invoke-MgGraphRequest -Method GET -Uri $idsUri -OutputType PSObject -ErrorAction Stop
+            }
+
+            $odUri    = [System.Uri]$ids.siteUrl
+            $odHost   = $odUri.Host
+            $odPath   = $odUri.AbsolutePath.TrimEnd('/')
+            $siteGraphUri = "https://graph.microsoft.com/v1.0/sites/${odHost}:${odPath}?`$select=id,displayName,webUrl,name"
+
+            if ($script:AppOnlyHeaders) {
+                $odSite = Invoke-GraphGet -Uri $siteGraphUri -Headers $script:AppOnlyHeaders
+            } else {
+                $odSite = Invoke-MgGraphRequest -Method GET -Uri $siteGraphUri -OutputType PSObject -ErrorAction Stop
+            }
+
+            if ($odSite -and $odSite.id -and $knownSiteIds.Add($odSite.id)) {
+                $sites.Add($odSite) | Out-Null
+                Write-ProgressHost -Message ("[OK] Added OneDrive: {0} ({1})" -f $upn, $odSite.webUrl) -ForegroundColor DarkGray
+            } else {
+                Write-ProgressHost -Message ("[INFO] OneDrive for {0} is already in the scan list." -f $upn) -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-ProgressHost -Message ("[WARN] Could not resolve OneDrive for {0}: {1}" -f $upn, $_.Exception.Message) -ForegroundColor Yellow
+        }
+    }
+}
+
+$oneDriveNote = if ($IncludeOneDriveUsers.Count -gt 0) { ", $($IncludeOneDriveUsers.Count) OneDrive user(s) included" } else { ', OneDrive excluded' }
+Write-ProgressHost -Message ("Found {0} site(s) (site collections + sub-sites included{1})" -f $sites.Count, $oneDriveNote) -ForegroundColor Green
 Write-Host ""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-$knownExtensions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-@(
-    '.doc','.docx','.docm','.odt','.rtf','.txt','.xls','.xlsx','.xlsm','.xlsb','.ods','.csv',
-    '.ppt','.pptx','.pptm','.odp','.pdf','.jpg','.jpeg','.png','.gif','.bmp','.tif','.tiff',
-    '.svg','.webp','.psd','.ai','.mp4','.avi','.mkv','.mov','.wmv','.mp3','.wav','.flac',
-    '.aac','.zip','.rar','.7z','.tar','.gz','.html','.htm','.css','.js','.ts','.json','.xml',
-    '.yaml','.yml','.py','.cs','.java','.cpp','.go','.rs','.sh','.exe','.dll','.msi','.sql',
-    '.db','.dwg','.stl','.ttf','.otf','.epub','.msg','.eml','.md','.log','.bak','.ndpi','.prism'
-) | ForEach-Object { $knownExtensions.Add($_) | Out-Null }
-
 function Test-IsFile {
     param([object]$Item)
-    if ($null -ne $Item.file) { return $true }
-    if ($null -ne $Item.folder) { return $false }
-    $ext = if ($Item.name -match '\.([^.]+)$') { ".$($Matches[1].ToLower())" } else { '' }
-    return $knownExtensions.Contains($ext)
+    return $null -ne $Item.file
 }
 
 function Get-SiteCollectionKey {
@@ -978,7 +1008,7 @@ if ($RecycleBinOnly) {
         if ([string]::IsNullOrWhiteSpace([string]$siteId)) { continue }
 
         # Only root site collections have their own recycle bin.
-        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
+        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+|/personal/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
 
         if (-not $processedRbSiteIds.Add($siteId)) { continue }
@@ -1335,8 +1365,8 @@ if ($Apply) {
 
         # Only root site collections have their own recycle bin.
         # Sub-webs (URLs with extra path segments beyond /sites/<name>) share the root's bin.
-        # Root patterns: https://tenant.sharepoint.com  or  .../sites/name  or  .../teams/name
-        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+)?/?$'
+        # Root patterns: https://tenant.sharepoint.com  or  .../sites/name  or  .../teams/name  or  .../personal/name
+        $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+|/personal/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
 
         if (-not $processedRbSiteIds.Add($siteId)) { continue }
