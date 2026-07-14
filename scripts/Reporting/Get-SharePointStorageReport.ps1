@@ -105,7 +105,9 @@ param (
     [switch] $RecycleBinOnly,
     [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
-    [int] $MaxGraphRetry = 6
+    [int] $MaxGraphRetry = 6,
+    [ValidateRange(1, 8)]
+    [int] $VersionBatchConcurrency = 4
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -696,13 +698,104 @@ function Invoke-GraphBatchGet {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
+    $chunkSpecs = [System.Collections.Generic.List[object]]::new()
     for ($i = 0; $i -lt $Requests.Count; $i += 20) {
         $end   = [Math]::Min($i + 19, $Requests.Count - 1)
         $chunk = $Requests.GetRange($i, $end - $i + 1)
 
-        $batchBody = @{
-            requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-        } | ConvertTo-Json -Depth 6
+        $chunkSpecs.Add([PSCustomObject]@{
+            Requests = $chunk
+            Body     = (@{
+                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+            } | ConvertTo-Json -Depth 6)
+        }) | Out-Null
+    }
+
+    if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+        $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
+        $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+        $runspacePool.Open()
+
+        $workers = [System.Collections.Generic.List[object]]::new()
+        $workerScript = {
+            param(
+                [string]$BatchBody,
+                [hashtable]$Headers,
+                [int]$TimeoutSec
+            )
+
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                        -Headers $Headers -ContentType 'application/json' `
+                        -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+
+                    return [PSCustomObject]@{
+                        Success   = $true
+                        Responses = @($resp.responses)
+                    }
+                } catch {
+                    if ($attempt -eq 3) {
+                        return [PSCustomObject]@{
+                            Success   = $false
+                            Responses = @()
+                        }
+                    }
+
+                    Start-Sleep -Seconds ($attempt * 3)
+                }
+            }
+        }
+
+        try {
+            foreach ($spec in $chunkSpecs) {
+                $ps = [PowerShell]::Create()
+                $ps.RunspacePool = $runspacePool
+                [void]$ps.AddScript($workerScript)
+                [void]$ps.AddParameter('BatchBody', $spec.Body)
+                [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
+                [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+
+                $workers.Add([PSCustomObject]@{
+                    PowerShell = $ps
+                    Handle     = $ps.BeginInvoke()
+                    Requests   = $spec.Requests
+                }) | Out-Null
+            }
+
+            foreach ($worker in $workers) {
+                $payload = $null
+
+                try {
+                    $payload = $worker.PowerShell.EndInvoke($worker.Handle)
+                } catch {
+                    $payload = $null
+                } finally {
+                    $worker.PowerShell.Dispose()
+                }
+
+                if ($payload -and $payload.Success) {
+                    foreach ($r in $payload.Responses) {
+                        $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
+                    }
+                    continue
+                }
+
+                foreach ($req in $worker.Requests) {
+                    $results[$req.Id] = $null
+                }
+            }
+        } finally {
+            $runspacePool.Close()
+            $runspacePool.Dispose()
+        }
+
+        return $results
+    }
+
+    foreach ($spec in $chunkSpecs) {
+        $chunk = $spec.Requests
+        $batchBody = $spec.Body
 
         $done = $false
         for ($attempt = 1; $attempt -le 3 -and -not $done; $attempt++) {
