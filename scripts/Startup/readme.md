@@ -118,7 +118,7 @@ Installs and imports all PowerShell modules required by this repository. Run onc
 .\scripts\Startup\Install-Modules.ps1
 ```
 
-Core modules installed include `ExchangeOnlineManagement` and required Microsoft Graph submodules (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Identity.Governance`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Users`, `Microsoft.Graph.Calendar`).
+Core modules installed include `ExchangeOnlineManagement` and required Microsoft Graph submodules (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Identity.Governance`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Users`, `Microsoft.Graph.Calendar`).
 Windows-only compatibility modules are also included when applicable (`WindowsAutopilotIntune`, `AzureAD`).
 
 ---
@@ -127,7 +127,7 @@ Windows-only compatibility modules are also included when applicable (`WindowsAu
 
 Updates every installed PowerShell module to its latest version. Run as administrator for system-wide modules.
 
-Also ensures a minimum version for the specific Graph submodules this repo depends on (`Microsoft.Graph.Authentication`, `Identity.SignIns`, `Identity.Governance`, `Applications`, `Groups`) before updating everything else installed on the machine.
+Also ensures a minimum version for the specific Graph submodules this repo depends on (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Identity.SignIns`, `Identity.Governance`, `Applications`, `Groups`) before updating everything else installed on the machine.
 
 ```powershell
 .\scripts\Startup\Update-Modules.ps1

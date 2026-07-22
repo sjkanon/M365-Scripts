@@ -194,6 +194,22 @@ if ($FastMode) {
     $SkipVersions = $true
 }
 
+# ── Module preflight ─────────────────────────────────────────────────────────
+$requiredGraphModules = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Sites'
+)
+
+$missingGraphModules = $requiredGraphModules | Where-Object {
+    -not (Get-Module -ListAvailable -Name $_)
+}
+
+if ($missingGraphModules.Count -gt 0) {
+    Write-Host "  [ERROR] Missing required module(s): $($missingGraphModules -join ', ')" -ForegroundColor Red
+    Write-Host "  Install with: .\scripts\Startup\Install-Modules.ps1" -ForegroundColor Yellow
+    exit 1
+}
+
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
     if ($ClientId -and $TenantId) {

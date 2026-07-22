@@ -545,6 +545,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-07-22 (2)
+| Change |
+|--------|
+| Fixed SharePoint report dependency issue causing `Get-MgSite` command-not-found errors: updated `load.ps1`, `scripts/Startup/Install-Modules.ps1`, and `scripts/Startup/Update-Modules.ps1` to include `Microsoft.Graph.Sites` |
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` with an explicit module preflight check for `Microsoft.Graph.Authentication` and `Microsoft.Graph.Sites`, including a clear install hint when modules are missing |
+| Updated `scripts/Startup/readme.md` module dependency documentation to include `Microsoft.Graph.Sites` in install/update requirements |
+
 ### 2026-07-22 (1)
 | Change |
 |--------|
