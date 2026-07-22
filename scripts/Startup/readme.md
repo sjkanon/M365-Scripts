@@ -15,6 +15,30 @@ Entry-point scripts and the core M365 function library.
 
 ---
 
+## Delegated GDAP Startup
+
+`load.ps1` now supports storing delegated defaults in `load.config.ps1`:
+
+- `authMode` (`GDAP` or `Direct`)
+- `defaultCustomerDomain` (optional)
+- `useDeviceCodeAuth` (`$true` / `$false`)
+
+When `authMode` is `GDAP` and a `defaultCustomerDomain` is configured, the menu auto-runs `Connect-Tenant` after `functies.ps1` is loaded.
+
+To register the launcher at Windows sign-in:
+
+```powershell
+.\load.ps1 -SetupStartup
+```
+
+To remove it:
+
+```powershell
+.\load.ps1 -RemoveStartup
+```
+
+---
+
 ## functies.ps1
 
 Central function library for multi-tenant M365 management via Microsoft Graph and Exchange Online. Loaded automatically by the menu on first use of a B–E option.
@@ -43,6 +67,7 @@ Connect-Tenant -Domain "customer.com"
 | Function | Description |
 |----------|-------------|
 | `Connect-Tenant` | Select a CSP customer by domain, populates `$cid` and `$connectmsoldomain` |
+| `Test-GdapConnection` | Validates delegated GDAP/CSP contract + tries delegated Exchange connection |
 | `Test-ExoConnection` | Checks / restores the Exchange Online connection |
 
 **Exchange Online**
@@ -89,6 +114,7 @@ Installs and imports all PowerShell modules required by this repository. Run onc
 ```
 
 Modules installed: `ExchangeOnlineManagement`, `Microsoft.Graph`, `ImportExcel`, `PSWindowsUpdate`
+Key Graph submodules include `Microsoft.Graph.Authentication` and `Microsoft.Graph.Identity.DirectoryManagement` for delegated/GDAP tenant contract lookups.
 
 ---
 

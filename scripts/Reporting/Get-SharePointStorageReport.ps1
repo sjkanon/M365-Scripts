@@ -57,6 +57,10 @@
     Perform the full recursive file scan. Without this switch, only quota data
     from the Graph sites API is retrieved (fast, no file enumeration).
 
+.PARAMETER FastMode
+    Perform the recursive scan with a smaller output footprint: skip version history
+    and per-item detail rows, while still producing summary totals and checkpoints.
+
 .PARAMETER UseHighPrivilege
     Optional. In auto mode, grants Sites.FullControl.All application permission
     to the temporary app instead of Sites.Read.All. Use this only when stricter
@@ -101,11 +105,14 @@ param (
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
     [switch] $Apply,
+    [switch] $FastMode,
     [switch] $UseHighPrivilege,
     [switch] $RecycleBinOnly,
     [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
-    [int] $MaxGraphRetry = 6
+    [int] $MaxGraphRetry = 6,
+    [ValidateRange(1, 8)]
+    [int] $VersionBatchConcurrency = 4
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -180,6 +187,11 @@ if ($UseHighPrivilege) {
     Write-Host "  Privilege : High (Sites.FullControl.All for temporary app)" -ForegroundColor Yellow
 } else {
     Write-Host "  Privilege : Standard (Sites.Read.All for temporary app)" -ForegroundColor DarkGray
+}
+
+if ($FastMode) {
+    Write-Host "  Mode      : Fast scan (no version history, no detail rows)" -ForegroundColor Cyan
+    $SkipVersions = $true
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
@@ -402,6 +414,43 @@ function Invoke-GraphGet {
             ) -ForegroundColor DarkGray
             Start-Sleep -Seconds $delay
         }
+    }
+}
+
+function Get-TextHashHex {
+    param([string]$Text)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        $hash  = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-LibraryCheckpointKey {
+    param(
+        [string]$SiteId,
+        [string]$DriveId
+    )
+
+    return ('{0}|{1}' -f $SiteId, $DriveId)
+}
+
+function Append-CheckpointRows {
+    param(
+        [string]$Path,
+        [object[]]$Rows
+    )
+
+    if ($Rows.Count -eq 0) { return }
+
+    if (Test-Path $Path) {
+        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
+    } else {
+        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
     }
 }
 
@@ -696,13 +745,104 @@ function Invoke-GraphBatchGet {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
+    $chunkSpecs = [System.Collections.Generic.List[object]]::new()
     for ($i = 0; $i -lt $Requests.Count; $i += 20) {
         $end   = [Math]::Min($i + 19, $Requests.Count - 1)
         $chunk = $Requests.GetRange($i, $end - $i + 1)
 
-        $batchBody = @{
-            requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-        } | ConvertTo-Json -Depth 6
+        $chunkSpecs.Add([PSCustomObject]@{
+            Requests = $chunk
+            Body     = (@{
+                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+            } | ConvertTo-Json -Depth 6)
+        }) | Out-Null
+    }
+
+    if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+        $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
+        $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+        $runspacePool.Open()
+
+        $workers = [System.Collections.Generic.List[object]]::new()
+        $workerScript = {
+            param(
+                [string]$BatchBody,
+                [hashtable]$Headers,
+                [int]$TimeoutSec
+            )
+
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+                try {
+                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                        -Headers $Headers -ContentType 'application/json' `
+                        -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+
+                    return [PSCustomObject]@{
+                        Success   = $true
+                        Responses = @($resp.responses)
+                    }
+                } catch {
+                    if ($attempt -eq 3) {
+                        return [PSCustomObject]@{
+                            Success   = $false
+                            Responses = @()
+                        }
+                    }
+
+                    Start-Sleep -Seconds ($attempt * 3)
+                }
+            }
+        }
+
+        try {
+            foreach ($spec in $chunkSpecs) {
+                $ps = [PowerShell]::Create()
+                $ps.RunspacePool = $runspacePool
+                [void]$ps.AddScript($workerScript)
+                [void]$ps.AddParameter('BatchBody', $spec.Body)
+                [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
+                [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+
+                $workers.Add([PSCustomObject]@{
+                    PowerShell = $ps
+                    Handle     = $ps.BeginInvoke()
+                    Requests   = $spec.Requests
+                }) | Out-Null
+            }
+
+            foreach ($worker in $workers) {
+                $payload = $null
+
+                try {
+                    $payload = $worker.PowerShell.EndInvoke($worker.Handle)
+                } catch {
+                    $payload = $null
+                } finally {
+                    $worker.PowerShell.Dispose()
+                }
+
+                if ($payload -and $payload.Success) {
+                    foreach ($r in $payload.Responses) {
+                        $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
+                    }
+                    continue
+                }
+
+                foreach ($req in $worker.Requests) {
+                    $results[$req.Id] = $null
+                }
+            }
+        } finally {
+            $runspacePool.Close()
+            $runspacePool.Dispose()
+        }
+
+        return $results
+    }
+
+    foreach ($spec in $chunkSpecs) {
+        $chunk = $spec.Requests
+        $batchBody = $spec.Body
 
         $done = $false
         for ($attempt = 1; $attempt -le 3 -and -not $done; $attempt++) {
@@ -986,8 +1126,107 @@ function Get-SiteRecycleBinItems {
     return $items
 }
 
+# ── Resume / checkpoint state ────────────────────────────────────────────────
+$checkpointSignature = Get-TextHashHex -Text (@"
+$PSCommandPath
+$outputDir
+$SiteUrl
+$SkipVersions
+$Apply
+$UseHighPrivilege
+$RecycleBinOnly
+$($IncludeOneDriveUsers -join ',')
+$TenantId
+$ClientId
+$CertificateThumbprint
+$GraphTimeoutSec
+$MaxGraphRetry
+$VersionBatchConcurrency
+"@)
+$script:CheckpointStatePath   = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.state.json"
+$script:CheckpointSummaryPath = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.summary.partial.csv"
+$script:CheckpointDetailPath  = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.detail.partial.csv"
+$script:CompletedLibraryKeys  = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:LoadedCheckpoint      = $false
+
+if (Test-Path $script:CheckpointStatePath) {
+    try {
+        $checkpointState = Get-Content -Path $script:CheckpointStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($checkpointState.RunSignature -eq $checkpointSignature) {
+            $script:LoadedCheckpoint = $true
+            foreach ($key in @($checkpointState.CompletedLibraryKeys)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$key)) {
+                    $script:CompletedLibraryKeys.Add([string]$key) | Out-Null
+                }
+            }
+        }
+    } catch {
+        $script:LoadedCheckpoint = $false
+    }
+}
+
+function Save-CheckpointState {
+    param(
+        [System.Collections.Generic.HashSet[string]]$CompletedLibraryKeys
+    )
+
+    $state = [PSCustomObject]@{
+        Version              = 1
+        RunSignature         = $checkpointSignature
+        UpdatedUtc           = (Get-Date).ToUniversalTime().ToString('o')
+        CompletedLibraryKeys = @($CompletedLibraryKeys | Sort-Object)
+    }
+
+    $state | ConvertTo-Json -Depth 4 | Set-Content -Path $script:CheckpointStatePath -Encoding UTF8
+}
+
+function Finalize-CheckpointFiles {
+    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath)) {
+        if (Test-Path $path) {
+            try { Remove-Item -Path $path -Force -ErrorAction Stop } catch {}
+        }
+    }
+}
+
+function Convert-CheckpointCsvRows {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return @() }
+    return @(Import-Csv -Path $Path -ErrorAction Stop)
+}
+
+function Complete-CheckpointUnit {
+    param(
+        [string]$CheckpointKey,
+        [object[]]$SummaryRows,
+        [object[]]$DetailRows
+    )
+
+    if ($SummaryRows.Count -gt 0) {
+        Append-CheckpointRows -Path $script:CheckpointSummaryPath -Rows $SummaryRows
+    }
+    if ($DetailRows.Count -gt 0) {
+        Append-CheckpointRows -Path $script:CheckpointDetailPath -Rows $DetailRows
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($CheckpointKey)) {
+        $script:CompletedLibraryKeys.Add($CheckpointKey) | Out-Null
+    }
+    Save-CheckpointState -CompletedLibraryKeys $script:CompletedLibraryKeys
+}
+
 $summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
 $detailRows  = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+if ($script:LoadedCheckpoint) {
+    foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointSummaryPath)) {
+        $summaryRows.Add($row) | Out-Null
+    }
+    foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointDetailPath)) {
+        $detailRows.Add($row) | Out-Null
+    }
+    Write-ProgressHost -Message ("Resuming with {0} completed library checkpoint(s)." -f $script:CompletedLibraryKeys.Count) -ForegroundColor DarkGray
+}
 
 if ($RecycleBinOnly) {
     Write-Host "  ================================================" -ForegroundColor Cyan
@@ -1101,6 +1340,7 @@ if ($RecycleBinOnly) {
     Write-Host ("  Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0), [math]::Round($grandRB / 1024, 2)) -ForegroundColor Magenta
     Write-Host ""
 
+    Finalize-CheckpointFiles
     Remove-TempApp
     return
 }
@@ -1158,13 +1398,22 @@ foreach ($entry in $siteLibraries) {
     $site     = $entry.Site
     $drive    = $entry.Drive
     $siteName = $site.displayName ?? $site.name
+    $libraryKey = Get-LibraryCheckpointKey -SiteId $site.id -DriveId $drive.id
 
     Write-ProgressHost -Message ("[{0}/{1}] {2} > {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
+
+    if ($script:LoadedCheckpoint -and $script:CompletedLibraryKeys.Contains($libraryKey)) {
+        Write-ProgressHost -Message "    [SKIP] Already completed in a previous run." -ForegroundColor DarkGray
+        continue
+    }
+
+    $librarySummaryRows = [System.Collections.Generic.List[object]]::new()
+    $libraryDetailRows  = [System.Collections.Generic.List[object]]::new()
 
     # Quick mode: use quota data from drives (no file enumeration)
     if (-not $Apply) {
         $quota = $drive.quota
-        $summaryRows.Add([PSCustomObject]@{
+        $librarySummaryRows.Add([PSCustomObject]@{
             SiteName           = $siteName
             SiteUrl            = $site.webUrl
             Library            = $drive.name
@@ -1180,6 +1429,9 @@ foreach ($entry in $siteLibraries) {
             TotalSizeMB        = $null
         }) | Out-Null
         Write-Host ("        used: {0} GB" -f ([math]::Round(($quota.used ?? 0) / 1GB, 2))) -ForegroundColor DarkGray
+
+        foreach ($row in $librarySummaryRows) { $summaryRows.Add($row) | Out-Null }
+        Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @()
         continue
     }
 
@@ -1188,7 +1440,8 @@ foreach ($entry in $siteLibraries) {
     # library — $drive.VersioningEnabled is $null (unknown) for the Get-MgSiteDrive fallback,
     # in which case we still fetch to avoid silently under-reporting.
     $versioningKnownOff = ($null -ne $drive.VersioningEnabled) -and (-not [bool]$drive.VersioningEnabled)
-    $fetchVersions      = (-not $SkipVersions) -and (-not $versioningKnownOff)
+    $fetchVersions      = (-not $SkipVersions) -and (-not $FastMode) -and (-not $versioningKnownOff)
+    $includeDetailRows  = -not $FastMode
     if (-not $SkipVersions -and $versioningKnownOff) {
         Write-Host "        versioning disabled on this library — skipping version lookups" -ForegroundColor DarkGray
     }
@@ -1259,35 +1512,40 @@ foreach ($entry in $siteLibraries) {
         }
     }
 
-    $folderReportRows = @(
-        $folderStats.Values | ForEach-Object {
-            [PSCustomObject]@{
-                ItemType         = 'Folder'
-                Path             = $_.Path
-                Level            = $_.Level
-                ParentPath       = $_.ParentPath
-                SizeMB           = [math]::Round($_.SizeBytes / 1MB, 3)
-                VersionCount     = $_.VersionCount
-                VersionSizeMB    = [math]::Round($_.VersionSizeBytes / 1MB, 3)
-                TotalSizeMB      = [math]::Round($_.TotalSizeBytes / 1MB, 3)
-                Modified         = $_.Modified
+    $folderReportRows = if ($includeDetailRows) {
+        @(
+            $folderStats.Values | ForEach-Object {
+                [PSCustomObject]@{
+                    ItemType         = 'Folder'
+                    Path             = $_.Path
+                    Level            = $_.Level
+                    ParentPath       = $_.ParentPath
+                    SizeMB           = [math]::Round($_.SizeBytes / 1MB, 3)
+                    VersionCount     = $_.VersionCount
+                    VersionSizeMB    = [math]::Round($_.VersionSizeBytes / 1MB, 3)
+                    TotalSizeMB      = [math]::Round($_.TotalSizeBytes / 1MB, 3)
+                    Modified         = $_.Modified
+                }
             }
-        }
-    )
+        )
+    } else {
+        @()
+    }
     $totalFiles  = $fileItems.Count
     $totalFolders = $folderReportRows.Count
     $currentSize = ($fileItems | Measure-Object -Property SizeBytes -Sum).Sum ?? 0
     $versionSize = ($fileItems | Measure-Object -Property VersionSizeBytes -Sum).Sum ?? 0
     $totalSize   = $currentSize + $versionSize
+    $folderCountDisplay = if ($FastMode) { 'n/a' } else { $totalFolders }
 
     Write-Host ("        {0} folders | {1} files | current: {2} MB | versions: {3} MB | total: {4} MB" -f
-        $totalFolders,
+        $folderCountDisplay,
         $totalFiles,
         [math]::Round($currentSize / 1MB, 1),
         [math]::Round($versionSize / 1MB, 1),
         [math]::Round($totalSize   / 1MB, 1)) -ForegroundColor DarkGray
 
-    $summaryRows.Add([PSCustomObject]@{
+    $librarySummaryRows.Add([PSCustomObject]@{
         SiteName          = $siteName
         SiteUrl           = $site.webUrl
         Library           = $drive.name
@@ -1298,7 +1556,7 @@ foreach ($entry in $siteLibraries) {
         RemainingGB       = $null
         State             = $null
         FileCount         = $totalFiles
-        FolderCount       = $totalFolders
+        FolderCount       = if ($FastMode) { $null } else { $totalFolders }
         VersionSizeMB     = [math]::Round($versionSize / 1MB, 2)
         TotalSizeMB       = [math]::Round($totalSize   / 1MB, 2)
     }) | Out-Null
@@ -1306,43 +1564,49 @@ foreach ($entry in $siteLibraries) {
     $verEnabled = $drive.VersioningEnabled
     $verLimit   = if ($drive.MajorVersionLimit -eq 0) { 'Unlimited' } else { $drive.MajorVersionLimit }
 
-    foreach ($item in $folderReportRows) {
-        $detailRows.Add([PSCustomObject]@{
-            SiteName          = $siteName
-            SiteUrl           = $site.webUrl
-            Library           = $drive.name
-            VersioningEnabled = $verEnabled
-            MajorVersionLimit = $verLimit
-            ItemType          = $item.ItemType
-            Path              = $item.Path
-            Level             = $item.Level
-            ParentPath        = $item.ParentPath
-            SizeMB            = $item.SizeMB
-            VersionCount      = $item.VersionCount
-            VersionSizeMB     = $item.VersionSizeMB
-            TotalSizeMB       = $item.TotalSizeMB
-            Modified          = $item.Modified
-        }) | Out-Null
+    if ($includeDetailRows) {
+        foreach ($item in $folderReportRows) {
+            $libraryDetailRows.Add([PSCustomObject]@{
+                SiteName          = $siteName
+                SiteUrl           = $site.webUrl
+                Library           = $drive.name
+                VersioningEnabled = $verEnabled
+                MajorVersionLimit = $verLimit
+                ItemType          = $item.ItemType
+                Path              = $item.Path
+                Level             = $item.Level
+                ParentPath        = $item.ParentPath
+                SizeMB            = $item.SizeMB
+                VersionCount      = $item.VersionCount
+                VersionSizeMB     = $item.VersionSizeMB
+                TotalSizeMB       = $item.TotalSizeMB
+                Modified          = $item.Modified
+            }) | Out-Null
+        }
+
+        foreach ($item in $fileItems) {
+            $libraryDetailRows.Add([PSCustomObject]@{
+                SiteName          = $siteName
+                SiteUrl           = $site.webUrl
+                Library           = $drive.name
+                VersioningEnabled = $verEnabled
+                MajorVersionLimit = $verLimit
+                ItemType          = $item.ItemType
+                Path              = $item.Path
+                Level             = $item.Level
+                ParentPath        = $item.ParentPath
+                SizeMB            = $item.SizeMB
+                VersionCount      = $item.VersionCount
+                VersionSizeMB     = $item.VersionSizeMB
+                TotalSizeMB       = $item.TotalSizeMB
+                Modified          = $item.Modified
+            }) | Out-Null
+        }
     }
 
-    foreach ($item in $fileItems) {
-        $detailRows.Add([PSCustomObject]@{
-            SiteName          = $siteName
-            SiteUrl           = $site.webUrl
-            Library           = $drive.name
-            VersioningEnabled = $verEnabled
-            MajorVersionLimit = $verLimit
-            ItemType          = $item.ItemType
-            Path              = $item.Path
-            Level             = $item.Level
-            ParentPath        = $item.ParentPath
-            SizeMB            = $item.SizeMB
-            VersionCount      = $item.VersionCount
-            VersionSizeMB     = $item.VersionSizeMB
-            TotalSizeMB       = $item.TotalSizeMB
-            Modified          = $item.Modified
-        }) | Out-Null
-    }
+    foreach ($row in $librarySummaryRows) { $summaryRows.Add($row) | Out-Null }
+    foreach ($row in $libraryDetailRows) { $detailRows.Add($row) | Out-Null }
+    Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @($libraryDetailRows)
 }
 
 # ── Phase 2b: Recycle bins ───────────────────────────────────────────────────
@@ -1362,6 +1626,7 @@ if ($Apply) {
     foreach ($site in $sites) {
         $siteId   = $site.id
         $siteName = $site.displayName ?? $site.name
+        $rbKey    = "rb|$siteId"
 
         # Only root site collections have their own recycle bin.
         # Sub-webs (URLs with extra path segments beyond /sites/<name>) share the root's bin.
@@ -1369,9 +1634,17 @@ if ($Apply) {
         $isRootSiteCollection = $site.webUrl -match '^https://[^/]+(/sites/[^/]+|/teams/[^/]+|/personal/[^/]+)?/?$'
         if (-not $isRootSiteCollection) { continue }
 
+        if ($script:LoadedCheckpoint -and $script:CompletedLibraryKeys.Contains($rbKey)) {
+            Write-Host ("  Recycle bin: {0} [SKIP]" -f $siteName) -ForegroundColor DarkGray
+            continue
+        }
+
         if (-not $processedRbSiteIds.Add($siteId)) { continue }
 
         Write-Host ("  Recycle bin: {0}" -f $siteName) -ForegroundColor White
+
+        $rbSummaryRows = [System.Collections.Generic.List[object]]::new()
+        $rbDetailRows  = [System.Collections.Generic.List[object]]::new()
 
         try {
             $rbItems = Get-SiteRecycleBinItems -SiteId $siteId -SiteWebUrl $site.webUrl
@@ -1383,7 +1656,7 @@ if ($Apply) {
             Write-Host ("        {0} item(s) | {1} MB" -f
                 $rbCount, [math]::Round($rbSizeBytes / 1MB, 1)) -ForegroundColor DarkGray
 
-            $summaryRows.Add([PSCustomObject]@{
+            $rbSummaryRows.Add([PSCustomObject]@{
                 SiteName          = $siteName
                 SiteUrl           = $site.webUrl
                 Library           = 'Recycle Bin (stage 1 + 2)'
@@ -1400,7 +1673,7 @@ if ($Apply) {
             }) | Out-Null
 
             foreach ($rbItem in $rbItems) {
-                $detailRows.Add([PSCustomObject]@{
+                $rbDetailRows.Add([PSCustomObject]@{
                     SiteName          = $siteName
                     SiteUrl           = $site.webUrl
                     Library           = 'Recycle Bin (stage 1 + 2)'
@@ -1417,6 +1690,10 @@ if ($Apply) {
                     Modified          = $rbItem.deletedDateTime
                 }) | Out-Null
             }
+
+            foreach ($row in $rbSummaryRows) { $summaryRows.Add($row) | Out-Null }
+            foreach ($row in $rbDetailRows) { $detailRows.Add($row) | Out-Null }
+            Complete-CheckpointUnit -CheckpointKey $rbKey -SummaryRows @($rbSummaryRows) -DetailRows @($rbDetailRows)
 
         } catch {
             Write-Host ("        [WARN] Cannot read recycle bin: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
@@ -1621,6 +1898,8 @@ if ($Apply -and $detailRows.Count -gt 0) {
         Write-ProgressHost -Message ("Rapport  : {0}" -f $reportMd) -ForegroundColor Green
     }
 }
+
+Finalize-CheckpointFiles
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 Write-Host ""
