@@ -545,6 +545,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-07-22 (3)
+| Change |
+|--------|
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` scan-mode handling so single-site runs (`-SiteUrl` with `/sites/...` or `/teams/...`) no longer trigger temporary app registration + app-only bootstrap; app-only setup is now only used for tenant-wide enumeration |
+| Improved single-site lookup performance and reliability by resolving the exact site directly via Graph URL path (`/sites/{hostname}:{path}`) instead of search/filter flow |
+| Updated `scripts/Reporting/readme.md` performance notes to document the single-site optimized path and expected startup speed behavior |
+
 ### 2026-07-22 (2)
 | Change |
 |--------|

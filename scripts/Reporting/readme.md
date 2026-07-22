@@ -145,6 +145,8 @@ Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie op
 
 `-SkipVersions` blijft de snelste optie als versiehistorie niet nodig is — dan wordt er helemaal geen version-call gedaan.
 
+Daarnaast is `-SiteUrl` (1 specifieke site) nu geoptimaliseerd: in auto mode wordt geen tijdelijke App Registration meer aangemaakt. Het script gebruikt dan direct delegated Graph-calls voor alleen die site, wat de opstarttijd gelijk trekt met andere commando's.
+
 ### Parameters
 
 | Parameter | Omschrijving |
