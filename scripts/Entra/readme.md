@@ -15,6 +15,9 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 | [`Get-M365UserLicenses.ps1`](#get-m365userlicensesps1) | Report assigned licenses for a list of users |
 | [`Import-ConditionalAccessBaseline.ps1`](#import-conditionalaccessbaselineps1) | Import the community Conditional Access baseline |
 | [`Test-M365GroupMembership.ps1`](#test-m365groupmembershipps1) | Audit M365 Group / Teams owners and members |
+| [`New-TemporaryConditionalAccessPolicy.ps1`](#new-temporaryconditionalaccesspolicyps1) | Create a temporary CA policy for one user or group |
+| [`Remove-TemporaryConditionalAccessPolicies.ps1`](#remove-temporaryconditionalaccesspoliciesps1) | Remove expired/all temporary CA policies |
+| [`New-UserTemporaryAccessPass.ps1`](#new-usertemporaryaccesspassps1) | Create a TAP code for a user |
 
 > Dynamic-to-static distribution group conversion (`Set-Distributionlist-dynamic-static.ps1`) lives in [`scripts/Exchange/`](../Exchange/readme.md) — it uses Exchange Online cmdlets, not Graph.
 
@@ -258,6 +261,67 @@ It also supports a follow-up action to switch imported policies to report-only o
 ```
 
 **Notes**
+
+---
+
+### New-TemporaryConditionalAccessPolicy.ps1
+
+Creates a temporary Conditional Access policy for one user or group.
+
+- Marks the policy name with prefix `TEMP-CA -`
+- Writes an expiry timestamp in policy description (`Expires=<UTC timestamp>`)
+- Supports either duration-based windows or exact local start/end date-time windows
+- By default keeps the script session open and removes the policy immediately when expiry is reached
+
+Important:
+- Immediate cleanup at expiry requires the script session to stay open
+- If you close the session early, run the cleanup script later
+
+**Examples**
+
+```powershell
+# Temporary MFA requirement for 2 hours, auto-remove at expiry
+.\New-TemporaryConditionalAccessPolicy.ps1 -TargetType User -TargetId "<object-id>" -DisplayName "Temporary MFA" -DurationHours 2
+
+# Temporary policy with exact local start/end date-time
+.\New-TemporaryConditionalAccessPolicy.ps1 -TargetType User -TargetId "<object-id>" -DisplayName "Install Window" -StartDateTimeLocal "2026-07-23 19:00" -EndDateTimeLocal "2026-07-23 22:00"
+
+# Temporary block policy, no auto cleanup wait loop
+.\New-TemporaryConditionalAccessPolicy.ps1 -TargetType Group -TargetId "<object-id>" -DisplayName "Temporary Block" -Action Block -NoAutoCleanup
+```
+
+---
+
+### Remove-TemporaryConditionalAccessPolicies.ps1
+
+Removes temporary policies created with prefix `TEMP-CA -`.
+
+Modes:
+- default: remove only expired TEMP-CA policies
+- `-PolicyId`: remove one specific policy
+- `-RemoveAllTempPolicies`: remove all TEMP-CA policies
+
+**Examples**
+
+```powershell
+# Remove only expired temporary policies
+.\Remove-TemporaryConditionalAccessPolicies.ps1
+
+# Remove one specific policy
+.\Remove-TemporaryConditionalAccessPolicies.ps1 -PolicyId "<policy-id>"
+```
+
+---
+
+### New-UserTemporaryAccessPass.ps1
+
+Creates a Temporary Access Pass (TAP) for one user.
+
+**Example**
+
+```powershell
+.\New-UserTemporaryAccessPass.ps1 -UserId "user@contoso.com" -LifetimeMinutes 60 -IsUsableOnce
+```
 - Keep at least one break-glass account excluded before enabling policies
 - Review exclusion groups and named locations after import
 
