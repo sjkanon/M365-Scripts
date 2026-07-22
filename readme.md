@@ -545,6 +545,21 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-07-22 (5)
+| Change |
+|--------|
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` to make single-site scans GDAP-proof: when `authMode=GDAP` is detected, the script now automatically uses the temporary app/app-only bootstrap path for `-SiteUrl` scans to avoid delegated permission gaps |
+| Added `-ForceAppOnlySingleSite` parameter to explicitly force app-only bootstrap for single-site scans, independent of detected auth mode |
+| Updated `scripts/Reporting/readme.md` to document the new GDAP behavior and `-ForceAppOnlySingleSite` parameter |
+
+### 2026-07-22 (4)
+| Change |
+|--------|
+| Hardened `scripts/Reporting/Get-SharePointStorageReport.ps1` delegated path to remove dependency on missing Graph cmdlets: replaced `Get-MgDriveItemChild` usage with Graph REST pagination via `Invoke-MgGraphRequest` for drive children traversal |
+| Updated site-drive enumeration fallbacks in `Get-SharePointStorageReport.ps1` to use Graph REST (`/sites/{id}/drives`) instead of `Get-MgSiteDrive` in delegated/non-app-only branches |
+| Updated recycle-bin retrieval in `Get-SharePointStorageReport.ps1` to use Graph REST pagination (`/sites/{id}/recycleBin/items`) as fallback/primary delegated path instead of `Get-MgSiteRecycleBinItem` cmdlet dependency |
+| Suppressed non-fatal MSAL authority warning noise on disconnect by wrapping `Disconnect-MgGraph` with temporary warning suppression in cleanup |
+
 ### 2026-07-22 (3)
 | Change |
 |--------|
