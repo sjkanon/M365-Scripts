@@ -26,11 +26,29 @@ $script:MspAdminDisplayName = 'MSP - Admin Account'
 
 #region Startup
 
-Connect-MgGraph -Scopes `
-    'Domain.Read.All', 'Organization.Read.All', 'User.ReadWrite.All', `
-    'Group.ReadWrite.All', 'RoleManagement.ReadWrite.Directory', `
-    'AuditLog.Read.All', 'Application.Read.All', 'Domain.ReadWrite.All' `
-    -NoWelcome
+$graphScopes = @(
+    'Domain.Read.All',
+    'Directory.Read.All',
+    'Organization.Read.All',
+    'User.ReadWrite.All',
+    'Group.ReadWrite.All',
+    'RoleManagement.ReadWrite.Directory',
+    'AuditLog.Read.All',
+    'Application.Read.All',
+    'Domain.ReadWrite.All'
+)
+
+$connectParams = @{
+    Scopes       = $graphScopes
+    ContextScope = 'Process'
+    NoWelcome    = $true
+}
+
+if ($global:useDeviceCodeAuth) {
+    $connectParams['UseDeviceAuthentication'] = $true
+}
+
+Connect-MgGraph @connectParams
 
 if ($realname) { Write-Host "Hey $realname. Good luck today!" }
 else           { Write-Host "Hey $upn. Good luck today!" }
@@ -164,6 +182,49 @@ function Connect-Tenant {
     if (-not $contract) { throw "No CSP contract found for domain '$Domain'." }
     $global:cid = $contract.CustomerId
     Write-Host "$($contract.DisplayName) selected. Use `$cid for Graph operations on this customer."
+}
+
+function Test-GdapConnection {
+    [CmdletBinding()]
+    param (
+        [string]$Domain
+    )
+
+    if (-not $Domain) {
+        if ($global:connectmsoldomain) { $Domain = $global:connectmsoldomain }
+        elseif ($global:defaultCustomerDomain) { $Domain = $global:defaultCustomerDomain }
+    }
+
+    if (-not $Domain) {
+        throw 'No customer domain provided. Use -Domain or run Connect-Tenant first.'
+    }
+
+    Write-Host "Testing GDAP delegated access for $Domain..." -ForegroundColor Cyan
+
+    $contract = Get-MgContract -Filter "defaultDomainName eq '$Domain'" -ErrorAction Stop
+    if (-not $contract) {
+        throw "No GDAP/CSP contract found for domain '$Domain'."
+    }
+
+    $global:connectmsoldomain = $Domain
+    $global:cid = $contract.CustomerId
+
+    Write-Host "  [OK] Contract found: $($contract.DisplayName)" -ForegroundColor Green
+    Write-Host "  [OK] CustomerId: $($contract.CustomerId)" -ForegroundColor Green
+
+    try {
+        Connect-ExchangeOnline -UserPrincipalName $upn -DelegatedOrganization $Domain -ShowBanner:$false -ErrorAction Stop
+        Get-AcceptedDomain -Identity $Domain -ErrorAction Stop | Out-Null
+        Write-Host '  [OK] Exchange delegated connection succeeded.' -ForegroundColor Green
+    } catch {
+        Write-Warning "Exchange delegated test failed: $($_.Exception.Message)"
+    }
+
+    [PSCustomObject]@{
+        Domain     = $Domain
+        CustomerId = $contract.CustomerId
+        DisplayName = $contract.DisplayName
+    }
 }
 
 #endregion

@@ -33,11 +33,25 @@
 On first run, `load.ps1` will:
 
 1. Ask for your admin UPN and display name — saved to a gitignored `load.config.ps1`
-2. Detect missing modules and offer to install them automatically
-3. Import all required modules
-4. Open the interactive menu
+2. Ask whether you want delegated GDAP mode as default and optionally store a default customer domain
+3. Ask whether Graph should use device code sign-in by default
+4. Detect missing modules and offer to install them automatically
+5. Import all required modules
+6. Open the interactive menu
 
 From then on it starts directly without any prompts.
+
+To run the launcher automatically at Windows sign-in:
+
+```powershell
+.\load.ps1 -SetupStartup
+```
+
+To remove the startup shortcut later:
+
+```powershell
+.\load.ps1 -RemoveStartup
+```
 
 > You can also run `.\menu.ps1` directly — it will ask for your UPN as a fallback.
 > To reinstall or update modules manually: `.\scripts\Startup\Install-Modules.ps1`
@@ -70,7 +84,10 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `8` / `F8` | Device | Disable-InternalMic |
 | `9` / `F9` | Startup | Install-Modules |
 | `A` / `F10` | Reporting | Licensing-Report |
+| `F` | Startup | Enable-LauncherStartup — add launcher to Windows Startup |
+| `G` | Startup | Disable-LauncherStartup — remove launcher from Windows Startup |
 | `B` | M365 | Connect-Tenant |
+| `H` | M365 | Test-GdapConnection — validate delegated GDAP access |
 | `C` | M365 | Exchange Online submenu |
 | `D` | M365 | Entra ID / Graph submenu |
 | `E` | M365 | MSP Admin submenu |
