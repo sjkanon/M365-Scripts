@@ -13,6 +13,46 @@
 $ROOT = $PSScriptRoot
 $script:FunctiesLoaded = $false
 
+function Set-StartupLauncher {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$Enable
+    )
+
+    if (-not $IsWindows) {
+        Write-Warning 'Startup shortcut setup is only supported on Windows.'
+        return
+    }
+
+    $startupDir = [Environment]::GetFolderPath('Startup')
+    $shortcutPath = Join-Path $startupDir 'M365-Scripts Launcher.lnk'
+
+    if (-not $Enable) {
+        if (Test-Path $shortcutPath) {
+            Remove-Item -Path $shortcutPath -Force
+            Write-Host "  Removed startup shortcut: $shortcutPath" -ForegroundColor Green
+        } else {
+            Write-Host '  Startup shortcut was not present.' -ForegroundColor DarkGray
+        }
+        return
+    }
+
+    $pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue).Source
+    if (-not $pwshPath) {
+        throw 'pwsh.exe not found on PATH. Install PowerShell 7 to enable startup launcher.'
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $pwshPath
+    $shortcut.Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$ROOT\load.ps1`""
+    $shortcut.WorkingDirectory = $ROOT
+    $shortcut.Description = 'Start M365-Scripts launcher at sign-in'
+    $shortcut.Save()
+
+    Write-Host "  Startup shortcut created: $shortcutPath" -ForegroundColor Green
+}
+
 # ── Fallback: ask for UPN if not set by load.ps1 ─────────────────────────────
 if (-not $global:upn) {
     Write-Host ""
@@ -36,6 +76,16 @@ function Import-Functies {
 
     try {
         . $path
+
+        if ($global:authMode -eq 'GDAP' -and $global:defaultCustomerDomain -and -not $global:cid) {
+            Write-Host "  Selecting GDAP customer tenant: $($global:defaultCustomerDomain)" -ForegroundColor DarkGray
+            try {
+                Connect-Tenant -Domain $global:defaultCustomerDomain
+            } catch {
+                Write-Warning "Could not auto-select default customer domain '$($global:defaultCustomerDomain)': $($_.Exception.Message)"
+            }
+        }
+
         $script:FunctiesLoaded = $true
         return $true
     } catch {
@@ -239,6 +289,84 @@ $EntraSubmenu = @(
         $confirm = Read-Host "  Dry run completed. Add -Apply to create accounts? [y/N]"
         if ($confirm -match '^[Yy]') { & $path @p -Apply }
     }}
+    @{ Key='D'; Label='New-TemporaryCA          — create temporary CA for user/group'; Action={
+        $path   = Join-Path $ROOT 'scripts\Entra\New-TemporaryConditionalAccessPolicy.ps1'
+        $typeIn = Read-Host "  Target type [User/Group]"
+        $target = Read-Host "  Target object ID"
+        $name   = Read-Host "  Policy name (suffix)"
+        $modeTime = Read-Host "  Timing mode [Duration/DateTime]"
+        $mode   = Read-Host "  Action [RequireMfa/Block]"
+        $state  = Read-Host "  State [enabled/reportOnly/disabled]"
+        $auto   = Read-Host "  Auto cleanup immediately at expiry in this session? [Y/n]"
+
+        $p = @{}
+        $p['TargetType'] = if ($typeIn -match '^(group|g)$') { 'Group' } else { 'User' }
+        $p['TargetId']   = $target
+        $p['DisplayName'] = $name
+
+        if ($modeTime -match '^(datetime|date|dt)$') {
+            $startAt = Read-Host "  Start local datetime [yyyy-MM-dd HH:mm]"
+            $endAt   = Read-Host "  End local datetime   [yyyy-MM-dd HH:mm]"
+            $p['StartDateTimeLocal'] = [datetime]$startAt
+            $p['EndDateTimeLocal']   = [datetime]$endAt
+        } else {
+            $hours  = Read-Host "  Duration in hours [4]"
+            $p['DurationHours'] = if ($hours) { [int]$hours } else { 4 }
+        }
+
+        $p['Action'] = if ($mode -match '^(block|b)$') { 'Block' } else { 'RequireMfa' }
+
+        if ($state -match '^(report|reportonly|enabledforreportingbutnotenforced)$') {
+            $p['State'] = 'enabledForReportingButNotEnforced'
+        } elseif ($state -match '^(disabled|off)$') {
+            $p['State'] = 'disabled'
+        } else {
+            $p['State'] = 'enabled'
+        }
+
+        if ($auto -match '^[Nn]') { $p['NoAutoCleanup'] = $true }
+        & $path @p
+
+        if ($p['TargetType'] -eq 'User') {
+            $makeTap = Read-Host "  Also create TAP code for this user? [y/N]"
+            if ($makeTap -match '^[Yy]') {
+                $tapPath = Join-Path $ROOT 'scripts\Entra\New-UserTemporaryAccessPass.ps1'
+                $tapMinutes = Read-Host "  TAP lifetime in minutes [60]"
+                $tapOnce = Read-Host "  TAP one-time only? [Y/n]"
+
+                $tp = @{ UserId = $target }
+                $tp['LifetimeMinutes'] = if ($tapMinutes) { [int]$tapMinutes } else { 60 }
+                if ($tapOnce -notmatch '^[Nn]') { $tp['IsUsableOnce'] = $true }
+                & $tapPath @tp
+            }
+        }
+    }}
+    @{ Key='E'; Label='Remove-TemporaryCA       — cleanup temporary CA policies'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\Remove-TemporaryConditionalAccessPolicies.ps1'
+        $id   = Read-Host "  Specific policy ID (optional)"
+        if ($id) {
+            & $path -PolicyId $id
+            return
+        }
+
+        $all = Read-Host "  Remove ALL TEMP-CA policies? [y/N]"
+        if ($all -match '^[Yy]') {
+            & $path -RemoveAllTempPolicies
+        } else {
+            & $path
+        }
+    }}
+    @{ Key='F'; Label='New-UserTAP              — create Temporary Access Pass'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\New-UserTemporaryAccessPass.ps1'
+        $user = Read-Host "  User object ID or UPN"
+        $mins = Read-Host "  TAP lifetime in minutes [60]"
+        $once = Read-Host "  TAP one-time only? [Y/n]"
+
+        $p = @{ UserId = $user }
+        $p['LifetimeMinutes'] = if ($mins) { [int]$mins } else { 60 }
+        if ($once -notmatch '^[Nn]') { $p['IsUsableOnce'] = $true }
+        & $path @p
+    }}
 )
 
 $MspSubmenu = @(
@@ -345,6 +473,18 @@ $menu = @(
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"
         Params={ return @{} }
     }
+    [PSCustomObject]@{ Key='F'; FKey=$null; Category='Startup'
+        Label='Enable-LauncherStartup — run launcher at Windows sign-in'
+        Action={
+            Set-StartupLauncher -Enable $true
+        }
+    }
+    [PSCustomObject]@{ Key='G'; FKey=$null; Category='Startup'
+        Label='Disable-LauncherStartup — remove launcher from Windows startup'
+        Action={
+            Set-StartupLauncher -Enable $false
+        }
+    }
     # ── M365 management (via functies.ps1, lazy-loaded on first use) ──────────
     [PSCustomObject]@{ Key='B'; FKey=$null; Category='M365'
         Label='Connect-Tenant      — select customer tenant'
@@ -352,6 +492,15 @@ $menu = @(
             if (-not (Import-Functies)) { return }
             $domain = Read-Host "  Customer domain (e.g. contoso.com)"
             Connect-Tenant -Domain $domain
+        }
+    }
+    [PSCustomObject]@{ Key='H'; FKey=$null; Category='M365'
+        Label='Test-GdapConnection — validate delegated GDAP for a customer tenant'
+        Action={
+            if (-not (Import-Functies)) { return }
+            $domain = Read-Host "  Customer domain (optional, blank uses current/default)"
+            if ($domain) { Test-GdapConnection -Domain $domain }
+            else { Test-GdapConnection }
         }
     }
     [PSCustomObject]@{ Key='C'; FKey=$null; Category='M365'; NoWait=$true
