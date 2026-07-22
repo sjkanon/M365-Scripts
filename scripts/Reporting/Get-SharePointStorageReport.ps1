@@ -210,6 +210,29 @@ if ($missingGraphModules.Count -gt 0) {
     exit 1
 }
 
+# ── Determine scan mode early (impacts auth flow and performance) ───────────
+$scanAllSites = $false
+$isSingleSiteScan = $false
+
+if ($SiteUrl) {
+    $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
+
+    # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
+    if ($normalizedSiteUrl -match '^https://[^/]+$') {
+        Write-ProgressHost -Message "[INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
+        $scanAllSites = $true
+        $SiteUrl = $null
+    } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/[^?#]+$') {
+        $SiteUrl = $normalizedSiteUrl
+        $isSingleSiteScan = $true
+    } else {
+        Write-ProgressHost -Message "[ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
+        exit 1
+    }
+}
+
+$needsAppOnlyEnumeration = ((-not $SiteUrl) -or $scanAllSites)
+
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
     if ($ClientId -and $TenantId) {
@@ -240,112 +263,122 @@ try {
 
     } else {
         # ── Auto mode: delegated session stays open throughout ────────────────
-        # The delegated session is used for:  app create/delete, drive ops, file ops
-        # A separate short-lived app-only REST token is used only for getAllSites
-        Write-Host "  Connecting interactively..." -ForegroundColor Cyan
-        Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
-        Connect-MgGraph -Scopes @(
-            'Application.ReadWrite.All'
-            'AppRoleAssignment.ReadWrite.All'
-            'Sites.Read.All'
-            'Files.Read.All'
-        ) -NoWelcome -ErrorAction Stop
-        $script:ConnectedHere = $true
+        # The delegated session is always used for drive/file operations.
+        # For tenant-wide enumeration we temporarily add app-only getAllSites.
+        if ($needsAppOnlyEnumeration) {
+            Write-Host "  Connecting interactively..." -ForegroundColor Cyan
+            Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
+            Connect-MgGraph -Scopes @(
+                'Application.ReadWrite.All'
+                'AppRoleAssignment.ReadWrite.All'
+                'Sites.Read.All'
+                'Files.Read.All'
+            ) -NoWelcome -ErrorAction Stop
+            $script:ConnectedHere = $true
 
-        $ctx          = Get-MgContext
-        $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
-        $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
-        if (-not $usedTenantId) {
-            Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
-            Remove-TempApp; exit 1
-        }
-
-        # Create temporary App Registration
-        $appName = "SP-StorageReport-Temp-$ts"
-        Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
-        $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
-        $script:TempAppObjectId = $app.Id
-
-        # Service Principal
-        $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-
-        # Assign site application permission + grant admin consent
-        $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
-        if (-not $appRole) {
-            Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
-            Remove-TempApp; exit 1
-        }
-        New-MgServicePrincipalAppRoleAssignment `
-            -ServicePrincipalId $sp.Id `
-            -PrincipalId        $sp.Id `
-            -ResourceId         $graphSp.Id `
-            -AppRoleId          $appRole.Id `
-            -ErrorAction Stop | Out-Null
-        Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
-
-        # Also grant Sites.Read.All on the SharePoint service principal so the app
-        # can obtain a SharePoint-scoped token for SPO REST calls (recycle bin, etc.).
-        try {
-            $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
-            $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -in @('Sites.Read.All', 'AllSites.Read') } | Select-Object -First 1
-            if ($spoRole) {
-                New-MgServicePrincipalAppRoleAssignment `
-                    -ServicePrincipalId $sp.Id `
-                    -PrincipalId        $sp.Id `
-                    -ResourceId         $spoSp.Id `
-                    -AppRoleId          $spoRole.Id `
-                    -ErrorAction Stop | Out-Null
-                Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
+            $ctx          = Get-MgContext
+            $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
+            $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
+            if (-not $usedTenantId) {
+                Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
+                Remove-TempApp; exit 1
             }
-        } catch {
-            Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
-        }
 
-        # Create short-lived client secret (expires in 1 day)
-        $secret = Add-MgApplicationPassword `
-            -ApplicationId      $app.Id `
-            -PasswordCredential @{
-                displayName = 'temp'
-                endDateTime = (Get-Date).AddDays(1)
-            } -ErrorAction Stop
+            # Create temporary App Registration
+            $appName = "SP-StorageReport-Temp-$ts"
+            Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
+            $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
+            $script:TempAppObjectId = $app.Id
 
-        # Get app-only OAuth token via REST — no SDK reconnect needed
-        # The delegated session stays open so Remove-MgApplication works at the end
-        Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
-        $tokenBody = @{
-            grant_type    = 'client_credentials'
-            scope         = 'https://graph.microsoft.com/.default'
-            client_id     = $app.AppId
-            client_secret = $secret.SecretText
-        }
+            # Service Principal
+            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
 
-        $appOnlyToken = $null
-        for ($i = 1; $i -le 6; $i++) {
+            # Assign site application permission + grant admin consent
+            $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+            $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
+            if (-not $appRole) {
+                Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
+            New-MgServicePrincipalAppRoleAssignment `
+                -ServicePrincipalId $sp.Id `
+                -PrincipalId        $sp.Id `
+                -ResourceId         $graphSp.Id `
+                -AppRoleId          $appRole.Id `
+                -ErrorAction Stop | Out-Null
+            Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
+
+            # Also grant Sites.Read.All on the SharePoint service principal so the app
+            # can obtain a SharePoint-scoped token for SPO REST calls (recycle bin, etc.).
             try {
-                $tokenResp    = Invoke-RestMethod -Method POST -ErrorAction Stop `
-                    -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
-                    -Body $tokenBody
-                $appOnlyToken = $tokenResp.access_token
-                break
+                $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
+                $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -in @('Sites.Read.All', 'AllSites.Read') } | Select-Object -First 1
+                if ($spoRole) {
+                    New-MgServicePrincipalAppRoleAssignment `
+                        -ServicePrincipalId $sp.Id `
+                        -PrincipalId        $sp.Id `
+                        -ResourceId         $spoSp.Id `
+                        -AppRoleId          $spoRole.Id `
+                        -ErrorAction Stop | Out-Null
+                    Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
+                }
             } catch {
-                if ($i -lt 6) {
-                    Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
-                    Start-Sleep -Seconds 5
+                Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
+            }
+
+            # Create short-lived client secret (expires in 1 day)
+            $secret = Add-MgApplicationPassword `
+                -ApplicationId      $app.Id `
+                -PasswordCredential @{
+                    displayName = 'temp'
+                    endDateTime = (Get-Date).AddDays(1)
+                } -ErrorAction Stop
+
+            # Get app-only OAuth token via REST — no SDK reconnect needed
+            # The delegated session stays open so Remove-MgApplication works at the end
+            Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
+            $tokenBody = @{
+                grant_type    = 'client_credentials'
+                scope         = 'https://graph.microsoft.com/.default'
+                client_id     = $app.AppId
+                client_secret = $secret.SecretText
+            }
+
+            $appOnlyToken = $null
+            for ($i = 1; $i -le 6; $i++) {
+                try {
+                    $tokenResp    = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                        -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
+                        -Body $tokenBody
+                    $appOnlyToken = $tokenResp.access_token
+                    break
+                } catch {
+                    if ($i -lt 6) {
+                        Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                        Start-Sleep -Seconds 5
+                    }
                 }
             }
-        }
 
-        if (-not $appOnlyToken) {
-            Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
-            Remove-TempApp; exit 1
-        }
+            if (-not $appOnlyToken) {
+                Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
 
-        $script:AppOnlyHeaders  = @{ Authorization = "Bearer $appOnlyToken" }
-        $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)  # refresh 5 min early
-        $script:TokenBody       = $tokenBody
-        $script:TokenTenantId   = $usedTenantId
-        Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+            $script:AppOnlyHeaders  = @{ Authorization = "Bearer $appOnlyToken" }
+            $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)  # refresh 5 min early
+            $script:TokenBody       = $tokenBody
+            $script:TokenTenantId   = $usedTenantId
+            Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+        } else {
+            Write-Host "  Connecting interactively (single-site optimized mode)..." -ForegroundColor Cyan
+            Connect-MgGraph -Scopes @(
+                'Sites.Read.All'
+                'Files.Read.All'
+            ) -NoWelcome -ErrorAction Stop
+            $script:ConnectedHere = $true
+            Write-Host "  [OK]   Connected (delegated single-site mode, no temporary app)." -ForegroundColor DarkGray
+        }
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
@@ -473,32 +506,27 @@ function Append-CheckpointRows {
 # ── Get sites ─────────────────────────────────────────────────────────────────
 Write-ProgressHost -Message "Retrieving sites..." -ForegroundColor Cyan
 
-$scanAllSites = $false
+if ($isSingleSiteScan) {
+    try {
+        $siteUri = [System.Uri]$SiteUrl
+        $siteHost = $siteUri.Host
+        $sitePath = $siteUri.AbsolutePath.TrimEnd('/')
+        $siteGraphUri = "https://graph.microsoft.com/v1.0/sites/${siteHost}:${sitePath}?`$select=id,displayName,webUrl,name"
 
-if ($SiteUrl) {
-    $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
+        if ($script:AppOnlyHeaders) {
+            $siteObj = Invoke-GraphGet -Uri $siteGraphUri -Headers $script:AppOnlyHeaders
+        } else {
+            $siteObj = Invoke-MgGraphRequest -Method GET -Uri $siteGraphUri -OutputType PSObject -ErrorAction Stop
+        }
 
-    # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
-    if ($normalizedSiteUrl -match '^https://[^/]+$') {
-        Write-ProgressHost -Message "[INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
-        $scanAllSites = $true
-    } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/([^?#]+)$') {
-        $SiteUrl = $normalizedSiteUrl
-        $siteSearchTerm = ($Matches[2] -split '/')[-1]
-
-        try {
-            $sites = @(Get-MgSite -Search $siteSearchTerm -ErrorAction Stop |
-                       Where-Object { $_.WebUrl.TrimEnd('/') -eq $SiteUrl })
-            if ($sites.Count -eq 0) {
-                Write-ProgressHost -Message "[ERROR] Site not found: $SiteUrl" -ForegroundColor Red
-                Remove-TempApp; exit 1
-            }
-        } catch {
-            Write-ProgressHost -Message "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $siteObj -or -not $siteObj.id) {
+            Write-ProgressHost -Message "[ERROR] Site not found: $SiteUrl" -ForegroundColor Red
             Remove-TempApp; exit 1
         }
-    } else {
-        Write-ProgressHost -Message "[ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
+
+        $sites = @($siteObj)
+    } catch {
+        Write-ProgressHost -Message "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
 }
