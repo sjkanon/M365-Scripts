@@ -104,6 +104,7 @@ if (-not (Test-Path $configFile)) {
 $requiredModules = @(
     'ExchangeOnlineManagement'
     'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Sites'
     'Microsoft.Graph.Identity.DirectoryManagement'
     'Microsoft.Graph.Users'
     'Microsoft.Graph.Groups'
