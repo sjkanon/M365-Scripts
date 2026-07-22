@@ -37,6 +37,11 @@ To remove it:
 .\load.ps1 -RemoveStartup
 ```
 
+You can also toggle startup from the launcher menu:
+
+- `F` = Enable-LauncherStartup
+- `G` = Disable-LauncherStartup
+
 ---
 
 ## functies.ps1
@@ -113,8 +118,8 @@ Installs and imports all PowerShell modules required by this repository. Run onc
 .\scripts\Startup\Install-Modules.ps1
 ```
 
-Modules installed: `ExchangeOnlineManagement`, `Microsoft.Graph`, `ImportExcel`, `PSWindowsUpdate`
-Key Graph submodules include `Microsoft.Graph.Authentication` and `Microsoft.Graph.Identity.DirectoryManagement` for delegated/GDAP tenant contract lookups.
+Core modules installed include `ExchangeOnlineManagement` and required Microsoft Graph submodules (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Identity.Governance`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Users`, `Microsoft.Graph.Calendar`).
+Windows-only compatibility modules are also included when applicable (`WindowsAutopilotIntune`, `AzureAD`).
 
 ---
 

@@ -92,7 +92,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `D` | M365 | Entra ID / Graph submenu |
 | `E` | M365 | MSP Admin submenu |
 
-M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
+M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
 
 **Exchange submenu (`C`)**
 
@@ -112,6 +112,9 @@ M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authent
 | `A` | Test-M365GroupMembership — audit M365 Group / Teams owners and members |
 | `B` | New-M365User — create a single new user (auto-generated password, optional license) |
 | `C` | Import-M365Users — bulk create users from CSV, dry-run by default |
+| `D` | New-TemporaryCA — create temporary Conditional Access policy for user/group (duration or start/end datetime) |
+| `E` | Remove-TemporaryCA — remove expired or all temporary CA policies |
+| `F` | New-UserTAP — create Temporary Access Pass for a user |
 
 ---
 
@@ -124,7 +127,7 @@ Interactive M365 management functions via Microsoft Graph and Exchange Online. L
 | Area | Features |
 |------|----------|
 | Exchange Online | Shared mailbox access, locale, aliases, distribution groups, auto-reply, sent-items copy |
-| Entra ID / Graph | Tenant admins, domains, licenses, users, password reset, sign-in logs, bulk create/remove |
+| Entra ID / Graph | Tenant admins, domains, licenses, users, password reset, sign-in logs, bulk create/remove, temporary CA windows, TAP codes |
 | MSP Admin | Create/manage MSP admin account across customer tenants |
 
 ---
@@ -194,6 +197,9 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 #### Entra ID / Graph
 
 - Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
+- Create temporary Conditional Access policies for installation windows (duration or exact local start/end)
+- Auto-clean temporary CA policy at end time (same session) and cleanup script for missed sessions
+- Create Temporary Access Pass (TAP) codes for user onboarding/support
 
 #### SharePoint Online
 
@@ -525,6 +531,7 @@ When adding new scripts:
 3. Test against a non-production tenant before committing
 4. Place the script in the appropriate workload folder
 5. Add it to `menu.ps1` and update this readme
+6. Update `Version History` in this file for every functional or structural change (required), including changes requested or applied via Copilot/AI assistant
 
 ---
 
@@ -535,6 +542,20 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+> Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-07-22 (1)
+| Change |
+|--------|
+| Updated `load.ps1` — added startup launcher switches `-SetupStartup` / `-RemoveStartup`; first-run config now stores delegated auth defaults (`authMode`, optional `defaultCustomerDomain`, `useDeviceCodeAuth`) in `load.config.ps1` |
+| Updated `menu.ps1` — added Startup actions `F` (Enable-LauncherStartup) and `G` (Disable-LauncherStartup); added M365 action `H` (Test-GdapConnection); Entra submenu now includes temporary CA and TAP actions (`D`/`E`/`F`) |
+| Updated `scripts/Startup/functies.ps1` — Graph startup connection now supports delegated device-auth preference + required scopes for GDAP flow; added `Test-GdapConnection` helper for delegated contract/connectivity checks |
+| Updated startup module maintenance: `scripts/Startup/Install-Modules.ps1` and `scripts/Startup/Update-Modules.ps1` now include `Microsoft.Graph.Identity.DirectoryManagement` |
+| Added `scripts/Entra/New-TemporaryConditionalAccessPolicy.ps1` — create temporary CA policy for user/group with either duration-based window or exact local start/end datetime; optional same-session auto-cleanup at end time |
+| Added `scripts/Entra/Remove-TemporaryConditionalAccessPolicies.ps1` — remove one or multiple temporary CA policies (`TEMP-CA -`), including expired-only or remove-all modes |
+| Added `scripts/Entra/New-UserTemporaryAccessPass.ps1` — create Temporary Access Pass (TAP) for a user with configurable lifetime and one-time option |
+| Updated docs for the above across `readme.md`, `scripts/readme.md`, `scripts/Startup/readme.md`, and `scripts/Entra/readme.md`; clarified that temporary CA auto-cleanup runs in the current session (no Scheduled Task created) |
 
 ### 2026-07-09 (8)
 | Change |
