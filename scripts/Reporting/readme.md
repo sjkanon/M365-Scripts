@@ -149,6 +149,8 @@ Daarnaast is `-SiteUrl` (1 specifieke site) geoptimaliseerd: in normale mode geb
 
 Voor GDAP-betrouwbaarheid schakelt het script bij single-site scans automatisch naar app-only bootstrap wanneer `authMode=GDAP` is gedetecteerd (uit `load.config.ps1`/launcher context). Wil je dat altijd forceren, gebruik dan `-ForceAppOnlySingleSite`.
 
+Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant context (`$global:cid`/`-TenantId`) voor zowel `Connect-MgGraph` als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden.
+
 ### Parameters
 
 | Parameter | Omschrijving |
