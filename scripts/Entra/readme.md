@@ -261,6 +261,8 @@ It also supports a follow-up action to switch imported policies to report-only o
 ```
 
 **Notes**
+- Keep at least one break-glass account excluded before enabling policies
+- Review exclusion groups and named locations after import
 
 ---
 
@@ -276,6 +278,7 @@ Creates a temporary Conditional Access policy for one user or group.
 Important:
 - Immediate cleanup at expiry requires the script session to stay open
 - If you close the session early, run the cleanup script later
+- This script does not create a Windows Scheduled Task; the wait/cleanup loop runs in the current session
 
 **Examples**
 
@@ -322,8 +325,10 @@ Creates a Temporary Access Pass (TAP) for one user.
 ```powershell
 .\New-UserTemporaryAccessPass.ps1 -UserId "user@contoso.com" -LifetimeMinutes 60 -IsUsableOnce
 ```
-- Keep at least one break-glass account excluded before enabling policies
-- Review exclusion groups and named locations after import
+
+**Notes**
+- Prefer `-IsUsableOnce` for support/install scenarios
+- Share the TAP code through a secure channel and expire it quickly
 
 ---
 
