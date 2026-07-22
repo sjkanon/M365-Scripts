@@ -8,7 +8,7 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 
 | Folder | Description |
 |--------|-------------|
-| [`Entra/`](Entra/readme.md) | User lifecycle, manager assignment, license reporting, Conditional Access baseline, M365 Group audit (Microsoft Graph) |
+| [`Entra/`](Entra/readme.md) | User lifecycle, manager assignment, license reporting, Conditional Access baseline, temporary CA windows, TAP codes, M365 Group audit (Microsoft Graph) |
 | [`Exchange/`](Exchange/readme.md) | Calendar migration/permissions, distribution groups, mailbox/calendar/DKIM/forwarding audits |
 | [`Graph/`](Graph/readme.md) | Microsoft Graph application permission management |
 | [`Intune/`](Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
