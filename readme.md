@@ -112,6 +112,9 @@ M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authent
 | `A` | Test-M365GroupMembership — audit M365 Group / Teams owners and members |
 | `B` | New-M365User — create a single new user (auto-generated password, optional license) |
 | `C` | Import-M365Users — bulk create users from CSV, dry-run by default |
+| `D` | New-TemporaryCA — create temporary Conditional Access policy for user/group (duration or start/end datetime) |
+| `E` | Remove-TemporaryCA — remove expired or all temporary CA policies |
+| `F` | New-UserTAP — create Temporary Access Pass for a user |
 
 ---
 
@@ -194,6 +197,9 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 #### Entra ID / Graph
 
 - Audit M365 Group (incl. Teams) owners and members — one row per entry, exports CSV
+- Create temporary Conditional Access policies for installation windows (duration or exact local start/end)
+- Auto-clean temporary CA policy at end time (same session) and cleanup script for missed sessions
+- Create Temporary Access Pass (TAP) codes for user onboarding/support
 
 #### SharePoint Online
 
