@@ -247,6 +247,17 @@ try {
     }
 } catch {}
 
+$effectiveTenantId = $TenantId
+if (-not $effectiveTenantId) {
+    try {
+        if ($isGdapMode -and $global:cid) {
+            $effectiveTenantId = [string]$global:cid
+        } elseif ($env:M365_CUSTOMER_TENANTID) {
+            $effectiveTenantId = [string]$env:M365_CUSTOMER_TENANTID
+        }
+    } catch {}
+}
+
 $useAppOnlyForSingleSite = ($isSingleSiteScan -and ($ForceAppOnlySingleSite -or $isGdapMode))
 if ($useAppOnlyForSingleSite) {
     if ($ForceAppOnlySingleSite) {
@@ -258,17 +269,29 @@ if ($useAppOnlyForSingleSite) {
 
 $needsAppOnlyEnumeration = ((-not $SiteUrl) -or $scanAllSites -or $useAppOnlyForSingleSite)
 
+if ($isGdapMode -and $needsAppOnlyEnumeration -and -not $effectiveTenantId) {
+    Write-ProgressHost -Message '[ERROR] GDAP mode detected but no customer TenantId found. Run Connect-Tenant first or pass -TenantId.' -ForegroundColor Red
+    exit 1
+}
+
+if ($ClientId -and -not $effectiveTenantId) {
+    Write-ProgressHost -Message '[ERROR] -ClientId requires -TenantId (or a resolvable GDAP customer tenant context).' -ForegroundColor Red
+    exit 1
+}
+
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
-    if ($ClientId -and $TenantId) {
+    if ($ClientId -and ($TenantId -or $effectiveTenantId)) {
+        $resolvedTenantId = if ($TenantId) { $TenantId } else { $effectiveTenantId }
+
         # ── Provided app credentials → full app-only SDK connection ──────────
         if ($CertificateThumbprint) {
-            Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
+            Connect-MgGraph -ClientId $ClientId -TenantId $resolvedTenantId `
                 -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
         } elseif ($ClientSecret) {
             $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
             $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
-            Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
+            Connect-MgGraph -ClientId $ClientId -TenantId $resolvedTenantId `
                 -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
 
             # Keep raw app credentials for non-Graph fallback token requests (for example SPO REST).
@@ -278,7 +301,7 @@ try {
                 client_id     = $ClientId
                 client_secret = $ClientSecret
             }
-            $script:TokenTenantId = $TenantId
+            $script:TokenTenantId = $resolvedTenantId
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
@@ -293,16 +316,23 @@ try {
         if ($needsAppOnlyEnumeration) {
             Write-Host "  Connecting interactively..." -ForegroundColor Cyan
             Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
-            Connect-MgGraph -Scopes @(
+            $connectParams = @{
+                Scopes    = @(
                 'Application.ReadWrite.All'
                 'AppRoleAssignment.ReadWrite.All'
                 'Sites.Read.All'
                 'Files.Read.All'
-            ) -NoWelcome -ErrorAction Stop
+                )
+                NoWelcome = $true
+            }
+            if ($effectiveTenantId) {
+                $connectParams['TenantId'] = $effectiveTenantId
+            }
+            Connect-MgGraph @connectParams -ErrorAction Stop
             $script:ConnectedHere = $true
 
             $ctx          = Get-MgContext
-            $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
+            $usedTenantId = if ($effectiveTenantId) { $effectiveTenantId } else { $ctx.TenantId }
             $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
             if (-not $usedTenantId) {
                 Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
@@ -397,10 +427,17 @@ try {
             Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
         } else {
             Write-Host "  Connecting interactively (single-site optimized mode)..." -ForegroundColor Cyan
-            Connect-MgGraph -Scopes @(
+            $connectParams = @{
+                Scopes    = @(
                 'Sites.Read.All'
                 'Files.Read.All'
-            ) -NoWelcome -ErrorAction Stop
+                )
+                NoWelcome = $true
+            }
+            if ($effectiveTenantId) {
+                $connectParams['TenantId'] = $effectiveTenantId
+            }
+            Connect-MgGraph @connectParams -ErrorAction Stop
             $script:ConnectedHere = $true
             Write-Host "  [OK]   Connected (delegated single-site mode, no temporary app)." -ForegroundColor DarkGray
         }
@@ -1230,8 +1267,10 @@ $SkipVersions
 $Apply
 $UseHighPrivilege
 $RecycleBinOnly
+$ForceAppOnlySingleSite
 $($IncludeOneDriveUsers -join ',')
 $TenantId
+$effectiveTenantId
 $ClientId
 $CertificateThumbprint
 $GraphTimeoutSec

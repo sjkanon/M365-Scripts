@@ -545,6 +545,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-07-22 (6)
+| Change |
+|--------|
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` to make full-site scans GDAP-proof by resolving and pinning one effective tenant context (`-TenantId`, or GDAP customer context from `$global:cid`) for Graph sign-in, temporary app creation, and app-only token issuance |
+| Added guard rails for GDAP/app-only flows: clearer errors when customer tenant context is missing (run `Connect-Tenant` first or pass `-TenantId`) and when `-ClientId` is provided without a resolvable tenant ID |
+| Updated checkpoint signature inputs in `Get-SharePointStorageReport.ps1` to include `-ForceAppOnlySingleSite` and resolved tenant context, preventing cross-context resume collisions |
+| Updated `scripts/Reporting/readme.md` to document full-site GDAP tenant binding behavior |
+
 ### 2026-07-22 (5)
 | Change |
 |--------|
