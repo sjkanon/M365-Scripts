@@ -531,6 +531,7 @@ When adding new scripts:
 3. Test against a non-production tenant before committing
 4. Place the script in the appropriate workload folder
 5. Add it to `menu.ps1` and update this readme
+6. Update `Version History` in this file for every functional or structural change (required), including changes requested or applied via Copilot/AI assistant
 
 ---
 
@@ -541,6 +542,20 @@ These scripts are provided as-is. Always test in a non-production environment be
 ---
 
 ## Version History
+
+> Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-07-22 (1)
+| Change |
+|--------|
+| Updated `load.ps1` — added startup launcher switches `-SetupStartup` / `-RemoveStartup`; first-run config now stores delegated auth defaults (`authMode`, optional `defaultCustomerDomain`, `useDeviceCodeAuth`) in `load.config.ps1` |
+| Updated `menu.ps1` — added Startup actions `F` (Enable-LauncherStartup) and `G` (Disable-LauncherStartup); added M365 action `H` (Test-GdapConnection); Entra submenu now includes temporary CA and TAP actions (`D`/`E`/`F`) |
+| Updated `scripts/Startup/functies.ps1` — Graph startup connection now supports delegated device-auth preference + required scopes for GDAP flow; added `Test-GdapConnection` helper for delegated contract/connectivity checks |
+| Updated startup module maintenance: `scripts/Startup/Install-Modules.ps1` and `scripts/Startup/Update-Modules.ps1` now include `Microsoft.Graph.Identity.DirectoryManagement` |
+| Added `scripts/Entra/New-TemporaryConditionalAccessPolicy.ps1` — create temporary CA policy for user/group with either duration-based window or exact local start/end datetime; optional same-session auto-cleanup at end time |
+| Added `scripts/Entra/Remove-TemporaryConditionalAccessPolicies.ps1` — remove one or multiple temporary CA policies (`TEMP-CA -`), including expired-only or remove-all modes |
+| Added `scripts/Entra/New-UserTemporaryAccessPass.ps1` — create Temporary Access Pass (TAP) for a user with configurable lifetime and one-time option |
+| Updated docs for the above across `readme.md`, `scripts/readme.md`, `scripts/Startup/readme.md`, and `scripts/Entra/readme.md`; clarified that temporary CA auto-cleanup runs in the current session (no Scheduled Task created) |
 
 ### 2026-07-09 (8)
 | Change |
