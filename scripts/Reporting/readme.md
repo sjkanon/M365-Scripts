@@ -145,7 +145,9 @@ Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie op
 
 `-SkipVersions` blijft de snelste optie als versiehistorie niet nodig is — dan wordt er helemaal geen version-call gedaan.
 
-Daarnaast is `-SiteUrl` (1 specifieke site) nu geoptimaliseerd: in auto mode wordt geen tijdelijke App Registration meer aangemaakt. Het script gebruikt dan direct delegated Graph-calls voor alleen die site, wat de opstarttijd gelijk trekt met andere commando's.
+Daarnaast is `-SiteUrl` (1 specifieke site) geoptimaliseerd: in normale mode gebruikt het script direct delegated Graph-calls voor alleen die site, wat de opstarttijd gelijk trekt met andere commando's.
+
+Voor GDAP-betrouwbaarheid schakelt het script bij single-site scans automatisch naar app-only bootstrap wanneer `authMode=GDAP` is gedetecteerd (uit `load.config.ps1`/launcher context). Wil je dat altijd forceren, gebruik dan `-ForceAppOnlySingleSite`.
 
 ### Parameters
 
@@ -161,6 +163,7 @@ Daarnaast is `-SiteUrl` (1 specifieke site) nu geoptimaliseerd: in auto mode wor
 | `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting |
 | `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken |
 | `-RecycleBinOnly` | Slaat storage/library scanning over — leest alleen recycle bin items (stage 1 + stage 2) per site collection |
+| `-ForceAppOnlySingleSite` | Forceert tijdelijke app-bootstrap voor `-SiteUrl` scans (handig voor GDAP/delegated beperkingen) |
 | `-GraphTimeoutSec` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
 

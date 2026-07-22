@@ -108,6 +108,7 @@ param (
     [switch] $FastMode,
     [switch] $UseHighPrivilege,
     [switch] $RecycleBinOnly,
+    [switch] $ForceAppOnlySingleSite,
     [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
@@ -156,7 +157,13 @@ function Remove-TempApp {
         $script:TempAppObjectId = $null
     }
     if ($script:ConnectedHere) {
-        try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
+        $prevWarningPreference = $WarningPreference
+        try {
+            $WarningPreference = 'SilentlyContinue'
+            Disconnect-MgGraph -ErrorAction SilentlyContinue
+        } catch {} finally {
+            $WarningPreference = $prevWarningPreference
+        }
         $script:ConnectedHere = $false
     }
 }
@@ -231,7 +238,25 @@ if ($SiteUrl) {
     }
 }
 
-$needsAppOnlyEnumeration = ((-not $SiteUrl) -or $scanAllSites)
+$isGdapMode = $false
+try {
+    if ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') {
+        $isGdapMode = $true
+    } elseif ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP') {
+        $isGdapMode = $true
+    }
+} catch {}
+
+$useAppOnlyForSingleSite = ($isSingleSiteScan -and ($ForceAppOnlySingleSite -or $isGdapMode))
+if ($useAppOnlyForSingleSite) {
+    if ($ForceAppOnlySingleSite) {
+        Write-ProgressHost -Message '[INFO] Single-site app-only mode enabled by -ForceAppOnlySingleSite.' -ForegroundColor DarkGray
+    } elseif ($isGdapMode) {
+        Write-ProgressHost -Message '[INFO] GDAP mode detected; using app-only path for single-site reliability.' -ForegroundColor DarkGray
+    }
+}
+
+$needsAppOnlyEnumeration = ((-not $SiteUrl) -or $scanAllSites -or $useAppOnlyForSingleSite)
 
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
@@ -766,14 +791,28 @@ function Get-SiteDrives {
                 # Continue to final fallback below.
             }
 
-            # Fallback 2: delegated SDK drives call when available (auto mode).
+            # Fallback 2: delegated Graph REST call (module-agnostic).
             if ($script:ConnectedHere) {
-                return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+                $drives = [System.Collections.Generic.List[object]]::new()
+                $drivesUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/drives?`$select=id,name,webUrl,quota&`$top=200"
+                do {
+                    $resp = Invoke-MgGraphRequest -Method GET -Uri $drivesUri -OutputType PSObject -ErrorAction Stop
+                    @($resp.value) | ForEach-Object { $drives.Add($_) }
+                    $drivesUri = $resp.'@odata.nextLink'
+                } while ($drivesUri)
+                return $drives
             }
             throw
         }
     } else {
-        return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+        $drives = [System.Collections.Generic.List[object]]::new()
+        $drivesUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/drives?`$select=id,name,webUrl,quota&`$top=200"
+        do {
+            $resp = Invoke-MgGraphRequest -Method GET -Uri $drivesUri -OutputType PSObject -ErrorAction Stop
+            @($resp.value) | ForEach-Object { $drives.Add($_) }
+            $drivesUri = $resp.'@odata.nextLink'
+        } while ($drivesUri)
+        return $drives
     }
 }
 
@@ -959,8 +998,13 @@ function Get-AllDriveItems {
                     $childUri = $resp.'@odata.nextLink'
                 } while ($childUri)
             } else {
-                Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $current.Id -All -ErrorAction Stop |
-                    ForEach-Object { $children.Add($_) }
+                $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$($current.Id)/children" +
+                            '?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200'
+                do {
+                    $resp = Invoke-MgGraphRequest -Method GET -Uri $childUri -OutputType PSObject -ErrorAction Stop
+                    @($resp.value) | ForEach-Object { $children.Add($_) }
+                    $childUri = $resp.'@odata.nextLink'
+                } while ($childUri)
             }
         } catch {
             Write-Host ("          [ERROR] Cannot read folder '{0}': {1}" -f $current.Path, $_.Exception.Message) -ForegroundColor Red
@@ -1149,23 +1193,30 @@ function Get-SiteRecycleBinItems {
             } catch {}
         }
 
-        # Final fallback: Graph SDK cmdlet (works in delegated mode only; returns 400
-        # app-only for regular sites, but try anyway for delegated sessions).
-        if ($script:ConnectedHere) {
-            try {
-                Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
-                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-                    ForEach-Object { $items.Add($_) }
+        # Final fallback: Graph REST recycle bin endpoint (delegated/app-only behavior
+        # depends on tenant/site type; if unsupported this call can return 400).
+        try {
+            $rbUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/recycleBin/items?`$select=id,name,size,deletedDateTime&`$top=200"
+            do {
+                $resp = Invoke-MgGraphRequest -Method GET -Uri $rbUri -OutputType PSObject -ErrorAction Stop
+                @($resp.value) | ForEach-Object { $items.Add($_) }
+                $rbUri = $resp.'@odata.nextLink'
+            } while ($rbUri)
+
+            if ($items.Count -gt 0) {
                 return $items
-            } catch {}
-        }
+            }
+        } catch {}
 
         throw "Recycle bin: all retrieval methods failed for this site."
     }
 
-    Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
-        -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-        ForEach-Object { $items.Add($_) }
+    $rbUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/recycleBin/items?`$select=id,name,size,deletedDateTime&`$top=200"
+    do {
+        $resp = Invoke-MgGraphRequest -Method GET -Uri $rbUri -OutputType PSObject -ErrorAction Stop
+        @($resp.value) | ForEach-Object { $items.Add($_) }
+        $rbUri = $resp.'@odata.nextLink'
+    } while ($rbUri)
 
     return $items
 }
