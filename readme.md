@@ -92,7 +92,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `D` | M365 | Entra ID / Graph submenu |
 | `E` | M365 | MSP Admin submenu |
 
-M365 options (`B`–`E`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
+M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use — Graph authentication is only triggered when needed.
 
 **Exchange submenu (`C`)**
 
@@ -127,7 +127,7 @@ Interactive M365 management functions via Microsoft Graph and Exchange Online. L
 | Area | Features |
 |------|----------|
 | Exchange Online | Shared mailbox access, locale, aliases, distribution groups, auto-reply, sent-items copy |
-| Entra ID / Graph | Tenant admins, domains, licenses, users, password reset, sign-in logs, bulk create/remove |
+| Entra ID / Graph | Tenant admins, domains, licenses, users, password reset, sign-in logs, bulk create/remove, temporary CA windows, TAP codes |
 | MSP Admin | Create/manage MSP admin account across customer tenants |
 
 ---
