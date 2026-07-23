@@ -2351,8 +2351,8 @@ if ($Apply) {
         Sort-Object { [double]$_.VersionSizeMB } -Descending |
         Select-Object -First 5 |
         ForEach-Object {
-            Write-ProgressHost -Message ("{0} MB  [{1}] > {2}" -f
-                [math]::Round($_.VersionSizeMB, 1),
+            Write-ProgressHost -Message ("{0}  [{1}] > {2}" -f
+                (Format-SizeAuto -MB $_.VersionSizeMB),
                 $_.SiteName,
                 $_.Library) -ForegroundColor Yellow
         }
@@ -2368,8 +2368,8 @@ if ($Apply) {
             Sort-Object { [double]$_.VersionSizeMB } -Descending |
             Select-Object -First 10 |
             ForEach-Object {
-                Write-ProgressHost -Message ("{0} MB  ({1} versies)  {2} > {3}" -f
-                    [math]::Round($_.VersionSizeMB, 1),
+                Write-ProgressHost -Message ("{0}  ({1} versies)  {2} > {3}" -f
+                    (Format-SizeAuto -MB $_.VersionSizeMB),
                     $_.VersionCount,
                     $_.Library,
                     $_.Path) -ForegroundColor Yellow
