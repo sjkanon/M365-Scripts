@@ -454,11 +454,17 @@ function Get-FileVersionsBatch {
                             continue
                         }
                         if ($r.status -eq 200) {
-                            $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
-                            if ($r.body.'@odata.nextLink') {
-                                Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                            try {
+                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                if ($r.body.'@odata.nextLink') {
+                                    Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                }
+                                $results[[string]$r.id] = @{ value = $values }
+                            } catch {
+                                # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                # fail just this one file's lookup instead of the whole 20-item chunk.
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
                             }
-                            $results[[string]$r.id] = @{ value = $values }
                         } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                             $retryList.Add($req)
                         } else {
