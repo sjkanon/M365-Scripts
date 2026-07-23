@@ -119,6 +119,48 @@ De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt d
 # Alleen prullenbak
 .\Get-SharePointStorageReport.ps1 -RecycleBinOnly
 
+---
+
+## Remove-SharePointFileVersionsByDate.ps1
+
+Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document libraries op basis van een cutoff-datum, terwijl de **huidige versie behouden blijft**.
+
+### Gedrag
+
+- Standaard: alleen preview/reporting
+- Met `-Apply`: verwijdert matching vorige versies echt
+- Werkt op één site of tenantbreed over alle sites
+- Standaard geen OneDrive-sites en geen hidden libraries
+- Gebaseerd op `PnP.PowerShell` (`Get-PnPFileVersion` + `Remove-PnPFileVersion`)
+
+### Parameters
+
+| Parameter | Type | Omschrijving |
+|---|---|---|
+| `-BeforeDate` | `datetime` | Verwijder versies ouder dan deze datum |
+| `-SiteUrl` | `string` | Optioneel: scan één site |
+| `-TenantUrl` | `string` | Vereist voor all-sites scan, bv. `https://contoso.sharepoint.com` |
+| `-ClientId` | `string` | Entra app/client ID voor interactieve PnP-login |
+| `-Apply` | `switch` | Voert de verwijdering echt uit |
+| `-IncludeOneDriveSites` | `switch` | Neemt OneDrive-sites mee in tenantscan |
+| `-IncludeHiddenLibraries` | `switch` | Neemt hidden document libraries mee |
+| `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
+
+### Voorbeelden
+
+```powershell
+# Preview tenantbreed: alles ouder dan 1 januari 2025
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -TenantUrl "https://contoso.sharepoint.com" `
+    -BeforeDate "2025-01-01"
+
+# Echt verwijderen op één site
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -SiteUrl "https://contoso.sharepoint.com/sites/Finance" `
+    -BeforeDate "2025-01-01" `
+    -Apply
+```
+
 # Volledige scan + prullenbak als extra fase
 .\Get-SharePointStorageReport.ps1 -Apply
 ```
