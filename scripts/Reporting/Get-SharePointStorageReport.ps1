@@ -996,6 +996,11 @@ function Invoke-GraphBatchGet {
 
             try {
                 foreach ($spec in $chunkSpecs) {
+                    # Stagger dispatch slightly — the pool size already caps true concurrency, but
+                    # spacing out when each request starts further reduces burst rate against the
+                    # same site/list, which is what activityLimitReached actually tracks.
+                    Start-Sleep -Milliseconds 75
+
                     $ps = [PowerShell]::Create()
                     $ps.RunspacePool = $runspacePool
                     [void]$ps.AddScript($workerScript)
@@ -1045,6 +1050,7 @@ function Invoke-GraphBatchGet {
                                 }
                             } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                                 $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
                             } else {
                                 $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
                                 $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
