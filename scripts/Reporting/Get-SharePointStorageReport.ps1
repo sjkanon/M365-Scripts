@@ -143,6 +143,20 @@ function Write-ProgressHost {
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) -ForegroundColor $ForegroundColor
 }
 
+function Format-SizeAuto {
+    # Picks MB/GB/TB automatically based on magnitude instead of a fixed unit,
+    # so small libraries don't print "0.00 GB" and tenant totals don't print in millions of MB.
+    param([Parameter(Mandatory = $true)][double]$MB)
+    $absMB = [math]::Abs($MB)
+    if ($absMB -ge 1024 * 1024) {
+        return "{0:N2} TB" -f ($MB / 1024 / 1024)
+    } elseif ($absMB -ge 1024) {
+        return "{0:N2} GB" -f ($MB / 1024)
+    } else {
+        return "{0:N1} MB" -f $MB
+    }
+}
+
 function Remove-TempApp {
     # Delegated session is still open here — Remove-MgApplication works
     if ($script:TempAppObjectId) {
@@ -363,11 +377,23 @@ try {
                 -ErrorAction Stop | Out-Null
             Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
 
-            # Also grant Sites.Read.All on the SharePoint service principal so the app
-            # can obtain a SharePoint-scoped token for SPO REST calls (recycle bin, etc.).
+            # Also grant a role on the SharePoint service principal so the app can obtain a
+            # SharePoint-scoped token for SPO REST calls (recycle bin, etc.). Reading a site's
+            # recycle bin needs elevated (manage/full-control level) rights — Sites.Read.All is
+            # not enough and the call fails silently — so this must follow -UseHighPrivilege the
+            # same way the Graph-scoped role above does, instead of always requesting read-only.
             try {
                 $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
-                $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -in @('Sites.Read.All', 'AllSites.Read') } | Select-Object -First 1
+                $spoRoleCandidates = if ($UseHighPrivilege) {
+                    @('Sites.FullControl.All', 'AllSites.FullControl', 'AllSites.Manage', 'Sites.Manage.All', 'Sites.Read.All', 'AllSites.Read')
+                } else {
+                    @('Sites.Read.All', 'AllSites.Read')
+                }
+                $spoRole = $null
+                foreach ($candidate in $spoRoleCandidates) {
+                    $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -eq $candidate } | Select-Object -First 1
+                    if ($spoRole) { break }
+                }
                 if ($spoRole) {
                     New-MgServicePrincipalAppRoleAssignment `
                         -ServicePrincipalId $sp.Id `
@@ -879,6 +905,12 @@ function Invoke-GraphBatchGet {
     }
 
     if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+        # Runspace workers get a plain copy of the bearer token and cannot see later updates to
+        # $script:AppOnlyHeaders, so refresh it here before dispatch. Without this, a token that
+        # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
+        # of the run — each chunk retries 3x against the same stale token, gives up, and falls
+        # back to "0 versions", which silently drags down the reported version-history size.
+        Update-AppOnlyToken
         $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
         $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
         $runspacePool.Open()
@@ -1576,8 +1608,8 @@ if ($RecycleBinOnly) {
                                Measure-Object -Property size -Sum).Sum ?? 0)
             $rbCount     = $rbItems.Count
 
-            Write-Host ("        {0} item(s) | {1} MB" -f
-                $rbCount, [math]::Round($rbSizeBytes / 1MB, 1)) -ForegroundColor DarkGray
+            Write-Host ("        {0} item(s) | {1}" -f
+                $rbCount, (Format-SizeAuto -MB ($rbSizeBytes / 1MB))) -ForegroundColor DarkGray
 
             $summaryRows.Add([PSCustomObject]@{
                 SiteName          = $siteName
@@ -1652,7 +1684,7 @@ if ($RecycleBinOnly) {
     $grandRB = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
     $grandItems = ($summaryRows | Measure-Object -Property FileCount -Sum).Sum ?? 0
     Write-Host ("  Deleted items : {0}" -f $grandItems)
-    Write-Host ("  Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0), [math]::Round($grandRB / 1024, 2)) -ForegroundColor Magenta
+    Write-Host ("  Recycle bins  : {0}" -f (Format-SizeAuto -MB $grandRB)) -ForegroundColor Magenta
     Write-Host ""
 
     Finalize-CheckpointFiles
@@ -1817,7 +1849,7 @@ foreach ($entry in $siteLibraries) {
             VersionSizeMB      = $null
             TotalSizeMB        = $null
         }) | Out-Null
-        Write-Host ("        used: {0} GB" -f ([math]::Round(($quota.used ?? 0) / 1GB, 2))) -ForegroundColor DarkGray
+        Write-Host ("        used: {0}" -f (Format-SizeAuto -MB (($quota.used ?? 0) / 1MB))) -ForegroundColor DarkGray
 
         foreach ($row in $librarySummaryRows) { $summaryRows.Add($row) | Out-Null }
         Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @()
@@ -1932,12 +1964,12 @@ foreach ($entry in $siteLibraries) {
     $totalSize   = $currentSize + $versionSize
     $folderCountDisplay = if ($FastMode) { 'n/a' } else { $totalFolders }
 
-    Write-Host ("        {0} folders | {1} files | current: {2} MB | versions: {3} MB | total: {4} MB" -f
+    Write-Host ("        {0} folders | {1} files | current: {2} | versions: {3} | total: {4}" -f
         $folderCountDisplay,
         $totalFiles,
-        [math]::Round($currentSize / 1MB, 1),
-        [math]::Round($versionSize / 1MB, 1),
-        [math]::Round($totalSize   / 1MB, 1)) -ForegroundColor DarkGray
+        (Format-SizeAuto -MB ($currentSize / 1MB)),
+        (Format-SizeAuto -MB ($versionSize / 1MB)),
+        (Format-SizeAuto -MB ($totalSize   / 1MB))) -ForegroundColor DarkGray
 
     $librarySummaryRows.Add([PSCustomObject]@{
         SiteName          = $siteName
@@ -2047,8 +2079,8 @@ if ($Apply) {
                                Measure-Object -Property size -Sum).Sum ?? 0)
             $rbCount     = $rbItems.Count
 
-            Write-Host ("        {0} item(s) | {1} MB" -f
-                $rbCount, [math]::Round($rbSizeBytes / 1MB, 1)) -ForegroundColor DarkGray
+            Write-Host ("        {0} item(s) | {1}" -f
+                $rbCount, (Format-SizeAuto -MB ($rbSizeBytes / 1MB))) -ForegroundColor DarkGray
 
             $rbSummaryRows.Add([PSCustomObject]@{
                 SiteName          = $siteName
@@ -2164,11 +2196,11 @@ if ($Apply) {
     Write-ProgressHost -Message "Top 10 site collections (libraries + recycle bin, sub-sites combined)" -ForegroundColor Cyan
     Write-Host "  ================================================" -ForegroundColor Cyan
     $siteCollectionRows | Select-Object -First 10 | ForEach-Object {
-        Write-ProgressHost -Message ("{0} GB  [{1}]  (libraries: {2} MB, prullenbak: {3} MB, {4} sub-site(n)/kanalen)" -f
-            [math]::Round($_.GrandTotalGB, 2),
+        Write-ProgressHost -Message ("{0}  [{1}]  (libraries: {2}, prullenbak: {3}, {4} sub-site(n)/kanalen)" -f
+            (Format-SizeAuto -MB ($_.LibrariesMB + $_.RecycleBinMB)),
             $_.SiteCollection,
-            [math]::Round($_.LibrariesMB, 0),
-            [math]::Round($_.RecycleBinMB, 0),
+            (Format-SizeAuto -MB $_.LibrariesMB),
+            (Format-SizeAuto -MB $_.RecycleBinMB),
             $_.SubSiteCount) -ForegroundColor Green
     }
 }
