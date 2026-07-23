@@ -133,6 +133,8 @@ $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
 $script:SpoHostTokenCache = @{}
+$script:VersionLookupFailureCount = 0
+$script:VersionLookupFailureSamples = [System.Collections.Generic.List[string]]::new()
 
 function Write-ProgressHost {
     param(
@@ -879,11 +881,28 @@ function Get-SiteDrives {
     }
 }
 
+function Get-VersionsNextPage {
+    # Follows @odata.nextLink for a single file's version list. The versions endpoint normally
+    # returns everything in one page, but if a library ever has enough version history to trigger
+    # paging, we must not silently drop the older versions on later pages.
+    param([string]$NextLink, [System.Collections.Generic.List[object]] $Values)
+    $link = $NextLink
+    while ($link) {
+        $page = if ($script:AppOnlyHeaders) { Invoke-GraphGet -Uri $link -Headers $script:AppOnlyHeaders }
+                else { Invoke-MgGraphRequest -Method GET -Uri $link -OutputType PSObject -ErrorAction Stop }
+        if ($page.value) { $Values.AddRange(@($page.value)) }
+        $link = $page.'@odata.nextLink'
+    }
+}
+
 function Invoke-GraphBatchGet {
     # Resolves a set of GET requests via Microsoft Graph's $batch endpoint (max 20 per call).
-    # Used for per-file version lookups — non-critical data, so retries here are few and cheap:
-    # a failed lookup just falls back to "0 versions" instead of stalling the whole scan the
-    # way the main Invoke-GraphGet retry/backoff (built for critical calls) would.
+    # Individual sub-requests inside an otherwise-successful batch response can come back
+    # throttled (429) or with a transient server error under sustained load (thousands of files).
+    # Those are retried in subsequent passes with backoff instead of being treated as a permanent
+    # "0 versions" — the previous single-attempt-per-chunk approach was silently discarding the
+    # vast majority of version history on large libraries, which is why tenant-wide version totals
+    # could come out lower than a single site's real Storage Metrics usage.
     param(
         [System.Collections.Generic.List[object]] $Requests   # each: @{ Id = 'string'; Url = '/relative/path' }
     )
@@ -891,137 +910,188 @@ function Invoke-GraphBatchGet {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
-    $chunkSpecs = [System.Collections.Generic.List[object]]::new()
-    for ($i = 0; $i -lt $Requests.Count; $i += 20) {
-        $end   = [Math]::Min($i + 19, $Requests.Count - 1)
-        $chunk = $Requests.GetRange($i, $end - $i + 1)
+    $pending = $Requests
+    $maxPasses = 5
+    for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
+        $chunkSpecs = [System.Collections.Generic.List[object]]::new()
+        for ($i = 0; $i -lt $pending.Count; $i += 20) {
+            $end   = [Math]::Min($i + 19, $pending.Count - 1)
+            $chunk = $pending.GetRange($i, $end - $i + 1)
 
-        $chunkSpecs.Add([PSCustomObject]@{
-            Requests = $chunk
-            Body     = (@{
-                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-            } | ConvertTo-Json -Depth 6)
-        }) | Out-Null
-    }
+            $chunkSpecs.Add([PSCustomObject]@{
+                Requests = $chunk
+                Body     = (@{
+                    requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+                } | ConvertTo-Json -Depth 6)
+            }) | Out-Null
+        }
 
-    if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
-        # Runspace workers get a plain copy of the bearer token and cannot see later updates to
-        # $script:AppOnlyHeaders, so refresh it here before dispatch. Without this, a token that
-        # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
-        # of the run — each chunk retries 3x against the same stale token, gives up, and falls
-        # back to "0 versions", which silently drags down the reported version-history size.
-        Update-AppOnlyToken
-        $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
-        $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
-        $runspacePool.Open()
+        $retryList = [System.Collections.Generic.List[object]]::new()
 
-        $workers = [System.Collections.Generic.List[object]]::new()
-        $workerScript = {
-            param(
-                [string]$BatchBody,
-                [hashtable]$Headers,
-                [int]$TimeoutSec
-            )
+        if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+            # Runspace workers get a plain copy of the bearer token and cannot see later updates to
+            # $script:AppOnlyHeaders, so refresh it here before dispatch. Without this, a token that
+            # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
+            # of the run.
+            Update-AppOnlyToken
+            $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
+            $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+            $runspacePool.Open()
 
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-                try {
-                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Headers $Headers -ContentType 'application/json' `
-                        -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $workers = [System.Collections.Generic.List[object]]::new()
+            $workerScript = {
+                param(
+                    [string]$BatchBody,
+                    [hashtable]$Headers,
+                    [int]$TimeoutSec
+                )
 
-                    return [PSCustomObject]@{
-                        Success   = $true
-                        Responses = @($resp.responses)
-                    }
-                } catch {
-                    if ($attempt -eq 3) {
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    try {
+                        $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                            -Headers $Headers -ContentType 'application/json' `
+                            -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+
                         return [PSCustomObject]@{
-                            Success   = $false
-                            Responses = @()
+                            Success   = $true
+                            Responses = @($resp.responses)
+                        }
+                    } catch {
+                        if ($attempt -eq 3) {
+                            return [PSCustomObject]@{
+                                Success      = $false
+                                Responses    = @()
+                                ErrorMessage = $_.Exception.Message
+                            }
+                        }
+
+                        Start-Sleep -Seconds ($attempt * 3)
+                    }
+                }
+            }
+
+            try {
+                foreach ($spec in $chunkSpecs) {
+                    $ps = [PowerShell]::Create()
+                    $ps.RunspacePool = $runspacePool
+                    [void]$ps.AddScript($workerScript)
+                    [void]$ps.AddParameter('BatchBody', $spec.Body)
+                    [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
+                    [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+
+                    $workers.Add([PSCustomObject]@{
+                        PowerShell = $ps
+                        Handle     = $ps.BeginInvoke()
+                        Requests   = $spec.Requests
+                    }) | Out-Null
+                }
+
+                foreach ($worker in $workers) {
+                    $payload = $null
+
+                    try {
+                        $payload = $worker.PowerShell.EndInvoke($worker.Handle)
+                    } catch {
+                        $payload = $null
+                    } finally {
+                        $worker.PowerShell.Dispose()
+                    }
+
+                    if ($payload -and $payload.Success) {
+                        $byId = @{}
+                        foreach ($r in $payload.Responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $worker.Requests) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                if ($r.body.'@odata.nextLink') {
+                                    Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                }
+                                $results[[string]$r.id] = @{ value = $values }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        continue
+                    }
+
+                    if ($pass -lt $maxPasses) {
+                        foreach ($req in $worker.Requests) { $retryList.Add($req) }
+                    } else {
+                        $reason = if ($payload -and $payload.ErrorMessage) { $payload.ErrorMessage } else { 'Batch call failed after retries.' }
+                        foreach ($req in $worker.Requests) { $results[$req.Id] = $reason }
+                    }
+                }
+            } finally {
+                $runspacePool.Close()
+                $runspacePool.Dispose()
+            }
+        } else {
+            foreach ($spec in $chunkSpecs) {
+                $chunk = $spec.Requests
+                $batchBody = $spec.Body
+
+                $batchDone = $false
+                for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
+                    try {
+                        if ($script:AppOnlyHeaders) {
+                            Update-AppOnlyToken
+                            $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Headers $script:AppOnlyHeaders -ContentType 'application/json' `
+                                -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                        } else {
+                            $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                        }
+                        $byId = @{}
+                        foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $chunk) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                if ($r.body.'@odata.nextLink') {
+                                    Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                }
+                                $results[[string]$r.id] = @{ value = $values }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        $batchDone = $true
+                    } catch {
+                        if ($attempt -eq 3) {
+                            if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
+                            else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
+                        } else {
+                            Start-Sleep -Seconds ($attempt * 3)
                         }
                     }
-
-                    Start-Sleep -Seconds ($attempt * 3)
                 }
             }
         }
 
-        try {
-            foreach ($spec in $chunkSpecs) {
-                $ps = [PowerShell]::Create()
-                $ps.RunspacePool = $runspacePool
-                [void]$ps.AddScript($workerScript)
-                [void]$ps.AddParameter('BatchBody', $spec.Body)
-                [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
-                [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
-
-                $workers.Add([PSCustomObject]@{
-                    PowerShell = $ps
-                    Handle     = $ps.BeginInvoke()
-                    Requests   = $spec.Requests
-                }) | Out-Null
-            }
-
-            foreach ($worker in $workers) {
-                $payload = $null
-
-                try {
-                    $payload = $worker.PowerShell.EndInvoke($worker.Handle)
-                } catch {
-                    $payload = $null
-                } finally {
-                    $worker.PowerShell.Dispose()
-                }
-
-                if ($payload -and $payload.Success) {
-                    foreach ($r in $payload.Responses) {
-                        $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
-                    }
-                    continue
-                }
-
-                foreach ($req in $worker.Requests) {
-                    $results[$req.Id] = $null
-                }
-            }
-        } finally {
-            $runspacePool.Close()
-            $runspacePool.Dispose()
+        if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
+            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
         }
-
-        return $results
+        $pending = $retryList
     }
-
-    foreach ($spec in $chunkSpecs) {
-        $chunk = $spec.Requests
-        $batchBody = $spec.Body
-
-        $done = $false
-        for ($attempt = 1; $attempt -le 3 -and -not $done; $attempt++) {
-            try {
-                if ($script:AppOnlyHeaders) {
-                    Update-AppOnlyToken
-                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Headers $script:AppOnlyHeaders -ContentType 'application/json' `
-                        -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-                } else {
-                    $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
-                }
-                foreach ($r in $resp.responses) {
-                    $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
-                }
-                $done = $true
-            } catch {
-                if ($attempt -eq 3) {
-                    # Give up on this chunk — mark every item as unresolved (falls back to 0 versions).
-                    foreach ($req in $chunk) { $results[$req.Id] = $null }
-                } else {
-                    Start-Sleep -Seconds ($attempt * 3)
-                }
-            }
-        }
-    }
+    foreach ($req in $pending) { $results[[string]$req.Id] = "Gave up after $maxPasses retry pass(es)." }
 
     return $results
 }
@@ -1156,8 +1226,14 @@ function Get-AllDriveItems {
                 $record.VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
                 $record.TotalSizeBytes   = $record.SizeBytes + $verSize
                 $record.TotalSizeMB      = [math]::Round($record.TotalSizeBytes / 1MB, 3)
+            } else {
+                # Lookup failed after retries — record keeps its zeroed version defaults. Track the
+                # reason so the run summary can surface *why*, instead of silently under-reporting.
+                $script:VersionLookupFailureCount++
+                if ($body -is [string] -and $script:VersionLookupFailureSamples.Count -lt 20) {
+                    $script:VersionLookupFailureSamples.Add($body)
+                }
             }
-            # else: lookup failed after retries — record keeps its zeroed version defaults.
         }
     }
 
@@ -2340,6 +2416,13 @@ if ($Apply) {
     Write-ProgressHost -Message ("Version data  : {0}" -f (Format-SizeAuto -MB $grandVer)) -ForegroundColor Yellow
     Write-ProgressHost -Message ("Recycle bins  : {0}" -f (Format-SizeAuto -MB $grandRB)) -ForegroundColor Magenta
     Write-ProgressHost -Message ("Grand total   : {0}" -f (Format-SizeAuto -MB $grandTotal)) -ForegroundColor Green
+
+    if ($script:VersionLookupFailureCount -gt 0) {
+        Write-ProgressHost -Message ("[WARN] Version history could not be resolved for {0} file(s) — Version data above is understated by that much." -f $script:VersionLookupFailureCount) -ForegroundColor Yellow
+        foreach ($sample in ($script:VersionLookupFailureSamples | Select-Object -Unique | Select-Object -First 5)) {
+            Write-ProgressHost -Message ("        e.g. {0}" -f $sample) -ForegroundColor DarkYellow
+        }
+    }
 
     # ── Top libraries by version history size ─────────────────────────────────
     Write-Host ""
