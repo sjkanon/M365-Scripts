@@ -131,7 +131,15 @@ Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document
 - Met `-Apply`: verwijdert matching vorige versies echt
 - Werkt op één site of tenantbreed over alle sites
 - Standaard geen OneDrive-sites en geen hidden libraries
-- Gebaseerd op `PnP.PowerShell` (`Get-PnPFileVersion` + `Remove-PnPFileVersion`)
+- Gebaseerd op Microsoft Graph (`Invoke-MgGraphRequest`) — **geen** `PnP.PowerShell` en **geen** eigen Entra app-registratie nodig voor het standaardgeval
+
+### Authenticatie
+
+Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) om alle sites op te sommen — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Die tijdelijke app wordt na afloop weer verwijderd; alle daadwerkelijke file-reads en version-deletes lopen altijd via je eigen delegated permissies, nooit via die tijdelijke app.
+
+Wil je de tijdelijke app overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al `Sites.ReadWrite.All` application permission hebben.
+
+> **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie garantie is.
 
 ### Parameters
 
@@ -140,11 +148,16 @@ Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document
 | `-BeforeDate` | `datetime` | Verwijder versies ouder dan deze datum |
 | `-SiteUrl` | `string` | Optioneel: scan één site |
 | `-TenantUrl` | `string` | Vereist voor all-sites scan, bv. `https://contoso.sharepoint.com` |
-| `-ClientId` | `string` | Entra app/client ID voor interactieve PnP-login |
+| `-TenantId` | `string` | Entra ID tenant ID — automatisch gedetecteerd indien niet opgegeven; verplicht in combinatie met `-ClientId` |
+| `-ClientId` | `string` | Bestaande App Registration client ID — slaat de tijdelijke app over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
+| `-ClientSecret` | `string` | Client secret voor een bestaande app registration |
+| `-CertificateThumbprint` | `string` | Certificate thumbprint voor een bestaande app registration |
 | `-Apply` | `switch` | Voert de verwijdering echt uit |
 | `-IncludeOneDriveSites` | `switch` | Neemt OneDrive-sites mee in tenantscan |
 | `-IncludeHiddenLibraries` | `switch` | Neemt hidden document libraries mee |
 | `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
+| `-GraphTimeoutSec` | `int` | Timeout in seconden per Graph-call (standaard: `120`) |
+| `-MaxGraphRetry` | `int` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
 
 ### Voorbeelden
 
