@@ -2280,8 +2280,8 @@ if ($Apply -and $detailRows.Count -gt 0) {
         $mdLines.Add("|---|---|")
         $mdLines.Add(("| Sites gescand | {0} |" -f $sites.Count))
         $mdLines.Add(("| Totaal bestanden | {0} |" -f $grandFiles))
-        $mdLines.Add(("| Versiedata | {0} MB ({1} GB) |" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)))
-        $mdLines.Add(("| Totaal (huidig + versies) | {0} MB ({1} GB) |" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)))
+        $mdLines.Add(("| Versiedata | {0} |" -f (Format-SizeAuto -MB $grandVer)))
+        $mdLines.Add(("| Totaal (huidig + versies) | {0} |" -f (Format-SizeAuto -MB $grandTotal)))
         $mdLines.Add('')
         $mdLines.Add('---')
         $mdLines.Add('')
@@ -2337,9 +2337,9 @@ Write-ProgressHost -Message ("Sites scanned : {0}" -f $sites.Count)
 if ($Apply) {
     Write-ProgressHost -Message ("Site collections : {0}" -f $siteCollectionRows.Count)
     Write-ProgressHost -Message ("Total files   : {0}"    -f $grandFiles)
-    Write-ProgressHost -Message ("Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
-    Write-ProgressHost -Message ("Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
-    Write-ProgressHost -Message ("Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
+    Write-ProgressHost -Message ("Version data  : {0}" -f (Format-SizeAuto -MB $grandVer)) -ForegroundColor Yellow
+    Write-ProgressHost -Message ("Recycle bins  : {0}" -f (Format-SizeAuto -MB $grandRB)) -ForegroundColor Magenta
+    Write-ProgressHost -Message ("Grand total   : {0}" -f (Format-SizeAuto -MB $grandTotal)) -ForegroundColor Green
 
     # ── Top libraries by version history size ─────────────────────────────────
     Write-Host ""
