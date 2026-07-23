@@ -1075,6 +1075,8 @@ function Invoke-GraphBatchGet {
                 $chunk = $spec.Requests
                 $batchBody = $spec.Body
 
+                Start-Sleep -Milliseconds 150
+
                 $batchDone = $false
                 for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
                     try {
@@ -1108,6 +1110,7 @@ function Invoke-GraphBatchGet {
                                 }
                             } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                                 $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
                             } else {
                                 $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
                                 $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
