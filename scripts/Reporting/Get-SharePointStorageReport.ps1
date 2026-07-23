@@ -1130,7 +1130,7 @@ function Invoke-GraphBatchGet {
         }
 
         if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
-            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
+            Start-Sleep -Seconds ([Math]::Max($nextDelay, [Math]::Min(5 * $pass, 30)))
         }
         $pending = $retryList
     }
