@@ -895,6 +895,29 @@ function Get-VersionsNextPage {
     }
 }
 
+function Get-BatchItemRetryDelaySeconds {
+    # "activityLimitReached" (SharePoint/OneDrive resource-level quota, surfaced as HTTP 429) needs
+    # a much longer cooldown than ordinary throttling — it's a rolling quota against the same
+    # site/list, so retrying quickly just keeps re-tripping it. Honor a Retry-After header when
+    # Graph gives us one; otherwise back off hard specifically for activityLimitReached, and more
+    # gently for plain 429/5xx.
+    param([int]$Pass, [object]$SubResponse)
+    $retryAfter = $null
+    try {
+        if ($SubResponse -and $SubResponse.headers) {
+            $h = $SubResponse.headers.'Retry-After'
+            if ($h) { [void][int]::TryParse([string]$h, [ref]$retryAfter) }
+        }
+    } catch {}
+    if ($retryAfter -and $retryAfter -gt 0) { return [Math]::Min($retryAfter + 2, 180) }
+
+    $errorCode = $null
+    try { $errorCode = $SubResponse.body.error.code } catch {}
+    if ($errorCode -eq 'activityLimitReached') { return [Math]::Min(30 * $Pass, 180) }
+
+    return [Math]::Min(5 * $Pass, 30)
+}
+
 function Invoke-GraphBatchGet {
     # Resolves a set of GET requests via Microsoft Graph's $batch endpoint (max 20 per call).
     # Individual sub-requests inside an otherwise-successful batch response can come back
@@ -911,7 +934,7 @@ function Invoke-GraphBatchGet {
     if ($Requests.Count -eq 0) { return $results }
 
     $pending = $Requests
-    $maxPasses = 5
+    $maxPasses = 8
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $chunkSpecs = [System.Collections.Generic.List[object]]::new()
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
@@ -927,6 +950,7 @@ function Invoke-GraphBatchGet {
         }
 
         $retryList = [System.Collections.Generic.List[object]]::new()
+        $nextDelay = 0
 
         if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
             # Runspace workers get a plain copy of the bearer token and cannot see later updates to

@@ -415,6 +415,29 @@ function Get-FileVersionsPage {
     }
 }
 
+function Get-BatchItemRetryDelaySeconds {
+    # "activityLimitReached" (SharePoint/OneDrive resource-level quota, surfaced as HTTP 429) needs
+    # a much longer cooldown than ordinary throttling — it's a rolling quota against the same
+    # site/list, so retrying quickly just keeps re-tripping it. Honor a Retry-After header when
+    # Graph gives us one; otherwise back off hard specifically for activityLimitReached, and more
+    # gently for plain 429/5xx.
+    param([int]$Pass, [object]$SubResponse)
+    $retryAfter = $null
+    try {
+        if ($SubResponse -and $SubResponse.headers) {
+            $h = $SubResponse.headers.'Retry-After'
+            if ($h) { [void][int]::TryParse([string]$h, [ref]$retryAfter) }
+        }
+    } catch {}
+    if ($retryAfter -and $retryAfter -gt 0) { return [Math]::Min($retryAfter + 2, 180) }
+
+    $errorCode = $null
+    try { $errorCode = $SubResponse.body.error.code } catch {}
+    if ($errorCode -eq 'activityLimitReached') { return [Math]::Min(30 * $Pass, 180) }
+
+    return [Math]::Min(5 * $Pass, 30)
+}
+
 function Get-FileVersionsBatch {
     # Resolves version lists for up to 20 files per Graph $batch call, no cap on version count
     # per file. Individual sub-requests that come back throttled (429) or with a transient server
@@ -428,9 +451,10 @@ function Get-FileVersionsBatch {
     if ($Requests.Count -eq 0) { return $results }
 
     $pending = $Requests
-    $maxPasses = 5
+    $maxPasses = 8
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $retryList = [System.Collections.Generic.List[object]]::new()
+        $nextDelay = 0
 
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
             $end   = [Math]::Min($i + 19, $pending.Count - 1)
@@ -438,6 +462,11 @@ function Get-FileVersionsBatch {
             $batchBody = @{
                 requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
             } | ConvertTo-Json -Depth 6
+
+            # A short pause between successive $batch dispatches spreads out the request rate
+            # against the same site/list, reducing how often we trip activityLimitReached to
+            # begin with — completeness matters more here than shaving seconds off the scan.
+            Start-Sleep -Milliseconds 150
 
             $batchDone = $false
             for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
@@ -467,6 +496,7 @@ function Get-FileVersionsBatch {
                             }
                         } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                             $retryList.Add($req)
+                            $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
                         } else {
                             $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
                             $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
@@ -485,7 +515,7 @@ function Get-FileVersionsBatch {
         }
 
         if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
-            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
+            Start-Sleep -Seconds ([Math]::Max($nextDelay, [Math]::Min(5 * $pass, 30)))
         }
         $pending = $retryList
     }
