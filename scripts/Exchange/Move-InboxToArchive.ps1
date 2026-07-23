@@ -310,12 +310,13 @@ try {
         }
         if (-not $tokenObtained) {
             Write-Host "  [ERROR] Could not obtain an app-only token after propagation retries." -ForegroundColor Red
-            Remove-TempApp; exit 1
+            Remove-TempApp
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            exit 1
         }
 
         # Delegated session (Application.ReadWrite.All) stays connected — needed to
         # remove the temp app at the end. Mail calls go through the app-only token.
-        $script:ConnectedHere = $true
         Write-Host "  [OK]   App-only token obtained (temporary app)." -ForegroundColor DarkGray
     }
 } catch {
