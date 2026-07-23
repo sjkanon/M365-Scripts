@@ -724,6 +724,6 @@ Write-Host '   Summary' -ForegroundColor Cyan
 Write-Host '  ================================================' -ForegroundColor Cyan
 Write-Host ("  Detail   : {0}" -f $detailCsv) -ForegroundColor Green
 Write-Host ("  Summary  : {0}" -f $summaryCsv) -ForegroundColor Green
-Write-Host ("  Candidates: {0} version(s) | {1} MB" -f $totalCandidates, [math]::Round($totalCandidateMB, 2)) -ForegroundColor Yellow
-Write-Host ("  Deleted   : {0} version(s) | {1} MB" -f $totalDeleted, [math]::Round($totalDeletedMB, 2)) -ForegroundColor $(if ($Apply) { 'Magenta' } else { 'DarkGray' })
+Write-Host ("  Candidates: {0} version(s) | {1}" -f $totalCandidates, (Format-SizeAuto -MB $totalCandidateMB)) -ForegroundColor Yellow
+Write-Host ("  Deleted   : {0} version(s) | {1}" -f $totalDeleted, (Format-SizeAuto -MB $totalDeletedMB)) -ForegroundColor $(if ($Apply) { 'Magenta' } else { 'DarkGray' })
 Write-Host ''
