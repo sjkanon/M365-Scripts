@@ -11,6 +11,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Migrate-Calendar.ps1`](#migrate-calendarps1) | Migrate a shared M365 Group calendar to a Room Mailbox |
 | [`Set-Calendar-rights.ps1`](#set-calendar-rightsps1) | Grant calendar folder permissions to a user |
 | [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
+| [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
 | [`Test-CalendarPermissions.ps1`](#test-calendarpermissionsps1) | Audit calendar folder permissions |
 | [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1) | Audit Full Access, Send As, Send on Behalf delegation |
 | [`Test-DistributionGroupPermissions.ps1`](#test-distributiongrouppermissionsps1) | Audit DG managers, Send As, Send on Behalf, member counts |
@@ -186,6 +187,59 @@ Resolves the members currently matching a Dynamic Distribution Group's filter an
 **Notes**
 - Requires Exchange Online PowerShell module and active EXO session (`Connect-ExchangeOnline`)
 - Dynamic Distribution Groups are Exchange objects; this script uses Exchange cmdlets, not Graph
+
+---
+
+### Move-InboxToArchive.ps1
+
+Moves every message in a mailbox's Inbox to its Archive folder — the same folder Outlook's "Archive" button targets. Optionally restrict the scope to a date range (`-After` / `-Before`). Uses Microsoft Graph's `$batch` endpoint to move messages in batches of 20, with retry/backoff on throttling (429/503). Default behavior is safe preview mode — pass `-Apply` to actually move messages.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|--------------|
+| `-Mailbox` | Yes | UPN or object ID of the mailbox whose Inbox to archive |
+| `-After` | No | Only archive messages received on or after this date |
+| `-Before` | No | Only archive messages received before this date |
+| `-TenantId` | No | Entra ID tenant ID (GUID) **or** a verified domain of the tenant (e.g. `contoso.com`) — either works. Optional if already connected or resolvable from a GDAP customer tenant context; required with `-ClientId` if not resolvable |
+| `-ClientId` | No | Existing App Registration client ID for app-only auth. Use with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
+| `-ClientSecret` | No | Client secret for the app registration in `-ClientId` |
+| `-CertificateThumbprint` | No | Certificate thumbprint for the app registration in `-ClientId` |
+| `-Apply` | No | Actually move the messages. Without it, the script only reports how many messages would be archived |
+
+**Examples**
+
+```powershell
+# Preview — reports the count, makes no changes
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com"
+
+# Archive everything in the Inbox
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -Apply
+
+# Only messages received before 2025
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -Before (Get-Date "2025-01-01") -Apply
+
+# Only messages received in 2024
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -After (Get-Date "2024-01-01") -Before (Get-Date "2025-01-01") -Apply
+
+# App-only — archive any mailbox in the tenant without needing Full Access.
+# -TenantId accepts the tenant's domain instead of its GUID.
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -TenantId "contoso.com" `
+    -ClientId "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy" -ClientSecret "your-client-secret" -Apply
+```
+
+**Notes**
+- Uses Microsoft Graph, not Exchange Online cmdlets — requires `Microsoft.Graph.Authentication`
+- Default (delegated) mode uses scope `Mail.ReadWrite`; to archive a mailbox other than the signed-in user's own, the signed-in account needs Full Access on the target mailbox
+- Prints timestamped progress while paginating Inbox messages and while moving batches (`[HH:mm:ss] N / total moved (...%)`)
+- With `-ClientId` + `-ClientSecret`/`-CertificateThumbprint` the script connects fully app-only — that app registration must have `Mail.ReadWrite` **application** permission with admin consent, which allows archiving any mailbox in the tenant without per-mailbox delegation
+- GDAP-aware: under a GDAP session (`$global:authMode -eq 'GDAP'`, set via `Connect-Tenant` / `load.ps1`), `-TenantId` is resolved automatically from the selected customer tenant (`$global:cid`) if omitted — same fallback as `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` are honored too
+
+**Required module**
+
+```powershell
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
+```
 
 ---
 
