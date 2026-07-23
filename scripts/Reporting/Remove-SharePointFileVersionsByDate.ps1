@@ -402,39 +402,89 @@ function Invoke-GraphDelete {
     }
 }
 
+function Get-FileVersionsPage {
+    # Follows @odata.nextLink for a single file's version list. The versions endpoint normally
+    # returns everything in one page, but if a library ever has enough version history to trigger
+    # paging, we must not silently drop the older versions on later pages.
+    param([string]$NextLink, [System.Collections.Generic.List[object]] $Values)
+    $link = $NextLink
+    while ($link) {
+        $page = Invoke-GraphGet -Uri $link
+        if ($page.value) { $Values.AddRange(@($page.value)) }
+        $link = $page.'@odata.nextLink'
+    }
+}
+
 function Get-FileVersionsBatch {
-    # Resolves version lists for up to 20 files per Graph $batch call. A failed lookup for a
-    # file just falls back to "no versions retrievable" instead of stalling the whole scan.
+    # Resolves version lists for up to 20 files per Graph $batch call, no cap on version count
+    # per file. Individual sub-requests that come back throttled (429) or with a transient server
+    # error are retried in subsequent passes with backoff rather than being given up on
+    # immediately — under sustained load (thousands of files) Graph can throttle individual
+    # sub-requests inside an otherwise-successful batch response, and treating that the same as a
+    # permanent failure was silently discarding the vast majority of version history.
     param([System.Collections.Generic.List[object]] $Requests)   # each: @{ Id; Url }
 
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
-    for ($i = 0; $i -lt $Requests.Count; $i += 20) {
-        $end   = [Math]::Min($i + 19, $Requests.Count - 1)
-        $chunk = $Requests.GetRange($i, $end - $i + 1)
-        $batchBody = @{
-            requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-        } | ConvertTo-Json -Depth 6
+    $pending = $Requests
+    $maxPasses = 5
+    for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
+        $retryList = [System.Collections.Generic.List[object]]::new()
 
-        $done = $false
-        for ($attempt = 1; $attempt -le 3 -and -not $done; $attempt++) {
-            try {
-                $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                    -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
-                foreach ($r in $resp.responses) {
-                    $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
-                }
-                $done = $true
-            } catch {
-                if ($attempt -eq 3) {
-                    foreach ($req in $chunk) { $results[$req.Id] = $null }
-                } else {
-                    Start-Sleep -Seconds ($attempt * 3)
+        for ($i = 0; $i -lt $pending.Count; $i += 20) {
+            $end   = [Math]::Min($i + 19, $pending.Count - 1)
+            $chunk = $pending.GetRange($i, $end - $i + 1)
+            $batchBody = @{
+                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+            } | ConvertTo-Json -Depth 6
+
+            $batchDone = $false
+            for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
+                try {
+                    $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                        -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                    $byId = @{}
+                    foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+
+                    foreach ($req in $chunk) {
+                        $r = $byId[[string]$req.Id]
+                        if (-not $r) {
+                            if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                            continue
+                        }
+                        if ($r.status -eq 200) {
+                            $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                            if ($r.body.'@odata.nextLink') {
+                                Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                            }
+                            $results[[string]$r.id] = @{ value = $values }
+                        } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                            $retryList.Add($req)
+                        } else {
+                            $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                            $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                        }
+                    }
+                    $batchDone = $true
+                } catch {
+                    if ($attempt -eq 3) {
+                        if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
+                        else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
+                    } else {
+                        Start-Sleep -Seconds ($attempt * 3)
+                    }
                 }
             }
         }
+
+        if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
+            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
+        }
+        $pending = $retryList
     }
+    foreach ($req in $pending) { $results[[string]$req.Id] = "Gave up after $maxPasses retry pass(es)." }
+
     return $results
 }
 
@@ -490,29 +540,31 @@ if (-not $allSitesMode) {
             @($targetSites | Where-Object { $_.webUrl -notmatch '-my\.sharepoint\.com/personal/' })
         )
     }
+}
 
-    # Sub-sites at all depths — getAllSites primarily returns root site collections.
-    $subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
-    $knownSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $targetSites | ForEach-Object { if ($_.id -and $knownSiteIds.Add($_.id)) { $subSiteQueue.Enqueue($_) } }
+# Sub-sites at all depths — getAllSites/single-site lookup only returns the site(s) themselves,
+# not any classic SharePoint sub-webs underneath. This must run for -SiteUrl scans too, not just
+# tenant-wide ones, otherwise document libraries living on a sub-site are silently never scanned.
+$subSiteQueue = [System.Collections.Generic.Queue[object]]::new()
+$knownSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$targetSites | ForEach-Object { if ($_.id -and $knownSiteIds.Add($_.id)) { $subSiteQueue.Enqueue($_) } }
 
-    while ($subSiteQueue.Count -gt 0) {
-        $parent = $subSiteQueue.Dequeue()
-        try {
-            $subSitesUri = "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites`?`$select=id,displayName,webUrl&`$top=200"
-            do {
-                $subResp = Invoke-GraphGet -Uri $subSitesUri
-                $subResp.value | Where-Object { $_.id } | ForEach-Object {
-                    if ($knownSiteIds.Add($_.id)) {
-                        $targetSites.Add($_)
-                        $subSiteQueue.Enqueue($_)
-                    }
+while ($subSiteQueue.Count -gt 0) {
+    $parent = $subSiteQueue.Dequeue()
+    try {
+        $subSitesUri = "https://graph.microsoft.com/v1.0/sites/$($parent.id)/sites`?`$select=id,displayName,webUrl&`$top=200"
+        do {
+            $subResp = Invoke-GraphGet -Uri $subSitesUri
+            $subResp.value | Where-Object { $_.id } | ForEach-Object {
+                if ($knownSiteIds.Add($_.id)) {
+                    $targetSites.Add($_)
+                    $subSiteQueue.Enqueue($_)
                 }
-                $subSitesUri = $subResp.'@odata.nextLink'
-            } while ($subSitesUri)
-        } catch {
-            # Most sites have no sub-sites or are inaccessible with current permissions.
-        }
+            }
+            $subSitesUri = $subResp.'@odata.nextLink'
+        } while ($subSitesUri)
+    } catch {
+        # Most sites have no sub-sites or are inaccessible with current permissions.
     }
 }
 
@@ -616,7 +668,7 @@ try {
 
                 foreach ($file in $files) {
                     $body = $versionResults[$file.id]
-                    if (-not $body) {
+                    if ($body -is [string] -or -not $body) {
                         $detailRows.Add([PSCustomObject]@{
                             SiteUrl         = $targetSite.webUrl
                             Library         = $library.LibraryTitle
@@ -627,7 +679,7 @@ try {
                             VersionCreated  = $null
                             VersionSizeMB   = $null
                             Action          = 'Error'
-                            Message         = 'Could not retrieve version history.'
+                            Message         = if ($body -is [string]) { $body } else { 'Could not retrieve version history.' }
                         }) | Out-Null
                         continue
                     }
