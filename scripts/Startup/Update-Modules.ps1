@@ -7,6 +7,7 @@ Write-Host "Geinstalleerde modules ophalen..." -ForegroundColor Cyan
 
 $requiredModules = @(
     @{ Name = 'Microsoft.Graph.Authentication'; MinimumVersion = '2.0.0' }
+    @{ Name = 'Microsoft.Graph.Sites'; MinimumVersion = '2.0.0' }
     @{ Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinimumVersion = '2.0.0' }
     @{ Name = 'Microsoft.Graph.Identity.SignIns'; MinimumVersion = '2.0.0' }
     @{ Name = 'Microsoft.Graph.Identity.Governance'; MinimumVersion = '2.0.0' }

@@ -108,6 +108,7 @@ param (
     [switch] $FastMode,
     [switch] $UseHighPrivilege,
     [switch] $RecycleBinOnly,
+    [switch] $ForceAppOnlySingleSite,
     [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
@@ -132,6 +133,8 @@ $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
 $script:SpoHostTokenCache = @{}
+$script:VersionLookupFailureCount = 0
+$script:VersionLookupFailureSamples = [System.Collections.Generic.List[string]]::new()
 
 function Write-ProgressHost {
     param(
@@ -140,6 +143,20 @@ function Write-ProgressHost {
         [ConsoleColor]$ForegroundColor = [ConsoleColor]::DarkGray
     )
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) -ForegroundColor $ForegroundColor
+}
+
+function Format-SizeAuto {
+    # Picks MB/GB/TB automatically based on magnitude instead of a fixed unit,
+    # so small libraries don't print "0.00 GB" and tenant totals don't print in millions of MB.
+    param([Parameter(Mandatory = $true)][double]$MB)
+    $absMB = [math]::Abs($MB)
+    if ($absMB -ge 1024 * 1024) {
+        return "{0:N2} TB" -f ($MB / 1024 / 1024)
+    } elseif ($absMB -ge 1024) {
+        return "{0:N2} GB" -f ($MB / 1024)
+    } else {
+        return "{0:N1} MB" -f $MB
+    }
 }
 
 function Remove-TempApp {
@@ -156,7 +173,13 @@ function Remove-TempApp {
         $script:TempAppObjectId = $null
     }
     if ($script:ConnectedHere) {
-        try { Disconnect-MgGraph -ErrorAction SilentlyContinue } catch {}
+        $prevWarningPreference = $WarningPreference
+        try {
+            $WarningPreference = 'SilentlyContinue'
+            Disconnect-MgGraph -ErrorAction SilentlyContinue
+        } catch {} finally {
+            $WarningPreference = $prevWarningPreference
+        }
         $script:ConnectedHere = $false
     }
 }
@@ -194,17 +217,97 @@ if ($FastMode) {
     $SkipVersions = $true
 }
 
+# ── Module preflight ─────────────────────────────────────────────────────────
+$requiredGraphModules = @(
+    'Microsoft.Graph.Authentication'
+    'Microsoft.Graph.Sites'
+)
+
+$missingGraphModules = $requiredGraphModules | Where-Object {
+    -not (Get-Module -ListAvailable -Name $_)
+}
+
+if ($missingGraphModules.Count -gt 0) {
+    Write-Host "  [ERROR] Missing required module(s): $($missingGraphModules -join ', ')" -ForegroundColor Red
+    Write-Host "  Install with: .\scripts\Startup\Install-Modules.ps1" -ForegroundColor Yellow
+    exit 1
+}
+
+# ── Determine scan mode early (impacts auth flow and performance) ───────────
+$scanAllSites = $false
+$isSingleSiteScan = $false
+
+if ($SiteUrl) {
+    $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
+
+    # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
+    if ($normalizedSiteUrl -match '^https://[^/]+$') {
+        Write-ProgressHost -Message "[INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
+        $scanAllSites = $true
+        $SiteUrl = $null
+    } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/[^?#]+$') {
+        $SiteUrl = $normalizedSiteUrl
+        $isSingleSiteScan = $true
+    } else {
+        Write-ProgressHost -Message "[ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
+        exit 1
+    }
+}
+
+$isGdapMode = $false
+try {
+    if ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') {
+        $isGdapMode = $true
+    } elseif ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP') {
+        $isGdapMode = $true
+    }
+} catch {}
+
+$effectiveTenantId = $TenantId
+if (-not $effectiveTenantId) {
+    try {
+        if ($isGdapMode -and $global:cid) {
+            $effectiveTenantId = [string]$global:cid
+        } elseif ($env:M365_CUSTOMER_TENANTID) {
+            $effectiveTenantId = [string]$env:M365_CUSTOMER_TENANTID
+        }
+    } catch {}
+}
+
+$useAppOnlyForSingleSite = ($isSingleSiteScan -and ($ForceAppOnlySingleSite -or $isGdapMode))
+if ($useAppOnlyForSingleSite) {
+    if ($ForceAppOnlySingleSite) {
+        Write-ProgressHost -Message '[INFO] Single-site app-only mode enabled by -ForceAppOnlySingleSite.' -ForegroundColor DarkGray
+    } elseif ($isGdapMode) {
+        Write-ProgressHost -Message '[INFO] GDAP mode detected; using app-only path for single-site reliability.' -ForegroundColor DarkGray
+    }
+}
+
+$needsAppOnlyEnumeration = ((-not $SiteUrl) -or $scanAllSites -or $useAppOnlyForSingleSite)
+
+if ($isGdapMode -and $needsAppOnlyEnumeration -and -not $effectiveTenantId) {
+    Write-ProgressHost -Message '[ERROR] GDAP mode detected but no customer TenantId found. Run Connect-Tenant first or pass -TenantId.' -ForegroundColor Red
+    exit 1
+}
+
+if ($ClientId -and -not $effectiveTenantId) {
+    Write-ProgressHost -Message '[ERROR] -ClientId requires -TenantId (or a resolvable GDAP customer tenant context).' -ForegroundColor Red
+    exit 1
+}
+
 # ── Connection ────────────────────────────────────────────────────────────────
 try {
-    if ($ClientId -and $TenantId) {
+    if ($ClientId -and ($TenantId -or $effectiveTenantId)) {
+        $resolvedTenantId = if ($TenantId) { $TenantId } else { $effectiveTenantId }
+
         # ── Provided app credentials → full app-only SDK connection ──────────
         if ($CertificateThumbprint) {
-            Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
+            Connect-MgGraph -ClientId $ClientId -TenantId $resolvedTenantId `
                 -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
         } elseif ($ClientSecret) {
             $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
             $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
-            Connect-MgGraph -ClientId $ClientId -TenantId $TenantId `
+            Connect-MgGraph -ClientId $ClientId -TenantId $resolvedTenantId `
                 -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
 
             # Keep raw app credentials for non-Graph fallback token requests (for example SPO REST).
@@ -214,7 +317,7 @@ try {
                 client_id     = $ClientId
                 client_secret = $ClientSecret
             }
-            $script:TokenTenantId = $TenantId
+            $script:TokenTenantId = $resolvedTenantId
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
@@ -224,112 +327,148 @@ try {
 
     } else {
         # ── Auto mode: delegated session stays open throughout ────────────────
-        # The delegated session is used for:  app create/delete, drive ops, file ops
-        # A separate short-lived app-only REST token is used only for getAllSites
-        Write-Host "  Connecting interactively..." -ForegroundColor Cyan
-        Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
-        Connect-MgGraph -Scopes @(
-            'Application.ReadWrite.All'
-            'AppRoleAssignment.ReadWrite.All'
-            'Sites.Read.All'
-            'Files.Read.All'
-        ) -NoWelcome -ErrorAction Stop
-        $script:ConnectedHere = $true
-
-        $ctx          = Get-MgContext
-        $usedTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
-        $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
-        if (-not $usedTenantId) {
-            Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
-            Remove-TempApp; exit 1
-        }
-
-        # Create temporary App Registration
-        $appName = "SP-StorageReport-Temp-$ts"
-        Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
-        $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
-        $script:TempAppObjectId = $app.Id
-
-        # Service Principal
-        $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-
-        # Assign site application permission + grant admin consent
-        $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
-        if (-not $appRole) {
-            Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
-            Remove-TempApp; exit 1
-        }
-        New-MgServicePrincipalAppRoleAssignment `
-            -ServicePrincipalId $sp.Id `
-            -PrincipalId        $sp.Id `
-            -ResourceId         $graphSp.Id `
-            -AppRoleId          $appRole.Id `
-            -ErrorAction Stop | Out-Null
-        Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
-
-        # Also grant Sites.Read.All on the SharePoint service principal so the app
-        # can obtain a SharePoint-scoped token for SPO REST calls (recycle bin, etc.).
-        try {
-            $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
-            $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -in @('Sites.Read.All', 'AllSites.Read') } | Select-Object -First 1
-            if ($spoRole) {
-                New-MgServicePrincipalAppRoleAssignment `
-                    -ServicePrincipalId $sp.Id `
-                    -PrincipalId        $sp.Id `
-                    -ResourceId         $spoSp.Id `
-                    -AppRoleId          $spoRole.Id `
-                    -ErrorAction Stop | Out-Null
-                Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
+        # The delegated session is always used for drive/file operations.
+        # For tenant-wide enumeration we temporarily add app-only getAllSites.
+        if ($needsAppOnlyEnumeration) {
+            Write-Host "  Connecting interactively..." -ForegroundColor Cyan
+            Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
+            $connectParams = @{
+                Scopes    = @(
+                'Application.ReadWrite.All'
+                'AppRoleAssignment.ReadWrite.All'
+                'Sites.Read.All'
+                'Files.Read.All'
+                )
+                NoWelcome = $true
             }
-        } catch {
-            Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
-        }
+            if ($effectiveTenantId) {
+                $connectParams['TenantId'] = $effectiveTenantId
+            }
+            Connect-MgGraph @connectParams -ErrorAction Stop
+            $script:ConnectedHere = $true
 
-        # Create short-lived client secret (expires in 1 day)
-        $secret = Add-MgApplicationPassword `
-            -ApplicationId      $app.Id `
-            -PasswordCredential @{
-                displayName = 'temp'
-                endDateTime = (Get-Date).AddDays(1)
-            } -ErrorAction Stop
+            $ctx          = Get-MgContext
+            $usedTenantId = if ($effectiveTenantId) { $effectiveTenantId } else { $ctx.TenantId }
+            $requiredSiteRole = if ($UseHighPrivilege) { 'Sites.FullControl.All' } else { 'Sites.Read.All' }
+            if (-not $usedTenantId) {
+                Write-Host "  [ERROR] Could not determine tenant ID. Provide -TenantId." -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
 
-        # Get app-only OAuth token via REST — no SDK reconnect needed
-        # The delegated session stays open so Remove-MgApplication works at the end
-        Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
-        $tokenBody = @{
-            grant_type    = 'client_credentials'
-            scope         = 'https://graph.microsoft.com/.default'
-            client_id     = $app.AppId
-            client_secret = $secret.SecretText
-        }
+            # Create temporary App Registration
+            $appName = "SP-StorageReport-Temp-$ts"
+            Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
+            $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
+            $script:TempAppObjectId = $app.Id
 
-        $appOnlyToken = $null
-        for ($i = 1; $i -le 6; $i++) {
+            # Service Principal
+            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+
+            # Assign site application permission + grant admin consent
+            $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+            $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
+            if (-not $appRole) {
+                Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
+            New-MgServicePrincipalAppRoleAssignment `
+                -ServicePrincipalId $sp.Id `
+                -PrincipalId        $sp.Id `
+                -ResourceId         $graphSp.Id `
+                -AppRoleId          $appRole.Id `
+                -ErrorAction Stop | Out-Null
+            Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
+
+            # Also grant a role on the SharePoint service principal so the app can obtain a
+            # SharePoint-scoped token for SPO REST calls (recycle bin, etc.). Reading a site's
+            # recycle bin needs elevated (manage/full-control level) rights — Sites.Read.All is
+            # not enough and the call fails silently — so this must follow -UseHighPrivilege the
+            # same way the Graph-scoped role above does, instead of always requesting read-only.
             try {
-                $tokenResp    = Invoke-RestMethod -Method POST -ErrorAction Stop `
-                    -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
-                    -Body $tokenBody
-                $appOnlyToken = $tokenResp.access_token
-                break
+                $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
+                $spoRoleCandidates = if ($UseHighPrivilege) {
+                    @('Sites.FullControl.All', 'AllSites.FullControl', 'AllSites.Manage', 'Sites.Manage.All', 'Sites.Read.All', 'AllSites.Read')
+                } else {
+                    @('Sites.Read.All', 'AllSites.Read')
+                }
+                $spoRole = $null
+                foreach ($candidate in $spoRoleCandidates) {
+                    $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -eq $candidate } | Select-Object -First 1
+                    if ($spoRole) { break }
+                }
+                if ($spoRole) {
+                    New-MgServicePrincipalAppRoleAssignment `
+                        -ServicePrincipalId $sp.Id `
+                        -PrincipalId        $sp.Id `
+                        -ResourceId         $spoSp.Id `
+                        -AppRoleId          $spoRole.Id `
+                        -ErrorAction Stop | Out-Null
+                    Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
+                }
             } catch {
-                if ($i -lt 6) {
-                    Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
-                    Start-Sleep -Seconds 5
+                Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
+            }
+
+            # Create short-lived client secret (expires in 1 day)
+            $secret = Add-MgApplicationPassword `
+                -ApplicationId      $app.Id `
+                -PasswordCredential @{
+                    displayName = 'temp'
+                    endDateTime = (Get-Date).AddDays(1)
+                } -ErrorAction Stop
+
+            # Get app-only OAuth token via REST — no SDK reconnect needed
+            # The delegated session stays open so Remove-MgApplication works at the end
+            Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
+            $tokenBody = @{
+                grant_type    = 'client_credentials'
+                scope         = 'https://graph.microsoft.com/.default'
+                client_id     = $app.AppId
+                client_secret = $secret.SecretText
+            }
+
+            $appOnlyToken = $null
+            for ($i = 1; $i -le 6; $i++) {
+                try {
+                    $tokenResp    = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                        -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
+                        -Body $tokenBody
+                    $appOnlyToken = $tokenResp.access_token
+                    break
+                } catch {
+                    if ($i -lt 6) {
+                        Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
+                        Start-Sleep -Seconds 5
+                    }
                 }
             }
-        }
 
-        if (-not $appOnlyToken) {
-            Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
-            Remove-TempApp; exit 1
-        }
+            if (-not $appOnlyToken) {
+                Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
+                Remove-TempApp; exit 1
+            }
 
-        $script:AppOnlyHeaders  = @{ Authorization = "Bearer $appOnlyToken" }
-        $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)  # refresh 5 min early
-        $script:TokenBody       = $tokenBody
-        $script:TokenTenantId   = $usedTenantId
-        Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+            $script:AppOnlyHeaders  = @{ Authorization = "Bearer $appOnlyToken" }
+            $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)  # refresh 5 min early
+            $script:TokenBody       = $tokenBody
+            $script:TokenTenantId   = $usedTenantId
+            Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+        } else {
+            Write-Host "  Connecting interactively (single-site optimized mode)..." -ForegroundColor Cyan
+            $connectParams = @{
+                Scopes    = @(
+                'Sites.Read.All'
+                'Files.Read.All'
+                )
+                NoWelcome = $true
+            }
+            if ($effectiveTenantId) {
+                $connectParams['TenantId'] = $effectiveTenantId
+            }
+            Connect-MgGraph @connectParams -ErrorAction Stop
+            $script:ConnectedHere = $true
+            Write-Host "  [OK]   Connected (delegated single-site mode, no temporary app)." -ForegroundColor DarkGray
+        }
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
@@ -457,32 +596,27 @@ function Append-CheckpointRows {
 # ── Get sites ─────────────────────────────────────────────────────────────────
 Write-ProgressHost -Message "Retrieving sites..." -ForegroundColor Cyan
 
-$scanAllSites = $false
+if ($isSingleSiteScan) {
+    try {
+        $siteUri = [System.Uri]$SiteUrl
+        $siteHost = $siteUri.Host
+        $sitePath = $siteUri.AbsolutePath.TrimEnd('/')
+        $siteGraphUri = "https://graph.microsoft.com/v1.0/sites/${siteHost}:${sitePath}?`$select=id,displayName,webUrl,name"
 
-if ($SiteUrl) {
-    $normalizedSiteUrl = $SiteUrl.TrimEnd('/')
+        if ($script:AppOnlyHeaders) {
+            $siteObj = Invoke-GraphGet -Uri $siteGraphUri -Headers $script:AppOnlyHeaders
+        } else {
+            $siteObj = Invoke-MgGraphRequest -Method GET -Uri $siteGraphUri -OutputType PSObject -ErrorAction Stop
+        }
 
-    # A tenant root URL should behave like omitting -SiteUrl (scan all sites).
-    if ($normalizedSiteUrl -match '^https://[^/]+$') {
-        Write-ProgressHost -Message "[INFO] Tenant root URL detected; running tenant-wide scan." -ForegroundColor DarkGray
-        $scanAllSites = $true
-    } elseif ($normalizedSiteUrl -match '^https://[^/]+/(sites|teams)/([^?#]+)$') {
-        $SiteUrl = $normalizedSiteUrl
-        $siteSearchTerm = ($Matches[2] -split '/')[-1]
-
-        try {
-            $sites = @(Get-MgSite -Search $siteSearchTerm -ErrorAction Stop |
-                       Where-Object { $_.WebUrl.TrimEnd('/') -eq $SiteUrl })
-            if ($sites.Count -eq 0) {
-                Write-ProgressHost -Message "[ERROR] Site not found: $SiteUrl" -ForegroundColor Red
-                Remove-TempApp; exit 1
-            }
-        } catch {
-            Write-ProgressHost -Message "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        if (-not $siteObj -or -not $siteObj.id) {
+            Write-ProgressHost -Message "[ERROR] Site not found: $SiteUrl" -ForegroundColor Red
             Remove-TempApp; exit 1
         }
-    } else {
-        Write-ProgressHost -Message "[ERROR] Invalid URL format. Expected: https://tenant.sharepoint.com/sites/<name>, /teams/<name>, or tenant root URL." -ForegroundColor Red
+
+        $sites = @($siteObj)
+    } catch {
+        Write-ProgressHost -Message "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
         Remove-TempApp; exit 1
     }
 }
@@ -722,22 +856,53 @@ function Get-SiteDrives {
                 # Continue to final fallback below.
             }
 
-            # Fallback 2: delegated SDK drives call when available (auto mode).
+            # Fallback 2: delegated Graph REST call (module-agnostic).
             if ($script:ConnectedHere) {
-                return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+                $drives = [System.Collections.Generic.List[object]]::new()
+                $drivesUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/drives?`$select=id,name,webUrl,quota&`$top=200"
+                do {
+                    $resp = Invoke-MgGraphRequest -Method GET -Uri $drivesUri -OutputType PSObject -ErrorAction Stop
+                    @($resp.value) | ForEach-Object { $drives.Add($_) }
+                    $drivesUri = $resp.'@odata.nextLink'
+                } while ($drivesUri)
+                return $drives
             }
             throw
         }
     } else {
-        return Get-MgSiteDrive -SiteId $SiteId -ErrorAction Stop
+        $drives = [System.Collections.Generic.List[object]]::new()
+        $drivesUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/drives?`$select=id,name,webUrl,quota&`$top=200"
+        do {
+            $resp = Invoke-MgGraphRequest -Method GET -Uri $drivesUri -OutputType PSObject -ErrorAction Stop
+            @($resp.value) | ForEach-Object { $drives.Add($_) }
+            $drivesUri = $resp.'@odata.nextLink'
+        } while ($drivesUri)
+        return $drives
+    }
+}
+
+function Get-VersionsNextPage {
+    # Follows @odata.nextLink for a single file's version list. The versions endpoint normally
+    # returns everything in one page, but if a library ever has enough version history to trigger
+    # paging, we must not silently drop the older versions on later pages.
+    param([string]$NextLink, [System.Collections.Generic.List[object]] $Values)
+    $link = $NextLink
+    while ($link) {
+        $page = if ($script:AppOnlyHeaders) { Invoke-GraphGet -Uri $link -Headers $script:AppOnlyHeaders }
+                else { Invoke-MgGraphRequest -Method GET -Uri $link -OutputType PSObject -ErrorAction Stop }
+        if ($page.value) { $Values.AddRange(@($page.value)) }
+        $link = $page.'@odata.nextLink'
     }
 }
 
 function Invoke-GraphBatchGet {
     # Resolves a set of GET requests via Microsoft Graph's $batch endpoint (max 20 per call).
-    # Used for per-file version lookups — non-critical data, so retries here are few and cheap:
-    # a failed lookup just falls back to "0 versions" instead of stalling the whole scan the
-    # way the main Invoke-GraphGet retry/backoff (built for critical calls) would.
+    # Individual sub-requests inside an otherwise-successful batch response can come back
+    # throttled (429) or with a transient server error under sustained load (thousands of files).
+    # Those are retried in subsequent passes with backoff instead of being treated as a permanent
+    # "0 versions" — the previous single-attempt-per-chunk approach was silently discarding the
+    # vast majority of version history on large libraries, which is why tenant-wide version totals
+    # could come out lower than a single site's real Storage Metrics usage.
     param(
         [System.Collections.Generic.List[object]] $Requests   # each: @{ Id = 'string'; Url = '/relative/path' }
     )
@@ -745,131 +910,188 @@ function Invoke-GraphBatchGet {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
-    $chunkSpecs = [System.Collections.Generic.List[object]]::new()
-    for ($i = 0; $i -lt $Requests.Count; $i += 20) {
-        $end   = [Math]::Min($i + 19, $Requests.Count - 1)
-        $chunk = $Requests.GetRange($i, $end - $i + 1)
+    $pending = $Requests
+    $maxPasses = 5
+    for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
+        $chunkSpecs = [System.Collections.Generic.List[object]]::new()
+        for ($i = 0; $i -lt $pending.Count; $i += 20) {
+            $end   = [Math]::Min($i + 19, $pending.Count - 1)
+            $chunk = $pending.GetRange($i, $end - $i + 1)
 
-        $chunkSpecs.Add([PSCustomObject]@{
-            Requests = $chunk
-            Body     = (@{
-                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-            } | ConvertTo-Json -Depth 6)
-        }) | Out-Null
-    }
+            $chunkSpecs.Add([PSCustomObject]@{
+                Requests = $chunk
+                Body     = (@{
+                    requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+                } | ConvertTo-Json -Depth 6)
+            }) | Out-Null
+        }
 
-    if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
-        $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
-        $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
-        $runspacePool.Open()
+        $retryList = [System.Collections.Generic.List[object]]::new()
 
-        $workers = [System.Collections.Generic.List[object]]::new()
-        $workerScript = {
-            param(
-                [string]$BatchBody,
-                [hashtable]$Headers,
-                [int]$TimeoutSec
-            )
+        if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+            # Runspace workers get a plain copy of the bearer token and cannot see later updates to
+            # $script:AppOnlyHeaders, so refresh it here before dispatch. Without this, a token that
+            # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
+            # of the run.
+            Update-AppOnlyToken
+            $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
+            $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+            $runspacePool.Open()
 
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-                try {
-                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Headers $Headers -ContentType 'application/json' `
-                        -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+            $workers = [System.Collections.Generic.List[object]]::new()
+            $workerScript = {
+                param(
+                    [string]$BatchBody,
+                    [hashtable]$Headers,
+                    [int]$TimeoutSec
+                )
 
-                    return [PSCustomObject]@{
-                        Success   = $true
-                        Responses = @($resp.responses)
-                    }
-                } catch {
-                    if ($attempt -eq 3) {
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    try {
+                        $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                            -Headers $Headers -ContentType 'application/json' `
+                            -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+
                         return [PSCustomObject]@{
-                            Success   = $false
-                            Responses = @()
+                            Success   = $true
+                            Responses = @($resp.responses)
+                        }
+                    } catch {
+                        if ($attempt -eq 3) {
+                            return [PSCustomObject]@{
+                                Success      = $false
+                                Responses    = @()
+                                ErrorMessage = $_.Exception.Message
+                            }
+                        }
+
+                        Start-Sleep -Seconds ($attempt * 3)
+                    }
+                }
+            }
+
+            try {
+                foreach ($spec in $chunkSpecs) {
+                    $ps = [PowerShell]::Create()
+                    $ps.RunspacePool = $runspacePool
+                    [void]$ps.AddScript($workerScript)
+                    [void]$ps.AddParameter('BatchBody', $spec.Body)
+                    [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
+                    [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+
+                    $workers.Add([PSCustomObject]@{
+                        PowerShell = $ps
+                        Handle     = $ps.BeginInvoke()
+                        Requests   = $spec.Requests
+                    }) | Out-Null
+                }
+
+                foreach ($worker in $workers) {
+                    $payload = $null
+
+                    try {
+                        $payload = $worker.PowerShell.EndInvoke($worker.Handle)
+                    } catch {
+                        $payload = $null
+                    } finally {
+                        $worker.PowerShell.Dispose()
+                    }
+
+                    if ($payload -and $payload.Success) {
+                        $byId = @{}
+                        foreach ($r in $payload.Responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $worker.Requests) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                if ($r.body.'@odata.nextLink') {
+                                    Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                }
+                                $results[[string]$r.id] = @{ value = $values }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        continue
+                    }
+
+                    if ($pass -lt $maxPasses) {
+                        foreach ($req in $worker.Requests) { $retryList.Add($req) }
+                    } else {
+                        $reason = if ($payload -and $payload.ErrorMessage) { $payload.ErrorMessage } else { 'Batch call failed after retries.' }
+                        foreach ($req in $worker.Requests) { $results[$req.Id] = $reason }
+                    }
+                }
+            } finally {
+                $runspacePool.Close()
+                $runspacePool.Dispose()
+            }
+        } else {
+            foreach ($spec in $chunkSpecs) {
+                $chunk = $spec.Requests
+                $batchBody = $spec.Body
+
+                $batchDone = $false
+                for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
+                    try {
+                        if ($script:AppOnlyHeaders) {
+                            Update-AppOnlyToken
+                            $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Headers $script:AppOnlyHeaders -ContentType 'application/json' `
+                                -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                        } else {
+                            $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                        }
+                        $byId = @{}
+                        foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $chunk) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                if ($r.body.'@odata.nextLink') {
+                                    Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                }
+                                $results[[string]$r.id] = @{ value = $values }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        $batchDone = $true
+                    } catch {
+                        if ($attempt -eq 3) {
+                            if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
+                            else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
+                        } else {
+                            Start-Sleep -Seconds ($attempt * 3)
                         }
                     }
-
-                    Start-Sleep -Seconds ($attempt * 3)
                 }
             }
         }
 
-        try {
-            foreach ($spec in $chunkSpecs) {
-                $ps = [PowerShell]::Create()
-                $ps.RunspacePool = $runspacePool
-                [void]$ps.AddScript($workerScript)
-                [void]$ps.AddParameter('BatchBody', $spec.Body)
-                [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
-                [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
-
-                $workers.Add([PSCustomObject]@{
-                    PowerShell = $ps
-                    Handle     = $ps.BeginInvoke()
-                    Requests   = $spec.Requests
-                }) | Out-Null
-            }
-
-            foreach ($worker in $workers) {
-                $payload = $null
-
-                try {
-                    $payload = $worker.PowerShell.EndInvoke($worker.Handle)
-                } catch {
-                    $payload = $null
-                } finally {
-                    $worker.PowerShell.Dispose()
-                }
-
-                if ($payload -and $payload.Success) {
-                    foreach ($r in $payload.Responses) {
-                        $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
-                    }
-                    continue
-                }
-
-                foreach ($req in $worker.Requests) {
-                    $results[$req.Id] = $null
-                }
-            }
-        } finally {
-            $runspacePool.Close()
-            $runspacePool.Dispose()
+        if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
+            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
         }
-
-        return $results
+        $pending = $retryList
     }
-
-    foreach ($spec in $chunkSpecs) {
-        $chunk = $spec.Requests
-        $batchBody = $spec.Body
-
-        $done = $false
-        for ($attempt = 1; $attempt -le 3 -and -not $done; $attempt++) {
-            try {
-                if ($script:AppOnlyHeaders) {
-                    Update-AppOnlyToken
-                    $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Headers $script:AppOnlyHeaders -ContentType 'application/json' `
-                        -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-                } else {
-                    $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
-                }
-                foreach ($r in $resp.responses) {
-                    $results[[string]$r.id] = if ($r.status -eq 200) { $r.body } else { $null }
-                }
-                $done = $true
-            } catch {
-                if ($attempt -eq 3) {
-                    # Give up on this chunk — mark every item as unresolved (falls back to 0 versions).
-                    foreach ($req in $chunk) { $results[$req.Id] = $null }
-                } else {
-                    Start-Sleep -Seconds ($attempt * 3)
-                }
-            }
-        }
-    }
+    foreach ($req in $pending) { $results[[string]$req.Id] = "Gave up after $maxPasses retry pass(es)." }
 
     return $results
 }
@@ -915,8 +1137,13 @@ function Get-AllDriveItems {
                     $childUri = $resp.'@odata.nextLink'
                 } while ($childUri)
             } else {
-                Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $current.Id -All -ErrorAction Stop |
-                    ForEach-Object { $children.Add($_) }
+                $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$($current.Id)/children" +
+                            '?$select=id,name,size,file,folder,lastModifiedDateTime&$top=200'
+                do {
+                    $resp = Invoke-MgGraphRequest -Method GET -Uri $childUri -OutputType PSObject -ErrorAction Stop
+                    @($resp.value) | ForEach-Object { $children.Add($_) }
+                    $childUri = $resp.'@odata.nextLink'
+                } while ($childUri)
             }
         } catch {
             Write-Host ("          [ERROR] Cannot read folder '{0}': {1}" -f $current.Path, $_.Exception.Message) -ForegroundColor Red
@@ -999,8 +1226,14 @@ function Get-AllDriveItems {
                 $record.VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
                 $record.TotalSizeBytes   = $record.SizeBytes + $verSize
                 $record.TotalSizeMB      = [math]::Round($record.TotalSizeBytes / 1MB, 3)
+            } else {
+                # Lookup failed after retries — record keeps its zeroed version defaults. Track the
+                # reason so the run summary can surface *why*, instead of silently under-reporting.
+                $script:VersionLookupFailureCount++
+                if ($body -is [string] -and $script:VersionLookupFailureSamples.Count -lt 20) {
+                    $script:VersionLookupFailureSamples.Add($body)
+                }
             }
-            # else: lookup failed after retries — record keeps its zeroed version defaults.
         }
     }
 
@@ -1039,6 +1272,187 @@ function Get-SpoAppOnlyTokenForHost {
     } catch {}
 
     return $null
+}
+
+function Get-SpoResponseRows {
+    param([object]$Response)
+
+    if ($null -eq $Response) { return @() }
+    if ($Response.value) { return @($Response.value) }
+    if ($Response.d -and $Response.d.results) { return @($Response.d.results) }
+    return @()
+}
+
+function Get-AllSpoLibraryItems {
+    param(
+        [string]$SiteWebUrl,
+        [string]$RootFolderServerRelativeUrl,
+        [bool]$FetchVersions = $true
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SiteWebUrl)) {
+        throw 'SPO REST scan requires SiteWebUrl.'
+    }
+    if ([string]::IsNullOrWhiteSpace($RootFolderServerRelativeUrl)) {
+        throw 'SPO REST scan requires RootFolderServerRelativeUrl.'
+    }
+
+    $siteUri  = [Uri]$SiteWebUrl
+    $hostName = $siteUri.Host
+    $spoToken = Get-SpoAppOnlyTokenForHost -HostName $hostName
+    if (-not $spoToken) {
+        throw 'Could not obtain SharePoint-scoped token for hidden library scan.'
+    }
+
+    $spoHeaders = @{
+        Authorization = "Bearer $spoToken"
+        Accept        = 'application/json;odata=nometadata'
+    }
+
+    $libraryRoot      = $RootFolderServerRelativeUrl.TrimEnd('/')
+    $results          = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $queue            = [System.Collections.Generic.Queue[PSCustomObject]]::new()
+    $pendingVersions  = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $seenFolders      = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $processedFolders = 0
+    $processedFiles   = 0
+
+    $queue.Enqueue([PSCustomObject]@{ ServerRelativeUrl = $libraryRoot })
+    $seenFolders.Add($libraryRoot) | Out-Null
+
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        $processedFolders++
+        if ($processedFolders % 25 -eq 0) {
+            Write-ProgressHost -Message (
+                "progress (SPO REST): {0} folders, {1} files scanned..." -f
+                $processedFolders,
+                $processedFiles
+            ) -ForegroundColor DarkGray
+        }
+
+        $encodedFolderUrl = [Uri]::EscapeDataString($current.ServerRelativeUrl)
+
+        $filesUri = "https://$hostName/_api/web/GetFolderByServerRelativeUrl('$encodedFolderUrl')/Files?`$select=Name,ServerRelativeUrl,TimeLastModified,Length&`$top=5000"
+        do {
+            $filesResp = Invoke-RestMethod -Method GET -Uri $filesUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+            foreach ($file in (Get-SpoResponseRows -Response $filesResp)) {
+                $processedFiles++
+                $fileSize = [int64]($file.Length ?? 0)
+                $path = ([string]$file.ServerRelativeUrl).Substring($libraryRoot.Length).TrimStart('/')
+                if ([string]::IsNullOrWhiteSpace($path)) { $path = $file.Name }
+
+                $fileRecord = [PSCustomObject]@{
+                    ItemType         = 'File'
+                    Path             = $path
+                    Level            = (($path -split '/').Count)
+                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
+                    SizeBytes        = $fileSize
+                    SizeMB           = [math]::Round($fileSize / 1MB, 3)
+                    VersionCount     = 0
+                    VersionSizeBytes = [int64]0
+                    VersionSizeMB    = 0.0
+                    TotalSizeBytes   = $fileSize
+                    TotalSizeMB      = [math]::Round($fileSize / 1MB, 3)
+                    Modified         = $file.TimeLastModified
+                }
+                $results.Add($fileRecord) | Out-Null
+
+                if ($FetchVersions) {
+                    $pendingVersions.Add([PSCustomObject]@{
+                        ServerRelativeUrl = [string]$file.ServerRelativeUrl
+                        Record            = $fileRecord
+                    }) | Out-Null
+                }
+            }
+
+            if ($filesResp.'@odata.nextLink') {
+                $filesUri = $filesResp.'@odata.nextLink'
+            } elseif ($filesResp.d -and $filesResp.d.__next) {
+                $filesUri = $filesResp.d.__next
+            } else {
+                $filesUri = $null
+            }
+        } while ($filesUri)
+
+        $foldersUri = "https://$hostName/_api/web/GetFolderByServerRelativeUrl('$encodedFolderUrl')/Folders?`$select=Name,ServerRelativeUrl,TimeLastModified,ItemCount&`$top=5000"
+        do {
+            $foldersResp = Invoke-RestMethod -Method GET -Uri $foldersUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+            foreach ($folder in (Get-SpoResponseRows -Response $foldersResp)) {
+                $folderUrl = [string]$folder.ServerRelativeUrl
+                if ([string]::IsNullOrWhiteSpace($folderUrl) -or $folderUrl -eq $libraryRoot) { continue }
+
+                $path = $folderUrl.Substring($libraryRoot.Length).TrimStart('/')
+                if ([string]::IsNullOrWhiteSpace($path)) { continue }
+
+                $results.Add([PSCustomObject]@{
+                    ItemType         = 'Folder'
+                    Path             = $path
+                    Level            = (($path -split '/').Count)
+                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
+                    SizeBytes        = $null
+                    SizeMB           = $null
+                    VersionCount     = $null
+                    VersionSizeBytes = $null
+                    VersionSizeMB    = $null
+                    TotalSizeBytes   = $null
+                    TotalSizeMB      = $null
+                    Modified         = $folder.TimeLastModified
+                }) | Out-Null
+
+                if ($seenFolders.Add($folderUrl)) {
+                    $queue.Enqueue([PSCustomObject]@{ ServerRelativeUrl = $folderUrl })
+                }
+            }
+
+            if ($foldersResp.'@odata.nextLink') {
+                $foldersUri = $foldersResp.'@odata.nextLink'
+            } elseif ($foldersResp.d -and $foldersResp.d.__next) {
+                $foldersUri = $foldersResp.d.__next
+            } else {
+                $foldersUri = $null
+            }
+        } while ($foldersUri)
+    }
+
+    if ($FetchVersions -and $pendingVersions.Count -gt 0) {
+        Write-ProgressHost -Message ("resolving version history via SPO REST for {0} file(s)..." -f $pendingVersions.Count) -ForegroundColor DarkGray
+        foreach ($pending in $pendingVersions) {
+            try {
+                $encodedFileUrl = [Uri]::EscapeDataString($pending.ServerRelativeUrl)
+                $versionUri = "https://$hostName/_api/web/GetFileByServerRelativeUrl('$encodedFileUrl')/Versions?`$select=Size&`$top=5000"
+                $versionRows = [System.Collections.Generic.List[object]]::new()
+
+                do {
+                    $versionResp = Invoke-RestMethod -Method GET -Uri $versionUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                    foreach ($row in (Get-SpoResponseRows -Response $versionResp)) {
+                        $versionRows.Add($row) | Out-Null
+                    }
+
+                    if ($versionResp.'@odata.nextLink') {
+                        $versionUri = $versionResp.'@odata.nextLink'
+                    } elseif ($versionResp.d -and $versionResp.d.__next) {
+                        $versionUri = $versionResp.d.__next
+                    } else {
+                        $versionUri = $null
+                    }
+                } while ($versionUri)
+
+                if ($versionRows.Count -gt 0) {
+                    $verSize = [int64](($versionRows | Where-Object { $_.Size } | Measure-Object -Property Size -Sum).Sum ?? 0)
+                    $pending.Record.VersionCount     = $versionRows.Count
+                    $pending.Record.VersionSizeBytes = $verSize
+                    $pending.Record.VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
+                    $pending.Record.TotalSizeBytes   = $pending.Record.SizeBytes + $verSize
+                    $pending.Record.TotalSizeMB      = [math]::Round($pending.Record.TotalSizeBytes / 1MB, 3)
+                }
+            } catch {
+                # Version lookup failed for this file — keep zeroed version defaults.
+            }
+        }
+    }
+
+    return $results
 }
 
 function Get-SiteRecycleBinItems {
@@ -1105,23 +1519,30 @@ function Get-SiteRecycleBinItems {
             } catch {}
         }
 
-        # Final fallback: Graph SDK cmdlet (works in delegated mode only; returns 400
-        # app-only for regular sites, but try anyway for delegated sessions).
-        if ($script:ConnectedHere) {
-            try {
-                Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
-                    -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-                    ForEach-Object { $items.Add($_) }
+        # Final fallback: Graph REST recycle bin endpoint (delegated/app-only behavior
+        # depends on tenant/site type; if unsupported this call can return 400).
+        try {
+            $rbUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/recycleBin/items?`$select=id,name,size,deletedDateTime&`$top=200"
+            do {
+                $resp = Invoke-MgGraphRequest -Method GET -Uri $rbUri -OutputType PSObject -ErrorAction Stop
+                @($resp.value) | ForEach-Object { $items.Add($_) }
+                $rbUri = $resp.'@odata.nextLink'
+            } while ($rbUri)
+
+            if ($items.Count -gt 0) {
                 return $items
-            } catch {}
-        }
+            }
+        } catch {}
 
         throw "Recycle bin: all retrieval methods failed for this site."
     }
 
-    Get-MgSiteRecycleBinItem -SiteId $SiteId -All `
-        -Property 'id,name,size,deletedDateTime' -ErrorAction Stop |
-        ForEach-Object { $items.Add($_) }
+    $rbUri = "https://graph.microsoft.com/v1.0/sites/$SiteId/recycleBin/items?`$select=id,name,size,deletedDateTime&`$top=200"
+    do {
+        $resp = Invoke-MgGraphRequest -Method GET -Uri $rbUri -OutputType PSObject -ErrorAction Stop
+        @($resp.value) | ForEach-Object { $items.Add($_) }
+        $rbUri = $resp.'@odata.nextLink'
+    } while ($rbUri)
 
     return $items
 }
@@ -1135,8 +1556,10 @@ $SkipVersions
 $Apply
 $UseHighPrivilege
 $RecycleBinOnly
+$ForceAppOnlySingleSite
 $($IncludeOneDriveUsers -join ',')
 $TenantId
+$effectiveTenantId
 $ClientId
 $CertificateThumbprint
 $GraphTimeoutSec
@@ -1261,8 +1684,8 @@ if ($RecycleBinOnly) {
                                Measure-Object -Property size -Sum).Sum ?? 0)
             $rbCount     = $rbItems.Count
 
-            Write-Host ("        {0} item(s) | {1} MB" -f
-                $rbCount, [math]::Round($rbSizeBytes / 1MB, 1)) -ForegroundColor DarkGray
+            Write-Host ("        {0} item(s) | {1}" -f
+                $rbCount, (Format-SizeAuto -MB ($rbSizeBytes / 1MB))) -ForegroundColor DarkGray
 
             $summaryRows.Add([PSCustomObject]@{
                 SiteName          = $siteName
@@ -1337,7 +1760,7 @@ if ($RecycleBinOnly) {
     $grandRB = ($summaryRows | Measure-Object -Property TotalSizeMB -Sum).Sum ?? 0
     $grandItems = ($summaryRows | Measure-Object -Property FileCount -Sum).Sum ?? 0
     Write-Host ("  Deleted items : {0}" -f $grandItems)
-    Write-Host ("  Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0), [math]::Round($grandRB / 1024, 2)) -ForegroundColor Magenta
+    Write-Host ("  Recycle bins  : {0}" -f (Format-SizeAuto -MB $grandRB)) -ForegroundColor Magenta
     Write-Host ""
 
     Finalize-CheckpointFiles
@@ -1374,6 +1797,80 @@ foreach ($site in $sites) {
                 Drive = $drive
             }) | Out-Null
             Write-ProgressHost -Message ("{0}" -f $drive.name) -ForegroundColor DarkGray
+        }
+
+        # ── Hidden library scan via SPO REST ──────────────────────────────────
+        # The Preservation Hold Library (and other hidden document libraries) are
+        # created automatically by Microsoft Purview/Compliance retention policies.
+        # They count toward the SharePoint storage quota shown in the admin portal,
+        # but are NOT returned by the Graph /lists or /drives endpoints without
+        # Sites.FullControl.All. The SPO REST /_api/web/lists endpoint with a
+        # SharePoint-scoped token is the most reliable way to discover them.
+        # Requires -UseHighPrivilege (Sites.FullControl.All) on the temp app, or a
+        # provided app with FullControl, for the subsequent Graph drive lookup to succeed.
+        if ($site.webUrl -and $script:TokenBody) {
+            try {
+                $hSiteUri  = [Uri]$site.webUrl
+                $hHost     = $hSiteUri.Host
+                $hBasePath = $hSiteUri.AbsolutePath.TrimEnd('/')
+                if ($hBasePath -eq '/') { $hBasePath = '' }
+                $hSpoToken = Get-SpoAppOnlyTokenForHost -HostName $hHost
+                if ($hSpoToken) {
+                    $hSpoHdrs  = @{
+                        Authorization = "Bearer $hSpoToken"
+                        Accept        = 'application/json;odata=nometadata'
+                    }
+                    # Enumerate all hidden document libraries and capture the root folder URL,
+                    # so they can still be scanned via SPO REST when Graph won't expose a drive.
+                    $hListUri  = "https://$hHost$hBasePath/_api/web/lists?`$filter=Hidden eq true and BaseTemplate eq 101&`$select=Id,Title,BaseTemplate,RootFolder/ServerRelativeUrl&`$expand=RootFolder&`$top=500"
+                    $hListResp = Invoke-RestMethod -Method GET -Uri $hListUri -Headers $hSpoHdrs `
+                                    -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                    # Build a set of drive IDs already found to avoid duplicates
+                    $hKnownIds = [System.Collections.Generic.HashSet[string]]::new(
+                        [string[]]@($drives | Where-Object { $_.id } | ForEach-Object { $_.id }),
+                        [StringComparer]::OrdinalIgnoreCase
+                    )
+                    foreach ($hList in (Get-SpoResponseRows -Response $hListResp)) {
+                        try {
+                            $hDriveUri = "https://graph.microsoft.com/v1.0/sites/$siteId/lists/$($hList.Id)/drive"
+                            $hDrive    = if ($script:AppOnlyHeaders) {
+                                Invoke-GraphGet -Uri $hDriveUri -Headers $script:AppOnlyHeaders
+                            } else {
+                                Invoke-MgGraphRequest -Method GET -Uri $hDriveUri -OutputType PSObject -ErrorAction Stop
+                            }
+                            if ($hDrive -and $hDrive.id -and $hKnownIds.Add($hDrive.id)) {
+                                $hDrive | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $null -Force -ErrorAction SilentlyContinue
+                                $hDrive | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $null -Force -ErrorAction SilentlyContinue
+                                $siteLibraries.Add([PSCustomObject]@{
+                                    Site  = $site
+                                    Drive = $hDrive
+                                }) | Out-Null
+                                Write-ProgressHost -Message ("[hidden] {0}" -f $hList.Title) -ForegroundColor DarkYellow
+                            }
+                        } catch {
+                            if ($hList.RootFolder -and $hList.RootFolder.ServerRelativeUrl) {
+                                $pseudoDrive = [PSCustomObject]@{
+                                    id                          = "spo-list|$($hList.Id)"
+                                    name                        = $hList.Title
+                                    webUrl                      = "https://$hHost$($hList.RootFolder.ServerRelativeUrl)"
+                                    quota                       = $null
+                                    VersioningEnabled           = $null
+                                    MajorVersionLimit           = $null
+                                    ScanMode                    = 'SpoRest'
+                                    RootFolderServerRelativeUrl = $hList.RootFolder.ServerRelativeUrl
+                                }
+                                $siteLibraries.Add([PSCustomObject]@{
+                                    Site  = $site
+                                    Drive = $pseudoDrive
+                                }) | Out-Null
+                                Write-ProgressHost -Message ("[hidden-rest] {0}" -f $hList.Title) -ForegroundColor DarkYellow
+                            }
+                        }
+                    }
+                }
+            } catch {
+                # SPO REST hidden library scan failed — non-critical, standard libraries already collected.
+            }
         }
     } catch {
         Write-ProgressHost -Message ("[ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
@@ -1428,7 +1925,7 @@ foreach ($entry in $siteLibraries) {
             VersionSizeMB      = $null
             TotalSizeMB        = $null
         }) | Out-Null
-        Write-Host ("        used: {0} GB" -f ([math]::Round(($quota.used ?? 0) / 1GB, 2))) -ForegroundColor DarkGray
+        Write-Host ("        used: {0}" -f (Format-SizeAuto -MB (($quota.used ?? 0) / 1MB))) -ForegroundColor DarkGray
 
         foreach ($row in $librarySummaryRows) { $summaryRows.Add($row) | Out-Null }
         Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @()
@@ -1439,13 +1936,18 @@ foreach ($entry in $siteLibraries) {
     # Skip per-file version lookups only when we positively know versioning is off for this
     # library — $drive.VersioningEnabled is $null (unknown) for the Get-MgSiteDrive fallback,
     # in which case we still fetch to avoid silently under-reporting.
+    $isSpoRestLibrary   = ($drive.PSObject.Properties.Name -contains 'ScanMode') -and ($drive.ScanMode -eq 'SpoRest')
     $versioningKnownOff = ($null -ne $drive.VersioningEnabled) -and (-not [bool]$drive.VersioningEnabled)
     $fetchVersions      = (-not $SkipVersions) -and (-not $FastMode) -and (-not $versioningKnownOff)
     $includeDetailRows  = -not $FastMode
     if (-not $SkipVersions -and $versioningKnownOff) {
         Write-Host "        versioning disabled on this library — skipping version lookups" -ForegroundColor DarkGray
     }
-    $items = Get-AllDriveItems -DriveId $drive.id -FetchVersions $fetchVersions
+    $items = if ($isSpoRestLibrary) {
+        Get-AllSpoLibraryItems -SiteWebUrl $site.webUrl -RootFolderServerRelativeUrl $drive.RootFolderServerRelativeUrl -FetchVersions $fetchVersions
+    } else {
+        Get-AllDriveItems -DriveId $drive.id -FetchVersions $fetchVersions
+    }
 
     $fileItems   = @($items | Where-Object { $_.ItemType -eq 'File' })
     $folderItems = @($items | Where-Object { $_.ItemType -eq 'Folder' })
@@ -1538,12 +2040,12 @@ foreach ($entry in $siteLibraries) {
     $totalSize   = $currentSize + $versionSize
     $folderCountDisplay = if ($FastMode) { 'n/a' } else { $totalFolders }
 
-    Write-Host ("        {0} folders | {1} files | current: {2} MB | versions: {3} MB | total: {4} MB" -f
+    Write-Host ("        {0} folders | {1} files | current: {2} | versions: {3} | total: {4}" -f
         $folderCountDisplay,
         $totalFiles,
-        [math]::Round($currentSize / 1MB, 1),
-        [math]::Round($versionSize / 1MB, 1),
-        [math]::Round($totalSize   / 1MB, 1)) -ForegroundColor DarkGray
+        (Format-SizeAuto -MB ($currentSize / 1MB)),
+        (Format-SizeAuto -MB ($versionSize / 1MB)),
+        (Format-SizeAuto -MB ($totalSize   / 1MB))) -ForegroundColor DarkGray
 
     $librarySummaryRows.Add([PSCustomObject]@{
         SiteName          = $siteName
@@ -1653,8 +2155,8 @@ if ($Apply) {
                                Measure-Object -Property size -Sum).Sum ?? 0)
             $rbCount     = $rbItems.Count
 
-            Write-Host ("        {0} item(s) | {1} MB" -f
-                $rbCount, [math]::Round($rbSizeBytes / 1MB, 1)) -ForegroundColor DarkGray
+            Write-Host ("        {0} item(s) | {1}" -f
+                $rbCount, (Format-SizeAuto -MB ($rbSizeBytes / 1MB))) -ForegroundColor DarkGray
 
             $rbSummaryRows.Add([PSCustomObject]@{
                 SiteName          = $siteName
@@ -1770,11 +2272,11 @@ if ($Apply) {
     Write-ProgressHost -Message "Top 10 site collections (libraries + recycle bin, sub-sites combined)" -ForegroundColor Cyan
     Write-Host "  ================================================" -ForegroundColor Cyan
     $siteCollectionRows | Select-Object -First 10 | ForEach-Object {
-        Write-ProgressHost -Message ("{0} GB  [{1}]  (libraries: {2} MB, prullenbak: {3} MB, {4} sub-site(n)/kanalen)" -f
-            [math]::Round($_.GrandTotalGB, 2),
+        Write-ProgressHost -Message ("{0}  [{1}]  (libraries: {2}, prullenbak: {3}, {4} sub-site(n)/kanalen)" -f
+            (Format-SizeAuto -MB ($_.LibrariesMB + $_.RecycleBinMB)),
             $_.SiteCollection,
-            [math]::Round($_.LibrariesMB, 0),
-            [math]::Round($_.RecycleBinMB, 0),
+            (Format-SizeAuto -MB $_.LibrariesMB),
+            (Format-SizeAuto -MB $_.RecycleBinMB),
             $_.SubSiteCount) -ForegroundColor Green
     }
 }
@@ -1854,8 +2356,8 @@ if ($Apply -and $detailRows.Count -gt 0) {
         $mdLines.Add("|---|---|")
         $mdLines.Add(("| Sites gescand | {0} |" -f $sites.Count))
         $mdLines.Add(("| Totaal bestanden | {0} |" -f $grandFiles))
-        $mdLines.Add(("| Versiedata | {0} MB ({1} GB) |" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)))
-        $mdLines.Add(("| Totaal (huidig + versies) | {0} MB ({1} GB) |" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)))
+        $mdLines.Add(("| Versiedata | {0} |" -f (Format-SizeAuto -MB $grandVer)))
+        $mdLines.Add(("| Totaal (huidig + versies) | {0} |" -f (Format-SizeAuto -MB $grandTotal)))
         $mdLines.Add('')
         $mdLines.Add('---')
         $mdLines.Add('')
@@ -1911,9 +2413,16 @@ Write-ProgressHost -Message ("Sites scanned : {0}" -f $sites.Count)
 if ($Apply) {
     Write-ProgressHost -Message ("Site collections : {0}" -f $siteCollectionRows.Count)
     Write-ProgressHost -Message ("Total files   : {0}"    -f $grandFiles)
-    Write-ProgressHost -Message ("Version data  : {0} MB ({1} GB)" -f [math]::Round($grandVer, 0), [math]::Round($grandVer / 1024, 2)) -ForegroundColor Yellow
-    Write-ProgressHost -Message ("Recycle bins  : {0} MB ({1} GB)" -f [math]::Round($grandRB, 0),  [math]::Round($grandRB  / 1024, 2)) -ForegroundColor Magenta
-    Write-ProgressHost -Message ("Grand total   : {0} MB ({1} GB)" -f [math]::Round($grandTotal, 0), [math]::Round($grandTotal / 1024, 2)) -ForegroundColor Green
+    Write-ProgressHost -Message ("Version data  : {0}" -f (Format-SizeAuto -MB $grandVer)) -ForegroundColor Yellow
+    Write-ProgressHost -Message ("Recycle bins  : {0}" -f (Format-SizeAuto -MB $grandRB)) -ForegroundColor Magenta
+    Write-ProgressHost -Message ("Grand total   : {0}" -f (Format-SizeAuto -MB $grandTotal)) -ForegroundColor Green
+
+    if ($script:VersionLookupFailureCount -gt 0) {
+        Write-ProgressHost -Message ("[WARN] Version history could not be resolved for {0} file(s) — Version data above is understated by that much." -f $script:VersionLookupFailureCount) -ForegroundColor Yellow
+        foreach ($sample in ($script:VersionLookupFailureSamples | Select-Object -Unique | Select-Object -First 5)) {
+            Write-ProgressHost -Message ("        e.g. {0}" -f $sample) -ForegroundColor DarkYellow
+        }
+    }
 
     # ── Top libraries by version history size ─────────────────────────────────
     Write-Host ""
@@ -1925,8 +2434,8 @@ if ($Apply) {
         Sort-Object { [double]$_.VersionSizeMB } -Descending |
         Select-Object -First 5 |
         ForEach-Object {
-            Write-ProgressHost -Message ("{0} MB  [{1}] > {2}" -f
-                [math]::Round($_.VersionSizeMB, 1),
+            Write-ProgressHost -Message ("{0}  [{1}] > {2}" -f
+                (Format-SizeAuto -MB $_.VersionSizeMB),
                 $_.SiteName,
                 $_.Library) -ForegroundColor Yellow
         }
@@ -1942,8 +2451,8 @@ if ($Apply) {
             Sort-Object { [double]$_.VersionSizeMB } -Descending |
             Select-Object -First 10 |
             ForEach-Object {
-                Write-ProgressHost -Message ("{0} MB  ({1} versies)  {2} > {3}" -f
-                    [math]::Round($_.VersionSizeMB, 1),
+                Write-ProgressHost -Message ("{0}  ({1} versies)  {2} > {3}" -f
+                    (Format-SizeAuto -MB $_.VersionSizeMB),
                     $_.VersionCount,
                     $_.Library,
                     $_.Path) -ForegroundColor Yellow

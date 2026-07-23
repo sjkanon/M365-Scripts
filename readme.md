@@ -545,6 +545,43 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-07-22 (6)
+| Change |
+|--------|
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` to make full-site scans GDAP-proof by resolving and pinning one effective tenant context (`-TenantId`, or GDAP customer context from `$global:cid`) for Graph sign-in, temporary app creation, and app-only token issuance |
+| Added guard rails for GDAP/app-only flows: clearer errors when customer tenant context is missing (run `Connect-Tenant` first or pass `-TenantId`) and when `-ClientId` is provided without a resolvable tenant ID |
+| Updated checkpoint signature inputs in `Get-SharePointStorageReport.ps1` to include `-ForceAppOnlySingleSite` and resolved tenant context, preventing cross-context resume collisions |
+| Updated `scripts/Reporting/readme.md` to document full-site GDAP tenant binding behavior |
+
+### 2026-07-22 (5)
+| Change |
+|--------|
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` to make single-site scans GDAP-proof: when `authMode=GDAP` is detected, the script now automatically uses the temporary app/app-only bootstrap path for `-SiteUrl` scans to avoid delegated permission gaps |
+| Added `-ForceAppOnlySingleSite` parameter to explicitly force app-only bootstrap for single-site scans, independent of detected auth mode |
+| Updated `scripts/Reporting/readme.md` to document the new GDAP behavior and `-ForceAppOnlySingleSite` parameter |
+
+### 2026-07-22 (4)
+| Change |
+|--------|
+| Hardened `scripts/Reporting/Get-SharePointStorageReport.ps1` delegated path to remove dependency on missing Graph cmdlets: replaced `Get-MgDriveItemChild` usage with Graph REST pagination via `Invoke-MgGraphRequest` for drive children traversal |
+| Updated site-drive enumeration fallbacks in `Get-SharePointStorageReport.ps1` to use Graph REST (`/sites/{id}/drives`) instead of `Get-MgSiteDrive` in delegated/non-app-only branches |
+| Updated recycle-bin retrieval in `Get-SharePointStorageReport.ps1` to use Graph REST pagination (`/sites/{id}/recycleBin/items`) as fallback/primary delegated path instead of `Get-MgSiteRecycleBinItem` cmdlet dependency |
+| Suppressed non-fatal MSAL authority warning noise on disconnect by wrapping `Disconnect-MgGraph` with temporary warning suppression in cleanup |
+
+### 2026-07-22 (3)
+| Change |
+|--------|
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` scan-mode handling so single-site runs (`-SiteUrl` with `/sites/...` or `/teams/...`) no longer trigger temporary app registration + app-only bootstrap; app-only setup is now only used for tenant-wide enumeration |
+| Improved single-site lookup performance and reliability by resolving the exact site directly via Graph URL path (`/sites/{hostname}:{path}`) instead of search/filter flow |
+| Updated `scripts/Reporting/readme.md` performance notes to document the single-site optimized path and expected startup speed behavior |
+
+### 2026-07-22 (2)
+| Change |
+|--------|
+| Fixed SharePoint report dependency issue causing `Get-MgSite` command-not-found errors: updated `load.ps1`, `scripts/Startup/Install-Modules.ps1`, and `scripts/Startup/Update-Modules.ps1` to include `Microsoft.Graph.Sites` |
+| Updated `scripts/Reporting/Get-SharePointStorageReport.ps1` with an explicit module preflight check for `Microsoft.Graph.Authentication` and `Microsoft.Graph.Sites`, including a clear install hint when modules are missing |
+| Updated `scripts/Startup/readme.md` module dependency documentation to include `Microsoft.Graph.Sites` in install/update requirements |
+
 ### 2026-07-22 (1)
 | Change |
 |--------|

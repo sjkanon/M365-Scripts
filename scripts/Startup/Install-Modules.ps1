@@ -144,6 +144,7 @@ if ($gallery.InstallationPolicy -ne 'Trusted') {
 $modules = @(
     @{ Name = 'ExchangeOnlineManagement';   MinimumVersion = '3.0.0'; WindowsOnly = $false }
     @{ Name = 'Microsoft.Graph.Authentication'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
+    @{ Name = 'Microsoft.Graph.Sites'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
     @{ Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
     @{ Name = 'Microsoft.Graph.Identity.SignIns'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
     @{ Name = 'Microsoft.Graph.Identity.Governance'; MinimumVersion = '2.0.0'; WindowsOnly = $false }

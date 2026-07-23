@@ -119,6 +119,61 @@ De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt d
 # Alleen prullenbak
 .\Get-SharePointStorageReport.ps1 -RecycleBinOnly
 
+---
+
+## Remove-SharePointFileVersionsByDate.ps1
+
+Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document libraries op basis van een cutoff-datum, terwijl de **huidige versie behouden blijft**.
+
+### Gedrag
+
+- Standaard: alleen preview/reporting
+- Met `-Apply`: verwijdert matching vorige versies echt
+- Werkt op één site of tenantbreed over alle sites
+- Standaard geen OneDrive-sites en geen hidden libraries
+- Gebaseerd op Microsoft Graph (`Invoke-MgGraphRequest`) — **geen** `PnP.PowerShell` en **geen** eigen Entra app-registratie nodig voor het standaardgeval
+
+### Authenticatie
+
+Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) om alle sites op te sommen — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Die tijdelijke app wordt na afloop weer verwijderd; alle daadwerkelijke file-reads en version-deletes lopen altijd via je eigen delegated permissies, nooit via die tijdelijke app.
+
+Wil je de tijdelijke app overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al `Sites.ReadWrite.All` application permission hebben.
+
+> **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie garantie is.
+
+### Parameters
+
+| Parameter | Type | Omschrijving |
+|---|---|---|
+| `-BeforeDate` | `datetime` | Verwijder versies ouder dan deze datum |
+| `-SiteUrl` | `string` | Optioneel: scan één site |
+| `-TenantUrl` | `string` | Vereist voor all-sites scan, bv. `https://contoso.sharepoint.com` |
+| `-TenantId` | `string` | Entra ID tenant ID — automatisch gedetecteerd indien niet opgegeven; verplicht in combinatie met `-ClientId` |
+| `-ClientId` | `string` | Bestaande App Registration client ID — slaat de tijdelijke app over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
+| `-ClientSecret` | `string` | Client secret voor een bestaande app registration |
+| `-CertificateThumbprint` | `string` | Certificate thumbprint voor een bestaande app registration |
+| `-Apply` | `switch` | Voert de verwijdering echt uit |
+| `-IncludeOneDriveSites` | `switch` | Neemt OneDrive-sites mee in tenantscan |
+| `-IncludeHiddenLibraries` | `switch` | Neemt hidden document libraries mee |
+| `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
+| `-GraphTimeoutSec` | `int` | Timeout in seconden per Graph-call (standaard: `120`) |
+| `-MaxGraphRetry` | `int` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+
+### Voorbeelden
+
+```powershell
+# Preview tenantbreed: alles ouder dan 1 januari 2025
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -TenantUrl "https://contoso.sharepoint.com" `
+    -BeforeDate "2025-01-01"
+
+# Echt verwijderen op één site
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -SiteUrl "https://contoso.sharepoint.com/sites/Finance" `
+    -BeforeDate "2025-01-01" `
+    -Apply
+```
+
 # Volledige scan + prullenbak als extra fase
 .\Get-SharePointStorageReport.ps1 -Apply
 ```
@@ -145,6 +200,12 @@ Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie op
 
 `-SkipVersions` blijft de snelste optie als versiehistorie niet nodig is — dan wordt er helemaal geen version-call gedaan.
 
+Daarnaast is `-SiteUrl` (1 specifieke site) geoptimaliseerd: in normale mode gebruikt het script direct delegated Graph-calls voor alleen die site, wat de opstarttijd gelijk trekt met andere commando's.
+
+Voor GDAP-betrouwbaarheid schakelt het script bij single-site scans automatisch naar app-only bootstrap wanneer `authMode=GDAP` is gedetecteerd (uit `load.config.ps1`/launcher context). Wil je dat altijd forceren, gebruik dan `-ForceAppOnlySingleSite`.
+
+Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant context (`$global:cid`/`-TenantId`) voor zowel `Connect-MgGraph` als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden.
+
 ### Parameters
 
 | Parameter | Omschrijving |
@@ -159,6 +220,7 @@ Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie op
 | `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting |
 | `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken |
 | `-RecycleBinOnly` | Slaat storage/library scanning over — leest alleen recycle bin items (stage 1 + stage 2) per site collection |
+| `-ForceAppOnlySingleSite` | Forceert tijdelijke app-bootstrap voor `-SiteUrl` scans (handig voor GDAP/delegated beperkingen) |
 | `-GraphTimeoutSec` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
 
