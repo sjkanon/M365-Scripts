@@ -255,6 +255,7 @@ try {
         Write-Host "  Required role: Global Administrator or Privileged Role Administrator (one-time setup)" -ForegroundColor DarkGray
         Connect-MgGraph -Scopes @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All') `
             -TenantId $effectiveTenantId -NoWelcome -ErrorAction Stop
+        $script:ConnectedHere = $true
         Write-Host "  [OK]   Connected (delegated, for app setup only)." -ForegroundColor DarkGray
 
         $ts = Get-Date -Format 'yyyyMMddHHmmss'
@@ -268,7 +269,9 @@ try {
         $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Mail.ReadWrite' -and $_.AllowedMemberTypes -contains 'Application' }
         if (-not $appRole) {
             Write-Host "  [ERROR] Could not resolve app role 'Mail.ReadWrite'." -ForegroundColor Red
-            Remove-TempApp; exit 1
+            Remove-TempApp
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            exit 1
         }
         New-MgServicePrincipalAppRoleAssignment `
             -ServicePrincipalId $sp.Id `
