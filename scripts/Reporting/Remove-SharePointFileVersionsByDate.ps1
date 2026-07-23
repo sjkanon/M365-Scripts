@@ -125,6 +125,19 @@ function Write-ProgressHost {
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) -ForegroundColor $ForegroundColor
 }
 
+function Format-SizeAuto {
+    # Picks MB/GB/TB automatically based on magnitude instead of a fixed unit.
+    param([Parameter(Mandatory = $true)][double]$MB)
+    $absMB = [math]::Abs($MB)
+    if ($absMB -ge 1024 * 1024) {
+        return "{0:N2} TB" -f ($MB / 1024 / 1024)
+    } elseif ($absMB -ge 1024) {
+        return "{0:N2} GB" -f ($MB / 1024)
+    } else {
+        return "{0:N1} MB" -f $MB
+    }
+}
+
 function Remove-TempApp {
     if ($script:TempAppObjectId) {
         Write-ProgressHost -Message "Removing temporary App Registration..." -ForegroundColor DarkGray
@@ -660,11 +673,11 @@ try {
                     }
                 }
 
-                Write-Host ("        {0} files scanned | candidates: {1} version(s) ({2} MB){3}" -f
+                Write-Host ("        {0} files scanned | candidates: {1} version(s) ({2}){3}" -f
                     $files.Count,
                     $candidateCount,
-                    [math]::Round($candidateBytes / 1MB, 2),
-                    $(if ($Apply) { " | deleted: {0} version(s) ({1} MB)" -f $deletedCount, [math]::Round($deletedBytes / 1MB, 2) } else { '' })
+                    (Format-SizeAuto -MB ($candidateBytes / 1MB)),
+                    $(if ($Apply) { " | deleted: {0} version(s) ({1})" -f $deletedCount, (Format-SizeAuto -MB ($deletedBytes / 1MB)) } else { '' })
                 ) -ForegroundColor DarkGray
 
                 $summaryRows.Add([PSCustomObject]@{
