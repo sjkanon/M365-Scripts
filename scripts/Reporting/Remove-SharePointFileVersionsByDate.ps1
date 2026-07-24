@@ -73,6 +73,18 @@
 .PARAMETER MaxGraphRetry
     Max retries on Graph throttling/timeouts (default: 6).
 
+.PARAMETER MaxVersionRetryPasses
+    Maximum retry passes for resolving version lists under sustained Graph/SharePoint
+    throttling before giving up on whatever is still pending. SharePoint Online enforces a
+    hard per-app "activity" ceiling — roughly 1500-2500 resolved lookups per pass before a
+    ~60-90s cool-down window repeats, regardless of client-side pacing. A fixed low pass
+    count would silently abandon the majority of very large libraries before the scan (or
+    deletion pass) is actually done.
+
+    Default (0) auto-scales the pass count to the number of files needing version lookups.
+    Set explicitly only to force a lower ceiling (e.g. for a quick partial run) or a higher
+    one than the auto-scaled value.
+
 .PARAMETER Restart
     Discard any existing checkpoint for this run (same parameters + output folder) and
     start the scan completely from scratch, instead of resuming from the last completed
@@ -101,6 +113,8 @@ param(
     [string[]] $LibraryTitle = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
+    [ValidateRange(0, 5000)]
+    [int] $MaxVersionRetryPasses = 0,
     [switch] $Restart
 )
 
@@ -514,7 +528,15 @@ function Get-FileVersionsBatch {
     $lastReportedCount = 0
 
     $pending = $Requests
-    $maxPasses = 8
+    $maxPasses = if ($MaxVersionRetryPasses -gt 0) {
+        $MaxVersionRetryPasses
+    } else {
+        # Auto-scale: SharePoint's per-app activity throttle allows roughly 1500-2500 resolved
+        # lookups per pass before the cool-down window repeats (a hard server-side ceiling) — a
+        # fixed low pass count would silently give up on the bulk of a large tenant long before
+        # the scan is actually finished. Capped so a pathological case can't retry forever.
+        [Math]::Min([Math]::Max(8, [int][Math]::Ceiling($totalRequests / 1500.0) + 10), 500)
+    }
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $retryList = [System.Collections.Generic.List[object]]::new()
         $nextDelay = 0
@@ -596,6 +618,13 @@ function Get-FileVersionsBatch {
         $pending = $retryList
     }
     foreach ($req in $pending) { $results[[string]$req.Id] = "Gave up after $maxPasses retry pass(es)." }
+
+    if ($pending.Count -gt 0) {
+        Write-Warning (
+            "Version lookup gave up on {0}/{1} file(s) after {2} retry pass(es) under sustained throttling — " -f $pending.Count, $totalRequests, $maxPasses `
+            + "these will be skipped for this run. Re-run with a higher -MaxVersionRetryPasses (or omit it to auto-scale) if this is a very large tenant."
+        )
+    }
 
     return $results
 }

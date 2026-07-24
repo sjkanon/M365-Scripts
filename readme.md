@@ -648,8 +648,9 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Change |
 |--------|
 | Fixed `scripts/Reporting/Get-SharePointStorageReport.ps1` silently abandoning version-history lookups on very large libraries: `Invoke-GraphBatchGet`'s retry-pass ceiling was hardcoded at 8, but SharePoint Online's per-app activity throttle allows only ~1500-2500 resolved version lookups per pass before a ~60-90s cool-down repeats — on a 200k-file tenant this meant ~90% of files got marked "gave up" before the scan actually finished |
-| Added `-MaxVersionRetryPasses` parameter (default `0` = auto-scales the pass ceiling to the request volume, capped at 500 passes); a clear `Write-Warning` is now emitted listing exactly how many files were abandoned and suggesting the parameter if the ceiling is still hit |
-| Updated `scripts/Reporting/readme.md` to document `-VersionBatchConcurrency` and `-MaxVersionRetryPasses` |
+| Applied the identical fix to `scripts/Reporting/Remove-SharePointFileVersionsByDate.ps1`'s own copy of the same batch-retry function (`Get-FileVersionsBatch`), which had the same hardcoded 8-pass ceiling |
+| Added `-MaxVersionRetryPasses` parameter to both scripts (default `0` = auto-scales the pass ceiling to the request volume, capped at 500 passes); a clear `Write-Warning` is now emitted listing exactly how many files were abandoned and suggesting the parameter if the ceiling is still hit |
+| Updated `scripts/Reporting/readme.md` to document `-VersionBatchConcurrency` and `-MaxVersionRetryPasses` for both scripts |
 
 ### 2026-07-24 (1)
 | Change |
