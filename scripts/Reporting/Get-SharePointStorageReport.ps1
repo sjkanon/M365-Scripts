@@ -933,6 +933,11 @@ function Invoke-GraphBatchGet {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
+    # Progress is reported off $results.Count (final success/failure assignments only), so it
+    # climbs monotonically across retry passes instead of double-counting items that get retried.
+    $totalRequests     = $Requests.Count
+    $lastReportedCount = 0
+
     $pending = $Requests
     $maxPasses = 8
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
@@ -1056,6 +1061,10 @@ function Invoke-GraphBatchGet {
                                 $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
                             }
                         }
+                        if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                            Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                            $lastReportedCount = $results.Count
+                        }
                         continue
                     }
 
@@ -1064,6 +1073,10 @@ function Invoke-GraphBatchGet {
                     } else {
                         $reason = if ($payload -and $payload.ErrorMessage) { $payload.ErrorMessage } else { 'Batch call failed after retries.' }
                         foreach ($req in $worker.Requests) { $results[$req.Id] = $reason }
+                    }
+                    if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                        Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                        $lastReportedCount = $results.Count
                     }
                 }
             } finally {
@@ -1125,6 +1138,11 @@ function Invoke-GraphBatchGet {
                             Start-Sleep -Seconds ($attempt * 3)
                         }
                     }
+                }
+
+                if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                    Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                    $lastReportedCount = $results.Count
                 }
             }
         }

@@ -26,9 +26,17 @@
       setup, and the Microsoft.Graph.Applications module.
 
       Pass -Delegated to skip all of that and use a plain delegated Mail.ReadWrite
-      connection instead (only needs the delegated scope, no admin app-creation rights)
-      — but then archiving a mailbox other than the signed-in user's own requires the
-      signed-in account to already have Full Access on that mailbox.
+      connection instead — no Entra app-creation rights needed, only Exchange Admin.
+      When the target mailbox isn't the signed-in user's own, the script connects to
+      Exchange Online, grants that account temporary Full Access on the mailbox,
+      polls Get-MailboxPermission until it's visible (up to ~3 minutes), then keeps
+      retrying the actual archive operation against a -MaxWaitMinutes deadline
+      (default 65) while the grant stays in place, and only then removes it again.
+      CAVEAT: Get-MailboxPermission reflects Exchange's own state almost immediately,
+      but Microsoft Graph's authorization cache for delegate mailbox access can lag
+      up to ~60 minutes behind that — a known Microsoft limitation. -MaxWaitMinutes
+      covers that worst case in a single run; the default app-only mode (drop
+      -Delegated) has no such delay if you'd rather not wait at all.
 
       To reuse your own existing App Registration instead of creating a temporary one,
       pass -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint); that app
@@ -71,12 +79,25 @@
 
 .PARAMETER Delegated
     Skip the automatic temporary app-only setup and connect with a plain delegated
-    Mail.ReadWrite session instead. Archiving a mailbox other than the signed-in
-    user's own then requires the signed-in account to have Full Access on it.
+    Mail.ReadWrite session instead (needs Exchange Admin, not Entra app-creation
+    rights). For a mailbox other than the signed-in user's own, the script grants
+    that account temporary Full Access via Exchange Online, polls for it to
+    propagate, archives, then removes the grant again. Note: Microsoft Graph can
+    take up to ~60 minutes to honor a new Full Access grant even after Exchange
+    itself shows it — a known Microsoft limitation. If this still 403s, prefer the
+    default app-only mode instead of waiting longer.
 
 .PARAMETER Apply
     Actually move the messages. Without this switch, the script only reports how
     many messages would be archived.
+
+.PARAMETER MaxWaitMinutes
+    -Delegated only. How long to keep retrying the Inbox read while waiting for
+    Microsoft Graph to honor the temporary Full Access grant, before giving up and
+    revoking it. Default 65 (covers Microsoft's documented worst case of ~60
+    minutes). The temporary Full Access grant stays in place for the whole wait —
+    re-running the script from scratch instead of raising this resets the clock,
+    since each run revokes and re-grants a fresh permission.
 
 .EXAMPLE
     # Preview — auto app-only setup, reports the count, makes no changes
@@ -92,8 +113,14 @@
     .\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -After (Get-Date "2024-01-01") -Before (Get-Date "2025-01-01") -Apply
 
 .EXAMPLE
-    # Own mailbox / already have Full Access — skip app-only setup
+    # Delegated — auto-grants + revokes temporary Full Access via Exchange Online
+    # instead of the Entra app-only setup (needs Exchange Admin, not Global Admin)
     .\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -Delegated -Apply
+
+.EXAMPLE
+    # Delegated, willing to wait out Microsoft's full ~90-minute worst case for
+    # Graph to honor the Full Access grant, instead of the 65-minute default
+    .\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -Delegated -MaxWaitMinutes 90 -Apply
 
 .EXAMPLE
     # Reuse an existing App Registration instead of creating a temporary one.
@@ -113,7 +140,8 @@ param(
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
     [switch] $Delegated,
-    [switch] $Apply
+    [switch] $Apply,
+    [int] $MaxWaitMinutes = 65
 )
 
 if ($After -and $Before -and $After -ge $Before) {
@@ -188,6 +216,48 @@ function Invoke-Graph {
     return Invoke-MgGraphRequest @params
 }
 
+# ── Temporary Full Access cleanup (-Delegated mode) ─────────────────────────
+# -Delegated grants the signed-in admin Full Access on the target mailbox just
+# long enough to archive it, then revokes it again — no permission is left behind.
+$script:GrantedFullAccessMailbox = $null
+$script:GrantedFullAccessUser    = $null
+$script:ConnectedExo             = $false
+function Remove-TempFullAccess {
+    if ($script:GrantedFullAccessMailbox -and $script:GrantedFullAccessUser) {
+        Write-ProgressHost -Message "Removing temporary Full Access on '$($script:GrantedFullAccessMailbox)'..."
+        $removed = $false
+        for ($i = 1; $i -le 4 -and -not $removed; $i++) {
+            $removeWarnings = $null
+            try {
+                Remove-MailboxPermission -Identity $script:GrantedFullAccessMailbox -User $script:GrantedFullAccessUser `
+                    -AccessRights FullAccess -Confirm:$false -ErrorAction Stop -WarningVariable removeWarnings -WarningAction SilentlyContinue
+            } catch {
+                $removeWarnings = @($_.Exception.Message)
+            }
+
+            if (-not $removeWarnings) {
+                $removed = $true
+            } elseif ($i -lt 4) {
+                # The grant may not have replicated to the domain controller this
+                # request landed on yet — wait and retry rather than giving up.
+                Write-ProgressHost -Message "Permission not visible yet, retrying removal ($i/4)..."
+                Start-Sleep -Seconds 15
+            }
+        }
+        if ($removed) {
+            Write-ProgressHost -Message "[OK] Temporary Full Access removed."
+        } else {
+            Write-Host "  [WARN] Could not confirm removal of temporary Full Access for '$($script:GrantedFullAccessUser)' on '$($script:GrantedFullAccessMailbox)'. Verify manually (Get-MailboxPermission / Remove-MailboxPermission)." -ForegroundColor Yellow
+        }
+        $script:GrantedFullAccessMailbox = $null
+        $script:GrantedFullAccessUser    = $null
+    }
+    if ($script:ConnectedExo) {
+        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        $script:ConnectedExo = $false
+    }
+}
+
 $useTempApp = (-not $ClientId) -and (-not $Delegated)
 if ($useTempApp -and -not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
     Write-Host "  [ERROR] Missing required module: Microsoft.Graph.Applications (needed to auto-create the temporary app registration)." -ForegroundColor Red
@@ -242,7 +312,49 @@ try {
         Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
 
     } elseif ($Delegated) {
-        # ── Plain delegated session — requires Full Access on other mailboxes ───
+        # ── Plain delegated session — auto-grants temporary Full Access via Exchange
+        #    Online on other mailboxes (Exchange Admin role only, no Entra app rights) ──
+        if (-not (Get-Module -ListAvailable -Name 'ExchangeOnlineManagement')) {
+            throw "Missing required module: ExchangeOnlineManagement (needed for -Delegated's temporary Full Access grant). Install with: .\scripts\Startup\Install-Modules.ps1"
+        }
+
+        Write-Host "  Connecting to Exchange Online..." -ForegroundColor Cyan
+        $eos = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $eos) {
+            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+            $script:ConnectedExo = $true
+            $eos = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        $adminUpn = $eos.UserPrincipalName
+
+        if ($adminUpn -and $adminUpn.ToLowerInvariant() -ne $Mailbox.ToLowerInvariant()) {
+            Write-Host "  Granting temporary Full Access on '$Mailbox' to '$adminUpn'..." -ForegroundColor Cyan
+            Add-MailboxPermission -Identity $Mailbox -User $adminUpn -AccessRights FullAccess `
+                -AutoMapping:$false -Confirm:$false -ErrorAction Stop | Out-Null
+            $script:GrantedFullAccessMailbox = $Mailbox
+            $script:GrantedFullAccessUser    = $adminUpn
+            Write-Host "  [OK]   Full Access granted (temporary — will be removed when the script finishes)." -ForegroundColor DarkGray
+
+            # Exchange Online permission changes can take anywhere from seconds to a
+            # few minutes to propagate — poll instead of a single blind sleep.
+            $propagated = $false
+            for ($i = 1; $i -le 12; $i++) {
+                Write-ProgressHost -Message "Waiting for the permission to propagate (attempt $i/12)..."
+                Start-Sleep -Seconds 15
+                $perm = Get-MailboxPermission -Identity $Mailbox -User $adminUpn -ErrorAction SilentlyContinue
+                if ($perm | Where-Object { $_.AccessRights -contains 'FullAccess' }) {
+                    $propagated = $true
+                    break
+                }
+            }
+            if ($propagated) {
+                Write-ProgressHost -Message "[OK] Permission confirmed. Giving Graph a few more seconds to catch up..."
+                Start-Sleep -Seconds 15
+            } else {
+                Write-Host "  [WARN] Full Access not yet visible after 3 minutes — continuing anyway." -ForegroundColor Yellow
+            }
+        }
+
         $connectParams = @{ Scopes = @('Mail.ReadWrite'); NoWelcome = $true }
         if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
         Connect-MgGraph @connectParams -ErrorAction Stop
@@ -322,6 +434,7 @@ try {
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Remove-TempApp
+    Remove-TempFullAccess
     if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
     exit 1
 }
@@ -335,7 +448,7 @@ Write-Host ""
 Write-Host "  Mailbox : $Mailbox"
 if ($After)  { Write-Host "  After   : $($After.ToString('yyyy-MM-dd HH:mm'))" }
 if ($Before) { Write-Host "  Before  : $($Before.ToString('yyyy-MM-dd HH:mm'))" }
-Write-Host ("  Auth    : {0}" -f $(if ($ClientId) { 'App-only (provided app)' } elseif ($Delegated) { 'Delegated' } else { 'App-only (temporary app)' })) -ForegroundColor DarkGray
+Write-Host ("  Auth    : {0}" -f $(if ($ClientId) { 'App-only (provided app)' } elseif ($Delegated) { 'Delegated (temporary Full Access)' } else { 'App-only (temporary app)' })) -ForegroundColor DarkGray
 Write-Host ("  Mode    : {0}" -f $(if ($Apply) { 'Apply (messages will be moved)' } else { 'Preview only (no changes)' })) -ForegroundColor $(if ($Apply) { 'Yellow' } else { 'DarkGray' })
 Write-Host ""
 
@@ -433,20 +546,59 @@ function Move-MessagesToArchive {
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 Write-Host "  Retrieving Inbox message IDs..." -ForegroundColor DarkGray
-try {
-    $ids = Get-InboxMessageIds -MailboxId $Mailbox -Filter $filter
-} catch {
-    $statusCode = $_.Exception.Response.StatusCode.value__
-    Write-Host ""
-    Write-Host "  [ERROR] Could not read the Inbox of '$Mailbox': $($_.Exception.Message)" -ForegroundColor Red
-    if ($statusCode -eq 403 -and $Delegated) {
-        Write-Host "  [HINT] Access denied on a delegated connection usually means the signed-in account" -ForegroundColor Yellow
-        Write-Host "         does not have Full Access on this mailbox. Either grant Full Access, or drop" -ForegroundColor Yellow
-        Write-Host "         -Delegated to let the script set up app-only access automatically." -ForegroundColor Yellow
+
+# In -Delegated mode a 403 here is usually Microsoft Graph's delegate-permission
+# cache still catching up (Exchange itself already shows the grant) — retry against
+# a wall-clock deadline (not a fixed attempt count) so -MaxWaitMinutes covers
+# Microsoft's documented worst case in a single run, without the temporary Full
+# Access grant getting revoked and re-granted (which would reset the propagation
+# clock) between attempts. Any other mode/error fails immediately since retrying
+# wouldn't help.
+$graphRetryDelaySeconds = 60
+$graphDeadline = if ($Delegated) { (Get-Date).AddMinutes($MaxWaitMinutes) } else { Get-Date }
+$ids = $null
+$attempt = 0
+
+while ($true) {
+    $attempt++
+    try {
+        $ids = Get-InboxMessageIds -MailboxId $Mailbox -Filter $filter
+        break
+    } catch {
+        $statusCode = $_.Exception.Response.StatusCode.value__
+        $isPermissionLag = ($statusCode -eq 403 -and $Delegated)
+
+        if ($isPermissionLag -and (Get-Date) -lt $graphDeadline) {
+            $minutesLeft = [Math]::Max(0, [Math]::Round(($graphDeadline - (Get-Date)).TotalMinutes, 1))
+            Write-ProgressHost -Message "Graph still returns 403 (permission cache lag) — retry $attempt, waiting ${graphRetryDelaySeconds}s (~$minutesLeft min left of the $MaxWaitMinutes-min window)..." -ForegroundColor Yellow
+            Start-Sleep -Seconds $graphRetryDelaySeconds
+            continue
+        }
+
+        Write-Host ""
+        Write-Host "  [ERROR] Could not read the Inbox of '$Mailbox': $($_.Exception.Message)" -ForegroundColor Red
+        if ($isPermissionLag) {
+            Write-Host "  [HINT] Exchange Online already shows the Full Access grant (the removal below" -ForegroundColor Yellow
+            Write-Host "         wouldn't otherwise succeed), but Microsoft Graph's own authorization cache" -ForegroundColor Yellow
+            Write-Host "         for delegate mailbox access can lag up to ~60 minutes behind — a known" -ForegroundColor Yellow
+            Write-Host "         Microsoft limitation. Already retried for $MaxWaitMinutes minutes." -ForegroundColor Yellow
+            Write-Host "         Re-run with a higher -MaxWaitMinutes, or drop -Delegated to use the" -ForegroundColor Yellow
+            Write-Host "         default app-only mode instead, which has no such propagation delay." -ForegroundColor Yellow
+        } elseif ($statusCode -eq 403 -and -not $Delegated) {
+            Write-Host "  [HINT] App-only access denied on this specific mailbox despite Mail.ReadWrite" -ForegroundColor Yellow
+            Write-Host "         application permission. The most common cause is an Application Access" -ForegroundColor Yellow
+            Write-Host "         Policy in this tenant that restricts which mailboxes app-only calls may" -ForegroundColor Yellow
+            Write-Host "         touch. Check with (as an admin):" -ForegroundColor Yellow
+            Write-Host "           Get-ApplicationAccessPolicy" -ForegroundColor Yellow
+            Write-Host "         and whether '$Mailbox' is a member of the scoping group used there." -ForegroundColor Yellow
+            Write-Host "         Also possible: '$Mailbox' has no Exchange Online license, or is a" -ForegroundColor Yellow
+            Write-Host "         mailbox type Graph doesn't allow app-only access to." -ForegroundColor Yellow
+        }
+        Remove-TempApp
+        Remove-TempFullAccess
+        if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+        exit 1
     }
-    Remove-TempApp
-    if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
-    exit 1
 }
 Write-Host "  Found $($ids.Count) message(s) to archive." -ForegroundColor DarkGray
 Write-Host ""
@@ -469,4 +621,5 @@ Write-Host ""
 
 # ── Disconnect / cleanup ─────────────────────────────────────────────────────
 Remove-TempApp
+Remove-TempFullAccess
 if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
