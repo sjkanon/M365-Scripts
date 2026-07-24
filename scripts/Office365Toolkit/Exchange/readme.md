@@ -19,7 +19,8 @@ connected.
 | [`Test-MailboxForwardingRisk.ps1`](#test-mailboxforwardingriskps1) | Audit inbox rules and Sweep rules for forwarding/exfiltration patterns (BEC indicator) |
 | [`Get-MailboxAddIns.ps1`](#get-mailboxaddinsps1) | Report Outlook add-ins installed per mailbox |
 | [`Search-MailboxAuditLog.ps1`](#search-mailboxauditlogps1) | Search the Unified Audit Log for sign-in and mailbox login events |
-| [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Report mail flow (message trace) with sender/recipient/status filters |
+
+> Message trace reporting lives in [`scripts/PatronToolkit/Exchange/Get-MessageTraceReport.ps1`](../../PatronToolkit/Exchange/readme.md#get-messagetracereportps1) — an equivalent script was built independently for both toolkits, so only one was kept (with `-IncludeDetail` support merged in from this one).
 
 ---
 
