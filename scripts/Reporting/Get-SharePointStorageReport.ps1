@@ -70,6 +70,11 @@
     Skip storage/library scanning and only read SharePoint recycle bin items
     (stage 1 + stage 2) for each site collection.
 
+.PARAMETER Restart
+    Discard any existing checkpoint for this run (same parameters + output folder) and
+    start the scan completely from scratch, instead of resuming from the last completed
+    library. Use this if a previous run's partial data looks wrong or you want a clean run.
+
 .PARAMETER IncludeOneDriveUsers
     One or more user principal names whose OneDrive personal site should be included
     in the scan alongside SharePoint sites (e.g. dilara.beerten@d-build.be).
@@ -109,6 +114,7 @@ param (
     [switch] $UseHighPrivilege,
     [switch] $RecycleBinOnly,
     [switch] $ForceAppOnlySingleSite,
+    [switch] $Restart,
     [string[]] $IncludeOneDriveUsers = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
@@ -135,6 +141,31 @@ $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST c
 $script:SpoHostTokenCache = @{}
 $script:VersionLookupFailureCount = 0
 $script:VersionLookupFailureSamples = [System.Collections.Generic.List[string]]::new()
+$script:CurrentScanLabel = ''
+
+function Set-ScanProgress {
+    # Thin wrapper around the native PowerShell progress bar (Write-Progress) so long-running
+    # phases show a real progress UI (percent + ETA in interactive hosts) instead of relying
+    # purely on scrolling Write-Host log lines.
+    param(
+        [Parameter(Mandatory = $true)][int]$Id,
+        [int]$ParentId = -1,
+        [Parameter(Mandatory = $true)][string]$Activity,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$PercentComplete = -1
+    )
+    $params = @{ Id = $Id; Activity = $Activity; Status = $Status }
+    if ($ParentId -ge 0) { $params['ParentId'] = $ParentId }
+    if ($PercentComplete -ge 0) { $params['PercentComplete'] = [Math]::Min($PercentComplete, 100) }
+    Write-Progress @params
+}
+
+function Complete-ScanProgress {
+    param([Parameter(Mandatory = $true)][int]$Id, [int]$ParentId = -1)
+    $params = @{ Id = $Id; Activity = 'Done'; Completed = $true }
+    if ($ParentId -ge 0) { $params['ParentId'] = $ParentId }
+    Write-Progress @params
+}
 
 function Write-ProgressHost {
     param(
@@ -895,6 +926,29 @@ function Get-VersionsNextPage {
     }
 }
 
+function Get-BatchItemRetryDelaySeconds {
+    # "activityLimitReached" (SharePoint/OneDrive resource-level quota, surfaced as HTTP 429) needs
+    # a much longer cooldown than ordinary throttling — it's a rolling quota against the same
+    # site/list, so retrying quickly just keeps re-tripping it. Honor a Retry-After header when
+    # Graph gives us one; otherwise back off hard specifically for activityLimitReached, and more
+    # gently for plain 429/5xx.
+    param([int]$Pass, [object]$SubResponse)
+    $retryAfter = $null
+    try {
+        if ($SubResponse -and $SubResponse.headers) {
+            $h = $SubResponse.headers.'Retry-After'
+            if ($h) { [void][int]::TryParse([string]$h, [ref]$retryAfter) }
+        }
+    } catch {}
+    if ($retryAfter -and $retryAfter -gt 0) { return [Math]::Min($retryAfter + 2, 180) }
+
+    $errorCode = $null
+    try { $errorCode = $SubResponse.body.error.code } catch {}
+    if ($errorCode -eq 'activityLimitReached') { return [Math]::Min(30 * $Pass, 180) }
+
+    return [Math]::Min(5 * $Pass, 30)
+}
+
 function Invoke-GraphBatchGet {
     # Resolves a set of GET requests via Microsoft Graph's $batch endpoint (max 20 per call).
     # Individual sub-requests inside an otherwise-successful batch response can come back
@@ -910,8 +964,13 @@ function Invoke-GraphBatchGet {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
+    # Progress is reported off $results.Count (final success/failure assignments only), so it
+    # climbs monotonically across retry passes instead of double-counting items that get retried.
+    $totalRequests     = $Requests.Count
+    $lastReportedCount = 0
+
     $pending = $Requests
-    $maxPasses = 5
+    $maxPasses = 8
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $chunkSpecs = [System.Collections.Generic.List[object]]::new()
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
@@ -927,6 +986,7 @@ function Invoke-GraphBatchGet {
         }
 
         $retryList = [System.Collections.Generic.List[object]]::new()
+        $nextDelay = 0
 
         if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
             # Runspace workers get a plain copy of the bearer token and cannot see later updates to
@@ -972,6 +1032,11 @@ function Invoke-GraphBatchGet {
 
             try {
                 foreach ($spec in $chunkSpecs) {
+                    # Stagger dispatch slightly — the pool size already caps true concurrency, but
+                    # spacing out when each request starts further reduces burst rate against the
+                    # same site/list, which is what activityLimitReached actually tracks.
+                    Start-Sleep -Milliseconds 75
+
                     $ps = [PowerShell]::Create()
                     $ps.RunspacePool = $runspacePool
                     [void]$ps.AddScript($workerScript)
@@ -1008,17 +1073,31 @@ function Invoke-GraphBatchGet {
                                 continue
                             }
                             if ($r.status -eq 200) {
-                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
-                                if ($r.body.'@odata.nextLink') {
-                                    Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                try {
+                                    $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                    if ($r.body.'@odata.nextLink') {
+                                        Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                    }
+                                    $results[[string]$r.id] = @{ value = $values }
+                                } catch {
+                                    # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                    # fail just this one file's lookup instead of crashing the whole scan.
+                                    if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
                                 }
-                                $results[[string]$r.id] = @{ value = $values }
                             } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                                 $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
                             } else {
                                 $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
                                 $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
                             }
+                        }
+                        if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                            Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                                "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                            ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                            $lastReportedCount = $results.Count
                         }
                         continue
                     }
@@ -1029,6 +1108,13 @@ function Invoke-GraphBatchGet {
                         $reason = if ($payload -and $payload.ErrorMessage) { $payload.ErrorMessage } else { 'Batch call failed after retries.' }
                         foreach ($req in $worker.Requests) { $results[$req.Id] = $reason }
                     }
+                    if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                        Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                        Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                            "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                        ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                        $lastReportedCount = $results.Count
+                    }
                 }
             } finally {
                 $runspacePool.Close()
@@ -1038,6 +1124,8 @@ function Invoke-GraphBatchGet {
             foreach ($spec in $chunkSpecs) {
                 $chunk = $spec.Requests
                 $batchBody = $spec.Body
+
+                Start-Sleep -Milliseconds 150
 
                 $batchDone = $false
                 for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
@@ -1061,13 +1149,18 @@ function Invoke-GraphBatchGet {
                                 continue
                             }
                             if ($r.status -eq 200) {
-                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
-                                if ($r.body.'@odata.nextLink') {
-                                    Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                try {
+                                    $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                    if ($r.body.'@odata.nextLink') {
+                                        Get-VersionsNextPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                    }
+                                    $results[[string]$r.id] = @{ value = $values }
+                                } catch {
+                                    if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
                                 }
-                                $results[[string]$r.id] = @{ value = $values }
                             } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                                 $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
                             } else {
                                 $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
                                 $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
@@ -1083,11 +1176,24 @@ function Invoke-GraphBatchGet {
                         }
                     }
                 }
+
+                if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                    Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                    Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                        "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                    ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                    $lastReportedCount = $results.Count
+                }
             }
         }
 
         if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
-            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
+            $waitSeconds = [Math]::Max($nextDelay, [Math]::Min(5 * $pass, 30))
+            Write-ProgressHost -Message (
+                "[WAIT] throttled by Microsoft Graph — waiting {0}s before retrying {1}/{2} remaining file(s) (pass {3}/{4})..." -f
+                $waitSeconds, $retryList.Count, $totalRequests, $pass, $maxPasses
+            ) -ForegroundColor Yellow
+            Start-Sleep -Seconds $waitSeconds
         }
         $pending = $retryList
     }
@@ -1123,6 +1229,9 @@ function Get-AllDriveItems {
                 $processedFolders,
                 $processedFiles
             ) -ForegroundColor DarkGray
+            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Mappen en bestanden scannen' -Status (
+                "{0} — {1} mappen, {2} bestanden" -f $script:CurrentScanLabel, $processedFolders, $processedFiles
+            )
         }
 
         # Collect all children (paginated)
@@ -1329,6 +1438,9 @@ function Get-AllSpoLibraryItems {
                 $processedFolders,
                 $processedFiles
             ) -ForegroundColor DarkGray
+            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Mappen en bestanden scannen (SPO REST)' -Status (
+                "{0} — {1} mappen, {2} bestanden" -f $script:CurrentScanLabel, $processedFolders, $processedFiles
+            )
         }
 
         $encodedFolderUrl = [Uri]::EscapeDataString($current.ServerRelativeUrl)
@@ -1572,7 +1684,17 @@ $script:CheckpointDetailPath  = Join-Path $outputDir "SharePoint_StorageReport_$
 $script:CompletedLibraryKeys  = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:LoadedCheckpoint      = $false
 
-if (Test-Path $script:CheckpointStatePath) {
+if ($Restart) {
+    $discardedCheckpoint = $false
+    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath)) {
+        if (Test-Path $path) {
+            try { Remove-Item -Path $path -Force -ErrorAction Stop; $discardedCheckpoint = $true } catch {}
+        }
+    }
+    if ($discardedCheckpoint) {
+        Write-ProgressHost -Message "[INFO] -Restart specified: discarded existing checkpoint, starting from scratch." -ForegroundColor Yellow
+    }
+} elseif (Test-Path $script:CheckpointStatePath) {
     try {
         $checkpointState = Get-Content -Path $script:CheckpointStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($checkpointState.RunSignature -eq $checkpointSignature) {
@@ -1662,10 +1784,14 @@ if ($RecycleBinOnly) {
     # SharePoint has two stages: first-stage (user) and second-stage (site collection admin).
     # The Graph recycleBin/items endpoint returns items from both stages.
     $processedRbSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $rbIndex = 0
 
     foreach ($site in $sites) {
+        $rbIndex++
         $siteId   = $site.id
         $siteName = $site.displayName ?? $site.name
+
+        Set-ScanProgress -Id 1 -Activity 'Recycle bins ophalen' -Status ("[{0}/{1}] {2}" -f $rbIndex, $sites.Count, $siteName) -PercentComplete ([int](($rbIndex / [Math]::Max($sites.Count, 1)) * 100))
 
         if ([string]::IsNullOrWhiteSpace([string]$siteId)) { continue }
 
@@ -1763,6 +1889,7 @@ if ($RecycleBinOnly) {
     Write-Host ("  Recycle bins  : {0}" -f (Format-SizeAuto -MB $grandRB)) -ForegroundColor Magenta
     Write-Host ""
 
+    Complete-ScanProgress -Id 1
     Finalize-CheckpointFiles
     Remove-TempApp
     return
@@ -1783,6 +1910,7 @@ foreach ($site in $sites) {
     $siteId   = $site.id
 
     Write-ProgressHost -Message ("[{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -ForegroundColor White
+    Set-ScanProgress -Id 1 -Activity 'Fase 1: sites & bibliotheken inventariseren' -Status ("[{0}/{1}] {2}" -f $siteIndex, $sites.Count, $siteName) -PercentComplete ([int](($siteIndex / [Math]::Max($sites.Count, 1)) * 100))
 
     if ([string]::IsNullOrWhiteSpace([string]$siteId)) {
         Write-ProgressHost -Message "[WARN] Skipping site without valid id." -ForegroundColor Yellow
@@ -1876,6 +2004,7 @@ foreach ($site in $sites) {
         Write-ProgressHost -Message ("[ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
     }
 }
+Complete-ScanProgress -Id 1
 
 Write-Host ""
 Write-ProgressHost -Message ("Found {0} document libraries across {1} site(s)" -f
@@ -1896,8 +2025,10 @@ foreach ($entry in $siteLibraries) {
     $drive    = $entry.Drive
     $siteName = $site.displayName ?? $site.name
     $libraryKey = Get-LibraryCheckpointKey -SiteId $site.id -DriveId $drive.id
+    $script:CurrentScanLabel = "$siteName > $($drive.name)"
 
     Write-ProgressHost -Message ("[{0}/{1}] {2} > {3}" -f $libIndex, $siteLibraries.Count, $siteName, $drive.name) -ForegroundColor White
+    Set-ScanProgress -Id 2 -Activity 'Fase 2: opslag & versiegeschiedenis ophalen' -Status ("[{0}/{1}] {2}" -f $libIndex, $siteLibraries.Count, $script:CurrentScanLabel) -PercentComplete ([int](($libIndex / [Math]::Max($siteLibraries.Count, 1)) * 100))
 
     if ($script:LoadedCheckpoint -and $script:CompletedLibraryKeys.Contains($libraryKey)) {
         Write-ProgressHost -Message "    [SKIP] Already completed in a previous run." -ForegroundColor DarkGray
@@ -2110,6 +2241,8 @@ foreach ($entry in $siteLibraries) {
     foreach ($row in $libraryDetailRows) { $detailRows.Add($row) | Out-Null }
     Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @($libraryDetailRows)
 }
+Complete-ScanProgress -Id 3 -ParentId 2
+Complete-ScanProgress -Id 2
 
 # ── Phase 2b: Recycle bins ───────────────────────────────────────────────────
 if ($Apply) {
@@ -2124,11 +2257,15 @@ if ($Apply) {
     # SharePoint has two stages: first-stage (user) and second-stage (site collection admin).
     # The Graph recycleBin/items endpoint returns items from both stages.
     $processedRbSiteIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $rbIndex = 0
 
     foreach ($site in $sites) {
+        $rbIndex++
         $siteId   = $site.id
         $siteName = $site.displayName ?? $site.name
         $rbKey    = "rb|$siteId"
+
+        Set-ScanProgress -Id 4 -Activity 'Fase 2b: recycle bins ophalen' -Status ("[{0}/{1}] {2}" -f $rbIndex, $sites.Count, $siteName) -PercentComplete ([int](($rbIndex / [Math]::Max($sites.Count, 1)) * 100))
 
         # Only root site collections have their own recycle bin.
         # Sub-webs (URLs with extra path segments beyond /sites/<name>) share the root's bin.
@@ -2201,6 +2338,7 @@ if ($Apply) {
             Write-Host ("        [WARN] Cannot read recycle bin: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
         }
     }
+    Complete-ScanProgress -Id 4
 }
 
 # ── Phase 2c: Site collection totals ─────────────────────────────────────────
@@ -2401,6 +2539,7 @@ if ($Apply -and $detailRows.Count -gt 0) {
     }
 }
 
+1, 2, 3, 4 | ForEach-Object { Complete-ScanProgress -Id $_ }
 Finalize-CheckpointFiles
 
 # ── Summary ───────────────────────────────────────────────────────────────────

@@ -104,6 +104,8 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `B` | Test-DkimConfig — validate DKIM signing config and DNS CNAME/TXT records |
 | `C` | Get-ExternalForwards — audit mailboxes with external forwarding configured |
 | `D` | Get-MailboxSizes — mailbox size report sorted by storage used |
+| `E` | Move-InboxToArchive — archive Inbox messages to Archive folder |
+| `F` | Set-DL-Dynamic-Static — resolve a dynamic distribution group into a static group |
 
 **Entra ID submenu (`D`)**
 
@@ -115,6 +117,9 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `D` | New-TemporaryCA — create temporary Conditional Access policy for user/group (duration or start/end datetime) |
 | `E` | Remove-TemporaryCA — remove expired or all temporary CA policies |
 | `F` | New-UserTAP — create Temporary Access Pass for a user |
+| `G` | Get-M365UserLicenses — report assigned licenses for a set of users |
+| `H` | Import-CA-Baseline — import the community Conditional Access baseline |
+| `I` | Set-UserManager — report/bulk-set manager for a set of users |
 
 ---
 
