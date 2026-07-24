@@ -261,6 +261,7 @@ Tijdens de scan toont het script geneste progress-balken (sites → libraries �
 | `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
 | `-GraphTimeoutSec` | `int` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | `int` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-MaxVersionRetryPasses` | `int` | Max. aantal retry-passes voor het ophalen van versielijsten onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — zelfde aanpak en reden als bij `Get-SharePointStorageReport.ps1` hierboven |
 | `-Restart` | `switch` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
 
 ### Voorbeelden
