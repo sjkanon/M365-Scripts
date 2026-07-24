@@ -80,6 +80,20 @@
     in the scan alongside SharePoint sites (e.g. dilara.beerten@d-build.be).
     OneDrive personal sites are excluded by default.
 
+.PARAMETER MaxVersionRetryPasses
+    Maximum retry passes for resolving version history under sustained Graph/SharePoint
+    throttling before giving up on whatever is still pending. SharePoint Online enforces a
+    hard per-app "activity" ceiling — observed in practice as roughly 1500-2500 successfully
+    resolved file version lookups before a ~60-90s cool-down window repeats, regardless of
+    client-side pacing or concurrency. A fixed low pass count therefore silently abandons the
+    majority of very large libraries (hundreds of thousands of files) well before the scan is
+    actually done.
+
+    Default (0) auto-scales the pass count to the number of files needing version lookups, so
+    large scans get enough passes to genuinely finish instead of partially failing. Set this
+    explicitly only to force a lower ceiling (e.g. for a quick partial run) or a higher one
+    than the auto-scaled value.
+
 .EXAMPLE
     # Auto mode — creates and deletes a temporary App Registration automatically
     .\Get-SharePointStorageReport.ps1 -Apply
@@ -119,7 +133,9 @@ param (
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
     [ValidateRange(1, 8)]
-    [int] $VersionBatchConcurrency = 4
+    [int] $VersionBatchConcurrency = 4,
+    [ValidateRange(0, 5000)]
+    [int] $MaxVersionRetryPasses = 0
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -970,7 +986,18 @@ function Invoke-GraphBatchGet {
     $lastReportedCount = 0
 
     $pending = $Requests
-    $maxPasses = 8
+    $maxPasses = if ($MaxVersionRetryPasses -gt 0) {
+        $MaxVersionRetryPasses
+    } else {
+        # Auto-scale: SharePoint's per-app activity throttle allows roughly 1500-2500 resolved
+        # file version lookups per pass before the cool-down window repeats (a hard server-side
+        # ceiling — higher concurrency or tighter pacing doesn't avoid it, see notes above the
+        # parallel/serial dispatch branches below). A fixed low pass count would silently give
+        # up on the bulk of a large tenant long before the scan is actually finished, so scale
+        # the ceiling to the request volume instead. Capped so a pathological case can't retry
+        # forever — 500 passes is already many hours of wall-clock time at observed throughput.
+        [Math]::Min([Math]::Max(8, [int][Math]::Ceiling($totalRequests / 1500.0) + 10), 500)
+    }
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $chunkSpecs = [System.Collections.Generic.List[object]]::new()
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
@@ -1198,6 +1225,13 @@ function Invoke-GraphBatchGet {
         $pending = $retryList
     }
     foreach ($req in $pending) { $results[[string]$req.Id] = "Gave up after $maxPasses retry pass(es)." }
+
+    if ($pending.Count -gt 0) {
+        Write-Warning (
+            "Version history lookup gave up on {0}/{1} file(s) after {2} retry pass(es) under sustained throttling — " -f $pending.Count, $totalRequests, $maxPasses `
+            + "these will show as errors in the report. Re-run with a higher -MaxVersionRetryPasses (or omit it to auto-scale) if this is a very large tenant."
+        )
+    }
 
     return $results
 }

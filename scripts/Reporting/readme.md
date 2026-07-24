@@ -186,6 +186,8 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant contex
 | `-ForceAppOnlySingleSite` | Forceert tijdelijke app-bootstrap voor `-SiteUrl` scans (handig voor GDAP/delegated beperkingen) |
 | `-GraphTimeoutSec` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-VersionBatchConcurrency` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis, 1-8 (standaard: `4`) |
+| `-MaxVersionRetryPasses` | Max. aantal retry-passes voor versiegeschiedenis onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — SharePoint hanteert een harde activity-ceiling van ~1500-2500 opgeloste versie-lookups per pass, dus bij tenants met honderdduizenden bestanden gaf een vaste lage waarde (voorheen hardcoded op 8) vroegtijdig op voor het gros van de scan. Zet expliciet hoger/lager om de auto-schaling te overschrijven |
 | `-Restart` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
 
 ### Voorbeelden

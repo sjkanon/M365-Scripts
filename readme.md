@@ -588,6 +588,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-07-24 (2)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointStorageReport.ps1` silently abandoning version-history lookups on very large libraries: `Invoke-GraphBatchGet`'s retry-pass ceiling was hardcoded at 8, but SharePoint Online's per-app activity throttle allows only ~1500-2500 resolved version lookups per pass before a ~60-90s cool-down repeats — on a 200k-file tenant this meant ~90% of files got marked "gave up" before the scan actually finished |
+| Added `-MaxVersionRetryPasses` parameter (default `0` = auto-scales the pass ceiling to the request volume, capped at 500 passes); a clear `Write-Warning` is now emitted listing exactly how many files were abandoned and suggesting the parameter if the ceiling is still hit |
+| Updated `scripts/Reporting/readme.md` to document `-VersionBatchConcurrency` and `-MaxVersionRetryPasses` |
+
 ### 2026-07-24 (1)
 | Change |
 |--------|
