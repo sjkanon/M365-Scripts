@@ -71,7 +71,7 @@ function Test-PowerShellFileSyntax {
 }
 
 try {
-    $targetFiles = Get-TargetFiles -InputPath $Path -Recursive:$Recurse -IncludeModules:$IncludePsm1
+    $targetFiles = @(Get-TargetFiles -InputPath $Path -Recursive:$Recurse -IncludeModules:$IncludePsm1)
 } catch {
     Write-Error $_
     exit 2

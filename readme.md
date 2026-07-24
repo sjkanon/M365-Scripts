@@ -18,6 +18,7 @@
   - [Reporting](#-reporting)
   - [Infrastructure & Devices](#️-infrastructure--devices)
   - [Custom Tools](#-custom-tools)
+  - [Azure Infrastructure](#️-azure-infrastructure)
 - [Repository Structure](#repository-structure)
 - [Contributing](#contributing)
 - [Version History](#version-history)
@@ -162,6 +163,7 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
 
 - Retrieve Windows Autopilot hardware info
 - CMD-based Autopilot enrollment helper
+- **Compare-IntuneConfig.ps1** — compare a customer tenant's Intune configuration against an MSP baseline backup (drift detection), via the `IntuneBackupAndRestore` module — read-only
 - **iOS Compliance Updater** — automatically keeps the minimum iOS version requirement in Intune up to date
   - Fetches latest iOS version from Apple's RSS feed (with fallback to Apple Support page)
   - Compares against current policy minimum and patches via Microsoft Graph API
@@ -219,6 +221,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - Recurring SMTP test (every 5 minutes) with saved encrypted password
 - Auth & network diagnostics — Event Viewer (logon failures, Kerberos, NTLM, DC availability), time sync, DNS, TCP, UNC shares, optional log scan; exports txt report to `C:\Temp\`
 - File I/O diagnostics — write/append/read/delete loop on any path; classifies failures as AUTH/NETWORK/TIMEOUT/DISK/PATH; on each failure captures FileSystemWatcher events, NTFS permission diff vs baseline, open process handles (Handle.exe auto-downloaded from Sysinternals), new process snapshot, Kerberos tickets, and Security event log; stops after 3 failures
+- **UniFi** — network documentation HTML report (devices, firmware, uptime, per site) and firmware upgrade tooling for a UniFi Controller/UniFi OS console; credentials via `Get-Credential`, never hardcoded
 
 #### Device
 
@@ -318,6 +321,17 @@ Comprehensive disk space cleanup for Windows endpoints.
 - Run with `-Apply` to perform the actual cleanup; individual categories can be skipped with `-SkipBrowserCache`, `-SkipEventLogs`, `-SkipDism`, `-SkipRecycleBin`
 - Exports a CSV report with bytes freed per category to `C:\Temp\`
 
+#### OEM Bloatware Removal
+
+- Detects device manufacturer (HP/Lenovo/Dell) and removes known OEM bloatware via `winget`, plus a generic list of consumer Microsoft Store apps (Xbox, Solitaire, Bing News/Weather, Cortana, Clipchamp)
+- Dry-run by default; `-Apply` to actually remove. CSV report of found/removed apps to `C:\Temp\`
+
+#### Cloud Drive Mapping
+
+- Maps SharePoint/OneDrive document libraries to persistent drive letters via WebDAV (`net use`), for use as a per-user logon script (Intune Win32 app or scheduled task)
+- Config-driven via a mappings CSV (`DriveLetter`, `Url`, optional `Label`); dry-run by default, `-Apply` to actually map
+- No stored credentials — relies on the signed-in user's existing tenant session (same as browser WebDAV access)
+
 ---
 
 ### 🔧 Custom Tools
@@ -383,6 +397,14 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 
 ---
 
+### ☁️ Azure Infrastructure
+
+Scripts that target Azure IaaS directly via the `Az` module — not the M365 tenant, and not wired into `menu.ps1`.
+
+- **Azure-NVMe-Conversion.ps1** — vendored third-party script (Microsoft, MIT licensed, from `Azure/SAP-on-Azure-Scripts-and-Utilities`) that converts a VM's disk controller type between SCSI and NVMe, including in-guest driver readiness checks and fixes for both Windows and Linux guests
+
+---
+
 ## Repository Structure
 
 Every folder has its own `readme.md` — this tree is a map; follow the links for full parameter/usage docs.
@@ -397,6 +419,11 @@ M365-Scripts/
 ├── readme.md
 └── scripts/
     ├── readme.md                    ← Index of all categories below
+    ├── Azure/                        ← targets Azure IaaS directly via Az, not the M365 tenant
+    │   ├── readme.md
+    │   └── VM/
+    │       ├── readme.md
+    │       └── Azure-NVMe-Conversion.ps1   ← vendored (Microsoft, MIT) — SCSI/NVMe disk controller conversion
     ├── Entra/
     │   ├── readme.md
     │   ├── Set-UserManager.ps1
@@ -411,6 +438,7 @@ M365-Scripts/
     │   ├── Migrate-Calendar.ps1
     │   ├── Set-Calendar-rights.ps1
     │   ├── Set-Distributionlist-dynamic-static.ps1
+    │   ├── Move-InboxToArchive.ps1
     │   ├── Test-CalendarPermissions.ps1
     │   ├── Test-MailboxPermissions.ps1
     │   ├── Test-DistributionGroupPermissions.ps1
@@ -422,6 +450,7 @@ M365-Scripts/
     │   └── logic-permissies.ps1     ← grant a Graph app role to a Logic App managed identity
     ├── Intune/
     │   ├── readme.md
+    │   ├── Compare-IntuneConfig.ps1  ← Intune config drift vs an MSP baseline backup (IntuneBackupAndRestore)
     │   ├── Get-Autopilot/
     │   │   ├── readme.md
     │   │   ├── Get-WindowsAutoPilotInfo.ps1
@@ -452,12 +481,16 @@ M365-Scripts/
     │   ├── Invoke-WindowsActivation.ps1 ← activate Windows, set product key / KMS server
     │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   ├── Clear-TempFiles.ps1
+    │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
     │   │   ├── Disable-internalmic.ps1
     │   │   └── Rollback-InternalMic.ps1
+    │   ├── DriveMapping/
+    │   │   ├── readme.md
+    │   │   └── New-CloudDriveMapping.ps1   ← map SharePoint/OneDrive libraries to drive letters (WebDAV)
     │   └── Time sync/
     │       ├── readme.md
     │       └── Restart-Time-Sync.ps1
@@ -465,7 +498,12 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Test-Ports.ps1
     │   ├── Test-AuthNetworkDiagnostics.ps1   ← auth/network issue diagnostics
-    │   └── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
+    │   ├── Test-FileIODiagnostics.ps1        ← file I/O test + real-time directory monitor
+    │   └── UniFi/
+    │       ├── readme.md
+    │       ├── UnifiApi.ps1                  ← shared login/session helper (dot-sourced)
+    │       ├── Get-UnifiNetworkReport.ps1     ← HTML network documentation report
+    │       └── Update-UnifiFirmware.ps1       ← list/trigger firmware upgrades across sites
     ├── RDS/
     │   ├── readme.md
     │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
@@ -549,6 +587,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-07-24 (1)
+| Change |
+|--------|
+| Documented `scripts/Azure/VM/Azure-NVMe-Conversion.ps1` (previously untracked in any readme/structure tree): added `scripts/Azure/readme.md` and `scripts/Azure/VM/readme.md`, and a new "Azure Infrastructure" category in this readme |
+| Wired 5 previously menu-less but fully-documented scripts into `menu.ps1`: `Move-InboxToArchive.ps1` and `Set-Distributionlist-dynamic-static.ps1` (Exchange submenu, keys E/F), `Get-M365UserLicenses.ps1`, `Import-ConditionalAccessBaseline.ps1`, `Set-UserManager.ps1` (Entra submenu, keys G/H/I) — and added them to the Menu tables in this readme |
+| Added `scripts/Device/Remove-OemBloatware.ps1` — detects HP/Lenovo/Dell and removes OEM bloatware via winget plus generic Microsoft Store junk via AppX; dry-run by default; wired into `menu.ps1` (key I) |
+| Added `scripts/Device/DriveMapping/New-CloudDriveMapping.ps1` — maps SharePoint/OneDrive document libraries to drive letters via WebDAV for use as a logon script; dry-run by default |
+| Added `scripts/Network/UniFi/` — `UnifiApi.ps1` shared login helper (classic controller + UniFi OS auto-detect), `Get-UnifiNetworkReport.ps1` (HTML documentation report), `Update-UnifiFirmware.ps1` (dry-run firmware upgrade tooling); credentials always via `Get-Credential`, never hardcoded |
+| Added `scripts/Intune/Compare-IntuneConfig.ps1` — Intune configuration drift detection between a customer tenant and an MSP baseline backup, via the `IntuneBackupAndRestore` module; read-only |
 
 ### 2026-07-22 (6)
 | Change |
