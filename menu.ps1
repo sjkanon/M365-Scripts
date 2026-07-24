@@ -525,6 +525,16 @@ $menu = @(
         Script="$ROOT\scripts\Device\audio\Disable-internalmic.ps1"
         Params={ return @{} }
     }
+    [PSCustomObject]@{ Key='I'; FKey=$null; Category='Device'
+        Label='Remove-OemBloatware — remove OEM + generic Store bloatware'
+        Script="$ROOT\scripts\Device\Remove-OemBloatware.ps1"
+        Params={
+            $apply = Read-Host "  Remove apps now (not just preview)? [y/N]"
+            $a = @{}
+            if ($apply -match '^[Yy]') { $a['Apply'] = $true }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"
