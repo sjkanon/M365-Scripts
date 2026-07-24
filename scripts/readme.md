@@ -24,3 +24,7 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 | [`Teams/`](Teams/readme.md) | Microsoft Teams / SharePoint export and archiving |
 | [`Startup/`](Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap + syntax checker, dot-sourced by the menu |
 | [`Custom Scripts/`](Custom%20Scripts/readme.md) | Path-pinned scripts — Office theme deployment (hardcodes its download URL to this repo path) |
+| [`TenantOnboarding/`](TenantOnboarding/readme.md) | New-tenant provisioning, multi-tenant/GDAP reporting, app deployment, device config, OneDrive management, user management — modernized from a retired internal tenant-setup toolkit |
+| [`Office365Toolkit/`](Office365Toolkit/readme.md) | Security/Exchange/Intune rewrites of still-useful capabilities from the retired `directorcia/Office365` (CIAOPS) toolkit |
+| [`PatronToolkit/`](PatronToolkit/readme.md) | Entra/Exchange/Intune/Security/SharePoint/Teams rewrites of still-useful capabilities from the retired `directorcia/patron` toolkit |
+| [`LegacyUtilities/`](LegacyUtilities/readme.md) | Misc modernized scripts (Exchange, Entra, Teams, Network, Device, Workspace 365) from assorted small tools in the retired internal toolkit |
