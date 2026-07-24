@@ -216,6 +216,31 @@ $ExchangeSubmenu = @(
         if ($mbx) { $p['Mailbox'] = $mbx }
         & "$ROOT\scripts\Exchange\Get-MailboxSizes.ps1" @p
     }}
+    @{ Key='E'; Label='Move-InboxToArchive      — archive Inbox messages to Archive folder'; Action={
+        $path  = Join-Path $ROOT 'scripts\Exchange\Move-InboxToArchive.ps1'
+        $mbx   = Read-Host "  Mailbox UPN"
+        $after = Read-Host "  Only messages on/after this date [yyyy-MM-dd] (optional)"
+        $before = Read-Host "  Only messages before this date [yyyy-MM-dd] (optional)"
+        $deleg = Read-Host "  Delegated mode (Exchange Admin, no temp app) instead of automatic? [y/N]"
+        $p = @{ Mailbox = $mbx }
+        if ($after)  { $p['After']  = [datetime]$after }
+        if ($before) { $p['Before'] = [datetime]$before }
+        if ($deleg -match '^[Yy]') { $p['Delegated'] = $true }
+        & $path @p
+        $confirm = Read-Host "  Preview completed. Add -Apply to actually move messages? [y/N]"
+        if ($confirm -match '^[Yy]') { & $path @p -Apply }
+    }}
+    @{ Key='F'; Label='Set-DL-Dynamic-Static    — resolve a dynamic DG into a static group'; Action={
+        $path  = Join-Path $ROOT 'scripts\Exchange\Set-Distributionlist-dynamic-static.ps1'
+        $dyn   = Read-Host "  Dynamic distribution group identity"
+        $tgt   = Read-Host "  Target static group identity"
+        $clear = Read-Host "  Clear existing target members first? [y/N]"
+        $whatIf = Read-Host "  Preview only (-WhatIf), no changes made? [Y/n]"
+        $p = @{ DynamicGroupIdentity = $dyn; TargetGroupIdentity = $tgt }
+        if ($clear -match '^[Yy]') { $p['ClearTargetMembers'] = $true }
+        if ($whatIf -notmatch '^[Nn]') { $p['WhatIf'] = $true }
+        & $path @p
+    }}
 )
 
 $EntraSubmenu = @(
@@ -365,6 +390,43 @@ $EntraSubmenu = @(
         $p = @{ UserId = $user }
         $p['LifetimeMinutes'] = if ($mins) { [int]$mins } else { 60 }
         if ($once -notmatch '^[Nn]') { $p['IsUsableOnce'] = $true }
+        & $path @p
+    }}
+    @{ Key='G'; Label='Get-M365UserLicenses     — report assigned licenses for a set of users'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\Get-M365UserLicenses.ps1'
+        $csv  = Read-Host "  CSV/TXT path (or leave blank for a UPN list)"
+        if ($csv) {
+            & $path -CsvPath $csv
+        } else {
+            $users = Read-Host "  UPNs/emails (comma-separated)"
+            & $path -UserList ($users -split '\s*,\s*')
+        }
+    }}
+    @{ Key='H'; Label='Import-CA-Baseline       — import the community CA baseline'; Action={
+        $path   = Join-Path $ROOT 'scripts\Entra\Import-ConditionalAccessBaseline.ps1'
+        $action = Read-Host "  Action [Import/SetState] [Import]"
+        if ($action -match '^(setstate)$') {
+            $target = Read-Host "  Target state [disabled/enabledForReportingButNotEnforced/enabled]"
+            & $path -Action SetState -TargetState $target
+        } else {
+            $state = Read-Host "  Policy state on import [disabled/enabledForReportingButNotEnforced] [disabled]"
+            $p = @{}
+            if ($state) { $p['PolicyStateOnImport'] = $state }
+            & $path @p
+        }
+    }}
+    @{ Key='I'; Label='Set-UserManager          — report/bulk-set manager for a set of users'; Action={
+        $path = Join-Path $ROOT 'scripts\Entra\Set-UserManager.ps1'
+        $mode = Read-Host "  Select users by [G]roup name / [D]epartment / [C]urrent manager / [U]PN list"
+        $p = @{}
+        switch -Regex ($mode) {
+            '^[Gg]' { $p['GroupName']      = Read-Host "  Group display name" }
+            '^[Dd]' { $p['Department']     = Read-Host "  Department" }
+            '^[Cc]' { $p['CurrentManager'] = Read-Host "  Current manager UPN or object ID" }
+            default { $p['UserList']       = (Read-Host "  UPNs (comma-separated)") -split '\s*,\s*' }
+        }
+        $newMgr = Read-Host "  New manager UPN (leave blank to only report current managers)"
+        if ($newMgr) { $p['NewManager'] = $newMgr }
         & $path @p
     }}
 )
