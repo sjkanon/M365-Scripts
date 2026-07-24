@@ -194,6 +194,14 @@ Resolves the members currently matching a Dynamic Distribution Group's filter an
 
 Moves every message in a mailbox's Inbox to its Archive folder — the same folder Outlook's "Archive" button targets. Optionally restrict the scope to a date range (`-After` / `-Before`). Uses Microsoft Graph's `$batch` endpoint to move messages in batches of 20, with retry/backoff on throttling (429/503). Default behavior is safe preview mode — pass `-Apply` to actually move messages.
 
+**Authentication (default: automatic, no Full Access needed)**
+
+By default the script archives any mailbox in the tenant without requiring Full Access on it. It connects interactively (delegated, `Application.ReadWrite.All` + `AppRoleAssignment.ReadWrite.All`), creates a short-lived temporary App Registration, self-grants it `Mail.ReadWrite` application permission (no separate admin-consent screen — the delegated role does that), uses it for the mailbox operations, and removes it again when the script finishes. This mirrors the temporary-app pattern in `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. Requires Global Administrator or Privileged Role Administrator for that one-time setup, and the `Microsoft.Graph.Applications` module.
+
+- `-Delegated` skips all of that and uses a plain delegated `Mail.ReadWrite` session instead — needs Exchange Admin, not Entra app-creation rights. For a mailbox other than the signed-in user's own, the script connects to Exchange Online, grants that account temporary Full Access, polls `Get-MailboxPermission` until it's actually visible (up to ~3 minutes — Exchange Online permission changes don't propagate instantly), archives, then removes the grant again (with a few retries, since the removal can likewise hit a domain controller that hasn't caught up yet).
+  > **Known limitation:** `Get-MailboxPermission` reflects Exchange's own state almost immediately, but Microsoft Graph's authorization cache for delegate mailbox access can lag up to **~60 minutes** behind that — this is a Microsoft-side limitation. If the actual Inbox read still 403s after the Full Access poll, the script keeps retrying it (60s apart) against a **`-MaxWaitMinutes`** deadline (default 65, covering Microsoft's documented worst case) — the Full Access grant stays in place for the whole wait, since revoking and re-granting between attempts would reset the propagation clock. Raise `-MaxWaitMinutes` if 65 isn't enough, or drop `-Delegated` to use the default app-only mode, which has no such delay.
+- `-ClientId` + `-ClientSecret`/`-CertificateThumbprint` reuses your own existing App Registration instead of creating a temporary one — that app must already have `Mail.ReadWrite` application permission (admin consent granted).
+
 **Parameters**
 
 | Parameter | Required | Description |
@@ -201,16 +209,18 @@ Moves every message in a mailbox's Inbox to its Archive folder — the same fold
 | `-Mailbox` | Yes | UPN or object ID of the mailbox whose Inbox to archive |
 | `-After` | No | Only archive messages received on or after this date |
 | `-Before` | No | Only archive messages received before this date |
-| `-TenantId` | No | Entra ID tenant ID (GUID) **or** a verified domain of the tenant (e.g. `contoso.com`) — either works. Optional if already connected or resolvable from a GDAP customer tenant context; required with `-ClientId` if not resolvable |
-| `-ClientId` | No | Existing App Registration client ID for app-only auth. Use with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
+| `-TenantId` | No | Entra ID tenant ID (GUID) **or** a verified domain of the tenant (e.g. `contoso.com`) — either works. Optional if already connected or resolvable from a GDAP customer tenant context; required for app-only auth if not resolvable |
+| `-ClientId` | No | Existing App Registration client ID for app-only auth — skips the automatic temporary app. Use with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
 | `-ClientSecret` | No | Client secret for the app registration in `-ClientId` |
 | `-CertificateThumbprint` | No | Certificate thumbprint for the app registration in `-ClientId` |
+| `-Delegated` | No | Skip the automatic temporary app-only setup; connect delegated instead. For other mailboxes, auto-grants + polls + revokes temporary Full Access via Exchange Online (needs Exchange Admin) |
+| `-MaxWaitMinutes` | No | `-Delegated` only. How long to keep retrying while waiting for Graph to honor the Full Access grant, before giving up and revoking it. Default `65` |
 | `-Apply` | No | Actually move the messages. Without it, the script only reports how many messages would be archived |
 
 **Examples**
 
 ```powershell
-# Preview — reports the count, makes no changes
+# Preview — auto app-only setup, reports the count, makes no changes
 .\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com"
 
 # Archive everything in the Inbox
@@ -222,23 +232,31 @@ Moves every message in a mailbox's Inbox to its Archive folder — the same fold
 # Only messages received in 2024
 .\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -After (Get-Date "2024-01-01") -Before (Get-Date "2025-01-01") -Apply
 
-# App-only — archive any mailbox in the tenant without needing Full Access.
+# Delegated — auto-grants + polls + revokes temporary Full Access via Exchange Online
+# instead of the Entra app-only setup (needs Exchange Admin, not Global Admin)
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -Delegated -Apply
+
+# Delegated, willing to wait out Microsoft's full ~90-minute worst case for Graph
+# to honor the Full Access grant, instead of the 65-minute default
+.\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -Delegated -MaxWaitMinutes 90 -Apply
+
+# Reuse an existing App Registration instead of creating a temporary one.
 # -TenantId accepts the tenant's domain instead of its GUID.
 .\Move-InboxToArchive.ps1 -Mailbox "user@contoso.com" -TenantId "contoso.com" `
     -ClientId "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy" -ClientSecret "your-client-secret" -Apply
 ```
 
 **Notes**
-- Uses Microsoft Graph, not Exchange Online cmdlets — requires `Microsoft.Graph.Authentication`
-- Default (delegated) mode uses scope `Mail.ReadWrite`; to archive a mailbox other than the signed-in user's own, the signed-in account needs Full Access on the target mailbox
-- Prints timestamped progress while paginating Inbox messages and while moving batches (`[HH:mm:ss] N / total moved (...%)`)
-- With `-ClientId` + `-ClientSecret`/`-CertificateThumbprint` the script connects fully app-only — that app registration must have `Mail.ReadWrite` **application** permission with admin consent, which allows archiving any mailbox in the tenant without per-mailbox delegation
+- Mailbox reads/moves always go through Microsoft Graph, not Exchange Online cmdlets — requires `Microsoft.Graph.Authentication` (and `Microsoft.Graph.Applications` for the default automatic temporary-app mode, or `ExchangeOnlineManagement` for `-Delegated`'s temporary Full Access grant)
+- Prints timestamped progress while paginating Inbox messages, while moving batches (`[HH:mm:ss] N / total moved (...%)`), and while polling for Full Access propagation in `-Delegated` mode
 - GDAP-aware: under a GDAP session (`$global:authMode -eq 'GDAP'`, set via `Connect-Tenant` / `load.ps1`), `-TenantId` is resolved automatically from the selected customer tenant (`$global:cid`) if omitted — same fallback as `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` are honored too
 
-**Required module**
+**Required modules**
 
 ```powershell
 Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
+Install-Module Microsoft.Graph.Applications    -Scope CurrentUser
+Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 ```
 
 ---
