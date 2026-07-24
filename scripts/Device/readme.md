@@ -11,9 +11,11 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Clear-TempFiles.ps1`](#clear-tempfilesps1) | Clear the shared script temp folder (`C:\Temp` on Windows, `/tmp` on Linux/macOS) |
 | [`Invoke-WindowsActivation.ps1`](#invoke-windowsactivationps1) | Activate Windows, manage product keys and KMS settings |
 | [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
+| [`Remove-OemBloatware.ps1`](#remove-oembloatwareps1) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
 | [`Test-OpenVpnDiagnostics.ps1`](#test-openvpndiagnosticsps1) | Diagnose OpenVPN Connect issues |
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
+| [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
 
 ---
 
@@ -127,6 +129,41 @@ Scan and optionally remove reclaimable disk space. Runs as a dry-run by default 
 ```
 
 A CSV report with per-category results is saved to `C:\Temp\` after each run.
+
+---
+
+## Remove-OemBloatware.ps1
+
+Detects the device manufacturer and removes known OEM bloatware via `winget`, plus a generic list of consumer Microsoft Store apps (Xbox, Solitaire, Bing News/Weather, Cortana, Clipchamp, etc.) via `Remove-AppxPackage`. Runs as a dry-run by default — no app is removed without `-Apply`.
+
+> The bloatware lists are a starting point, not exhaustive — package IDs vary by OEM preload image and change over time. Run `winget list` / `Get-AppxPackage | Select Name` on a representative device first and adjust the lists in the script if needed.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Apply` | Actually remove matched apps (default: dry-run only) |
+| `-SkipOem` | Skip manufacturer-specific removal, only process the generic Microsoft Store list |
+| `-SkipAppx` | Skip the generic Microsoft Store list, only process manufacturer-specific apps |
+| `-Manufacturer` | Override auto-detection (`HP`, `Lenovo`, `Dell`) |
+| `-OutputPath` | Override report output folder (default: `C:\Temp\`) |
+
+**Examples**
+
+```powershell
+# Dry run — see what would be removed on this device
+.\Remove-OemBloatware.ps1
+
+# Actually remove OEM + generic bloatware
+.\Remove-OemBloatware.ps1 -Apply
+
+# Only remove generic Microsoft Store junk, leave OEM apps alone
+.\Remove-OemBloatware.ps1 -Apply -SkipOem
+```
+
+A CSV report (found/removed per app) is saved to `C:\Temp\` after each run.
+
+**Requires:** `winget` (App Installer from the Microsoft Store) for OEM package removal; Administrator privileges.
 
 ---
 

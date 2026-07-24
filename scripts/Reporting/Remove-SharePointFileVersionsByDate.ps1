@@ -73,6 +73,11 @@
 .PARAMETER MaxGraphRetry
     Max retries on Graph throttling/timeouts (default: 6).
 
+.PARAMETER Restart
+    Discard any existing checkpoint for this run (same parameters + output folder) and
+    start the scan completely from scratch, instead of resuming from the last completed
+    library.
+
 .EXAMPLE
     .\Remove-SharePointFileVersionsByDate.ps1 -TenantUrl "https://contoso.sharepoint.com" -BeforeDate "2025-01-01"
 
@@ -95,7 +100,8 @@ param(
     [switch] $IncludeHiddenLibraries,
     [string[]] $LibraryTitle = @(),
     [int] $GraphTimeoutSec = 120,
-    [int] $MaxGraphRetry = 6
+    [int] $MaxGraphRetry = 6,
+    [switch] $Restart
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -115,6 +121,7 @@ $script:AppOnlyHeaders  = $null   # set only for the tenant-wide site-listing ca
 $script:TokenBody       = $null
 $script:TokenTenantId   = $null
 $script:TokenExpiry     = $null
+$script:CurrentScanLabel = ''
 
 function Write-ProgressHost {
     param(
@@ -123,6 +130,57 @@ function Write-ProgressHost {
         [ConsoleColor]$ForegroundColor = [ConsoleColor]::DarkGray
     )
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message) -ForegroundColor $ForegroundColor
+}
+
+function Set-ScanProgress {
+    # Thin wrapper around the native PowerShell progress bar (Write-Progress) so long-running
+    # phases show a real progress UI (percent + ETA in interactive hosts) instead of relying
+    # purely on scrolling Write-Host log lines.
+    param(
+        [Parameter(Mandatory = $true)][int]$Id,
+        [int]$ParentId = -1,
+        [Parameter(Mandatory = $true)][string]$Activity,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [int]$PercentComplete = -1
+    )
+    $params = @{ Id = $Id; Activity = $Activity; Status = $Status }
+    if ($ParentId -ge 0) { $params['ParentId'] = $ParentId }
+    if ($PercentComplete -ge 0) { $params['PercentComplete'] = [Math]::Min($PercentComplete, 100) }
+    Write-Progress @params
+}
+
+function Complete-ScanProgress {
+    param([Parameter(Mandatory = $true)][int]$Id, [int]$ParentId = -1)
+    $params = @{ Id = $Id; Activity = 'Done'; Completed = $true }
+    if ($ParentId -ge 0) { $params['ParentId'] = $ParentId }
+    Write-Progress @params
+}
+
+function Get-TextHashHex {
+    param([string]$Text)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        $hash  = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-LibraryCheckpointKey {
+    param([string]$SiteId, [string]$DriveId)
+    return ('{0}|{1}' -f $SiteId, $DriveId)
+}
+
+function Append-CheckpointRows {
+    param([string]$Path, [object[]]$Rows)
+    if ($Rows.Count -eq 0) { return }
+    if (Test-Path $Path) {
+        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
+    } else {
+        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+    }
 }
 
 function Format-SizeAuto {
@@ -415,6 +473,29 @@ function Get-FileVersionsPage {
     }
 }
 
+function Get-BatchItemRetryDelaySeconds {
+    # "activityLimitReached" (SharePoint/OneDrive resource-level quota, surfaced as HTTP 429) needs
+    # a much longer cooldown than ordinary throttling — it's a rolling quota against the same
+    # site/list, so retrying quickly just keeps re-tripping it. Honor a Retry-After header when
+    # Graph gives us one; otherwise back off hard specifically for activityLimitReached, and more
+    # gently for plain 429/5xx.
+    param([int]$Pass, [object]$SubResponse)
+    $retryAfter = $null
+    try {
+        if ($SubResponse -and $SubResponse.headers) {
+            $h = $SubResponse.headers.'Retry-After'
+            if ($h) { [void][int]::TryParse([string]$h, [ref]$retryAfter) }
+        }
+    } catch {}
+    if ($retryAfter -and $retryAfter -gt 0) { return [Math]::Min($retryAfter + 2, 180) }
+
+    $errorCode = $null
+    try { $errorCode = $SubResponse.body.error.code } catch {}
+    if ($errorCode -eq 'activityLimitReached') { return [Math]::Min(30 * $Pass, 180) }
+
+    return [Math]::Min(5 * $Pass, 30)
+}
+
 function Get-FileVersionsBatch {
     # Resolves version lists for up to 20 files per Graph $batch call, no cap on version count
     # per file. Individual sub-requests that come back throttled (429) or with a transient server
@@ -427,10 +508,16 @@ function Get-FileVersionsBatch {
     $results = @{}
     if ($Requests.Count -eq 0) { return $results }
 
+    # Progress is reported off $results.Count (final success/failure assignments only), so it
+    # climbs monotonically across retry passes instead of double-counting items that get retried.
+    $totalRequests     = $Requests.Count
+    $lastReportedCount = 0
+
     $pending = $Requests
-    $maxPasses = 5
+    $maxPasses = 8
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $retryList = [System.Collections.Generic.List[object]]::new()
+        $nextDelay = 0
 
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
             $end   = [Math]::Min($i + 19, $pending.Count - 1)
@@ -438,6 +525,11 @@ function Get-FileVersionsBatch {
             $batchBody = @{
                 requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
             } | ConvertTo-Json -Depth 6
+
+            # A short pause between successive $batch dispatches spreads out the request rate
+            # against the same site/list, reducing how often we trip activityLimitReached to
+            # begin with — completeness matters more here than shaving seconds off the scan.
+            Start-Sleep -Milliseconds 150
 
             $batchDone = $false
             for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
@@ -454,13 +546,20 @@ function Get-FileVersionsBatch {
                             continue
                         }
                         if ($r.status -eq 200) {
-                            $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
-                            if ($r.body.'@odata.nextLink') {
-                                Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                            try {
+                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                if ($r.body.'@odata.nextLink') {
+                                    Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                }
+                                $results[[string]$r.id] = @{ value = $values }
+                            } catch {
+                                # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                # fail just this one file's lookup instead of the whole 20-item chunk.
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
                             }
-                            $results[[string]$r.id] = @{ value = $values }
                         } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
                             $retryList.Add($req)
+                            $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
                         } else {
                             $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
                             $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
@@ -476,10 +575,23 @@ function Get-FileVersionsBatch {
                     }
                 }
             }
+
+            if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                    "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                $lastReportedCount = $results.Count
+            }
         }
 
         if ($retryList.Count -gt 0 -and $pass -lt $maxPasses) {
-            Start-Sleep -Seconds ([Math]::Min(5 * $pass, 30))
+            $waitSeconds = [Math]::Max($nextDelay, [Math]::Min(5 * $pass, 30))
+            Write-ProgressHost -Message (
+                "[WAIT] throttled by Microsoft Graph — waiting {0}s before retrying {1}/{2} remaining file(s) (pass {3}/{4})..." -f
+                $waitSeconds, $retryList.Count, $totalRequests, $pass, $maxPasses
+            ) -ForegroundColor Yellow
+            Start-Sleep -Seconds $waitSeconds
         }
         $pending = $retryList
     }
@@ -603,6 +715,9 @@ function Get-DriveFiles {
         $processedFolders++
         if ($processedFolders % 25 -eq 0) {
             Write-ProgressHost -Message ("progress: {0} folders, {1} files scanned..." -f $processedFolders, $files.Count) -ForegroundColor DarkGray
+            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Mappen en bestanden scannen' -Status (
+                "{0} — {1} mappen, {2} bestanden" -f $script:CurrentScanLabel, $processedFolders, $files.Count
+            )
         }
         $childUri = "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$folderId/children" +
                     '?$select=id,name,file,folder,webUrl&$top=200'
@@ -618,15 +733,111 @@ function Get-DriveFiles {
     return $files
 }
 
+# ── Resume / checkpoint state ────────────────────────────────────────────────
+$checkpointSignature = Get-TextHashHex -Text (@"
+$PSCommandPath
+$outputDir
+$BeforeDate.Ticks
+$SiteUrl
+$TenantUrl
+$Apply
+$IncludeOneDriveSites
+$IncludeHiddenLibraries
+$($LibraryTitle -join ',')
+$TenantId
+$effectiveTenantId
+$ClientId
+$CertificateThumbprint
+$GraphTimeoutSec
+$MaxGraphRetry
+"@)
+$script:CheckpointStatePath   = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.state.json"
+$script:CheckpointSummaryPath = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.summary.partial.csv"
+$script:CheckpointDetailPath  = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.detail.partial.csv"
+$script:CompletedLibraryKeys  = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:LoadedCheckpoint      = $false
+
+if ($Restart) {
+    $discardedCheckpoint = $false
+    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath)) {
+        if (Test-Path $path) {
+            try { Remove-Item -Path $path -Force -ErrorAction Stop; $discardedCheckpoint = $true } catch {}
+        }
+    }
+    if ($discardedCheckpoint) {
+        Write-ProgressHost -Message "[INFO] -Restart specified: discarded existing checkpoint, starting from scratch." -ForegroundColor Yellow
+    }
+} elseif (Test-Path $script:CheckpointStatePath) {
+    try {
+        $checkpointState = Get-Content -Path $script:CheckpointStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($checkpointState.RunSignature -eq $checkpointSignature) {
+            $script:LoadedCheckpoint = $true
+            foreach ($key in @($checkpointState.CompletedLibraryKeys)) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$key)) {
+                    $script:CompletedLibraryKeys.Add([string]$key) | Out-Null
+                }
+            }
+        }
+    } catch {
+        $script:LoadedCheckpoint = $false
+    }
+}
+
+function Save-CheckpointState {
+    param([System.Collections.Generic.HashSet[string]]$CompletedLibraryKeys)
+    $state = [PSCustomObject]@{
+        Version              = 1
+        RunSignature         = $checkpointSignature
+        UpdatedUtc           = (Get-Date).ToUniversalTime().ToString('o')
+        CompletedLibraryKeys = @($CompletedLibraryKeys | Sort-Object)
+    }
+    $state | ConvertTo-Json -Depth 4 | Set-Content -Path $script:CheckpointStatePath -Encoding UTF8
+}
+
+function Finalize-CheckpointFiles {
+    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath)) {
+        if (Test-Path $path) {
+            try { Remove-Item -Path $path -Force -ErrorAction Stop } catch {}
+        }
+    }
+}
+
+function Convert-CheckpointCsvRows {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return @() }
+    return @(Import-Csv -Path $Path -ErrorAction Stop)
+}
+
+function Complete-CheckpointUnit {
+    param(
+        [string]$CheckpointKey,
+        [object[]]$SummaryRows,
+        [object[]]$DetailRows
+    )
+    if ($SummaryRows.Count -gt 0) { Append-CheckpointRows -Path $script:CheckpointSummaryPath -Rows $SummaryRows }
+    if ($DetailRows.Count -gt 0) { Append-CheckpointRows -Path $script:CheckpointDetailPath -Rows $DetailRows }
+    if (-not [string]::IsNullOrWhiteSpace($CheckpointKey)) {
+        $script:CompletedLibraryKeys.Add($CheckpointKey) | Out-Null
+    }
+    Save-CheckpointState -CompletedLibraryKeys $script:CompletedLibraryKeys
+}
+
 # ── Scan ──────────────────────────────────────────────────────────────────────
 $detailRows = [System.Collections.Generic.List[object]]::new()
 $summaryRows = [System.Collections.Generic.List[object]]::new()
+
+if ($script:LoadedCheckpoint) {
+    foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointSummaryPath)) { $summaryRows.Add($row) | Out-Null }
+    foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointDetailPath)) { $detailRows.Add($row) | Out-Null }
+    Write-ProgressHost -Message ("Resuming with {0} completed library checkpoint(s)." -f $script:CompletedLibraryKeys.Count) -ForegroundColor DarkGray
+}
 
 try {
     $siteIndex = 0
     foreach ($targetSite in $targetSites) {
         $siteIndex++
         Write-ProgressHost -Message ("[{0}/{1}] {2}" -f $siteIndex, $targetSites.Count, $targetSite.webUrl) -ForegroundColor White
+        Set-ScanProgress -Id 1 -Activity 'Sites scannen' -Status ("[{0}/{1}] {2}" -f $siteIndex, $targetSites.Count, $targetSite.webUrl) -PercentComplete ([int](($siteIndex / [Math]::Max($targetSites.Count, 1)) * 100))
 
         try {
             $libraries = @(Get-SiteDocumentLibraries -SiteId $targetSite.id | Where-Object {
@@ -640,7 +851,16 @@ try {
             $libIndex = 0
             foreach ($library in $libraries) {
                 $libIndex++
+                $libraryKey = Get-LibraryCheckpointKey -SiteId $targetSite.id -DriveId $library.id
+                $script:CurrentScanLabel = "$($targetSite.webUrl) > $($library.LibraryTitle)"
+
                 Write-ProgressHost -Message ("[{0}/{1}] Library: {2}" -f $libIndex, $libraries.Count, $library.LibraryTitle) -ForegroundColor White
+                Set-ScanProgress -Id 2 -Activity 'Bibliotheken scannen' -Status ("[{0}/{1}] {2}" -f $libIndex, $libraries.Count, $script:CurrentScanLabel) -PercentComplete ([int](($libIndex / [Math]::Max($libraries.Count, 1)) * 100))
+
+                if ($script:LoadedCheckpoint -and $script:CompletedLibraryKeys.Contains($libraryKey)) {
+                    Write-ProgressHost -Message "    [SKIP] Already completed in a previous run." -ForegroundColor DarkGray
+                    continue
+                }
 
                 try {
                     $files = @(Get-DriveFiles -DriveId $library.id)
@@ -653,6 +873,7 @@ try {
                 $deletedCount = 0
                 $candidateBytes = [int64]0
                 $deletedBytes = [int64]0
+                $libraryDetailRows = [System.Collections.Generic.List[object]]::new()
 
                 $versionRequests = [System.Collections.Generic.List[object]]::new()
                 foreach ($file in $files) {
@@ -669,7 +890,7 @@ try {
                 foreach ($file in $files) {
                     $body = $versionResults[$file.id]
                     if ($body -is [string] -or -not $body) {
-                        $detailRows.Add([PSCustomObject]@{
+                        $libraryDetailRows.Add([PSCustomObject]@{
                             SiteUrl         = $targetSite.webUrl
                             Library         = $library.LibraryTitle
                             FileUrl         = $file.webUrl
@@ -710,7 +931,7 @@ try {
                             }
                         }
 
-                        $detailRows.Add([PSCustomObject]@{
+                        $libraryDetailRows.Add([PSCustomObject]@{
                             SiteUrl         = $targetSite.webUrl
                             Library         = $library.LibraryTitle
                             FileUrl         = $file.webUrl
@@ -732,7 +953,7 @@ try {
                     $(if ($Apply) { " | deleted: {0} version(s) ({1})" -f $deletedCount, (Format-SizeAuto -MB ($deletedBytes / 1MB)) } else { '' })
                 ) -ForegroundColor DarkGray
 
-                $summaryRows.Add([PSCustomObject]@{
+                $librarySummaryRows = @([PSCustomObject]@{
                     SiteUrl           = $targetSite.webUrl
                     Library           = $library.LibraryTitle
                     FilesScanned      = $files.Count
@@ -741,7 +962,11 @@ try {
                     DeletedVersions   = $deletedCount
                     DeletedSizeMB     = [math]::Round($deletedBytes / 1MB, 2)
                     Mode              = if ($Apply) { 'Apply' } else { 'Preview' }
-                }) | Out-Null
+                })
+
+                foreach ($row in $librarySummaryRows) { $summaryRows.Add($row) | Out-Null }
+                foreach ($row in $libraryDetailRows) { $detailRows.Add($row) | Out-Null }
+                Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows $librarySummaryRows -DetailRows @($libraryDetailRows)
             }
         } catch {
             $summaryRows.Add([PSCustomObject]@{
@@ -759,11 +984,13 @@ try {
         }
     }
 } finally {
+    1, 2, 3 | ForEach-Object { Complete-ScanProgress -Id $_ }
     Remove-TempApp
 }
 
 $detailRows | Export-Csv -Path $detailCsv -NoTypeInformation -Encoding UTF8
 $summaryRows | Export-Csv -Path $summaryCsv -NoTypeInformation -Encoding UTF8
+Finalize-CheckpointFiles
 
 $totalCandidates = ($summaryRows | Measure-Object -Property CandidateVersions -Sum).Sum ?? 0
 $totalDeleted = ($summaryRows | Measure-Object -Property DeletedVersions -Sum).Sum ?? 0
