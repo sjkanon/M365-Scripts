@@ -27,6 +27,13 @@
 
       Enumerating all sites requires app-only auth — delegated is not supported by Microsoft.
 
+      For a full scan with version history (-Apply, no -SkipVersions/-FastMode) and
+      -VersionBatchConcurrency above 1 (the default), a second temporary App Registration is
+      also created purely to double version-lookup throughput: SharePoint enforces its
+      "activityLimitReached" throttle per app registration, so splitting batch calls across two
+      apps gives each its own throttle budget instead of sharing one. Both temp apps are deleted
+      when the run finishes.
+
       To skip auto-create and use your own app, pass -ClientId + -TenantId + -ClientSecret
       (or -CertificateThumbprint). The script will then connect fully app-only.
 
@@ -151,10 +158,16 @@ $reportMd    = Join-Path $outputDir "SharePoint_VersionReport_$ts.md"
 $collectionCsv = Join-Path $outputDir "SharePoint_SiteCollectionTotals_$ts.csv"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
-$script:TempAppObjectId = $null
+$script:TempAppObjectId  = $null
+$script:TempAppObjectId2 = $null  # second temp app, used only to double version-lookup throughput
 $script:ConnectedHere   = $false
 $script:AppOnlyHeaders  = $null   # set in auto mode for site enumeration REST calls
-$script:SpoHostTokenCache = @{}
+$script:VersionAppOnlyHeaders = $null   # optional second app-only credential, version lookups only
+$script:VersionTokenBody      = $null
+$script:VersionTokenExpiry    = $null
+$script:VersionTokenTenantId  = $null
+$script:SpoHostTokenCache  = @{}
+$script:SpoHostTokenExpiry = @{}
 $script:VersionLookupFailureCount = 0
 $script:VersionLookupFailureSamples = [System.Collections.Generic.List[string]]::new()
 $script:CurrentScanLabel = ''
@@ -207,18 +220,20 @@ function Format-SizeAuto {
 }
 
 function Remove-TempApp {
-    # Delegated session is still open here — Remove-MgApplication works
-    if ($script:TempAppObjectId) {
+    # Delegated session is still open here — Remove-MgApplication works. Cleans up both the
+    # primary app and the optional second app created to double version-lookup throughput.
+    foreach ($objectId in @($script:TempAppObjectId, $script:TempAppObjectId2) | Where-Object { $_ }) {
         Write-ProgressHost -Message "Removing temporary App Registration..." -ForegroundColor DarkGray
         try {
-            Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
+            Remove-MgApplication -ApplicationId $objectId -ErrorAction Stop
             Write-ProgressHost -Message "[OK] Temporary App Registration removed." -ForegroundColor DarkGray
         } catch {
-            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
+            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $objectId) -ForegroundColor Yellow
             Write-ProgressHost -Message "[WARN] Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
         }
-        $script:TempAppObjectId = $null
     }
+    $script:TempAppObjectId  = $null
+    $script:TempAppObjectId2 = $null
     if ($script:ConnectedHere) {
         $prevWarningPreference = $WarningPreference
         try {
@@ -228,6 +243,115 @@ function Remove-TempApp {
             $WarningPreference = $prevWarningPreference
         }
         $script:ConnectedHere = $false
+    }
+}
+
+function New-TempAppRegistration {
+    # Creates one temporary App Registration + service principal, grants it the requested Graph
+    # site role (and optionally a SharePoint REST role), and mints an app-only token. Factored out
+    # so a second, independent app can be created purely to double version-lookup throughput —
+    # SharePoint's "activityLimitReached" throttle is enforced per app registration, so splitting
+    # batch calls across two apps gives each its own throttle bucket instead of sharing one.
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$UsedTenantId,
+        [Parameter(Mandatory = $true)][string]$RequiredSiteRole,
+        [switch]$UseHighPrivilege,
+        [switch]$GrantSpoRole,
+        [string]$Label = 'app'
+    )
+
+    Write-Host "  Creating temporary App Registration '$AppName'..." -ForegroundColor Cyan
+    $app = New-MgApplication -DisplayName $AppName -ErrorAction Stop
+    $sp  = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+
+    $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+    $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $RequiredSiteRole }
+    if (-not $appRole) {
+        throw "Could not resolve app role '$RequiredSiteRole'."
+    }
+    New-MgServicePrincipalAppRoleAssignment `
+        -ServicePrincipalId $sp.Id `
+        -PrincipalId        $sp.Id `
+        -ResourceId         $graphSp.Id `
+        -AppRoleId          $appRole.Id `
+        -ErrorAction Stop | Out-Null
+    Write-Host ("  [OK]   {0} granted (Graph, {1})." -f $RequiredSiteRole, $Label) -ForegroundColor DarkGray
+
+    if ($GrantSpoRole) {
+        # Reading a site's recycle bin needs a SharePoint-scoped token with elevated rights —
+        # Sites.Read.All on Graph is not enough and the SPO REST call fails silently otherwise.
+        try {
+            $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
+            $spoRoleCandidates = if ($UseHighPrivilege) {
+                @('Sites.FullControl.All', 'AllSites.FullControl', 'AllSites.Manage', 'Sites.Manage.All', 'Sites.Read.All', 'AllSites.Read')
+            } else {
+                @('Sites.Read.All', 'AllSites.Read')
+            }
+            $spoRole = $null
+            foreach ($candidate in $spoRoleCandidates) {
+                $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -eq $candidate } | Select-Object -First 1
+                if ($spoRole) { break }
+            }
+            if ($spoRole) {
+                New-MgServicePrincipalAppRoleAssignment `
+                    -ServicePrincipalId $sp.Id `
+                    -PrincipalId        $sp.Id `
+                    -ResourceId         $spoSp.Id `
+                    -AppRoleId          $spoRole.Id `
+                    -ErrorAction Stop | Out-Null
+                Write-Host ("  [OK]   {0} granted (SharePoint REST, {1})." -f $spoRole.Value, $Label) -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Host ("  [WARN] Could not grant SharePoint REST permission to {0} app. Recycle bin data may be unavailable." -f $Label) -ForegroundColor Yellow
+        }
+    }
+
+    # 30-day secret: large tenant scans (version history especially) can run for well over 24
+    # hours — a short-lived secret would expire mid-run, after which no new access token can be
+    # minted at all (the secret itself is dead, not just the token), silently breaking every
+    # subsequent Graph call for the rest of the run. The app (and its secret) is deleted by
+    # Remove-TempApp when the run finishes normally.
+    $secret = Add-MgApplicationPassword `
+        -ApplicationId      $app.Id `
+        -PasswordCredential @{
+            displayName = 'temp'
+            endDateTime = (Get-Date).AddDays(30)
+        } -ErrorAction Stop
+
+    Write-Host ("  Obtaining app-only token ({0})..." -f $Label) -ForegroundColor Cyan
+    $tokenBody = @{
+        grant_type    = 'client_credentials'
+        scope         = 'https://graph.microsoft.com/.default'
+        client_id     = $app.AppId
+        client_secret = $secret.SecretText
+    }
+
+    $tokenResp = $null
+    for ($i = 1; $i -le 6; $i++) {
+        try {
+            $tokenResp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                -Uri  "https://login.microsoftonline.com/$UsedTenantId/oauth2/v2.0/token" `
+                -Body $tokenBody
+            break
+        } catch {
+            if ($i -lt 6) {
+                Write-Host ("  [INFO] Waiting for app registration propagation ({0}, attempt {1}/6)..." -f $Label, $i) -ForegroundColor DarkGray
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+
+    if (-not $tokenResp -or -not $tokenResp.access_token) {
+        throw "Could not obtain app-only token for $Label app."
+    }
+
+    return [PSCustomObject]@{
+        AppObjectId   = $app.Id
+        Headers       = @{ Authorization = "Bearer $($tokenResp.access_token)" }
+        TokenExpiry   = (Get-Date).AddSeconds($tokenResp.expires_in - 300)
+        TokenBody     = $tokenBody
+        TokenTenantId = $UsedTenantId
     }
 }
 
@@ -402,104 +526,42 @@ try {
                 Remove-TempApp; exit 1
             }
 
-            # Create temporary App Registration
-            $appName = "SP-StorageReport-Temp-$ts"
-            Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
-            $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
-            $script:TempAppObjectId = $app.Id
-
-            # Service Principal
-            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-
-            # Assign site application permission + grant admin consent
-            $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-            $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $requiredSiteRole }
-            if (-not $appRole) {
-                Write-Host "  [ERROR] Could not resolve app role '$requiredSiteRole'." -ForegroundColor Red
-                Remove-TempApp; exit 1
-            }
-            New-MgServicePrincipalAppRoleAssignment `
-                -ServicePrincipalId $sp.Id `
-                -PrincipalId        $sp.Id `
-                -ResourceId         $graphSp.Id `
-                -AppRoleId          $appRole.Id `
-                -ErrorAction Stop | Out-Null
-            Write-Host ("  [OK]   {0} granted (Graph)." -f $requiredSiteRole) -ForegroundColor DarkGray
-
-            # Also grant a role on the SharePoint service principal so the app can obtain a
-            # SharePoint-scoped token for SPO REST calls (recycle bin, etc.). Reading a site's
-            # recycle bin needs elevated (manage/full-control level) rights — Sites.Read.All is
-            # not enough and the call fails silently — so this must follow -UseHighPrivilege the
-            # same way the Graph-scoped role above does, instead of always requesting read-only.
+            # Create temporary App Registration (primary — site/drive enumeration, recycle bin)
             try {
-                $spoSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" -ErrorAction Stop
-                $spoRoleCandidates = if ($UseHighPrivilege) {
-                    @('Sites.FullControl.All', 'AllSites.FullControl', 'AllSites.Manage', 'Sites.Manage.All', 'Sites.Read.All', 'AllSites.Read')
-                } else {
-                    @('Sites.Read.All', 'AllSites.Read')
-                }
-                $spoRole = $null
-                foreach ($candidate in $spoRoleCandidates) {
-                    $spoRole = $spoSp.AppRoles | Where-Object { $_.Value -eq $candidate } | Select-Object -First 1
-                    if ($spoRole) { break }
-                }
-                if ($spoRole) {
-                    New-MgServicePrincipalAppRoleAssignment `
-                        -ServicePrincipalId $sp.Id `
-                        -PrincipalId        $sp.Id `
-                        -ResourceId         $spoSp.Id `
-                        -AppRoleId          $spoRole.Id `
-                        -ErrorAction Stop | Out-Null
-                    Write-Host ("  [OK]   {0} granted (SharePoint REST)." -f $spoRole.Value) -ForegroundColor DarkGray
-                }
+                $primaryApp = New-TempAppRegistration -AppName "SP-StorageReport-Temp-$ts" `
+                    -UsedTenantId $usedTenantId -RequiredSiteRole $requiredSiteRole `
+                    -UseHighPrivilege:$UseHighPrivilege -GrantSpoRole -Label 'primary'
             } catch {
-                Write-Host "  [WARN] Could not grant SharePoint REST permission to temp app. Recycle bin data may be unavailable." -ForegroundColor Yellow
-            }
-
-            # Create short-lived client secret (expires in 1 day)
-            $secret = Add-MgApplicationPassword `
-                -ApplicationId      $app.Id `
-                -PasswordCredential @{
-                    displayName = 'temp'
-                    endDateTime = (Get-Date).AddDays(1)
-                } -ErrorAction Stop
-
-            # Get app-only OAuth token via REST — no SDK reconnect needed
-            # The delegated session stays open so Remove-MgApplication works at the end
-            Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
-            $tokenBody = @{
-                grant_type    = 'client_credentials'
-                scope         = 'https://graph.microsoft.com/.default'
-                client_id     = $app.AppId
-                client_secret = $secret.SecretText
-            }
-
-            $appOnlyToken = $null
-            for ($i = 1; $i -le 6; $i++) {
-                try {
-                    $tokenResp    = Invoke-RestMethod -Method POST -ErrorAction Stop `
-                        -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
-                        -Body $tokenBody
-                    $appOnlyToken = $tokenResp.access_token
-                    break
-                } catch {
-                    if ($i -lt 6) {
-                        Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
-                        Start-Sleep -Seconds 5
-                    }
-                }
-            }
-
-            if (-not $appOnlyToken) {
-                Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
+                Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
                 Remove-TempApp; exit 1
             }
-
-            $script:AppOnlyHeaders  = @{ Authorization = "Bearer $appOnlyToken" }
-            $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)  # refresh 5 min early
-            $script:TokenBody       = $tokenBody
-            $script:TokenTenantId   = $usedTenantId
+            $script:TempAppObjectId = $primaryApp.AppObjectId
+            $script:AppOnlyHeaders  = $primaryApp.Headers
+            $script:TokenExpiry     = $primaryApp.TokenExpiry
+            $script:TokenBody       = $primaryApp.TokenBody
+            $script:TokenTenantId   = $primaryApp.TokenTenantId
             Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+
+            # Second, independent temp app used only to double version-lookup throughput — see
+            # New-TempAppRegistration for why this actually helps. Only worth the extra Entra ID
+            # object (and propagation wait) when a real, concurrent version scan will follow;
+            # skipped for quick/recycle-bin-only/skip-versions/single-threaded runs. Failure here
+            # is non-fatal — the scan just proceeds with a single app, as before.
+            if ($Apply -and -not $SkipVersions -and -not $FastMode -and -not $RecycleBinOnly -and $VersionBatchConcurrency -gt 1) {
+                try {
+                    $versionApp = New-TempAppRegistration -AppName "SP-StorageReport-TempVer-$ts" `
+                        -UsedTenantId $usedTenantId -RequiredSiteRole $requiredSiteRole `
+                        -UseHighPrivilege:$UseHighPrivilege -Label 'secondary, version lookups'
+                    $script:TempAppObjectId2      = $versionApp.AppObjectId
+                    $script:VersionAppOnlyHeaders = $versionApp.Headers
+                    $script:VersionTokenExpiry    = $versionApp.TokenExpiry
+                    $script:VersionTokenBody      = $versionApp.TokenBody
+                    $script:VersionTokenTenantId  = $versionApp.TokenTenantId
+                    Write-Host "  [OK]   Second app ready — version-history lookups will alternate across both." -ForegroundColor DarkGray
+                } catch {
+                    Write-Host "  [WARN] Could not create second app for faster version lookups — continuing with a single app." -ForegroundColor Yellow
+                }
+            }
         } else {
             Write-Host "  Connecting interactively (single-site optimized mode)..." -ForegroundColor Cyan
             $connectParams = @{
@@ -536,6 +598,23 @@ function Update-AppOnlyToken {
         Write-Host "  [INFO] App-only token refreshed (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
     } catch {
         Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Update-VersionAppOnlyToken {
+    # Mirrors Update-AppOnlyToken for the optional second (version-lookup-only) app credential.
+    if (-not $script:VersionTokenBody) { return }
+    if ((Get-Date) -lt $script:VersionTokenExpiry) { return }
+
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:VersionTokenTenantId)/oauth2/v2.0/token" `
+            -Body $script:VersionTokenBody
+        $script:VersionAppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+        $script:VersionTokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+        Write-Host "  [INFO] Secondary (version-lookup) app-only token refreshed (valid until ~$($script:VersionTokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  [WARN] Secondary token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -1000,15 +1079,23 @@ function Invoke-GraphBatchGet {
     }
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
         $chunkSpecs = [System.Collections.Generic.List[object]]::new()
+        $chunkIndex = 0
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
             $end   = [Math]::Min($i + 19, $pending.Count - 1)
             $chunk = $pending.GetRange($i, $end - $i + 1)
 
+            # Alternate chunks across the two app credentials (when the second one exists) so
+            # each app's own activity-throttle bucket absorbs roughly half the traffic instead of
+            # both halves competing for one bucket.
+            $useSecondary = [bool]$script:VersionAppOnlyHeaders -and (($chunkIndex % 2) -eq 1)
+            $chunkIndex++
+
             $chunkSpecs.Add([PSCustomObject]@{
-                Requests = $chunk
-                Body     = (@{
+                Requests     = $chunk
+                Body         = (@{
                     requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
                 } | ConvertTo-Json -Depth 6)
+                UseSecondary = $useSecondary
             }) | Out-Null
         }
 
@@ -1021,6 +1108,7 @@ function Invoke-GraphBatchGet {
             # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
             # of the run.
             Update-AppOnlyToken
+            if ($script:VersionAppOnlyHeaders) { Update-VersionAppOnlyToken }
             $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
             $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
             $runspacePool.Open()
@@ -1068,7 +1156,7 @@ function Invoke-GraphBatchGet {
                     $ps.RunspacePool = $runspacePool
                     [void]$ps.AddScript($workerScript)
                     [void]$ps.AddParameter('BatchBody', $spec.Body)
-                    [void]$ps.AddParameter('Headers', $script:AppOnlyHeaders)
+                    [void]$ps.AddParameter('Headers', $(if ($spec.UseSecondary) { $script:VersionAppOnlyHeaders } else { $script:AppOnlyHeaders }))
                     [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
 
                     $workers.Add([PSCustomObject]@{
@@ -1158,9 +1246,10 @@ function Invoke-GraphBatchGet {
                 for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
                     try {
                         if ($script:AppOnlyHeaders) {
-                            Update-AppOnlyToken
+                            if ($spec.UseSecondary) { Update-VersionAppOnlyToken; $batchHeaders = $script:VersionAppOnlyHeaders }
+                            else { Update-AppOnlyToken; $batchHeaders = $script:AppOnlyHeaders }
                             $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                                -Headers $script:AppOnlyHeaders -ContentType 'application/json' `
+                                -Headers $batchHeaders -ContentType 'application/json' `
                                 -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
                         } else {
                             $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
@@ -1384,11 +1473,18 @@ function Get-AllDriveItems {
 }
 
 function Get-SpoAppOnlyTokenForHost {
+    # SPO-scoped tokens are per-hostname and, like the Graph app-only token, are short-lived —
+    # caching them forever (as before) meant a long run's recycle-bin/hidden-library phases would
+    # start silently failing with 401s the moment the cached token expired, since nothing ever
+    # re-fetched it. Track an expiry per host and refresh 5 minutes early, mirroring
+    # Update-AppOnlyToken's behavior for the Graph token.
     param([string]$HostName)
 
     if ([string]::IsNullOrWhiteSpace($HostName)) { return $null }
 
-    if ($script:SpoHostTokenCache.ContainsKey($HostName)) {
+    if ($script:SpoHostTokenCache.ContainsKey($HostName) -and
+        $script:SpoHostTokenExpiry.ContainsKey($HostName) -and
+        (Get-Date) -lt $script:SpoHostTokenExpiry[$HostName]) {
         return $script:SpoHostTokenCache[$HostName]
     }
 
@@ -1409,7 +1505,8 @@ function Get-SpoAppOnlyTokenForHost {
             -Body $body
 
         if ($resp.access_token) {
-            $script:SpoHostTokenCache[$HostName] = $resp.access_token
+            $script:SpoHostTokenCache[$HostName]  = $resp.access_token
+            $script:SpoHostTokenExpiry[$HostName] = (Get-Date).AddSeconds($resp.expires_in - 300)
             return $resp.access_token
         }
     } catch {}
