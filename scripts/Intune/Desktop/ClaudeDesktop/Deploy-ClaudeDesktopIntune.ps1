@@ -263,6 +263,10 @@ $packageParams = @{
     SourceFolder = $sourceDir
     SetupFile    = 'Install-ClaudeDesktop-Intune.ps1'
     OutputFolder = $outputDir
+    # Zonder -Force slaat New-IntuneWin32AppPackage het bouwen stilzwijgend over (en geeft
+    # geen object terug) als er al een .intunewin met dezelfde naam in $outputDir staat — dat
+    # moet elke maandelijkse run juist wél opnieuw gebeuren, met de zojuist gedownloade MSIX.
+    Force        = $true
 }
 if ($IntuneWinAppUtilPath) { $packageParams['IntuneWinAppUtilPath'] = $IntuneWinAppUtilPath }
 try {
@@ -272,6 +276,10 @@ try {
     exit 1
 }
 $intuneWinFile = $win32AppPackage.Path
+if ([string]::IsNullOrWhiteSpace($intuneWinFile) -or -not (Test-Path $intuneWinFile)) {
+    Write-Host "  [ERROR] New-IntuneWin32AppPackage leverde geen geldig .intunewin-pad op." -ForegroundColor Red
+    exit 1
+}
 Write-Info "[OK]   Package gebouwd: $intuneWinFile"
 
 # ── Microsoft Graph (delegated) ──────────────────────────────────────────────
