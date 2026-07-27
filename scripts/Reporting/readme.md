@@ -133,6 +133,8 @@ Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-pru
 
 Tijdens een lange scan toont het script zowel scrollende logregels als (in een interactieve console) geneste progress-balken per fase: sites/libraries inventariseren, per bibliotheek mappen/bestanden scannen, versiegeschiedenis ophalen, en recycle bins. Als Microsoft Graph throttlet (bijvoorbeeld `activityLimitReached` tijdens version-history lookups) verschijnt er een `[WAIT] throttled by Microsoft Graph — waiting ...`-melding met de wachttijd, in plaats van dat het script stil lijkt te hangen.
 
+> **Let op (delegated/SDK-calls):** de Microsoft.Graph SDK-cmdlets retryen op 429/503 standaard *zelf* stil, met een eigen interne backoff die bij `activityLimitReached` een flink `Retry-After` kan respecteren — dat kon minutenlange stiltes geven zonder dat het script's eigen `[WAIT]`-melding ooit in beeld kwam. Het script zet daarom `Set-MgRequestContext -ClientTimeout <-GraphTimeoutSec> -MaxRetry 0` direct na het verbinden, zodat elke Graph-SDK-call een harde timeout krijgt en alle retries via de eigen, zichtbare logica van het script lopen.
+
 ```powershell
 # Hervat automatisch een onderbroken tenantscan
 .\Get-SharePointStorageReport.ps1 -Apply
@@ -243,6 +245,8 @@ Net als `Get-SharePointStorageReport.ps1` schrijft dit script na elke afgeronde 
 - De checkpointbestanden worden automatisch opgeruimd zodra de scan succesvol volledig afrondt.
 
 Tijdens de scan toont het script geneste progress-balken (sites → libraries → mappen/bestanden scannen / versiegeschiedenis ophalen) naast de scrollende logregels, en een `[WAIT] throttled by Microsoft Graph — waiting ...`-melding zodra Graph throttlet, zodat een lange pauze niet aanvoelt als een hang.
+
+> **Let op (delegated/SDK-calls):** net als bij `Get-SharePointStorageReport.ps1` zet het script `Set-MgRequestContext -ClientTimeout <-GraphTimeoutSec> -MaxRetry 0` direct na het verbinden — zonder die instelling retryen de Microsoft.Graph SDK-cmdlets 429/503 zelf stil met een eigen backoff, wat bij `activityLimitReached` minutenlange stiltes kan geven zonder dat het script's eigen `[WAIT]`-melding in beeld komt.
 
 ### Parameters
 
