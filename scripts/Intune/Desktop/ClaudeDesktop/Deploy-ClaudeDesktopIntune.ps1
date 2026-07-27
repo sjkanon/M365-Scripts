@@ -97,8 +97,21 @@ param(
 )
 
 # ── Cleanup tracking ─────────────────────────────────────────────────────────
-$script:TempAppObjectId = $null
+$script:TempAppObjectId  = $null
 $script:ConnectedHere    = $false
+
+# ── Cultuur tijdelijk op invariant zetten ────────────────────────────────────
+# De IntuneWin32App-module heeft een bekende, nog niet gemergede bug (upstream issue #210):
+# de token-vervaldatum wordt met .ToString()/.Parse() weggeschreven en teruggelezen zonder
+# expliciete cultuur op te geven. Op een systeem met dd/MM/jjjj-notatie (zoals nl-NL) crasht
+# dat zodra de module de datum terugleest ("was not recognized as a valid DateTime"), wat
+# elke retry na de eerste laat mislukken op een heel andere fout dan de eigenlijke Graph-fout.
+# Invariant culture (M/d/jjjj) is intern consistent, dus dit voorkomt de crash zonder dat de
+# module zelf gepatcht hoeft te worden.
+$script:OriginalCulture   = [System.Threading.Thread]::CurrentThread.CurrentCulture
+$script:OriginalUICulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
+[System.Threading.Thread]::CurrentThread.CurrentCulture   = [System.Globalization.CultureInfo]::InvariantCulture
+[System.Threading.Thread]::CurrentThread.CurrentUICulture = [System.Globalization.CultureInfo]::InvariantCulture
 
 function Write-Step {
     param([string]$Message, [ConsoleColor]$ForegroundColor = 'Cyan')
@@ -306,21 +319,31 @@ try {
 
     # ── Verbinden met Intune Graph via de tijdelijke app (met propagatie-retry) ─────────────
     Write-Step "Verbinden met Intune (app-only, via tijdelijke App Registration)"
+    # Connect-MSIntuneGraph meldt een mislukte token-aanvraag (bv. AADSTS7000215 doordat het
+    # secret van de zojuist aangemaakte app nog niet is gerepliceerd) via Write-Warning, niet
+    # via een terminating error — -ErrorAction Stop op zichzelf vangt dat dus niet af. Door
+    # -WarningAction Stop mee te geven wordt zo'n waarschuwing wél een exception die de retry-
+    # lus kan opvangen. Een echte vervolgcall (Get-IntuneWin32App) valideert bovendien dat er
+    # ook daadwerkelijk een bruikbaar token is, niet alleen dat Connect-MSIntuneGraph zonder
+    # fouten doorliep.
     $connected = $false
-    for ($i = 1; $i -le 6; $i++) {
+    $maxAttempts = 12
+    $retryDelaySeconds = 10
+    for ($i = 1; $i -le $maxAttempts; $i++) {
         try {
-            Connect-MSIntuneGraph -TenantID $effectiveTenantId -ClientID $tempApp.AppId -ClientSecret $tempApp.ClientSecret -ErrorAction Stop | Out-Null
+            Connect-MSIntuneGraph -TenantID $effectiveTenantId -ClientID $tempApp.AppId -ClientSecret $tempApp.ClientSecret -ErrorAction Stop -WarningAction Stop | Out-Null
+            Get-IntuneWin32App -ErrorAction Stop -WarningAction Stop | Out-Null
             $connected = $true
             break
         } catch {
-            if ($i -lt 6) {
-                Write-Info "Wachten op propagatie van de tijdelijke App Registration (poging $i/6)..."
-                Start-Sleep -Seconds 5
+            if ($i -lt $maxAttempts) {
+                Write-Info "Wachten op propagatie van de tijdelijke App Registration (poging $i/$maxAttempts): $($_.Exception.Message)"
+                Start-Sleep -Seconds $retryDelaySeconds
             }
         }
     }
     if (-not $connected) {
-        throw "Kon niet verbinden met Intune via de tijdelijke App Registration."
+        throw "Kon niet verbinden met Intune via de tijdelijke App Registration (na $maxAttempts pogingen)."
     }
     Write-Info "[OK]   Verbonden met Intune."
 
@@ -397,6 +420,8 @@ finally {
     if ($script:ConnectedHere) {
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     }
+    [System.Threading.Thread]::CurrentThread.CurrentCulture   = $script:OriginalCulture
+    [System.Threading.Thread]::CurrentThread.CurrentUICulture = $script:OriginalUICulture
 }
 
 Write-Host "`n  ================================================" -ForegroundColor Cyan
