@@ -505,9 +505,9 @@ function Get-GraphRetryDelaySeconds {
 }
 
 function Invoke-GraphGet {
-    # Uses the app-only bridge token only when set (tenant-wide site enumeration in auto mode).
-    # Every other call goes through the delegated (or provided app-only) SDK session, so file
-    # reads/deletes always run under the caller's own permissions.
+    # Uses the app-only bridge token only when set (site/library enumeration and version-history
+    # GETs in auto mode). Version *deletions* (Invoke-GraphDelete) never use it — those always go
+    # through the delegated (or provided app-only) SDK session, under the caller's own permissions.
     param([string]$Uri)
     for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
         try {
