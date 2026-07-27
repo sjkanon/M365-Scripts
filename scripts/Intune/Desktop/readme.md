@@ -12,3 +12,4 @@ Intune-deployed desktop customization: corporate wallpaper + lockscreen, and a t
 |------|-------------|
 | [`Background/`](Background/readme.md) | Corporate wallpaper (`Desktop/`) and lockscreen (`Lockscreen/`) |
 | [`Add Lockscreen to start and desktop/`](Add%20Lockscreen%20to%20start%20and%20desktop/readme.md) | Pins a "Lock Workstation" shortcut to Start |
+| [`ClaudeDesktop/`](ClaudeDesktop/readme.md) | Machine-wide Claude Desktop deployment (Cowork-ready), one script run monthly to stay current |
