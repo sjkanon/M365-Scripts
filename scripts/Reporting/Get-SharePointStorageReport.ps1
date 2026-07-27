@@ -219,6 +219,26 @@ function Format-SizeAuto {
     }
 }
 
+function Set-GraphRequestTimeoutOptions {
+    # Microsoft.Graph SDK cmdlets (Invoke-MgGraphRequest, Get-MgAllSite, New-MgApplication, ...)
+    # have no per-call timeout and, by default, silently retry on 429/503 with their own internal
+    # backoff before ever surfacing an exception to this script. Under SharePoint's
+    # "activityLimitReached" throttle — which commonly returns large Retry-After values — that
+    # produces long stretches of dead silence with no [INFO]/[WAIT] message, indistinguishable
+    # from a real hang. Disabling the SDK's own retry and giving every call a hard client-side
+    # timeout routes every retry decision through this script's own visible retry/backoff logic
+    # instead (Invoke-GraphGet, Invoke-GraphBatchGet). Only affects delegated / SDK-issued calls —
+    # the app-only REST path already has an explicit -TimeoutSec.
+    param([int]$TimeoutSec)
+    if (Get-Command Set-MgRequestContext -ErrorAction SilentlyContinue) {
+        try {
+            Set-MgRequestContext -ClientTimeout $TimeoutSec -MaxRetry 0 -ErrorAction Stop
+        } catch {
+            Write-Host "  [WARN] Could not configure Graph SDK request timeout/retry options: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
 function Remove-TempApp {
     # Delegated session is still open here — Remove-MgApplication works. Cleans up both the
     # primary app and the optional second app created to double version-lookup throughput.
@@ -583,6 +603,8 @@ try {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Remove-TempApp; exit 1
 }
+
+Set-GraphRequestTimeoutOptions -TimeoutSec $GraphTimeoutSec
 
 function Update-AppOnlyToken {
     # Silently refreshes the app-only token if it expires within 5 minutes
