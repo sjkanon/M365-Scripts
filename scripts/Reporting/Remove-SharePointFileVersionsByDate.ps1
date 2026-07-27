@@ -19,12 +19,18 @@
     Authentication:
       By default the script connects interactively (delegated) with Sites.ReadWrite.All and
       Files.ReadWrite.All — no Entra ID app registration is required. Scanning all sites in the
-      tenant additionally needs app-only auth for the site-listing call only (Microsoft does not
-      support delegated tenant-wide site enumeration); the script creates a short-lived, read-only
-      temporary App Registration for that single lookup and removes it when done. All file reads
-      and version deletions always go through your own delegated permissions, never the temp app.
+      tenant additionally needs app-only auth for site/library enumeration and version-history
+      lookups (Microsoft does not support delegated tenant-wide site enumeration); the script
+      creates a short-lived, read-only temporary App Registration for that and removes it when
+      done. Version deletions always go through your own delegated permissions, never a temp app.
 
-      To skip the temporary app and use your own existing app registration instead, pass
+      For an all-sites run with -VersionBatchConcurrency above 1 (the default), a second temporary
+      App Registration is also created purely to double version-lookup throughput: SharePoint
+      enforces its "activityLimitReached" throttle per app registration, so splitting batch calls
+      across two apps gives each its own throttle budget instead of sharing one. Both temp apps
+      are deleted when the run finishes.
+
+      To skip the temporary app(s) and use your own existing app registration instead, pass
       -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint). That app must already
       have Sites.ReadWrite.All application permission granted.
 
@@ -73,6 +79,13 @@
 .PARAMETER MaxGraphRetry
     Max retries on Graph throttling/timeouts (default: 6).
 
+.PARAMETER VersionBatchConcurrency
+    Number of parallel workers (1-8, default: 4) used to dispatch version-history batch
+    lookups when running in all-sites mode. Values above 1 also trigger creation of a second
+    temporary App Registration (see Authentication above) so the two apps split SharePoint's
+    per-app "activityLimitReached" throttle budget instead of sharing one. Set to 1 to disable
+    both parallel dispatch and the second temp app.
+
 .PARAMETER MaxVersionRetryPasses
     Maximum retry passes for resolving version lists under sustained Graph/SharePoint
     throttling before giving up on whatever is still pending. SharePoint Online enforces a
@@ -113,6 +126,8 @@ param(
     [string[]] $LibraryTitle = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
+    [ValidateRange(1, 8)]
+    [int] $VersionBatchConcurrency = 4,
     [ValidateRange(0, 5000)]
     [int] $MaxVersionRetryPasses = 0,
     [switch] $Restart
@@ -129,12 +144,17 @@ $detailCsv = Join-Path $outputDir "SharePoint_VersionCleanup_Detail_$ts.csv"
 $summaryCsv = Join-Path $outputDir "SharePoint_VersionCleanup_Summary_$ts.csv"
 
 # ── Cleanup tracking ──────────────────────────────────────────────────────────
-$script:TempAppObjectId = $null
-$script:ConnectedHere   = $false
-$script:AppOnlyHeaders  = $null   # set only for the tenant-wide site-listing call in auto mode
-$script:TokenBody       = $null
-$script:TokenTenantId   = $null
-$script:TokenExpiry     = $null
+$script:TempAppObjectId  = $null
+$script:TempAppObjectId2 = $null  # second temp app, used only to double version-lookup throughput
+$script:ConnectedHere    = $false
+$script:AppOnlyHeaders   = $null   # set for tenant-wide site/library enumeration + version lookups in auto mode
+$script:TokenBody        = $null
+$script:TokenTenantId    = $null
+$script:TokenExpiry      = $null
+$script:VersionAppOnlyHeaders = $null   # optional second app-only credential, version lookups only
+$script:VersionTokenBody      = $null
+$script:VersionTokenExpiry    = $null
+$script:VersionTokenTenantId  = $null
 $script:CurrentScanLabel = ''
 
 function Write-ProgressHost {
@@ -211,17 +231,20 @@ function Format-SizeAuto {
 }
 
 function Remove-TempApp {
-    if ($script:TempAppObjectId) {
+    # Delegated session is still open here — Remove-MgApplication works. Cleans up both the
+    # primary app and the optional second app created to double version-lookup throughput.
+    foreach ($objectId in @($script:TempAppObjectId, $script:TempAppObjectId2) | Where-Object { $_ }) {
         Write-ProgressHost -Message "Removing temporary App Registration..." -ForegroundColor DarkGray
         try {
-            Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
+            Remove-MgApplication -ApplicationId $objectId -ErrorAction Stop
             Write-ProgressHost -Message "[OK] Temporary App Registration removed." -ForegroundColor DarkGray
         } catch {
-            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
+            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $objectId) -ForegroundColor Yellow
             Write-ProgressHost -Message "[WARN] Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
         }
-        $script:TempAppObjectId = $null
     }
+    $script:TempAppObjectId  = $null
+    $script:TempAppObjectId2 = $null
     if ($script:ConnectedHere) {
         $prevWarningPreference = $WarningPreference
         try {
@@ -231,6 +254,83 @@ function Remove-TempApp {
             $WarningPreference = $prevWarningPreference
         }
         $script:ConnectedHere = $false
+    }
+}
+
+function New-TempAppRegistration {
+    # Creates one temporary App Registration + service principal, grants it the requested Graph
+    # site role, and mints an app-only token. Factored out so a second, independent app can be
+    # created purely to double version-lookup throughput — SharePoint's "activityLimitReached"
+    # throttle is enforced per app registration, so splitting batch calls across two apps gives
+    # each its own throttle bucket instead of sharing one.
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$UsedTenantId,
+        [Parameter(Mandatory = $true)][string]$RequiredSiteRole,
+        [string]$Label = 'app'
+    )
+
+    Write-Host "  Creating temporary App Registration '$AppName'..." -ForegroundColor Cyan
+    $app = New-MgApplication -DisplayName $AppName -ErrorAction Stop
+    $sp  = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+
+    $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+    $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $RequiredSiteRole }
+    if (-not $appRole) {
+        throw "Could not resolve app role '$RequiredSiteRole'."
+    }
+    New-MgServicePrincipalAppRoleAssignment `
+        -ServicePrincipalId $sp.Id `
+        -PrincipalId        $sp.Id `
+        -ResourceId         $graphSp.Id `
+        -AppRoleId          $appRole.Id `
+        -ErrorAction Stop | Out-Null
+    Write-Host ("  [OK]   {0} granted ({1})." -f $RequiredSiteRole, $Label) -ForegroundColor DarkGray
+
+    # 1-day secret: this script's runs are short (unlike the full storage report scan), so no
+    # need for the 30-day lifetime used elsewhere — a short-lived secret limits exposure if
+    # cleanup ever fails to run. The app (and its secret) is deleted by Remove-TempApp when the
+    # run finishes normally.
+    $secret = Add-MgApplicationPassword `
+        -ApplicationId      $app.Id `
+        -PasswordCredential @{
+            displayName = 'temp'
+            endDateTime = (Get-Date).AddDays(1)
+        } -ErrorAction Stop
+
+    Write-Host ("  Obtaining app-only token ({0})..." -f $Label) -ForegroundColor Cyan
+    $tokenBody = @{
+        grant_type    = 'client_credentials'
+        scope         = 'https://graph.microsoft.com/.default'
+        client_id     = $app.AppId
+        client_secret = $secret.SecretText
+    }
+
+    $tokenResp = $null
+    for ($i = 1; $i -le 6; $i++) {
+        try {
+            $tokenResp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                -Uri  "https://login.microsoftonline.com/$UsedTenantId/oauth2/v2.0/token" `
+                -Body $tokenBody
+            break
+        } catch {
+            if ($i -lt 6) {
+                Write-Host ("  [INFO] Waiting for app registration propagation ({0}, attempt {1}/6)..." -f $Label, $i) -ForegroundColor DarkGray
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+
+    if (-not $tokenResp -or -not $tokenResp.access_token) {
+        throw "Could not obtain app-only token for $Label app."
+    }
+
+    return [PSCustomObject]@{
+        AppObjectId   = $app.Id
+        Headers       = @{ Authorization = "Bearer $($tokenResp.access_token)" }
+        TokenExpiry   = (Get-Date).AddSeconds($tokenResp.expires_in - 300)
+        TokenBody     = $tokenBody
+        TokenTenantId = $UsedTenantId
     }
 }
 
@@ -321,67 +421,39 @@ try {
                 Remove-TempApp; exit 1
             }
 
-            $appName = "SP-VersionCleanup-Temp-$ts"
-            Write-Host "  Creating temporary read-only App Registration '$appName' for site enumeration..." -ForegroundColor Cyan
-            $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
-            $script:TempAppObjectId = $app.Id
-
-            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-            $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-            $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Sites.Read.All' }
-            if (-not $appRole) {
-                Write-Host "  [ERROR] Could not resolve app role 'Sites.Read.All'." -ForegroundColor Red
+            # Primary temp app — read-only, used for site/library enumeration and (absent a
+            # second app) version-history lookups too.
+            try {
+                $primaryApp = New-TempAppRegistration -AppName "SP-VersionCleanup-Temp-$ts" `
+                    -UsedTenantId $usedTenantId -RequiredSiteRole 'Sites.Read.All' -Label 'primary'
+            } catch {
+                Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
                 Remove-TempApp; exit 1
             }
-            New-MgServicePrincipalAppRoleAssignment `
-                -ServicePrincipalId $sp.Id `
-                -PrincipalId        $sp.Id `
-                -ResourceId         $graphSp.Id `
-                -AppRoleId          $appRole.Id `
-                -ErrorAction Stop | Out-Null
-            Write-Host "  [OK]   Sites.Read.All granted (enumeration only)." -ForegroundColor DarkGray
+            $script:TempAppObjectId = $primaryApp.AppObjectId
+            $script:AppOnlyHeaders  = $primaryApp.Headers
+            $script:TokenExpiry     = $primaryApp.TokenExpiry
+            $script:TokenBody       = $primaryApp.TokenBody
+            $script:TokenTenantId   = $primaryApp.TokenTenantId
+            Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
 
-            $secret = Add-MgApplicationPassword `
-                -ApplicationId      $app.Id `
-                -PasswordCredential @{
-                    displayName = 'temp'
-                    endDateTime = (Get-Date).AddDays(1)
-                } -ErrorAction Stop
-
-            Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
-            $tokenBody = @{
-                grant_type    = 'client_credentials'
-                scope         = 'https://graph.microsoft.com/.default'
-                client_id     = $app.AppId
-                client_secret = $secret.SecretText
-            }
-
-            $appOnlyToken = $null
-            for ($i = 1; $i -le 6; $i++) {
+            # Second, independent temp app used only to double version-lookup throughput — see
+            # New-TempAppRegistration for why this actually helps. Failure here is non-fatal —
+            # the scan just proceeds with a single app, as before.
+            if ($VersionBatchConcurrency -gt 1) {
                 try {
-                    $tokenResp = Invoke-RestMethod -Method POST -ErrorAction Stop `
-                        -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
-                        -Body $tokenBody
-                    $appOnlyToken = $tokenResp.access_token
-                    break
+                    $versionApp = New-TempAppRegistration -AppName "SP-VersionCleanup-TempVer-$ts" `
+                        -UsedTenantId $usedTenantId -RequiredSiteRole 'Sites.Read.All' -Label 'secondary, version lookups'
+                    $script:TempAppObjectId2      = $versionApp.AppObjectId
+                    $script:VersionAppOnlyHeaders = $versionApp.Headers
+                    $script:VersionTokenExpiry    = $versionApp.TokenExpiry
+                    $script:VersionTokenBody      = $versionApp.TokenBody
+                    $script:VersionTokenTenantId  = $versionApp.TokenTenantId
+                    Write-Host "  [OK]   Second app ready — version-history lookups will alternate across both." -ForegroundColor DarkGray
                 } catch {
-                    if ($i -lt 6) {
-                        Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
-                        Start-Sleep -Seconds 5
-                    }
+                    Write-Host "  [WARN] Could not create second app for faster version lookups — continuing with a single app." -ForegroundColor Yellow
                 }
             }
-
-            if (-not $appOnlyToken) {
-                Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
-                Remove-TempApp; exit 1
-            }
-
-            $script:AppOnlyHeaders = @{ Authorization = "Bearer $appOnlyToken" }
-            $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)
-            $script:TokenBody       = $tokenBody
-            $script:TokenTenantId   = $usedTenantId
-            Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
         }
     }
 } catch {
@@ -400,6 +472,21 @@ function Update-AppOnlyToken {
         $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
     } catch {
         Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Update-VersionAppOnlyToken {
+    # Mirrors Update-AppOnlyToken for the optional second (version-lookup-only) app credential.
+    if (-not $script:VersionTokenBody) { return }
+    if ((Get-Date) -lt $script:VersionTokenExpiry) { return }
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:VersionTokenTenantId)/oauth2/v2.0/token" `
+            -Body $script:VersionTokenBody
+        $script:VersionAppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+        $script:VersionTokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+    } catch {
+        Write-Host "  [WARN] Secondary token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
