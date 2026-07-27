@@ -1034,6 +1034,7 @@ $ClientId
 $CertificateThumbprint
 $GraphTimeoutSec
 $MaxGraphRetry
+$VersionBatchConcurrency
 "@)
 $script:CheckpointStatePath   = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.state.json"
 $script:CheckpointSummaryPath = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.summary.partial.csv"
