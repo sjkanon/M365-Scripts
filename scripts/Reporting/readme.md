@@ -228,9 +228,9 @@ Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document
 
 ### Authenticatie
 
-Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) om alle sites op te sommen — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Die tijdelijke app wordt na afloop weer verwijderd; alle daadwerkelijke file-reads en version-deletes lopen altijd via je eigen delegated permissies, nooit via die tijdelijke app.
+Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
 
-Wil je de tijdelijke app overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al `Sites.ReadWrite.All` application permission hebben.
+Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al `Sites.ReadWrite.All` application permission hebben.
 
 > **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie garantie is.
 
@@ -261,6 +261,7 @@ Tijdens de scan toont het script geneste progress-balken (sites → libraries �
 | `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
 | `-GraphTimeoutSec` | `int` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | `int` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-VersionBatchConcurrency` | `int` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis in tenantbrede scans, 1-8 (standaard: `4`). Boven `1` wordt ook de tweede tijdelijke app aangemaakt (zie Authenticatie) |
 | `-MaxVersionRetryPasses` | `int` | Max. aantal retry-passes voor het ophalen van versielijsten onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — zelfde aanpak en reden als bij `Get-SharePointStorageReport.ps1` hierboven |
 | `-Restart` | `switch` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
 
