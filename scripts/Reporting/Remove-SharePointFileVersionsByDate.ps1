@@ -604,6 +604,13 @@ function Get-FileVersionsBatch {
     # immediately — under sustained load (thousands of files) Graph can throttle individual
     # sub-requests inside an otherwise-successful batch response, and treating that the same as a
     # permanent failure was silently discarding the vast majority of version history.
+    #
+    # When a temp app-only credential is available ($script:AppOnlyHeaders — auto mode, all-sites
+    # scans), batches dispatch over REST via that credential instead of the delegated SDK session,
+    # and — with -VersionBatchConcurrency above 1 — run in parallel across a runspace pool, with
+    # chunks alternating across the primary and secondary temp app when both exist. Version
+    # deletions (Invoke-GraphDelete) never use these credentials; only the read-only version-list
+    # lookup goes through the temp app(s).
     param([System.Collections.Generic.List[object]] $Requests)   # each: @{ Id; Url }
 
     $results = @{}
@@ -625,72 +632,233 @@ function Get-FileVersionsBatch {
         [Math]::Min([Math]::Max(8, [int][Math]::Ceiling($totalRequests / 1500.0) + 10), 500)
     }
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
-        $retryList = [System.Collections.Generic.List[object]]::new()
-        $nextDelay = 0
-
+        $chunkSpecs = [System.Collections.Generic.List[object]]::new()
+        $chunkIndex = 0
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
             $end   = [Math]::Min($i + 19, $pending.Count - 1)
             $chunk = $pending.GetRange($i, $end - $i + 1)
-            $batchBody = @{
-                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-            } | ConvertTo-Json -Depth 6
 
-            # A short pause between successive $batch dispatches spreads out the request rate
-            # against the same site/list, reducing how often we trip activityLimitReached to
-            # begin with — completeness matters more here than shaving seconds off the scan.
-            Start-Sleep -Milliseconds 150
+            # Alternate chunks across the two app credentials (when the second one exists) so
+            # each app's own activity-throttle bucket absorbs roughly half the traffic instead of
+            # both halves competing for one bucket.
+            $useSecondary = [bool]$script:VersionAppOnlyHeaders -and (($chunkIndex % 2) -eq 1)
+            $chunkIndex++
 
-            $batchDone = $false
-            for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
-                try {
-                    $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
-                    $byId = @{}
-                    foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+            $chunkSpecs.Add([PSCustomObject]@{
+                Requests     = $chunk
+                Body         = (@{
+                    requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+                } | ConvertTo-Json -Depth 6)
+                UseSecondary = $useSecondary
+            }) | Out-Null
+        }
 
-                    foreach ($req in $chunk) {
-                        $r = $byId[[string]$req.Id]
-                        if (-not $r) {
-                            if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
-                            continue
+        $retryList = [System.Collections.Generic.List[object]]::new()
+        $nextDelay = 0
+
+        if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+            # Runspace workers get a plain copy of the bearer token and cannot see later updates to
+            # $script:AppOnlyHeaders, so refresh it here before dispatch. Without this, a token that
+            # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
+            # of the run.
+            Update-AppOnlyToken
+            if ($script:VersionAppOnlyHeaders) { Update-VersionAppOnlyToken }
+            $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
+            $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+            $runspacePool.Open()
+
+            $workers = [System.Collections.Generic.List[object]]::new()
+            $workerScript = {
+                param(
+                    [string]$BatchBody,
+                    [hashtable]$Headers,
+                    [int]$TimeoutSec
+                )
+
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    try {
+                        $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                            -Headers $Headers -ContentType 'application/json' `
+                            -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+
+                        return [PSCustomObject]@{
+                            Success   = $true
+                            Responses = @($resp.responses)
                         }
-                        if ($r.status -eq 200) {
-                            try {
-                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
-                                if ($r.body.'@odata.nextLink') {
-                                    Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
-                                }
-                                $results[[string]$r.id] = @{ value = $values }
-                            } catch {
-                                # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
-                                # fail just this one file's lookup instead of the whole 20-item chunk.
-                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
+                    } catch {
+                        if ($attempt -eq 3) {
+                            return [PSCustomObject]@{
+                                Success      = $false
+                                Responses    = @()
+                                ErrorMessage = $_.Exception.Message
                             }
-                        } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
-                            $retryList.Add($req)
-                            $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
-                        } else {
-                            $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
-                            $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
                         }
-                    }
-                    $batchDone = $true
-                } catch {
-                    if ($attempt -eq 3) {
-                        if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
-                        else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
-                    } else {
+
                         Start-Sleep -Seconds ($attempt * 3)
                     }
                 }
             }
 
-            if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
-                Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
-                Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
-                    "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
-                ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
-                $lastReportedCount = $results.Count
+            try {
+                foreach ($spec in $chunkSpecs) {
+                    # Stagger dispatch slightly — the pool size already caps true concurrency, but
+                    # spacing out when each request starts further reduces burst rate against the
+                    # same site/list, which is what activityLimitReached actually tracks.
+                    Start-Sleep -Milliseconds 75
+
+                    $ps = [PowerShell]::Create()
+                    $ps.RunspacePool = $runspacePool
+                    [void]$ps.AddScript($workerScript)
+                    [void]$ps.AddParameter('BatchBody', $spec.Body)
+                    [void]$ps.AddParameter('Headers', $(if ($spec.UseSecondary) { $script:VersionAppOnlyHeaders } else { $script:AppOnlyHeaders }))
+                    [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+
+                    $workers.Add([PSCustomObject]@{
+                        PowerShell = $ps
+                        Handle     = $ps.BeginInvoke()
+                        Requests   = $spec.Requests
+                    }) | Out-Null
+                }
+
+                foreach ($worker in $workers) {
+                    $payload = $null
+
+                    try {
+                        $payload = $worker.PowerShell.EndInvoke($worker.Handle)
+                    } catch {
+                        $payload = $null
+                    } finally {
+                        $worker.PowerShell.Dispose()
+                    }
+
+                    if ($payload -and $payload.Success) {
+                        $byId = @{}
+                        foreach ($r in $payload.Responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $worker.Requests) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                try {
+                                    $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                    if ($r.body.'@odata.nextLink') {
+                                        Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                    }
+                                    $results[[string]$r.id] = @{ value = $values }
+                                } catch {
+                                    # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                    # fail just this one file's lookup instead of crashing the whole scan.
+                                    if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
+                                }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                            Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                                "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                            ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                            $lastReportedCount = $results.Count
+                        }
+                        continue
+                    }
+
+                    if ($pass -lt $maxPasses) {
+                        foreach ($req in $worker.Requests) { $retryList.Add($req) }
+                    } else {
+                        $reason = if ($payload -and $payload.ErrorMessage) { $payload.ErrorMessage } else { 'Batch call failed after retries.' }
+                        foreach ($req in $worker.Requests) { $results[$req.Id] = $reason }
+                    }
+                    if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                        Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                        Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                            "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                        ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                        $lastReportedCount = $results.Count
+                    }
+                }
+            } finally {
+                $runspacePool.Close()
+                $runspacePool.Dispose()
+            }
+        } else {
+            foreach ($spec in $chunkSpecs) {
+                $chunk = $spec.Requests
+                $batchBody = $spec.Body
+
+                # A short pause between successive $batch dispatches spreads out the request rate
+                # against the same site/list, reducing how often we trip activityLimitReached to
+                # begin with — completeness matters more here than shaving seconds off the scan.
+                Start-Sleep -Milliseconds 150
+
+                $batchDone = $false
+                for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
+                    try {
+                        if ($script:AppOnlyHeaders) {
+                            if ($spec.UseSecondary) { Update-VersionAppOnlyToken; $batchHeaders = $script:VersionAppOnlyHeaders }
+                            else { Update-AppOnlyToken; $batchHeaders = $script:AppOnlyHeaders }
+                            $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Headers $batchHeaders -ContentType 'application/json' `
+                                -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                        } else {
+                            $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                        }
+                        $byId = @{}
+                        foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $chunk) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                try {
+                                    $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                    if ($r.body.'@odata.nextLink') {
+                                        Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                    }
+                                    $results[[string]$r.id] = @{ value = $values }
+                                } catch {
+                                    # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                    # fail just this one file's lookup instead of the whole 20-item chunk.
+                                    if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
+                                }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        $batchDone = $true
+                    } catch {
+                        if ($attempt -eq 3) {
+                            if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
+                            else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
+                        } else {
+                            Start-Sleep -Seconds ($attempt * 3)
+                        }
+                    }
+                }
+
+                if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                    Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                    Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                        "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                    ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                    $lastReportedCount = $results.Count
+                }
             }
         }
 
