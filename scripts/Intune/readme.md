@@ -19,6 +19,7 @@ Autopilot enrollment, compliance policy automation, configuration drift detectio
 | [`Get-Autopilot/`](Get-Autopilot/readme.md) | Windows Autopilot hardware hash collection |
 | [`iOS-Compliance-Updater/`](iOS-Compliance-Updater/readme.md) | Auto-updates the minimum iOS version in an Intune compliance policy |
 | [`Desktop/`](Desktop/readme.md) | Corporate wallpaper + lockscreen, taskbar lock shortcut |
+| [`DiskCleanup/`](DiskCleanup/readme.md) | Win32-app wrapper that runs the C:\ disk cleanup script and reboots the device |
 
 ---
 

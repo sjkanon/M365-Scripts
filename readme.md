@@ -403,6 +403,7 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 Scripts that target Azure IaaS directly via the `Az` module — not the M365 tenant, and not wired into `menu.ps1`.
 
 - **Azure-NVMe-Conversion.ps1** — vendored third-party script (Microsoft, MIT licensed, from `Azure/SAP-on-Azure-Scripts-and-Utilities`) that converts a VM's disk controller type between SCSI and NVMe, including in-guest driver readiness checks and fixes for both Windows and Linux guests
+- **Search-AADDSUserActivity.ps1** — searches all Azure AD Domain Services audit tables in Log Analytics for a single user in one `union` query, instead of guessing which table an event landed in
 
 ---
 
