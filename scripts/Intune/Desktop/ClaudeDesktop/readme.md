@@ -28,9 +28,9 @@ Intune installs LOB MSIX apps per-user. That fails for standard users without ad
 3. Copies the install/uninstall scripts next to the MSIX and builds a `.intunewin` package (`IntuneWin32App` module — `IntuneWinAppUtil.exe` is downloaded automatically if not already present).
 4. Connects to Microsoft Graph delegated (interactive sign-in) and creates a short-lived **temporary App Registration** — same pattern as [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.md) — with only the `DeviceManagementApps.ReadWrite.All` application permission. Used to authenticate the `IntuneWin32App` module, then deleted at the end of the run. Nothing persists between runs except the Intune app itself.
 5. First run: creates the Win32 app "Claude Desktop (Machine-wide)" in Intune with detection/requirement rules and assigns it **Required** to the Entra ID group you pass in.
-6. Later runs: if the downloaded MSIX version is newer than what's recorded on the Intune app (tracked in the app's Notes field, no local state file needed), pushes an updated package via `Update-IntuneWin32AppPackageFile` — the existing assignment is left untouched, devices just get the new content. If the version hasn't changed, nothing happens.
+6. Later runs: pushes an updated package via `Update-IntuneWin32AppPackageFile` (existing assignment left untouched, devices just get the new content) if **either** the downloaded MSIX version is newer, **or** the Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 scripts themselves changed since the last run — both tracked in the app's Notes field (`ClaudeMsixVersion=...; ScriptsHash=...`), no local state file needed. If neither changed, nothing happens.
 
-Detection is deliberately version-agnostic (presence of the provisioned package + `VirtualMachinePlatform` enabled). Intune redeploys a Win32 app to already-targeted devices whenever its content version changes in Intune, regardless of what the detection rule reports — so there's no `$MinimumVersion` to bump by hand every month.
+Detection is deliberately version-agnostic (presence of the provisioned package + `VirtualMachinePlatform` enabled). Intune redeploys a Win32 app to already-targeted devices whenever its content version changes in Intune, regardless of what the detection rule reports — so there's no `$MinimumVersion` to bump by hand every month, and a pure script edit (no new MSIX) still triggers a redeploy via the `ScriptsHash` check above.
 
 ### Required role
 
@@ -58,6 +58,10 @@ You'll get an interactive sign-in prompt and a "type JA to continue" confirmatio
 ### Auto-update policy
 
 The install script sets `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` (DWord). Claude's own updater is disabled so version control stays entirely with this monthly Intune run instead of drifting per-device.
+
+### VirtualMachinePlatform restart
+
+If `VirtualMachinePlatform` was already enabled on the device, nothing else happens — Cowork works immediately. If the install script has to enable it for the first time, it does **not** restart the device itself: it sends an English `msg.exe` notification to the active console session (the logged-in user, not a broadcast to every session) telling them to restart when convenient. The feature only becomes fully active after that restart.
 
 ### Prerequisites
 
