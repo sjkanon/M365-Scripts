@@ -236,6 +236,41 @@ function Get-ScriptsHashHex {
     }
 }
 
+function Set-Win32AppArchitectureRequirement {
+    # Werkt om een bevestigde bug in IntuneWin32App-module 1.5.0 heen: Set-IntuneWin32App.ps1
+    # (de UPDATE-cmdlet) eist ten onrechte een '@odata.type'-property op de basis -RequirementRule
+    # (architecture + minimumSupportedWindowsRelease zijn platte win32LobApp-properties, geen
+    # polymorf lid van de 'rules'-collectie — zie Microsoft Graph win32LobApp-documentatie:
+    # https://learn.microsoft.com/en-us/graph/api/resources/intune-apps-win32lobapp — dus die
+    # @odata.type hoort daar sowieso niet bij). New-IntuneWin32AppRequirementRule zet 'm nooit,
+    # dus deze check slaat ALTIJD aan. Erger nog: de "break" die daarop volgt zit niet in een
+    # loop/switch, dus breekt — empirisch geverifieerd — de HELE Process-block van
+    # Set-IntuneWin32App af, ruim vóór de eigenlijke Graph-PATCH-call verderop in die functie.
+    # Zolang -RequirementRule aan Set-IntuneWin32App werd meegegeven, werd dus NOOIT iets van die
+    # aanroep (Notes, AppVersion, DetectionRule, Icon, CompanyPortalFeaturedApp) daadwerkelijk
+    # naar Intune weggeschreven. Add-IntuneWin32App (eerste aanmaak) heeft dit euvel niet — die
+    # gebruikt een andere, correcte interne bodyconstructie zonder @odata.type-eis — dus alleen
+    # de update-route heeft deze losse PATCH nodig, rechtstreeks via de sessie die
+    # Connect-MSIntuneGraph al opzette ($Global:AuthenticationHeader).
+    param(
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$RequirementRule
+    )
+    if (-not $Global:AuthenticationHeader) {
+        throw "Geen actieve Intune Graph-sessie (Global:AuthenticationHeader ontbreekt) — Connect-MSIntuneGraph moet al zijn uitgevoerd."
+    }
+    $body = @{
+        '@odata.type'                    = '#microsoft.graph.win32LobApp'
+        allowedArchitectures             = $RequirementRule['allowedArchitectures']
+        applicableArchitectures          = 'none'
+        minimumSupportedWindowsRelease   = $RequirementRule['minimumSupportedWindowsRelease']
+    } | ConvertTo-Json -Depth 5
+
+    Invoke-RestMethod -Method Patch `
+        -Uri "https://graph.microsoft.com/v1.0/deviceAppManagement/mobileApps/$AppId" `
+        -Headers $Global:AuthenticationHeader -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
+}
+
 function New-TempAppRegistration {
     # Zelfde patroon als Remove-SharePointFileVersionsByDate.ps1: een kortlevende App
     # Registration + service principal, met alleen het app-only Graph-recht dat nodig is voor
@@ -478,12 +513,20 @@ try {
     $scriptsUnchanged = $existingScriptsHash -eq $newScriptsHash
 
     # Detectie- en requirement-regel worden bij ELKE run opnieuw opgebouwd (niet alleen bij eerste
-    # aanmaak) en op elke content-update opnieuw meegestuurd aan Set-IntuneWin32App. Zonder dit
-    # blijft een fout die ooit bij de allereerste Add-IntuneWin32App-call is vastgelegd (bv. een
-    # verkeerde/verouderde architecture-waarde door een oudere IntuneWin32App-moduleversie) voor
-    # altijd op de app staan, ook al draait deze module nu correct — dit was de kernoorzaak achter
-    # de 0x80070001-installatiefouten (RequiredOSArchitecture stond op 32 i.p.v. de verwachte
-    # waarde voor x64, terwijl elke andere app in de tenant-policy 3 heeft).
+    # aanmaak), zodat een fout die ooit bij de allereerste Add-IntuneWin32App-call is vastgelegd
+    # niet voor altijd op de app blijft staan — dit was de kernoorzaak achter de 0x80070001-
+    # installatiefouten (RequiredOSArchitecture stond op 32 i.p.v. de verwachte waarde voor x64,
+    # terwijl elke andere app in de tenant-policy 3 heeft).
+    #
+    # BELANGRIJK: $requirementRule wordt bij een UPDATE bewust NIET meegegeven aan
+    # Set-IntuneWin32App (zie Set-Win32AppArchitectureRequirement hierboven) — de module (1.5.0)
+    # heeft daar een bevestigde bug: die cmdlet eist ten onrechte '@odata.type' op deze parameter,
+    # wat New-IntuneWin32AppRequirementRule nooit zet, en de "break" die daarop volgt breekt (geen
+    # loop/switch eromheen, empirisch geverifieerd) de HELE rest van de functie af — inclusief de
+    # eigenlijke Graph-PATCH-call verderop. Zolang -RequirementRule werd meegegeven, werd dus NOOIT
+    # iets van die Set-IntuneWin32App-aanroep (Notes, AppVersion, DetectionRule, Icon,
+    # CompanyPortalFeaturedApp) daadwerkelijk weggeschreven. Add-IntuneWin32App (eerste aanmaak,
+    # elseif-tak hieronder) heeft deze bug niet — die krijgt $requirementRule dus gewoon mee.
     $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
     $requirementRule = New-IntuneWin32AppRequirementRule -Architecture 'x64' -MinimumSupportedWindowsRelease $MinimumSupportedWindowsRelease
 
@@ -512,8 +555,9 @@ try {
             exit 1
         }
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
-        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule `
+        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule `
             -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
+        Set-Win32AppArchitectureRequirement -AppId $existingApp.id -RequirementRule $requirementRule
         Write-Info "[OK]   App bijgewerkt naar versie $newVersion (incl. ververste requirement rule)." -ForegroundColor Green
     }
     else {
