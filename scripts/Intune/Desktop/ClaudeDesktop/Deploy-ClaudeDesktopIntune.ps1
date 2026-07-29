@@ -22,15 +22,25 @@
          permanente App Registration of los te beheren client secret nodig.
       5. Bestaat de Intune-app "Claude Desktop (Machine-wide)" nog niet? Dan wordt hij aangemaakt
          met detectie-/requirement-regels en toegewezen (Required) aan de opgegeven Entra-groep.
-         Bestaat hij al en is er een nieuwere MSIX-versie? Dan wordt alleen de package-inhoud
-         bijgewerkt (Update-IntuneWin32AppPackageFile) — de bestaande toewijzing blijft ongewijzigd
-         staan en apparaten krijgen de nieuwe versie automatisch gepusht.
-      6. Is de MSIX-versie ongewijzigd t.o.v. de vorige run? Dan gebeurt er niets.
+         Bestaat hij al en is er een nieuwere MSIX-versie EN/OF zijn Install-/Uninstall-/
+         Detect-ClaudeDesktop-Intune.ps1 zelf gewijzigd sinds de vorige run? Dan wordt de
+         package-inhoud bijgewerkt (Update-IntuneWin32AppPackageFile) én de detectieregel
+         opnieuw gezet — de bestaande toewijzing blijft ongewijzigd staan en apparaten krijgen
+         de nieuwe content automatisch gepusht.
+      6. Zijn zowel de MSIX-versie als de drie content-scripts ongewijzigd t.o.v. de vorige run?
+         Dan gebeurt er niets.
 
     Detectie is bewust NIET versie-specifiek (zie Detect-ClaudeDesktop-Intune.ps1) — Intune
     herinstalleert een Win32-app op reeds-toegewezen apparaten zodra de content-versie in Intune
     wijzigt, ongeacht wat de detectieregel teruggeeft. Je hoeft dus nooit meer handmatig een
     $MinimumVersion op te hogen.
+
+    Omdat "content wijzigt" hierboven niet alleen de MSIX raakt: een SHA256-hash van de drie
+    .ps1-content-scripts wordt naast ClaudeMsixVersion bewaard in het Notes-veld van de
+    Intune-app (ScriptsHash=...). Zo triggert ook een pure code-wijziging in dit script-drietal
+    (bv. de Install-script restart-fix) een nieuwe Update-IntuneWin32AppPackageFile-run, ook als
+    de MSIX-versie zelf niet is veranderd — zonder dat je zelf hoeft te onthouden wanneer dat
+    nodig is.
 
     Vereiste rol tijdens het draaien van dit script: Global Administrator, of Application
     Administrator in combinatie met een rol die AppRoleAssignment.ReadWrite.All-consent mag geven

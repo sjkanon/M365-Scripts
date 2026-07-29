@@ -10,7 +10,11 @@
 
     Voert uit:
       1. Enable-WindowsOptionalFeature -FeatureName VirtualMachinePlatform (indien nodig,
-         vereist voor Cowork)
+         vereist voor Cowork). Stond de feature al aan, dan gebeurt er verder niets bijzonders en
+         is er geen herstart nodig. Moest de feature net worden ingeschakeld, dan plant dit
+         script aan het einde een herstart via shutdown.exe /r /t met een Engelstalige melding
+         (/c) aan de ingelogde gebruiker — een net ingeschakelde optional feature is anders pas
+         na een herstart écht actief, en Cowork zou dan alsnog niet werken.
       2. Verwijdert eerder geprovisioneerde Claude-versies (Remove-AppxProvisionedPackage).
          Add-AppxProvisionedPackage vervangt een bestaande, andere versie niet automatisch —
          zonder deze stap stapelen oude versies zich op in de image. Dit raakt alleen de
