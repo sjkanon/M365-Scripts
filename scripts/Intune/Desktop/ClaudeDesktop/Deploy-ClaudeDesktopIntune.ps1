@@ -483,7 +483,10 @@ try {
     # verkeerde/verouderde architecture-waarde door een oudere IntuneWin32App-moduleversie) voor
     # altijd op de app staan, ook al draait deze module nu correct — dit was de kernoorzaak achter
     # de 0x80070001-installatiefouten (RequiredOSArchitecture stond op 32 i.p.v. de verwachte
-    # waarde voor x64, terwijl elke andere app in de tenant-policy 3 heeft).
+    # waarde voor x64, terwijl elke andere app in de tenant-policy 3 heeft). Dezelfde reden waarom
+    # -RestartBehavior 'basedOnExitCode' hieronder ook op de Set-IntuneWin32App-call (update-pad)
+    # staat, niet alleen op Add-IntuneWin32App (eerste aanmaak) verderop: anders zou een toekomstige
+    # wijziging van deze waarde nooit doorwerken naar een al bestaande app.
     $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
     $requirementRule = New-IntuneWin32AppRequirementRule -Architecture 'x64' -MinimumSupportedWindowsRelease $MinimumSupportedWindowsRelease
 
@@ -513,7 +516,7 @@ try {
         }
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
         Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule `
-            -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
+            -RestartBehavior 'basedOnExitCode' -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
         Write-Info "[OK]   App bijgewerkt naar versie $newVersion (incl. ververste requirement rule)." -ForegroundColor Green
     }
     else {
@@ -538,7 +541,7 @@ try {
             -InstallCommandLine     $installCommandLine `
             -UninstallCommandLine   $uninstallCommandLine `
             -InstallExperience      'system' `
-            -RestartBehavior        'suppress' `
+            -RestartBehavior        'basedOnExitCode' `
             -DetectionRule          $detectionRule `
             -RequirementRule        $requirementRule `
             -CompanyPortalFeaturedApp $true `

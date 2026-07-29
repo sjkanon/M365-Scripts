@@ -11,7 +11,8 @@ Autopilot enrollment, compliance policy automation, configuration drift detectio
 | Script | Description |
 |--------|-------------|
 | [`Compare-IntuneConfig.ps1`](#compare-intuneconfigps1) | Compare a customer tenant's Intune configuration against an MSP baseline backup |
-| [`Repair-StuckWin32AppEnforcement.ps1`](#repair-stuckwin32appenforcementps1) | Clear Win32 apps stuck behind Intune's GRS retry cooldown on a device |
+| [`Repair-StuckWin32AppEnforcement.ps1`](#repair-stuckwin32appenforcementps1) | Clear Win32 apps stuck behind Intune's GRS retry cooldown on a device — run manually, locally, with a dry-run/report/`-AppId` filter |
+| [`Detect-StuckWin32AppEnforcement.ps1`](#detect--remediate-stuckwin32appenforcementps1) + [`Remediate-StuckWin32AppEnforcement.ps1`](#detect--remediate-stuckwin32appenforcementps1) | Same fix, packaged as an Intune Remediation pair — trigger entirely from the Intune portal, no device access needed |
 
 ## Folders
 
@@ -90,3 +91,30 @@ This script finds every locally cached Win32 app with a real last error code (no
 **Notes**
 - This is device-local state — it affects **every** Win32 app assigned to that device, not just one, so a single device stuck in GRS can look like several unrelated app deployments are all silently failing at once.
 - Based on the community-documented (not officially published by Microsoft) GRS registry structure — see script `.NOTES` for sources.
+
+---
+
+### Detect- / Remediate-StuckWin32AppEnforcement.ps1
+
+Same fix as `Repair-StuckWin32AppEnforcement.ps1` above, split into a detection/remediation pair for Intune **Devices → Scripts and remediations → Remediations**, so clearing a stuck device never needs a manual RDP/console session — everything is triggered from the Intune portal.
+
+| Script | Role |
+|---|---|
+| `Detect-StuckWin32AppEnforcement.ps1` | Detection half — exit 1 if any Win32 app has a real last error code cached (possible GRS lock), exit 0 otherwise |
+| `Remediate-StuckWin32AppEnforcement.ps1` | Remediation half — always clears everything the detection script found, restarts IME, forces an immediate MDM sync |
+
+**Deploy in Intune:**
+
+1. **Devices → Scripts and remediations → Remediations → Create**
+2. Name it e.g. `Clear Stuck Win32 App Enforcement`
+3. Upload `Detect-StuckWin32AppEnforcement.ps1` as the detection script, `Remediate-StuckWin32AppEnforcement.ps1` as the remediation script
+4. Run using logged-on credentials: **No** (SYSTEM) · Run in 64-bit PowerShell: **Yes** · Enforce signature check: **No**
+5. **Do not assign it to a device group or schedule.** Leave assignment empty.
+
+**Trigger on-demand, per device, entirely from the portal** (no schedule, no device access):
+
+1. **Devices → All devices → [the affected device]**
+2. **… (ellipsis) → Run remediation (preview)**
+3. Select `Clear Stuck Win32 App Enforcement`, run it
+
+**Why unassigned/on-demand instead of a running schedule:** a scheduled, fleet-wide assignment would keep silently clearing GRS lockouts for *any* app that fails 3 times, for *any* reason — masking a genuinely broken deployment behind an endless auto-retry instead of surfacing it. Keeping it unassigned and only running it on a specific device once you've confirmed (via `AppActionProcessor.log`/`AppWorkload.log`, or the underlying problem is already fixed) that a retry is actually warranted avoids that. This mirrors the community-established pattern for this exact scenario (see script `.NOTES`), not something invented for this repo.
