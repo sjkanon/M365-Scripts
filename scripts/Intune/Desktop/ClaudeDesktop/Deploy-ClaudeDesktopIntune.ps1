@@ -407,6 +407,16 @@ try {
     $versionUnchanged = $existingVersion -eq $newVersion
     $scriptsUnchanged = $existingScriptsHash -eq $newScriptsHash
 
+    # Detectie- en requirement-regel worden bij ELKE run opnieuw opgebouwd (niet alleen bij eerste
+    # aanmaak) en op elke content-update opnieuw meegestuurd aan Set-IntuneWin32App. Zonder dit
+    # blijft een fout die ooit bij de allereerste Add-IntuneWin32App-call is vastgelegd (bv. een
+    # verkeerde/verouderde architecture-waarde door een oudere IntuneWin32App-moduleversie) voor
+    # altijd op de app staan, ook al draait deze module nu correct — dit was de kernoorzaak achter
+    # de 0x80070001-installatiefouten (RequiredOSArchitecture stond op 32 i.p.v. de verwachte
+    # waarde voor x64, terwijl elke andere app in de tenant-policy 3 heeft).
+    $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
+    $requirementRule = New-IntuneWin32AppRequirementRule -Architecture 'x64' -MinimumSupportedWindowsRelease $MinimumSupportedWindowsRelease
+
     if ($existingApp -and $versionUnchanged -and $scriptsUnchanged) {
         # ── Geen actie nodig ──────────────────────────────────────────────
         Write-Step "Al up-to-date"
@@ -420,15 +430,15 @@ try {
         $reasonParts = [System.Collections.Generic.List[string]]::new()
         if (-not $versionUnchanged) { $reasonParts.Add("MSIX-versie $existingVersionLabel -> $newVersion") }
         if (-not $scriptsUnchanged) { $reasonParts.Add("install-/uninstall-/detect-scripts gewijzigd") }
+        if ($reasonParts.Count -eq 0) { $reasonParts.Add("detectie-/requirement-regel verversen") }
         Write-Step ("Bestaande app bijwerken ({0})" -f ($reasonParts -join '; '))
         if (-not (Confirm-Action "Package-inhoud van '$AppDisplayName' (ID $($existingApp.id)) bijwerken in PRODUCTIE-Intune?")) {
             Write-Host "  Afgebroken door gebruiker." -ForegroundColor Yellow
             exit 1
         }
-        $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
-        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -ErrorAction Stop | Out-Null
-        Write-Info "[OK]   App bijgewerkt naar versie $newVersion." -ForegroundColor Green
+        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule -ErrorAction Stop | Out-Null
+        Write-Info "[OK]   App bijgewerkt naar versie $newVersion (incl. ververste requirement rule)." -ForegroundColor Green
     }
     else {
         # ── Eerste aanmaak ────────────────────────────────────────────────
@@ -437,9 +447,6 @@ try {
             Write-Host "  Afgebroken door gebruiker." -ForegroundColor Yellow
             exit 1
         }
-
-        $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
-        $requirementRule = New-IntuneWin32AppRequirementRule -Architecture 'x64' -MinimumSupportedWindowsRelease $MinimumSupportedWindowsRelease
 
         $sysnativePwsh = '%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe'
         $installCommandLine   = "$sysnativePwsh -ExecutionPolicy Bypass -File Install-ClaudeDesktop-Intune.ps1"
