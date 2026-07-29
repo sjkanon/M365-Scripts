@@ -73,7 +73,9 @@ The install script sets `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` 
 
 ### VirtualMachinePlatform restart
 
-If `VirtualMachinePlatform` was already enabled on the device, nothing else happens — Cowork works immediately. If the install script has to enable it for the first time, it does **not** restart the device itself: it sends an English `msg.exe` notification to the active console session (the logged-in user, not a broadcast to every session) telling them to restart when convenient. The feature only becomes fully active after that restart.
+If `VirtualMachinePlatform` was already enabled on the device, nothing else happens — Cowork works immediately. If the install script has to enable it for the first time, it does **not** restart the device itself. Instead it exits with code **3010** ("soft reboot required") and the Win32 app is configured with `-RestartBehavior 'basedOnExitCode'`, so **Intune** enforces the actual restart (prompt, deadline, grace period) — this doesn't depend on a user being logged in. As a courtesy it also sends an English `msg.exe` notification to the active console session (recognized via the untranslated `SESSIONNAME` "console", not the OS-language-dependent `STATE` text "Active" — a plain string match on "Active" would silently never fire on a non-English Windows display language), but that notification is a nicety, not the mechanism the restart actually relies on. The feature only becomes fully active after that restart.
+
+Enabling the feature itself is wrapped in its own retry + try/catch, isolated from the rest of the install: a transient DISM failure here (e.g. a busy servicing stack, or Windows Update unreachable as a feature source — both more likely on a freshly imaged device mid-Autopilot-ESP than on an already-running one) only means Cowork isn't available yet, it no longer aborts the Claude Desktop install itself.
 
 ### Clean reinstall on every run
 
@@ -89,7 +91,7 @@ Only after all three passes does it provision the new MSIX. This is deliberately
 
 Both content scripts are written so a device where Claude has never been present — including the very first Autopilot ESP run — goes through cleanly:
 
-- **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring. If `VirtualMachinePlatform` has to be enabled for the first time and there's no active console session yet (the normal case mid-Autopilot ESP, since ESP itself restarts the device before handing over to the user), the restart notification is skipped with a log line explaining why — no forced restart is invented to compensate, since ESP's own end-of-provisioning restart already covers it.
+- **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring. If `VirtualMachinePlatform` has to be enabled for the first time and there's no active console session yet (the normal case mid-Autopilot ESP, since no user has signed in), the `msg.exe` notification is skipped with a log line explaining why — the actual restart guarantee doesn't depend on it, since exit code 3010 tells Intune itself to enforce the restart regardless of ESP's own behavior.
 - **Detection script**: an empty/negative result from `Get-AppxProvisionedPackage` or `Get-WindowsOptionalFeature` (the expected outcome on a never-installed device) reports "not installed" (exit 1) immediately, with no retry — retries only kick in on an actual **exception** from either cmdlet (e.g. a transient DISM lock, plausible right after the install script's own heavy Appx/DISM activity on the same device), so a genuinely clean machine is never slowed down waiting on retries that can't change the outcome.
 
 ### Prerequisites

@@ -3,10 +3,14 @@
     Intune Win32-app custom detection script voor Claude Desktop.
 
 .DESCRIPTION
-    Rapporteert "geïnstalleerd" (exit 0 + stdout) alleen als zowel de machine-brede
-    Claude-provisioning als het VirtualMachinePlatform-feature (vereist voor Cowork)
-    aanwezig zijn. Zo dekt de detectie precies het scenario waar Cowork stilzwijgend
-    faalt terwijl Claude zelf wél als geïnstalleerd oogt.
+    Rapporteert "geïnstalleerd" (exit 0 + stdout) alleen als de machine-brede
+    Claude-provisioning, het VirtualMachinePlatform-feature (vereist voor Cowork) én de
+    onderliggende HCS-services (vmcompute, HNS, vfpext) aanwezig zijn. Zo dekt de detectie
+    precies het scenario waar Cowork stilzwijgend faalt terwijl Claude zelf wél als
+    geïnstalleerd oogt — VirtualMachinePlatform op "Enabled" in DISM betekent niet
+    automatisch dat deze services al bestaan (zie Anthropic's eigen Cowork-troubleshooting:
+    "Missing HCS services: HNS, vmcompute, vfpext"), met name vlak na het inschakelen van
+    VirtualMachinePlatform maar vóór de vereiste herstart.
 
     Bewust GEEN versie-check: Intune Win32-apps herinstalleren op reeds-toegewezen
     apparaten zodra de content-versie van de app in Intune wijzigt (zie
@@ -64,7 +68,21 @@ try {
         exit 1
     }
 
-    Write-Output "Claude Desktop $($provisioned[0].Version) machine-wide provisioned; VirtualMachinePlatform enabled."
+    # HCS-services die Cowork daadwerkelijk gebruikt — VirtualMachinePlatform "Enabled" in DISM
+    # betekent niet automatisch dat deze al bestaan (zie Anthropic's eigen Cowork-troubleshooting:
+    # "Missing HCS services: HNS, vmcompute, vfpext"), bv. vlak na het inschakelen van
+    # VirtualMachinePlatform maar vóór de vereiste herstart. Bewust geen check op Status
+    # "Running": vmcompute is een trigger-start service en hoort dus "Stopped" te zijn zolang er
+    # geen Cowork-sessie actief is — dat zou een volkomen gezond apparaat als "niet geïnstalleerd"
+    # laten zien. Alleen het volledig ontbreken van de service (Get-Service vindt hem niet) is een
+    # betrouwbaar signaal dat de onderliggende Hyper-V-componenten nog niet actief zijn.
+    foreach ($svcName in @('vmcompute', 'HNS', 'vfpext')) {
+        if (-not (Get-Service -Name $svcName -ErrorAction SilentlyContinue)) {
+            exit 1
+        }
+    }
+
+    Write-Output "Claude Desktop $($provisioned[0].Version) machine-wide provisioned; VirtualMachinePlatform enabled; HCS services present."
     exit 0
 }
 catch {
