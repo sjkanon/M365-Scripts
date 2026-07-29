@@ -192,8 +192,13 @@ function Save-MsixLogoIcon {
         if (-not $logoRelPath) { return $null }
         $logoBaseName = [System.IO.Path]::GetFileNameWithoutExtension((Split-Path $logoRelPath -Leaf))
 
+        # Match op het begin van de bestandsnaam (gevolgd door '.' of einde string), niet zomaar
+        # ergens in het pad — anders zou bv. "Wide310x150StoreLogo.png" ook matchen op de
+        # basisnaam "StoreLogo" terwijl dat een ander asset is.
+        $logoNamePattern = '^' + [regex]::Escape($logoBaseName) + '(\.|$)'
         $candidates = @($zip.Entries | Where-Object {
-            $_.FullName -match [regex]::Escape($logoBaseName) -and $_.FullName -match '\.(png|jpg|jpeg)$'
+            $leaf = Split-Path $_.FullName -Leaf
+            $leaf -match $logoNamePattern -and $leaf -match '\.(png|jpg|jpeg)$'
         })
         $entry = $candidates | Where-Object { $_.FullName -eq $logoRelPath.Replace('\', '/') } | Select-Object -First 1
         if (-not $entry) {
@@ -343,9 +348,14 @@ Copy-Item -Path (Join-Path $PSScriptRoot 'Install-ClaudeDesktop-Intune.ps1')   -
 Copy-Item -Path (Join-Path $PSScriptRoot 'Uninstall-ClaudeDesktop-Intune.ps1') -Destination $sourceDir -Force
 $detectScriptPath = Join-Path $PSScriptRoot 'Detect-ClaudeDesktop-Intune.ps1'
 
-# Hash van de drie content-scripts, zodat een pure code-wijziging (zonder nieuwe MSIX-versie)
-# ook als "content gewijzigd" wordt herkend verderop — zie .DESCRIPTION.
+# Hash van alle vier de scripts — óók dit deploy-script zelf, niet alleen de drie
+# content-scripts — zodat een pure code-wijziging (zonder nieuwe MSIX-versie), waar dan ook,
+# als "content gewijzigd" wordt herkend verderop — zie .DESCRIPTION. Zonder $PSCommandPath hier
+# zou een toekomstige fix puur in dit orchestratie-script (zoals de requirement-rule-refresh of
+# de Company Portal-icoon/featured-logica hierboven) zichzelf nooit naar een bestaande app
+# pushen als de MSIX-versie en de drie content-scripts toevallig ongewijzigd zijn.
 $newScriptsHash = Get-ScriptsHashHex -Paths @(
+    $PSCommandPath,
     (Join-Path $PSScriptRoot 'Install-ClaudeDesktop-Intune.ps1'),
     (Join-Path $PSScriptRoot 'Uninstall-ClaudeDesktop-Intune.ps1'),
     $detectScriptPath
