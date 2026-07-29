@@ -259,16 +259,45 @@ function Set-Win32AppArchitectureRequirement {
     if (-not $Global:AuthenticationHeader) {
         throw "Geen actieve Intune Graph-sessie (Global:AuthenticationHeader ontbreekt) — Connect-MSIntuneGraph moet al zijn uitgevoerd."
     }
+    # Alleen allowedArchitectures (+ @odata.type) meesturen — niet ook het oudere
+    # applicableArchitectures. Per de Graph-documentatie zet de API applicableArchitectures
+    # automatisch op "none" zodra allowedArchitectures een waarde krijgt; beide velden zelf
+    # expliciet meesturen in dezelfde PATCH is een aannemelijke oorzaak van een 400 Bad Request
+    # (twee elkaar deels overlappende architecture-properties tegelijk zetten).
     $body = @{
         '@odata.type'                    = '#microsoft.graph.win32LobApp'
         allowedArchitectures             = $RequirementRule['allowedArchitectures']
-        applicableArchitectures          = 'none'
         minimumSupportedWindowsRelease   = $RequirementRule['minimumSupportedWindowsRelease']
     } | ConvertTo-Json -Depth 5
 
-    Invoke-RestMethod -Method Patch `
-        -Uri "https://graph.microsoft.com/v1.0/deviceAppManagement/mobileApps/$AppId" `
-        -Headers $Global:AuthenticationHeader -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
+    try {
+        Invoke-RestMethod -Method Patch `
+            -Uri "https://graph.microsoft.com/v1.0/deviceAppManagement/mobileApps/$AppId" `
+            -Headers $Global:AuthenticationHeader -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
+    } catch {
+        # De blote exceptionmessage van Invoke-RestMethod op PS5.1 is alleen "Response status code
+        # does not indicate success: 400 (Bad Request)" — zonder de echte Graph error.code/message
+        # uit de response body. Die er expliciet bij pakken, anders is dit niet te diagnosticeren.
+        $graphErrorDetail = $null
+        try {
+            if ($_.Exception.Response) {
+                $streamReader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                try {
+                    $streamReader.BaseStream.Position = 0
+                    $responseBody = $streamReader.ReadToEnd()
+                    $graphErrorDetail = $responseBody
+                } finally {
+                    $streamReader.Dispose()
+                }
+            }
+        } catch {}
+
+        if ($graphErrorDetail) {
+            throw "Graph PATCH van architecture requirement mislukt: $graphErrorDetail"
+        } else {
+            throw
+        }
+    }
 }
 
 function New-TempAppRegistration {
