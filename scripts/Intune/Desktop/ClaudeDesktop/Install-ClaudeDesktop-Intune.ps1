@@ -16,13 +16,17 @@
          "Active" volgens quser, niet een broadcast naar alle sessies) dat die zelf moet
          herstarten — dit script herstart het apparaat NIET zelf. Een net ingeschakelde optional
          feature is pas na een herstart écht actief, en Cowork zou tot dan niet werken.
-      2. Verwijdert eerder geprovisioneerde Claude-versies (Remove-AppxProvisionedPackage).
-         Add-AppxProvisionedPackage vervangt een bestaande, andere versie niet automatisch —
-         zonder deze stap stapelen oude versies zich op in de image. Dit raakt alleen de
-         provisioning-laag (toekomstige profielen); al ingelogde gebruikers met de oude versie
-         geregistreerd blijven gewoon werken totdat zij zelf opnieuw inloggen of de app herstarten.
+      2. Verwijdert Claude Desktop VOLLEDIG van dit apparaat vóór de nieuwe installatie: sluit
+         eventueel actieve Claude-processen, verwijdert alle per-user installaties (Get-AppxPackage
+         -AllUsers, ook voor reeds ingelogde profielen — Remove-AppxPackage -AllUsers) én eerder
+         geprovisioneerde machine-brede versies (Remove-AppxProvisionedPackage). Dit is bewust
+         grondiger dan alleen de provisioning-laag opschonen: een blijvende per-user installatie
+         kan een eigen, niet-Cowork-geregistreerde Claude-sessie in stand houden, ook nadat de
+         machine-brede versie is bijgewerkt. Een ingelogde gebruiker die Claude open heeft staan
+         verliest hierdoor die sessie.
       3. Add-AppxProvisionedPackage voor machine-brede installatie van de nieuwe versie (bereikt
-         ook standaardgebruikers zonder adminrechten; Add-AppxPackage alleen zou dat niet doen)
+         ook standaardgebruikers zonder adminrechten; Add-AppxPackage alleen zou dat niet doen) —
+         zo staat Cowork voor elke gebruiker die hierna inlogt vanaf de eerste keer klaar.
       4. HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1, zodat de ingebouwde
          auto-updater de machine-brede provisioning niet per-user kan overschrijven —
          versiebeheer loopt voortaan via de maandelijkse Deploy-ClaudeDesktopIntune.ps1 run
@@ -90,8 +94,25 @@ try {
         Write-Log "VirtualMachinePlatform was al ingeschakeld, geen herstart nodig."
     }
 
-    # 2. Eerder geprovisioneerde Claude-versies opruimen vóór het provisioneren van de nieuwe
-    #    (zie .DESCRIPTION hierboven waarom dit nodig is)
+    # 2. Claude Desktop volledig verwijderen vóór de nieuwe installatie (zie .DESCRIPTION)
+    Write-Log "Actieve Claude-processen sluiten (indien aanwezig)..."
+    Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "*Claude*" } |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+
+    $oldUserPackages = Get-AppxPackage -AllUsers -Name "*Claude*" -ErrorAction SilentlyContinue
+    if ($oldUserPackages) {
+        foreach ($pkg in $oldUserPackages) {
+            Write-Log "Per-user installatie verwijderen: $($pkg.PackageFullName) voor $($pkg.PackageUserInformation.UserSecurityId.Sid -join ', ')"
+            try {
+                Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
+            } catch {
+                Write-Log "Waarschuwing: kon $($pkg.PackageFullName) niet verwijderen voor alle users: $($_.Exception.Message)"
+            }
+        }
+    } else {
+        Write-Log "Geen per-user Claude-installaties gevonden."
+    }
+
     $oldProvisioned = Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue |
         Where-Object { $_.DisplayName -like "*Claude*" }
     if ($oldProvisioned) {

@@ -63,6 +63,10 @@ The install script sets `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` 
 
 If `VirtualMachinePlatform` was already enabled on the device, nothing else happens — Cowork works immediately. If the install script has to enable it for the first time, it does **not** restart the device itself: it sends an English `msg.exe` notification to the active console session (the logged-in user, not a broadcast to every session) telling them to restart when convenient. The feature only becomes fully active after that restart.
 
+### Clean reinstall on every run
+
+Before provisioning the new version, the install script fully removes Claude Desktop from the device first: it stops any running Claude process, removes every per-user installation (`Get-AppxPackage -AllUsers` / `Remove-AppxPackage -AllUsers`, including already-logged-in profiles), then the old machine-wide provisioned package. Only after that does it provision the new MSIX. This is deliberately more thorough than just clearing the provisioning layer — a leftover per-user install could otherwise keep running its own, non-Cowork-registered Claude session even after the machine-wide version was updated. A user with Claude open loses that session when this runs.
+
 ### Prerequisites
 
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
