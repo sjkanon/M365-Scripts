@@ -17,10 +17,16 @@
          herstarten — dit script herstart het apparaat NIET zelf. Een net ingeschakelde optional
          feature is pas na een herstart écht actief, en Cowork zou tot dan niet werken.
       2. Verwijdert Claude Desktop VOLLEDIG van dit apparaat vóór de nieuwe installatie: sluit
-         eventueel actieve Claude-processen, verwijdert alle per-user installaties (Get-AppxPackage
-         -AllUsers, ook voor reeds ingelogde profielen — Remove-AppxPackage -AllUsers) én eerder
-         geprovisioneerde machine-brede versies (Remove-AppxProvisionedPackage). Dit is bewust
-         grondiger dan alleen de provisioning-laag opschonen: een blijvende per-user installatie
+         eventueel actieve Claude-processen, verwijdert alle per-user Appx-installaties
+         (Get-AppxPackage -AllUsers / Remove-AppxPackage -AllUsers), eerder geprovisioneerde
+         machine-brede versies (Remove-AppxProvisionedPackage), én eventuele "klassieke"
+         (niet-Appx) per-user installaties zoals de consumer-installer van claude.ai/download
+         die neerzet — die registreert zichzelf via een gewone per-user Uninstall-registry-key,
+         niet als Appx-package, dus Get-AppxPackage ziet die nooit. Voor elk lokaal profiel
+         (ingelogd of niet — niet-geladen profielhives worden tijdelijk geladen) wordt de
+         Uninstall-registry doorzocht op "*Claude*" en de bijbehorende
+         QuietUninstallString/UninstallString uitgevoerd. Dit is bewust grondiger dan alleen de
+         provisioning-laag opschonen: elke blijvende, niet via deze route beheerde installatie
          kan een eigen, niet-Cowork-geregistreerde Claude-sessie in stand houden, ook nadat de
          machine-brede versie is bijgewerkt. Een ingelogde gebruiker die Claude open heeft staan
          verliest hierdoor die sessie.
@@ -60,6 +66,84 @@ function Write-Log {
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
     Add-Content -Path $logFile -Value $line
     Write-Host $line
+}
+
+function Get-ClassicClaudeUninstallEntries {
+    # Vindt "klassieke" (niet-Appx) Claude Desktop-installaties: de consumer-installer van
+    # claude.ai/download registreert zichzelf per-user via een gewone Uninstall-registry-key
+    # (zoals de meeste Electron-apps), niet als Appx-package — Get-AppxPackage ziet die dus
+    # nooit. Doorzoekt HKLM (zeldzaam voor deze installer, maar goedkoop om mee te nemen) en de
+    # per-user hive van elk lokaal profiel, inclusief profielen die nu niet zijn ingelogd (hive
+    # wordt daarvoor tijdelijk geladen vanuit NTUSER.DAT en aan het einde weer ontladen).
+    $uninstallSubPaths = @(
+        'Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    $entries = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($subPath in $uninstallSubPaths) {
+        Get-ItemProperty -Path "HKLM:\$subPath" -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "*Claude*" } |
+            ForEach-Object { $entries.Add($_) }
+    }
+
+    # Al geladen user-hives (ingelogde/onlangs ingelogde profielen) — SIDs van echte
+    # gebruikersaccounts, geen ..._Classes-subhives.
+    Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' } |
+        ForEach-Object {
+            $sid = $_.PSChildName
+            foreach ($subPath in $uninstallSubPaths) {
+                Get-ItemProperty -Path "Registry::HKEY_USERS\$sid\$subPath" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.DisplayName -like "*Claude*" } |
+                    ForEach-Object { $entries.Add($_) }
+            }
+        }
+
+    # Niet-geladen profielen: NTUSER.DAT tijdelijk laden, doorzoeken, weer ontladen.
+    $systemProfileNames = @('Public', 'Default', 'Default User', 'All Users')
+    Get-ChildItem 'C:\Users' -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notin $systemProfileNames } |
+        ForEach-Object {
+            $ntUserPath = Join-Path $_.FullName 'NTUSER.DAT'
+            $tempHiveName = "ClaudeCleanup_$($_.Name)"
+            if ((Test-Path $ntUserPath) -and -not (Test-Path "Registry::HKEY_USERS\$tempHiveName")) {
+                $loaded = $false
+                try {
+                    & reg.exe load "HKU\$tempHiveName" $ntUserPath *> $null
+                    $loaded = ($LASTEXITCODE -eq 0)
+                } catch {
+                    $loaded = $false
+                }
+
+                if ($loaded) {
+                    try {
+                        foreach ($subPath in $uninstallSubPaths) {
+                            Get-ItemProperty -Path "Registry::HKEY_USERS\$tempHiveName\$subPath" -ErrorAction SilentlyContinue |
+                                Where-Object { $_.DisplayName -like "*Claude*" } |
+                                ForEach-Object { $entries.Add($_) }
+                        }
+                    } finally {
+                        # .NET houdt registry-handles soms vast tot een expliciete GC-cyclus —
+                        # zonder dit faalt "reg unload" regelmatig met "Access is denied".
+                        [System.GC]::Collect()
+                        [System.GC]::WaitForPendingFinalizers()
+                        & reg.exe unload "HKU\$tempHiveName" *> $null
+                    }
+                }
+            }
+        }
+
+    return $entries
+}
+
+function Invoke-ClassicUninstall {
+    param([Parameter(Mandatory = $true)][string]$UninstallCommand, [int]$TimeoutSeconds = 120)
+    $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"$UninstallCommand`"" -WindowStyle Hidden -PassThru
+    if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $proc.Kill() } catch {}
+        throw "Uninstall reageerde niet binnen $TimeoutSeconds seconden en is afgebroken."
+    }
 }
 
 function Get-ActiveConsoleSessionId {
@@ -126,6 +210,24 @@ try {
         }
     } else {
         Write-Log "Geen eerder geprovisioneerde Claude-versie gevonden (eerste installatie)."
+    }
+
+    # Klassieke (niet-Appx) per-user installaties opruimen — bv. de consumer-installer van
+    # claude.ai/download, die geen Appx-package is (zie .DESCRIPTION).
+    $classicEntries = Get-ClassicClaudeUninstallEntries
+    if ($classicEntries.Count -gt 0) {
+        foreach ($entry in $classicEntries) {
+            $uninstallCmd = if ($entry.QuietUninstallString) { $entry.QuietUninstallString } else { $entry.UninstallString }
+            if (-not $uninstallCmd) { continue }
+            Write-Log "Klassieke installatie verwijderen: $($entry.DisplayName) $($entry.DisplayVersion) via: $uninstallCmd"
+            try {
+                Invoke-ClassicUninstall -UninstallCommand $uninstallCmd
+            } catch {
+                Write-Log "Waarschuwing: klassieke uninstall mislukt voor $($entry.DisplayName): $($_.Exception.Message)"
+            }
+        }
+    } else {
+        Write-Log "Geen klassieke (niet-Appx) Claude-installaties gevonden."
     }
 
     # 3. MSIX pad bepalen (naast dit script, zoals Intune Win32-content dat plaatst)
