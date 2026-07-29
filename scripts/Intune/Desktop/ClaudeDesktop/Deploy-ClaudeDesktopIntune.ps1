@@ -283,6 +283,14 @@ Copy-Item -Path (Join-Path $PSScriptRoot 'Install-ClaudeDesktop-Intune.ps1')   -
 Copy-Item -Path (Join-Path $PSScriptRoot 'Uninstall-ClaudeDesktop-Intune.ps1') -Destination $sourceDir -Force
 $detectScriptPath = Join-Path $PSScriptRoot 'Detect-ClaudeDesktop-Intune.ps1'
 
+# Hash van de drie content-scripts, zodat een pure code-wijziging (zonder nieuwe MSIX-versie)
+# ook als "content gewijzigd" wordt herkend verderop — zie .DESCRIPTION.
+$newScriptsHash = Get-ScriptsHashHex -Paths @(
+    (Join-Path $PSScriptRoot 'Install-ClaudeDesktop-Intune.ps1'),
+    (Join-Path $PSScriptRoot 'Uninstall-ClaudeDesktop-Intune.ps1'),
+    $detectScriptPath
+)
+
 # ── .intunewin bouwen ────────────────────────────────────────────────────────
 Write-Step "Package bouwen (.intunewin)"
 $packageParams = @{
