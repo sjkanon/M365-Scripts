@@ -398,24 +398,36 @@ try {
     if ($existingApp -and $existingApp.notes -match 'ClaudeMsixVersion=([0-9.]+)') {
         $existingVersion = $Matches[1]
     }
+    $existingScriptsHash = $null
+    if ($existingApp -and $existingApp.notes -match 'ScriptsHash=([0-9a-f]+)') {
+        $existingScriptsHash = $Matches[1]
+    }
 
-    $notes = "ClaudeMsixVersion=$newVersion; LastUpdated=$(Get-Date -Format o); Deployed by Deploy-ClaudeDesktopIntune.ps1"
+    $notes = "ClaudeMsixVersion=$newVersion; ScriptsHash=$newScriptsHash; LastUpdated=$(Get-Date -Format o); Deployed by Deploy-ClaudeDesktopIntune.ps1"
+    $versionUnchanged = $existingVersion -eq $newVersion
+    $scriptsUnchanged = $existingScriptsHash -eq $newScriptsHash
 
-    if ($existingApp -and $existingVersion -eq $newVersion) {
+    if ($existingApp -and $versionUnchanged -and $scriptsUnchanged) {
         # ── Geen actie nodig ──────────────────────────────────────────────
         Write-Step "Al up-to-date"
-        Write-Info "Intune-app '$AppDisplayName' staat al op versie $newVersion. Geen wijzigingen nodig." -ForegroundColor Green
+        Write-Info "Intune-app '$AppDisplayName' staat al op versie $newVersion met ongewijzigde content-scripts. Geen wijzigingen nodig." -ForegroundColor Green
     }
     elseif ($existingApp) {
         # ── Content-update op de bestaande app; toewijzing blijft ongewijzigd ──
+        # Getriggerd door een nieuwere MSIX-versie EN/OF een wijziging in de Install-/Uninstall-/
+        # Detect-ClaudeDesktop-Intune.ps1 scripts zelf (bv. de restart-melding bij VMP-install).
         $existingVersionLabel = if ($existingVersion) { $existingVersion } else { 'onbekend' }
-        Write-Step "Bestaande app bijwerken naar versie $newVersion (was: $existingVersionLabel)"
+        $reasonParts = [System.Collections.Generic.List[string]]::new()
+        if (-not $versionUnchanged) { $reasonParts.Add("MSIX-versie $existingVersionLabel -> $newVersion") }
+        if (-not $scriptsUnchanged) { $reasonParts.Add("install-/uninstall-/detect-scripts gewijzigd") }
+        Write-Step ("Bestaande app bijwerken ({0})" -f ($reasonParts -join '; '))
         if (-not (Confirm-Action "Package-inhoud van '$AppDisplayName' (ID $($existingApp.id)) bijwerken in PRODUCTIE-Intune?")) {
             Write-Host "  Afgebroken door gebruiker." -ForegroundColor Yellow
             exit 1
         }
+        $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
-        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -ErrorAction Stop | Out-Null
+        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -ErrorAction Stop | Out-Null
         Write-Info "[OK]   App bijgewerkt naar versie $newVersion." -ForegroundColor Green
     }
     else {
