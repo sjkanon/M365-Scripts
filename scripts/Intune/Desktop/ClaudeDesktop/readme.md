@@ -79,6 +79,13 @@ Before provisioning the new version, the install script fully removes Claude Des
 
 Only after all three passes does it provision the new MSIX. This is deliberately more thorough than just clearing the provisioning layer — any installation left over from a different route can keep running its own, non-Cowork-registered Claude session even after the machine-wide version was updated. A user with Claude open loses that session when this runs.
 
+### Robustness on a never-installed device
+
+Both content scripts are written so a device where Claude has never been present — including the very first Autopilot ESP run — goes through cleanly:
+
+- **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring. If `VirtualMachinePlatform` has to be enabled for the first time and there's no active console session yet (the normal case mid-Autopilot ESP, since ESP itself restarts the device before handing over to the user), the restart notification is skipped with a log line explaining why — no forced restart is invented to compensate, since ESP's own end-of-provisioning restart already covers it.
+- **Detection script**: an empty/negative result from `Get-AppxProvisionedPackage` or `Get-WindowsOptionalFeature` (the expected outcome on a never-installed device) reports "not installed" (exit 1) immediately, with no retry — retries only kick in on an actual **exception** from either cmdlet (e.g. a transient DISM lock, plausible right after the install script's own heavy Appx/DISM activity on the same device), so a genuinely clean machine is never slowed down waiting on retries that can't change the outcome.
+
 ### Prerequisites
 
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
