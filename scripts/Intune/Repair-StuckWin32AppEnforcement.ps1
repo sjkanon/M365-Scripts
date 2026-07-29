@@ -115,7 +115,6 @@ function Get-FailedWin32AppStates {
         $prop = Get-ItemProperty -Path $subKey.PSPath -Name EnforcementStateMessage -ErrorAction SilentlyContinue
         if (-not $prop) { continue }
         if ($prop.EnforcementStateMessage -notmatch '"ErrorCode":(-?\d+|null)') { continue }
-
         $errorCodeRaw = $Matches[1]
         if ($errorCodeRaw -eq 'null') { continue }
         $errorCode = [int]$errorCodeRaw
@@ -124,7 +123,7 @@ function Get-FailedWin32AppStates {
         # SID en App-ID zijn de twee padsegmenten direct na "Win32Apps\" — regex i.p.v. een vaste
         # index, zodat dit standhoudt ook als IME een extra subkey-niveau toevoegt/verwijdert.
         $relativePath = $subKey.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
-        if ($relativePath -notmatch 'Win32Apps\\([^\\]+)\\([^\\]+)') { continue }
+        if (-not ($relativePath -match 'Win32Apps\\([^\\]+)\\([^\\]+)')) { continue }
         $userObjectId = $Matches[1]
         $foundAppId   = $Matches[2]
         if ($foundAppId -eq 'Reporting') { continue }
@@ -152,6 +151,7 @@ function Get-LastHashValue {
 }
 
 function Remove-StuckAppState {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$UserObjectId, [string]$TargetAppId, [string]$LastHashValue)
     $pathsToRemove = @(
         "HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension\Win32Apps\$UserObjectId\$TargetAppId",
