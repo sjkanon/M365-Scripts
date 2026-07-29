@@ -268,7 +268,13 @@ try {
                 Write-Log "Waarschuwing: kon geen melding naar ingelogde gebruiker sturen: $($_.Exception.Message)"
             }
         } else {
-            Write-Log "Geen actief ingelogde gebruiker gevonden — melding overgeslagen (VirtualMachinePlatform vereist alsnog een herstart bij volgend gebruik)."
+            # Verwacht bij de allereerste install van een apparaat: tijdens Autopilot ESP is er
+            # nog geen ingelogde gebruiker als dit script draait. Autopilot ESP sluit standaard
+            # zelf af met een herstart vóórdat de gebruiker de desktop te zien krijgt, dus
+            # VirtualMachinePlatform wordt dan alsnog actief zonder dat hier iets extra's voor
+            # nodig is. Buiten ESP (bv. een later opnieuw uitgerolde/reset app) is dit een
+            # signaal dat de gebruiker het bij de volgende handmatige herstart zelf moet doen.
+            Write-Log "Geen actief ingelogde gebruiker gevonden — melding overgeslagen. Normaal tijdens Autopilot ESP (die zelf al herstart); buiten ESP vereist VirtualMachinePlatform alsnog een herstart bij volgend gebruik."
         }
     }
 

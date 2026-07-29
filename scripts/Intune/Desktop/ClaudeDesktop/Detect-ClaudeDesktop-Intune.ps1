@@ -14,7 +14,18 @@
     van wat deze detectieregel teruggeeft. Een versie-check hier zou dus alleen extra
     onderhoud betekenen (handmatig ophogen bij elke maandelijkse release) zonder functie.
 
-    Gebruik als Intune "Custom detection script" (32-bit script, geen signature check).
+    Op een apparaat waar Claude nog nooit heeft gestaan geven beide checks gewoon een
+    lege/"Disabled"-uitkomst terug (geen exception) — dat resulteert in exit 1 ("niet
+    geïnstalleerd"), precies zoals bedoeld, zonder speciale afhandeling nodig. Losstaand
+    daarvan: Get-AppxProvisionedPackage/Get-WindowsOptionalFeature kunnen tijdelijk falen
+    als DISM net door iets anders bezet wordt (bv. terwijl Install-ClaudeDesktop-Intune.ps1
+    op hetzelfde apparaat nog aan het opruimen/provisioneren is) — beide calls krijgen
+    daarom een korte retry, zodat zo'n voorbijgaande DISM-lock niet als "niet
+    geïnstalleerd" wordt geïnterpreteerd.
+
+    Gebruik als Intune "Custom detection script" (64-bit script — RunAs32Bit $false in
+    Deploy-ClaudeDesktopIntune.ps1, consistent met de x64-requirement rule van de app zelf
+    —, geen signature check).
 
 .NOTES
     Geen output/log-bestand: Intune leest alleen exit code + eventuele stdout van dit
@@ -23,14 +34,32 @@
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-WithRetry {
+    # Alleen bedoeld om voorbijgaande DISM/Appx-storingen (bv. "busy") op te vangen — een
+    # normale lege/negatieve uitkomst (niet geïnstalleerd) is geen exception en wordt dus
+    # nooit geretried; dit vertraagt het "echt niet geïnstalleerd"-pad niet.
+    param([scriptblock]$Action, [int]$MaxAttempts = 3, [int]$DelaySeconds = 5)
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            return & $Action
+        } catch {
+            if ($attempt -eq $MaxAttempts) { throw }
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
 try {
-    $provisioned = Get-AppxProvisionedPackage -Online -ErrorAction Stop |
-        Where-Object { $_.DisplayName -like "*Claude*" }
+    $provisioned = Invoke-WithRetry -Action {
+        Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object { $_.DisplayName -like "*Claude*" }
+    }
     if (-not $provisioned) {
         exit 1
     }
 
-    $vmp = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction Stop
+    $vmp = Invoke-WithRetry -Action {
+        Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction Stop
+    }
     if ($vmp.State -ne "Enabled") {
         exit 1
     }
