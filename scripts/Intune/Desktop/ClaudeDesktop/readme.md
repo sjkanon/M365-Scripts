@@ -38,6 +38,12 @@ Devices failed installation with error `0x80070001` regardless of the device. Co
 
 The root cause: `Set-IntuneWin32App` in the update branch never passed `-RequirementRule` (only `Add-IntuneWin32App` did, at first creation) — so whatever got recorded on that very first run, right or wrong, stayed on the app forever, immune to every later redeploy. Fixed by rebuilding and resubmitting both `-DetectionRule` and `-RequirementRule` on every run (see point 6 above). Run the script again to push the corrected requirement rule to the existing app.
 
+**If a device still fails after that fix**: check whether it's actually stuck behind Intune's unrelated **GRS retry cooldown** instead (3 failed attempts → 24h lockout, regardless of the app config) — see [`Repair-StuckWin32AppEnforcement.ps1`](../../readme.md#repair-stuckwin32appenforcementps1) one level up. This affects every Win32 app on that device, not just Claude, so it's a useful first check if several unrelated apps are also silently stuck.
+
+### Company Portal visibility
+
+The deploy script extracts the app's logo directly from the downloaded MSIX (`Properties/Logo` in `AppxManifest.xml`, falling back to the highest-scale variant actually present in the package) and sets it as the Win32 app's icon, plus `-CompanyPortalFeaturedApp $true` on every run — so instead of a generic Win32 icon buried in the full app list, users see the real Claude logo, featured, in Company Portal.
+
 ### Required role
 
 Global Administrator, or Application Administrator combined with a role that can grant `AppRoleAssignment.ReadWrite.All` consent — the same requirement as the temporary App Registration in the SharePoint reporting scripts.
