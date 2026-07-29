@@ -28,9 +28,15 @@ Intune installs LOB MSIX apps per-user. That fails for standard users without ad
 3. Copies the install/uninstall scripts next to the MSIX and builds a `.intunewin` package (`IntuneWin32App` module — `IntuneWinAppUtil.exe` is downloaded automatically if not already present).
 4. Connects to Microsoft Graph delegated (interactive sign-in) and creates a short-lived **temporary App Registration** — same pattern as [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.md) — with only the `DeviceManagementApps.ReadWrite.All` application permission. Used to authenticate the `IntuneWin32App` module, then deleted at the end of the run. Nothing persists between runs except the Intune app itself.
 5. First run: creates the Win32 app "Claude Desktop (Machine-wide)" in Intune with detection/requirement rules and assigns it **Required** to the Entra ID group you pass in.
-6. Later runs: pushes an updated package via `Update-IntuneWin32AppPackageFile` (existing assignment left untouched, devices just get the new content) if **either** the downloaded MSIX version is newer, **or** the Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 scripts themselves changed since the last run — both tracked in the app's Notes field (`ClaudeMsixVersion=...; ScriptsHash=...`), no local state file needed. If neither changed, nothing happens.
+6. Later runs: pushes an updated package via `Update-IntuneWin32AppPackageFile` (existing assignment left untouched, devices just get the new content) if **either** the downloaded MSIX version is newer, **or** the Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 scripts themselves changed since the last run — both tracked in the app's Notes field (`ClaudeMsixVersion=...; ScriptsHash=...`), no local state file needed. Detection **and requirement rules are rebuilt and resubmitted on every run**, not just at first creation (see "Known issue" below). If neither the version nor the scripts changed, only the rules get refreshed.
 
 Detection is deliberately version-agnostic (presence of the provisioned package + `VirtualMachinePlatform` enabled). Intune redeploys a Win32 app to already-targeted devices whenever its content version changes in Intune, regardless of what the detection rule reports — so there's no `$MinimumVersion` to bump by hand every month, and a pure script edit (no new MSIX) still triggers a redeploy via the `ScriptsHash` check above.
+
+### Known issue: 0x80070001 install failures fixed by resubmitting the requirement rule
+
+Devices failed installation with error `0x80070001` regardless of the device. Comparing the cached Win32 app policy on an affected device (`AppWorkload.log`) against every other Win32 app assigned to the same tenant showed the anomaly: every other app's `RequirementRules` had `RequiredOSArchitecture: 3`, but Claude Desktop's had `RequiredOSArchitecture: 32` — a value no other app in the tenant used, and 16x what `-Architecture 'x64'` should produce. Since this is stored on the app object in Intune (not per-device), it explained why the failure was 100% reproducible across every device, not device-specific corruption.
+
+The root cause: `Set-IntuneWin32App` in the update branch never passed `-RequirementRule` (only `Add-IntuneWin32App` did, at first creation) — so whatever got recorded on that very first run, right or wrong, stayed on the app forever, immune to every later redeploy. Fixed by rebuilding and resubmitting both `-DetectionRule` and `-RequirementRule` on every run (see point 6 above). Run the script again to push the corrected requirement rule to the existing app.
 
 ### Required role
 
@@ -65,7 +71,13 @@ If `VirtualMachinePlatform` was already enabled on the device, nothing else happ
 
 ### Clean reinstall on every run
 
-Before provisioning the new version, the install script fully removes Claude Desktop from the device first: it stops any running Claude process, removes every per-user installation (`Get-AppxPackage -AllUsers` / `Remove-AppxPackage -AllUsers`, including already-logged-in profiles), then the old machine-wide provisioned package. Only after that does it provision the new MSIX. This is deliberately more thorough than just clearing the provisioning layer — a leftover per-user install could otherwise keep running its own, non-Cowork-registered Claude session even after the machine-wide version was updated. A user with Claude open loses that session when this runs.
+Before provisioning the new version, the install script fully removes Claude Desktop from the device first, in three passes:
+
+1. Stops any running Claude process.
+2. Removes every per-user **Appx** installation (`Get-AppxPackage -AllUsers` / `Remove-AppxPackage -AllUsers`, including already-logged-in profiles), then the old machine-wide provisioned package.
+3. Removes any **classic (non-Appx) per-user installation** — most notably the consumer installer from [claude.ai/download](https://claude.ai/download), which registers itself through an ordinary per-user Uninstall registry key rather than as an Appx package, so `Get-AppxPackage` never sees it. The script scans the Uninstall registry key of every local profile — including profiles that aren't currently logged in, by temporarily loading their `NTUSER.DAT` — and runs each match's `QuietUninstallString` (or `UninstallString` if that's absent), with a 120s timeout so a stuck installer can't hang the Intune install.
+
+Only after all three passes does it provision the new MSIX. This is deliberately more thorough than just clearing the provisioning layer — any installation left over from a different route can keep running its own, non-Cowork-registered Claude session even after the machine-wide version was updated. A user with Claude open loses that session when this runs.
 
 ### Prerequisites
 
