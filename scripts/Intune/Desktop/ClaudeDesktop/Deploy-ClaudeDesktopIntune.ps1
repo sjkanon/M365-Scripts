@@ -166,6 +166,55 @@ function Get-MsixVersion {
     }
 }
 
+function Save-MsixLogoIcon {
+    # Haalt het store-logo uit de MSIX zodat de Intune-app een echt icoon krijgt i.p.v. het
+    # generieke Win32-app-icoon — nodig om de app herkenbaar te maken in Company Portal.
+    # Properties/Logo in AppxManifest.xml verwijst meestal naar de ongeschaalde bestandsnaam
+    # (bv. Assets\StoreLogo.png), maar het pakket bevat vaak alleen geschaalde varianten
+    # (StoreLogo.scale-200.png e.d.) — daarom wordt op basisnaam gezocht en de hoogste
+    # beschikbare schaal gekozen als de exacte naam niet voorkomt.
+    param(
+        [Parameter(Mandatory = $true)][string]$MsixPath,
+        [Parameter(Mandatory = $true)][string]$OutputPath
+    )
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($MsixPath)
+    try {
+        $manifestEntry = $zip.Entries | Where-Object { $_.FullName -eq 'AppxManifest.xml' }
+        if (-not $manifestEntry) { return $null }
+        $stream = $manifestEntry.Open()
+        try {
+            $reader = New-Object System.IO.StreamReader($stream)
+            try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        } finally { $stream.Dispose() }
+
+        $logoRelPath = [string]$manifest.Package.Properties.Logo
+        if (-not $logoRelPath) { return $null }
+        $logoBaseName = [System.IO.Path]::GetFileNameWithoutExtension((Split-Path $logoRelPath -Leaf))
+
+        $candidates = @($zip.Entries | Where-Object {
+            $_.FullName -match [regex]::Escape($logoBaseName) -and $_.FullName -match '\.(png|jpg|jpeg)$'
+        })
+        $entry = $candidates | Where-Object { $_.FullName -eq $logoRelPath.Replace('\', '/') } | Select-Object -First 1
+        if (-not $entry) {
+            $entry = $candidates |
+                Sort-Object -Property @{ Expression = { if ($_.FullName -match 'scale-(\d+)') { [int]$Matches[1] } else { 0 } } } -Descending |
+                Select-Object -First 1
+        }
+        if (-not $entry) { return $null }
+
+        $entryStream = $entry.Open()
+        try {
+            $fileStream = [System.IO.File]::Create($OutputPath)
+            try { $entryStream.CopyTo($fileStream) } finally { $fileStream.Dispose() }
+        } finally { $entryStream.Dispose() }
+
+        return $OutputPath
+    } finally {
+        $zip.Dispose()
+    }
+}
+
 function Get-ScriptsHashHex {
     # SHA256 over de gecombineerde inhoud van de content-scripts (Install/Uninstall/Detect),
     # zodat een pure code-wijziging in een van die drie ook zonder MSIX-versiebump wordt
@@ -277,6 +326,17 @@ if (-not (Test-Path $msixPath) -or (Get-Item $msixPath).Length -lt 1MB) {
 
 $newVersion = Get-MsixVersion -Path $msixPath
 Write-Info "[OK]   Gedownload: Claude Desktop $newVersion"
+
+# ── Icoon uit de MSIX halen (zichtbaarheid in Company Portal) ────────────────
+$iconPngPath = Join-Path $sourceDir 'ClaudeIcon.png'
+$resolvedIconPath = Save-MsixLogoIcon -MsixPath $msixPath -OutputPath $iconPngPath
+$appIcon = if ($resolvedIconPath) {
+    Write-Info "[OK]   Icoon geëxtraheerd uit MSIX: $resolvedIconPath"
+    New-IntuneWin32AppIcon -FilePath $resolvedIconPath
+} else {
+    Write-Host "  [WARN] Kon geen logo uit de MSIX halen — app krijgt het generieke Win32-icoon." -ForegroundColor Yellow
+    $null
+}
 
 # ── Content-scripts naast de MSIX plaatsen ───────────────────────────────────
 Copy-Item -Path (Join-Path $PSScriptRoot 'Install-ClaudeDesktop-Intune.ps1')   -Destination $sourceDir -Force
@@ -417,6 +477,11 @@ try {
     $detectionRule = New-IntuneWin32AppDetectionRuleScript -ScriptFile $detectScriptPath -EnforceSignatureCheck $false -RunAs32Bit $false
     $requirementRule = New-IntuneWin32AppRequirementRule -Architecture 'x64' -MinimumSupportedWindowsRelease $MinimumSupportedWindowsRelease
 
+    # Alleen meegeven als de icoon-extractie is gelukt — Add-/Set-IntuneWin32App accepteren geen
+    # expliciete $null voor -Icon.
+    $iconParams = @{}
+    if ($appIcon) { $iconParams['Icon'] = $appIcon }
+
     if ($existingApp -and $versionUnchanged -and $scriptsUnchanged) {
         # ── Geen actie nodig ──────────────────────────────────────────────
         Write-Step "Al up-to-date"
@@ -437,7 +502,8 @@ try {
             exit 1
         }
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
-        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule -ErrorAction Stop | Out-Null
+        Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule `
+            -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
         Write-Info "[OK]   App bijgewerkt naar versie $newVersion (incl. ververste requirement rule)." -ForegroundColor Green
     }
     else {
@@ -465,6 +531,8 @@ try {
             -RestartBehavior        'suppress' `
             -DetectionRule          $detectionRule `
             -RequirementRule        $requirementRule `
+            -CompanyPortalFeaturedApp $true `
+            @iconParams `
             -ErrorAction Stop
 
         Add-IntuneWin32AppAssignmentGroup -Include -ID $newApp.id -GroupID $assignmentGroup.Id -Intent 'required' -Notification 'showAll' -ErrorAction Stop | Out-Null
