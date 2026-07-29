@@ -166,6 +166,22 @@ function Get-MsixVersion {
     }
 }
 
+function Get-ScriptsHashHex {
+    # SHA256 over de gecombineerde inhoud van de content-scripts (Install/Uninstall/Detect),
+    # zodat een pure code-wijziging in een van die drie ook zonder MSIX-versiebump wordt
+    # gedetecteerd als "content gewijzigd" — zie .DESCRIPTION hierboven.
+    param([Parameter(Mandatory = $true)][string[]]$Paths)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $combined = ($Paths | ForEach-Object { Get-Content -Path $_ -Raw }) -join "`n---`n"
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($combined)
+        $hash  = $sha256.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant().Substring(0, 12)
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
 function New-TempAppRegistration {
     # Zelfde patroon als Remove-SharePointFileVersionsByDate.ps1: een kortlevende App
     # Registration + service principal, met alleen het app-only Graph-recht dat nodig is voor
