@@ -25,7 +25,16 @@
       4. Detectie- en requirement-regel worden bij ELKE run opnieuw opgebouwd en meegestuurd,
          niet alleen bij eerste aanmaak — zelfde reden als in Deploy-ClaudeDesktopIntune.ps1 (een
          fout die ooit bij de allereerste Add-IntuneWin32App-call is vastgelegd blijft anders voor
-         altijd op de app staan).
+         altijd op de app staan). Bij een UPDATE wordt de requirement rule bewust niet via
+         Set-IntuneWin32App's eigen -RequirementRule-parameter gezet — die cmdlet heeft in de
+         geïnstalleerde IntuneWin32App-module (1.5.0) een bevestigde bug waarbij die parameter een
+         niet-bestaand '@odata.type'-veld eist en bij het ontbreken daarvan de HELE rest van de
+         functie afbreekt (dus ook Notes/DetectionRule/RestartBehavior zouden dan nooit wegschrijven)
+         — zie Set-Win32AppArchitectureRequirement hieronder, die architecture/OS-release rechtstreeks
+         via Graph PATCHt, buiten die kapotte route om. Add-IntuneWin32App (eerste aanmaak) heeft
+         deze bug niet.
+      5. De app is `-CompanyPortalFeaturedApp` op elke run, zodat hij zichtbaar/uitgelicht in
+         Company Portal staat i.p.v. verborgen te blijven als achtergrond-vereiste.
 
     Bewust een ONAFHANKELIJKE app, zonder Intune-dependency naar/van de Claude Desktop-app: een
     mislukte of nog-niet-voltooide Cowork-prereqs-install mag Claude Desktop zelf niet
@@ -122,6 +131,57 @@ function Get-ScriptsHashHex {
         return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant().Substring(0, 12)
     } finally {
         $sha256.Dispose()
+    }
+}
+
+function Set-Win32AppArchitectureRequirement {
+    # Zelfde bevestigde IntuneWin32App-moduleprobleem (1.5.0) als in Deploy-ClaudeDesktopIntune.ps1:
+    # Set-IntuneWin32App (de UPDATE-cmdlet) eist ten onrechte '@odata.type' op -RequirementRule
+    # (architecture/minimumSupportedWindowsRelease zijn platte win32LobApp-properties, geen
+    # polymorf 'rules'-lid — zie https://learn.microsoft.com/en-us/graph/api/resources/intune-apps-win32lobapp).
+    # New-IntuneWin32AppRequirementRule zet '@odata.type' nooit, dus die check slaat altijd aan, en
+    # de "break" erna (geen loop/switch eromheen — empirisch geverifieerd) breekt de HELE rest van
+    # de functie af, ruim vóór de eigenlijke Graph-PATCH-call verderop: Notes/DetectionRule/
+    # RestartBehavior zouden dus NOOIT wegschrijven zolang -RequirementRule werd meegegeven aan een
+    # UPDATE-aanroep. Add-IntuneWin32App (eerste aanmaak) heeft dit euvel niet. Deze functie zet
+    # architecture/minimumSupportedWindowsRelease daarom rechtstreeks via Graph, buiten de kapotte
+    # cmdlet-route om, met dezelfde sessie die Connect-MSIntuneGraph al opzette.
+    param(
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$RequirementRule
+    )
+    if (-not $Global:AuthenticationHeader) {
+        throw "Geen actieve Intune Graph-sessie (Global:AuthenticationHeader ontbreekt) — Connect-MSIntuneGraph moet al zijn uitgevoerd."
+    }
+    $body = @{
+        '@odata.type'                    = '#microsoft.graph.win32LobApp'
+        allowedArchitectures             = $RequirementRule['allowedArchitectures']
+        minimumSupportedWindowsRelease   = $RequirementRule['minimumSupportedWindowsRelease']
+    } | ConvertTo-Json -Depth 5
+
+    try {
+        Invoke-RestMethod -Method Patch `
+            -Uri "https://graph.microsoft.com/v1.0/deviceAppManagement/mobileApps/$AppId" `
+            -Headers $Global:AuthenticationHeader -Body $body -ContentType 'application/json' -ErrorAction Stop | Out-Null
+    } catch {
+        $graphErrorDetail = $null
+        try {
+            if ($_.Exception.Response) {
+                $streamReader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                try {
+                    $streamReader.BaseStream.Position = 0
+                    $graphErrorDetail = $streamReader.ReadToEnd()
+                } finally {
+                    $streamReader.Dispose()
+                }
+            }
+        } catch {}
+
+        if ($graphErrorDetail) {
+            throw "Graph PATCH van architecture requirement mislukt: $graphErrorDetail"
+        } else {
+            throw
+        }
     }
 }
 
@@ -326,8 +386,9 @@ try {
             exit 1
         }
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
-        Set-IntuneWin32App -ID $existingApp.id -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule `
-            -RestartBehavior 'basedOnExitCode' -ErrorAction Stop | Out-Null
+        Set-IntuneWin32App -ID $existingApp.id -Notes $notes -DetectionRule $detectionRule `
+            -RestartBehavior 'basedOnExitCode' -CompanyPortalFeaturedApp $true -ErrorAction Stop | Out-Null
+        Set-Win32AppArchitectureRequirement -AppId $existingApp.id -RequirementRule $requirementRule
         Write-Info "[OK]   App bijgewerkt (incl. ververste requirement rule)." -ForegroundColor Green
     }
     else {
@@ -354,6 +415,7 @@ try {
             -RestartBehavior        'basedOnExitCode' `
             -DetectionRule          $detectionRule `
             -RequirementRule        $requirementRule `
+            -CompanyPortalFeaturedApp $true `
             -ErrorAction Stop
 
         Add-IntuneWin32AppAssignmentGroup -Include -ID $newApp.id -GroupID $assignmentGroup.Id -Intent 'required' -Notification 'showAll' -ErrorAction Stop | Out-Null
