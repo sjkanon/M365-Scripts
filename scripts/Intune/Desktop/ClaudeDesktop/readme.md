@@ -1,14 +1,16 @@
 # ClaudeDesktop
 
-Machine-wide Intune deployment of [Claude Desktop](https://claude.com/download) for Windows, including the Virtual Machine Platform feature required for Cowork. Run **one script once a month** to keep the Intune app current — no persistent App Registration or client secret to manage.
+Machine-wide Intune deployment of [Claude Desktop](https://claude.com/download) for Windows. Run **one script once a month** to keep the Intune app current — no persistent App Registration or client secret to manage.
 
 Based on [Deploy Claude Desktop for Windows](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows) and [Enterprise configuration for Claude Desktop](https://support.claude.com/en/articles/12622667-enterprise-configuration-for-claude-desktop).
+
+> **Cowork's Windows prerequisites (VirtualMachinePlatform, Fast Startup) are a separate, independent Win32 app** — see [`../CoworkPrerequisites/readme.md`](../CoworkPrerequisites/readme.md). Deploy both if you want Cowork; deploy only this one if you just want Claude Desktop itself. There is deliberately **no Intune dependency** between the two: a Cowork-prerequisites failure must never block Claude Desktop (which works fine without Cowork), and a Claude Desktop install problem must never be confused with a Windows-feature problem — each app gets its own, separately visible install status in Intune.
 
 ---
 
 ## Why not just upload the MSIX as a line-of-business app?
 
-Intune installs LOB MSIX apps per-user. That fails for standard users without admin rights and doesn't satisfy Cowork's machine-wide requirement. Instead, `Add-AppxProvisionedPackage` is wrapped as a Win32 app, exactly as the official article recommends.
+Intune installs LOB MSIX apps per-user. That fails for standard users without admin rights. Instead, `Add-AppxProvisionedPackage` is wrapped as a Win32 app, exactly as the official article recommends.
 
 ## Contents
 
@@ -30,7 +32,7 @@ Intune installs LOB MSIX apps per-user. That fails for standard users without ad
 5. First run: creates the Win32 app "Claude Desktop (Machine-wide)" in Intune with detection/requirement rules and assigns it **Required** to the Entra ID group you pass in.
 6. Later runs: pushes an updated package via `Update-IntuneWin32AppPackageFile` (existing assignment left untouched, devices just get the new content) if **either** the downloaded MSIX version is newer, **or** the Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 scripts themselves changed since the last run — both tracked in the app's Notes field (`ClaudeMsixVersion=...; ScriptsHash=...`), no local state file needed. Detection **and requirement rules are rebuilt and resubmitted on every run**, not just at first creation (see "Known issue" below). If neither the version nor the scripts changed, only the rules get refreshed.
 
-Detection is deliberately version-agnostic (presence of the provisioned package + `VirtualMachinePlatform` enabled). Intune redeploys a Win32 app to already-targeted devices whenever its content version changes in Intune, regardless of what the detection rule reports — so there's no `$MinimumVersion` to bump by hand every month, and a pure script edit (no new MSIX) still triggers a redeploy via the `ScriptsHash` check above.
+Detection is deliberately version-agnostic (presence of the provisioned package). Intune redeploys a Win32 app to already-targeted devices whenever its content version changes in Intune, regardless of what the detection rule reports — so there's no `$MinimumVersion` to bump by hand every month, and a pure script edit (no new MSIX) still triggers a redeploy via the `ScriptsHash` check above.
 
 ### Known issue: 0x80070001 install failures fixed by resubmitting the requirement rule
 
@@ -38,7 +40,7 @@ Devices failed installation with error `0x80070001` regardless of the device. Co
 
 The root cause: `Set-IntuneWin32App` in the update branch never passed `-RequirementRule` (only `Add-IntuneWin32App` did, at first creation) — so whatever got recorded on that very first run, right or wrong, stayed on the app forever, immune to every later redeploy. Fixed by rebuilding and resubmitting both `-DetectionRule` and `-RequirementRule` on every run (see point 6 above). Run the script again to push the corrected requirement rule to the existing app.
 
-**If a device still fails after that fix**: check whether it's actually stuck behind Intune's unrelated **GRS retry cooldown** instead (3 failed attempts → 24h lockout, regardless of the app config) — see [`Repair-StuckWin32AppEnforcement.ps1`](../../readme.md#repair-stuckwin32appenforcementps1) one level up. This affects every Win32 app on that device, not just Claude, so it's a useful first check if several unrelated apps are also silently stuck.
+**If a device still fails after that fix**: check whether it's actually stuck behind Intune's unrelated **GRS retry cooldown** instead (3 failed attempts → 24h lockout, regardless of the app config) — see the [GRS-cooldown scripts](../../readme.md#repair-stuckwin32appenforcementps1) one level up, either the manual on-device version or the Detect-/Remediate- pair that runs entirely via the Intune portal. This affects every Win32 app on that device, not just Claude, so it's a useful first check if several unrelated apps are also silently stuck.
 
 ### Company Portal visibility
 
@@ -71,12 +73,6 @@ You'll get an interactive sign-in prompt and a "type JA to continue" confirmatio
 
 The install script sets `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` (DWord). Claude's own updater is disabled so version control stays entirely with this monthly Intune run instead of drifting per-device.
 
-### VirtualMachinePlatform restart
-
-If `VirtualMachinePlatform` was already enabled on the device, nothing else happens — Cowork works immediately. If the install script has to enable it for the first time, it does **not** restart the device itself. Instead it exits with code **3010** ("soft reboot required") and the Win32 app is configured with `-RestartBehavior 'basedOnExitCode'`, so **Intune** enforces the actual restart (prompt, deadline, grace period) — this doesn't depend on a user being logged in. As a courtesy it also sends an English `msg.exe` notification to the active console session (recognized via the untranslated `SESSIONNAME` "console", not the OS-language-dependent `STATE` text "Active" — a plain string match on "Active" would silently never fire on a non-English Windows display language), but that notification is a nicety, not the mechanism the restart actually relies on. The feature only becomes fully active after that restart.
-
-Enabling the feature itself is wrapped in its own retry + try/catch, isolated from the rest of the install: a transient DISM failure here (e.g. a busy servicing stack, or Windows Update unreachable as a feature source — both more likely on a freshly imaged device mid-Autopilot-ESP than on an already-running one) only means Cowork isn't available yet, it no longer aborts the Claude Desktop install itself.
-
 ### Clean reinstall on every run
 
 Before provisioning the new version, the install script fully removes Claude Desktop from the device first, in three passes:
@@ -85,14 +81,14 @@ Before provisioning the new version, the install script fully removes Claude Des
 2. Removes every per-user **Appx** installation (`Get-AppxPackage -AllUsers` / `Remove-AppxPackage -AllUsers`, including already-logged-in profiles), then the old machine-wide provisioned package.
 3. Removes any **classic (non-Appx) per-user installation** — most notably the consumer installer from [claude.ai/download](https://claude.ai/download), which registers itself through an ordinary per-user Uninstall registry key rather than as an Appx package, so `Get-AppxPackage` never sees it. The script scans the Uninstall registry key of every local profile — including profiles that aren't currently logged in, by temporarily loading their `NTUSER.DAT` — and runs each match's `QuietUninstallString` (or `UninstallString` if that's absent), with a 120s timeout so a stuck installer can't hang the Intune install.
 
-Only after all three passes does it provision the new MSIX. This is deliberately more thorough than just clearing the provisioning layer — any installation left over from a different route can keep running its own, non-Cowork-registered Claude session even after the machine-wide version was updated. A user with Claude open loses that session when this runs.
+Only after all three passes does it provision the new MSIX. This is deliberately more thorough than just clearing the provisioning layer — any installation left over from a different route can keep running its own, unmanaged Claude session even after the machine-wide version was updated. A user with Claude open loses that session when this runs.
 
 ### Robustness on a never-installed device
 
 Both content scripts are written so a device where Claude has never been present — including the very first Autopilot ESP run — goes through cleanly:
 
-- **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring. If `VirtualMachinePlatform` has to be enabled for the first time and there's no active console session yet (the normal case mid-Autopilot ESP, since no user has signed in), the `msg.exe` notification is skipped with a log line explaining why — the actual restart guarantee doesn't depend on it, since exit code 3010 tells Intune itself to enforce the restart regardless of ESP's own behavior.
-- **Detection script**: an empty/negative result from `Get-AppxProvisionedPackage` or `Get-WindowsOptionalFeature` (the expected outcome on a never-installed device) reports "not installed" (exit 1) immediately, with no retry — retries only kick in on an actual **exception** from either cmdlet (e.g. a transient DISM lock, plausible right after the install script's own heavy Appx/DISM activity on the same device), so a genuinely clean machine is never slowed down waiting on retries that can't change the outcome.
+- **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring.
+- **Detection script**: an empty/negative result from `Get-AppxProvisionedPackage` (the expected outcome on a never-installed device) reports "not installed" (exit 1) immediately, with no retry — retries only kick in on an actual **exception** (e.g. a transient DISM lock, plausible right after the install script's own heavy Appx activity on the same device), so a genuinely clean machine is never slowed down waiting on retries that can't change the outcome.
 
 ### Prerequisites
 
