@@ -1,12 +1,12 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Intune Remediation fix script — clears Win32 apps stuck behind Intune's GRS retry cooldown
+    Intune Remediation fix script - clears Win32 apps stuck behind Intune's GRS retry cooldown
     on this device.
 
 .DESCRIPTION
-    Companion remediation script for Detect-StuckWin32AppEnforcement.ps1 — deploy both together
+    Companion remediation script for Detect-StuckWin32AppEnforcement.ps1 - deploy both together
     as an Intune "Scripts and remediations > Remediations" package so a device that gets stuck
     (3 failed Win32 app install attempts -> 24h local GRS cooldown, independent of whatever gets
     fixed afterwards in Intune itself) clears and resyncs itself automatically on the next
@@ -14,7 +14,7 @@
 
     Same clearing logic as the standalone Repair-StuckWin32AppEnforcement.ps1 run with
     -Apply -ForceSync, minus the interactive dry-run/report options that only make sense for a
-    manually-run, one-off troubleshooting session — this script always clears everything it
+    manually-run, one-off troubleshooting session - this script always clears everything it
     finds and always forces an immediate resync, since that is unconditionally the right thing
     to do once Intune's Remediations engine has already decided (via the paired detection
     script) that this device is non-compliant.
@@ -34,7 +34,7 @@
     PowerShell, no signature check.
 
     Registry structure and remediation approach based on community documentation of Intune's GRS
-    (retry schedule) mechanism — Microsoft does not publicly document this internal IME state:
+    (retry schedule) mechanism - Microsoft does not publicly document this internal IME state:
       https://www.anoopcnair.com/override-grs-trigger-ime-to-retry-failed-win32/
       https://call4cloud.nl/retry-failed-win32app-installation/
       https://msnugget.com/retry-failed-win32-apps-on-demand-with-intune-remediations/
@@ -114,7 +114,10 @@ function Invoke-ForceMdmSync {
 }
 
 try {
-    $failedStates = Get-FailedWin32AppStates
+    # @() dwingt array-vorm af ongeacht hoeveel items de functie teruggeeft - zonder dit "pakt"
+    # PowerShell een 1-item resultaat bij het verlaten van de functie uit tot een los object, dat
+    # onder Set-StrictMode geen .Count-property heeft ("property 'Count' cannot be found").
+    $failedStates = @(Get-FailedWin32AppStates)
 
     if ($failedStates.Count -eq 0) {
         Write-Host "Nothing to remediate -- no Win32 apps with a stuck/failed enforcement state found."
