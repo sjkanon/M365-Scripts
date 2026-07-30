@@ -10,10 +10,10 @@
     Gebruik als Intune "Uninstall command":
         %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Uninstall-ClaudeDesktop-Intune.ps1
 
-    Raakt de Windows-kant van Cowork (VirtualMachinePlatform, Fast Startup) niet aan — dat is een
-    eigen, onafhankelijke Win32-app met zijn eigen uninstall
-    (../CoworkPrerequisites/Uninstall-CoworkPrerequisites-Intune.ps1), losstaand van of Claude
-    Desktop hier wordt verwijderd of niet.
+    Raakt de Windows-kant van Cowork (VirtualMachinePlatform, Fast Startup) niet aan — dat loopt
+    via een eigen, onafhankelijke Intune Proactive Remediation (zie ../CoworkPrerequisites/),
+    losstaand van of Claude Desktop hier wordt verwijderd of niet. Er is voor die remediation
+    ook geen "uninstall"-concept — zie ../CoworkPrerequisites/readme.md.
 
 .NOTES
     Logt naar %ProgramData%\ClaudeDeploy\uninstall.log
