@@ -534,14 +534,14 @@ try {
         $newApp = Add-IntuneWin32App `
             -FilePath              $intuneWinFile `
             -DisplayName           $AppDisplayName `
-            -Description           'Claude Desktop, machine-breed geinstalleerd via Add-AppxProvisionedPackage (incl. Cowork-vereiste: VirtualMachinePlatform). Wordt maandelijks bijgewerkt door Deploy-ClaudeDesktopIntune.ps1.' `
+            -Description           'Claude Desktop, machine-breed geinstalleerd via Add-AppxProvisionedPackage. De Windows-vereisten voor Cowork (VirtualMachinePlatform) zitten in de losse app "Cowork Windows Prerequisites". Wordt maandelijks bijgewerkt door Deploy-ClaudeDesktopIntune.ps1.' `
             -Publisher              'Anthropic' `
             -AppVersion             $newVersion `
             -Notes                  $notes `
             -InstallCommandLine     $installCommandLine `
             -UninstallCommandLine   $uninstallCommandLine `
             -InstallExperience      'system' `
-            -RestartBehavior        'basedOnExitCode' `
+            -RestartBehavior        'suppress' `
             -DetectionRule          $detectionRule `
             -RequirementRule        $requirementRule `
             -CompanyPortalFeaturedApp $true `
