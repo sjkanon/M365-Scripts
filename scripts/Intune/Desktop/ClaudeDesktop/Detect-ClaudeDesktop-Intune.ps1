@@ -5,7 +5,7 @@
 .DESCRIPTION
     Rapporteert "geïnstalleerd" (exit 0 + stdout) als de machine-brede Claude-provisioning
     aanwezig is. De Windows-kant van Cowork (VirtualMachinePlatform + HCS-services) heeft een
-    eigen, onafhankelijke detectie in ../CoworkPrerequisites/Detect-CoworkPrerequisites.ps1
+    eigen, onafhankelijke detectie in ../CoworkPrerequisites/Detect-CoworkPrerequisites-Intune.ps1
     — bewust niet hier meegenomen, zodat een Cowork-probleem niet door elkaar loopt met een
     Claude Desktop-installatieprobleem: beide apps krijgen hun eigen, apart zichtbare status in
     Intune.

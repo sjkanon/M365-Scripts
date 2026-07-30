@@ -1,66 +1,74 @@
 # CoworkPrerequisites
 
-Windows-side prerequisites for [Claude Cowork](https://support.claude.com/en/articles/12622667-enterprise-configuration-for-claude-desktop) — the `VirtualMachinePlatform` optional feature and disabling Windows Fast Startup — deployed as an Intune **Proactive Remediation** (Detect + Remediate script pair), entirely separate from [`../ClaudeDesktop/`](../ClaudeDesktop/readme.md).
+Machine-wide Intune deployment of the Windows-side prerequisites for [Claude Cowork](https://support.claude.com/en/articles/12622667-enterprise-configuration-for-claude-desktop) — the `VirtualMachinePlatform` optional feature and disabling Windows Fast Startup — packaged as its **own, independent** Win32 app, separate from [`../ClaudeDesktop/`](../ClaudeDesktop/readme.md).
 
-## Why a remediation instead of a Win32 app
+## Why a separate app instead of bundling it into Claude Desktop's install script
 
-This used to be a Win32 app, wrapped around the same `Add-/Set-IntuneWin32App` machinery as Claude Desktop. That turned out to be the wrong tool for the job:
+Cowork is optional: Claude Desktop works fine without it. Bundling the Windows-feature step into Claude Desktop's own install script means a DISM hiccup unrelated to Claude (a busy servicing stack, Windows Update unreachable as a feature source — both more likely on a freshly imaged device mid-Autopilot-ESP) could abort the *entire* Claude Desktop install. Splitting it out means:
 
-- There's no actual binary here — just two OS config changes (enable a feature, flip a registry value). All the Win32-app scaffolding (detection rule, requirement rule, `@odata.type`-tagged objects, return-code mapping for the 3010 "soft reboot" exit code) was overhead that added failure surface without adding value, and it *did* fail in practice — see the `IntuneWin32App`-module bug documented in [`../ClaudeDesktop/readme.md`](../ClaudeDesktop/readme.md#known-issue-0x80070001-install-failures--and-a-much-deeper-intunewin32app-module-bug-behind-it), which affected this app too.
-- A Win32 app only runs its install command **once** per device (until content/version changes force a re-push). If a device fails once — a transient DISM lock, a user who never restarts — nothing re-tries it.
-- A Proactive Remediation re-runs **on its own schedule** (daily by default): it re-checks compliance and re-applies the fix automatically, without you needing to redeploy anything. That fits "enable this feature and nag the user to restart until they do" much better than a one-shot install.
+- A Cowork-prerequisites failure never blocks Claude Desktop itself.
+- Each app has its own, separately visible install status in Intune — you can tell at a glance whether a device's problem is "Windows feature" or "Claude Desktop", instead of one opaque combined install command.
+
+There is deliberately **no Intune "Dependency"** configured between the two apps by default. A hard dependency would mean Claude Desktop doesn't even attempt to install until this app succeeds — which reintroduces the exact problem above. Assign both **Required** to the same group, independently.
+
+If your environment treats Cowork as a hard requirement rather than optional, deploy this app first, then run `Deploy-ClaudeDesktopIntune.ps1 -RequireCoworkPrerequisites` — see [`../ClaudeDesktop/readme.md`](../ClaudeDesktop/readme.md#optional-requiring-cowork-prerequisites) for what that adds and the tradeoff involved.
 
 ## Contents
 
-| Script | Role |
+| Script | Role in Intune |
 |---|---|
-| `Deploy-CoworkPrerequisitesRemediation.ps1` | **The one you run.** Creates/updates the remediation in Intune and assigns it — see "Deploy" below. |
-| `Detect-CoworkPrerequisites.ps1` | Detection half — exit 0 if `VirtualMachinePlatform` is enabled **and** the HCS services (`vmcompute`, `HNS`, `vfpext`) exist, exit 1 otherwise |
-| `Remediate-CoworkPrerequisites.ps1` | Remediation half — enables `VirtualMachinePlatform`, disables Fast Startup, notifies the logged-on user if a restart is now required |
+| `Deploy-CoworkPrerequisitesIntune.ps1` | **The one you run.** Packages the scripts below and creates/updates the Win32 app. |
+| `Install-CoworkPrerequisites-Intune.ps1` | Install command content script |
+| `Uninstall-CoworkPrerequisites-Intune.ps1` | Uninstall command content script |
+| `Detect-CoworkPrerequisites-Intune.ps1` | Custom detection script |
 
-## What it checks / fixes
+There's no MSIX here — unlike Claude Desktop, the "content" is just these three scripts, so a re-run only does something if you've actually edited one of them (tracked via a `ScriptsHash` in the app's Notes field, same pattern as `Deploy-ClaudeDesktopIntune.ps1`).
+
+## What the install script does
 
 1. **VirtualMachinePlatform**: `Enable-WindowsOptionalFeature`, with retry against transient DISM failures. No-op if already enabled.
-2. **HCS services present** (`vmcompute`, `HNS`, `vfpext`): `VirtualMachinePlatform` showing `Enabled` in DISM doesn't guarantee these already exist (see Anthropic's own Cowork troubleshooting: *"Missing HCS services: HNS, vmcompute, vfpext"*) — particularly right after enabling the feature but before the required restart. Detection deliberately does **not** check service `Status` (e.g. `Running`): `vmcompute` is a trigger-start service and is expected to be `Stopped` whenever no Cowork session is active — checking for `Running` would flag a perfectly healthy device as non-compliant. Only the service being completely absent is a reliable "not there yet" signal.
-3. **Fast Startup**: sets `HiberbootEnabled = 0` under `HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power`, on every remediation run. Anthropic's own docs warn: *"Restart the machine using Restart, not shut down and power on. With Windows Fast Startup enabled, a shutdown cycle can leave the virtualization services uninitialized."*
+2. **Fast Startup**: sets `HiberbootEnabled = 0` under `HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power`, on every run (not just when VMP was just enabled). Anthropic's own Cowork documentation explicitly warns: *"Restart the machine using Restart, not shut down and power on. With Windows Fast Startup enabled, a shutdown cycle can leave the virtualization services uninitialized."* Fast Startup is on by default on nearly every Windows image — without disabling it, a user who just "shuts down" instead of "restarts" (the common case) never gets working Cowork services, no matter how many power cycles happen, even though Intune shows the app as installed.
+3. If VMP was just enabled: exits with code **3010** ("soft reboot required"). The app is configured with `-RestartBehavior 'basedOnReturnCode'`, so **Intune itself** enforces the restart (prompt/deadline/grace period) — this doesn't depend on a user being logged in. As a courtesy it also sends an English `msg.exe` notification to the active console session (recognized via the untranslated `SESSIONNAME` "console", not the OS-language-dependent `STATE` text "Active" — a plain string match on "Active" would silently never fire on a non-English Windows display language), but the notification is a nicety, not the mechanism the restart actually relies on.
 
-## Restart: the user does it, the script doesn't
+## What the detection script checks
 
-If `VirtualMachinePlatform` was just enabled, the remediation script sends an English `msg.exe` notification to the active console session (matched via the untranslated `SESSIONNAME` value `console`, not the OS-language-dependent `STATE` text "Active" — a plain string match on "Active" would silently never fire on a non-English Windows display language) telling the user to restart. **It does not restart the device itself.**
+Reports "installed" only if **both** `VirtualMachinePlatform` is `Enabled` **and** the underlying HCS services (`vmcompute`, `HNS`, `vfpext`) are present — VMP showing `Enabled` in DISM doesn't guarantee these services already exist (see Anthropic's own Cowork troubleshooting: *"Missing HCS services: HNS, vmcompute, vfpext"*), particularly right after enabling VMP but before the required restart.
 
-This is deliberate, not a missing feature: the user restarts on their own schedule, not one forced by the script. Because detection keeps reporting "not compliant" until the restart actually happens, and remediations re-run daily by default, the reminder simply repeats on the next cycle instead of being a one-shot notification that's easy to miss and never followed up on.
+Deliberately **no check on service `Status`** (e.g. `Running`): `vmcompute` is a trigger-start service and is expected to be `Stopped` whenever no Cowork session is active — checking for `Running` would report a perfectly healthy device as "not installed". Only the service being completely absent (`Get-Service` can't find it) is a reliable signal that the underlying Hyper-V components aren't there yet.
 
-## Deploy
+## Known issue: `-RequirementRule` on `Set-IntuneWin32App` silently no-ops (fixed)
+
+Same confirmed `IntuneWin32App`-module (1.5.0) bug as [`../ClaudeDesktop/readme.md`](../ClaudeDesktop/readme.md#known-issue-0x80070001-install-failures--and-a-much-deeper-intunewin32app-module-bug-behind-it): `Set-IntuneWin32App`'s `-RequirementRule` parameter incorrectly demands an `@odata.type` property that `New-IntuneWin32AppRequirementRule` never sets, and the `break` that follows terminates the **entire rest of the function** — meaning every update call that included `-RequirementRule` silently skipped `Notes`, `DetectionRule`, and `RestartBehavior` too, not just the architecture requirement. `Add-IntuneWin32App` (first creation) doesn't have this bug.
+
+Fixed the same way: the update branch no longer passes `-RequirementRule` to `Set-IntuneWin32App`, and instead calls `Set-Win32AppArchitectureRequirement` — a direct Graph PATCH for `allowedArchitectures`/`minimumSupportedWindowsRelease`, reusing the session `Connect-MSIntuneGraph` already established.
+
+## Company Portal visibility
+
+`-CompanyPortalFeaturedApp $true` is set on every run (both first creation and updates), so this shows up featured in Company Portal instead of staying invisible as a background-only prerequisite. There's no MSIX here to extract a logo from, so it uses Intune's default Win32 app icon — set `-Icon` manually in the Intune portal afterward if you want a custom one.
+
+## Monthly / as-needed run
 
 ```powershell
-.\Deploy-CoworkPrerequisitesRemediation.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
+.\Deploy-CoworkPrerequisitesIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
 ```
 
-Reads `Detect-CoworkPrerequisites.ps1` + `Remediate-CoworkPrerequisites.ps1`, base64-encodes them, and creates or updates the remediation via the Microsoft Graph `deviceManagement/deviceHealthScripts` API (`beta` only — Proactive Remediations have no `v1.0` endpoint, so this doesn't use the `IntuneWin32App` module at all, just `Invoke-MgGraphRequest` on an ordinary delegated `Connect-MgGraph` session). First run creates and assigns it; later runs always re-PATCH the content (cheap, idempotent) but leave the existing assignment alone unless you pass `-ReassignGroup`.
-
-Assigned to the group on a **daily schedule** by default (`-IntervalDays 1`, `-RunTimeLocal "03:00"`) — unlike [`Repair-StuckWin32AppEnforcement.ps1`'s remediation pair](../../readme.md#detect--remediate-stuckwin32appenforcementps1) (deliberately left unassigned/on-demand, since silently auto-clearing a retry lockout can mask a genuinely broken deployment), this one is meant to proactively reach and self-heal the whole target fleet, not just react to one flagged device.
+Same confirmation/`-Force` behavior as `Deploy-ClaudeDesktopIntune.ps1`. Since there's no MSIX to version-bump, re-running this only pushes an update if you've edited one of the three content scripts — otherwise it's a no-op.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `-AssignmentGroupName` | *(required)* | Entra ID group. Used at first creation, and with `-ReassignGroup` |
-| `-DisplayName` | `Cowork Windows Prerequisites` | Used to find the existing remediation on later runs |
-| `-IntervalDays` | `1` | Recurrence in days for the schedule |
-| `-RunTimeLocal` | `03:00` | Local time the daily run fires |
-| `-ReassignGroup` | off | Re-apply the assignment (group/schedule) on an existing remediation — needed to change `-AssignmentGroupName`/`-IntervalDays`/`-RunTimeLocal` later |
+| `-AssignmentGroupName` | *(required)* | Entra ID group assigned Required. Only used on first creation. |
+| `-WorkingDirectory` | `C:\Temp\CoworkPrereqDeploy` | Build staging folder (`Source/`, `Output/`) |
+| `-AppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Used to find the existing app on later runs — don't change without renaming in Intune too |
+| `-MinimumSupportedWindowsRelease` | `W10_21H2` | Requirement rule |
 | `-TenantId` | auto-detected | Entra ID tenant ID |
+| `-IntuneWinAppUtilPath` | auto-download | Use an already-downloaded `IntuneWinAppUtil.exe` |
 | `-Force` | off | Skip the confirmation prompt(s) |
 
-Required role: one that can grant `DeviceManagementScripts.ReadWrite.All` consent (Intune Administrator or Global Administrator).
+## Uninstall
 
-## Independence from Claude Desktop
-
-Cowork is optional: Claude Desktop works fine without it. Keeping this as a separate remediation (rather than folding it into Claude Desktop's own install) means a Windows-feature hiccup unrelated to Claude never blocks or gets confused with a Claude Desktop install problem — each has its own, separately visible status in Intune. There's no Intune "Dependency" between the two (remediations can't be a Win32-app dependency target anyway) — assign both to the same group and let them run independently.
-
-## Reverting
-
-`VirtualMachinePlatform` is **not** disabled by this remediation pair, and there's no "uninstall" concept for a remediation — if you need to turn the feature back off on a device, do it manually (`Disable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform`) after confirming nothing else (WSL, Hyper-V-based tools, other Cowork-like apps) depends on it. Fast Startup is left disabled either way — it's a harmless, device-wide setting, not something specific to Cowork.
+`VirtualMachinePlatform` is **not** disabled by default (other applications — WSL, Hyper-V-based tools, other Cowork-like apps — may depend on it too). Pass `-DisableVirtualMachinePlatform` to the uninstall script if you're certain nothing else on the device needs it. Fast Startup is left disabled either way — it's a harmless, device-wide setting, not something specific to Cowork.
 
 ## Prerequisites
 
-- `Microsoft.Graph.Authentication`, `Microsoft.Graph.Groups` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
-- Run from Windows or any platform with PowerShell 5.1+ — nothing here is Windows-only (unlike Claude Desktop's MSIX/AppX packaging step), it's just Graph calls
+- `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
+- Run from Windows (the packaging tool and DISM cmdlets are Windows-only)

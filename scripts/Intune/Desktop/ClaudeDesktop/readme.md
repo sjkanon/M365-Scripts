@@ -4,7 +4,7 @@ Machine-wide Intune deployment of [Claude Desktop](https://claude.com/download) 
 
 Based on [Deploy Claude Desktop for Windows](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows) and [Enterprise configuration for Claude Desktop](https://support.claude.com/en/articles/12622667-enterprise-configuration-for-claude-desktop).
 
-> **Cowork's Windows prerequisites (VirtualMachinePlatform, Fast Startup) run as a separate Intune Proactive Remediation** — see [`../CoworkPrerequisites/readme.md`](../CoworkPrerequisites/readme.md). Deploy both if you want Cowork; deploy only this one if you just want Claude Desktop itself. There is no Intune dependency between the two — a Cowork-prerequisites failure must never block Claude Desktop (which works fine without Cowork), and a Claude Desktop install problem must never be confused with a Windows-feature problem. Since Proactive Remediations aren't Win32 apps, there's no dependency mechanism to link them even if you wanted to — assign both to the same group and let them run independently.
+> **Cowork's Windows prerequisites (VirtualMachinePlatform, Fast Startup) are a separate, independent Win32 app** — see [`../CoworkPrerequisites/readme.md`](../CoworkPrerequisites/readme.md). Deploy both if you want Cowork; deploy only this one if you just want Claude Desktop itself. **By default there is no Intune dependency** between the two: a Cowork-prerequisites failure must never block Claude Desktop (which works fine without Cowork), and a Claude Desktop install problem must never be confused with a Windows-feature problem — each app gets its own, separately visible install status in Intune. If your environment treats Cowork as a hard requirement rather than optional, pass `-RequireCoworkPrerequisites` to *this* deploy script to add a real Intune dependency instead — see "Optional: requiring Cowork Prerequisites" below.
 
 ---
 
@@ -76,6 +76,18 @@ You'll get an interactive sign-in prompt and a "type JA to continue" confirmatio
 | `-TenantId` | auto-detected | Entra ID tenant ID |
 | `-IntuneWinAppUtilPath` | auto-download | Use an already-downloaded `IntuneWinAppUtil.exe` |
 | `-Force` | off | Skip the confirmation prompt(s) |
+| `-RequireCoworkPrerequisites` | off | Add a real Intune dependency on the Cowork Prerequisites app — see below |
+| `-CoworkPrerequisitesAppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Must match `-AppDisplayName` used in `Deploy-CoworkPrerequisitesIntune.ps1`. Only used with `-RequireCoworkPrerequisites` |
+
+### Optional: requiring Cowork Prerequisites
+
+By default, Claude Desktop and Cowork Prerequisites are independent — no Intune dependency links them (see the note at the top of this readme for why). If your environment genuinely needs Cowork to always be present — a device without working Cowork prerequisites shouldn't get Claude Desktop at all — pass `-RequireCoworkPrerequisites`:
+
+```powershell
+.\Deploy-ClaudeDesktopIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop" -RequireCoworkPrerequisites
+```
+
+This looks up the Cowork Prerequisites app (deploy that one **first** — `Deploy-CoworkPrerequisitesIntune.ps1`) and calls `Add-IntuneWin32AppDependency` with `DependencyType 'Detect'` (not `'AutoInstall'`): the prerequisites app must still be independently assigned Required and already detected on the device — this dependency doesn't auto-install it on Claude Desktop's behalf, it only makes Intune wait for it. The tradeoff versus the default: a device stuck on Cowork prerequisites (e.g. mid-reboot, or genuinely failing) will also not get Claude Desktop until that's resolved, instead of getting Claude Desktop immediately and Cowork later.
 
 ### Auto-update policy
 
