@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
@@ -6,11 +6,11 @@
 
 .DESCRIPTION
     The Intune Management Extension (IME) retries a failing Win32 app install 3 times, 5 minutes
-    apart. After the 3rd failure it locks the app into a 24-hour "GRS" (retry schedule) cooldown —
+    apart. After the 3rd failure it locks the app into a 24-hour "GRS" (retry schedule) cooldown -
     visible in AppActionProcessor.log as "... to install is in GRS. The app will not be enforced."
     or "... has previously been selected for enforcement. The app will not be enforced." During
     that cooldown IME will NOT retry the app again, even after you fix the underlying problem
-    (corrected requirement rule, new package, fixed install command) — the cooldown is local
+    (corrected requirement rule, new package, fixed install command) - the cooldown is local
     per-device state, unrelated to what's configured in Intune itself.
 
     This script finds every locally cached Win32 app whose last recorded EnforcementStateMessage
@@ -21,9 +21,9 @@
         HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension\Win32Apps\Reporting\<UserSID>\<AppId>
         HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension\Win32Apps\<UserSID>\GRS\<LastHashValue>
     then restarts the IntuneManagementExtension service so it re-evaluates every app from scratch
-    on the next check-in — no more waiting out the 24h window.
+    on the next check-in - no more waiting out the 24h window.
 
-    Run without -Apply for a dry run — reports which apps are found stuck and would be cleared.
+    Run without -Apply for a dry run - reports which apps are found stuck and would be cleared.
     Run with -Apply to actually clear them.
 
 .PARAMETER Apply
@@ -43,7 +43,7 @@
     CSV report of found (and, with -Apply, cleared) app states. Default: C:\Temp\.
 
 .EXAMPLE
-    # Dry run — see what's currently stuck on this device
+    # Dry run - see what's currently stuck on this device
     .\Repair-StuckWin32AppEnforcement.ps1
 
 .EXAMPLE
@@ -56,7 +56,7 @@
 
 .NOTES
     Registry structure and remediation approach based on community documentation of Intune's GRS
-    (retry schedule) mechanism — Microsoft does not publicly document this internal IME state:
+    (retry schedule) mechanism - Microsoft does not publicly document this internal IME state:
       https://www.anoopcnair.com/override-grs-trigger-ime-to-retry-failed-win32/
       https://call4cloud.nl/retry-failed-win32app-installation/
       https://msnugget.com/retry-failed-win32-apps-on-demand-with-intune-remediations/
@@ -86,13 +86,13 @@ Write-Host ''
 
 if (-not $Apply) {
     Write-Host '  ================================================' -ForegroundColor Yellow
-    Write-Host '   DRY RUN — no registry keys will be removed, no service restart.' -ForegroundColor Yellow
+    Write-Host '   DRY RUN - no registry keys will be removed, no service restart.' -ForegroundColor Yellow
     Write-Host '   Add -Apply to actually clear the GRS cooldown.' -ForegroundColor Yellow
     Write-Host '  ================================================' -ForegroundColor Yellow
     Write-Host ''
 }
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# -- Helpers --------------------------------------------------------------------
 function Get-UsernameFromSid {
     param([string]$Sid)
     try {
@@ -103,7 +103,7 @@ function Get-UsernameFromSid {
 }
 
 function Get-FailedWin32AppStates {
-    # Alleen "echte" fouten (niet 0 = geslaagd, niet 3010 = herstart in afwachting) — dat zijn
+    # Alleen "echte" fouten (niet 0 = geslaagd, niet 3010 = herstart in afwachting) - dat zijn
     # precies de apps die na 3 mislukte pogingen 24u in GRS-cooldown zitten.
     $win32AppsKeyPath = 'HKLM:\SOFTWARE\Microsoft\IntuneManagementExtension\Win32Apps'
     if (-not (Test-Path $win32AppsKeyPath)) { return @() }
@@ -120,7 +120,7 @@ function Get-FailedWin32AppStates {
         $errorCode = [int]$errorCodeRaw
         if ($errorCode -eq 0 -or $errorCode -eq 3010) { continue }
 
-        # SID en App-ID zijn de twee padsegmenten direct na "Win32Apps\" — regex i.p.v. een vaste
+        # SID en App-ID zijn de twee padsegmenten direct na "Win32Apps\" - regex i.p.v. een vaste
         # index, zodat dit standhoudt ook als IME een extra subkey-niveau toevoegt/verwijdert.
         $relativePath = $subKey.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
         if (-not ($relativePath -match 'Win32Apps\\([^\\]+)\\([^\\]+)')) { continue }
@@ -138,7 +138,7 @@ function Get-FailedWin32AppStates {
         })
     }
 
-    # Eén entry per (user, app) — meerdere subkeys onder dezelfde app kunnen matchen.
+    # Een entry per (user, app) - meerdere subkeys onder dezelfde app kunnen matchen.
     return @($results | Sort-Object UserObjectId, AppId -Unique)
 }
 
@@ -178,7 +178,7 @@ function Invoke-ForceMdmSync {
     $pushLaunchTasks = Get-ScheduledTask -TaskName 'PushLaunch' -ErrorAction SilentlyContinue |
         Where-Object { $_.TaskPath -like '*Microsoft\Windows\EnterpriseMgmt*' }
     if (-not $pushLaunchTasks) {
-        Write-Host '    [WARN] Geen PushLaunch scheduled task gevonden — apparaat is mogelijk niet MDM-ingeschreven.' -ForegroundColor Yellow
+        Write-Host '    [WARN] Geen PushLaunch scheduled task gevonden - apparaat is mogelijk niet MDM-ingeschreven.' -ForegroundColor Yellow
         return
     }
     foreach ($task in $pushLaunchTasks) {
@@ -187,13 +187,18 @@ function Invoke-ForceMdmSync {
     }
 }
 
-# ── Scan ───────────────────────────────────────────────────────────────────────
+# -- Scan -----------------------------------------------------------------------
 Write-Host '  Gecachte Win32-app enforcement-status doorzoeken op mislukte pogingen...' -ForegroundColor Cyan
-$failedStates = Get-FailedWin32AppStates
+# @() OOK hier bij de aanroep zelf, niet alleen in de return-statement van de functie: als die
+# functie precies 1 object teruggeeft, "pakt" PowerShell de array bij het verlaten van de functie
+# uit tot een los object (een bekende valkuil), en dat losse object heeft onder Set-StrictMode
+# geen .Count-property meer - vandaar de "property 'Count' cannot be found"-fout. @() bij de call
+# zelf dwingt array-vorm af ongeacht hoeveel items de functie teruggaf (0, 1 of meer).
+$failedStates = @(Get-FailedWin32AppStates)
 
 if ($failedStates.Count -eq 0) {
     Write-Host ''
-    Write-Host '  Geen apps met een vastgelegde installatiefout gevonden — niets om op te ruimen.' -ForegroundColor Green
+    Write-Host '  Geen apps met een vastgelegde installatiefout gevonden - niets om op te ruimen.' -ForegroundColor Green
     Write-Host ''
     exit 0
 }
@@ -205,7 +210,7 @@ $reportRows = [System.Collections.Generic.List[object]]::new()
 
 foreach ($state in $failedStates) {
     $userLabel = if ($state.UserName) { $state.UserName } else { $state.UserObjectId }
-    Write-Host ("  App {0} (user: {1}) — laatste ErrorCode: {2}" -f $state.AppId, $userLabel, $state.ErrorCode) -ForegroundColor Yellow
+    Write-Host ("  App {0} (user: {1}) - laatste ErrorCode: {2}" -f $state.AppId, $userLabel, $state.ErrorCode) -ForegroundColor Yellow
 
     $lastHashValue = Get-LastHashValue -UserObjectId $state.UserObjectId -TargetAppId $state.AppId
 
@@ -231,7 +236,7 @@ if ($Apply) {
     Write-Host ''
     Write-Host '  Intune Management Extension-service herstarten...' -ForegroundColor Cyan
     Restart-Service -Name 'IntuneManagementExtension' -Force
-    Write-Host '  [OK]   Service herstart — apps worden opnieuw geëvalueerd bij de volgende check-in.' -ForegroundColor Green
+    Write-Host '  [OK]   Service herstart - apps worden opnieuw geevalueerd bij de volgende check-in.' -ForegroundColor Green
 
     if ($ForceSync) {
         Write-Host ''

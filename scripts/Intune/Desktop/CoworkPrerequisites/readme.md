@@ -17,10 +17,11 @@ If your environment treats Cowork as a hard requirement rather than optional, de
 
 | Script | Role in Intune |
 |---|---|
-| `Deploy-CoworkPrerequisitesIntune.ps1` | **The one you run.** Packages the scripts below and creates/updates the Win32 app. |
-| `Install-CoworkPrerequisites-Intune.ps1` | Install command content script |
-| `Uninstall-CoworkPrerequisites-Intune.ps1` | Uninstall command content script |
-| `Detect-CoworkPrerequisites-Intune.ps1` | Custom detection script |
+| `Deploy-CoworkPrerequisitesIntune.ps1` | **The one you run** for the Win32-app route. Packages the scripts below and creates/updates the Win32 app. |
+| `Install-CoworkPrerequisites-Intune.ps1` | Win32-app install command content script |
+| `Uninstall-CoworkPrerequisites-Intune.ps1` | Win32-app uninstall command content script |
+| `Detect-CoworkPrerequisites-Intune.ps1` | Win32-app custom detection script |
+| `CoworkPrerequisites-PlatformScript.ps1` | **Alternative**, standalone route — no Deploy script, no packaging, uploaded directly as an Intune "Platform script". See "Platform script alternative" below. |
 
 There's no MSIX here — unlike Claude Desktop, the "content" is just these three scripts, so a re-run only does something if you've actually edited one of them (tracked via a `ScriptsHash` in the app's Notes field, same pattern as `Deploy-ClaudeDesktopIntune.ps1`).
 
@@ -72,3 +73,24 @@ Same confirmation/`-Force` behavior as `Deploy-ClaudeDesktopIntune.ps1`. Since t
 
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
 - Run from Windows (the packaging tool and DISM cmdlets are Windows-only)
+
+## Platform script alternative
+
+`CoworkPrerequisites-PlatformScript.ps1` is the same enable-VMP-and-disable-Fast-Startup logic, adapted to be uploaded directly as an Intune **Platform script** (Devices → Scripts and remediations → Platform scripts) instead of going through the Win32-app machinery above. No `.intunewin` packaging, no detection/requirement rule, no `Deploy-*.ps1` — just upload the one file.
+
+**Why this exists alongside the Win32 app:** the Win32-app route hit real friction in practice (the `IntuneWin32App`-module `@odata.type` bug, GRS lockouts affecting the whole device, a `RestartBehavior` typo) — a plain platform script sidesteps all of that Win32-app-specific machinery entirely. The tradeoff is losing the two things Win32 apps and Remediations each offered:
+
+| | Win32 app (this folder's `Deploy-CoworkPrerequisitesIntune.ps1`) | Platform script (`CoworkPrerequisites-PlatformScript.ps1`) |
+|---|---|---|
+| Restart after enabling VMP | `-RestartBehavior 'basedOnReturnCode'` + exit `3010` → **Intune itself** enforces a restart (deadline/grace period), no user action required beyond the prompt | No such mechanism exists for platform scripts — exit code is only success(`0`)/failure(anything else), so this script always exits `0` and only sends the one-time `msg.exe` notification; the user must restart entirely on their own initiative |
+| Re-checking after failure | Detection rule re-evaluated on every check-in | Runs once per device by default; a "failed" run does get retried on subsequent check-ins, but a *successful* run (VMP enabled, restart still pending) is not re-verified afterward the way a Proactive Remediation's daily Detect would |
+
+Proactive Remediations (Detect + Remediate, re-runs daily) would give the best of both — but that feature requires Windows Enterprise/Education licensing or per-user VDA, which **Business Premium does not include**, so it isn't an option here.
+
+**Deploy:**
+1. **Devices → Scripts and remediations → Platform scripts → Add → Windows 10 and later**
+2. Upload `CoworkPrerequisites-PlatformScript.ps1`
+3. Script settings: **Run this script using the logged on credentials** = No (SYSTEM) · **Enforce script signature check** = No · **Run script in 64-bit PowerShell Host** = Yes
+4. Assign to the same device group as Claude Desktop
+
+Logs to `%ProgramData%\CoworkPrereqDeploy\platformscript.log` — a different filename from the Win32-app variant's `install.log`, so testing both on the same device doesn't overwrite either log.

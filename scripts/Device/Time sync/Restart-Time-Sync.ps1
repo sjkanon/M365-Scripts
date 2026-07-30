@@ -9,15 +9,15 @@ w32tm /resync
 '@ 
  
 #create custom folder and write PS script 
-$path = $(Join-Path $env:ProgramFiles EOO) 
+$path = $(Join-Path $env:ProgramFiles TimeSyncIntune) 
 if (!(Test-Path $path)) 
 { 
 New-Item -Path $path -ItemType Directory -Force -Confirm:$false 
 } 
-Out-File -FilePath $(Join-Path $env:ProgramFiles EOO\Restart-NTP.ps1) -Encoding unicode -Force -InputObject $content -Confirm:$false 
+Out-File -FilePath $(Join-Path $env:ProgramFiles TimeSyncIntune\Restart-NTP.ps1) -Encoding unicode -Force -InputObject $content -Confirm:$false 
   
 #register script as scheduled task 
 $Time = New-ScheduledTaskTrigger -Once -At 8am -RepetitionDuration  (New-TimeSpan -Days 9999)  -RepetitionInterval  (New-TimeSpan -Minutes 59)
 $User = "SYSTEM"
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ex bypass -file `"C:\ProgramFiles\EOO\Restart-NTP.ps1`"" 
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ex bypass -file `"C:\ProgramFiles\TimeSyncIntune\Restart-NTP.ps1`"" 
 Register-ScheduledTask -TaskName "Restart NTP" -Trigger $Time -User $User -Action $Action -Force 
