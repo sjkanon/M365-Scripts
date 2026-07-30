@@ -46,10 +46,10 @@
     Administrator in combinatie met een rol die AppRoleAssignment.ReadWrite.All-consent mag geven
     (zelfde vereiste als bij de tijdelijke App Registration in Remove-SharePointFileVersionsByDate.ps1).
 
-    Cowork's Windows-vereisten (VirtualMachinePlatform, Fast Startup) lopen volledig los via een
-    Intune Proactive Remediation (zie ../CoworkPrerequisites/) — geen Win32-app, geen Intune-
-    dependency naar deze app. Een probleem aan de Cowork-kant mag Claude Desktop zelf niet
-    blokkeren, dus dit script raakt die remediation op geen enkele manier aan.
+    Cowork's Windows-vereisten (VirtualMachinePlatform, Fast Startup) zijn een aparte, onafhankelijke
+    Win32-app (zie ../CoworkPrerequisites/), zonder Intune-dependency naar deze app — een probleem
+    aan de Cowork-kant mag Claude Desktop zelf niet blokkeren. Voor omgevingen waar dat wél gewenst
+    is: zie .PARAMETER RequireCoworkPrerequisites.
 
 .PARAMETER AssignmentGroupName
     Displaynaam van een bestaande Entra ID-groep. Alleen gebruikt bij de allereerste aanmaak van
@@ -84,11 +84,33 @@
     aangemaakt/bijgewerkt. Gebruik dit als je het script onbeheerd (bv. via een geplande taak)
     wilt laten draaien.
 
+.PARAMETER RequireCoworkPrerequisites
+    Optioneel, standaard UIT. Zonder dit staan Claude Desktop en de Cowork Windows Prerequisites-
+    app volledig los van elkaar (aanbevolen — zie ../CoworkPrerequisites/readme.md voor waarom).
+    Zet dit AAN als je bewust wilt dat Intune Claude Desktop pas als voldaan beschouwt zodra de
+    Cowork-prereqs-app al bij dat apparaat is toegewezen/gedetecteerd — voor omgevingen waar
+    Cowork geen "nice to have" is maar een harde eis, en een device zonder werkende Cowork-
+    prereqs dus ook (nog) geen Claude Desktop hoort te krijgen. Voegt een Intune "Dependency"
+    (DependencyType 'Detect', niet 'AutoInstall' — de prereqs-app blijft zelf apart Required-
+    toegewezen, dit vereist alleen dát die al gedetecteerd is) toe aan de Claude Desktop-app via
+    Add-IntuneWin32AppDependency. Vereist dat de Cowork Prerequisites-app al bestaat in Intune
+    (draai Deploy-CoworkPrerequisitesIntune.ps1 eerst).
+
+.PARAMETER CoworkPrerequisitesAppDisplayName
+    Displaynaam van de Cowork Prerequisites-app in Intune, gebruikt om die op te zoeken wanneer
+    -RequireCoworkPrerequisites is opgegeven. Moet overeenkomen met -AppDisplayName in
+    Deploy-CoworkPrerequisitesIntune.ps1.
+
 .EXAMPLE
     .\Deploy-ClaudeDesktopIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
 
 .EXAMPLE
     .\Deploy-ClaudeDesktopIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop" -Force
+
+.EXAMPLE
+    # Voor omgevingen waar Cowork een harde eis is: Claude Desktop pas laten gelden als voldaan
+    # zodra de Cowork-prereqs-app al is gedetecteerd op het apparaat.
+    .\Deploy-ClaudeDesktopIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop" -RequireCoworkPrerequisites
 #>
 
 [CmdletBinding()]
@@ -108,7 +130,11 @@ param(
 
     [string]$IntuneWinAppUtilPath,
 
-    [switch]$Force
+    [switch]$Force,
+
+    [switch]$RequireCoworkPrerequisites,
+
+    [string]$CoworkPrerequisitesAppDisplayName = 'Cowork Windows Prerequisites (Machine-wide)'
 )
 
 # ── Cleanup tracking ─────────────────────────────────────────────────────────
@@ -571,10 +597,13 @@ try {
     $iconParams = @{}
     if ($appIcon) { $iconParams['Icon'] = $appIcon }
 
+    $targetAppId = $null
+
     if ($existingApp -and $versionUnchanged -and $scriptsUnchanged) {
         # ── Geen actie nodig ──────────────────────────────────────────────
         Write-Step "Al up-to-date"
         Write-Info "Intune-app '$AppDisplayName' staat al op versie $newVersion met ongewijzigde content-scripts. Geen wijzigingen nodig." -ForegroundColor Green
+        $targetAppId = $existingApp.id
     }
     elseif ($existingApp) {
         # ── Content-update op de bestaande app; toewijzing blijft ongewijzigd ──
@@ -595,6 +624,7 @@ try {
             -RestartBehavior 'suppress' -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
         Set-Win32AppArchitectureRequirement -AppId $existingApp.id -RequirementRule $requirementRule
         Write-Info "[OK]   App bijgewerkt naar versie $newVersion (incl. ververste requirement rule)." -ForegroundColor Green
+        $targetAppId = $existingApp.id
     }
     else {
         # ── Eerste aanmaak ────────────────────────────────────────────────
@@ -611,7 +641,7 @@ try {
         $newApp = Add-IntuneWin32App `
             -FilePath              $intuneWinFile `
             -DisplayName           $AppDisplayName `
-            -Description           'Claude Desktop, machine-breed geinstalleerd via Add-AppxProvisionedPackage. De Windows-vereisten voor Cowork (VirtualMachinePlatform) lopen via een aparte Intune Proactive Remediation "Cowork Windows Prerequisites". Wordt maandelijks bijgewerkt door Deploy-ClaudeDesktopIntune.ps1.' `
+            -Description           'Claude Desktop, machine-breed geinstalleerd via Add-AppxProvisionedPackage. De Windows-vereisten voor Cowork (VirtualMachinePlatform) zitten in de losse app "Cowork Windows Prerequisites". Wordt maandelijks bijgewerkt door Deploy-ClaudeDesktopIntune.ps1.' `
             -Publisher              'Anthropic' `
             -AppVersion             $newVersion `
             -Notes                  $notes `
@@ -627,6 +657,27 @@ try {
 
         Add-IntuneWin32AppAssignmentGroup -Include -ID $newApp.id -GroupID $assignmentGroup.Id -Intent 'required' -Notification 'showAll' -ErrorAction Stop | Out-Null
         Write-Info "[OK]   App aangemaakt (ID $($newApp.id)) en toegewezen aan '$($assignmentGroup.DisplayName)'." -ForegroundColor Green
+        $targetAppId = $newApp.id
+    }
+
+    # ── Optionele Dependency naar Cowork Prerequisites ───────────────────────
+    # Standaard UIT (zie .PARAMETER RequireCoworkPrerequisites): de twee apps staan bewust los van
+    # elkaar, zodat een Cowork-probleem Claude Desktop zelf niet blokkeert. Voor omgevingen waar
+    # Cowork een harde eis is, kan dit expliciet aangezet worden — DependencyType 'Detect' (niet
+    # 'AutoInstall'): de prereqs-app moet zelf al apart Required toegewezen zijn en al gedetecteerd
+    # zijn, dit voegt geen automatische install van die app toe bovenop zijn eigen toewijzing.
+    if ($RequireCoworkPrerequisites) {
+        Write-Step "Dependency naar '$CoworkPrerequisitesAppDisplayName' configureren"
+        $prereqApps = @(Get-IntuneWin32App -DisplayName $CoworkPrerequisitesAppDisplayName -ErrorAction SilentlyContinue)
+        if ($prereqApps.Count -eq 0) {
+            throw "Cowork Prerequisites-app '$CoworkPrerequisitesAppDisplayName' niet gevonden in Intune. Draai Deploy-CoworkPrerequisitesIntune.ps1 eerst, of geef de juiste naam op via -CoworkPrerequisitesAppDisplayName."
+        } elseif ($prereqApps.Count -gt 1) {
+            throw "Meerdere apps gevonden met de naam '$CoworkPrerequisitesAppDisplayName' — gebruik een unieke naam."
+        }
+        $prereqApp = $prereqApps[0]
+        $dependencyObject = New-IntuneWin32AppDependency -ID $prereqApp.id -DependencyType Detect
+        Add-IntuneWin32AppDependency -ID $targetAppId -Dependency $dependencyObject
+        Write-Info "[OK]   Claude Desktop vereist nu dat '$($prereqApp.DisplayName)' al is gedetecteerd op het apparaat." -ForegroundColor Green
     }
 }
 catch {
