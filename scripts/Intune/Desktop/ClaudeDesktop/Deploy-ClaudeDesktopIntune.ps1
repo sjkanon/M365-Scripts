@@ -575,7 +575,6 @@ try {
         # ── Geen actie nodig ──────────────────────────────────────────────
         Write-Step "Al up-to-date"
         Write-Info "Intune-app '$AppDisplayName' staat al op versie $newVersion met ongewijzigde content-scripts. Geen wijzigingen nodig." -ForegroundColor Green
-        $targetAppId = $existingApp.id
     }
     elseif ($existingApp) {
         # ── Content-update op de bestaande app; toewijzing blijft ongewijzigd ──

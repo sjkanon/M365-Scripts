@@ -14,6 +14,7 @@ This used to be a Win32 app, wrapped around the same `Add-/Set-IntuneWin32App` m
 
 | Script | Role |
 |---|---|
+| `Deploy-CoworkPrerequisitesRemediation.ps1` | **The one you run.** Creates/updates the remediation in Intune and assigns it — see "Deploy" below. |
 | `Detect-CoworkPrerequisites.ps1` | Detection half — exit 0 if `VirtualMachinePlatform` is enabled **and** the HCS services (`vmcompute`, `HNS`, `vfpext`) exist, exit 1 otherwise |
 | `Remediate-CoworkPrerequisites.ps1` | Remediation half — enables `VirtualMachinePlatform`, disables Fast Startup, notifies the logged-on user if a restart is now required |
 
@@ -29,15 +30,27 @@ If `VirtualMachinePlatform` was just enabled, the remediation script sends an En
 
 This is deliberate, not a missing feature: the user restarts on their own schedule, not one forced by the script. Because detection keeps reporting "not compliant" until the restart actually happens, and remediations re-run daily by default, the reminder simply repeats on the next cycle instead of being a one-shot notification that's easy to miss and never followed up on.
 
-## Deploy in Intune
+## Deploy
 
-1. **Devices → Scripts and remediations → Remediations → Create**
-2. Name it e.g. `Cowork Windows Prerequisites`
-3. Upload `Detect-CoworkPrerequisites.ps1` as the detection script, `Remediate-CoworkPrerequisites.ps1` as the remediation script
-4. Run using logged-on credentials: **No** (SYSTEM) · Run in 64-bit PowerShell: **Yes** · Enforce signature check: **No**
-5. **Assign it** to the same device group you'd assign Claude Desktop to, on a **daily schedule** — unlike [`Repair-StuckWin32AppEnforcement.ps1`'s remediation pair](../../readme.md#detect--remediate-stuckwin32appenforcementps1) (deliberately left unassigned/on-demand, since silently auto-clearing a retry lockout can mask a genuinely broken deployment), this one is meant to proactively reach and self-heal the whole target fleet, not just react to one flagged device.
+```powershell
+.\Deploy-CoworkPrerequisitesRemediation.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
+```
 
-No PowerShell "deploy" script for this one — unlike Claude Desktop, there's no package content to build or app object to create/update, so the two scripts are uploaded directly through the portal steps above.
+Reads `Detect-CoworkPrerequisites.ps1` + `Remediate-CoworkPrerequisites.ps1`, base64-encodes them, and creates or updates the remediation via the Microsoft Graph `deviceManagement/deviceHealthScripts` API (`beta` only — Proactive Remediations have no `v1.0` endpoint, so this doesn't use the `IntuneWin32App` module at all, just `Invoke-MgGraphRequest` on an ordinary delegated `Connect-MgGraph` session). First run creates and assigns it; later runs always re-PATCH the content (cheap, idempotent) but leave the existing assignment alone unless you pass `-ReassignGroup`.
+
+Assigned to the group on a **daily schedule** by default (`-IntervalDays 1`, `-RunTimeLocal "03:00"`) — unlike [`Repair-StuckWin32AppEnforcement.ps1`'s remediation pair](../../readme.md#detect--remediate-stuckwin32appenforcementps1) (deliberately left unassigned/on-demand, since silently auto-clearing a retry lockout can mask a genuinely broken deployment), this one is meant to proactively reach and self-heal the whole target fleet, not just react to one flagged device.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `-AssignmentGroupName` | *(required)* | Entra ID group. Used at first creation, and with `-ReassignGroup` |
+| `-DisplayName` | `Cowork Windows Prerequisites` | Used to find the existing remediation on later runs |
+| `-IntervalDays` | `1` | Recurrence in days for the schedule |
+| `-RunTimeLocal` | `03:00` | Local time the daily run fires |
+| `-ReassignGroup` | off | Re-apply the assignment (group/schedule) on an existing remediation — needed to change `-AssignmentGroupName`/`-IntervalDays`/`-RunTimeLocal` later |
+| `-TenantId` | auto-detected | Entra ID tenant ID |
+| `-Force` | off | Skip the confirmation prompt(s) |
+
+Required role: one that can grant `DeviceManagementScripts.ReadWrite.All` consent (Intune Administrator or Global Administrator).
 
 ## Independence from Claude Desktop
 
@@ -49,4 +62,5 @@ Cowork is optional: Claude Desktop works fine without it. Keeping this as a sepa
 
 ## Prerequisites
 
-- None beyond a normal Intune-managed Windows device — no PowerShell modules needed to *deploy* this (it's just two files uploaded through the portal).
+- `Microsoft.Graph.Authentication`, `Microsoft.Graph.Groups` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
+- Run from Windows or any platform with PowerShell 5.1+ — nothing here is Windows-only (unlike Claude Desktop's MSIX/AppX packaging step), it's just Graph calls

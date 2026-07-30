@@ -1,20 +1,20 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Draait Deploy-CoworkPrerequisitesIntune.ps1 en Deploy-ClaudeDesktopIntune.ps1 na elkaar, in
-    één aanroep.
+    Draait Deploy-CoworkPrerequisitesRemediation.ps1 en Deploy-ClaudeDesktopIntune.ps1 na elkaar,
+    in één aanroep.
 
 .DESCRIPTION
     Pure orchestrator — bevat zelf geen Intune/Graph-logica, roept alleen de twee bestaande
     deploy-scripts na elkaar aan met dezelfde -AssignmentGroupName/-TenantId/-Force. Cowork
-    Prerequisites draait eerst: als je later -RequireCoworkPrerequisites gebruikt bij Claude
-    Desktop (zie ClaudeDesktop/readme.md), moet die app al bestaan in Intune.
+    Prerequisites (een Proactive Remediation, zie CoworkPrerequisites/readme.md) draait eerst,
+    Claude Desktop (een Win32-app) daarna — puur qua leesvolgorde, er is geen Intune-dependency
+    tussen de twee.
 
-    Elke deelrun beheert zijn eigen Microsoft Graph-sessie en tijdelijke App Registration
-    volledig zelfstandig (aanmaken, gebruiken, opruimen) — dit script deelt niets tussen de twee
-    runs, het is puur twee losse, achter-elkaar uitgevoerde aanroepen. Faalt de Cowork-run, dan
-    stopt dit script vóór Claude Desktop (geen zin om door te gaan als de vereiste al niet lukte),
-    tenzij -ContinueOnError is opgegeven.
+    Elke deelrun beheert zijn eigen Microsoft Graph-sessie volledig zelfstandig (verbinden,
+    gebruiken, ontkoppelen) — dit script deelt niets tussen de twee runs, het is puur twee losse,
+    achter-elkaar uitgevoerde aanroepen. Faalt de Cowork-run, dan stopt dit script vóór Claude
+    Desktop, tenzij -ContinueOnError is opgegeven.
 
 .PARAMETER AssignmentGroupName
     Entra ID-groep, doorgegeven aan beide deelscripts.
@@ -27,7 +27,7 @@
     Slaat de "typ JA om door te gaan"-bevestiging over voor beide deelscripts.
 
 .PARAMETER SkipCoworkPrerequisites
-    Sla de Cowork Prerequisites-deploy over, draai alleen Claude Desktop.
+    Sla de Cowork Prerequisites-remediation-deploy over, draai alleen Claude Desktop.
 
 .PARAMETER ContinueOnError
     Ga door met de Claude Desktop-deploy ook als de Cowork Prerequisites-deploy is mislukt.
@@ -63,11 +63,11 @@ $sharedParams = @{ AssignmentGroupName = $AssignmentGroupName }
 if ($TenantId) { $sharedParams['TenantId'] = $TenantId }
 if ($Force) { $sharedParams['Force'] = $true }
 
-$coworkScript = Join-Path $PSScriptRoot 'CoworkPrerequisites\Deploy-CoworkPrerequisitesIntune.ps1'
+$coworkScript = Join-Path $PSScriptRoot 'CoworkPrerequisites\Deploy-CoworkPrerequisitesRemediation.ps1'
 $claudeScript = Join-Path $PSScriptRoot 'ClaudeDesktop\Deploy-ClaudeDesktopIntune.ps1'
 
 if (-not $SkipCoworkPrerequisites) {
-    Write-Host "`n########## Cowork Windows Prerequisites ##########" -ForegroundColor Magenta
+    Write-Host "`n########## Cowork Windows Prerequisites (Remediation) ##########" -ForegroundColor Magenta
     & $coworkScript @sharedParams
     if ($LASTEXITCODE -ne 0) {
         if (-not $ContinueOnError) {
