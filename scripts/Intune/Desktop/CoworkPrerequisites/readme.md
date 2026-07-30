@@ -36,6 +36,16 @@ Reports "installed" only if **both** `VirtualMachinePlatform` is `Enabled` **and
 
 Deliberately **no check on service `Status`** (e.g. `Running`): `vmcompute` is a trigger-start service and is expected to be `Stopped` whenever no Cowork session is active — checking for `Running` would report a perfectly healthy device as "not installed". Only the service being completely absent (`Get-Service` can't find it) is a reliable signal that the underlying Hyper-V components aren't there yet.
 
+## Known issue: `-RequirementRule` on `Set-IntuneWin32App` silently no-ops (fixed)
+
+Same confirmed `IntuneWin32App`-module (1.5.0) bug as [`../ClaudeDesktop/readme.md`](../ClaudeDesktop/readme.md#known-issue-0x80070001-install-failures--and-a-much-deeper-intunewin32app-module-bug-behind-it): `Set-IntuneWin32App`'s `-RequirementRule` parameter incorrectly demands an `@odata.type` property that `New-IntuneWin32AppRequirementRule` never sets, and the `break` that follows terminates the **entire rest of the function** — meaning every update call that included `-RequirementRule` silently skipped `Notes`, `DetectionRule`, and `RestartBehavior` too, not just the architecture requirement. `Add-IntuneWin32App` (first creation) doesn't have this bug.
+
+Fixed the same way: the update branch no longer passes `-RequirementRule` to `Set-IntuneWin32App`, and instead calls `Set-Win32AppArchitectureRequirement` — a direct Graph PATCH for `allowedArchitectures`/`minimumSupportedWindowsRelease`, reusing the session `Connect-MSIntuneGraph` already established.
+
+## Company Portal visibility
+
+`-CompanyPortalFeaturedApp $true` is set on every run (both first creation and updates), so this shows up featured in Company Portal instead of staying invisible as a background-only prerequisite. There's no MSIX here to extract a logo from, so it uses Intune's default Win32 app icon — set `-Icon` manually in the Intune portal afterward if you want a custom one.
+
 ## Monthly / as-needed run
 
 ```powershell
