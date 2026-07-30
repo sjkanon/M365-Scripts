@@ -25,7 +25,10 @@
          de per OS-taal wisselende STATE-tekst "Active"), én exitcode 3010 ("soft reboot
          required") zodat Intune's eigen herstart-UX (RestartBehavior 'basedOnReturnCode' in
          Deploy-CoworkPrerequisitesIntune.ps1) de herstart afdwingt/plant — dit script herstart
-         het apparaat NIET zelf.
+         het apparaat NIET zelf. De melding wordt niet rechtstreeks vanuit deze SYSTEM-context
+         verstuurd (dat levert een dialoog op waarvan de OK-knop niet reageert op klikken — een
+         bekend msg.exe-euvel bij cross-session-berichten), maar via een kortstondige geplande
+         taak die msg.exe binnen de eigen sessie van de gebruiker draait.
 
     Gebruik als Intune "Install command":
         %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Install-CoworkPrerequisites-Intune.ps1
@@ -67,20 +70,53 @@ function Invoke-WithRetry {
     }
 }
 
-function Get-ActiveConsoleSessionId {
+function Get-ActiveConsoleSession {
     # SESSIONNAME "console" is een vaste, niet-vertaalde WinStation-naam, in tegenstelling tot de
     # STATE-kolom ("Active"), die per OS-weergavetaal verschilt (bv. "Actief" op nl-NL).
     try {
         $output = quser 2>$null
         if (-not $output) { return $null }
         $consoleLine = $output | Select-Object -Skip 1 |
-            Where-Object { $_ -match '^\s*\S+\s+console\s+(\d+)\s' } | Select-Object -First 1
-        if ($consoleLine -match '^\s*\S+\s+console\s+(\d+)\s') {
-            return $Matches[1]
+            Where-Object { $_ -match '^\s*>?(\S+)\s+console\s+(\d+)\s' } | Select-Object -First 1
+        if ($consoleLine -match '^\s*>?(\S+)\s+console\s+(\d+)\s') {
+            return [PSCustomObject]@{
+                UserName  = $Matches[1]
+                SessionId = $Matches[2]
+            }
         }
         return $null
     } catch {
         return $null
+    }
+}
+
+function Show-UserRestartNotification {
+    # Rechtstreeks "msg.exe <sessieId> ..." aanroepen vanuit déze SYSTEM-context levert een
+    # dialoog op waarvan de OK-knop niet op klikken reageert — een bekend msg.exe-euvel bij
+    # cross-session-berichten die van een niet-interactieve afzender komen. Door msg.exe via een
+    # kortstondige geplande taak in de eigen sessie van de ingelogde gebruiker te draaien, hoort
+    # de dialoog bij een echt interactief bureaublad en werkt de OK-knop wél gewoon.
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    $session = Get-ActiveConsoleSession
+    if (-not $session) {
+        Write-Log "Geen actief ingelogde gebruiker gevonden — melding overgeslagen, Intune plant de herstart af via exitcode 3010 (bv. tijdens Autopilot ESP, waar nog niemand is ingelogd)."
+        return
+    }
+
+    $taskName = "CoworkPrereqNotify_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    try {
+        $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\msg.exe" -Argument "$($session.SessionId) /TIME:0 `"$Message`""
+        $principal = New-ScheduledTaskPrincipal -UserId $session.UserName -LogonType Interactive -RunLevel Limited
+        $task = New-ScheduledTask -Action $action -Principal $principal
+        Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        Start-Sleep -Seconds 2
+        Write-Log "Melding gestuurd naar ingelogde gebruiker ($($session.UserName), sessie $($session.SessionId)) via geplande taak."
+    } catch {
+        Write-Log "Waarschuwing: kon geen melding naar ingelogde gebruiker sturen: $($_.Exception.Message)"
+    } finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     }
 }
 
@@ -109,18 +145,8 @@ try {
     # 3. Alleen relevant als VirtualMachinePlatform in déze run net is ingeschakeld.
     if ($vmpJustEnabled) {
         $restartMessage = "A required Windows feature (Virtual Machine Platform) was just enabled to support Claude Cowork. Please restart this computer as soon as possible to finish enabling it."
-        $sessionId = Get-ActiveConsoleSessionId
-        if ($sessionId) {
-            Write-Log "Melding sturen naar ingelogde gebruiker (sessie $sessionId); Intune plant daarnaast zelf de herstart af via exitcode 3010."
-            try {
-                & msg.exe $sessionId /TIME:0 $restartMessage
-            } catch {
-                Write-Log "Waarschuwing: kon geen melding naar ingelogde gebruiker sturen: $($_.Exception.Message)"
-            }
-        } else {
-            Write-Log "Geen actief ingelogde gebruiker gevonden — melding overgeslagen, Intune plant de herstart af via exitcode 3010 (bv. tijdens Autopilot ESP, waar nog niemand is ingelogd)."
-        }
-        Write-Log "Exit 3010 (herstart vereist)."
+        Show-UserRestartNotification -Message $restartMessage
+        Write-Log "Exit 3010 (herstart vereist); Intune plant daarnaast zelf de herstart af via exitcode 3010."
         exit 3010
     }
 

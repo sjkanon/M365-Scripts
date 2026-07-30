@@ -35,8 +35,11 @@
          uninitialized." Bij elke run gezet, niet alleen als VMP in deze run net is ingeschakeld.
       3. Als VMP in deze run net is ingeschakeld: een Engelstalige melding (msg.exe) naar de actief
          ingelogde gebruiker (herkend via de niet-vertaalde SESSIONNAME "console") dat die zelf
-         moet herstarten. Dit script herstart het apparaat NIET zelf en kan dat ook niet via Intune
-         laten afdwingen (dat vereist het Win32-app-return-code-mechanisme).
+         moet herstarten. Verstuurd via een kortstondige geplande taak die msg.exe binnen de eigen
+         sessie van de gebruiker draait - msg.exe rechtstreeks vanuit deze SYSTEM-context aanroepen
+         levert een dialoog op waarvan de OK-knop niet op klikken reageert. Dit script herstart het
+         apparaat NIET zelf en kan dat ook niet via Intune laten afdwingen (dat vereist het
+         Win32-app-return-code-mechanisme).
 
     Uploaden in Intune:
       1. Devices > Scripts and remediations > Platform scripts > Add > Windows 10 and later
@@ -81,20 +84,53 @@ function Invoke-WithRetry {
     }
 }
 
-function Get-ActiveConsoleSessionId {
+function Get-ActiveConsoleSession {
     # SESSIONNAME "console" is een vaste, niet-vertaalde WinStation-naam, in tegenstelling tot de
     # STATE-kolom ("Active"), die per OS-weergavetaal verschilt (bv. "Actief" op nl-NL).
     try {
         $output = quser 2>$null
         if (-not $output) { return $null }
         $consoleLine = $output | Select-Object -Skip 1 |
-            Where-Object { $_ -match '^\s*\S+\s+console\s+(\d+)\s' } | Select-Object -First 1
-        if ($consoleLine -match '^\s*\S+\s+console\s+(\d+)\s') {
-            return $Matches[1]
+            Where-Object { $_ -match '^\s*>?(\S+)\s+console\s+(\d+)\s' } | Select-Object -First 1
+        if ($consoleLine -match '^\s*>?(\S+)\s+console\s+(\d+)\s') {
+            return [PSCustomObject]@{
+                UserName  = $Matches[1]
+                SessionId = $Matches[2]
+            }
         }
         return $null
     } catch {
         return $null
+    }
+}
+
+function Show-UserRestartNotification {
+    # Rechtstreeks "msg.exe <sessieId> ..." aanroepen vanuit deze SYSTEM-context levert een
+    # dialoog op waarvan de OK-knop niet op klikken reageert - een bekend msg.exe-euvel bij
+    # cross-session-berichten die van een niet-interactieve afzender komen. Door msg.exe via een
+    # kortstondige geplande taak in de eigen sessie van de ingelogde gebruiker te draaien, hoort
+    # de dialoog bij een echt interactief bureaublad en werkt de OK-knop wel gewoon.
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    $session = Get-ActiveConsoleSession
+    if (-not $session) {
+        Write-Log "Geen actief ingelogde gebruiker gevonden - melding overgeslagen (bv. tijdens Autopilot ESP)."
+        return
+    }
+
+    $taskName = "CoworkPrereqNotify_$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    try {
+        $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\msg.exe" -Argument "$($session.SessionId) /TIME:0 `"$Message`""
+        $principal = New-ScheduledTaskPrincipal -UserId $session.UserName -LogonType Interactive -RunLevel Limited
+        $task = New-ScheduledTask -Action $action -Principal $principal
+        Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        Start-Sleep -Seconds 2
+        Write-Log "Melding gestuurd naar ingelogde gebruiker ($($session.UserName), sessie $($session.SessionId)) via geplande taak."
+    } catch {
+        Write-Log "Waarschuwing: kon geen melding naar ingelogde gebruiker sturen: $($_.Exception.Message)"
+    } finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     }
 }
 
@@ -122,17 +158,7 @@ try {
     #    mogelijk vanuit een platform script (zie .DESCRIPTION).
     if ($vmpJustEnabled) {
         $restartMessage = "A required Windows feature (Virtual Machine Platform) was just enabled to support Claude Cowork. Please restart this computer as soon as possible to finish enabling it."
-        $sessionId = Get-ActiveConsoleSessionId
-        if ($sessionId) {
-            Write-Log "Melding sturen naar ingelogde gebruiker (sessie $sessionId) om zelf te herstarten."
-            try {
-                & msg.exe $sessionId /TIME:0 $restartMessage
-            } catch {
-                Write-Log "Waarschuwing: kon geen melding naar ingelogde gebruiker sturen: $($_.Exception.Message)"
-            }
-        } else {
-            Write-Log "Geen actief ingelogde gebruiker gevonden - melding overgeslagen (bv. tijdens Autopilot ESP)."
-        }
+        Show-UserRestartNotification -Message $restartMessage
     }
 
     # Platform scripts kennen geen 3010/soft-reboot-semantiek - altijd exit 0 bij geslaagde
