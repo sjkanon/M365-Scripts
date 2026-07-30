@@ -503,7 +503,7 @@ try {
     elseif ($existingApp) {
         # ── Content-update op de bestaande app; toewijzing blijft ongewijzigd ──
         # Getriggerd door een nieuwere MSIX-versie EN/OF een wijziging in de Install-/Uninstall-/
-        # Detect-ClaudeDesktop-Intune.ps1 scripts zelf (bv. de restart-melding bij VMP-install).
+        # Detect-ClaudeDesktop-Intune.ps1 scripts zelf.
         $existingVersionLabel = if ($existingVersion) { $existingVersion } else { 'onbekend' }
         $reasonParts = [System.Collections.Generic.List[string]]::new()
         if (-not $versionUnchanged) { $reasonParts.Add("MSIX-versie $existingVersionLabel -> $newVersion") }
@@ -516,7 +516,7 @@ try {
         }
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
         Set-IntuneWin32App -ID $existingApp.id -AppVersion $newVersion -Notes $notes -DetectionRule $detectionRule -RequirementRule $requirementRule `
-            -RestartBehavior 'basedOnExitCode' -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
+            -RestartBehavior 'suppress' -CompanyPortalFeaturedApp $true @iconParams -ErrorAction Stop | Out-Null
         Write-Info "[OK]   App bijgewerkt naar versie $newVersion (incl. ververste requirement rule)." -ForegroundColor Green
     }
     else {
