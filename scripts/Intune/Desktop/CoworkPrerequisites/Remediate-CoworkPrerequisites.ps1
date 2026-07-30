@@ -1,50 +1,44 @@
 <#
 .SYNOPSIS
-    Intune Win32-app install script voor de Windows-vereisten van Claude Cowork
-    (VirtualMachinePlatform + Fast Startup), los van de Claude Desktop-app zelf.
+    Intune Proactive Remediation — remediatiehelft — Cowork Windows-vereisten.
 
 .DESCRIPTION
-    Losgetrokken van Install-ClaudeDesktop-Intune.ps1: dit stuk heeft niets met Claude Desktop
-    zelf te maken (dat werkt prima zonder dit), maar is puur de Windows-kant die Cowork nodig
-    heeft. Door dit als eigen Win32-app te draaien, zonder Intune-dependency naar de Claude
-    Desktop-app, kan Claude Desktop altijd geïnstalleerd worden ongeacht of Cowork-prereqs
-    slagen — en zie je in Intune apart of het de Windows-kant of de Claude-kant is die faalt,
-    in plaats van één opaak install command dat alles combineert.
+    Schakelt VirtualMachinePlatform in en Fast Startup (Hiberboot) uit — de twee Windows-kant-
+    vereisten voor Claude Cowork. Wordt door Intune alleen aangeroepen als
+    Detect-CoworkPrerequisites.ps1 "niet compliant" rapporteerde.
 
     Voert uit:
       1. Enable-WindowsOptionalFeature -FeatureName VirtualMachinePlatform (indien nodig), met
-         retry tegen voorbijgaande DISM-storingen. Stond de feature al aan, dan gebeurt er
-         verder niets bijzonders.
+         retry tegen voorbijgaande DISM-storingen. Stond de feature al aan, dan gebeurt er verder
+         niets bijzonders.
       2. Fast Startup (HiberbootEnabled) uitschakelen — expliciet genoemd in Anthropic's eigen
          Cowork-documentatie: "Restart the machine using Restart, not shut down and power on.
          With Windows Fast Startup enabled, a shutdown cycle can leave the virtualization
          services uninitialized." Bij elke run gezet, niet alleen als VMP in déze run net is
          ingeschakeld.
       3. Als VMP in déze run net is ingeschakeld: een Engelstalige melding (msg.exe) naar de
-         actief ingelogde gebruiker (herkend via de niet-vertaalde SESSIONNAME "console", niet
-         de per OS-taal wisselende STATE-tekst "Active"), én exitcode 3010 ("soft reboot
-         required") zodat Intune's eigen herstart-UX (RestartBehavior 'basedOnReturnCode' in
-         Deploy-CoworkPrerequisitesIntune.ps1) de herstart afdwingt/plant — dit script herstart
-         het apparaat NIET zelf.
+         actief ingelogde gebruiker (herkend via de niet-vertaalde SESSIONNAME "console", niet de
+         per OS-taal wisselende STATE-tekst "Active"). De gebruiker moet zelf herstarten — dit
+         script herstart het apparaat NIET zelf (Proactive Remediations hebben, anders dan
+         Win32-apps, geen return-code-gebaseerd herstart-mechanisme om op terug te vallen, dus
+         forceren zou hier alleen via een expliciete Restart-Computer-aanroep kunnen, en dat is
+         bewust niet de bedoeling — zie readme.md).
 
-    Gebruik als Intune "Install command":
-        %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Install-CoworkPrerequisites-Intune.ps1
-
-    Gebruik het meegeleverde Detect-CoworkPrerequisites-Intune.ps1 als "Custom detection script".
+    Omdat Proactive Remediations standaard dagelijks opnieuw draaien: zolang de gebruiker niet
+    herstart, blijft Detect-CoworkPrerequisites.ps1 "niet compliant" melden, en stuurt deze
+    remediation de volgende cyclus gewoon opnieuw een herinnering — geen eenmalige melding die
+    kan worden gemist, maar een terugkerende totdat het apparaat daadwerkelijk herstart is.
 
 .NOTES
-    Logt naar %ProgramData%\CoworkPrereqDeploy\install.log voor troubleshooting via Intune
+    Logt naar %ProgramData%\CoworkPrereqDeploy\remediate.log voor troubleshooting via Intune
     diagnostics / IME-logs.
 #>
-
-[CmdletBinding()]
-param()
 
 $ErrorActionPreference = "Stop"
 
 $logDir = Join-Path $env:ProgramData "CoworkPrereqDeploy"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-$logFile = Join-Path $logDir "install.log"
+$logFile = Join-Path $logDir "remediate.log"
 
 function Write-Log {
     param([string]$Message)
@@ -54,8 +48,8 @@ function Write-Log {
 }
 
 function Invoke-WithRetry {
-    # Vangt voorbijgaande DISM-storingen op (bv. "busy" doordat Autopilot ESP meerdere
-    # Win32-apps/features tegelijk aan het verwerken is).
+    # Vangt voorbijgaande DISM-storingen op (bv. "busy" doordat er tegelijk andere Win32-apps/
+    # remediations verwerkt worden).
     param([scriptblock]$Action, [int]$MaxAttempts = 3, [int]$DelaySeconds = 10)
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
@@ -85,7 +79,7 @@ function Get-ActiveConsoleSessionId {
 }
 
 try {
-    Write-Log "=== Start Cowork Prerequisites install ==="
+    Write-Log "=== Start Cowork Prerequisites remediation ==="
 
     # 1. Virtual Machine Platform
     $vmpJustEnabled = $false
@@ -94,9 +88,9 @@ try {
         Write-Log "VirtualMachinePlatform niet ingeschakeld, wordt nu ingeschakeld..."
         Invoke-WithRetry -Action { Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All -NoRestart -ErrorAction Stop | Out-Null }
         $vmpJustEnabled = $true
-        Write-Log "VirtualMachinePlatform ingeschakeld (herstart vereist — zie exitcode 3010 aan het einde van dit script)."
+        Write-Log "VirtualMachinePlatform ingeschakeld — herstart vereist voordat de HCS-services actief worden."
     } else {
-        Write-Log "VirtualMachinePlatform was al ingeschakeld, geen herstart nodig."
+        Write-Log "VirtualMachinePlatform was al ingeschakeld."
     }
 
     # 2. Fast Startup (Hiberboot) uitschakelen — zie .DESCRIPTION.
@@ -104,26 +98,24 @@ try {
     New-ItemProperty -Path $powerPath -Name "HiberbootEnabled" -PropertyType DWord -Value 0 -Force | Out-Null
     Write-Log "Fast Startup (HiberbootEnabled) uitgeschakeld, zodat een shutdown/power-on-cyclus de Cowork-virtualisatieservices niet ongeïnitialiseerd achterlaat."
 
-    Write-Log "=== Install script succesvol afgerond ==="
-
-    # 3. Alleen relevant als VirtualMachinePlatform in déze run net is ingeschakeld.
+    # 3. Melding bij een net ingeschakelde VMP — de gebruiker moet zelf herstarten, dit script
+    #    doet dat NIET automatisch (zie .DESCRIPTION).
     if ($vmpJustEnabled) {
         $restartMessage = "A required Windows feature (Virtual Machine Platform) was just enabled to support Claude Cowork. Please restart this computer as soon as possible to finish enabling it."
         $sessionId = Get-ActiveConsoleSessionId
         if ($sessionId) {
-            Write-Log "Melding sturen naar ingelogde gebruiker (sessie $sessionId); Intune plant daarnaast zelf de herstart af via exitcode 3010."
+            Write-Log "Melding sturen naar ingelogde gebruiker (sessie $sessionId) om zelf te herstarten."
             try {
                 & msg.exe $sessionId /TIME:0 $restartMessage
             } catch {
                 Write-Log "Waarschuwing: kon geen melding naar ingelogde gebruiker sturen: $($_.Exception.Message)"
             }
         } else {
-            Write-Log "Geen actief ingelogde gebruiker gevonden — melding overgeslagen, Intune plant de herstart af via exitcode 3010 (bv. tijdens Autopilot ESP, waar nog niemand is ingelogd)."
+            Write-Log "Geen actief ingelogde gebruiker gevonden — melding overgeslagen. Detectie blijft 'niet compliant' tot een herstart, dus de melding volgt bij de eerstvolgende dagelijkse remediation-cyclus alsnog."
         }
-        Write-Log "Exit 3010 (herstart vereist)."
-        exit 3010
     }
 
+    Write-Log "=== Remediation succesvol afgerond ==="
     exit 0
 }
 catch {
