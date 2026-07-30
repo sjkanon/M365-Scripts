@@ -9,7 +9,9 @@ Cowork is optional: Claude Desktop works fine without it. Bundling the Windows-f
 - A Cowork-prerequisites failure never blocks Claude Desktop itself.
 - Each app has its own, separately visible install status in Intune — you can tell at a glance whether a device's problem is "Windows feature" or "Claude Desktop", instead of one opaque combined install command.
 
-There is deliberately **no Intune "Dependency"** configured between the two apps. A hard dependency would mean Claude Desktop doesn't even attempt to install until this app succeeds — which reintroduces the exact problem above. Assign both **Required** to the same group, independently.
+There is deliberately **no Intune "Dependency"** configured between the two apps by default. A hard dependency would mean Claude Desktop doesn't even attempt to install until this app succeeds — which reintroduces the exact problem above. Assign both **Required** to the same group, independently.
+
+If your environment treats Cowork as a hard requirement rather than optional, deploy this app first, then run `Deploy-ClaudeDesktopIntune.ps1 -RequireCoworkPrerequisites` — see [`../ClaudeDesktop/readme.md`](../ClaudeDesktop/readme.md#optional-requiring-cowork-prerequisites) for what that adds and the tradeoff involved.
 
 ## Contents
 
