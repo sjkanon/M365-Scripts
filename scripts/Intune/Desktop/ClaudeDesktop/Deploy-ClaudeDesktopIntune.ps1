@@ -46,10 +46,10 @@
     Administrator in combinatie met een rol die AppRoleAssignment.ReadWrite.All-consent mag geven
     (zelfde vereiste als bij de tijdelijke App Registration in Remove-SharePointFileVersionsByDate.ps1).
 
-    Cowork's Windows-vereisten (VirtualMachinePlatform, Fast Startup) zijn een aparte, onafhankelijke
-    Win32-app (zie ../CoworkPrerequisites/), zonder Intune-dependency naar deze app — een probleem
-    aan de Cowork-kant mag Claude Desktop zelf niet blokkeren. Voor omgevingen waar dat wél gewenst
-    is: zie .PARAMETER RequireCoworkPrerequisites.
+    Cowork's Windows-vereisten (VirtualMachinePlatform, Fast Startup) lopen volledig los via een
+    Intune Proactive Remediation (zie ../CoworkPrerequisites/) — geen Win32-app, geen Intune-
+    dependency naar deze app. Een probleem aan de Cowork-kant mag Claude Desktop zelf niet
+    blokkeren, dus dit script raakt die remediation op geen enkele manier aan.
 
 .PARAMETER AssignmentGroupName
     Displaynaam van een bestaande Entra ID-groep. Alleen gebruikt bij de allereerste aanmaak van
