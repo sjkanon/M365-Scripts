@@ -10,23 +10,17 @@
     Gebruik als Intune "Uninstall command":
         %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Uninstall-ClaudeDesktop-Intune.ps1
 
-    Het VirtualMachinePlatform-feature wordt standaard NIET uitgeschakeld, omdat andere
-    applicaties (WSL, Hyper-V based tools, andere Cowork-achtige apps) hier ook van
-    afhankelijk kunnen zijn. Gebruik -DisableVirtualMachinePlatform als je zeker weet
-    dat dit device het feature nergens anders voor nodig heeft.
-
-.PARAMETER DisableVirtualMachinePlatform
-    Schakelt ook het Windows-feature VirtualMachinePlatform uit. Standaard uitgeschakeld
-    gelaten (aanbevolen), tenzij je zeker weet dat niets anders op dit apparaat dit nodig heeft.
+    Raakt de Windows-kant van Cowork (VirtualMachinePlatform, Fast Startup) niet aan — dat is een
+    eigen, onafhankelijke Win32-app met zijn eigen uninstall
+    (../CoworkPrerequisites/Uninstall-CoworkPrerequisites-Intune.ps1), losstaand van of Claude
+    Desktop hier wordt verwijderd of niet.
 
 .NOTES
     Logt naar %ProgramData%\ClaudeDeploy\uninstall.log
 #>
 
 [CmdletBinding()]
-param(
-    [switch]$DisableVirtualMachinePlatform
-)
+param()
 
 $ErrorActionPreference = "Stop"
 
@@ -79,15 +73,6 @@ try {
     if (Test-Path $policyPath) {
         Remove-ItemProperty -Path $policyPath -Name "disableAutoUpdates" -ErrorAction SilentlyContinue
         Write-Log "disableAutoUpdates policy-waarde verwijderd."
-    }
-
-    # 4. Optioneel: Virtual Machine Platform uitschakelen
-    if ($DisableVirtualMachinePlatform) {
-        Write-Log "Uitschakelen VirtualMachinePlatform (op verzoek via -DisableVirtualMachinePlatform)..."
-        Disable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
-        Write-Log "VirtualMachinePlatform uitgeschakeld (herstart kan nodig zijn)."
-    } else {
-        Write-Log "VirtualMachinePlatform blijft ingeschakeld (standaardgedrag, gebruik -DisableVirtualMachinePlatform om ook uit te schakelen)."
     }
 
     Write-Log "=== Uninstall script succesvol afgerond ==="
