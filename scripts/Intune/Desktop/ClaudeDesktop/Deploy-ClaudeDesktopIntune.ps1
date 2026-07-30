@@ -697,3 +697,4 @@ finally {
 Write-Host "`n  ================================================" -ForegroundColor Cyan
 Write-Host "   Klaar — Claude Desktop $newVersion" -ForegroundColor Cyan
 Write-Host "  ================================================`n" -ForegroundColor Cyan
+exit 0

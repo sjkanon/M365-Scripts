@@ -387,7 +387,7 @@ try {
         }
         Update-IntuneWin32AppPackageFile -ID $existingApp.id -FilePath $intuneWinFile -ErrorAction Stop | Out-Null
         Set-IntuneWin32App -ID $existingApp.id -Notes $notes -DetectionRule $detectionRule `
-            -RestartBehavior 'basedOnExitCode' -CompanyPortalFeaturedApp $true -ErrorAction Stop | Out-Null
+            -RestartBehavior 'basedOnReturnCode' -CompanyPortalFeaturedApp $true -ErrorAction Stop | Out-Null
         Set-Win32AppArchitectureRequirement -AppId $existingApp.id -RequirementRule $requirementRule
         Write-Info "[OK]   App bijgewerkt (incl. ververste requirement rule)." -ForegroundColor Green
     }
@@ -412,7 +412,7 @@ try {
             -InstallCommandLine     $installCommandLine `
             -UninstallCommandLine   $uninstallCommandLine `
             -InstallExperience      'system' `
-            -RestartBehavior        'basedOnExitCode' `
+            -RestartBehavior        'basedOnReturnCode' `
             -DetectionRule          $detectionRule `
             -RequirementRule        $requirementRule `
             -CompanyPortalFeaturedApp $true `
@@ -439,3 +439,4 @@ finally {
 Write-Host "`n  ================================================" -ForegroundColor Cyan
 Write-Host "   Klaar — Cowork Windows Prerequisites" -ForegroundColor Cyan
 Write-Host "  ================================================`n" -ForegroundColor Cyan
+exit 0

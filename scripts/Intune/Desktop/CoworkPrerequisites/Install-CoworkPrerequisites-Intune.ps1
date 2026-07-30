@@ -23,7 +23,7 @@
       3. Als VMP in déze run net is ingeschakeld: een Engelstalige melding (msg.exe) naar de
          actief ingelogde gebruiker (herkend via de niet-vertaalde SESSIONNAME "console", niet
          de per OS-taal wisselende STATE-tekst "Active"), én exitcode 3010 ("soft reboot
-         required") zodat Intune's eigen herstart-UX (RestartBehavior 'basedOnExitCode' in
+         required") zodat Intune's eigen herstart-UX (RestartBehavior 'basedOnReturnCode' in
          Deploy-CoworkPrerequisitesIntune.ps1) de herstart afdwingt/plant — dit script herstart
          het apparaat NIET zelf.
 
