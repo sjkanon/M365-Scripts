@@ -316,8 +316,10 @@ function Invoke-Trace {
 
                 $batch = @(Get-MessageTraceV2 @p -ErrorAction Stop)
                 foreach ($row in $batch) { $collected.Add($row) }
-                Write-Host ("  Retrieved {0,6} row(s)  [{1} → {2}]" -f $collected.Count,
-                    $chunkFrom.ToString('yyyy-MM-dd'), $chunkTo.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
+                if (-not $Quiet) {
+                    Write-Host ("  Retrieved {0,6} row(s)  [{1} → {2}]" -f $collected.Count,
+                        $chunkFrom.ToString('yyyy-MM-dd'), $chunkTo.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
+                }
 
                 if ($batch.Count -lt $pageSize) { break }
                 $last            = $batch[-1]
