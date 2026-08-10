@@ -241,6 +241,22 @@ $ExchangeSubmenu = @(
         if ($whatIf -notmatch '^[Nn]') { $p['WhatIf'] = $true }
         & $path @p
     }}
+    @{ Key='G'; Label='Get-MessageTraceReport   — who received what, when, and where it was forwarded'; Action={
+        $mbx  = Read-Host "  Mailbox UPN (traces sent + received, leave blank to filter manually)"
+        $days = Read-Host "  Days back [2]"
+        $p = @{}
+        if ($mbx)  { $p['Mailbox'] = $mbx }
+        else {
+            $snd = Read-Host "  Sender address (optional)"
+            $rcp = Read-Host "  Recipient address (optional)"
+            if ($snd) { $p['Sender']    = $snd }
+            if ($rcp) { $p['Recipient'] = $rcp }
+        }
+        if ($days) { $p['Days'] = [int]$days }
+        $det = Read-Host "  Include per-hop delivery details (slower, shows redirects)? [y/N]"
+        if ($det -match '^[Yy]') { $p['IncludeDetails'] = $true }
+        & "$ROOT\scripts\Exchange\Get-MessageTraceReport.ps1" @p
+    }}
 )
 
 $EntraSubmenu = @(
