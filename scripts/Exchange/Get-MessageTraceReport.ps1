@@ -201,6 +201,85 @@ function Get-EmailsFromText([string] $text) {
     ([regex]::Matches($text, "[\w\.\-\+']+@[\w\.\-]+\.\w{2,}") | ForEach-Object { $_.Value.ToLowerInvariant() }) | Sort-Object -Unique
 }
 
+# ── Forwarding configuration ──────────────────────────────────────────────────
+# Shared by the pre-trace seed lookup (which turns discovered forward targets
+# into extra trace filters) and the post-trace sweep over every address seen.
+$forwardConfig    = [System.Collections.Generic.List[PSObject]]::new()
+$checkedMailboxes = [System.Collections.Generic.HashSet[string]]::new()
+$acceptedDomains  = if ($SkipForwardingConfig) { @() } else { @((Get-AcceptedDomain).DomainName) }
+
+function Test-InternalAddress([string] $addr) {
+    if (-not $addr) { return $false }
+    $acceptedDomains -contains ($addr.ToLowerInvariant() -split '@')[-1]
+}
+
+function Read-ForwardingConfig {
+    <#
+        Records the mailbox forwarding setting and any forwarding inbox rules for
+        one address, and returns the target addresses it found. Each address is
+        inspected once; repeat calls return an empty list.
+    #>
+    param([string] $Address)
+
+    if ($SkipForwardingConfig -or -not $Address) { return @() }
+    $addr = $Address.ToLowerInvariant()
+    if (-not (Test-InternalAddress $addr)) { return @() }
+    if (-not $checkedMailboxes.Add($addr)) { return @() }
+
+    try {
+        $mbx = Get-EXOMailbox -Identity $addr -Properties ForwardingSMTPAddress, ForwardingAddress, DeliverToMailboxAndForward -ErrorAction Stop
+    } catch {
+        return @()   # not a mailbox (distribution group, contact, guest, …)
+    }
+
+    $targets = [System.Collections.Generic.List[string]]::new()
+
+    if ($mbx.ForwardingSMTPAddress -or $mbx.ForwardingAddress) {
+        $to = @(
+            @($mbx.ForwardingSMTPAddress, $mbx.ForwardingAddress) |
+                Where-Object { $_ } |
+                ForEach-Object { Get-EmailsFromText ($_ -split 'smtp:')[-1] }
+        ) | Sort-Object -Unique
+
+        foreach ($t in $to) { if ($targets -notcontains $t) { $targets.Add($t) } }
+
+        $forwardConfig.Add([PSCustomObject]@{
+            Mailbox                    = $mbx.PrimarySmtpAddress
+            Source                     = 'Mailbox setting'
+            RuleName                   = ''
+            ForwardTo                  = ($to -join '; ')
+            DeliverToMailboxAndForward = $mbx.DeliverToMailboxAndForward
+            Enabled                    = $true
+        })
+    }
+
+    try {
+        $rules = @(Get-InboxRule -Mailbox $addr -ErrorAction Stop)
+    } catch {
+        Write-Verbose "Could not read inbox rules for $addr : $($_.Exception.Message)"
+        return $targets
+    }
+
+    foreach ($rule in $rules) {
+        $raw = @(@($rule.ForwardTo) + @($rule.RedirectTo) + @($rule.ForwardAsAttachmentTo)) | Where-Object { $_ }
+        if (-not $raw) { continue }
+
+        $to = @($raw | ForEach-Object { Get-EmailsFromText $_ }) | Sort-Object -Unique
+        foreach ($t in $to) { if ($targets -notcontains $t) { $targets.Add($t) } }
+
+        $forwardConfig.Add([PSCustomObject]@{
+            Mailbox                    = $mbx.PrimarySmtpAddress
+            Source                     = 'Inbox rule'
+            RuleName                   = $rule.Name
+            ForwardTo                  = ($to -join '; ')
+            DeliverToMailboxAndForward = $null
+            Enabled                    = $rule.Enabled
+        })
+    }
+
+    $targets
+}
+
 # ── Trace retrieval ───────────────────────────────────────────────────────────
 function Invoke-Trace {
     param(
@@ -277,6 +356,25 @@ if ($Mailbox) {
     if ($Recipient) { $base['RecipientAddress'] = $Recipient }
     $filters.Add($base)
 }
+
+# A mailbox forward or a redirect rule keeps the ORIGINAL sender on the
+# forwarded copy, so the delivery to the forward target mentions neither the
+# traced mailbox as sender nor as recipient — filtering on the mailbox alone
+# would never return it. Resolve the configured forward targets first and trace
+# those addresses as recipients too, so the actual hand-off shows up with its
+# own exact timestamp.
+$seedTargets = [System.Collections.Generic.List[string]]::new()
+foreach ($seed in @($Mailbox, $Recipient, $Sender | Where-Object { $_ })) {
+    foreach ($t in (Read-ForwardingConfig -Address $seed)) {
+        if ($seedTargets -notcontains $t) { $seedTargets.Add($t) }
+    }
+}
+foreach ($t in $seedTargets) {
+    Write-Host "  Configured forward found → also tracing deliveries to $t" -ForegroundColor Yellow
+    $filters.Add(@{ RecipientAddress = $t })
+}
+if ($seedTargets.Count -gt 0) { Write-Host "" }
+
 foreach ($f in $filters) {
     if ($MessageId) { $f['MessageId'] = $MessageId }
     if ($Status)    { $f['Status']    = $Status }
