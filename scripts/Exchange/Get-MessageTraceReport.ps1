@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Trace exactly where mail went: date/time, sender, recipient, status and the
@@ -69,6 +69,15 @@
     Maximum number of messages to pull hop details for. Default 50. If more
     messages match, the truncation is reported explicitly.
 
+.PARAMETER ResolveSiblings
+    Re-trace every matched MessageId without any sender/recipient filter, to
+    reveal every address the message was delivered to. Catches forward targets
+    that are no longer configured — a rule deleted after it did its work still
+    leaves its deliveries in the trace. Costs one extra call per MessageId.
+
+.PARAMETER MaxSiblingLookups
+    Maximum number of MessageIds to re-trace for -ResolveSiblings. Default 100.
+
 .PARAMETER SkipForwardingConfig
     Do not inspect mailbox forwarding settings and inbox rules.
 
@@ -121,6 +130,8 @@ param(
     [string]   $Status,
     [switch]   $IncludeDetails,
     [int]      $MaxDetailLookups = 50,
+    [switch]   $ResolveSiblings,
+    [int]      $MaxSiblingLookups = 100,
     [switch]   $SkipForwardingConfig,
     [string]   $OutputPath,
     [string]   $TenantId
@@ -337,7 +348,9 @@ function Invoke-Trace {
 
                 $batch = @(Get-MessageTrace @p -ErrorAction Stop)
                 foreach ($row in $batch) { $collected.Add($row) }
-                Write-Host ("  Retrieved {0,6} row(s)  [page {1}]" -f $collected.Count, $page) -ForegroundColor DarkGray
+                if (-not $Quiet) {
+                    Write-Host ("  Retrieved {0,6} row(s)  [page {1}]" -f $collected.Count, $page) -ForegroundColor DarkGray
+                }
                 $page++
             } while ($batch.Count -eq $pageSize -and $page -le 1000)
         }
@@ -598,12 +611,10 @@ foreach ($r in $rows) {
     })
 }
 
-# ── Configured forwarding for the internal mailboxes involved ────────────────
-$forwardConfig = [System.Collections.Generic.List[PSObject]]::new()
-
+# ── Configured forwarding for the remaining mailboxes involved ───────────────
+# The seed addresses were already inspected before the trace; Read-ForwardingConfig
+# skips anything it has seen, so this only covers newly discovered addresses.
 if (-not $SkipForwardingConfig) {
-    $acceptedDomains = @((Get-AcceptedDomain).DomainName)
-
     # @() around each side — with a single result these are scalars and a bare
     # + would concatenate the two strings instead of building a list.
     $addresses = @(
@@ -611,53 +622,12 @@ if (-not $SkipForwardingConfig) {
             Where-Object { $_ } |
             ForEach-Object { $_.ToString().ToLowerInvariant() } |
             Sort-Object -Unique |
-            Where-Object { $acceptedDomains -contains ($_ -split '@')[-1] }
+            Where-Object { (Test-InternalAddress $_) -and -not $checkedMailboxes.Contains($_) }
     )
 
     if ($addresses.Count -gt 0) {
         Write-Host "  Checking forwarding configuration for $($addresses.Count) internal address(es)..." -ForegroundColor DarkGray
-
-        foreach ($addr in $addresses) {
-            try {
-                $mbx = Get-EXOMailbox -Identity $addr -Properties ForwardingSMTPAddress, ForwardingAddress, DeliverToMailboxAndForward -ErrorAction Stop
-            } catch {
-                continue   # not a mailbox (distribution group, external contact, guest, …)
-            }
-
-            if ($mbx.ForwardingSMTPAddress -or $mbx.ForwardingAddress) {
-                $forwardConfig.Add([PSCustomObject]@{
-                    Mailbox                    = $mbx.PrimarySmtpAddress
-                    Source                     = 'Mailbox setting'
-                    RuleName                   = ''
-                    ForwardTo                  = (@($mbx.ForwardingSMTPAddress, $mbx.ForwardingAddress) |
-                                                    Where-Object { $_ } |
-                                                    ForEach-Object { ($_ -split 'smtp:')[-1].Trim() }) -join '; '
-                    DeliverToMailboxAndForward = $mbx.DeliverToMailboxAndForward
-                    Enabled                    = $true
-                })
-            }
-
-            try {
-                $rules = @(Get-InboxRule -Mailbox $addr -ErrorAction Stop)
-            } catch {
-                Write-Verbose "Could not read inbox rules for $addr : $($_.Exception.Message)"
-                continue
-            }
-
-            foreach ($rule in $rules) {
-                $targets = @(@($rule.ForwardTo) + @($rule.RedirectTo) + @($rule.ForwardAsAttachmentTo)) | Where-Object { $_ }
-                if (-not $targets) { continue }
-
-                $forwardConfig.Add([PSCustomObject]@{
-                    Mailbox                    = $mbx.PrimarySmtpAddress
-                    Source                     = 'Inbox rule'
-                    RuleName                   = $rule.Name
-                    ForwardTo                  = (@($targets | ForEach-Object { Get-EmailsFromText $_ }) | Sort-Object -Unique) -join '; '
-                    DeliverToMailboxAndForward = $null
-                    Enabled                    = $rule.Enabled
-                })
-            }
-        }
+        foreach ($addr in $addresses) { $null = Read-ForwardingConfig -Address $addr }
         Write-Host ""
     }
 }
