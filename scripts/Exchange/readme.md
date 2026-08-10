@@ -18,6 +18,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
 | [`Get-ExternalForwards.ps1`](#get-externalforwardsps1) | Audit mailboxes with external forwarding |
 | [`Get-MailboxSizes.ps1`](#get-mailboxsizesps1) | Report mailbox sizes and item counts |
+| [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Trace who received what, at what exact time, and where it was forwarded to |
 
 ---
 
@@ -435,4 +436,69 @@ Reports mailbox sizes (MB/GB), item counts, and quota status. Sorted by size des
 
 # Single mailbox
 .\Get-MailboxSizes.ps1 -Mailbox "user@contoso.com"
+```
+
+---
+
+### Get-MessageTraceReport.ps1
+
+Answers "who received this, when exactly, and where did it go next?". Runs a message trace and reports per message the exact timestamp in **both local time and UTC** (Exchange stores message trace timestamps in UTC), sender, recipient, subject, status, size, originating/delivering IP, `MessageId` and `MessageTraceId`.
+
+**Forward detection** — the `ForwardedTo` column is filled from three independent signals, and `ForwardDetection` names which one fired:
+
+| Method | Detects |
+|--------|---------|
+| `SameMessageId` | Other recipients that received the same `MessageId` — SMTP forwarding, redirect rules, distribution group expansion |
+| `RedirectHop` | Redirect / transport-rule hops pulled from `Get-MessageTraceDetailV2` (requires `-IncludeDetails`) |
+| `ClientForward(subject match)` | A later message sent **by** the recipient carrying the same normalized subject — an Outlook "Forward", which gets a brand new `MessageId`. Heuristic; replies back to the original sender are excluded |
+
+On top of that, the script reports the **configured** forwarding of every internal mailbox that appears in the trace — `ForwardingSMTPAddress` / `ForwardingAddress` plus any inbox rule with `ForwardTo` / `RedirectTo` / `ForwardAsAttachmentTo` — so a forward that has not fired inside the traced window is still visible.
+
+Uses `Get-MessageTraceV2` when available and falls back to the retired `Get-MessageTrace`. Ranges longer than the V2 limit are split into 10-day chunks automatically, and every chunk is paginated until exhausted.
+
+**Parameters**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `-Mailbox` | No | — | Trace both directions for this address (sent **and** received) and pull its forwarding config |
+| `-Sender` | No | — | Filter on sender address |
+| `-Recipient` | No | — | Filter on recipient address |
+| `-Subject` | No | — | Client-side subject filter, wildcards allowed (message trace cannot filter on subject server-side) |
+| `-MessageId` | No | — | Internet MessageId to trace, with or without angle brackets |
+| `-Days` | No | `2` | Days back from `-EndDate`. Ignored if `-StartDate` is given |
+| `-StartDate` | No | — | Explicit window start (local time) |
+| `-EndDate` | No | now | Explicit window end (local time) |
+| `-Status` | No | — | `Delivered`, `Failed`, `Pending`, `Expanded`, `Quarantined`, `FilteredAsSpam`, `GettingStatus`, `None` |
+| `-IncludeDetails` | No | off | Retrieve per-hop delivery detail — this is what exposes redirect / transport-rule targets. Slow and throttled |
+| `-MaxDetailLookups` | No | `50` | Cap on hop-detail lookups; truncation is reported explicitly |
+| `-SkipForwardingConfig` | No | off | Skip the mailbox forwarding / inbox rule inspection |
+| `-OutputPath` | No | `C:\Temp\` / `~/Downloads` | Main CSV path. Detail and forwarding reports are written alongside it with `_Details` / `_ForwardingConfig` suffixes |
+| `-TenantId` | No | — | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Everything one mailbox sent and received in the last 2 days, incl. forwards
+.\Get-MessageTraceReport.ps1 -Mailbox "user@contoso.com"
+
+# One specific flow over the last 30 days, with per-hop detail
+.\Get-MessageTraceReport.ps1 -Sender "boss@contoso.com" -Recipient "user@contoso.com" -Days 30 -IncludeDetails
+
+# Where did this specific message end up?
+.\Get-MessageTraceReport.ps1 -MessageId "<abc123@contoso.com>" -Days 10 -IncludeDetails
+
+# All failed mail from one sender in an explicit window
+.\Get-MessageTraceReport.ps1 -Sender "noreply@contoso.com" -Status Failed `
+    -StartDate (Get-Date "2026-08-01") -EndDate (Get-Date "2026-08-08")
+```
+
+**Notes**
+- Message trace retains **90 days**; the script warns when the requested window reaches past that
+- Reading inbox rules requires permissions on the mailbox — mailboxes that cannot be read are skipped silently (use `-Verbose` to see which)
+- `-IncludeDetails` issues one API call per message and is subject to Exchange Online throttling; raise `-MaxDetailLookups` deliberately
+
+**Required module**
+
+```powershell
+Install-Module ExchangeOnlineManagement -Scope CurrentUser
 ```
