@@ -154,6 +154,7 @@ $modules = @(
     @{ Name = 'Microsoft.Graph.Users';          MinimumVersion = '2.0.0'; WindowsOnly = $false }
     @{ Name = 'WindowsAutopilotIntune';         MinimumVersion = $null;   WindowsOnly = $true  }
     @{ Name = 'AzureAD';                        MinimumVersion = $null;   WindowsOnly = $true  }
+    @{ Name = 'IntuneWin32App';                 MinimumVersion = $null;   WindowsOnly = $true  }
 )
 #endregion
 

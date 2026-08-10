@@ -19,6 +19,7 @@
   - [Infrastructure & Devices](#️-infrastructure--devices)
   - [Custom Tools](#-custom-tools)
   - [Azure Infrastructure](#️-azure-infrastructure)
+  - [Legacy Toolkit Rewrites](#️-legacy-toolkit-rewrites)
 - [Repository Structure](#repository-structure)
 - [Contributing](#contributing)
 - [Version History](#version-history)
@@ -402,6 +403,22 @@ Scripts for managing DNS records in Active Directory-integrated DNS zones.
 Scripts that target Azure IaaS directly via the `Az` module — not the M365 tenant, and not wired into `menu.ps1`.
 
 - **Azure-NVMe-Conversion.ps1** — vendored third-party script (Microsoft, MIT licensed, from `Azure/SAP-on-Azure-Scripts-and-Utilities`) that converts a VM's disk controller type between SCSI and NVMe, including in-guest driver readiness checks and fixes for both Windows and Linux guests
+- **Search-AADDSUserActivity.ps1** — searches all Azure AD Domain Services audit tables in Log Analytics for a single user in one `union` query, instead of guessing which table an event landed in
+
+---
+
+### 🗄️ Legacy Toolkit Rewrites
+
+A now-retired internal PowerShell repo (and two forked third-party GitHub toolkits it vendored) was reviewed script-by-script and modernized into this repo's house style — Graph/Exchange Online instead of the retired `MSOnline`/`AzureAD` modules, dry-run-by-default with `-Apply` for anything mutating, no hardcoded customer data or secrets. None of these are wired into `menu.ps1` — they're audit/reporting/setup scripts meant to be run directly, following the same pattern as `scripts/RDS/`, `scripts/Azure/`, and `scripts/Network/UniFi/`. Each folder has its own readme with full parameter/usage docs.
+
+| Folder | Source | Covers |
+|--------|--------|--------|
+| [`TenantOnboarding/`](../scripts/TenantOnboarding/readme.md) | Internal tenant-setup toolkit | New-tenant provisioning (break-glass admin, baseline groups/Intune assignment), multi-tenant/GDAP license + break-glass password reporting, Win32/Chocolatey app deployment, device config (kiosk power, Office uninstall, Start menu layout), OneDrive management, dynamic-DG/feature-group user management |
+| [`Office365Toolkit/`](../scripts/Office365Toolkit/readme.md) | Fork of [`directorcia/Office365`](https://github.com/directorcia/Office365) (CIAOPS) | Secure Score reporting, enterprise app consent cleanup, shared mailbox sign-in lockdown, EOP baseline, mailbox hygiene/forwarding-risk audits, Unified Audit Log search, Intune policy inventory |
+| [`PatronToolkit/`](../scripts/PatronToolkit/readme.md) | Fork of [`directorcia/patron`](https://github.com/directorcia/patron) | MFA registration + CA policy export, enterprise app consent + suspicious inbox rule + unified security alert audits, consolidated email security posture + mailbox auditing checks, SPF/DMARC validation, Intune policy assignment + Autopilot device reports, message trace, SharePoint sharing config, Teams config report |
+| [`LegacyUtilities/`](../scripts/LegacyUtilities/readme.md) | Internal toolkit (misc small scripts) | Mailbox folder permissions/delegate access, bulk shared mailbox/contact creation, contact sync, duplicate mail item cleanup, M365 group membership, CA policy backup, Teams/Planner cloning, Azure Files drive mapping, NumLock/lock-workstation device tweaks, Workspace 365 environment provisioning |
+
+Both GitHub forks were reviewed capability-by-capability rather than ported 1:1 — near-duplicate single-purpose report scripts were consolidated into fewer well-parameterized ones, and capabilities already covered elsewhere in this repo were skipped rather than duplicated (see each folder's readme for the full skip list and reasoning). All code is a fresh implementation in this repo's style, not copied from the source projects.
 
 ---
 
@@ -547,18 +564,47 @@ M365-Scripts/
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
     │   └── Test-PowerShellSyntax.ps1
-    └── Custom Scripts/                 ← path-pinned scripts (see note above)
+    ├── Custom Scripts/                 ← path-pinned scripts (see note above)
+    │   ├── readme.md
+    │   └── Intune/
+    │       ├── readme.md
+    │       └── Desktop/
+    │           ├── readme.md
+    │           ├── Deploy-OfficeTheme.ps1        ← installs the full VIAS .thmx Office theme
+    │           ├── 2026 Vias institute colours (2).thmx
+    │           └── Office Themes/
+    │               ├── readme.md
+    │               ├── Deploy-Officecolors.ps1   ← installs just the color scheme
+    │               └── Test VIAS.xml
+    ├── TenantOnboarding/                ← modernized from a retired internal tenant-setup toolkit, not menu-wired
+    │   ├── readme.md
+    │   ├── Provisioning/         (3 scripts)  ← break-glass admin, baseline groups, Intune policy assignment
+    │   ├── MultiTenant/          (3 scripts)  ← GDAP license report, break-glass password rotation, customer portal index
+    │   ├── AppDeployment/        (7 scripts)  ← Win32/Chocolatey install, shortcuts, file associations, printer connections
+    │   ├── DeviceConfig/         (6 scripts)  ← kiosk power, Office uninstall, Start menu layout, Teams firewall rule
+    │   ├── OneDriveManagement/   (3 scripts)  ← sync watchdog, library sync stop, known-folder redirect
+    │   └── UserManagement/       (2 scripts)  ← dynamic DG by filter, feature-group membership
+    ├── Office365Toolkit/                ← rewrite of retired directorcia/Office365 (CIAOPS) fork, not menu-wired
+    │   ├── readme.md
+    │   ├── Security/             (4 scripts)  ← Secure Score, app consent cleanup, shared mailbox lockdown, EOP baseline
+    │   ├── Exchange/             (4 scripts)  ← mailbox hygiene baseline, forwarding risk, add-ins, audit log search
+    │   └── Intune/               (1 script)   ← tenant-wide policy inventory
+    ├── PatronToolkit/                    ← rewrite of retired directorcia/patron fork, not menu-wired
+    │   ├── readme.md
+    │   ├── Entra/                (2 scripts)  ← MFA registration report, CA policy export
+    │   ├── Security/             (5 scripts)  ← app consents, suspicious inbox rules, security alerts, email security posture, mailbox auditing
+    │   ├── Exchange/             (1 script)   ← message trace report
+    │   ├── Intune/               (2 scripts)  ← policy assignments, Autopilot devices
+    │   ├── SharePoint/           (1 script)   ← sharing config audit
+    │   └── Teams/                (1 script)   ← Teams config report
+    └── LegacyUtilities/                  ← misc modernized scripts from the retired internal toolkit, not menu-wired
         ├── readme.md
-        └── Intune/
-            ├── readme.md
-            └── Desktop/
-                ├── readme.md
-                ├── Deploy-OfficeTheme.ps1        ← installs the full VIAS .thmx Office theme
-                ├── 2026 Vias institute colours (2).thmx
-                └── Office Themes/
-                    ├── readme.md
-                    ├── Deploy-Officecolors.ps1   ← installs just the color scheme
-                    └── Test VIAS.xml
+        ├── Exchange/             (7 scripts)  ← folder permissions, delegate access, bulk mailboxes/contacts, contact sync, dedup, message trace
+        ├── Entra/                (2 scripts)  ← group membership, CA policy backup
+        ├── Teams/                (3 scripts)  ← team/plan cloning, project team provisioning
+        ├── Network/              (1 script)   ← Azure Files drive mapping
+        ├── Device/               (2 scripts)  ← NumLock default, lock-workstation shortcut
+        └── Workspace365/         (2 scripts)  ← environment provisioning/removal
 ```
 
 `Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` hardcode their download URL to this exact repo path (`main` branch) — they stay here rather than under `Intune/Desktop/` so the URL keeps resolving.
@@ -587,6 +633,25 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-07-24 (3)
+| Change |
+|--------|
+| Retired a now-unmaintained internal PowerShell repo (`Windows-Powershell`, last commit March 2023) by reviewing every script in it and modernizing whatever still had value into this repo — nothing was copied verbatim; everything was rewritten against Microsoft Graph / Exchange Online (the source repo's `MSOnline`/`AzureAD`-based scripts are fully non-functional since Microsoft retired those endpoints) |
+| Added `scripts/TenantOnboarding/` (24 scripts across Provisioning/MultiTenant/AppDeployment/DeviceConfig/OneDriveManagement/UserManagement) — modernized from the source repo's tenant-setup/onboarding scripts |
+| Added `scripts/Office365Toolkit/` (9 scripts across Security/Exchange/Intune) — modernized from a forked copy of the retired `directorcia/Office365` (CIAOPS) GitHub project found in the source repo; reviewed capability-by-capability and consolidated, not ported 1:1 |
+| Added `scripts/PatronToolkit/` (13 scripts across Entra/Security/Exchange/Intune/SharePoint/Teams) — modernized from a forked copy of the retired `directorcia/patron` GitHub project found in the source repo, same capability-consolidation approach |
+| Added `scripts/LegacyUtilities/` (17 scripts across Exchange/Entra/Teams/Network/Device/Workspace365) — modernized from assorted small tools in the source repo not covered by the above |
+| Data-handling boundary applied throughout: the source repo's `Klanten`, `created-users`, `csv files`, and `Archief` folders (real customer names/tenant domains/generated passwords) were never read or ported; any other script found to hardcode real customer/tenant identifiers or secrets was generalized into parameters instead, or skipped outright — see each new folder's readme for its specific skip list |
+| None of the ~63 new scripts are wired into `menu.ps1` — they're audit/reporting/setup scripts meant to be run directly, matching the existing pattern for `scripts/RDS/`, `scripts/Azure/`, and `scripts/Network/UniFi/` |
+
+### 2026-07-24 (2)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointStorageReport.ps1` silently abandoning version-history lookups on very large libraries: `Invoke-GraphBatchGet`'s retry-pass ceiling was hardcoded at 8, but SharePoint Online's per-app activity throttle allows only ~1500-2500 resolved version lookups per pass before a ~60-90s cool-down repeats — on a 200k-file tenant this meant ~90% of files got marked "gave up" before the scan actually finished |
+| Applied the identical fix to `scripts/Reporting/Remove-SharePointFileVersionsByDate.ps1`'s own copy of the same batch-retry function (`Get-FileVersionsBatch`), which had the same hardcoded 8-pass ceiling |
+| Added `-MaxVersionRetryPasses` parameter to both scripts (default `0` = auto-scales the pass ceiling to the request volume, capped at 500 passes); a clear `Write-Warning` is now emitted listing exactly how many files were abandoned and suggesting the parameter if the ceiling is still hit |
+| Updated `scripts/Reporting/readme.md` to document `-VersionBatchConcurrency` and `-MaxVersionRetryPasses` for both scripts |
 
 ### 2026-07-24 (1)
 | Change |

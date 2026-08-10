@@ -8,6 +8,7 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 
 | Folder | Description |
 |--------|-------------|
+| [`ActiveDirectory/`](ActiveDirectory/readme.md) | On-prem AD DS monitoring (account lockout watcher) — targets a DC/file server directly, not Entra ID |
 | [`Azure/`](Azure/readme.md) | Azure IaaS VM management (disk controller conversion) — targets Azure directly via `Az`, not the M365 tenant |
 | [`Entra/`](Entra/readme.md) | User lifecycle, manager assignment, license reporting, Conditional Access baseline, temporary CA windows, TAP codes, M365 Group audit (Microsoft Graph) |
 | [`Exchange/`](Exchange/readme.md) | Calendar migration/permissions, distribution groups, mailbox/calendar/DKIM/forwarding audits |
@@ -24,3 +25,7 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 | [`Teams/`](Teams/readme.md) | Microsoft Teams / SharePoint export and archiving |
 | [`Startup/`](Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap + syntax checker, dot-sourced by the menu |
 | [`Custom Scripts/`](Custom%20Scripts/readme.md) | Path-pinned scripts — Office theme deployment (hardcodes its download URL to this repo path) |
+| [`TenantOnboarding/`](TenantOnboarding/readme.md) | New-tenant provisioning, multi-tenant/GDAP reporting, app deployment, device config, OneDrive management, user management — modernized from a retired internal tenant-setup toolkit |
+| [`Office365Toolkit/`](Office365Toolkit/readme.md) | Security/Exchange/Intune rewrites of still-useful capabilities from the retired `directorcia/Office365` (CIAOPS) toolkit |
+| [`PatronToolkit/`](PatronToolkit/readme.md) | Entra/Exchange/Intune/Security/SharePoint/Teams rewrites of still-useful capabilities from the retired `directorcia/patron` toolkit |
+| [`LegacyUtilities/`](LegacyUtilities/readme.md) | Misc modernized scripts (Exchange, Entra, Teams, Network, Device, Workspace 365) from assorted small tools in the retired internal toolkit |

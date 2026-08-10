@@ -19,12 +19,18 @@
     Authentication:
       By default the script connects interactively (delegated) with Sites.ReadWrite.All and
       Files.ReadWrite.All — no Entra ID app registration is required. Scanning all sites in the
-      tenant additionally needs app-only auth for the site-listing call only (Microsoft does not
-      support delegated tenant-wide site enumeration); the script creates a short-lived, read-only
-      temporary App Registration for that single lookup and removes it when done. All file reads
-      and version deletions always go through your own delegated permissions, never the temp app.
+      tenant additionally needs app-only auth for site/library enumeration and version-history
+      lookups (Microsoft does not support delegated tenant-wide site enumeration); the script
+      creates a short-lived, read-only temporary App Registration for that and removes it when
+      done. Version deletions always go through your own delegated permissions, never a temp app.
 
-      To skip the temporary app and use your own existing app registration instead, pass
+      For an all-sites run with -VersionBatchConcurrency above 1 (the default), a second temporary
+      App Registration is also created purely to double version-lookup throughput: SharePoint
+      enforces its "activityLimitReached" throttle per app registration, so splitting batch calls
+      across two apps gives each its own throttle budget instead of sharing one. Both temp apps
+      are deleted when the run finishes.
+
+      To skip the temporary app(s) and use your own existing app registration instead, pass
       -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint). That app must already
       have Sites.ReadWrite.All application permission granted.
 
@@ -73,6 +79,25 @@
 .PARAMETER MaxGraphRetry
     Max retries on Graph throttling/timeouts (default: 6).
 
+.PARAMETER VersionBatchConcurrency
+    Number of parallel workers (1-8, default: 4) used to dispatch version-history batch
+    lookups when running in all-sites mode. Values above 1 also trigger creation of a second
+    temporary App Registration (see Authentication above) so the two apps split SharePoint's
+    per-app "activityLimitReached" throttle budget instead of sharing one. Set to 1 to disable
+    both parallel dispatch and the second temp app.
+
+.PARAMETER MaxVersionRetryPasses
+    Maximum retry passes for resolving version lists under sustained Graph/SharePoint
+    throttling before giving up on whatever is still pending. SharePoint Online enforces a
+    hard per-app "activity" ceiling — roughly 1500-2500 resolved lookups per pass before a
+    ~60-90s cool-down window repeats, regardless of client-side pacing. A fixed low pass
+    count would silently abandon the majority of very large libraries before the scan (or
+    deletion pass) is actually done.
+
+    Default (0) auto-scales the pass count to the number of files needing version lookups.
+    Set explicitly only to force a lower ceiling (e.g. for a quick partial run) or a higher
+    one than the auto-scaled value.
+
 .PARAMETER Restart
     Discard any existing checkpoint for this run (same parameters + output folder) and
     start the scan completely from scratch, instead of resuming from the last completed
@@ -101,6 +126,10 @@ param(
     [string[]] $LibraryTitle = @(),
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
+    [ValidateRange(1, 8)]
+    [int] $VersionBatchConcurrency = 4,
+    [ValidateRange(0, 5000)]
+    [int] $MaxVersionRetryPasses = 0,
     [switch] $Restart
 )
 
@@ -115,12 +144,17 @@ $detailCsv = Join-Path $outputDir "SharePoint_VersionCleanup_Detail_$ts.csv"
 $summaryCsv = Join-Path $outputDir "SharePoint_VersionCleanup_Summary_$ts.csv"
 
 # ── Cleanup tracking ──────────────────────────────────────────────────────────
-$script:TempAppObjectId = $null
-$script:ConnectedHere   = $false
-$script:AppOnlyHeaders  = $null   # set only for the tenant-wide site-listing call in auto mode
-$script:TokenBody       = $null
-$script:TokenTenantId   = $null
-$script:TokenExpiry     = $null
+$script:TempAppObjectId  = $null
+$script:TempAppObjectId2 = $null  # second temp app, used only to double version-lookup throughput
+$script:ConnectedHere    = $false
+$script:AppOnlyHeaders   = $null   # set for tenant-wide site/library enumeration + version lookups in auto mode
+$script:TokenBody        = $null
+$script:TokenTenantId    = $null
+$script:TokenExpiry      = $null
+$script:VersionAppOnlyHeaders = $null   # optional second app-only credential, version lookups only
+$script:VersionTokenBody      = $null
+$script:VersionTokenExpiry    = $null
+$script:VersionTokenTenantId  = $null
 $script:CurrentScanLabel = ''
 
 function Write-ProgressHost {
@@ -196,18 +230,41 @@ function Format-SizeAuto {
     }
 }
 
+function Set-GraphRequestTimeoutOptions {
+    # Microsoft.Graph SDK cmdlets (Invoke-MgGraphRequest, New-MgApplication, ...) have no
+    # per-call timeout and, by default, silently retry on 429/503 with their own internal
+    # backoff before ever surfacing an exception to this script. Under SharePoint's
+    # "activityLimitReached" throttle — which commonly returns large Retry-After values — that
+    # produces long stretches of dead silence with no [INFO]/[WAIT] message, indistinguishable
+    # from a real hang. Disabling the SDK's own retry and giving every call a hard client-side
+    # timeout routes every retry decision through this script's own visible retry/backoff logic
+    # instead (Invoke-GraphGet, Invoke-GraphDelete, Get-FileVersionsBatch). Only affects delegated
+    # / SDK-issued calls — the app-only REST path already has an explicit -TimeoutSec.
+    param([int]$TimeoutSec)
+    if (Get-Command Set-MgRequestContext -ErrorAction SilentlyContinue) {
+        try {
+            Set-MgRequestContext -ClientTimeout $TimeoutSec -MaxRetry 0 -ErrorAction Stop
+        } catch {
+            Write-Host "  [WARN] Could not configure Graph SDK request timeout/retry options: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
 function Remove-TempApp {
-    if ($script:TempAppObjectId) {
+    # Delegated session is still open here — Remove-MgApplication works. Cleans up both the
+    # primary app and the optional second app created to double version-lookup throughput.
+    foreach ($objectId in @($script:TempAppObjectId, $script:TempAppObjectId2) | Where-Object { $_ }) {
         Write-ProgressHost -Message "Removing temporary App Registration..." -ForegroundColor DarkGray
         try {
-            Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
+            Remove-MgApplication -ApplicationId $objectId -ErrorAction Stop
             Write-ProgressHost -Message "[OK] Temporary App Registration removed." -ForegroundColor DarkGray
         } catch {
-            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $script:TempAppObjectId) -ForegroundColor Yellow
+            Write-ProgressHost -Message ("[WARN] Could not remove temp App Registration (ID: {0})" -f $objectId) -ForegroundColor Yellow
             Write-ProgressHost -Message "[WARN] Remove it manually in Entra ID > App registrations." -ForegroundColor Yellow
         }
-        $script:TempAppObjectId = $null
     }
+    $script:TempAppObjectId  = $null
+    $script:TempAppObjectId2 = $null
     if ($script:ConnectedHere) {
         $prevWarningPreference = $WarningPreference
         try {
@@ -217,6 +274,83 @@ function Remove-TempApp {
             $WarningPreference = $prevWarningPreference
         }
         $script:ConnectedHere = $false
+    }
+}
+
+function New-TempAppRegistration {
+    # Creates one temporary App Registration + service principal, grants it the requested Graph
+    # site role, and mints an app-only token. Factored out so a second, independent app can be
+    # created purely to double version-lookup throughput — SharePoint's "activityLimitReached"
+    # throttle is enforced per app registration, so splitting batch calls across two apps gives
+    # each its own throttle bucket instead of sharing one.
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$UsedTenantId,
+        [Parameter(Mandatory = $true)][string]$RequiredSiteRole,
+        [string]$Label = 'app'
+    )
+
+    Write-Host "  Creating temporary App Registration '$AppName'..." -ForegroundColor Cyan
+    $app = New-MgApplication -DisplayName $AppName -ErrorAction Stop
+    $sp  = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+
+    $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+    $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $RequiredSiteRole }
+    if (-not $appRole) {
+        throw "Could not resolve app role '$RequiredSiteRole'."
+    }
+    New-MgServicePrincipalAppRoleAssignment `
+        -ServicePrincipalId $sp.Id `
+        -PrincipalId        $sp.Id `
+        -ResourceId         $graphSp.Id `
+        -AppRoleId          $appRole.Id `
+        -ErrorAction Stop | Out-Null
+    Write-Host ("  [OK]   {0} granted ({1})." -f $RequiredSiteRole, $Label) -ForegroundColor DarkGray
+
+    # 1-day secret: this script's runs are short (unlike the full storage report scan), so no
+    # need for the 30-day lifetime used elsewhere — a short-lived secret limits exposure if
+    # cleanup ever fails to run. The app (and its secret) is deleted by Remove-TempApp when the
+    # run finishes normally.
+    $secret = Add-MgApplicationPassword `
+        -ApplicationId      $app.Id `
+        -PasswordCredential @{
+            displayName = 'temp'
+            endDateTime = (Get-Date).AddDays(1)
+        } -ErrorAction Stop
+
+    Write-Host ("  Obtaining app-only token ({0})..." -f $Label) -ForegroundColor Cyan
+    $tokenBody = @{
+        grant_type    = 'client_credentials'
+        scope         = 'https://graph.microsoft.com/.default'
+        client_id     = $app.AppId
+        client_secret = $secret.SecretText
+    }
+
+    $tokenResp = $null
+    for ($i = 1; $i -le 6; $i++) {
+        try {
+            $tokenResp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                -Uri  "https://login.microsoftonline.com/$UsedTenantId/oauth2/v2.0/token" `
+                -Body $tokenBody
+            break
+        } catch {
+            if ($i -lt 6) {
+                Write-Host ("  [INFO] Waiting for app registration propagation ({0}, attempt {1}/6)..." -f $Label, $i) -ForegroundColor DarkGray
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+
+    if (-not $tokenResp -or -not $tokenResp.access_token) {
+        throw "Could not obtain app-only token for $Label app."
+    }
+
+    return [PSCustomObject]@{
+        AppObjectId   = $app.Id
+        Headers       = @{ Authorization = "Bearer $($tokenResp.access_token)" }
+        TokenExpiry   = (Get-Date).AddSeconds($tokenResp.expires_in - 300)
+        TokenBody     = $tokenBody
+        TokenTenantId = $UsedTenantId
     }
 }
 
@@ -307,73 +441,47 @@ try {
                 Remove-TempApp; exit 1
             }
 
-            $appName = "SP-VersionCleanup-Temp-$ts"
-            Write-Host "  Creating temporary read-only App Registration '$appName' for site enumeration..." -ForegroundColor Cyan
-            $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
-            $script:TempAppObjectId = $app.Id
-
-            $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-            $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-            $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Sites.Read.All' }
-            if (-not $appRole) {
-                Write-Host "  [ERROR] Could not resolve app role 'Sites.Read.All'." -ForegroundColor Red
+            # Primary temp app — read-only, used for site/library enumeration and (absent a
+            # second app) version-history lookups too.
+            try {
+                $primaryApp = New-TempAppRegistration -AppName "SP-VersionCleanup-Temp-$ts" `
+                    -UsedTenantId $usedTenantId -RequiredSiteRole 'Sites.Read.All' -Label 'primary'
+            } catch {
+                Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
                 Remove-TempApp; exit 1
             }
-            New-MgServicePrincipalAppRoleAssignment `
-                -ServicePrincipalId $sp.Id `
-                -PrincipalId        $sp.Id `
-                -ResourceId         $graphSp.Id `
-                -AppRoleId          $appRole.Id `
-                -ErrorAction Stop | Out-Null
-            Write-Host "  [OK]   Sites.Read.All granted (enumeration only)." -ForegroundColor DarkGray
+            $script:TempAppObjectId = $primaryApp.AppObjectId
+            $script:AppOnlyHeaders  = $primaryApp.Headers
+            $script:TokenExpiry     = $primaryApp.TokenExpiry
+            $script:TokenBody       = $primaryApp.TokenBody
+            $script:TokenTenantId   = $primaryApp.TokenTenantId
+            Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
 
-            $secret = Add-MgApplicationPassword `
-                -ApplicationId      $app.Id `
-                -PasswordCredential @{
-                    displayName = 'temp'
-                    endDateTime = (Get-Date).AddDays(1)
-                } -ErrorAction Stop
-
-            Write-Host "  Obtaining app-only token for site enumeration..." -ForegroundColor Cyan
-            $tokenBody = @{
-                grant_type    = 'client_credentials'
-                scope         = 'https://graph.microsoft.com/.default'
-                client_id     = $app.AppId
-                client_secret = $secret.SecretText
-            }
-
-            $appOnlyToken = $null
-            for ($i = 1; $i -le 6; $i++) {
+            # Second, independent temp app used only to double version-lookup throughput — see
+            # New-TempAppRegistration for why this actually helps. Failure here is non-fatal —
+            # the scan just proceeds with a single app, as before.
+            if ($VersionBatchConcurrency -gt 1) {
                 try {
-                    $tokenResp = Invoke-RestMethod -Method POST -ErrorAction Stop `
-                        -Uri  "https://login.microsoftonline.com/$usedTenantId/oauth2/v2.0/token" `
-                        -Body $tokenBody
-                    $appOnlyToken = $tokenResp.access_token
-                    break
+                    $versionApp = New-TempAppRegistration -AppName "SP-VersionCleanup-TempVer-$ts" `
+                        -UsedTenantId $usedTenantId -RequiredSiteRole 'Sites.Read.All' -Label 'secondary, version lookups'
+                    $script:TempAppObjectId2      = $versionApp.AppObjectId
+                    $script:VersionAppOnlyHeaders = $versionApp.Headers
+                    $script:VersionTokenExpiry    = $versionApp.TokenExpiry
+                    $script:VersionTokenBody      = $versionApp.TokenBody
+                    $script:VersionTokenTenantId  = $versionApp.TokenTenantId
+                    Write-Host "  [OK]   Second app ready — version-history lookups will alternate across both." -ForegroundColor DarkGray
                 } catch {
-                    if ($i -lt 6) {
-                        Write-Host ("  [INFO] Waiting for app registration propagation (attempt {0}/6)..." -f $i) -ForegroundColor DarkGray
-                        Start-Sleep -Seconds 5
-                    }
+                    Write-Host "  [WARN] Could not create second app for faster version lookups — continuing with a single app." -ForegroundColor Yellow
                 }
             }
-
-            if (-not $appOnlyToken) {
-                Write-Host "  [ERROR] Could not obtain app-only token. Try again in a moment." -ForegroundColor Red
-                Remove-TempApp; exit 1
-            }
-
-            $script:AppOnlyHeaders = @{ Authorization = "Bearer $appOnlyToken" }
-            $script:TokenExpiry     = (Get-Date).AddSeconds($tokenResp.expires_in - 300)
-            $script:TokenBody       = $tokenBody
-            $script:TokenTenantId   = $usedTenantId
-            Write-Host "  [OK]   Token obtained (valid until ~$($script:TokenExpiry.ToString('HH:mm')))." -ForegroundColor DarkGray
         }
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Remove-TempApp; exit 1
 }
+
+Set-GraphRequestTimeoutOptions -TimeoutSec $GraphTimeoutSec
 
 function Update-AppOnlyToken {
     if (-not $script:TokenBody) { return }
@@ -386,6 +494,21 @@ function Update-AppOnlyToken {
         $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
     } catch {
         Write-Host "  [WARN] Token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+function Update-VersionAppOnlyToken {
+    # Mirrors Update-AppOnlyToken for the optional second (version-lookup-only) app credential.
+    if (-not $script:VersionTokenBody) { return }
+    if ((Get-Date) -lt $script:VersionTokenExpiry) { return }
+    try {
+        $resp = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$($script:VersionTokenTenantId)/oauth2/v2.0/token" `
+            -Body $script:VersionTokenBody
+        $script:VersionAppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+        $script:VersionTokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+    } catch {
+        Write-Host "  [WARN] Secondary token refresh failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -404,9 +527,9 @@ function Get-GraphRetryDelaySeconds {
 }
 
 function Invoke-GraphGet {
-    # Uses the app-only bridge token only when set (tenant-wide site enumeration in auto mode).
-    # Every other call goes through the delegated (or provided app-only) SDK session, so file
-    # reads/deletes always run under the caller's own permissions.
+    # Uses the app-only bridge token only when set (site/library enumeration and version-history
+    # GETs in auto mode). Version *deletions* (Invoke-GraphDelete) never use it — those always go
+    # through the delegated (or provided app-only) SDK session, under the caller's own permissions.
     param([string]$Uri)
     for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
         try {
@@ -503,6 +626,13 @@ function Get-FileVersionsBatch {
     # immediately — under sustained load (thousands of files) Graph can throttle individual
     # sub-requests inside an otherwise-successful batch response, and treating that the same as a
     # permanent failure was silently discarding the vast majority of version history.
+    #
+    # When a temp app-only credential is available ($script:AppOnlyHeaders — auto mode, all-sites
+    # scans), batches dispatch over REST via that credential instead of the delegated SDK session,
+    # and — with -VersionBatchConcurrency above 1 — run in parallel across a runspace pool, with
+    # chunks alternating across the primary and secondary temp app when both exist. Version
+    # deletions (Invoke-GraphDelete) never use these credentials; only the read-only version-list
+    # lookup goes through the temp app(s).
     param([System.Collections.Generic.List[object]] $Requests)   # each: @{ Id; Url }
 
     $results = @{}
@@ -514,74 +644,243 @@ function Get-FileVersionsBatch {
     $lastReportedCount = 0
 
     $pending = $Requests
-    $maxPasses = 8
+    $maxPasses = if ($MaxVersionRetryPasses -gt 0) {
+        $MaxVersionRetryPasses
+    } else {
+        # Auto-scale: SharePoint's per-app activity throttle allows roughly 1500-2500 resolved
+        # lookups per pass before the cool-down window repeats (a hard server-side ceiling) — a
+        # fixed low pass count would silently give up on the bulk of a large tenant long before
+        # the scan is actually finished. Capped so a pathological case can't retry forever.
+        [Math]::Min([Math]::Max(8, [int][Math]::Ceiling($totalRequests / 1500.0) + 10), 500)
+    }
     for ($pass = 1; $pass -le $maxPasses -and $pending.Count -gt 0; $pass++) {
-        $retryList = [System.Collections.Generic.List[object]]::new()
-        $nextDelay = 0
-
+        $chunkSpecs = [System.Collections.Generic.List[object]]::new()
+        $chunkIndex = 0
         for ($i = 0; $i -lt $pending.Count; $i += 20) {
             $end   = [Math]::Min($i + 19, $pending.Count - 1)
             $chunk = $pending.GetRange($i, $end - $i + 1)
-            $batchBody = @{
-                requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
-            } | ConvertTo-Json -Depth 6
 
-            # A short pause between successive $batch dispatches spreads out the request rate
-            # against the same site/list, reducing how often we trip activityLimitReached to
-            # begin with — completeness matters more here than shaving seconds off the scan.
-            Start-Sleep -Milliseconds 150
+            # Alternate chunks across the two app credentials (when the second one exists) so
+            # each app's own activity-throttle bucket absorbs roughly half the traffic instead of
+            # both halves competing for one bucket.
+            $useSecondary = [bool]$script:VersionAppOnlyHeaders -and (($chunkIndex % 2) -eq 1)
+            $chunkIndex++
 
-            $batchDone = $false
-            for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
-                try {
-                    $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
-                        -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
-                    $byId = @{}
-                    foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+            $chunkSpecs.Add([PSCustomObject]@{
+                Requests     = $chunk
+                Body         = (@{
+                    requests = @($chunk | ForEach-Object { @{ id = $_.Id; method = 'GET'; url = $_.Url } })
+                } | ConvertTo-Json -Depth 6)
+                UseSecondary = $useSecondary
+            }) | Out-Null
+        }
 
-                    foreach ($req in $chunk) {
-                        $r = $byId[[string]$req.Id]
-                        if (-not $r) {
-                            if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
-                            continue
+        $retryList = [System.Collections.Generic.List[object]]::new()
+        $nextDelay = 0
+
+        if ($script:AppOnlyHeaders -and $VersionBatchConcurrency -gt 1 -and $chunkSpecs.Count -gt 1) {
+            # Runspace workers get a plain copy of the bearer token and cannot see later updates to
+            # $script:AppOnlyHeaders, so refresh it here before dispatch. Without this, a token that
+            # expires mid-scan silently breaks every subsequent parallel version lookup for the rest
+            # of the run.
+            Update-AppOnlyToken
+            if ($script:VersionAppOnlyHeaders) { Update-VersionAppOnlyToken }
+            $poolSize = [Math]::Min($VersionBatchConcurrency, $chunkSpecs.Count)
+            $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
+            $runspacePool.Open()
+
+            $workers = [System.Collections.Generic.List[object]]::new()
+            $workerScript = {
+                param(
+                    [string]$BatchBody,
+                    [hashtable]$Headers,
+                    [int]$TimeoutSec
+                )
+
+                for ($attempt = 1; $attempt -le 3; $attempt++) {
+                    try {
+                        $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                            -Headers $Headers -ContentType 'application/json' `
+                            -Body $BatchBody -TimeoutSec $TimeoutSec -ErrorAction Stop
+
+                        return [PSCustomObject]@{
+                            Success   = $true
+                            Responses = @($resp.responses)
                         }
-                        if ($r.status -eq 200) {
-                            try {
-                                $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
-                                if ($r.body.'@odata.nextLink') {
-                                    Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
-                                }
-                                $results[[string]$r.id] = @{ value = $values }
-                            } catch {
-                                # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
-                                # fail just this one file's lookup instead of the whole 20-item chunk.
-                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
+                    } catch {
+                        if ($attempt -eq 3) {
+                            return [PSCustomObject]@{
+                                Success      = $false
+                                Responses    = @()
+                                ErrorMessage = $_.Exception.Message
                             }
-                        } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
-                            $retryList.Add($req)
-                            $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
-                        } else {
-                            $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
-                            $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
                         }
-                    }
-                    $batchDone = $true
-                } catch {
-                    if ($attempt -eq 3) {
-                        if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
-                        else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
-                    } else {
+
                         Start-Sleep -Seconds ($attempt * 3)
                     }
                 }
             }
 
-            if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
-                Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
-                Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
-                    "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
-                ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
-                $lastReportedCount = $results.Count
+            try {
+                foreach ($spec in $chunkSpecs) {
+                    # Stagger dispatch slightly — the pool size already caps true concurrency, but
+                    # spacing out when each request starts further reduces burst rate against the
+                    # same site/list, which is what activityLimitReached actually tracks.
+                    Start-Sleep -Milliseconds 75
+
+                    $ps = [PowerShell]::Create()
+                    $ps.RunspacePool = $runspacePool
+                    [void]$ps.AddScript($workerScript)
+                    [void]$ps.AddParameter('BatchBody', $spec.Body)
+                    [void]$ps.AddParameter('Headers', $(if ($spec.UseSecondary) { $script:VersionAppOnlyHeaders } else { $script:AppOnlyHeaders }))
+                    [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+
+                    $workers.Add([PSCustomObject]@{
+                        PowerShell = $ps
+                        Handle     = $ps.BeginInvoke()
+                        Requests   = $spec.Requests
+                    }) | Out-Null
+                }
+
+                foreach ($worker in $workers) {
+                    $payload = $null
+
+                    try {
+                        $payload = $worker.PowerShell.EndInvoke($worker.Handle)
+                    } catch {
+                        $payload = $null
+                    } finally {
+                        $worker.PowerShell.Dispose()
+                    }
+
+                    if ($payload -and $payload.Success) {
+                        $byId = @{}
+                        foreach ($r in $payload.Responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $worker.Requests) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                try {
+                                    $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                    if ($r.body.'@odata.nextLink') {
+                                        Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                    }
+                                    $results[[string]$r.id] = @{ value = $values }
+                                } catch {
+                                    # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                    # fail just this one file's lookup instead of crashing the whole scan.
+                                    if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
+                                }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                            Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                                "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                            ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                            $lastReportedCount = $results.Count
+                        }
+                        continue
+                    }
+
+                    if ($pass -lt $maxPasses) {
+                        foreach ($req in $worker.Requests) { $retryList.Add($req) }
+                    } else {
+                        $reason = if ($payload -and $payload.ErrorMessage) { $payload.ErrorMessage } else { 'Batch call failed after retries.' }
+                        foreach ($req in $worker.Requests) { $results[$req.Id] = $reason }
+                    }
+                    if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                        Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                        Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                            "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                        ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                        $lastReportedCount = $results.Count
+                    }
+                }
+            } finally {
+                $runspacePool.Close()
+                $runspacePool.Dispose()
+            }
+        } else {
+            foreach ($spec in $chunkSpecs) {
+                $chunk = $spec.Requests
+                $batchBody = $spec.Body
+
+                # A short pause between successive $batch dispatches spreads out the request rate
+                # against the same site/list, reducing how often we trip activityLimitReached to
+                # begin with — completeness matters more here than shaving seconds off the scan.
+                Start-Sleep -Milliseconds 150
+
+                $batchDone = $false
+                for ($attempt = 1; $attempt -le 3 -and -not $batchDone; $attempt++) {
+                    try {
+                        if ($script:AppOnlyHeaders) {
+                            if ($spec.UseSecondary) { Update-VersionAppOnlyToken; $batchHeaders = $script:VersionAppOnlyHeaders }
+                            else { Update-AppOnlyToken; $batchHeaders = $script:AppOnlyHeaders }
+                            $resp = Invoke-RestMethod -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Headers $batchHeaders -ContentType 'application/json' `
+                                -Body $batchBody -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+                        } else {
+                            $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+                                -Body $batchBody -ContentType 'application/json' -OutputType PSObject -ErrorAction Stop
+                        }
+                        $byId = @{}
+                        foreach ($r in $resp.responses) { $byId[[string]$r.id] = $r }
+
+                        foreach ($req in $chunk) {
+                            $r = $byId[[string]$req.Id]
+                            if (-not $r) {
+                                if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "No response for request id in batch." }
+                                continue
+                            }
+                            if ($r.status -eq 200) {
+                                try {
+                                    $values = [System.Collections.Generic.List[object]]::new(@($r.body.value))
+                                    if ($r.body.'@odata.nextLink') {
+                                        Get-FileVersionsPage -NextLink $r.body.'@odata.nextLink' -Values $values
+                                    }
+                                    $results[[string]$r.id] = @{ value = $values }
+                                } catch {
+                                    # Pagination follow-up hit a hard failure (e.g. sustained throttling) —
+                                    # fail just this one file's lookup instead of the whole 20-item chunk.
+                                    if ($pass -lt $maxPasses) { $retryList.Add($req) } else { $results[$req.Id] = "Version page fetch failed: $($_.Exception.Message)" }
+                                }
+                            } elseif ($r.status -in @(429, 500, 502, 503, 504) -and $pass -lt $maxPasses) {
+                                $retryList.Add($req)
+                                $nextDelay = [Math]::Max($nextDelay, (Get-BatchItemRetryDelaySeconds -Pass $pass -SubResponse $r))
+                            } else {
+                                $errBody = try { $r.body | ConvertTo-Json -Compress -Depth 4 } catch { [string]$r.body }
+                                $results[[string]$req.Id] = "HTTP $($r.status): $errBody"
+                            }
+                        }
+                        $batchDone = $true
+                    } catch {
+                        if ($attempt -eq 3) {
+                            if ($pass -lt $maxPasses) { foreach ($req in $chunk) { $retryList.Add($req) } }
+                            else { foreach ($req in $chunk) { $results[$req.Id] = "Batch call failed: $($_.Exception.Message)" } }
+                        } else {
+                            Start-Sleep -Seconds ($attempt * 3)
+                        }
+                    }
+                }
+
+                if ($totalRequests -gt 0 -and (($results.Count - $lastReportedCount) -ge 200 -or $results.Count -eq $totalRequests)) {
+                    Write-ProgressHost -Message ("resolved version history for {0}/{1} file(s)..." -f $results.Count, $totalRequests) -ForegroundColor DarkGray
+                    Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Versiegeschiedenis ophalen' -Status (
+                        "{0} — {1}/{2} bestanden" -f $script:CurrentScanLabel, $results.Count, $totalRequests
+                    ) -PercentComplete ([int](($results.Count / [Math]::Max($totalRequests, 1)) * 100))
+                    $lastReportedCount = $results.Count
+                }
             }
         }
 
@@ -596,6 +895,13 @@ function Get-FileVersionsBatch {
         $pending = $retryList
     }
     foreach ($req in $pending) { $results[[string]$req.Id] = "Gave up after $maxPasses retry pass(es)." }
+
+    if ($pending.Count -gt 0) {
+        Write-Warning (
+            "Version lookup gave up on {0}/{1} file(s) after {2} retry pass(es) under sustained throttling — " -f $pending.Count, $totalRequests, $maxPasses `
+            + "these will be skipped for this run. Re-run with a higher -MaxVersionRetryPasses (or omit it to auto-scale) if this is a very large tenant."
+        )
+    }
 
     return $results
 }
@@ -750,6 +1056,7 @@ $ClientId
 $CertificateThumbprint
 $GraphTimeoutSec
 $MaxGraphRetry
+$VersionBatchConcurrency
 "@)
 $script:CheckpointStatePath   = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.state.json"
 $script:CheckpointSummaryPath = Join-Path $outputDir "SharePoint_VersionCleanup_$checkpointSignature.summary.partial.csv"

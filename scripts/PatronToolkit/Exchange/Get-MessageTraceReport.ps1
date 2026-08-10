@@ -5,9 +5,11 @@
 
 .DESCRIPTION
     Connects to Exchange Online and runs a message trace for a given time window,
-    optionally filtered by sender, recipient, and delivery status. Exports a summary CSV
-    and, with -IncludeDetail, a per-message detail CSV (delivery hop-by-hop events) —
-    useful for "did this email arrive / where did it go" mail flow diagnostics.
+    optionally filtered by sender, recipient, and delivery status. Uses the newer
+    Get-MessageTraceV2 cmdlet when available (falls back to the classic Get-MessageTrace
+    on older module versions). Exports a summary CSV and, with -IncludeDetail, a
+    per-message detail CSV (delivery hop-by-hop events) — useful for "did this email
+    arrive / where did it go" mail flow diagnostics.
 
     Note: message trace only covers the last 10 days (a Microsoft-side limit of the
     Get-MessageTrace cmdlet). For older mail, use the Exchange admin center's historical
@@ -102,14 +104,20 @@ if ($Status)           { Write-Host "  Status    : $Status" }
 Write-Host ""
 
 # ── Run trace ─────────────────────────────────────────────────────────────────
-$traceParams = @{ StartDate = $StartDate; EndDate = $EndDate; ResultSize = 5000 }
+$useV2 = [bool](Get-Command Get-MessageTraceV2 -ErrorAction SilentlyContinue)
+$traceParams = @{ StartDate = $StartDate; EndDate = $EndDate }
+if (-not $useV2) { $traceParams['ResultSize'] = 5000 }
 if ($SenderAddress)    { $traceParams['SenderAddress'] = $SenderAddress }
 if ($RecipientAddress) { $traceParams['RecipientAddress'] = $RecipientAddress }
 if ($Status)           { $traceParams['Status'] = $Status }
 
-Write-Host "  Running message trace..." -ForegroundColor DarkGray
+Write-Host "  Running message trace ($(if ($useV2) { 'v2' } else { 'classic' }) cmdlet)..." -ForegroundColor DarkGray
 try {
-    $results = @(Get-MessageTrace @traceParams -ErrorAction Stop | Select-Object Received, SenderAddress, RecipientAddress, Subject, Status, ToIP, FromIP, Size, MessageId, MessageTraceId)
+    if ($useV2) {
+        $results = @(Get-MessageTraceV2 @traceParams -ResultSize 5000 -ErrorAction Stop | Select-Object Received, SenderAddress, RecipientAddress, Subject, Status, ToIP, FromIP, Size, MessageId, MessageTraceId)
+    } else {
+        $results = @(Get-MessageTrace @traceParams -ErrorAction Stop | Select-Object Received, SenderAddress, RecipientAddress, Subject, Status, ToIP, FromIP, Size, MessageId, MessageTraceId)
+    }
 } catch {
     Write-Host "  [ERROR] Message trace failed: $($_.Exception.Message)" -ForegroundColor Red
     if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
