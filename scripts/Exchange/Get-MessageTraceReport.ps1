@@ -285,7 +285,8 @@ function Invoke-Trace {
     param(
         [hashtable] $Filter,
         [datetime]  $From,
-        [datetime]  $To
+        [datetime]  $To,
+        [switch]    $Quiet
     )
 
     $collected = [System.Collections.Generic.List[PSObject]]::new()
