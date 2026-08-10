@@ -385,11 +385,43 @@ foreach ($f in $filters) {
     foreach ($row in (Invoke-Trace -Filter $f -From $StartDate -To $EndDate)) { $raw.Add($row) }
 }
 
-# Both directions of a -Mailbox trace overlap for internal mail — de-duplicate.
-$rows = $raw |
-    Sort-Object @{ Expression = { "$($_.MessageTraceId)|$($_.RecipientAddress)|$($_.Received)" } } -Unique
+function Get-UniqueRows($TraceRows) {
+    # Both directions of a -Mailbox trace overlap for internal mail, and sibling
+    # lookups re-return rows we already have — de-duplicate on the trace row key.
+    @($TraceRows | Sort-Object @{ Expression = { "$($_.MessageTraceId)|$($_.RecipientAddress)|$($_.Received)" } } -Unique)
+}
 
+$rows = Get-UniqueRows $raw
 if ($Subject) { $rows = @($rows | Where-Object { $_.Subject -like $Subject }) }
+
+# Re-trace each MessageId without any sender/recipient filter to reveal every
+# address the message was delivered to — including forward targets that are no
+# longer configured, e.g. a rule that was deleted after it did its work.
+if ($ResolveSiblings -and $rows.Count -gt 0) {
+    $ids = @($rows | ForEach-Object { $_.MessageId } | Where-Object { $_ } | Sort-Object -Unique)
+    $lookups = @($ids | Select-Object -First $MaxSiblingLookups)
+    if ($ids.Count -gt $MaxSiblingLookups) {
+        Write-Host "  NOTE: sibling lookup limited to $MaxSiblingLookups of $($ids.Count) MessageIds (-MaxSiblingLookups)." -ForegroundColor Yellow
+    }
+    Write-Host "  Resolving all recipients for $($lookups.Count) MessageId(s)..." -ForegroundColor DarkGray
+
+    $found = 0
+    foreach ($id in $lookups) {
+        try {
+            foreach ($row in (Invoke-Trace -Filter @{ MessageId = $id } -From $StartDate -To $EndDate -Quiet)) {
+                $raw.Add($row); $found++
+            }
+        } catch {
+            Write-Verbose "Sibling lookup failed for $id : $($_.Exception.Message)"
+        }
+    }
+    Write-Host "  $found row(s) returned by sibling lookup." -ForegroundColor DarkGray
+    Write-Host ""
+
+    $rows = Get-UniqueRows $raw
+    if ($Subject) { $rows = @($rows | Where-Object { $_.Subject -like $Subject }) }
+}
+
 $rows = @($rows | Sort-Object Received -Descending)
 
 Write-Host ""
