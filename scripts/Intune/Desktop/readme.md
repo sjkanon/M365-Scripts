@@ -12,3 +12,25 @@ Intune-deployed desktop customization: corporate wallpaper + lockscreen, and a t
 |------|-------------|
 | [`Background/`](Background/readme.md) | Corporate wallpaper (`Desktop/`) and lockscreen (`Lockscreen/`) |
 | [`Add Lockscreen to start and desktop/`](Add%20Lockscreen%20to%20start%20and%20desktop/readme.md) | Pins a "Lock Workstation" shortcut to Start |
+| [`ClaudeDesktop/`](ClaudeDesktop/readme.md) | Machine-wide Claude Desktop deployment, one script run monthly to stay current |
+| [`CoworkPrerequisites/`](CoworkPrerequisites/readme.md) | Windows-side Cowork prerequisites (`VirtualMachinePlatform`, Fast Startup) — its own independent Win32 app, not bundled into Claude Desktop |
+| [`Deploy-AllIntune.ps1`](#deploy-allintuneps1) | Runs both of the above deploy scripts in one call |
+
+---
+
+### Deploy-AllIntune.ps1
+
+Thin orchestrator with no Intune/Graph logic of its own — runs `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` then `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1`, passing through `-AssignmentGroupName`/`-TenantId`/`-Force` to both. Each deploy still manages its own Graph session and temporary App Registration independently — this just saves running two commands by hand.
+
+```powershell
+# Both apps, one command
+.\Deploy-AllIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
+
+# Unattended (e.g. scheduled task)
+.\Deploy-AllIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop" -Force
+
+# Skip Cowork Prerequisites, only Claude Desktop
+.\Deploy-AllIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop" -SkipCoworkPrerequisites
+```
+
+Stops before running Claude Desktop if the Cowork Prerequisites deploy fails (pass `-ContinueOnError` to run it anyway).

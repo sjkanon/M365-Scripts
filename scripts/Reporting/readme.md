@@ -133,6 +133,8 @@ Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-pru
 
 Tijdens een lange scan toont het script zowel scrollende logregels als (in een interactieve console) geneste progress-balken per fase: sites/libraries inventariseren, per bibliotheek mappen/bestanden scannen, versiegeschiedenis ophalen, en recycle bins. Als Microsoft Graph throttlet (bijvoorbeeld `activityLimitReached` tijdens version-history lookups) verschijnt er een `[WAIT] throttled by Microsoft Graph — waiting ...`-melding met de wachttijd, in plaats van dat het script stil lijkt te hangen.
 
+> **Let op (delegated/SDK-calls):** de Microsoft.Graph SDK-cmdlets retryen op 429/503 standaard *zelf* stil, met een eigen interne backoff die bij `activityLimitReached` een flink `Retry-After` kan respecteren — dat kon minutenlange stiltes geven zonder dat het script's eigen `[WAIT]`-melding ooit in beeld kwam. Het script zet daarom `Set-MgRequestContext -ClientTimeout <-GraphTimeoutSec> -MaxRetry 0` direct na het verbinden, zodat elke Graph-SDK-call een harde timeout krijgt en alle retries via de eigen, zichtbare logica van het script lopen.
+
 ```powershell
 # Hervat automatisch een onderbroken tenantscan
 .\Get-SharePointStorageReport.ps1 -Apply
@@ -186,6 +188,8 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant contex
 | `-ForceAppOnlySingleSite` | Forceert tijdelijke app-bootstrap voor `-SiteUrl` scans (handig voor GDAP/delegated beperkingen) |
 | `-GraphTimeoutSec` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-VersionBatchConcurrency` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis, 1-8 (standaard: `4`) |
+| `-MaxVersionRetryPasses` | Max. aantal retry-passes voor versiegeschiedenis onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — SharePoint hanteert een harde activity-ceiling van ~1500-2500 opgeloste versie-lookups per pass, dus bij tenants met honderdduizenden bestanden gaf een vaste lage waarde (voorheen hardcoded op 8) vroegtijdig op voor het gros van de scan. Zet expliciet hoger/lager om de auto-schaling te overschrijven |
 | `-Restart` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
 
 ### Voorbeelden
@@ -226,9 +230,9 @@ Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document
 
 ### Authenticatie
 
-Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) om alle sites op te sommen — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Die tijdelijke app wordt na afloop weer verwijderd; alle daadwerkelijke file-reads en version-deletes lopen altijd via je eigen delegated permissies, nooit via die tijdelijke app.
+Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
 
-Wil je de tijdelijke app overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al `Sites.ReadWrite.All` application permission hebben.
+Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al `Sites.ReadWrite.All` application permission hebben.
 
 > **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie garantie is.
 
@@ -241,6 +245,8 @@ Net als `Get-SharePointStorageReport.ps1` schrijft dit script na elke afgeronde 
 - De checkpointbestanden worden automatisch opgeruimd zodra de scan succesvol volledig afrondt.
 
 Tijdens de scan toont het script geneste progress-balken (sites → libraries → mappen/bestanden scannen / versiegeschiedenis ophalen) naast de scrollende logregels, en een `[WAIT] throttled by Microsoft Graph — waiting ...`-melding zodra Graph throttlet, zodat een lange pauze niet aanvoelt als een hang.
+
+> **Let op (delegated/SDK-calls):** net als bij `Get-SharePointStorageReport.ps1` zet het script `Set-MgRequestContext -ClientTimeout <-GraphTimeoutSec> -MaxRetry 0` direct na het verbinden — zonder die instelling retryen de Microsoft.Graph SDK-cmdlets 429/503 zelf stil met een eigen backoff, wat bij `activityLimitReached` minutenlange stiltes kan geven zonder dat het script's eigen `[WAIT]`-melding in beeld komt.
 
 ### Parameters
 
@@ -259,6 +265,8 @@ Tijdens de scan toont het script geneste progress-balken (sites → libraries �
 | `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
 | `-GraphTimeoutSec` | `int` | Timeout in seconden per Graph-call (standaard: `120`) |
 | `-MaxGraphRetry` | `int` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-VersionBatchConcurrency` | `int` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis in tenantbrede scans, 1-8 (standaard: `4`). Boven `1` wordt ook de tweede tijdelijke app aangemaakt (zie Authenticatie) |
+| `-MaxVersionRetryPasses` | `int` | Max. aantal retry-passes voor het ophalen van versielijsten onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — zelfde aanpak en reden als bij `Get-SharePointStorageReport.ps1` hierboven |
 | `-Restart` | `switch` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
 
 ### Voorbeelden
