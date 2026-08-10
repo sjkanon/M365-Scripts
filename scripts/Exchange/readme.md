@@ -452,6 +452,8 @@ Answers "who received this, when exactly, and where did it go next?". Runs a mes
 | `RedirectHop` | Redirect / transport-rule hops pulled from `Get-MessageTraceDetailV2` (requires `-IncludeDetails`) |
 | `ClientForward(subject match)` | A later message sent **by** the recipient carrying the same normalized subject — an Outlook "Forward", which gets a brand new `MessageId`. Heuristic; replies back to the original sender are excluded |
 
+> **Why the forward target is traced separately:** a mailbox forward or a redirect rule keeps the **original sender** on the forwarded copy. The trace row for the delivery to the forward target therefore mentions the traced mailbox *neither as sender nor as recipient* — filtering on the mailbox alone would never return it. The script resolves the configured forward targets **before** tracing and adds them as extra recipient filters, so the actual hand-off shows up with its own exact timestamp. `-ResolveSiblings` goes further and re-traces every matched `MessageId` without any filter, which also catches forward targets that are no longer configured (a rule deleted after it did its work still leaves its deliveries in the trace).
+
 On top of that, the script reports the **configured** forwarding of every internal mailbox that appears in the trace — `ForwardingSMTPAddress` / `ForwardingAddress` plus any inbox rule with `ForwardTo` / `RedirectTo` / `ForwardAsAttachmentTo` — so a forward that has not fired inside the traced window is still visible.
 
 Uses `Get-MessageTraceV2` when available and falls back to the retired `Get-MessageTrace`. Ranges longer than the V2 limit are split into 10-day chunks automatically, and every chunk is paginated until exhausted.
@@ -461,8 +463,9 @@ Uses `Get-MessageTraceV2` when available and falls back to the retired `Get-Mess
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `-Mailbox` | No | — | Trace both directions for this address (sent **and** received) and pull its forwarding config |
-| `-Sender` | No | — | Filter on sender address |
+| `-SenderAddress` | No | — | Filter on sender address. Aliased as `-Sender` (`$Sender` is a PowerShell automatic variable, so it cannot be the parameter's real name) |
 | `-Recipient` | No | — | Filter on recipient address |
+| `-ForwardAddress` | No | — | Known forward/exfiltration address(es) to trace as recipients on top of whatever forwarding config is discovered. Use when the forward has **already been removed** — there is then no config left to find, but its past deliveries are still in the trace |
 | `-Subject` | No | — | Client-side subject filter, wildcards allowed (message trace cannot filter on subject server-side) |
 | `-MessageId` | No | — | Internet MessageId to trace, with or without angle brackets |
 | `-Days` | No | `2` | Days back from `-EndDate`. Ignored if `-StartDate` is given |
@@ -471,6 +474,8 @@ Uses `Get-MessageTraceV2` when available and falls back to the retired `Get-Mess
 | `-Status` | No | — | `Delivered`, `Failed`, `Pending`, `Expanded`, `Quarantined`, `FilteredAsSpam`, `GettingStatus`, `None` |
 | `-IncludeDetails` | No | off | Retrieve per-hop delivery detail — this is what exposes redirect / transport-rule targets. Slow and throttled |
 | `-MaxDetailLookups` | No | `50` | Cap on hop-detail lookups; truncation is reported explicitly |
+| `-ResolveSiblings` | No | off | Re-trace every matched `MessageId` without sender/recipient filter to reveal **all** recipients — catches forward targets that are no longer configured. One extra call per MessageId |
+| `-MaxSiblingLookups` | No | `100` | Cap on sibling lookups |
 | `-SkipForwardingConfig` | No | off | Skip the mailbox forwarding / inbox rule inspection |
 | `-OutputPath` | No | `C:\Temp\` / `~/Downloads` | Main CSV path. Detail and forwarding reports are written alongside it with `_Details` / `_ForwardingConfig` suffixes |
 | `-TenantId` | No | — | Entra ID tenant ID or domain |
@@ -486,6 +491,13 @@ Uses `Get-MessageTraceV2` when available and falls back to the retired `Get-Mess
 
 # Where did this specific message end up?
 .\Get-MessageTraceReport.ps1 -MessageId "<abc123@contoso.com>" -Days 10 -IncludeDetails
+
+# Suspected external forward — full picture, incl. targets no longer configured
+.\Get-MessageTraceReport.ps1 -Mailbox "facturen@contoso.com" -Days 10 -ResolveSiblings -IncludeDetails
+
+# The forward was already removed, but the address is known — trace it anyway
+.\Get-MessageTraceReport.ps1 -Mailbox "facturen@contoso.com" -Days 10 -ResolveSiblings `
+    -ForwardAddress "exfil@lookalike-domain.nl"
 
 # All failed mail from one sender in an explicit window
 .\Get-MessageTraceReport.ps1 -Sender "noreply@contoso.com" -Status Failed `
