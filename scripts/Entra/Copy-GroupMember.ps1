@@ -38,6 +38,10 @@
     Actually add (and with -Mirror remove) members. Without it the script only
     reports what it would do.
 
+.PARAMETER Disconnect
+    Sign out of Microsoft Graph when finished. Off by default: Disconnect-MgGraph
+    clears the SDK token cache, which means a new browser prompt on every run.
+
 .PARAMETER OutputPath
     CSV report path. Defaults to C:\Temp\GroupMemberCopy_<timestamp>.csv
     (~/Downloads on non-Windows).
@@ -75,6 +79,7 @@ param(
     [switch] $Flatten,
     [switch] $Mirror,
     [switch] $Apply,
+    [switch] $Disconnect,
 
     [string] $OutputPath,
     [string] $TenantId
@@ -308,5 +313,8 @@ if (-not $Apply) {
 }
 Write-Host ""
 
-# ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+# ── Session ───────────────────────────────────────────────────────────────────
+# Deliberately NOT calling Disconnect-MgGraph: it clears the SDK token cache, so
+# every following run would trigger a fresh browser prompt. Use -Disconnect if
+# you really want the session torn down (e.g. on a shared machine).
+if ($Disconnect -and $script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
