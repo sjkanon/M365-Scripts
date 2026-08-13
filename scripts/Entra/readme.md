@@ -15,6 +15,7 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 | [`Get-M365UserLicenses.ps1`](#get-m365userlicensesps1) | Report assigned licenses for a list of users |
 | [`Import-ConditionalAccessBaseline.ps1`](#import-conditionalaccessbaselineps1) | Import the community Conditional Access baseline |
 | [`Test-M365GroupMembership.ps1`](#test-m365groupmembershipps1) | Audit M365 Group / Teams owners and members |
+| [`Copy-GroupMember.ps1`](#copy-groupmemberps1) | Copy members from one Entra ID group into another (dry-run by default) |
 | [`New-TemporaryConditionalAccessPolicy.ps1`](#new-temporaryconditionalaccesspolicyps1) | Create a temporary CA policy for one user or group |
 | [`Remove-TemporaryConditionalAccessPolicies.ps1`](#remove-temporaryconditionalaccesspoliciesps1) | Remove expired/all temporary CA policies |
 | [`New-UserTemporaryAccessPass.ps1`](#new-usertemporaryaccesspassps1) | Create a TAP code for a user |
@@ -360,6 +361,57 @@ Lists all owners and members of Microsoft 365 Groups (including Teams-backed gro
 **Required scopes**
 - `Group.Read.All`
 - `Directory.Read.All`
+
+**Required module**
+```powershell
+Install-Module Microsoft.Graph -Scope CurrentUser
+```
+
+---
+
+### Copy-GroupMember.ps1
+
+Copies the members of one Entra ID group into another group. Members already present in the target are skipped, so the script is safe to re-run. Defaults to dry-run — pass `-Apply` to write changes.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-SourceGroup` | Yes | Display name or Object ID of the group to copy FROM |
+| `-TargetGroup` | Yes | Display name or Object ID of the group to copy TO |
+| `-MemberType` | No | `All` (default), `User`, `Group`, `Device` or `ServicePrincipal` |
+| `-Flatten` | No | Expand nested groups and copy their effective members instead of the nested group object |
+| `-Mirror` | No | Also remove members from the target that are not in the source (exact copy instead of union) |
+| `-Apply` | No | Actually add/remove members (default: dry run) |
+| `-Disconnect` | No | Sign out of Graph when finished (off by default — disconnecting clears the token cache and forces a new browser prompt next run) |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\GroupMemberCopy_<timestamp>.csv`) |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Dry run — show what would be copied
+.\Copy-GroupMember.ps1 -SourceGroup "All Staff" -TargetGroup "MFA Rollout"
+
+# Actually copy the members
+.\Copy-GroupMember.ps1 -SourceGroup "All Staff" -TargetGroup "MFA Rollout" -Apply
+
+# Copy only users, expanding nested groups
+.\Copy-GroupMember.ps1 -SourceGroup "Sales" -TargetGroup "Sales Mail" -MemberType User -Flatten -Apply
+
+# Make the target an exact copy of the source (adds and removes)
+.\Copy-GroupMember.ps1 -SourceGroup "Pilot" -TargetGroup "Pilot Copy" -Mirror -Apply
+```
+
+**Notes**
+- Display names are resolved via Graph; an ambiguous name is a hard error — use the Object ID instead
+- A dynamic-membership target group is rejected: its membership is rule-driven and cannot be edited
+- Mail-enabled security and distribution groups are not writable through Graph — use Exchange Online cmdlets for those
+- Supports `-WhatIf` (`SupportsShouldProcess`)
+
+**Required scopes**
+- `Group.Read.All`
+- `GroupMember.ReadWrite.All`
 
 **Required module**
 ```powershell

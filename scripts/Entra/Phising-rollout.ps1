@@ -136,11 +136,14 @@ function Connect-GraphSession {
             Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $ClientCertificateThumbprint -NoWelcome -ErrorAction Stop
         }
         elseif ($Interactive) {
-            # Bestaande sessie hergebruiken, anders komt er elke pass een browser-prompt
-            $ctx = Get-MgContext
-            if ($Silent -and $ctx -and $ctx.Scopes -and -not ($InteractiveScopes | Where-Object { $_ -notin $ctx.Scopes })) {
-                return
-            }
+            # Bestaande sessie ALTIJD hergebruiken. De SDK vernieuwt het access
+            # token zelf via de refresh token in de cache; opnieuw Connect-MgGraph
+            # draaien levert alleen een browser-prompt op. Niet vergelijken op
+            # scope-namen: Entra geeft consented scopes terug, die kunnen breder
+            # of anders benoemd zijn dan wat we vroegen (bv. Group.ReadWrite.All
+            # i.p.v. GroupMember.ReadWrite.All) -> zo'n check faalt dan elke pass.
+            if ($Silent -and (Get-MgContext)) { return }
+
             $connectParams = @{ Scopes = $InteractiveScopes; NoWelcome = $true; ErrorAction = 'Stop' }
             if ($TenantId) { $connectParams['TenantId'] = $TenantId }
             Connect-MgGraph @connectParams
@@ -215,8 +218,10 @@ function Invoke-MfaSyncPass {
 
     Write-Output "=== Sync-pass gestart: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ==="
 
-    $rolloutMemberIds    = (Get-MgGroupMember -GroupId $RolloutGroupId -All).Id
-    $registeredMemberIds = (Get-MgGroupMember -GroupId $RegisteredGroupId -All).Id
+    # -ErrorAction Stop: zonder dit loopt een mislukte lees-actie door met 0 leden
+    # en meldt de pass "niks te doen", terwijl er niets is gecontroleerd.
+    $rolloutMemberIds    = (Get-MgGroupMember -GroupId $RolloutGroupId -All -ErrorAction Stop).Id
+    $registeredMemberIds = (Get-MgGroupMember -GroupId $RegisteredGroupId -All -ErrorAction Stop).Id
 
     Write-Output "Rollout-groep leden    : $($rolloutMemberIds.Count)"
     Write-Output "Registered-groep leden : $($registeredMemberIds.Count)"
@@ -228,14 +233,22 @@ function Invoke-MfaSyncPass {
     $toRevert   = [System.Collections.Generic.List[string]]::new()   # Registered -> Rollout
 
     $i = 0
+    $consecutiveFailures = 0
     foreach ($userId in $allUserIds) {
         $i++
         if ($i % 50 -eq 0) { Write-Output "Verwerkt: $i / $($allUserIds.Count)" }
 
         try {
             $methods = Get-MgUserAuthenticationMethod -UserId $userId -ErrorAction Stop
+            $consecutiveFailures = 0
         }
         catch {
+            # Bij een kapotte sessie faalt élke gebruiker; dan de pass afbreken i.p.v.
+            # honderden identieke waarschuwingen produceren en daarna "0 acties" melden.
+            $consecutiveFailures++
+            if ($consecutiveFailures -ge 5) {
+                throw "Vijf gebruikers op rij mislukt - waarschijnlijk een verlopen of afgebroken Graph-sessie. Laatste fout: $($_.Exception.Message)"
+            }
             Write-Warning "Kon authenticatiemethoden niet ophalen voor $userId : $($_.Exception.Message)"
             continue
         }
