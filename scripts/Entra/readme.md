@@ -19,6 +19,7 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 | [`New-TemporaryConditionalAccessPolicy.ps1`](#new-temporaryconditionalaccesspolicyps1) | Create a temporary CA policy for one user or group |
 | [`Remove-TemporaryConditionalAccessPolicies.ps1`](#remove-temporaryconditionalaccesspoliciesps1) | Remove expired/all temporary CA policies |
 | [`New-UserTemporaryAccessPass.ps1`](#new-usertemporaryaccesspassps1) | Create a TAP code for a user |
+| [`Set-EntraPasskeyMigrationOptOut.ps1`](#set-entrapasskeymigrationoptoutps1) | Defer the Sept 1, 2026 automatic passkey enablement (single tenant or a GDAP list) |
 
 > Dynamic-to-static distribution group conversion (`Set-Distributionlist-dynamic-static.ps1`) lives in [`scripts/Exchange/`](../Exchange/readme.md) — it uses Exchange Online cmdlets, not Graph.
 
@@ -417,3 +418,70 @@ Copies the members of one Entra ID group into another group. Members already pre
 ```powershell
 Install-Module Microsoft.Graph -Scope CurrentUser
 ```
+
+---
+
+### Set-EntraPasskeyMigrationOptOut.ps1
+
+Sets (or clears) the temporary opt-out from Entra ID's automatic passkey enablement and Registration Campaign rollout. It patches the tenant authentication methods policy:
+
+```http
+PATCH https://graph.microsoft.com/beta/policies/authenticationmethodspolicy
+{ "optOutSettings": { "passkeyDynamicMigration": true } }
+```
+
+Accepts an array of tenants, so a GDAP partner can walk every customer tenant in one run. Each tenant is handled independently — one that fails to connect, read or patch is reported and the run continues with the next.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-TenantId` | No | One or more tenant IDs or domain names. Omit to use the current connection / default tenant |
+| `-Revert` | No | Set `passkeyDynamicMigration` back to `false` (re-opt the tenant IN to the automatic migration) |
+| `-ReportOnly` | No | Read and display the current value without changing anything |
+
+**Examples**
+
+```powershell
+# Show the current setting for the connected tenant
+.\Set-EntraPasskeyMigrationOptOut.ps1 -ReportOnly
+
+# Preview the change without writing it
+.\Set-EntraPasskeyMigrationOptOut.ps1 -TenantId contoso.onmicrosoft.com -WhatIf
+
+# Opt out every tenant listed in a text file, no per-tenant confirmation
+.\Set-EntraPasskeyMigrationOptOut.ps1 -TenantId (Get-Content .\tenants.txt) -Confirm:$false
+
+# Re-opt a tenant back IN to the automatic migration
+.\Set-EntraPasskeyMigrationOptOut.ps1 -TenantId contoso.onmicrosoft.com -Revert
+```
+
+**Timeline**
+
+| Date | What happens |
+|------|--------------|
+| Sept 1, 2026 | Users enabled for SMS or voice are auto-enabled for passkeys and nudged by a Microsoft-managed registration campaign |
+| Feb 1, 2027 | Microsoft-provided SMS/voice delivery is retired |
+| After Feb 1, 2027 | Users whose only MFA method is SMS or voice get a **blocking** passkey registration prompt at sign-in |
+
+**Notes**
+- The opt-out defers **only** the Sept 1, 2026 → Feb 1, 2027 behavior. There is no opt-out from the Feb 1, 2027 enforcement — it applies to all tenants
+- `optOutSettings` is **beta-only** as of Aug 2026 and is not exposed in the Entra admin center
+- Writes are confirmed per tenant (`ConfirmImpact = 'High'`); pass `-Confirm:$false` for unattended multi-tenant runs
+- The setting is read back ~2 seconds after the PATCH; a mismatch is reported as `PatchedUnverified` rather than treated as success
+- Returns one object per tenant (`Tenant`, `Before`, `After`, `Status`, `Message`) so a run can be piped to `Export-Csv`
+- Supports `-WhatIf` (`SupportsShouldProcess`)
+- If you need SMS/voice after Feb 1, 2027, configure a customer-managed telecom provider through the Microsoft Security Store (selectable from Oct 30, 2026)
+
+**Required scope**
+- `Policy.ReadWrite.AuthenticationMethod` (`Policy.Read.All` is enough for `-ReportOnly`)
+
+**Required role**
+- Authentication Policy Administrator (or Global Administrator)
+
+**Required module**
+```powershell
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
+```
+
+**Reference** — [Passkeys by default and retirement of Microsoft-provided SMS and voice authentication](https://learn.microsoft.com/en-us/entra/identity/authentication/concept-sms-voice-retirement)
