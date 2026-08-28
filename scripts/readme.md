@@ -14,6 +14,7 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 | [`Exchange/`](Exchange/readme.md) | Calendar migration/permissions, distribution groups, mailbox/calendar/DKIM/forwarding audits |
 | [`Graph/`](Graph/readme.md) | Microsoft Graph application permission management |
 | [`Intune/`](Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
+| [`SharePoint/`](SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration) |
 | [`Reporting/`](Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
 | [`Device/`](Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics |
 | [`Network/`](Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
