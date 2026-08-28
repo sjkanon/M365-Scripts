@@ -1,3 +1,5 @@
 load.config.ps1
 config.json
 .DS_Store
+pnp.appid.json
+.f-index.json
