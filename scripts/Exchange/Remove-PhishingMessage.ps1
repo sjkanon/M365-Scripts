@@ -51,15 +51,23 @@
     automatic variable).
 
 .PARAMETER Subject
-    Subject to match. Purview matches this as an indexed phrase; Graph matches it
-    client-side and accepts wildcards (e.g. "*your invoice*").
+    A fragment of the subject is enough - it does not have to be the whole thing.
+
+    Purview matches it as a phrase, which already matches anywhere in the subject:
+    "kick-off meeting" finds every subject containing those words in that order.
+    What KQL cannot do is match inside a word, so a leading wildcard is dropped
+    (with a warning) and a trailing one only survives on a single word.
+
+    Graph matches client-side and takes wildcards as written; a value without any
+    wildcard is treated as *value* (substring).
 
 .PARAMETER AttachmentName
     Attachment filename to match, wildcards allowed (e.g. "*.html").
 
 .PARAMETER BodyContains
-    Word or phrase in the message body. Purview engine only - Graph would have to
-    download every body to test it.
+    Word or phrase from the message body - a distinctive sentence out of the phish
+    is often the most durable selector when the sender rotates addresses. Purview
+    engine only: Graph would have to download every body to test it.
 
 .PARAMETER ReceivedAfter
     Only consider messages received at or after this moment (local time).
@@ -136,6 +144,16 @@
     # Campaign sweep: everything from one sender in a window, tenant-wide
     .\Remove-PhishingMessage.ps1 -Sender "no-reply@evil.example" `
         -ReceivedAfter (Get-Date "2026-08-30") -DeleteType HardDelete -Apply
+
+.EXAMPLE
+    # The usual phishing combination: the sender plus a fragment of the subject
+    .\Remove-PhishingMessage.ps1 -Sender "no-reply@evil.example" `
+        -Subject "kick-off meeting" -DeleteType HardDelete -Apply
+
+.EXAMPLE
+    # Sender rotates addresses - match on a sentence from the body instead
+    .\Remove-PhishingMessage.ps1 -BodyContains "your password will expire today" `
+        -ReceivedAfter (Get-Date "2026-08-30") -Apply
 
 .EXAMPLE
     # HTML attachment campaign
@@ -287,10 +305,8 @@ function Invoke-PurviewPurge {
     $clauses = [System.Collections.Generic.List[string]]::new()
     if ($MessageId)      { $clauses.Add("(InternetMessageId:`"$MessageId`")") }
     if ($SenderAddress)  { $clauses.Add("(From:`"$SenderAddress`")") }
-    # KQL has no wildcard-in-phrase support, so a -Subject like "*invoice*" would
-    # match nothing. Strip the wildcards and let the phrase match do the work.
-    if ($Subject)        { $clauses.Add("(Subject:`"$($Subject.Trim('*'))`")") }
-    if ($AttachmentName) { $clauses.Add("(Attachment:`"$($AttachmentName.Trim('*'))`")") }
+    if ($Subject)        { $clauses.Add("(Subject:$(ConvertTo-KqlTerm $Subject -Field 'Subject'))") }
+    if ($AttachmentName) { $clauses.Add("(Attachment:$(ConvertTo-KqlTerm $AttachmentName -Field 'Attachment'))") }
     if ($BodyContains)   { $clauses.Add("(Body:`"$BodyContains`")") }
     # The index stores Received in UTC; converting keeps the window honest for
     # operators who are not on UTC themselves.
@@ -526,6 +542,42 @@ function Wait-ForComplianceState {
     }
     Write-Warning "$Label did not complete within $TimeoutMinutes minute(s)."
     return $null
+}
+
+function ConvertTo-KqlTerm {
+    <#
+        Turns a user-supplied fragment into a KQL term.
+
+        A quoted phrase already matches anywhere in the field, so a fragment of a
+        subject needs no wildcards at all - "kick-off meeting" finds every subject
+        containing those words in that order. What KQL cannot do is match inside a
+        word: a leading wildcard is unsupported, and a wildcard is inert inside
+        quotes. So a trailing wildcard is preserved on a single unquoted term
+        (prefix match), a leading one is reported as dropped, and anything with a
+        space falls back to a phrase.
+    #>
+    param(
+        [string] $Value,
+        [string] $Field = 'term'
+    )
+
+    $v           = $Value.Trim()
+    $hadLeading  = $v.StartsWith('*')
+    $hadTrailing = $v.EndsWith('*')
+    $core        = $v.Trim('*').Trim()
+
+    if ($hadLeading) {
+        Write-Warning "KQL cannot match a leading wildcard, so -$Field '$Value' matches from the start of a word. A quoted fragment already matches anywhere in the field; for true substring matching use -Engine Graph with -Mailbox."
+    }
+
+    if ($core -match '\s') {
+        if ($hadTrailing) {
+            Write-Warning "A wildcard is inert inside a quoted phrase, so -$Field '$Value' is matched as the phrase '$core'."
+        }
+        return '"{0}"' -f ($core -replace '"', '')
+    }
+    if ($hadTrailing) { return "$core*" }
+    return '"{0}"' -f ($core -replace '"', '')
 }
 
 function Format-ByteSize {
