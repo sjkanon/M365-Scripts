@@ -213,14 +213,14 @@
                  2. -ClientId with -ClientSecret or -CertificateThumbprint uses
                     your own App Registration (needs Mail.ReadWrite application
                     permission, admin consent granted).
-                 3. Otherwise the script connects interactively, creates a
-                    short-lived temporary App Registration, self-grants it
-                    Mail.ReadWrite application permission (the delegated role
+                 3. Otherwise the script signs you in with a device code,
+                    creates a short-lived temporary App Registration, self-grants
+                    it Mail.ReadWrite application permission (the delegated role
                     does the consent, so no separate consent screen), takes an
                     app-only token with it, and removes the temporary app again
                     when the run finishes. Needs Global Administrator or
-                    Privileged Role Administrator for that one-time setup, plus
-                    the Microsoft.Graph.Applications module.
+                    Privileged Role Administrator for that one-time sign-in, and
+                    no extra modules.
 
                Mail.ReadWrite (application) grants access to every mailbox in the
                tenant - scope the app with New-ApplicationAccessPolicy if that is
@@ -230,11 +230,13 @@
                each bundle their own Microsoft.Identity.Client, and only the
                first one loaded in a process is used. A Purview purge connects
                Exchange first, so the Graph SDK then fails with "Method not
-               found ... WithLogging(...)". The script recognises that and says
-               so. Route 2 with -ClientSecret takes its token over plain REST and
-               never loads the SDK, so it is the one that works in the same
-               session as Exchange; route 3 cannot avoid the SDK because
-               creating an app registration needs it.
+               found ... WithLogging(...)". Routes 2 (-ClientSecret) and 3 are
+               therefore built on plain REST - device code flow for the sign-in,
+               the Graph REST API for creating and removing the app - and load
+               no SDK at all, so they work in that same session. Only the
+               -CertificateThumbprint variant and reusing an existing
+               Connect-MgGraph session still go through the SDK; both report the
+               clash for what it is when they hit it.
 
                GDAP-aware: under a GDAP session ($global:authMode -eq 'GDAP', set
                by Connect-Tenant / load.ps1) -TenantId is resolved from the
@@ -254,8 +256,10 @@
     most 50,000 mailboxes. For bulk removal beyond that, Microsoft points at the
     Graph ediscoverySearch: purgeData API, which allows 100 items per location.
 
-    Required modules: ExchangeOnlineManagement, plus Microsoft.Graph.Authentication
-    for the Graph engine.
+    Required module: ExchangeOnlineManagement. Microsoft.Graph.Authentication is
+    optional - only needed to reuse an existing Connect-MgGraph session or to use
+    -CertificateThumbprint; the -ClientSecret and temporary-app routes run on
+    plain REST.
 #>
 [CmdletBinding()]
 param(
@@ -381,7 +385,7 @@ function Remove-TempApp {
     if (-not $script:TempAppObjectId) { return }
     Write-Host "  Removing temporary App Registration..." -ForegroundColor DarkGray
     try {
-        Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
+        Invoke-GraphAdmin -Method DELETE -Uri "https://graph.microsoft.com/v1.0/applications/$($script:TempAppObjectId)" | Out-Null
         Write-Host "  [OK]   Temporary App Registration removed." -ForegroundColor DarkGray
     } catch {
         Write-Warning "Could not remove the temporary App Registration (object ID $($script:TempAppObjectId)). Remove it by hand in Entra ID > App registrations."
@@ -496,6 +500,79 @@ function Get-AppOnlyTokenByRest {
     Update-AppOnlyToken
 }
 
+# The Graph PowerShell SDK's own public client. Using it for device code keeps
+# the sign-in identical to what Connect-MgGraph would have done, minus the MSAL
+# assembly that collides with Exchange's.
+$script:GraphCliClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
+$script:AdminHeaders     = $null
+
+function Get-DelegatedTokenByDeviceCode {
+    <#
+        Device code flow over plain REST. The whole point is to obtain a delegated
+        token for app management without loading the Graph SDK - see the MSAL note
+        in .NOTES. Returns a ready-made Authorization header.
+    #>
+    param(
+        [string]   $Tenant,
+        [string[]] $Scopes
+    )
+
+    $scopeString = ((@($Scopes | ForEach-Object { "https://graph.microsoft.com/$_" })) + 'offline_access') -join ' '
+    $dc = Invoke-RestMethod -Method POST -ErrorAction Stop `
+            -Uri  "https://login.microsoftonline.com/$Tenant/oauth2/v2.0/devicecode" `
+            -Body @{ client_id = $script:GraphCliClientId; scope = $scopeString }
+
+    Write-Host ""
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host "   $($dc.message)" -ForegroundColor Yellow
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Waiting for sign-in..." -ForegroundColor DarkGray
+
+    $deadline = (Get-Date).AddSeconds([int]$dc.expires_in)
+    $interval = [int]$dc.interval
+    if ($interval -lt 5) { $interval = 5 }
+
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds $interval
+        try {
+            $tok = Invoke-RestMethod -Method POST -ErrorAction Stop `
+                    -Uri  "https://login.microsoftonline.com/$Tenant/oauth2/v2.0/token" `
+                    -Body @{
+                        grant_type  = 'urn:ietf:params:oauth:grant-type:device_code'
+                        client_id   = $script:GraphCliClientId
+                        device_code = $dc.device_code
+                    }
+            return @{ Authorization = "Bearer $($tok.access_token)" }
+        } catch {
+            # authorization_pending is the normal "not signed in yet" answer.
+            $code = ''
+            try { $code = ($_.ErrorDetails.Message | ConvertFrom-Json).error } catch {}
+            if ($code -eq 'authorization_pending') { continue }
+            if ($code -eq 'slow_down')             { $interval += 5; continue }
+            if ($code -eq 'expired_token')         { throw "Device code expired before sign-in completed." }
+            if ($code -eq 'authorization_declined'){ throw "Sign-in was declined." }
+            throw
+        }
+    }
+    throw "Device code sign-in timed out."
+}
+
+function Invoke-GraphAdmin {
+    # App-management calls, using the delegated token from the device code flow.
+    param(
+        [string] $Method = 'GET',
+        [Parameter(Mandatory)] [string] $Uri,
+        $Body
+    )
+    $params = @{ Method = $Method; Uri = $Uri; Headers = $script:AdminHeaders; ErrorAction = 'Stop' }
+    if ($Body) {
+        $params['Body']        = ($Body | ConvertTo-Json -Depth 6)
+        $params['ContentType'] = 'application/json'
+    }
+    return Invoke-RestMethod @params
+}
+
 function Connect-GraphForMail {
     <#
         Establishes app-only Mail.ReadWrite, one way or another. Returns $true when
@@ -504,13 +581,10 @@ function Connect-GraphForMail {
     #>
     if ($script:GraphConnected -or $script:AppOnlyHeaders) { return $true }
 
-    if (-not (Get-Command Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
-        Write-Warning "Microsoft.Graph.Authentication is not available. Install-Module Microsoft.Graph.Authentication"
-        return $false
-    }
-
-    # 1. An app-only session the caller already established.
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
+    # 1. An app-only session the caller already established. Optional - the other
+    #    two routes need no Graph SDK at all.
+    $ctx = $null
+    try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {}
     if ($ctx -and $ctx.AuthType -eq 'AppOnly') {
         Write-Host "  [OK]   Using the existing app-only Graph session." -ForegroundColor DarkGray
         $script:GraphConnected = $true
@@ -556,65 +630,58 @@ function Connect-GraphForMail {
     }
 
     # 3. Build a short-lived app, use it, remove it at the end.
-    if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
-        Write-Warning "Microsoft.Graph.Applications is needed to create the temporary app registration. Install it, or pass -ClientId for your own app."
+    #
+    # Done entirely over REST rather than with Microsoft.Graph.Applications: the
+    # SDK drags in an MSAL that clashes with Exchange's, and this route has to
+    # work in exactly the session where Exchange is already connected.
+    if (-not $effectiveTenantId) {
+        Write-Warning "-TenantId is required to create the temporary app registration (or a resolvable GDAP customer tenant)."
         return $false
     }
 
-    # The temporary-app route needs the Graph SDK, which is exactly what breaks
-    # once Exchange has loaded its own MSAL. Say so before the confusing failure.
-    if (Get-Module ExchangeOnlineManagement) {
-        Write-Warning "Exchange Online is already loaded in this session, which usually breaks the Graph SDK sign-in (MSAL version clash). If the next step fails, use -ClientId with -ClientSecret, or run the Graph part in a fresh window."
-    }
-
     try {
-        Write-Host "  Connecting interactively to set up a temporary app registration..." -ForegroundColor Cyan
-        Write-Host "  Required role: Global Administrator or Privileged Role Administrator (one-time setup)" -ForegroundColor DarkGray
-        $connectParams = @{
-            Scopes      = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
-            NoWelcome   = $true
-            ErrorAction = 'Stop'
-        }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams
-        $script:GraphConnected = $true
+        Write-Host "  No app-only Graph access yet - setting up a temporary App Registration." -ForegroundColor Cyan
+        Write-Host "  Required role: Global Administrator or Privileged Role Administrator (one-time)" -ForegroundColor DarkGray
 
-        if (-not $effectiveTenantId) { $effectiveTenantId = (Get-MgContext).TenantId }
+        $script:AdminHeaders = Get-DelegatedTokenByDeviceCode -Tenant $effectiveTenantId `
+                                    -Scopes @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
+        Write-Host "  [OK]   Signed in." -ForegroundColor DarkGray
 
         $appName = "PhishPurge-Temp-$(Get-Date -Format 'yyyyMMddHHmmss')"
         Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
-        $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
-        $script:TempAppObjectId = $app.Id
+        $app = Invoke-GraphAdmin -Method POST -Uri 'https://graph.microsoft.com/v1.0/applications' `
+                    -Body @{ displayName = $appName; signInAudience = 'AzureADMyOrg' }
+        $script:TempAppObjectId = $app.id
 
-        $sp      = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-        $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
-        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Mail.ReadWrite' -and $_.AllowedMemberTypes -contains 'Application' }
+        $sp = Invoke-GraphAdmin -Method POST -Uri 'https://graph.microsoft.com/v1.0/servicePrincipals' `
+                    -Body @{ appId = $app.appId }
+
+        $graphSpResp = Invoke-GraphAdmin -Method GET `
+                    -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '00000003-0000-0000-c000-000000000000'"
+        $graphSp = @($graphSpResp.value)[0]
+        if (-not $graphSp) { throw "Could not resolve the Microsoft Graph service principal." }
+
+        $appRole = @($graphSp.appRoles | Where-Object { $_.value -eq 'Mail.ReadWrite' -and $_.allowedMemberTypes -contains 'Application' })[0]
         if (-not $appRole) { throw "Could not resolve the Mail.ReadWrite application role." }
 
-        New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $sp.Id -PrincipalId $sp.Id -ResourceId $graphSp.Id -AppRoleId $appRole.Id -ErrorAction Stop | Out-Null
+        Invoke-GraphAdmin -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments" `
+            -Body @{ principalId = $sp.id; resourceId = $graphSp.id; appRoleId = $appRole.id } | Out-Null
         Write-Host "  [OK]   Mail.ReadWrite (application) granted." -ForegroundColor DarkGray
 
-        $secret = Add-MgApplicationPassword -ApplicationId $app.Id -PasswordCredential @{
-            displayName = 'temp'
-            endDateTime = (Get-Date).AddHours(2)
-        } -ErrorAction Stop
+        $secret = Invoke-GraphAdmin -Method POST -Uri "https://graph.microsoft.com/v1.0/applications/$($app.id)/addPassword" `
+                    -Body @{ passwordCredential = @{ displayName = 'temp'; endDateTime = (Get-Date).AddHours(2).ToString('o') } }
 
-        $script:TokenBody = @{
-            grant_type    = 'client_credentials'
-            scope         = 'https://graph.microsoft.com/.default'
-            client_id     = $app.AppId
-            client_secret = $secret.SecretText
-        }
-        $script:TokenTenantId = $effectiveTenantId
-
-        # A brand new app registration is not instantly usable - retry the first
-        # token while it propagates.
+        # A brand new registration is not instantly usable - retry the first token
+        # while it propagates.
         $ok = $false
-        for ($i = 1; $i -le 6; $i++) {
-            try { Update-AppOnlyToken; $ok = $true; break }
-            catch {
-                if ($i -lt 6) {
-                    Write-Host "  Waiting for app registration propagation (attempt $i/6)..." -ForegroundColor DarkGray
+        for ($i = 1; $i -le 8; $i++) {
+            try {
+                Get-AppOnlyTokenByRest -Tenant $effectiveTenantId -App $app.appId -Secret $secret.secretText
+                $ok = $true
+                break
+            } catch {
+                if ($i -lt 8) {
+                    Write-Host "  Waiting for the app registration to propagate (attempt $i/8)..." -ForegroundColor DarkGray
                     Start-Sleep -Seconds 5
                 }
             }
