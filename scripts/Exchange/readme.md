@@ -627,16 +627,22 @@ The same three-way pattern as [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps
 |---|-------|---------------|
 | 1 | An app-only Graph session you already established | Nothing — it is used as-is |
 | 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` or `-CertificateThumbprint`) | Your own app with `Mail.ReadWrite` application permission, admin consent granted. **With `-ClientSecret` this is the most robust route** — it takes its token over plain REST and never loads the Graph SDK |
-| 3 | **Automatic** — the script connects interactively, creates a short-lived App Registration, self-grants it `Mail.ReadWrite`, takes an app-only token, and **removes the app again when the run finishes** | Global Administrator or Privileged Role Administrator for that one-time setup, plus `Microsoft.Graph.Applications` |
+| 3 | **Automatic** — device code sign-in, then a short-lived App Registration that self-grants `Mail.ReadWrite`, hands over an app-only token, and is **removed again when the run finishes** | Global Administrator or Privileged Role Administrator for that one-time sign-in. No extra modules |
 
 Route 3 is what happens when you pass nothing, so `-VerifyWithGraph` works out of the box. The delegated role grants the consent, so there is no separate admin-consent screen. If setup fails halfway, the partly-created app is removed before the error is reported — no orphans left in Entra ID.
 
+Routes 2 (with `-ClientSecret`) and 3 are both built on plain REST — device code flow for the sign-in, the Graph REST API for creating and deleting the app registration. **Neither loads the Graph SDK**, which is what lets them work in the same session that already connected to Exchange. Route 3 shows a code to enter at `microsoft.com/devicelogin`:
+
+```
+  ------------------------------------------------------------
+   To sign in, use a web browser to open https://microsoft.com/devicelogin
+   and enter the code ABCD-EFGH to authenticate.
+  ------------------------------------------------------------
+```
+
 > **Exchange and Graph fight over MSAL.** `ExchangeOnlineManagement` and `Microsoft.Graph.Authentication` each bundle their own `Microsoft.Identity.Client`, and .NET loads only the first one a process touches. So a Purview purge (which connects Exchange) followed by `-VerifyWithGraph` in the same window makes the Graph SDK call into an MSAL whose API does not match, and it fails with `Method not found: ... WithLogging(...)` — which looks nothing like the version clash it is.
 >
-> The script detects that specific failure and says so instead of leaving you to read the stack trace. Two ways round it, in order of preference:
->
-> 1. **`-ClientId` with `-ClientSecret`.** This route never loads the Graph SDK, so it works in the same session as Exchange. Route 3 cannot do this — creating an app registration needs the SDK.
-> 2. Run the Graph part in a **fresh PowerShell window** before anything connects to Exchange: `-Engine Graph -Mailbox <addresses>`.
+> Routes 2 (`-ClientSecret`) and 3 sidestep this entirely by never loading the SDK. Only the `-CertificateThumbprint` variant and reusing an existing `Connect-MgGraph` session still go through it, and both report the clash for what it is rather than leaving you to read the stack trace.
 >
 > When `-VerifyWithGraph` is used with the Purview engine, Graph access is established **before** the purge, so a verification that cannot run is reported up front instead of after the messages are gone. The purge still runs either way — a failed verification never means a failed purge.
 
@@ -665,5 +671,7 @@ Route 3 is what happens when you pass nothing, so `-VerifyWithGraph` works out o
 
 ```powershell
 Install-Module ExchangeOnlineManagement       -Scope CurrentUser
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # Graph engine only
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # optional, see below
 ```
+
+Microsoft.Graph.Authentication is only needed to reuse an existing `Connect-MgGraph` session or to use `-CertificateThumbprint`. The `-ClientSecret` and automatic temporary-app routes run on plain REST and need nothing beyond ExchangeOnlineManagement.
