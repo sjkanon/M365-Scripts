@@ -27,8 +27,9 @@
                recipient list, and cannot reach Recoverable Items\Purges, so
                HardDelete is not available here.
 
-    Engine defaults to Graph when -Mailbox is given and Purview otherwise, which
-    matches how these two are normally used. Override with -Engine.
+    Engine defaults to Graph when -Mailbox or -IncludeCalendar is given, and
+    Purview otherwise, which matches how these two are normally used. Override
+    with -Engine.
 
     NOTHING IS DELETED WITHOUT -Apply. Every run without it performs the full
     search and reports precisely what it would have removed.
@@ -101,7 +102,8 @@
     when you want to inspect the search in the Purview portal.
 
 .PARAMETER IncludeCalendar
-    Also remove matching CALENDAR ITEMS, not just mail. Graph engine only.
+    Also remove matching CALENDAR ITEMS, not just mail. Selects the Graph engine
+    automatically, since it is the only one that can do this.
 
     A phishing meeting invitation leaves two things behind: the invitation mail
     and an event in the calendar. Deleting the mail does not remove the event -
@@ -334,14 +336,19 @@ if ($ReceivedAfter -and $ReceivedBefore -and $ReceivedAfter -ge $ReceivedBefore)
     throw "-ReceivedAfter must be earlier than -ReceivedBefore."
 }
 
-if (-not $Engine) { $Engine = if ($Mailbox) { 'Graph' } else { 'Purview' } }
+# -IncludeCalendar only means anything on the Graph engine, so asking for it is
+# itself the choice of engine. Only an explicit -Engine Purview contradicts it.
+$engineWasExplicit = $PSBoundParameters.ContainsKey('Engine')
+if (-not $Engine) {
+    $Engine = if ($Mailbox -or $IncludeCalendar) { 'Graph' } else { 'Purview' }
+}
 
 if ($Engine -eq 'Purview' -and $DeleteType -eq 'Recycle') {
     throw "Purview purge only supports SoftDelete and HardDelete - it cannot move items to Deleted Items. Use -DeleteType SoftDelete, or -Engine Graph with -Mailbox for a Recycle."
 }
 
-if ($Engine -eq 'Purview' -and $IncludeCalendar) {
-    throw "-IncludeCalendar is a Graph-engine feature. Purview's purge acts on whatever the content search matched and cannot be pointed at the calendar specifically. Use -Engine Graph -Mailbox <addresses> for the calendar sweep."
+if ($Engine -eq 'Purview' -and $IncludeCalendar -and $engineWasExplicit) {
+    throw "-Engine Purview and -IncludeCalendar contradict each other: Purview's purge acts on whatever the content search matched and cannot be pointed at the calendar specifically. Drop -Engine Purview to let the calendar sweep run on Graph, or drop -IncludeCalendar."
 }
 
 if ($Engine -eq 'Graph') {
@@ -1179,6 +1186,12 @@ function Invoke-GraphPurge {
         $targets = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox,SharedMailbox |
                         ForEach-Object { $_.PrimarySmtpAddress } | Where-Object { $_ })
         Write-Host "  $($targets.Count) mailbox(es) to check." -ForegroundColor DarkGray
+        # One Graph round trip per mailbox, two with -IncludeCalendar. Worth saying
+        # out loud before someone waits twenty minutes wondering if it hung.
+        $perMailbox = if ($IncludeCalendar) { 2 } else { 1 }
+        if ($targets.Count -gt 50) {
+            Write-Warning "That is $($targets.Count * $perMailbox) Graph queries and will take a while. If you already know which mailboxes were hit - a Purview run lists them - pass those with -Mailbox instead."
+        }
         Write-Host ""
     }
 
