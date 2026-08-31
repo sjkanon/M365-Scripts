@@ -559,6 +559,7 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 | `-Apply` | No | off | **Actually delete.** Without it the script only reports what it found |
 | `-SearchName` | No | `Phish_<timestamp>` | Name of the Content Search to create. Purview requires unique names |
 | `-KeepSearch` | No | off | Keep the Content Search afterwards so you can inspect it in the Purview portal |
+| `-VerifyWithGraph` | No | off | After a Purview purge, check the affected mailboxes over Graph to confirm the messages are really gone. Needs the same app-only Graph session as `-Engine Graph` |
 | `-MaxPurgeRounds` | No | `10` | Purview purges max 10 items per mailbox per action, so the script loops rounds. 10 rounds = up to 100 items per mailbox |
 | `-MaxMessagesPerMailbox` | No | `500` | Graph safety cap per mailbox; hitting it is reported explicitly |
 | `-TimeoutMinutes` | No | `30` | How long to wait for a search or purge action to complete |
@@ -570,6 +571,10 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 ```powershell
 # 1. What would be removed, tenant-wide? (no -Apply = nothing is deleted)
 .\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>"
+
+# 1b. Purge, then confirm over Graph that it is really gone
+.\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>" `
+    -DeleteType HardDelete -Apply -VerifyWithGraph
 
 # 2. Same, now actually purge it beyond user recovery
 .\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>" `
@@ -614,6 +619,8 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 > Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so it cannot be used for the Graph engine — the script warns when it detects a delegated session. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
 
 **Notes**
+- **Nothing in Purview can confirm a purge.** The purge action reports what the service believes it did, and the search index keeps listing purged items for up to ~30 minutes — so re-running the script is not a check. `-VerifyWithGraph` is the only lag-free verification: it re-asks the *same* query the Graph engine deletes on, directly against the mailboxes the search hit. Soft- and hard-deleted items sit in Recoverable Items, which Graph does not list, so a purged message correctly reads as gone
+- Verification distinguishes **"could not check"** from **"clean"**. A mailbox that returns 403 is reported as unverified, never as confirmed. It also never fails the run — a purge that already happened is not reported as failed because the check could not run
 - **Purview cannot show you the individual messages.** Content Search reports item counts per mailbox; the preview action that used to return sender and subject per message is [documented as on-premises only](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/new-compliancesearchaction?view=exchange-ps) since the May 2025 eDiscovery changes. For per-message detail, take the mailbox list from the Purview run and re-run those addresses through `-Engine Graph`
 - **Rounds are planned, not polled.** A purge removes at most 10 items per mailbox per action, so the script computes `ceil(max items per mailbox / 10)` from the first search. It deliberately does *not* loop until the index goes quiet: the index lags a purge by up to ~30 minutes, so that would re-purge the same items and then report a false truncation. What each round actually removed is read back from the purge action itself
 - A single content search purges at most **50,000 mailboxes**; beyond that the script warns and you should batch with `-Mailbox`. Microsoft points at the Graph `ediscoverySearch: purgeData` API (100 items per location) for bulk work
