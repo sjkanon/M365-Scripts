@@ -418,6 +418,7 @@ $script:AppOnlyHeaders  = $null
 $script:TokenBody       = $null
 $script:TokenTenantId   = $null
 $script:TokenExpiry     = [datetime]::MinValue
+$script:AccessToken     = $null
 $script:GraphConnected  = $false
 
 function Remove-TempApp {
@@ -441,6 +442,7 @@ function Update-AppOnlyToken {
     if (-not $script:TokenBody) { return }
     if ($script:AppOnlyHeaders -and (Get-Date) -lt $script:TokenExpiry) { return }
     $resp = Invoke-RestMethod -Method POST -ErrorAction Stop -Body $script:TokenBody -Uri "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token"
+    $script:AccessToken    = $resp.access_token
     $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
     $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
 }
@@ -459,16 +461,112 @@ function Invoke-Graph {
         [string] $ContentType = 'application/json'
     )
 
-    if ($script:AppOnlyHeaders) {
-        Update-AppOnlyToken
-        $params = @{ Method = $Method; Uri = $Uri; Headers = $script:AppOnlyHeaders; ErrorAction = 'Stop' }
-        if ($Body) { $params['Body'] = $Body; $params['ContentType'] = $ContentType }
-        return Invoke-RestMethod @params
-    }
+    # Throttling and gateway hiccups are routine against Graph at this scale and
+    # say nothing about the mailbox. Retrying them keeps a transient 503 from
+    # being reported as a mailbox that could not be checked.
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try {
+            if ($script:AppOnlyHeaders) {
+                Update-AppOnlyToken
+                $params = @{ Method = $Method; Uri = $Uri; Headers = $script:AppOnlyHeaders; ErrorAction = 'Stop' }
+                if ($Body) { $params['Body'] = $Body; $params['ContentType'] = $ContentType }
+                return Invoke-RestMethod @params
+            }
 
-    $params = @{ Method = $Method; Uri = $Uri; OutputType = 'PSObject'; ErrorAction = 'Stop' }
-    if ($Body) { $params['Body'] = $Body; $params['ContentType'] = $ContentType }
-    return Invoke-MgGraphRequest @params
+            $params = @{ Method = $Method; Uri = $Uri; OutputType = 'PSObject'; ErrorAction = 'Stop' }
+            if ($Body) { $params['Body'] = $Body; $params['ContentType'] = $ContentType }
+            return Invoke-MgGraphRequest @params
+
+        } catch {
+            # Captured up front: the status probe below has its own catch,
+            # and a catch block rebinds $_ to its own error.
+            $err = $_
+            $msg = "$($err.Exception.Message)"
+
+            $code = 0
+            try { $code = [int]$err.Exception.Response.StatusCode } catch { $code = 0 }
+            if ($code -eq 0 -and $msg -match '(?<![0-9])(429|503|504)(?![0-9])') {
+                $code = [int]$Matches[1]
+            }
+
+            # Only transient failures are retried. A 401 or 403 never improves
+            # by asking again - a token without the right roles stays that way.
+            if ($attempt -ge 4 -or $code -notin @(429, 503, 504)) { throw $err }
+            Start-Sleep -Seconds ([Math]::Pow(2, $attempt))
+        }
+    }
+}
+
+function Get-TokenRole {
+    <#
+        Reads the roles claim out of an app-only access token.
+
+        A client_credentials token is issued whether or not the app has been
+        granted anything - the permissions simply are not in it. Without this
+        check the run proceeds happily and then 403s on every single mailbox,
+        which looks like a permissions problem with the operator's account
+        rather than an app registration that has not propagated yet.
+    #>
+    param([string] $Jwt)
+
+    try {
+        $payload = $Jwt.Split('.')[1]
+        $payload = $payload.Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) {
+            2 { $payload += '==' }
+            3 { $payload += '=' }
+        }
+        $json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload))
+        return @(($json | ConvertFrom-Json).roles)
+    } catch {
+        return @()
+    }
+}
+
+function Confirm-AppRole {
+    <#
+        Waits until the token actually carries the roles the run needs.
+
+        App role assignments take a while to reach the token service, and a token
+        minted too early is cached for an hour - so a run that does not wait here
+        fails for its whole duration. Re-mints rather than just sleeping, since
+        only a fresh token can pick the roles up.
+    #>
+    param(
+        [string[]] $Required,
+        [int]      $TimeoutSeconds = 180
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $reported = $false
+
+    while ($true) {
+        $have    = Get-TokenRole -Jwt $script:AccessToken
+        $missing = @($Required | Where-Object { $have -notcontains $_ })
+
+        if ($missing.Count -eq 0) {
+            Write-Host "  [OK]   Token carries: $($have -join ', ')" -ForegroundColor DarkGray
+            return $true
+        }
+
+        if ((Get-Date) -ge $deadline) {
+            Write-Warning "The app-only token still lacks $($missing -join ', ') after $TimeoutSeconds seconds. Every mailbox will return 403. Grant those permissions to the app and re-run."
+            return $false
+        }
+
+        if (-not $reported) {
+            Write-Host "  Waiting for the permission grant to reach the token service ($($missing -join ', '))..." -ForegroundColor DarkGray
+            $reported = $true
+        }
+
+        Start-Sleep -Seconds 10
+        # Force a fresh token: the cached one can never gain roles.
+        $script:TokenExpiry    = [datetime]::MinValue
+        $script:AppOnlyHeaders = $null
+        try { Update-AppOnlyToken } catch { }
+    }
 }
 
 function Resolve-EffectiveTenantId {
@@ -653,6 +751,14 @@ function Connect-GraphForMail {
                 return $false
             }
             Write-Host "  [OK]   App-only token obtained (supplied app, REST)." -ForegroundColor DarkGray
+
+            $need = @('Mail.ReadWrite')
+            if ($IncludeCalendar) { $need += 'Calendars.ReadWrite' }
+            $have    = Get-TokenRole -Jwt $script:AccessToken
+            $missing = @($need | Where-Object { $have -notcontains $_ })
+            if ($missing.Count -gt 0) {
+                Write-Warning "App $ClientId has no $($missing -join ', ') application permission (token carries: $(if ($have) { $have -join ', ' } else { 'nothing' })). Every mailbox will return 403 until that is granted and admin-consented."
+            }
             return $true
         }
 
@@ -683,6 +789,9 @@ function Connect-GraphForMail {
         return $false
     }
 
+    $requiredRoles = @('Mail.ReadWrite')
+    if ($IncludeCalendar) { $requiredRoles += 'Calendars.ReadWrite' }
+
     try {
         Write-Host "  No app-only Graph access yet - setting up a temporary App Registration." -ForegroundColor Cyan
         Write-Host "  Required role: Global Administrator or Privileged Role Administrator (one-time)" -ForegroundColor DarkGray
@@ -705,12 +814,17 @@ function Connect-GraphForMail {
         $graphSp = @($graphSpResp.value)[0]
         if (-not $graphSp) { throw "Could not resolve the Microsoft Graph service principal." }
 
-        $appRole = @($graphSp.appRoles | Where-Object { $_.value -eq 'Mail.ReadWrite' -and $_.allowedMemberTypes -contains 'Application' })[0]
-        if (-not $appRole) { throw "Could not resolve the Mail.ReadWrite application role." }
+        # Mail.ReadWrite does not cover calendars - /events and /calendarView need
+        # Calendars.ReadWrite, so it is granted only when the run actually sweeps
+        # the calendar.
+        foreach ($roleName in $requiredRoles) {
+            $appRole = @($graphSp.appRoles | Where-Object { $_.value -eq $roleName -and $_.allowedMemberTypes -contains 'Application' })[0]
+            if (-not $appRole) { throw "Could not resolve the $roleName application role." }
 
-        Invoke-GraphAdmin -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments" `
-            -Body @{ principalId = $sp.id; resourceId = $graphSp.id; appRoleId = $appRole.id } | Out-Null
-        Write-Host "  [OK]   Mail.ReadWrite (application) granted." -ForegroundColor DarkGray
+            Invoke-GraphAdmin -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments" `
+                -Body @{ principalId = $sp.id; resourceId = $graphSp.id; appRoleId = $appRole.id } | Out-Null
+            Write-Host "  [OK]   $roleName (application) granted." -ForegroundColor DarkGray
+        }
 
         $secret = Invoke-GraphAdmin -Method POST -Uri "https://graph.microsoft.com/v1.0/applications/$($app.id)/addPassword" `
                     -Body @{ passwordCredential = @{ displayName = 'temp'; endDateTime = (Get-Date).AddHours(2).ToString('o') } }
@@ -733,6 +847,14 @@ function Connect-GraphForMail {
         if (-not $ok) { throw "Could not obtain an app-only token after propagation retries." }
 
         Write-Host "  [OK]   App-only token obtained (temporary app)." -ForegroundColor DarkGray
+
+        # A token minted before the grant propagated is valid but powerless, and
+        # is then cached for an hour - so wait for the roles rather than 403 on
+        # every mailbox for the rest of the run.
+        if (-not (Confirm-AppRole -Required $requiredRoles)) {
+            Remove-TempApp
+            return $false
+        }
         return $true
 
     } catch {
