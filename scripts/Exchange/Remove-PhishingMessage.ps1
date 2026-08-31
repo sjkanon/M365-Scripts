@@ -226,6 +226,16 @@
                tenant - scope the app with New-ApplicationAccessPolicy if that is
                wider than you want.
 
+               NOTE: ExchangeOnlineManagement and Microsoft.Graph.Authentication
+               each bundle their own Microsoft.Identity.Client, and only the
+               first one loaded in a process is used. A Purview purge connects
+               Exchange first, so the Graph SDK then fails with "Method not
+               found ... WithLogging(...)". The script recognises that and says
+               so. Route 2 with -ClientSecret takes its token over plain REST and
+               never loads the SDK, so it is the one that works in the same
+               session as Exchange; route 3 cannot avoid the SDK because
+               creating an app registration needs it.
+
                GDAP-aware: under a GDAP session ($global:authMode -eq 'GDAP', set
                by Connect-Tenant / load.ps1) -TenantId is resolved from the
                selected customer tenant ($global:cid) when not supplied.
@@ -425,6 +435,67 @@ function Resolve-EffectiveTenantId {
     return $null
 }
 
+function Test-MsalConflict {
+    <#
+        ExchangeOnlineManagement and Microsoft.Graph.Authentication each ship their
+        own Microsoft.Identity.Client (MSAL), and .NET only ever loads one of them
+        per process - whichever module got there first. Connect to Exchange first
+        and the Graph SDK then calls into an MSAL whose API surface does not match,
+        which surfaces as "Method not found" or an assembly load failure rather
+        than as anything resembling an auth problem.
+    #>
+    param($ErrorRecord)
+    $m = "$($ErrorRecord.Exception.Message)"
+    return ($m -match 'Method not found' -or
+            $m -match 'Could not load file or assembly' -or
+            $m -match 'FileLoadException' -or
+            $m -match 'Microsoft\.Identity\.Client' -or
+            $m -match 'Microsoft\.IdentityModel')
+}
+
+function Write-MsalConflictHelp {
+    $exo   = (Get-Module ExchangeOnlineManagement | Select-Object -First 1).Version
+    $graph = (Get-Module Microsoft.Graph.Authentication | Select-Object -First 1).Version
+    Write-Host ""
+    Write-Host "  This is an assembly conflict, not a permissions problem." -ForegroundColor Yellow
+    if ($exo -and $graph) {
+        Write-Host "  ExchangeOnlineManagement $exo and Microsoft.Graph.Authentication $graph each" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  ExchangeOnlineManagement and Microsoft.Graph.Authentication each" -ForegroundColor DarkGray
+    }
+    Write-Host "  bundle a different Microsoft.Identity.Client, and only the first one loaded" -ForegroundColor DarkGray
+    Write-Host "  in a process is used. Connecting to Exchange first breaks the Graph sign-in." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Two ways round it:" -ForegroundColor Yellow
+    Write-Host "    1. Pass -ClientId with -ClientSecret. That path takes its token over plain" -ForegroundColor DarkGray
+    Write-Host "       REST and never touches the Graph SDK, so it works in this same session." -ForegroundColor DarkGray
+    Write-Host "    2. Run the Graph part in a fresh PowerShell window, before anything" -ForegroundColor DarkGray
+    Write-Host "       connects to Exchange:  -Engine Graph -Mailbox <addresses>" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+function Get-AppOnlyTokenByRest {
+    <#
+        client_credentials straight over REST. Deliberately avoids the Graph SDK:
+        that is the whole point, since the SDK is what collides with Exchange's
+        MSAL. Every later Graph call already goes through Invoke-Graph, which uses
+        this bearer token when one is present.
+    #>
+    param(
+        [string] $Tenant,
+        [string] $App,
+        [string] $Secret
+    )
+    $script:TokenBody = @{
+        grant_type    = 'client_credentials'
+        scope         = 'https://graph.microsoft.com/.default'
+        client_id     = $App
+        client_secret = $Secret
+    }
+    $script:TokenTenantId = $Tenant
+    Update-AppOnlyToken
+}
+
 function Connect-GraphForMail {
     <#
         Establishes app-only Mail.ReadWrite, one way or another. Returns $true when
@@ -454,29 +525,46 @@ function Connect-GraphForMail {
             Write-Warning "-ClientId needs -TenantId (or a resolvable GDAP customer tenant)."
             return $false
         }
-        try {
-            if ($CertificateThumbprint) {
-                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
-            } elseif ($ClientSecret) {
-                $cred = [System.Management.Automation.PSCredential]::new($ClientId, (ConvertTo-SecureString $ClientSecret -AsPlainText -Force))
-                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
-            } else {
-                Write-Warning "-ClientId needs -ClientSecret or -CertificateThumbprint."
+        if ($ClientSecret) {
+            # Preferred: no Graph SDK involved, so it survives an already-loaded
+            # Exchange session.
+            try {
+                Get-AppOnlyTokenByRest -Tenant $effectiveTenantId -App $ClientId -Secret $ClientSecret
+            } catch {
+                Write-Warning "Could not obtain a token for the supplied app: $($_.Exception.Message)"
                 return $false
             }
-        } catch {
-            Write-Warning "Could not connect with the supplied app credentials: $($_.Exception.Message)"
-            return $false
+            Write-Host "  [OK]   App-only token obtained (supplied app, REST)." -ForegroundColor DarkGray
+            return $true
         }
-        Write-Host "  [OK]   Connected with the supplied app credentials." -ForegroundColor DarkGray
-        $script:GraphConnected = $true
-        return $true
+
+        if ($CertificateThumbprint) {
+            try {
+                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+            } catch {
+                Write-Warning "Could not connect with the supplied certificate: $($_.Exception.Message)"
+                if (Test-MsalConflict $_) { Write-MsalConflictHelp }
+                return $false
+            }
+            Write-Host "  [OK]   Connected with the supplied certificate." -ForegroundColor DarkGray
+            $script:GraphConnected = $true
+            return $true
+        }
+
+        Write-Warning "-ClientId needs -ClientSecret or -CertificateThumbprint."
+        return $false
     }
 
     # 3. Build a short-lived app, use it, remove it at the end.
     if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
         Write-Warning "Microsoft.Graph.Applications is needed to create the temporary app registration. Install it, or pass -ClientId for your own app."
         return $false
+    }
+
+    # The temporary-app route needs the Graph SDK, which is exactly what breaks
+    # once Exchange has loaded its own MSAL. Say so before the confusing failure.
+    if (Get-Module ExchangeOnlineManagement) {
+        Write-Warning "Exchange Online is already loaded in this session, which usually breaks the Graph SDK sign-in (MSAL version clash). If the next step fails, use -ClientId with -ClientSecret, or run the Graph part in a fresh window."
     }
 
     try {
@@ -538,6 +626,7 @@ function Connect-GraphForMail {
 
     } catch {
         Write-Warning "Temporary app setup failed: $($_.Exception.Message)"
+        if (Test-MsalConflict $_) { Write-MsalConflictHelp }
         Remove-TempApp
         return $false
     }
@@ -1180,6 +1269,19 @@ function Remove-GraphMessage {
 #  Run
 # ══════════════════════════════════════════════════════════════════════════════
 try {
+    # Establish Graph up front when it will be needed, so a verification that
+    # cannot run is known before the purge rather than discovered afterwards -
+    # and so Graph loads its MSAL before Exchange loads a different one.
+    if ($VerifyWithGraph -and $Engine -eq 'Purview') {
+        Write-Host "  Preparing Graph access for verification..." -ForegroundColor DarkGray
+        if (Connect-GraphForMail) {
+            Write-Host ""
+        } else {
+            Write-Warning "Verification will be skipped - the purge still runs. Re-run with -VerifyWithGraph once Graph access works, or check a mailbox directly."
+            Write-Host ""
+        }
+    }
+
     if ($Engine -eq 'Purview') { Invoke-PurviewPurge } else { Invoke-GraphPurge }
 } finally {
     # The temporary app must go before the delegated session that can delete it.
