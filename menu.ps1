@@ -257,6 +257,29 @@ $ExchangeSubmenu = @(
         if ($det -match '^[Yy]') { $p['IncludeDetails'] = $true }
         & "$ROOT\scripts\Exchange\Get-MessageTraceReport.ps1" @p
     }}
+    @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
+        $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
+        $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = @($mbx -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        if ($mid) { $p['MessageId'] = $mid }
+        else {
+            $snd = Read-Host "  Sender address (optional)"
+            $sub = Read-Host "  Subject, wildcards allowed (optional)"
+            if ($snd) { $p['Sender']  = $snd }
+            if ($sub) { $p['Subject'] = $sub }
+        }
+        $del = Read-Host "  Delete type: [S]oftDelete / [H]ardDelete / [R]ecycle [S]"
+        switch -Regex ($del) {
+            '^[Hh]' { $p['DeleteType'] = 'HardDelete' }
+            '^[Rr]' { $p['DeleteType'] = 'Recycle' }
+            default { $p['DeleteType'] = 'SoftDelete' }
+        }
+        # Dry run unless explicitly confirmed - deletion is not undoable on HardDelete.
+        $apply = Read-Host "  Actually DELETE? Type DELETE to confirm, anything else = dry run"
+        if ($apply -ceq 'DELETE') { $p['Apply'] = $true }
+        & "$ROOT\scripts\Exchange\Remove-PhishingMessage.ps1" @p
+    }}
 )
 
 $EntraSubmenu = @(

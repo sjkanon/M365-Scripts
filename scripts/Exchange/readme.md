@@ -19,6 +19,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Get-ExternalForwards.ps1`](#get-externalforwardsps1) | Audit mailboxes with external forwarding |
 | [`Get-MailboxSizes.ps1`](#get-mailboxsizesps1) | Report mailbox sizes and item counts |
 | [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Trace who received what, at what exact time, and where it was forwarded to |
+| [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
 
 ---
 
@@ -513,4 +514,115 @@ Uses `Get-MessageTraceV2` when available and falls back to the retired `Get-Mess
 
 ```powershell
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
+```
+
+---
+
+### Remove-PhishingMessage.ps1
+
+Incident-response companion to `Get-MessageTraceReport.ps1`: the trace tells you **who received** the phish, this script **removes it again**. Dry-run by default — nothing is deleted without `-Apply`.
+
+**Two engines**
+
+| Engine | How it finds messages | Use it when |
+|--------|----------------------|-------------|
+| `Purview` | One KQL Content Search across the tenant, then `New-ComplianceSearchAction -Purge` | You do **not** know the recipients, or you need a **HardDelete** |
+| `Graph` | Enumerates each target mailbox over the Graph mail API and deletes message by message | You **do** know the recipients (from the trace) and want it gone **now**, with a per-message report |
+
+Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Override with `-Engine`.
+
+> **Why two engines.** Purview reads the **search index**, which lags delivery by roughly 15–30 minutes — a purge fired straight after the phish lands can honestly report *0 hits* and still leave the message sitting in every inbox. Graph queries the mailbox directly and has no such lag, but it needs the recipient list and cannot write to `Recoverable Items\Purges`, so it cannot hard-delete. During a live campaign the usual sequence is: trace → **Graph** the known recipients immediately → **Purview** sweep tenant-wide half an hour later to catch the rest.
+
+**Delete types**
+
+| Value | Lands in | User can recover? | Engines |
+|-------|----------|-------------------|---------|
+| `Recycle` | Deleted Items | Yes, trivially | Graph |
+| `SoftDelete` *(default)* | `Recoverable Items\Deletions` | Yes, via "Recover deleted items" | Both |
+| `HardDelete` | `Recoverable Items\Purges` | No — retained only if the mailbox is on hold | Purview |
+
+**Parameters**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `-Mailbox` | No | — | Target mailbox address(es). Required for Graph unless `-AllMailboxes`. Omitted on Purview = every mailbox in the tenant |
+| `-AllMailboxes` | No | off | Sweep every mailbox. Implicit for Purview; for Graph this is one query per mailbox and is slow |
+| `-MessageId` | No | — | Internet MessageId, with or without angle brackets. **The precise selector** — matches that one message and nothing else |
+| `-SenderAddress` | No | — | Sender address. Aliased as `-Sender` (`$Sender` is a PowerShell automatic variable) |
+| `-Subject` | No | — | Purview matches this as an indexed phrase; Graph matches client-side and accepts wildcards |
+| `-AttachmentName` | No | — | Attachment filename, wildcards allowed (e.g. `*.html`) |
+| `-BodyContains` | No | — | Word or phrase in the body. **Purview only** — Graph would have to download every body |
+| `-ReceivedAfter` | No | — | Only messages received at or after this moment (local time) |
+| `-ReceivedBefore` | No | — | Only messages received at or before this moment (local time) |
+| `-Engine` | No | see above | `Purview` or `Graph` |
+| `-DeleteType` | No | `SoftDelete` | `Recycle`, `SoftDelete` or `HardDelete` (see table above) |
+| `-Apply` | No | off | **Actually delete.** Without it the script only reports what it found |
+| `-SearchName` | No | `Phish_<timestamp>` | Name of the Content Search to create. Purview requires unique names |
+| `-KeepSearch` | No | off | Keep the Content Search afterwards so you can inspect it in the Purview portal |
+| `-MaxPurgeRounds` | No | `10` | Purview purges max 10 items per mailbox per action, so the script loops rounds. 10 rounds = up to 100 items per mailbox |
+| `-MaxMessagesPerMailbox` | No | `500` | Graph safety cap per mailbox; hitting it is reported explicitly |
+| `-TimeoutMinutes` | No | `30` | How long to wait for a search or purge action to complete |
+| `-OutputPath` | No | `C:\Temp\` / `~/Downloads` | CSV report path |
+| `-TenantId` | No | — | Tenant ID or domain, used when the script has to connect itself |
+
+**Examples**
+
+```powershell
+# 1. What would be removed, tenant-wide? (no -Apply = nothing is deleted)
+.\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>"
+
+# 2. Same, now actually purge it beyond user recovery
+.\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>" `
+    -DeleteType HardDelete -Apply
+
+# 3. Known recipients from the message trace — immediate, no index lag
+.\Remove-PhishingMessage.ps1 `
+    -Mailbox "a@contoso.com","b@contoso.com" `
+    -Sender  "no-reply@evil.example" `
+    -Subject "*password expires*" `
+    -Apply
+
+# 4. Campaign sweep: everything from one sender in a window, tenant-wide
+.\Remove-PhishingMessage.ps1 -Sender "no-reply@evil.example" `
+    -ReceivedAfter (Get-Date "2026-08-30") -DeleteType HardDelete -Apply
+
+# 5. HTML attachment campaign
+.\Remove-PhishingMessage.ps1 -AttachmentName "*.html" `
+    -Sender "billing@evil.example" -Apply
+```
+
+**Typical incident flow**
+
+```powershell
+# Who got it, and where did it go?
+.\Get-MessageTraceReport.ps1 -Sender "no-reply@evil.example" -Days 2 -ResolveSiblings
+
+# Pull it from the known recipients right now (no index lag)
+.\Remove-PhishingMessage.ps1 -Mailbox $recipients -MessageId "<abc123@evil.example>" -Apply
+
+# ~30 minutes later, sweep the tenant for anything the trace missed
+.\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>" -DeleteType HardDelete -Apply
+```
+
+**Required permissions**
+
+| Engine | Permission |
+|--------|-----------|
+| `Purview` | Membership of the **Search And Purge** role — in practice the *Organization Management* or *eDiscovery Manager* role group in the Purview compliance portal. Connects via `Connect-IPPSSession` |
+| `Graph` | An **app-only** Graph session with the `Mail.ReadWrite` **application** permission. Connect first: `Connect-MgGraph -TenantId <tenant> -ClientId <appid> -CertificateThumbprint <thumb>` |
+
+> Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so it cannot be used for the Graph engine — the script warns when it detects a delegated session. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
+
+**Notes**
+- The script **refuses to run** without at least one of `-MessageId`, `-SenderAddress`, `-Subject`, `-AttachmentName` or `-BodyContains` — a date range on its own would match every message in every mailbox
+- **Index lag** (Purview only): a message delivered in the last ~30 minutes may not be searchable yet. A `0 hits` result straight after delivery is not proof the phish is gone — wait and re-run, or use the Graph engine
+- Purge covers the **primary mailbox only** — neither engine reaches the archive mailbox
+- KQL has no wildcard-in-phrase support, so `-Subject "*invoice*"` has its wildcards stripped on the Purview engine and is matched as a phrase; on Graph the wildcards work as written
+- Every run writes a CSV report of what was matched and what was deleted
+
+**Required modules**
+
+```powershell
+Install-Module ExchangeOnlineManagement       -Scope CurrentUser
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # Graph engine only
 ```
