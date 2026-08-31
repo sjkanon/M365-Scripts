@@ -565,6 +565,9 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 | `-TimeoutMinutes` | No | `30` | How long to wait for a search or purge action to complete |
 | `-OutputPath` | No | `C:\Temp\` / `~/Downloads` | CSV report path |
 | `-TenantId` | No | — | Tenant ID or domain, used when the script has to connect itself |
+| `-ClientId` | No | — | Your own App Registration for app-only Graph auth — skips the automatic temporary app |
+| `-ClientSecret` | No | — | Client secret for `-ClientId` |
+| `-CertificateThumbprint` | No | — | Certificate thumbprint for `-ClientId` |
 
 **Examples**
 
@@ -614,9 +617,23 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 | Engine | Permission |
 |--------|-----------|
 | `Purview` | Membership of the **Search And Purge** role — in practice the *Organization Management* or *eDiscovery Manager* role group in the Purview compliance portal. Connects via `Connect-IPPSSession -EnableSearchOnlySession` |
-| `Graph` | An **app-only** Graph session with the `Mail.ReadWrite` **application** permission. Connect first: `Connect-MgGraph -TenantId <tenant> -ClientId <appid> -CertificateThumbprint <thumb>` |
+| `Graph` | App-only `Mail.ReadWrite`. **You do not have to arrange this yourself** — see the three routes below |
 
-> Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so it cannot be used for the Graph engine — the script warns when it detects a delegated session. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
+**How the Graph engine (and `-VerifyWithGraph`) gets its access**
+
+The same three-way pattern as [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) and the SharePoint reporting scripts, tried in order:
+
+| # | Route | What it needs |
+|---|-------|---------------|
+| 1 | An app-only Graph session you already established | Nothing — it is used as-is |
+| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` or `-CertificateThumbprint`) | Your own app with `Mail.ReadWrite` application permission, admin consent granted |
+| 3 | **Automatic** — the script connects interactively, creates a short-lived App Registration, self-grants it `Mail.ReadWrite`, takes an app-only token, and **removes the app again when the run finishes** | Global Administrator or Privileged Role Administrator for that one-time setup, plus `Microsoft.Graph.Applications` |
+
+Route 3 is what happens when you pass nothing, so `-VerifyWithGraph` works out of the box. The delegated role grants the consent, so there is no separate admin-consent screen. If setup fails halfway, the partly-created app is removed before the error is reported — no orphans left in Entra ID.
+
+> Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so a delegated session is deliberately **not** accepted for the Graph engine; the script falls through to route 2 or 3 instead. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
+
+> GDAP-aware: under a GDAP session (`$global:authMode -eq 'GDAP'`, set by `Connect-Tenant` / `load.ps1`) `-TenantId` is resolved from the selected customer tenant, same as the SharePoint scripts.
 
 **Notes**
 - **Nothing in Purview can confirm a purge.** The purge action reports what the service believes it did, and the search index keeps listing purged items for up to ~30 minutes — so re-running the script is not a check. `-VerifyWithGraph` is the only lag-free verification: it re-asks the *same* query the Graph engine deletes on, directly against the mailboxes the search hit. Soft- and hard-deleted items sit in Recoverable Items, which Graph does not list, so a purged message correctly reads as gone

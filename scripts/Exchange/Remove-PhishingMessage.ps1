@@ -128,8 +128,22 @@
     CSV report path. Defaults to C:\Temp\ (Windows) or ~/Downloads.
 
 .PARAMETER TenantId
-    Tenant ID or domain, passed to Connect-ExchangeOnline / Connect-IPPSSession
-    when the script has to establish the connection itself.
+    Entra ID tenant - either the tenant ID (GUID) or a verified domain of the
+    tenant (e.g. contoso.com). Passed to Connect-ExchangeOnline /
+    Connect-IPPSSession when the script has to connect itself, and required for
+    app-only Graph auth unless it can be resolved from a GDAP customer context.
+
+.PARAMETER ClientId
+    Existing App Registration client ID for app-only Graph auth - skips the
+    automatic temporary app. Use with -TenantId and -ClientSecret or
+    -CertificateThumbprint. That app must already have Mail.ReadWrite application
+    permission with admin consent granted.
+
+.PARAMETER ClientSecret
+    Client secret for the app registration given in -ClientId.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for the app registration given in -ClientId.
 
 .EXAMPLE
     # What would be removed, tenant-wide? (no deletion - no -Apply)
@@ -189,16 +203,33 @@
                starting the script and did not pass it, the session cannot be
                repaired from inside the process - open a new PowerShell window.
 
-      Graph    An app-only Graph session with the Mail.ReadWrite APPLICATION
-               permission. Delegated Mail.ReadWrite only ever reaches your own
-               mailbox, so it cannot be used here. Connect first, then run:
+      Graph    Needs app-only Mail.ReadWrite; delegated Mail.ReadWrite only ever
+               reaches your own mailbox. You do not have to arrange that
+               yourself - the script handles it the same way
+               Move-InboxToArchive.ps1 and the SharePoint reporting scripts do:
 
-                 Connect-MgGraph -TenantId <tenant> -ClientId <appid> `
-                     -CertificateThumbprint <thumb>
+                 1. An app-only Graph session you already established is used
+                    as-is.
+                 2. -ClientId with -ClientSecret or -CertificateThumbprint uses
+                    your own App Registration (needs Mail.ReadWrite application
+                    permission, admin consent granted).
+                 3. Otherwise the script connects interactively, creates a
+                    short-lived temporary App Registration, self-grants it
+                    Mail.ReadWrite application permission (the delegated role
+                    does the consent, so no separate consent screen), takes an
+                    app-only token with it, and removes the temporary app again
+                    when the run finishes. Needs Global Administrator or
+                    Privileged Role Administrator for that one-time setup, plus
+                    the Microsoft.Graph.Applications module.
 
                Mail.ReadWrite (application) grants access to every mailbox in the
                tenant - scope the app with New-ApplicationAccessPolicy if that is
                wider than you want.
+
+               GDAP-aware: under a GDAP session ($global:authMode -eq 'GDAP', set
+               by Connect-Tenant / load.ps1) -TenantId is resolved from the
+               selected customer tenant ($global:cid) when not supplied.
+               $env:M365_CUSTOMER_TENANTID / $env:M365_AUTH_MODE are honored too.
 
     Index lag (Purview only): a message delivered minutes ago may not be
     searchable yet, so a purge run straight after delivery can report 0 hits and
@@ -242,7 +273,10 @@ param(
     [int]      $MaxMessagesPerMailbox = 500,
     [int]      $TimeoutMinutes = 30,
     [string]   $OutputPath,
-    [string]   $TenantId
+    [string]   $TenantId,
+    [string]   $ClientId,
+    [string]   $ClientSecret,
+    [string]   $CertificateThumbprint
 )
 
 # ── Criteria validation ───────────────────────────────────────────────────────
@@ -309,9 +343,205 @@ Write-Host ""
 
 $results             = [System.Collections.Generic.List[PSObject]]::new()
 $script:ConnectedIpps    = $false
+$script:ConnectedExo     = $false
 $script:ReusedIppsSession = $false
 $script:TotalPurged       = 0
 $script:Truncated     = $false
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Graph connection
+#
+#  Same three-way pattern as Move-InboxToArchive.ps1 and the SharePoint reporting
+#  scripts: reuse an app-only session, or use your own app, or build a short-lived
+#  one and tear it down afterwards.
+# ══════════════════════════════════════════════════════════════════════════════
+$script:TempAppObjectId = $null
+$script:AppOnlyHeaders  = $null
+$script:TokenBody       = $null
+$script:TokenTenantId   = $null
+$script:TokenExpiry     = [datetime]::MinValue
+$script:GraphConnected  = $false
+
+function Remove-TempApp {
+    <#
+        Deleting the temp app needs the delegated session's
+        Application.ReadWrite.All - the app-only token only ever holds
+        Mail.ReadWrite - so this must run before that session is disconnected.
+    #>
+    if (-not $script:TempAppObjectId) { return }
+    Write-Host "  Removing temporary App Registration..." -ForegroundColor DarkGray
+    try {
+        Remove-MgApplication -ApplicationId $script:TempAppObjectId -ErrorAction Stop
+        Write-Host "  [OK]   Temporary App Registration removed." -ForegroundColor DarkGray
+    } catch {
+        Write-Warning "Could not remove the temporary App Registration (object ID $($script:TempAppObjectId)). Remove it by hand in Entra ID > App registrations."
+    }
+    $script:TempAppObjectId = $null
+}
+
+function Update-AppOnlyToken {
+    if (-not $script:TokenBody) { return }
+    if ($script:AppOnlyHeaders -and (Get-Date) -lt $script:TokenExpiry) { return }
+    $resp = Invoke-RestMethod -Method POST -ErrorAction Stop -Body $script:TokenBody -Uri "https://login.microsoftonline.com/$($script:TokenTenantId)/oauth2/v2.0/token"
+    $script:AppOnlyHeaders = @{ Authorization = "Bearer $($resp.access_token)" }
+    $script:TokenExpiry    = (Get-Date).AddSeconds($resp.expires_in - 300)
+}
+
+function Invoke-Graph {
+    <#
+        One entry point for every Graph call, so the temporary-app mode (a raw
+        bearer token, because the delegated session has to stay connected to clean
+        the app up afterwards) and a normal Connect-MgGraph session look identical
+        to callers.
+    #>
+    param(
+        [string] $Method = 'GET',
+        [Parameter(Mandatory)] [string] $Uri,
+        $Body,
+        [string] $ContentType = 'application/json'
+    )
+
+    if ($script:AppOnlyHeaders) {
+        Update-AppOnlyToken
+        $params = @{ Method = $Method; Uri = $Uri; Headers = $script:AppOnlyHeaders; ErrorAction = 'Stop' }
+        if ($Body) { $params['Body'] = $Body; $params['ContentType'] = $ContentType }
+        return Invoke-RestMethod @params
+    }
+
+    $params = @{ Method = $Method; Uri = $Uri; OutputType = 'PSObject'; ErrorAction = 'Stop' }
+    if ($Body) { $params['Body'] = $Body; $params['ContentType'] = $ContentType }
+    return Invoke-MgGraphRequest @params
+}
+
+function Resolve-EffectiveTenantId {
+    # GDAP-aware, matching Get-SharePointStorageReport.ps1 / Move-InboxToArchive.ps1.
+    if ($TenantId) { return $TenantId }
+    try {
+        $gdap = ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') -or
+                ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP')
+        if ($gdap -and $global:cid)      { return [string]$global:cid }
+        if ($env:M365_CUSTOMER_TENANTID) { return [string]$env:M365_CUSTOMER_TENANTID }
+    } catch {}
+    return $null
+}
+
+function Connect-GraphForMail {
+    <#
+        Establishes app-only Mail.ReadWrite, one way or another. Returns $true when
+        Graph is usable. Callers decide whether failure is fatal: the Graph engine
+        cannot run without it, verification just skips.
+    #>
+    if ($script:GraphConnected -or $script:AppOnlyHeaders) { return $true }
+
+    if (-not (Get-Command Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+        Write-Warning "Microsoft.Graph.Authentication is not available. Install-Module Microsoft.Graph.Authentication"
+        return $false
+    }
+
+    # 1. An app-only session the caller already established.
+    $ctx = Get-MgContext -ErrorAction SilentlyContinue
+    if ($ctx -and $ctx.AuthType -eq 'AppOnly') {
+        Write-Host "  [OK]   Using the existing app-only Graph session." -ForegroundColor DarkGray
+        $script:GraphConnected = $true
+        return $true
+    }
+
+    $effectiveTenantId = Resolve-EffectiveTenantId
+
+    # 2. Your own app registration.
+    if ($ClientId) {
+        if (-not $effectiveTenantId) {
+            Write-Warning "-ClientId needs -TenantId (or a resolvable GDAP customer tenant)."
+            return $false
+        }
+        try {
+            if ($CertificateThumbprint) {
+                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+            } elseif ($ClientSecret) {
+                $cred = [System.Management.Automation.PSCredential]::new($ClientId, (ConvertTo-SecureString $ClientSecret -AsPlainText -Force))
+                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+            } else {
+                Write-Warning "-ClientId needs -ClientSecret or -CertificateThumbprint."
+                return $false
+            }
+        } catch {
+            Write-Warning "Could not connect with the supplied app credentials: $($_.Exception.Message)"
+            return $false
+        }
+        Write-Host "  [OK]   Connected with the supplied app credentials." -ForegroundColor DarkGray
+        $script:GraphConnected = $true
+        return $true
+    }
+
+    # 3. Build a short-lived app, use it, remove it at the end.
+    if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
+        Write-Warning "Microsoft.Graph.Applications is needed to create the temporary app registration. Install it, or pass -ClientId for your own app."
+        return $false
+    }
+
+    try {
+        Write-Host "  Connecting interactively to set up a temporary app registration..." -ForegroundColor Cyan
+        Write-Host "  Required role: Global Administrator or Privileged Role Administrator (one-time setup)" -ForegroundColor DarkGray
+        $connectParams = @{
+            Scopes      = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
+            NoWelcome   = $true
+            ErrorAction = 'Stop'
+        }
+        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
+        Connect-MgGraph @connectParams
+        $script:GraphConnected = $true
+
+        if (-not $effectiveTenantId) { $effectiveTenantId = (Get-MgContext).TenantId }
+
+        $appName = "PhishPurge-Temp-$(Get-Date -Format 'yyyyMMddHHmmss')"
+        Write-Host "  Creating temporary App Registration '$appName'..." -ForegroundColor Cyan
+        $app = New-MgApplication -DisplayName $appName -ErrorAction Stop
+        $script:TempAppObjectId = $app.Id
+
+        $sp      = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+        $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+        $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq 'Mail.ReadWrite' -and $_.AllowedMemberTypes -contains 'Application' }
+        if (-not $appRole) { throw "Could not resolve the Mail.ReadWrite application role." }
+
+        New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $sp.Id -PrincipalId $sp.Id -ResourceId $graphSp.Id -AppRoleId $appRole.Id -ErrorAction Stop | Out-Null
+        Write-Host "  [OK]   Mail.ReadWrite (application) granted." -ForegroundColor DarkGray
+
+        $secret = Add-MgApplicationPassword -ApplicationId $app.Id -PasswordCredential @{
+            displayName = 'temp'
+            endDateTime = (Get-Date).AddHours(2)
+        } -ErrorAction Stop
+
+        $script:TokenBody = @{
+            grant_type    = 'client_credentials'
+            scope         = 'https://graph.microsoft.com/.default'
+            client_id     = $app.AppId
+            client_secret = $secret.SecretText
+        }
+        $script:TokenTenantId = $effectiveTenantId
+
+        # A brand new app registration is not instantly usable - retry the first
+        # token while it propagates.
+        $ok = $false
+        for ($i = 1; $i -le 6; $i++) {
+            try { Update-AppOnlyToken; $ok = $true; break }
+            catch {
+                if ($i -lt 6) {
+                    Write-Host "  Waiting for app registration propagation (attempt $i/6)..." -ForegroundColor DarkGray
+                    Start-Sleep -Seconds 5
+                }
+            }
+        }
+        if (-not $ok) { throw "Could not obtain an app-only token after propagation retries." }
+
+        Write-Host "  [OK]   App-only token obtained (temporary app)." -ForegroundColor DarkGray
+        return $true
+
+    } catch {
+        Write-Warning "Temporary app setup failed: $($_.Exception.Message)"
+        Remove-TempApp
+        return $false
+    }
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Purview engine
@@ -634,12 +864,8 @@ function Test-PurgeWithGraph {
     Write-Host ""
     Write-Host "  -- Verifying over Graph --" -ForegroundColor Cyan
 
-    if (-not (Get-Command Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
-        Write-Warning "Cannot verify: Microsoft.Graph.Authentication is not loaded. The purge itself is unaffected."
-        return
-    }
-    if (-not (Get-MgContext)) {
-        Write-Warning "Cannot verify: no Graph session. Connect app-only (see .NOTES) and re-run with -VerifyWithGraph. The purge itself is unaffected."
+    if (-not (Connect-GraphForMail)) {
+        Write-Warning "Cannot verify: no app-only Graph access could be established (see .NOTES). The purge itself is unaffected - nothing here says it failed."
         return
     }
 
@@ -738,24 +964,25 @@ function Read-ComplianceSuccessResults {
 # ══════════════════════════════════════════════════════════════════════════════
 function Invoke-GraphPurge {
 
-    if (-not (Get-Command Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
-        throw "Microsoft.Graph.Authentication is not loaded. Install-Module Microsoft.Graph.Authentication, then connect app-only (see .NOTES)."
-    }
-    $ctx = Get-MgContext
-    if (-not $ctx) {
-        throw "No Graph session. Connect app-only first, e.g. Connect-MgGraph -TenantId <tenant> -ClientId <appid> -CertificateThumbprint <thumb> (needs Mail.ReadWrite application permission)."
-    }
-    if ($ctx.AuthType -ne 'AppOnly') {
-        Write-Warning "The Graph session is delegated ($($ctx.AuthType)). Delegated Mail.ReadWrite only reaches your own mailbox - other mailboxes will fail with 403."
+    if (-not (Connect-GraphForMail)) {
+        throw "The Graph engine needs app-only Mail.ReadWrite and none could be established. See .NOTES for the three ways to supply it."
     }
 
     # ── Target mailboxes ──────────────────────────────────────────────────────
+    # Mailboxes come from Exchange Online, not Graph /users: enumerating users
+    # would need User.Read.All on top of Mail.ReadWrite, and Get-EXOMailbox
+    # answers the question that actually matters - which mailboxes exist.
     $targets = @($Mailbox)
     if ($AllMailboxes) {
         Write-Host "  Enumerating mailboxes..." -ForegroundColor DarkGray
-        $targets = @(Get-GraphPaged -Uri "https://graph.microsoft.com/v1.0/users?`$select=userPrincipalName,mail&`$filter=accountEnabled eq true&`$top=999" -MaxItems 100000 |
-                        ForEach-Object { if ($_.mail) { $_.mail } else { $_.userPrincipalName } } |
-                        Where-Object { $_ })
+        if (-not (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue)) {
+            $exoParams = @{ ShowBanner = $false; ErrorAction = 'Stop' }
+            if ($TenantId) { $exoParams['Organization'] = $TenantId }
+            Connect-ExchangeOnline @exoParams
+            $script:ConnectedExo = $true
+        }
+        $targets = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox,SharedMailbox |
+                        ForEach-Object { $_.PrimarySmtpAddress } | Where-Object { $_ })
         Write-Host "  $($targets.Count) mailbox(es) to check." -ForegroundColor DarkGray
         Write-Host ""
     }
@@ -880,7 +1107,7 @@ function Get-GraphPaged {
     $items = [System.Collections.Generic.List[PSObject]]::new()
     $next  = $Uri
     while ($next -and $items.Count -lt $MaxItems) {
-        $resp = Invoke-MgGraphRequest -Method GET -Uri $next -OutputType PSObject -ErrorAction Stop
+        $resp = Invoke-Graph -Method GET -Uri $next
         foreach ($v in @($resp.value)) {
             $items.Add($v)
             if ($items.Count -ge $MaxItems) { break }
@@ -897,8 +1124,7 @@ function Test-GraphAttachmentName {
         [string] $Pattern
     )
     try {
-        $atts = Invoke-MgGraphRequest -Method GET -OutputType PSObject -ErrorAction Stop `
-                    -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($Mailbox))/messages/$MessageId/attachments?`$select=name"
+        $atts = Invoke-Graph -Method GET -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($Mailbox))/messages/$MessageId/attachments?`$select=name"
         foreach ($a in @($atts.value)) {
             if ($a.name -like $Pattern) { return $true }
         }
@@ -923,7 +1149,7 @@ function Resolve-GraphFolderName {
     $name = $FolderId
     try {
         $folderUri = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($Mailbox))/mailFolders/" + $FolderId + '?$select=displayName'
-        $f = Invoke-MgGraphRequest -Method GET -OutputType PSObject -ErrorAction Stop -Uri $folderUri
+        $f = Invoke-Graph -Method GET -Uri $folderUri
         if ($f.displayName) { $name = $f.displayName }
     } catch {}
 
@@ -940,14 +1166,13 @@ function Remove-GraphMessage {
 
     if ($DeleteType -eq 'Recycle') {
         # DELETE on a message moves it to Deleted Items rather than destroying it.
-        Invoke-MgGraphRequest -Method DELETE -Uri $base -ErrorAction Stop | Out-Null
+        Invoke-Graph -Method DELETE -Uri $base | Out-Null
     } else {
         # SoftDelete: straight into Recoverable Items\Deletions, so it leaves the
         # visible mailbox but the user can still restore it if this was a false
         # positive.
-        Invoke-MgGraphRequest -Method POST -Uri "$base/move" -ErrorAction Stop `
-            -Body (@{ destinationId = 'recoverableitemsdeletions' } | ConvertTo-Json) `
-            -ContentType 'application/json' | Out-Null
+        Invoke-Graph -Method POST -Uri "$base/move" `
+            -Body (@{ destinationId = 'recoverableitemsdeletions' } | ConvertTo-Json) | Out-Null
     }
 }
 
@@ -957,7 +1182,10 @@ function Remove-GraphMessage {
 try {
     if ($Engine -eq 'Purview') { Invoke-PurviewPurge } else { Invoke-GraphPurge }
 } finally {
-    if ($script:ConnectedIpps) {
+    # The temporary app must go before the delegated session that can delete it.
+    Remove-TempApp
+    if ($script:GraphConnected) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    if ($script:ConnectedIpps -or $script:ConnectedExo) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
     }
 }
