@@ -529,7 +529,7 @@ Incident-response companion to `Get-MessageTraceReport.ps1`: the trace tells you
 | `Purview` | One KQL Content Search across the tenant, then `New-ComplianceSearchAction -Purge` | You do **not** know the recipients, or you need a **HardDelete**. Reports counts **per mailbox**, not individual messages |
 | `Graph` | Enumerates each target mailbox over the Graph mail API and deletes message by message | You **do** know the recipients (from the trace) and want it gone **now**, with a per-message report |
 
-Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Override with `-Engine`.
+Engine defaults to `Graph` when `-Mailbox` or `-IncludeCalendar` is given, and `Purview` otherwise. Override with `-Engine`.
 
 > **Why two engines.** Purview reads the **search index**, which lags delivery by roughly 15–30 minutes — a purge fired straight after the phish lands can honestly report *0 hits* and still leave the message sitting in every inbox. Graph queries the mailbox directly and has no such lag, but it needs the recipient list and cannot write to `Recoverable Items\Purges`, so it cannot hard-delete. During a live campaign the usual sequence is: trace → **Graph** the known recipients immediately → **Purview** sweep tenant-wide half an hour later to catch the rest.
 
@@ -559,7 +559,7 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 | `-Apply` | No | off | **Actually delete.** Without it the script only reports what it found |
 | `-SearchName` | No | `Phish_<timestamp>` | Name of the Content Search to create. Purview requires unique names |
 | `-KeepSearch` | No | off | Keep the Content Search afterwards so you can inspect it in the Purview portal |
-| `-IncludeCalendar` | No | off | Also remove matching **calendar items**, not just mail. Graph engine only; needs `-Subject` or `-SenderAddress` |
+| `-IncludeCalendar` | No | off | Also remove matching **calendar items**, not just mail. **Selects the Graph engine automatically**; needs `-Subject` or `-SenderAddress` |
 | `-CalendarDaysBack` | No | `30` | How far back to scan the calendar |
 | `-CalendarDaysForward` | No | `365` | How far forward to scan the calendar |
 | `-VerifyWithGraph` | No | off | After a Purview purge, check the affected mailboxes over Graph to confirm the messages are really gone. Needs the same app-only Graph session as `-Engine Graph` |
