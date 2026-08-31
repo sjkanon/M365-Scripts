@@ -931,6 +931,7 @@ function Invoke-PurviewPurge {
         } catch {}
 
         Write-Host "  Purge round $round : removing up to 10 item(s) per mailbox ($DeleteType)..." -ForegroundColor Yellow
+        Write-Host "  Purview runs this server-side and it commonly takes several minutes." -ForegroundColor DarkGray
         New-ComplianceSearchAction -SearchName $SearchName -Purge -PurgeType $DeleteType -Confirm:$false -ErrorAction Stop | Out-Null
 
         $action = Wait-ForComplianceState -Getter { Get-ComplianceSearchAction -Identity $purgeActionName -Details -ErrorAction Stop } `
@@ -997,11 +998,43 @@ function Wait-ForComplianceState {
         [nullable[datetime]] $NewerThan
     )
 
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $started      = Get-Date
+    $deadline     = $started.AddMinutes($TimeoutMinutes)
+    $lastReport   = $started
+    $lastStatus   = ''
+    $getterErrors = 0
+
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 5
-        try { $obj = & $Getter } catch { continue }
-        switch ("$($obj.Status)") {
+
+        try {
+            $obj = & $Getter
+            $getterErrors = 0
+        } catch {
+            # Transient read failures are normal while a job spins up, but a run
+            # of them means something else is wrong - do not sit silent on it.
+            $getterErrors++
+            if ($getterErrors -eq 6) {
+                Write-Warning "Cannot read the state of $Label (6 attempts): $($_.Exception.Message). Still retrying until the timeout."
+            }
+            continue
+        }
+
+        $status  = "$($obj.Status)"
+        $elapsed = [int]((Get-Date) - $started).TotalSeconds
+
+        # Purview jobs routinely take minutes. Without this the console sits
+        # completely still and the run looks hung.
+        if ($status -ne $lastStatus -or ((Get-Date) - $lastReport).TotalSeconds -ge 15) {
+            $mins = [int]($elapsed / 60)
+            $secs = $elapsed % 60
+            Write-Host ("      {0,-12} {1}m{2:00}s elapsed (waiting on {3}, times out at {4} min)" -f
+                            $status, $mins, $secs, $Label, $TimeoutMinutes) -ForegroundColor DarkGray
+            $lastReport = Get-Date
+            $lastStatus = $status
+        }
+
+        switch ($status) {
             'Completed' {
                 if ($NewerThan -and $obj.JobEndTime -and [datetime]$obj.JobEndTime -le $NewerThan) {
                     continue   # previous run's result, the restart has not landed yet
@@ -1014,7 +1047,7 @@ function Wait-ForComplianceState {
             }
         }
     }
-    Write-Warning "$Label did not complete within $TimeoutMinutes minute(s)."
+    Write-Warning "$Label did not complete within $TimeoutMinutes minute(s). It may still finish server-side - check the Purview portal, or raise -TimeoutMinutes."
     return $null
 }
 
