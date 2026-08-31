@@ -526,7 +526,7 @@ Incident-response companion to `Get-MessageTraceReport.ps1`: the trace tells you
 
 | Engine | How it finds messages | Use it when |
 |--------|----------------------|-------------|
-| `Purview` | One KQL Content Search across the tenant, then `New-ComplianceSearchAction -Purge` | You do **not** know the recipients, or you need a **HardDelete** |
+| `Purview` | One KQL Content Search across the tenant, then `New-ComplianceSearchAction -Purge` | You do **not** know the recipients, or you need a **HardDelete**. Reports counts **per mailbox**, not individual messages |
 | `Graph` | Enumerates each target mailbox over the Graph mail API and deletes message by message | You **do** know the recipients (from the trace) and want it gone **now**, with a per-message report |
 
 Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Override with `-Engine`.
@@ -614,6 +614,9 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 > Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so it cannot be used for the Graph engine — the script warns when it detects a delegated session. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
 
 **Notes**
+- **Purview cannot show you the individual messages.** Content Search reports item counts per mailbox; the preview action that used to return sender and subject per message is [documented as on-premises only](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/new-compliancesearchaction?view=exchange-ps) since the May 2025 eDiscovery changes. For per-message detail, take the mailbox list from the Purview run and re-run those addresses through `-Engine Graph`
+- **Rounds are planned, not polled.** A purge removes at most 10 items per mailbox per action, so the script computes `ceil(max items per mailbox / 10)` from the first search. It deliberately does *not* loop until the index goes quiet: the index lags a purge by up to ~30 minutes, so that would re-purge the same items and then report a false truncation. What each round actually removed is read back from the purge action itself
+- A single content search purges at most **50,000 mailboxes**; beyond that the script warns and you should batch with `-Mailbox`. Microsoft points at the Graph `ediscoverySearch: purgeData` API (100 items per location) for bulk work
 - **Requires ExchangeOnlineManagement 3.9.0+** for the Purview engine. Content Search runs on a backend that a plain IPPS connection no longer reaches: without `-EnableSearchOnlySession` the cmdlets are present but `Start-ComplianceSearch` fails at initialisation. The script passes the switch when it connects itself. **If you were already connected without it, the session cannot be repaired from inside the process** — open a new PowerShell window and let the script connect
 - **You do not need the whole subject.** `-Subject` matches a fragment: on Purview it becomes a KQL phrase, which matches anywhere in the subject, so `-Subject "kick-off meeting"` finds every mail containing those words in that order. A long, punctuation-heavy subject is in fact the *fragile* choice — commas, apostrophes and times like `14:09` word-break badly. Short and distinctive wins
 - **Matching inside a word** is the one thing KQL cannot do. A leading `*` is dropped (the script warns rather than silently ignoring it) and a trailing `*` only survives on a single word, since a wildcard is inert inside a quoted phrase. For true substring matching use `-Engine Graph` with `-Mailbox`, which matches client-side and takes wildcards as written
