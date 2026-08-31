@@ -626,10 +626,19 @@ The same three-way pattern as [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps
 | # | Route | What it needs |
 |---|-------|---------------|
 | 1 | An app-only Graph session you already established | Nothing — it is used as-is |
-| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` or `-CertificateThumbprint`) | Your own app with `Mail.ReadWrite` application permission, admin consent granted |
+| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` or `-CertificateThumbprint`) | Your own app with `Mail.ReadWrite` application permission, admin consent granted. **With `-ClientSecret` this is the most robust route** — it takes its token over plain REST and never loads the Graph SDK |
 | 3 | **Automatic** — the script connects interactively, creates a short-lived App Registration, self-grants it `Mail.ReadWrite`, takes an app-only token, and **removes the app again when the run finishes** | Global Administrator or Privileged Role Administrator for that one-time setup, plus `Microsoft.Graph.Applications` |
 
 Route 3 is what happens when you pass nothing, so `-VerifyWithGraph` works out of the box. The delegated role grants the consent, so there is no separate admin-consent screen. If setup fails halfway, the partly-created app is removed before the error is reported — no orphans left in Entra ID.
+
+> **Exchange and Graph fight over MSAL.** `ExchangeOnlineManagement` and `Microsoft.Graph.Authentication` each bundle their own `Microsoft.Identity.Client`, and .NET loads only the first one a process touches. So a Purview purge (which connects Exchange) followed by `-VerifyWithGraph` in the same window makes the Graph SDK call into an MSAL whose API does not match, and it fails with `Method not found: ... WithLogging(...)` — which looks nothing like the version clash it is.
+>
+> The script detects that specific failure and says so instead of leaving you to read the stack trace. Two ways round it, in order of preference:
+>
+> 1. **`-ClientId` with `-ClientSecret`.** This route never loads the Graph SDK, so it works in the same session as Exchange. Route 3 cannot do this — creating an app registration needs the SDK.
+> 2. Run the Graph part in a **fresh PowerShell window** before anything connects to Exchange: `-Engine Graph -Mailbox <addresses>`.
+>
+> When `-VerifyWithGraph` is used with the Purview engine, Graph access is established **before** the purge, so a verification that cannot run is reported up front instead of after the messages are gone. The purge still runs either way — a failed verification never means a failed purge.
 
 > Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so a delegated session is deliberately **not** accepted for the Graph engine; the script falls through to route 2 or 3 instead. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
 
