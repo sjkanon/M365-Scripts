@@ -100,6 +100,17 @@
     Do not remove the Content Search and its purge actions afterwards. Useful
     when you want to inspect the search in the Purview portal.
 
+.PARAMETER VerifyWithGraph
+    After a Purview purge, check the affected mailboxes over Graph to confirm the
+    messages are actually gone. This is the only lag-free verification available:
+    the Content Search index keeps reporting purged items for up to ~30 minutes,
+    and the purge action only reports what the service believes it did.
+
+    Needs the same app-only Graph session as -Engine Graph. Soft- and hard-deleted
+    items live in Recoverable Items, which Graph does not list, so a purged
+    message correctly reads as gone. Verification never fails the run - if Graph
+    is unavailable it says so and skips.
+
 .PARAMETER MaxPurgeRounds
     Purview purges at most 10 items per mailbox per action, so the script repeats
     search + purge until a round removes nothing. Default 10 rounds (= up to 100
@@ -136,6 +147,11 @@
         -Sender  "no-reply@evil.example" `
         -Subject "*password expires*" `
         -Apply
+
+.EXAMPLE
+    # Purge, then confirm over Graph that the messages are really gone
+    .\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>" `
+        -DeleteType HardDelete -Apply -VerifyWithGraph
 
 .EXAMPLE
     # Campaign sweep: everything from one sender in a window, tenant-wide
@@ -221,6 +237,7 @@ param(
     [switch]   $Apply,
     [string]   $SearchName,
     [switch]   $KeepSearch,
+    [switch]   $VerifyWithGraph,
     [int]      $MaxPurgeRounds = 10,
     [int]      $MaxMessagesPerMailbox = 500,
     [int]      $TimeoutMinutes = 30,
@@ -356,8 +373,9 @@ function Invoke-PurviewPurge {
     Write-Host "  Creating Content Search '$SearchName'..." -ForegroundColor DarkGray
     New-ComplianceSearch @newParams | Out-Null
 
-    $round        = 0
-    $roundsNeeded = 1     # replaced by a real plan once the first search lands
+    $round           = 0
+    $roundsNeeded    = 1     # replaced by a real plan once the first search lands
+    $purgedMailboxes = @()
     $searchFailed = $false
     # A re-started search keeps reporting the previous run's Completed status and
     # SuccessResults for a few seconds. Carrying the last JobEndTime forward lets
@@ -441,6 +459,8 @@ function Invoke-PurviewPurge {
                 }
             }
 
+            $purgedMailboxes = @($hits | Select-Object -ExpandProperty Location)
+
             # Record what the search saw, so the CSV is useful even on a dry run.
             foreach ($h in $hits) {
                 $results.Add([PSCustomObject]@{
@@ -513,6 +533,9 @@ function Invoke-PurviewPurge {
         }
     }
 
+        if ($VerifyWithGraph -and $Apply -and $purgedMailboxes.Count -gt 0) {
+            Test-PurgeWithGraph -Mailboxes $purgedMailboxes
+        }
     }
     # ── Cleanup ───────────────────────────────────────────────────────────────
     finally {
@@ -597,6 +620,70 @@ function ConvertTo-KqlTerm {
     return '"{0}"' -f ($core -replace '"', '')
 }
 
+function Test-PurgeWithGraph {
+    <#
+        Re-asks the Graph engine's question against the mailboxes the search hit,
+        after the purge. Anything still returned is genuinely still in the
+        mailbox - unlike the Content Search index, Graph has no lag.
+
+        Reports rather than throws: a purge that already happened should not be
+        reported as failed because the verification could not run.
+    #>
+    param([string[]] $Mailboxes)
+
+    Write-Host ""
+    Write-Host "  -- Verifying over Graph --" -ForegroundColor Cyan
+
+    if (-not (Get-Command Invoke-MgGraphRequest -ErrorAction SilentlyContinue)) {
+        Write-Warning "Cannot verify: Microsoft.Graph.Authentication is not loaded. The purge itself is unaffected."
+        return
+    }
+    if (-not (Get-MgContext)) {
+        Write-Warning "Cannot verify: no Graph session. Connect app-only (see .NOTES) and re-run with -VerifyWithGraph. The purge itself is unaffected."
+        return
+    }
+
+    $stillPresent = [System.Collections.Generic.List[PSObject]]::new()
+    $unchecked    = 0
+
+    foreach ($mbx in $Mailboxes) {
+        try {
+            $left = @(Get-GraphMatchingMessage -Mailbox $mbx)
+        } catch {
+            Write-Host ("    {0,-45} could not check: {1}" -f $mbx, $_.Exception.Message) -ForegroundColor DarkYellow
+            $unchecked++
+            continue
+        }
+
+        if ($left.Count -eq 0) {
+            Write-Host ("    {0,-45} clean" -f $mbx) -ForegroundColor Green
+        } else {
+            Write-Host ("    {0,-45} {1} still present" -f $mbx, $left.Count) -ForegroundColor Red
+            $stillPresent.Add([PSCustomObject]@{ Mailbox = $mbx; Count = $left.Count })
+        }
+    }
+
+    Write-Host ""
+    if ($stillPresent.Count -gt 0) {
+        $total = ($stillPresent | Measure-Object -Property Count -Sum).Sum
+        Write-Warning "$total item(s) still present in $($stillPresent.Count) mailbox(es) after the purge. Re-run to clear the remainder, or use -Engine Graph -Mailbox to delete them directly."
+        $script:Truncated = $true
+        foreach ($r in $results) {
+            if ($r.Status -eq 'Purged' -and ($stillPresent.Mailbox -contains $r.Mailbox)) {
+                $r.Status = 'StillPresent'
+            }
+        }
+    } elseif ($unchecked -eq $Mailboxes.Count) {
+        Write-Warning "No mailbox could be checked - verification proved nothing."
+    } else {
+        $checked = $Mailboxes.Count - $unchecked
+        Write-Host "  Verified gone from $checked of $($Mailboxes.Count) mailbox(es)." -ForegroundColor Green
+        if ($unchecked -gt 0) {
+            Write-Warning "$unchecked mailbox(es) could not be checked; those are unverified, not confirmed clean."
+        }
+    }
+}
+
 function Format-ByteSize {
     param([int64] $Bytes)
     if     ($Bytes -ge 1MB) { '{0:N1} MB' -f ($Bytes / 1MB) }
@@ -673,34 +760,11 @@ function Invoke-GraphPurge {
         Write-Host ""
     }
 
-    # ── Server-side filter ────────────────────────────────────────────────────
-    # Only the selectors Graph can filter on go here; -Subject and
-    # -AttachmentName are applied client-side below.
-    $filters = [System.Collections.Generic.List[string]]::new()
-    if ($MessageId) {
-        # OData string literals escape a single quote by doubling it.
-        $escapedId = $MessageId.Replace("'", "''")
-        $filters.Add("internetMessageId eq '$escapedId'")
-    }
-    if ($SenderAddress) {
-        $escapedSender = $SenderAddress.Replace("'", "''")
-        $filters.Add("from/emailAddress/address eq '$escapedSender'")
-    }
-    if ($AttachmentName){ $filters.Add("hasAttachments eq true") }
-    if ($ReceivedAfter) { $filters.Add("receivedDateTime ge $($ReceivedAfter.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))") }
-    if ($ReceivedBefore){ $filters.Add("receivedDateTime le $($ReceivedBefore.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))") }
-
-    $select = 'id,internetMessageId,subject,receivedDateTime,from,hasAttachments,parentFolderId'
     $folderNames = @{}
 
     foreach ($mbx in $targets) {
-        $uri = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($mbx))/messages?`$select=$select&`$top=100"
-        if ($filters.Count -gt 0) {
-            $uri += "&`$filter=$([uri]::EscapeDataString($filters -join ' and '))"
-        }
-
         try {
-            $messages = @(Get-GraphPaged -Uri $uri -MaxItems $MaxMessagesPerMailbox)
+            $messages = @(Get-GraphMatchingMessage -Mailbox $mbx)
         } catch {
             Write-Host ("  {0,-45} ERROR  {1}" -f $mbx, $_.Exception.Message) -ForegroundColor Red
             $results.Add([PSCustomObject]@{
@@ -709,21 +773,6 @@ function Invoke-GraphPurge {
                 Action  = 'None'; Status = 'Error'; Detail = $_.Exception.Message
             })
             continue
-        }
-
-        if ($messages.Count -ge $MaxMessagesPerMailbox) {
-            Write-Warning "$mbx hit the -MaxMessagesPerMailbox cap ($MaxMessagesPerMailbox); there may be more matches."
-            $script:Truncated = $true
-        }
-
-        # ── Client-side selectors ─────────────────────────────────────────────
-        if ($Subject) {
-            $pattern = if ($Subject -match '\*') { $Subject } else { "*$Subject*" }
-            $messages = @($messages | Where-Object { $_.subject -like $pattern })
-        }
-        if ($AttachmentName) {
-            $pattern = if ($AttachmentName -match '\*') { $AttachmentName } else { "*$AttachmentName*" }
-            $messages = @($messages | Where-Object { Test-GraphAttachmentName -Mailbox $mbx -MessageId $_.id -Pattern $pattern })
         }
 
         if ($messages.Count -eq 0) {
@@ -771,6 +820,56 @@ function Invoke-GraphPurge {
             $results.Add($row)
         }
     }
+}
+
+function Get-GraphMatchingMessage {
+    <#
+        Returns the messages in one mailbox that match the run's criteria.
+
+        Shared by the Graph engine and by -VerifyWithGraph, so verification asks
+        exactly the same question the deletion answered - a check built on a
+        second, slightly different query would prove nothing.
+
+        Server-side $filter carries what Graph can filter on; -Subject and
+        -AttachmentName are matched client-side afterwards.
+    #>
+    param([string] $Mailbox)
+
+    $filters = [System.Collections.Generic.List[string]]::new()
+    if ($MessageId) {
+        # OData string literals escape a single quote by doubling it.
+        $filters.Add("internetMessageId eq '$($MessageId.Replace("'", "''"))'")
+    }
+    if ($SenderAddress) {
+        $filters.Add("from/emailAddress/address eq '$($SenderAddress.Replace("'", "''"))'")
+    }
+    if ($AttachmentName) { $filters.Add("hasAttachments eq true") }
+    if ($ReceivedAfter)  { $filters.Add("receivedDateTime ge $($ReceivedAfter.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))") }
+    if ($ReceivedBefore) { $filters.Add("receivedDateTime le $($ReceivedBefore.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))") }
+
+    $select = 'id,internetMessageId,subject,receivedDateTime,from,hasAttachments,parentFolderId'
+    $uri = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($Mailbox))/messages?`$select=$select&`$top=100"
+    if ($filters.Count -gt 0) {
+        $uri += "&`$filter=$([uri]::EscapeDataString($filters -join ' and '))"
+    }
+
+    $messages = @(Get-GraphPaged -Uri $uri -MaxItems $MaxMessagesPerMailbox)
+
+    if ($messages.Count -ge $MaxMessagesPerMailbox) {
+        Write-Warning "$Mailbox hit the -MaxMessagesPerMailbox cap ($MaxMessagesPerMailbox); there may be more matches."
+        $script:Truncated = $true
+    }
+
+    if ($Subject) {
+        $pattern = if ($Subject -match '\*') { $Subject } else { "*$Subject*" }
+        $messages = @($messages | Where-Object { $_.subject -like $pattern })
+    }
+    if ($AttachmentName) {
+        $pattern = if ($AttachmentName -match '\*') { $AttachmentName } else { "*$AttachmentName*" }
+        $messages = @($messages | Where-Object { Test-GraphAttachmentName -Mailbox $Mailbox -MessageId $_.id -Pattern $pattern })
+    }
+
+    return $messages
 }
 
 function Get-GraphPaged {
