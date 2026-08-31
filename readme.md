@@ -64,38 +64,48 @@ To remove the startup shortcut later:
 
 ## Quick Launcher
 
-`f.ps1` runs any script in this repo by name fragment, so you don't have to navigate to its folder first. Register it once:
+`f.ps1` creates one short command per script in [scripts/](scripts/), so you no longer have to navigate to a folder first. Dot-source it from your profile:
 
 ```powershell
-.\f.ps1 -Install
+notepad $PROFILE
+. "C:\Users\<you>\Git\M365-Scripts\f.ps1"
 ```
 
-This adds an `f` function to your PowerShell profile (`$PROFILE.CurrentUserAllHosts`). After restarting your shell:
+The leading dot is not optional — without it the file runs in its own scope and the commands are gone again immediately. `.\f.ps1 -Install` writes the line for you (and does nothing if it is already there).
+
+After restarting your shell:
 
 ```powershell
-f dkim                    # runs scripts\Exchange\Test-DkimConfig.ps1
-f mailboxsizes            # runs scripts\Exchange\Get-MailboxSizes.ps1
-f entra group             # every term must match — shows a numbered picker
+f-test-dkimconfig -Domain contoso.com
+f-dkimconfig -Domain contoso.com          # short form, when the noun is unique
+f-get-mailboxsizes
+f-m365                                    # the whole catalogue
+f-m365 mailbox                            # filtered
 ```
 
-Arguments after the search terms go straight to the script:
+The wrappers copy the parameter block of the target script from its AST, so `-Dom<Tab>` completes and a `ValidateSet` is enforced before anything runs. Default values are dropped from the wrapper on purpose: only bound parameters are forwarded, so the script's own defaults still apply.
+
+### Fuzzy search
+
+For when you know roughly what a script is called but not exactly, `f` matches on name, folder and `.SYNOPSIS`:
 
 ```powershell
+f dkim                    # one match -> runs it
+f entra group             # several matches -> numbered picker
 f dkim -Domain contoso.com
-f copygroup -SourceGroup "Grp A" -TargetGroup "Grp B" -WhatIf
+f -List mailbox           # show matches, run nothing
+f -Show trace             # path, synopsis and parameters
+f -Edit bloatware         # open in $env:EDITOR, VS Code, or notepad
 ```
 
-| Switch | Effect |
-|--------|--------|
-| `-List` | Show matches only, run nothing (`f -List mailbox`) |
-| `-Show` | Show path, synopsis and parameters of the match (`f -Show trace`) |
-| `-Edit` | Open the match in `$env:EDITOR`, VS Code, or notepad |
-| `-Refresh` | Rebuild the script index cache (`.f-index.json`, gitignored) |
-| `-Install` / `-Uninstall` | Add or remove the `f` function in your profile |
+### Notes
 
-Matching works on the script name, its folder, and its `.SYNOPSIS`, with abbreviations like `f msgtrace` supported. The index refreshes automatically when scripts are added or changed.
-
-> The launcher's own switches are consumed by `f` and never forwarded. Run a script directly if it needs a parameter named `-List`, `-Show`, `-Edit`, `-Refresh`, `-Install` or `-Uninstall`.
+| | |
+|---|---|
+| Naming | `f-<full-script-name>` always exists; `f-<noun>` is added only where it stays unambiguous. Stripping the verb collides 11 times here (`Detect-`, `Install-` and `Uninstall-ClaudeDesktop-Intune` become the same noun), so the full name is the one you can always count on. |
+| Cache | Generated wrappers live in `.f-index.json` (gitignored). Parsing every script costs ~500 ms, reading the cache ~30 ms, which is what keeps shell start quick. It refreshes itself when a script is added, removed or changed; `f-refresh` forces it. |
+| Collisions | Existing commands are never overwritten. A profile can load more than one of these — `ScriptRunner.Profile.ps1` in *itce-testing* owns `f-scripts`, which is why this catalogue is called `f-m365`. Anything skipped is reported on load. |
+| Uninstall | `.\f.ps1 -Uninstall` removes the marked block from `$PROFILE`. A hand-written dot-source line is reported, not deleted. |
 
 ---
 
