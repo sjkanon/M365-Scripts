@@ -608,12 +608,15 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 
 | Engine | Permission |
 |--------|-----------|
-| `Purview` | Membership of the **Search And Purge** role — in practice the *Organization Management* or *eDiscovery Manager* role group in the Purview compliance portal. Connects via `Connect-IPPSSession` |
+| `Purview` | Membership of the **Search And Purge** role — in practice the *Organization Management* or *eDiscovery Manager* role group in the Purview compliance portal. Connects via `Connect-IPPSSession -EnableSearchOnlySession` |
 | `Graph` | An **app-only** Graph session with the `Mail.ReadWrite` **application** permission. Connect first: `Connect-MgGraph -TenantId <tenant> -ClientId <appid> -CertificateThumbprint <thumb>` |
 
 > Delegated `Mail.ReadWrite` only ever reaches *your own* mailbox, so it cannot be used for the Graph engine — the script warns when it detects a delegated session. Note that `Mail.ReadWrite` (application) grants access to **every** mailbox in the tenant; scope the app with `New-ApplicationAccessPolicy` if that is wider than you want.
 
 **Notes**
+- **Requires ExchangeOnlineManagement 3.9.0+** for the Purview engine. Content Search runs on a backend that a plain IPPS connection no longer reaches: without `-EnableSearchOnlySession` the cmdlets are present but `Start-ComplianceSearch` fails at initialisation. The script passes the switch when it connects itself. **If you were already connected without it, the session cannot be repaired from inside the process** — open a new PowerShell window and let the script connect
+- A long, punctuation-heavy `-Subject` is a fragile selector: KQL word-breaks the phrase, so commas, apostrophes and times like `14:09` can stop it matching. Prefer `-MessageId`, or a short distinctive fragment of the subject
+- A run that fails partway no longer leaves its Content Search behind — cleanup runs in a `finally`. Searches orphaned by older runs can be listed with `Get-ComplianceSearch | Where-Object Name -like 'Phish_*'` and removed with `Remove-ComplianceSearch`
 - The script **refuses to run** without at least one of `-MessageId`, `-SenderAddress`, `-Subject`, `-AttachmentName` or `-BodyContains` — a date range on its own would match every message in every mailbox
 - **Index lag** (Purview only): a message delivered in the last ~30 minutes may not be searchable yet. A `0 hits` result straight after delivery is not proof the phish is gone — wait and re-run, or use the Graph engine
 - Purge covers the **primary mailbox only** — neither engine reaches the archive mailbox

@@ -142,7 +142,16 @@
 
       Purview  Membership of the "Search And Purge" role - in practice the
                Organization Management or eDiscovery Manager role group in the
-               Purview compliance portal. Connects via Connect-IPPSSession.
+               Purview compliance portal.
+
+               Content Search runs on a backend that a plain IPPS connection no
+               longer reaches: the session must be opened with
+               -EnableSearchOnlySession, or Start-ComplianceSearch fails at
+               initialisation even though the cmdlets are present. The script
+               passes that switch when it connects itself, which needs
+               ExchangeOnlineManagement 3.9.0 or higher. If you connected before
+               starting the script and did not pass it, the session cannot be
+               repaired from inside the process - open a new PowerShell window.
 
       Graph    An app-only Graph session with the Mail.ReadWrite APPLICATION
                permission. Delegated Mail.ReadWrite only ever reaches your own
@@ -257,7 +266,8 @@ if ($ReceivedBefore) { Write-Host "  Before    : $($ReceivedBefore.ToString('yyy
 Write-Host ""
 
 $results             = [System.Collections.Generic.List[PSObject]]::new()
-$script:ConnectedIpps = $false
+$script:ConnectedIpps    = $false
+$script:ReusedIppsSession = $false
 $script:Truncated     = $false
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -329,10 +339,27 @@ function Invoke-PurviewPurge {
     # the wait tell a fresh result from a stale one.
     $lastJobEnd   = $null
 
+    # The whole run sits in try/finally: a search that is created and then fails
+    # would otherwise be left behind in the tenant, and Purview refuses to reuse
+    # a name, so orphans pile up run after run.
+    try {
     while ($true) {
         $round++
 
-        Start-ComplianceSearch -Identity $SearchName -ErrorAction Stop
+        try {
+            Start-ComplianceSearch -Identity $SearchName -ErrorAction Stop
+        } catch {
+            if ("$($_.Exception.Message)" -match 'EnableSearchOnlySession') {
+                $hint = if ($script:ReusedIppsSession) {
+                    "This session was connected without it. Close this PowerShell window, open a new one and let the script connect itself, or run: Connect-IPPSSession -EnableSearchOnlySession"
+                } else {
+                    "Update the module - the switch needs ExchangeOnlineManagement 3.9.0 or higher: Install-Module ExchangeOnlineManagement -Force"
+                }
+                throw "Content Search needs an IPPS session opened with -EnableSearchOnlySession. $hint"
+            }
+            throw
+        }
+
         $search = Wait-ForComplianceState -Getter { Get-ComplianceSearch -Identity $SearchName -ErrorAction Stop } `
                                           -Label "search round $round" -NewerThan $lastJobEnd
         if (-not $search) { $searchFailed = $true; break }
@@ -402,12 +429,15 @@ function Invoke-PurviewPurge {
         }
     }
 
+    }
     # ── Cleanup ───────────────────────────────────────────────────────────────
-    if (-not $KeepSearch) {
-        try { Remove-ComplianceSearchAction -Identity $purgeActionName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
-        try { Remove-ComplianceSearch -Identity $SearchName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
-    } else {
-        Write-Host "  Content Search kept: '$SearchName'" -ForegroundColor DarkGray
+    finally {
+        if (-not $KeepSearch) {
+            try { Remove-ComplianceSearchAction -Identity $purgeActionName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+            try { Remove-ComplianceSearch -Identity $SearchName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+        } else {
+            Write-Host "  Content Search kept: '$SearchName'" -ForegroundColor DarkGray
+        }
     }
 }
 
