@@ -90,6 +90,11 @@
     Do not remove the Content Search and its purge actions afterwards. Useful
     when you want to inspect the search in the Purview portal.
 
+.PARAMETER NoPreview
+    Skip the preview action on the Purview engine. Without it the script lists
+    every matched message per mailbox (sender, subject, received time) before
+    purging, which costs one extra action and a little time.
+
 .PARAMETER MaxPurgeRounds
     Purview purges at most 10 items per mailbox per action, so the script repeats
     search + purge until a round removes nothing. Default 10 rounds (= up to 100
@@ -196,6 +201,7 @@ param(
     [switch]   $Apply,
     [string]   $SearchName,
     [switch]   $KeepSearch,
+    [switch]   $NoPreview,
     [int]      $MaxPurgeRounds = 10,
     [int]      $MaxMessagesPerMailbox = 500,
     [int]      $TimeoutMinutes = 30,
@@ -268,6 +274,7 @@ Write-Host ""
 $results             = [System.Collections.Generic.List[PSObject]]::new()
 $script:ConnectedIpps    = $false
 $script:ReusedIppsSession = $false
+$script:RawPreview        = $null
 $script:Truncated     = $false
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -375,24 +382,63 @@ function Invoke-PurviewPurge {
                 Write-Host "  No matching items found in the index." -ForegroundColor Yellow
                 Write-Host "  If the message was delivered in the last ~30 minutes it may not be" -ForegroundColor DarkGray
                 Write-Host "  indexed yet. Re-run later, or use -Engine Graph with -Mailbox." -ForegroundColor DarkGray
+                Write-Host ""
             } else {
-                Write-Host "  Found $hitTotal item(s) across $($hits.Count) mailbox(es)." -ForegroundColor Cyan
+                Write-Host "  Found $hitTotal item(s) across $($hits.Count) mailbox(es):" -ForegroundColor Cyan
+                Write-Host ""
+                foreach ($h in ($hits | Sort-Object -Property ItemCount -Descending)) {
+                    Write-Host ("    {0,-45} {1,4} item(s)   {2}" -f $h.Location, $h.ItemCount, (Format-ByteSize $h.TotalSize)) -ForegroundColor Yellow
+                }
+                Write-Host ""
+
+                # Per-mailbox counts come free with the search, but they do not say
+                # WHICH messages matched - which is exactly what you want to check
+                # before purging. A preview action returns that item-level detail.
+                if (-not $NoPreview) {
+                    $preview = Get-PurviewPreview -SearchName $SearchName
+                }
             }
-            Write-Host ""
+
             # Record what the search saw, so the CSV is useful even on a dry run.
-            foreach ($h in $hits) {
-                $results.Add([PSCustomObject]@{
-                    Mailbox    = $h.Location
-                    Engine     = 'Purview'
-                    ItemCount  = $h.ItemCount
-                    TotalSize  = $h.TotalSize
-                    Subject    = ''
-                    Received   = ''
-                    Folder     = ''
-                    Action     = if ($Apply) { $DeleteType } else { 'DryRun' }
-                    Status     = 'Matched'
-                    Detail     = "Search '$SearchName'"
-                })
+            # Item-level rows when the preview gave them, per-mailbox rows otherwise.
+            if ($preview -and $preview.Count -gt 0) {
+                Show-PurviewPreview -Items $preview -Total $hitTotal
+                foreach ($item in $preview) {
+                    $results.Add([PSCustomObject]@{
+                        Mailbox    = $item.Location
+                        Engine     = 'Purview'
+                        ItemCount  = 1
+                        TotalSize  = $item.Size
+                        Subject    = $item.Subject
+                        Received   = $item.Received
+                        Folder     = ''
+                        Action     = if ($Apply) { $DeleteType } else { 'DryRun' }
+                        Status     = 'Matched'
+                        Detail     = "From: $($item.Sender)"
+                    })
+                }
+            } else {
+                foreach ($h in $hits) {
+                    $results.Add([PSCustomObject]@{
+                        Mailbox    = $h.Location
+                        Engine     = 'Purview'
+                        ItemCount  = $h.ItemCount
+                        TotalSize  = $h.TotalSize
+                        Subject    = ''
+                        Received   = ''
+                        Folder     = ''
+                        Action     = if ($Apply) { $DeleteType } else { 'DryRun' }
+                        Status     = 'Matched'
+                        Detail     = "Search '$SearchName'"
+                    })
+                }
+            }
+        } else {
+            # Later rounds: show what is left, so a multi-round purge is not a
+            # silent wait.
+            Write-Host ("  {0} item(s) left across {1} mailbox(es)" -f $hitTotal, $hits.Count) -ForegroundColor DarkGray
+            foreach ($h in ($hits | Sort-Object -Property ItemCount -Descending)) {
+                Write-Host ("    {0,-45} {1,4} left" -f $h.Location, $h.ItemCount) -ForegroundColor DarkGray
             }
         }
 
@@ -405,11 +451,14 @@ function Invoke-PurviewPurge {
         }
 
         # ── Purge ─────────────────────────────────────────────────────────────
-        # A purge action name is derived from the search name, so the previous
-        # round's action has to go before the next one can be created.
-        try {
-            Remove-ComplianceSearchAction -Identity $purgeActionName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-        } catch {}
+        # Action names are derived from the search name and only one action can
+        # be outstanding, so the preview and the previous round's purge both have
+        # to go before the next purge can be created.
+        foreach ($stale in @($purgeActionName, "$($SearchName)_Preview")) {
+            try {
+                Remove-ComplianceSearchAction -Identity $stale -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+            } catch {}
+        }
 
         Write-Host "  Purge round $round : removing up to 10 item(s) per mailbox ($DeleteType)..." -ForegroundColor Yellow
         New-ComplianceSearchAction -SearchName $SearchName -Purge -PurgeType $DeleteType -Confirm:$false -ErrorAction Stop | Out-Null
@@ -433,7 +482,9 @@ function Invoke-PurviewPurge {
     # ── Cleanup ───────────────────────────────────────────────────────────────
     finally {
         if (-not $KeepSearch) {
-            try { Remove-ComplianceSearchAction -Identity $purgeActionName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+            foreach ($stale in @($purgeActionName, "$($SearchName)_Preview")) {
+                try { Remove-ComplianceSearchAction -Identity $stale -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+            }
             try { Remove-ComplianceSearch -Identity $SearchName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
         } else {
             Write-Host "  Content Search kept: '$SearchName'" -ForegroundColor DarkGray
@@ -475,6 +526,105 @@ function Wait-ForComplianceState {
     }
     Write-Warning "$Label did not complete within $TimeoutMinutes minute(s)."
     return $null
+}
+
+function Format-ByteSize {
+    param([int64] $Bytes)
+    if     ($Bytes -ge 1MB) { '{0:N1} MB' -f ($Bytes / 1MB) }
+    elseif ($Bytes -ge 1KB) { '{0:N0} KB' -f ($Bytes / 1KB) }
+    else                    { "$Bytes B" }
+}
+
+function Get-PurviewPreview {
+    <#
+        Runs a preview action against a completed search and returns the matched
+        items. Preview is capped by the service at roughly 1000 items; anything
+        beyond that is still purged, just not listed.
+
+        Never throws: a failed preview costs visibility, not the purge itself, so
+        every failure degrades to per-mailbox counts.
+    #>
+    param([string] $SearchName)
+
+    $previewName = "$($SearchName)_Preview"
+    try { Remove-ComplianceSearchAction -Identity $previewName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
+
+    Write-Host "  Retrieving per-message detail..." -ForegroundColor DarkGray
+    try {
+        New-ComplianceSearchAction -SearchName $SearchName -Preview -Confirm:$false -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Warning "Preview could not be started, falling back to per-mailbox counts: $($_.Exception.Message)"
+        return @()
+    }
+
+    $action = Wait-ForComplianceState -Getter { Get-ComplianceSearchAction -Identity $previewName -Details -ErrorAction Stop } `
+                                      -Label 'preview'
+    if (-not $action) { return @() }
+
+    $items = Read-CompliancePreviewResults -Results $action.Results
+    if ($items.Count -eq 0 -and $action.Results) {
+        # The service returned something this parser did not recognise. Say so
+        # rather than silently reporting nothing, and keep the raw text.
+        Write-Warning "Preview returned data in an unexpected format; falling back to per-mailbox counts. Raw preview is written to the report as a _Preview.txt file."
+        $script:RawPreview = $action.Results
+    }
+    return $items
+}
+
+function Read-CompliancePreviewResults {
+    <#
+        Preview results arrive as free text, one brace-delimited record per item:
+          {Location: user@contoso.com; Sender: a@b.com; Subject: Hi; Type: Email;
+           Size: 1234; Received Time: 8/30/2026 10:00:00 AM; Data Link: ...}
+
+        A subject can itself contain ';', so the fields are matched by name in
+        order rather than by splitting on the separator.
+    #>
+    param([string] $Results)
+
+    $out = [System.Collections.Generic.List[PSObject]]::new()
+    if (-not $Results) { return $out }
+
+    $rx = 'Location:\s*(?<loc>.*?);\s*Sender:\s*(?<sender>.*?);\s*Subject:\s*(?<subject>.*?);\s*Type:\s*(?<type>.*?);\s*Size:\s*(?<size>\d+);\s*Received Time:\s*(?<recv>.*?)\s*(?:;|\})'
+    foreach ($m in [regex]::Matches($Results, $rx)) {
+        $out.Add([PSCustomObject]@{
+            Location = $m.Groups['loc'].Value.Trim()
+            Sender   = $m.Groups['sender'].Value.Trim()
+            Subject  = $m.Groups['subject'].Value.Trim()
+            Type     = $m.Groups['type'].Value.Trim()
+            Size     = [int64] $m.Groups['size'].Value
+            Received = $m.Groups['recv'].Value.Trim()
+        })
+    }
+    return $out
+}
+
+function Show-PurviewPreview {
+    <#
+        Prints the previewed items grouped per mailbox, so you can see exactly
+        which messages a purge would take before committing to -Apply.
+    #>
+    param(
+        [PSObject[]] $Items,
+        [int]        $Total
+    )
+
+    Write-Host "  -- Messages matched --" -ForegroundColor Cyan
+    foreach ($group in ($Items | Group-Object -Property Location | Sort-Object -Property Count -Descending)) {
+        Write-Host ""
+        Write-Host ("  {0}  ({1} item(s))" -f $group.Name, $group.Count) -ForegroundColor Yellow
+        foreach ($item in ($group.Group | Sort-Object -Property Received)) {
+            Write-Host ("      {0,-20} {1,-32} {2}" -f
+                            $item.Received,
+                            ("$($item.Sender)"  -replace '^(.{29}).+$', '$1...'),
+                            ("$($item.Subject)" -replace '^(.{50}).+$', '$1...')) -ForegroundColor Gray
+        }
+    }
+    Write-Host ""
+    if ($Total -gt $Items.Count) {
+        Write-Host "  Preview lists $($Items.Count) of $Total item(s) - the service caps preview output. All $Total will be purged." -ForegroundColor DarkGray
+        Write-Host ""
+    }
 }
 
 function Read-ComplianceSuccessResults {
@@ -746,5 +896,12 @@ if ($results.Count -gt 0) {
     $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
     Write-Host ""
     Write-Host "  Report saved: $OutputPath" -ForegroundColor Green
+
+    if ($script:RawPreview) {
+        $previewPath = Join-Path (Split-Path -Parent $OutputPath) `
+                                 ("$([System.IO.Path]::GetFileNameWithoutExtension($OutputPath))_Preview.txt")
+        $script:RawPreview | Out-File -FilePath $previewPath -Encoding UTF8
+        Write-Host "  Raw preview : $previewPath" -ForegroundColor Yellow
+    }
 }
 Write-Host ""
