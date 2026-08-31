@@ -559,6 +559,9 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 | `-Apply` | No | off | **Actually delete.** Without it the script only reports what it found |
 | `-SearchName` | No | `Phish_<timestamp>` | Name of the Content Search to create. Purview requires unique names |
 | `-KeepSearch` | No | off | Keep the Content Search afterwards so you can inspect it in the Purview portal |
+| `-IncludeCalendar` | No | off | Also remove matching **calendar items**, not just mail. Graph engine only; needs `-Subject` or `-SenderAddress` |
+| `-CalendarDaysBack` | No | `30` | How far back to scan the calendar |
+| `-CalendarDaysForward` | No | `365` | How far forward to scan the calendar |
 | `-VerifyWithGraph` | No | off | After a Purview purge, check the affected mailboxes over Graph to confirm the messages are really gone. Needs the same app-only Graph session as `-Engine Graph` |
 | `-MaxPurgeRounds` | No | `10` | Purview purges max 10 items per mailbox per action, so the script loops rounds. 10 rounds = up to 100 items per mailbox |
 | `-MaxMessagesPerMailbox` | No | `500` | Graph safety cap per mailbox; hitting it is reported explicitly |
@@ -594,7 +597,11 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 .\Remove-PhishingMessage.ps1 -Sender "no-reply@evil.example" `
     -ReceivedAfter (Get-Date "2026-08-30") -DeleteType HardDelete -Apply
 
-# 5. HTML attachment campaign
+# 5. Phishing MEETING INVITE — the mail and the calendar entry
+.\Remove-PhishingMessage.ps1 -Mailbox "a@contoso.com","b@contoso.com" `
+    -Sender "no-reply@evil.example" -Subject "kick-off" -IncludeCalendar -Apply
+
+# 6. HTML attachment campaign
 .\Remove-PhishingMessage.ps1 -AttachmentName "*.html" `
     -Sender "billing@evil.example" -Apply
 ```
@@ -651,6 +658,8 @@ Routes 2 (with `-ClientSecret`) and 3 are both built on plain REST — device co
 > GDAP-aware: under a GDAP session (`$global:authMode -eq 'GDAP'`, set by `Connect-Tenant` / `load.ps1`) `-TenantId` is resolved from the selected customer tenant, same as the SharePoint scripts.
 
 **Notes**
+- **A phishing meeting invite is only half gone when the mail is deleted.** The invitation leaves an event in the calendar, and `/messages` and `/events` are separate collections — neither engine touches the calendar by default. `-Engine Graph -IncludeCalendar` sweeps those too, matching on `-Subject` or `-SenderAddress` (as organiser). Without a selector it refuses rather than walk the whole calendar
+- Verification follows suit: with `-IncludeCalendar` it checks the calendar as well, and without it prints *"mail only — calendar items are not checked"* rather than reporting a mailbox clean on incomplete evidence
 - **Nothing in Purview can confirm a purge.** The purge action reports what the service believes it did, and the search index keeps listing purged items for up to ~30 minutes — so re-running the script is not a check. `-VerifyWithGraph` is the only lag-free verification: it re-asks the *same* query the Graph engine deletes on, directly against the mailboxes the search hit. Soft- and hard-deleted items sit in Recoverable Items, which Graph does not list, so a purged message correctly reads as gone
 - Verification distinguishes **"could not check"** from **"clean"**. A mailbox that returns 403 is reported as unverified, never as confirmed. It also never fails the run — a purge that already happened is not reported as failed because the check could not run
 - **Purview cannot show you the individual messages.** Content Search reports item counts per mailbox; the preview action that used to return sender and subject per message is [documented as on-premises only](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/new-compliancesearchaction?view=exchange-ps) since the May 2025 eDiscovery changes. For per-message detail, take the mailbox list from the Purview run and re-run those addresses through `-Engine Graph`

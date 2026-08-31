@@ -100,6 +100,22 @@
     Do not remove the Content Search and its purge actions afterwards. Useful
     when you want to inspect the search in the Purview portal.
 
+.PARAMETER IncludeCalendar
+    Also remove matching CALENDAR ITEMS, not just mail. Graph engine only.
+
+    A phishing meeting invitation leaves two things behind: the invitation mail
+    and an event in the calendar. Deleting the mail does not remove the event -
+    they live in different collections - so a "meeting" phish is only half gone
+    without this. Matches on -Subject and on -SenderAddress as the organiser.
+
+.PARAMETER CalendarDaysBack
+    How far back to scan the calendar with -IncludeCalendar. Default 30.
+
+.PARAMETER CalendarDaysForward
+    How far forward to scan the calendar with -IncludeCalendar. Default 365. A
+    phishing invite usually sits in the near future, but recurring bait can run
+    long.
+
 .PARAMETER VerifyWithGraph
     After a Purview purge, check the affected mailboxes over Graph to confirm the
     messages are actually gone. This is the only lag-free verification available:
@@ -183,6 +199,12 @@
         -ReceivedAfter (Get-Date "2026-08-30") -Apply
 
 .EXAMPLE
+    # Phishing MEETING INVITE: the mail and the calendar entry it left behind
+    .\Remove-PhishingMessage.ps1 -Mailbox "a@contoso.com","b@contoso.com" `
+        -Sender "no-reply@evil.example" -Subject "kick-off" `
+        -IncludeCalendar -Apply
+
+.EXAMPLE
     # HTML attachment campaign
     .\Remove-PhishingMessage.ps1 -AttachmentName "*.html" `
         -Sender "billing@evil.example" -Apply
@@ -251,6 +273,12 @@
     Purge covers the primary mailbox only - neither engine reaches the archive
     mailbox.
 
+    Calendar items are NOT removed by default, by either engine. A phishing
+    meeting invitation leaves an event in the calendar that deleting the
+    invitation mail does not touch. Use -Engine Graph with -IncludeCalendar to
+    sweep those as well; -VerifyWithGraph then checks the calendar too, and says
+    plainly when it is only checking mail.
+
     Documented Purview limits, both handled by this script: a purge removes at
     most 10 items per mailbox per action, and a single content search purges at
     most 50,000 mailboxes. For bulk removal beyond that, Microsoft points at the
@@ -283,6 +311,9 @@ param(
     [string]   $SearchName,
     [switch]   $KeepSearch,
     [switch]   $VerifyWithGraph,
+    [switch]   $IncludeCalendar,
+    [int]      $CalendarDaysBack = 30,
+    [int]      $CalendarDaysForward = 365,
     [int]      $MaxPurgeRounds = 10,
     [int]      $MaxMessagesPerMailbox = 500,
     [int]      $TimeoutMinutes = 30,
@@ -307,6 +338,10 @@ if (-not $Engine) { $Engine = if ($Mailbox) { 'Graph' } else { 'Purview' } }
 
 if ($Engine -eq 'Purview' -and $DeleteType -eq 'Recycle') {
     throw "Purview purge only supports SoftDelete and HardDelete - it cannot move items to Deleted Items. Use -DeleteType SoftDelete, or -Engine Graph with -Mailbox for a Recycle."
+}
+
+if ($Engine -eq 'Purview' -and $IncludeCalendar) {
+    throw "-IncludeCalendar is a Graph-engine feature. Purview's purge acts on whatever the content search matched and cannot be pointed at the calendar specifically. Use -Engine Graph -Mailbox <addresses> for the calendar sweep."
 }
 
 if ($Engine -eq 'Graph') {
@@ -1019,6 +1054,9 @@ function Test-PurgeWithGraph {
 
     Write-Host ""
     Write-Host "  -- Verifying over Graph --" -ForegroundColor Cyan
+    if (-not $IncludeCalendar) {
+        Write-Host "  (mail only - calendar items are not checked without -IncludeCalendar)" -ForegroundColor DarkGray
+    }
 
     if (-not (Connect-GraphForMail)) {
         Write-Warning "Cannot verify: no app-only Graph access could be established (see .NOTES). The purge itself is unaffected - nothing here says it failed."
@@ -1031,6 +1069,7 @@ function Test-PurgeWithGraph {
     foreach ($mbx in $Mailboxes) {
         try {
             $left = @(Get-GraphMatchingMessage -Mailbox $mbx)
+            if ($IncludeCalendar) { $left += @(Get-GraphMatchingEvent -Mailbox $mbx) }
         } catch {
             Write-Host ("    {0,-45} could not check: {1}" -f $mbx, $_.Exception.Message) -ForegroundColor DarkYellow
             $unchecked++
@@ -1158,12 +1197,23 @@ function Invoke-GraphPurge {
             continue
         }
 
-        if ($messages.Count -eq 0) {
+        $events = @()
+        if ($IncludeCalendar) {
+            try {
+                $events = @(Get-GraphMatchingEvent -Mailbox $mbx)
+            } catch {
+                Write-Host ("  {0,-45} calendar check failed: {1}" -f $mbx, $_.Exception.Message) -ForegroundColor DarkYellow
+            }
+        }
+
+        if ($messages.Count -eq 0 -and $events.Count -eq 0) {
             Write-Host ("  {0,-45} no match" -f $mbx) -ForegroundColor DarkGray
             continue
         }
 
-        Write-Host ("  {0,-45} {1} match(es)" -f $mbx, $messages.Count) -ForegroundColor Cyan
+        $summary = "$($messages.Count) mail"
+        if ($IncludeCalendar) { $summary += ", $($events.Count) calendar" }
+        Write-Host ("  {0,-45} {1}" -f $mbx, $summary) -ForegroundColor Cyan
 
         foreach ($msg in $messages) {
             $folder = Resolve-GraphFolderName -Mailbox $mbx -FolderId $msg.parentFolderId -Cache $folderNames
@@ -1199,6 +1249,45 @@ function Invoke-GraphPurge {
                             $row.Received,
                             $folder,
                             ("$($msg.subject)" -replace '^(.{55}).+$', '$1...')) -ForegroundColor $color
+
+            $results.Add($row)
+        }
+
+        foreach ($ev in $events) {
+            $when = ''
+            if ($ev.start -and $ev.start.dateTime) {
+                try { $when = ([datetime]$ev.start.dateTime).ToString('yyyy-MM-dd HH:mm') } catch { $when = "$($ev.start.dateTime)" }
+            }
+            $row = [PSCustomObject]@{
+                Mailbox   = $mbx
+                Engine    = 'Graph'
+                ItemCount = 1
+                TotalSize = ''
+                Subject   = $ev.subject
+                Received  = $when
+                Folder    = 'Calendar'
+                Action    = if ($Apply) { 'Delete' } else { 'DryRun' }
+                Status    = 'Matched'
+                Detail    = "Organiser: $($ev.organizer.emailAddress.address)"
+            }
+
+            if ($Apply) {
+                try {
+                    Remove-GraphEvent -Mailbox $mbx -EventId $ev.id
+                    $row.Status = 'Removed'
+                } catch {
+                    $row.Status = 'Error'
+                    $row.Detail = $_.Exception.Message
+                }
+            }
+
+            $color = switch ($row.Status) {
+                'Error'   { 'Red' }
+                'Matched' { 'Yellow' }
+                default   { 'Green' }
+            }
+            Write-Host ("      [{0}] {1}  |  Calendar  |  {2}" -f $row.Status, $when,
+                            ("$($ev.subject)" -replace '^(.{50}).+$', '$1...')) -ForegroundColor $color
 
             $results.Add($row)
         }
@@ -1253,6 +1342,60 @@ function Get-GraphMatchingMessage {
     }
 
     return $messages
+}
+
+function Get-GraphMatchingEvent {
+    <#
+        Returns calendar events in one mailbox matching the run's criteria.
+
+        A phishing meeting invite leaves an event behind that deleting the mail
+        does not touch - /messages and /events are separate collections. Graph
+        cannot filter events on a substring of the subject, so the window is
+        narrowed server-side by date and the subject/organiser match is applied
+        here.
+    #>
+    param([string] $Mailbox)
+
+    # Checked before fetching anything: with neither selector there is nothing
+    # calendar-specific to match on, and pulling the whole calendar to then match
+    # nothing would be both pointless and dangerous.
+    if (-not $Subject -and -not $SenderAddress) {
+        Write-Warning "-IncludeCalendar needs -Subject or -SenderAddress to match on; a MessageId does not identify a calendar item. Skipping the calendar."
+        return @()
+    }
+
+    $from = (Get-Date).AddDays(-$CalendarDaysBack).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $to   = (Get-Date).AddDays($CalendarDaysForward).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+    # calendarView expands recurring series into occurrences, which is what you
+    # want here: a recurring bait invite should be found on every instance.
+    $select = 'id,subject,organizer,start,end,seriesMasterId,type'
+    $uri = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($Mailbox))/calendarView" +
+           "?startDateTime=$from&endDateTime=$to&`$select=$select&`$top=100"
+
+    $events = @(Get-GraphPaged -Uri $uri -MaxItems $MaxMessagesPerMailbox)
+
+    if ($Subject) {
+        $pattern = if ($Subject -match '\*') { $Subject } else { "*$Subject*" }
+        $events = @($events | Where-Object { $_.subject -like $pattern })
+    }
+    if ($SenderAddress) {
+        $events = @($events | Where-Object {
+            "$($_.organizer.emailAddress.address)".ToLowerInvariant() -eq $SenderAddress.ToLowerInvariant()
+        })
+    }
+
+    return $events
+}
+
+function Remove-GraphEvent {
+    param(
+        [string] $Mailbox,
+        [string] $EventId
+    )
+    # DELETE on an event the mailbox merely attends removes it from that
+    # calendar; it does not send cancellations to anyone else.
+    Invoke-Graph -Method DELETE -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($Mailbox))/events/$EventId" | Out-Null
 }
 
 function Get-GraphPaged {
