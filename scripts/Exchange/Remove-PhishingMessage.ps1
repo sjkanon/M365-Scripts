@@ -356,6 +356,7 @@ function Invoke-PurviewPurge {
     New-ComplianceSearch @newParams | Out-Null
 
     $round        = 0
+    $roundsNeeded = 1     # replaced by a real plan once the first search lands
     $searchFailed = $false
     # A re-started search keeps reporting the previous run's Completed status and
     # SuccessResults for a few seconds. Carrying the last JobEndTime forward lets
@@ -407,6 +408,21 @@ function Invoke-PurviewPurge {
                 }
                 Write-Host ""
 
+                # The purge cap is per mailbox, so the busiest mailbox decides how
+                # many rounds are needed - not the tenant-wide total.
+                $maxPerMailbox = ($hits | Measure-Object -Property ItemCount -Maximum).Maximum
+                if (-not $maxPerMailbox) { $maxPerMailbox = 0 }
+                $roundsNeeded  = [int][Math]::Ceiling($maxPerMailbox / 10.0)
+
+                if ($Apply -and $roundsNeeded -gt 1) {
+                    Write-Host "  Busiest mailbox holds $maxPerMailbox item(s) and a purge takes 10 per mailbox per round, so $roundsNeeded round(s) are needed." -ForegroundColor DarkGray
+                    Write-Host ""
+                }
+                if ($Apply -and $roundsNeeded -gt $MaxPurgeRounds) {
+                    Write-Warning "$roundsNeeded round(s) are needed but -MaxPurgeRounds is $MaxPurgeRounds. Raise it, or re-run afterwards to clear the remainder."
+                    $script:Truncated = $true
+                }
+
                 # Per-mailbox counts come free with the search, but they do not say
                 # WHICH messages matched - which is exactly what you want to check
                 # before purging. A preview action returns that item-level detail.
@@ -450,21 +466,20 @@ function Invoke-PurviewPurge {
                 }
             }
         } else {
-            # Later rounds: show what is left, so a multi-round purge is not a
-            # silent wait.
-            Write-Host ("  {0} item(s) left across {1} mailbox(es)" -f $hitTotal, $hits.Count) -ForegroundColor DarkGray
-            foreach ($h in ($hits | Sort-Object -Property ItemCount -Descending)) {
-                Write-Host ("    {0,-45} {1,4} left" -f $h.Location, $h.ItemCount) -ForegroundColor DarkGray
-            }
+            # Later rounds: show what the index still reports, so a multi-round
+            # purge is not a silent wait. This is NOT a reliable count of what is
+            # left - the index lags a purge by up to ~30 minutes, so items already
+            # purged keep showing up here for a while.
+            Write-Host ("  Index still reports {0} item(s) across {1} mailbox(es) (it lags a purge, so this is not proof anything remains)" -f $hitTotal, $hits.Count) -ForegroundColor DarkGray
         }
 
         if ($hitTotal -eq 0) { break }
         if (-not $Apply)     { break }
-        if ($round -gt $MaxPurgeRounds) {
-            Write-Warning "Reached -MaxPurgeRounds ($MaxPurgeRounds) with $hitTotal item(s) still matching. Re-run to continue."
-            $script:Truncated = $true
-            break
-        }
+        # The index cannot say when the purge is done, so the plan made from the
+        # first search decides. Looping until the index goes quiet would purge the
+        # same items over and over and then report a false truncation.
+        if ($round -gt $roundsNeeded)   { break }
+        if ($round -gt $MaxPurgeRounds) { break }
 
         # ── Purge ─────────────────────────────────────────────────────────────
         # Action names are derived from the search name and only one action can
@@ -489,6 +504,9 @@ function Invoke-PurviewPurge {
     if ($Apply -and -not $searchFailed) {
         Write-Host ""
         Write-Host "  Purge finished after $($round - 1) round(s)." -ForegroundColor Green
+        Write-Host "  The search index lags a purge by up to ~30 minutes, so re-running this" -ForegroundColor DarkGray
+        Write-Host "  script straight away will still show the items. Verify later, or check" -ForegroundColor DarkGray
+        Write-Host "  a mailbox directly." -ForegroundColor DarkGray
         foreach ($r in $results) {
             if ($r.Status -eq 'Matched') { $r.Status = 'Purged' }
         }
