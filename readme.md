@@ -194,6 +194,11 @@ Scripts for calendar and mailbox management.
 
 - Calendar migration between users
 - Set calendar folder permissions (NL/FR/EN locale support)
+- **Get-MessageTraceReport.ps1** — trace who received what, at what exact time, and where it was forwarded to
+- **Remove-PhishingMessage.ps1** — delete a phishing message from one, several, or all mailboxes; dry-run by default
+  - Two engines: **Purview** Content Search + purge (tenant-wide, the only one that can HardDelete) and **Graph** (per-mailbox, no search-index lag, per-message report)
+  - `Recycle` / `SoftDelete` / `HardDelete`; refuses to run without a content selector so a date range alone can never match every message
+  - Loops purge rounds automatically around Purview's 10-items-per-mailbox limit, and writes a CSV of everything matched and deleted
 
 ---
 

@@ -285,12 +285,26 @@ function Invoke-PurviewPurge {
     Write-Host ""
 
     # ── Connection ────────────────────────────────────────────────────────────
+    # Content Search runs on a separate backend that the plain IPPS connection no
+    # longer reaches: without -EnableSearchOnlySession the cmdlets are present but
+    # Start-ComplianceSearch fails at initialisation. The switch arrived in
+    # ExchangeOnlineManagement 3.9.0, so it is passed only when supported.
     if (-not (Get-Command New-ComplianceSearch -ErrorAction SilentlyContinue)) {
         Write-Host "  Connecting to Security & Compliance PowerShell..." -ForegroundColor DarkGray
         $ippsParams = @{ ErrorAction = 'Stop' }
         if ($TenantId) { $ippsParams['Organization'] = $TenantId }
+        $connectCmd = Get-Command Connect-IPPSSession -ErrorAction Stop
+        if ($connectCmd.Parameters.ContainsKey('EnableSearchOnlySession')) {
+            $ippsParams['EnableSearchOnlySession'] = $true
+        } else {
+            Write-Warning "ExchangeOnlineManagement $($connectCmd.Module.Version) has no -EnableSearchOnlySession. Content Search may fail to start; update with: Install-Module ExchangeOnlineManagement -Force"
+        }
         Connect-IPPSSession @ippsParams
         $script:ConnectedIpps = $true
+    } else {
+        # Reusing someone else's session: it may well have been opened without
+        # the switch, and that cannot be repaired from inside this process.
+        $script:ReusedIppsSession = $true
     }
 
     if (-not $SearchName) { $SearchName = "Phish_$(Get-Date -Format 'yyyyMMdd_HHmmss')" }
@@ -310,14 +324,19 @@ function Invoke-PurviewPurge {
 
     $round        = 0
     $searchFailed = $false
+    # A re-started search keeps reporting the previous run's Completed status and
+    # SuccessResults for a few seconds. Carrying the last JobEndTime forward lets
+    # the wait tell a fresh result from a stale one.
+    $lastJobEnd   = $null
 
     while ($true) {
         $round++
 
         Start-ComplianceSearch -Identity $SearchName -ErrorAction Stop
         $search = Wait-ForComplianceState -Getter { Get-ComplianceSearch -Identity $SearchName -ErrorAction Stop } `
-                                          -Label "search round $round"
+                                          -Label "search round $round" -NewerThan $lastJobEnd
         if (-not $search) { $searchFailed = $true; break }
+        $lastJobEnd = $search.JobEndTime
 
         $hits = Read-ComplianceSuccessResults -SuccessResults $search.SuccessResults
         $hitTotal = ($hits | Measure-Object -Property ItemCount -Sum).Sum
@@ -396,10 +415,15 @@ function Wait-ForComplianceState {
     <#
         Polls a compliance object until it reports Completed. Returns the object,
         or $null when it failed or ran past -TimeoutMinutes.
+
+        -NewerThan guards against a re-started search that is still serving the
+        previous run's Completed status: a result whose JobEndTime has not moved
+        past the given moment is treated as stale and polling continues.
     #>
     param(
-        [scriptblock] $Getter,
-        [string]      $Label
+        [scriptblock]        $Getter,
+        [string]             $Label,
+        [nullable[datetime]] $NewerThan
     )
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
@@ -407,7 +431,12 @@ function Wait-ForComplianceState {
         Start-Sleep -Seconds 5
         try { $obj = & $Getter } catch { continue }
         switch ("$($obj.Status)") {
-            'Completed' { return $obj }
+            'Completed' {
+                if ($NewerThan -and $obj.JobEndTime -and [datetime]$obj.JobEndTime -le $NewerThan) {
+                    continue   # previous run's result, the restart has not landed yet
+                }
+                return $obj
+            }
             'Failed'    {
                 Write-Warning "$Label failed: $($obj.Errors)"
                 return $null
