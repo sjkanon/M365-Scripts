@@ -13,10 +13,12 @@
       Purview  Content Search + New-ComplianceSearchAction -Purge. One KQL query
                sweeps every mailbox in the tenant, so you do not need to know the
                recipients up front. This is the only engine that can HardDelete
-               (Recoverable Items\Purges). Downside: it reads the search index,
-               which lags delivery by roughly 15-30 minutes, and each purge round
-               removes at most 10 items per mailbox - the script loops rounds
-               until nothing is left (-MaxPurgeRounds).
+               (Recoverable Items\Purges). Three downsides: it reads the search
+               index, which lags delivery by roughly 15-30 minutes; it reports
+               counts per mailbox but never the individual messages (the preview
+               action was retired in the cloud in May 2025); and a purge removes
+               at most 10 items per mailbox per round, so the script plans the
+               number of rounds from the busiest mailbox.
 
       Graph    Enumerates each target mailbox over the Graph mail API and deletes
                the matching messages one by one. No index lag (a message is
@@ -97,11 +99,6 @@
 .PARAMETER KeepSearch
     Do not remove the Content Search and its purge actions afterwards. Useful
     when you want to inspect the search in the Purview portal.
-
-.PARAMETER NoPreview
-    Skip the preview action on the Purview engine. Without it the script lists
-    every matched message per mailbox (sender, subject, received time) before
-    purging, which costs one extra action and a little time.
 
 .PARAMETER MaxPurgeRounds
     Purview purges at most 10 items per mailbox per action, so the script repeats
@@ -195,6 +192,11 @@
     Purge covers the primary mailbox only - neither engine reaches the archive
     mailbox.
 
+    Documented Purview limits, both handled by this script: a purge removes at
+    most 10 items per mailbox per action, and a single content search purges at
+    most 50,000 mailboxes. For bulk removal beyond that, Microsoft points at the
+    Graph ediscoverySearch: purgeData API, which allows 100 items per location.
+
     Required modules: ExchangeOnlineManagement, plus Microsoft.Graph.Authentication
     for the Graph engine.
 #>
@@ -219,7 +221,6 @@ param(
     [switch]   $Apply,
     [string]   $SearchName,
     [switch]   $KeepSearch,
-    [switch]   $NoPreview,
     [int]      $MaxPurgeRounds = 10,
     [int]      $MaxMessagesPerMailbox = 500,
     [int]      $TimeoutMinutes = 30,
@@ -292,7 +293,7 @@ Write-Host ""
 $results             = [System.Collections.Generic.List[PSObject]]::new()
 $script:ConnectedIpps    = $false
 $script:ReusedIppsSession = $false
-$script:RawPreview        = $null
+$script:TotalPurged       = 0
 $script:Truncated     = $false
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -410,6 +411,11 @@ function Invoke-PurviewPurge {
 
                 # The purge cap is per mailbox, so the busiest mailbox decides how
                 # many rounds are needed - not the tenant-wide total.
+                if ($hits.Count -gt 50000) {
+                    Write-Warning "A single content search purges at most 50,000 mailboxes; this search matched $($hits.Count). Narrow the scope with -Mailbox and run it in batches."
+                    $script:Truncated = $true
+                }
+
                 $maxPerMailbox = ($hits | Measure-Object -Property ItemCount -Maximum).Maximum
                 if (-not $maxPerMailbox) { $maxPerMailbox = 0 }
                 $roundsNeeded  = [int][Math]::Ceiling($maxPerMailbox / 10.0)
@@ -423,47 +429,32 @@ function Invoke-PurviewPurge {
                     $script:Truncated = $true
                 }
 
-                # Per-mailbox counts come free with the search, but they do not say
-                # WHICH messages matched - which is exactly what you want to check
-                # before purging. A preview action returns that item-level detail.
-                if (-not $NoPreview) {
-                    $preview = Get-PurviewPreview -SearchName $SearchName
+                # Purview can go no finer than this. Content Search reports counts
+                # per mailbox, and the preview action that used to return the
+                # individual messages was retired in the cloud in May 2025 - it is
+                # documented as on-premises only. For subject-level detail, run the
+                # Graph engine against these mailboxes.
+                if (-not $Apply) {
+                    Write-Host "  Purview reports counts per mailbox, not individual messages." -ForegroundColor DarkGray
+                    Write-Host "  For per-message detail, re-run with: -Engine Graph -Mailbox <the addresses above>" -ForegroundColor DarkGray
+                    Write-Host ""
                 }
             }
 
             # Record what the search saw, so the CSV is useful even on a dry run.
-            # Item-level rows when the preview gave them, per-mailbox rows otherwise.
-            if ($preview -and $preview.Count -gt 0) {
-                Show-PurviewPreview -Items $preview -Total $hitTotal
-                foreach ($item in $preview) {
-                    $results.Add([PSCustomObject]@{
-                        Mailbox    = $item.Location
-                        Engine     = 'Purview'
-                        ItemCount  = 1
-                        TotalSize  = $item.Size
-                        Subject    = $item.Subject
-                        Received   = $item.Received
-                        Folder     = ''
-                        Action     = if ($Apply) { $DeleteType } else { 'DryRun' }
-                        Status     = 'Matched'
-                        Detail     = "From: $($item.Sender)"
-                    })
-                }
-            } else {
-                foreach ($h in $hits) {
-                    $results.Add([PSCustomObject]@{
-                        Mailbox    = $h.Location
-                        Engine     = 'Purview'
-                        ItemCount  = $h.ItemCount
-                        TotalSize  = $h.TotalSize
-                        Subject    = ''
-                        Received   = ''
-                        Folder     = ''
-                        Action     = if ($Apply) { $DeleteType } else { 'DryRun' }
-                        Status     = 'Matched'
-                        Detail     = "Search '$SearchName'"
-                    })
-                }
+            foreach ($h in $hits) {
+                $results.Add([PSCustomObject]@{
+                    Mailbox    = $h.Location
+                    Engine     = 'Purview'
+                    ItemCount  = $h.ItemCount
+                    TotalSize  = $h.TotalSize
+                    Subject    = ''
+                    Received   = ''
+                    Folder     = ''
+                    Action     = if ($Apply) { $DeleteType } else { 'DryRun' }
+                    Status     = 'Matched'
+                    Detail     = "Search '$SearchName'"
+                })
             }
         } else {
             # Later rounds: show what the index still reports, so a multi-round
@@ -485,25 +476,35 @@ function Invoke-PurviewPurge {
         # Action names are derived from the search name and only one action can
         # be outstanding, so the preview and the previous round's purge both have
         # to go before the next purge can be created.
-        foreach ($stale in @($purgeActionName, "$($SearchName)_Preview")) {
-            try {
-                Remove-ComplianceSearchAction -Identity $stale -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-            } catch {}
-        }
+        try {
+            Remove-ComplianceSearchAction -Identity $purgeActionName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+        } catch {}
 
         Write-Host "  Purge round $round : removing up to 10 item(s) per mailbox ($DeleteType)..." -ForegroundColor Yellow
         New-ComplianceSearchAction -SearchName $SearchName -Purge -PurgeType $DeleteType -Confirm:$false -ErrorAction Stop | Out-Null
 
-        $action = Wait-ForComplianceState -Getter { Get-ComplianceSearchAction -Identity $purgeActionName -ErrorAction Stop } `
+        $action = Wait-ForComplianceState -Getter { Get-ComplianceSearchAction -Identity $purgeActionName -Details -ErrorAction Stop } `
                                           -Label "purge round $round"
         if (-not $action) { $searchFailed = $true; break }
 
-        Write-Host "    round $round done" -ForegroundColor DarkGray
+        # The action's own results are the only trustworthy account of what was
+        # removed - the search index lags and cannot confirm it.
+        $purgedNow = Read-CompliancePurgeResults -Results $action.Results
+        if ($null -ne $purgedNow) {
+            $script:TotalPurged += $purgedNow
+            Write-Host "    round $round done - $purgedNow item(s) purged" -ForegroundColor DarkGray
+        } else {
+            Write-Host "    round $round done - service reported no item detail" -ForegroundColor DarkGray
+        }
     }
 
     if ($Apply -and -not $searchFailed) {
         Write-Host ""
-        Write-Host "  Purge finished after $($round - 1) round(s)." -ForegroundColor Green
+        if ($script:TotalPurged -gt 0) {
+            Write-Host "  Purge finished after $($round - 1) round(s); the service reported $($script:TotalPurged) item(s) purged." -ForegroundColor Green
+        } else {
+            Write-Host "  Purge finished after $($round - 1) round(s)." -ForegroundColor Green
+        }
         Write-Host "  The search index lags a purge by up to ~30 minutes, so re-running this" -ForegroundColor DarkGray
         Write-Host "  script straight away will still show the items. Verify later, or check" -ForegroundColor DarkGray
         Write-Host "  a mailbox directly." -ForegroundColor DarkGray
@@ -516,9 +517,7 @@ function Invoke-PurviewPurge {
     # ── Cleanup ───────────────────────────────────────────────────────────────
     finally {
         if (-not $KeepSearch) {
-            foreach ($stale in @($purgeActionName, "$($SearchName)_Preview")) {
-                try { Remove-ComplianceSearchAction -Identity $stale -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
-            }
+            try { Remove-ComplianceSearchAction -Identity $purgeActionName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
             try { Remove-ComplianceSearch -Identity $SearchName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
         } else {
             Write-Host "  Content Search kept: '$SearchName'" -ForegroundColor DarkGray
@@ -605,96 +604,23 @@ function Format-ByteSize {
     else                    { "$Bytes B" }
 }
 
-function Get-PurviewPreview {
+function Read-CompliancePurgeResults {
     <#
-        Runs a preview action against a completed search and returns the matched
-        items. Preview is capped by the service at roughly 1000 items; anything
-        beyond that is still purged, just not listed.
-
-        Never throws: a failed preview costs visibility, not the purge itself, so
-        every failure degrades to per-mailbox counts.
-    #>
-    param([string] $SearchName)
-
-    $previewName = "$($SearchName)_Preview"
-    try { Remove-ComplianceSearchAction -Identity $previewName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null } catch {}
-
-    Write-Host "  Retrieving per-message detail..." -ForegroundColor DarkGray
-    try {
-        New-ComplianceSearchAction -SearchName $SearchName -Preview -Confirm:$false -ErrorAction Stop | Out-Null
-    } catch {
-        Write-Warning "Preview could not be started, falling back to per-mailbox counts: $($_.Exception.Message)"
-        return @()
-    }
-
-    $action = Wait-ForComplianceState -Getter { Get-ComplianceSearchAction -Identity $previewName -Details -ErrorAction Stop } `
-                                      -Label 'preview'
-    if (-not $action) { return @() }
-
-    $items = Read-CompliancePreviewResults -Results $action.Results
-    if ($items.Count -eq 0 -and $action.Results) {
-        # The service returned something this parser did not recognise. Say so
-        # rather than silently reporting nothing, and keep the raw text.
-        Write-Warning "Preview returned data in an unexpected format; falling back to per-mailbox counts. Raw preview is written to the report as a _Preview.txt file."
-        $script:RawPreview = $action.Results
-    }
-    return $items
-}
-
-function Read-CompliancePreviewResults {
-    <#
-        Preview results arrive as free text, one brace-delimited record per item:
-          {Location: user@contoso.com; Sender: a@b.com; Subject: Hi; Type: Email;
-           Size: 1234; Received Time: 8/30/2026 10:00:00 AM; Data Link: ...}
-
-        A subject can itself contain ';', so the fields are matched by name in
-        order rather than by splitting on the separator.
+        A purge action reports its outcome as free text. The exact shape is not
+        contractual, so an unrecognised payload returns $null - reported as "no
+        item detail" rather than guessed at as a number.
     #>
     param([string] $Results)
 
-    $out = [System.Collections.Generic.List[PSObject]]::new()
-    if (-not $Results) { return $out }
-
-    $rx = 'Location:\s*(?<loc>.*?);\s*Sender:\s*(?<sender>.*?);\s*Subject:\s*(?<subject>.*?);\s*Type:\s*(?<type>.*?);\s*Size:\s*(?<size>\d+);\s*Received Time:\s*(?<recv>.*?)\s*(?:;|\})'
-    foreach ($m in [regex]::Matches($Results, $rx)) {
-        $out.Add([PSCustomObject]@{
-            Location = $m.Groups['loc'].Value.Trim()
-            Sender   = $m.Groups['sender'].Value.Trim()
-            Subject  = $m.Groups['subject'].Value.Trim()
-            Type     = $m.Groups['type'].Value.Trim()
-            Size     = [int64] $m.Groups['size'].Value
-            Received = $m.Groups['recv'].Value.Trim()
-        })
+    if (-not $Results) { return $null }
+    $total = 0
+    $found = $false
+    foreach ($m in [regex]::Matches($Results, 'Item count:\s*(?<count>\d+)')) {
+        $total += [int] $m.Groups['count'].Value
+        $found  = $true
     }
-    return $out
-}
-
-function Show-PurviewPreview {
-    <#
-        Prints the previewed items grouped per mailbox, so you can see exactly
-        which messages a purge would take before committing to -Apply.
-    #>
-    param(
-        [PSObject[]] $Items,
-        [int]        $Total
-    )
-
-    Write-Host "  -- Messages matched --" -ForegroundColor Cyan
-    foreach ($group in ($Items | Group-Object -Property Location | Sort-Object -Property Count -Descending)) {
-        Write-Host ""
-        Write-Host ("  {0}  ({1} item(s))" -f $group.Name, $group.Count) -ForegroundColor Yellow
-        foreach ($item in ($group.Group | Sort-Object -Property Received)) {
-            Write-Host ("      {0,-20} {1,-32} {2}" -f
-                            $item.Received,
-                            ("$($item.Sender)"  -replace '^(.{29}).+$', '$1...'),
-                            ("$($item.Subject)" -replace '^(.{50}).+$', '$1...')) -ForegroundColor Gray
-        }
-    }
-    Write-Host ""
-    if ($Total -gt $Items.Count) {
-        Write-Host "  Preview lists $($Items.Count) of $Total item(s) - the service caps preview output. All $Total will be purged." -ForegroundColor DarkGray
-        Write-Host ""
-    }
+    if ($found) { return $total }
+    return $null
 }
 
 function Read-ComplianceSuccessResults {
@@ -966,12 +892,5 @@ if ($results.Count -gt 0) {
     $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
     Write-Host ""
     Write-Host "  Report saved: $OutputPath" -ForegroundColor Green
-
-    if ($script:RawPreview) {
-        $previewPath = Join-Path (Split-Path -Parent $OutputPath) `
-                                 ("$([System.IO.Path]::GetFileNameWithoutExtension($OutputPath))_Preview.txt")
-        $script:RawPreview | Out-File -FilePath $previewPath -Encoding UTF8
-        Write-Host "  Raw preview : $previewPath" -ForegroundColor Yellow
-    }
 }
 Write-Host ""
