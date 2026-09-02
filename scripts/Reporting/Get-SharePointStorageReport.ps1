@@ -1886,11 +1886,88 @@ function Finalize-CheckpointFiles {
     }
 }
 
+function ConvertFrom-CheckpointNumber {
+    # Export-Csv writes numbers in the *current* culture, so on a Dutch/German machine
+    # 833919.53 lands in the checkpoint as "833919,53". Import-Csv hands that back as a
+    # string, and PowerShell's [double] cast parses strings with the INVARIANT culture --
+    # which reads that comma as a thousands separator and yields 83391953: exactly 100x
+    # too big, which is how a 814 GB tenant ended up being reported as 81 TB.
+    # Parse with the current culture first (matching how Export-Csv wrote it), and only
+    # fall back to invariant for values that were written on a dot-decimal machine.
+    param([object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    # NumberStyles::Float deliberately excludes AllowThousands: Export-Csv never emits a
+    # group separator, so allowing one only creates the mirror image of the bug above --
+    # a dot-decimal "833919.53" being read as 83391953 under a Dutch culture.
+    $styles = [System.Globalization.NumberStyles]::Float
+    $parsed = 0.0
+    if ([double]::TryParse($text, $styles, [System.Globalization.CultureInfo]::CurrentCulture, [ref]$parsed)) {
+        return $parsed
+    }
+    if ([double]::TryParse($text, $styles, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
+        return $parsed
+    }
+    # Last resort: a checkpoint written under a comma-decimal culture, resumed under a
+    # dot-decimal one. Swap the separator rather than silently dropping the value.
+    if ($text -match '^\s*-?\d+,\d+\s*$') {
+        if ([double]::TryParse(($text -replace ',', '.'), $styles, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {
+            return $parsed
+        }
+    }
+    return $null
+}
+
+function ConvertFrom-CheckpointBoolean {
+    # Import-Csv turns $true/$false into the strings "True"/"False", and *every* non-empty
+    # string is truthy in PowerShell -- so a resumed row would report versioning as "Aan"
+    # even where it is switched off.
+    param([object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    $parsed = $false
+    if ([bool]::TryParse($text, [ref]$parsed)) { return $parsed }
+    return $null
+}
+
 function Convert-CheckpointCsvRows {
     param([string]$Path)
 
     if (-not (Test-Path $Path)) { return @() }
-    return @(Import-Csv -Path $Path -ErrorAction Stop)
+
+    # Columns carrying a size/count. Everything Import-Csv returns is a string, so these
+    # have to be turned back into real numbers before anything sums or sorts on them.
+    $numericColumns = @(
+        'UsedGB', 'TotalGB', 'RemainingGB',
+        'FileCount', 'FolderCount', 'VersionCount', 'Level',
+        'SizeMB', 'VersionSizeMB', 'TotalSizeMB'
+    )
+
+    return @(
+        Import-Csv -Path $Path -ErrorAction Stop | ForEach-Object {
+            $row = $_
+            foreach ($column in $numericColumns) {
+                if ($row.PSObject.Properties.Name -contains $column) {
+                    $row.$column = ConvertFrom-CheckpointNumber -Value $row.$column
+                }
+            }
+            if ($row.PSObject.Properties.Name -contains 'VersioningEnabled') {
+                $row.VersioningEnabled = ConvertFrom-CheckpointBoolean -Value $row.VersioningEnabled
+            }
+            if ($row.PSObject.Properties.Name -contains 'MajorVersionLimit') {
+                $limit = ConvertFrom-CheckpointNumber -Value $row.MajorVersionLimit
+                if ($null -ne $limit) { $row.MajorVersionLimit = [int]$limit }
+                elseif ([string]::IsNullOrWhiteSpace([string]$row.MajorVersionLimit)) { $row.MajorVersionLimit = $null }
+            }
+            $row
+        }
+    )
 }
 
 function Complete-CheckpointUnit {
