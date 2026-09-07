@@ -529,7 +529,7 @@ if ($grantedRoles.Count -gt 0) {
     $readAll = @('Sites.Read.All', 'Sites.FullControl.All', 'Sites.Manage.All', 'Sites.ReadWrite.All', 'Files.Read.All') |
         Where-Object { $grantedRoles -contains $_ }
     if ($readAll) {
-        Write-Host "  Access : tenant-wide through $($readAll[0]) - site membership does not apply to an app role" -ForegroundColor Green
+        Write-Host "  Access : tenant-wide through $(@($readAll)[0]) - site membership does not apply to an app role" -ForegroundColor Green
     } else {
         Write-Warning 'The token carries no tenant-wide read role (Sites.Read.All). Sites that were not granted to this app individually (Sites.Selected) will come back empty rather than refused.'
     }
@@ -583,6 +583,12 @@ function Invoke-Graph {
                 Start-Sleep -Seconds $wait
                 continue
             }
+            # Graph puts the useful part in the response body; -Quiet callers read it
+            # from here instead of losing it with the exception.
+            $script:LastGraphError = ''
+            try { if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $script:LastGraphError = "$($_.ErrorDetails.Message)" } } catch { }
+            if (-not $script:LastGraphError) { $script:LastGraphError = "$($_.Exception.Message)" }
+
             if (-not $Quiet) { throw }
             return $null
         }
@@ -667,10 +673,21 @@ function Invoke-GraphSearchPage {
     #>
     param([string] $Kql, [int] $From, [int] $Size)
 
-    $candidates = if ($script:SearchRegion) { @($script:SearchRegion) } else { @('EUR', 'NAM', 'DEU', 'GBR', 'APC', 'CAN', 'AUS', 'JPN', 'IND') }
+    $queue = [System.Collections.Generic.Queue[string]]::new()
+    if ($script:SearchRegion) {
+        $queue.Enqueue($script:SearchRegion)
+    } else {
+        foreach ($candidate in @('EMEA', 'NAM', 'APAC', 'EUR', 'GBR', 'AUS', 'CAN', 'JPN', 'IND')) { $queue.Enqueue($candidate) }
+    }
+
+    $tried       = [System.Collections.Generic.List[string]]::new()
     $firstAnswer = $null
 
-    foreach ($region in $candidates) {
+    while ($queue.Count -gt 0) {
+        $region = $queue.Dequeue()
+        if (-not $region -or $tried.Contains($region)) { continue }
+        $tried.Add($region)
+
         $payload = @{
             requests = @(@{
                 entityTypes = @('driveItem')
@@ -682,12 +699,24 @@ function Invoke-GraphSearchPage {
         }
 
         $response = Invoke-Graph -Uri '/search/query' -Method POST -Body $payload -Quiet
-        if (-not $response) { continue }
+
+        if (-not $response) {
+            # Graph names the regions it will accept ("Only valid regions are EMEA"),
+            # so take it at its word rather than working through the guesses.
+            if ($script:LastGraphError -match 'valid regions are\s+([^."]+)') {
+                foreach ($valid in ($Matches[1] -split '[,;]')) {
+                    $name = $valid.Trim().Trim('.')
+                    if ($name -and -not $tried.Contains($name)) { $queue.Enqueue($name) }
+                }
+            }
+            continue
+        }
+
         if (-not $firstAnswer) { $firstAnswer = [pscustomobject]@{ Region = $region; Response = $response } }
 
         $container = @(@($response.value)[0].hitsContainers)[0]
         if (@($container.hits).Count -gt 0) {
-            if ($script:SearchRegion -ne $region) { Write-Host "  Region : $region (found by trying)" -ForegroundColor DarkGray }
+            if ($script:SearchRegion -ne $region) { Write-Host "  Region : $region" -ForegroundColor DarkGray }
             $script:SearchRegion = $region
             return $response
         }
@@ -695,7 +724,7 @@ function Invoke-GraphSearchPage {
 
     if ($firstAnswer) {
         if (-not $script:SearchRegion) {
-            Write-Warning "No results from any region tried ($($candidates -join ', ')). If the query should have matched something, pass the right one with -Region."
+            Write-Warning "No results from any region tried ($($tried -join ', ')). If the query should have matched something, pass the right one with -Region."
             $script:SearchRegion = $firstAnswer.Region
         }
         return $firstAnswer.Response
@@ -709,7 +738,7 @@ function Invoke-GraphSearchPage {
             query       = @{ queryString = $Kql }
             from        = $From
             size        = $Size
-            region      = $candidates[0]
+            region      = if ($tried.Count -gt 0) { $tried[0] } else { 'EMEA' }
         })
     }
     return Invoke-Graph -Uri '/search/query' -Method POST -Body $payload
