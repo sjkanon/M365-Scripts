@@ -623,6 +623,7 @@ M365-Scripts/
     ├── SharePoint/
     │   ├── readme.md
     │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
+    │   ├── Search-SharePointContent.ps1 ← same, tenant-wide via Graph app-only: delta + /permissions, sharing links and guests (files/folders)
     │   └── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     ├── Teams/
     │   ├── readme.md
@@ -712,6 +713,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-07 (2)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Search-SharePointContent.ps1` — the Microsoft Graph counterpart of `Find-SiteContent.ps1`: app-only, no interactive sign-in, and it searches one site or **every site and OneDrive in the tenant** |
+| Finding content uses `/drives/{id}/root/delta` (a whole library tree in pages of a thousand items, so `*contains*` wildcards work) or `/search/query` with `-Content` for text inside documents; the filters are the same as in the PnP script |
+| Permissions come from `/drives/{id}/items/{id}/permissions`, 20 per `/$batch` call. One call yields the roles, the granted-to identities, the sharing link with its scope (anyone/organization/specific people), edit-or-view, expiry and URL, and `inheritedFrom` — which is what decides `PermissionSource = Item` (unique) versus `Inherited`. "Anyone with the link" gets its own counter because those need no sign-in at all |
+| Written down explicitly, in the script and the readme: Graph has no API for SharePoint role assignments, so site- and list-level rights and items in ordinary (non-library) lists stay the domain of `Find-SiteContent.ps1`. The readme has a comparison table for picking between the two |
+| Sign-in is app-only: the first run registers an app, consents the application role `Sites.Read.All`, creates a self-signed certificate in `CurrentUser\My` and uploads its public key — no secret on disk — and caches client ID plus thumbprint per tenant in `graph.appid.json` (added to `.gitignore`). Later runs connect without a prompt, so it also works from a scheduled task. Throttling (429) is retried, honouring `Retry-After`, for single calls and batch sub-requests alike |
 
 ### 2026-09-07
 | Change |
