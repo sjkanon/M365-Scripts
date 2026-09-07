@@ -247,6 +247,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# A terminating error anywhere below should name the line it came from - without it
+# PowerShell reports only the script name, which is no help in a script this size.
+trap {
+    Write-Host ''
+    Write-Host "  FAILED at line $($_.InvocationInfo.ScriptLineNumber)" -ForegroundColor Red
+    Write-Host "    $($_.InvocationInfo.Line.Trim())" -ForegroundColor DarkRed
+    Write-Host "    $($_.Exception.GetType().Name): $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ''
+    break
+}
+
 # -- Leave nothing out ---------------------------------------------------------
 # -Everything is the "do not make me think about it" switch: every subsite, every
 # hidden and system list, and no caps on what is reported.
