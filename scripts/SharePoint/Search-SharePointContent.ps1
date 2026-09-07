@@ -153,6 +153,13 @@
     Display name of the app registration to create or reuse.
     Default: "M365-Scripts Graph SharePoint Search".
 
+.PARAMETER Region
+    Geography for -Content searches, e.g. EUR, NAM, DEU, GBR. The Graph search API
+    demands one for app-only requests ("Region is required when request with
+    application permission"). Left out, the script reads it from the site's data
+    location and, when the tenant is not multi-geo and reports none, tries the
+    common regions until a query comes back with results.
+
 .PARAMETER OutputPath
     CSV report path. Defaults to C:\Temp\GraphSharePointFind_<timestamp>.csv
     (~/Downloads on non-Windows).
@@ -237,6 +244,8 @@ param(
     [string] $CertificateThumbprint,
     [string] $ClientSecret,
     [string] $AppName = 'M365-Scripts Graph SharePoint Search',
+
+    [string] $Region,
 
     [string] $OutputPath,
 
@@ -647,6 +656,65 @@ function Invoke-GraphBatch {
     return $results
 }
 
+function Invoke-GraphSearchPage {
+    <#
+        One page of /search/query. App-only requests must carry a region - without it
+        Graph answers 400, "Region is required when request with application
+        permission". When the region is not known yet the common ones are tried and
+        the first that returns hits is kept for the rest of the run. A page that is
+        empty from every region is reported as empty, with a warning, rather than
+        passed off as "nothing found".
+    #>
+    param([string] $Kql, [int] $From, [int] $Size)
+
+    $candidates = if ($script:SearchRegion) { @($script:SearchRegion) } else { @('EUR', 'NAM', 'DEU', 'GBR', 'APC', 'CAN', 'AUS', 'JPN', 'IND') }
+    $firstAnswer = $null
+
+    foreach ($region in $candidates) {
+        $payload = @{
+            requests = @(@{
+                entityTypes = @('driveItem')
+                query       = @{ queryString = $Kql }
+                from        = $From
+                size        = $Size
+                region      = $region
+            })
+        }
+
+        $response = Invoke-Graph -Uri '/search/query' -Method POST -Body $payload -Quiet
+        if (-not $response) { continue }
+        if (-not $firstAnswer) { $firstAnswer = [pscustomobject]@{ Region = $region; Response = $response } }
+
+        $container = @(@($response.value)[0].hitsContainers)[0]
+        if (@($container.hits).Count -gt 0) {
+            if ($script:SearchRegion -ne $region) { Write-Host "  Region : $region (found by trying)" -ForegroundColor DarkGray }
+            $script:SearchRegion = $region
+            return $response
+        }
+    }
+
+    if ($firstAnswer) {
+        if (-not $script:SearchRegion) {
+            Write-Warning "No results from any region tried ($($candidates -join ', ')). If the query should have matched something, pass the right one with -Region."
+            $script:SearchRegion = $firstAnswer.Region
+        }
+        return $firstAnswer.Response
+    }
+
+    # Every region errored: run one more without swallowing it, so the real problem
+    # surfaces instead of an empty result.
+    $payload = @{
+        requests = @(@{
+            entityTypes = @('driveItem')
+            query       = @{ queryString = $Kql }
+            from        = $From
+            size        = $Size
+            region      = $candidates[0]
+        })
+    }
+    return Invoke-Graph -Uri '/search/query' -Method POST -Body $payload
+}
+
 # -- Sites ---------------------------------------------------------------------
 function Get-SiteByUrl {
     param([string] $Url)
@@ -780,18 +848,24 @@ if ($searchMode) {
     $kql = if ($scopeClause) { "$Content $scopeClause" } else { $Content }
     if (-not $scopeClause) { Write-Host '  Note   : too many sites to scope the query - searching the whole tenant and filtering afterwards.' -ForegroundColor DarkGray }
 
+    # An app-only search must say which geography to run in. A multi-geo tenant
+    # reports it per site; a single-geo one reports nothing, so it has to be found by
+    # trying - see Invoke-GraphSearchPage.
+    $script:SearchRegion = $Region
+    if ($script:SearchRegion) {
+        Write-Host "  Region : $script:SearchRegion" -ForegroundColor DarkGray
+    } else {
+        $siteInfo = Invoke-Graph -Uri "/sites/$($sites[0].Id)?`$select=siteCollection" -Quiet
+        if ($siteInfo -and $siteInfo.siteCollection -and $siteInfo.siteCollection.dataLocationCode) {
+            $script:SearchRegion = "$($siteInfo.siteCollection.dataLocationCode)"
+            Write-Host "  Region : $script:SearchRegion (the site's data location)" -ForegroundColor DarkGray
+        }
+    }
+
     $siteUrls = @($sites.Url)
     $from = 0
     do {
-        $payload = @{
-            requests = @(@{
-                entityTypes = @('driveItem')
-                query       = @{ queryString = $kql }
-                from        = $from
-                size        = 200
-            })
-        }
-        $response = Invoke-Graph -Uri '/search/query' -Method POST -Body $payload
+        $response = Invoke-GraphSearchPage -Kql $kql -From $from -Size 200
         $container = @($response.value)[0]
         $hitsContainer = @($container.hitsContainers)[0]
         $rows = @($hitsContainer.hits)
