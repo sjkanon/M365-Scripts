@@ -28,9 +28,15 @@ and **who can get at it**. Read-only — the script never changes anything.
 
 Both engines feed the same filters: `-Name` (wildcards), `-Path`, `-Extension`,
 `-ItemType`, `-ListName`, `-ModifiedBy`, `-ModifiedAfter` / `-ModifiedBefore`,
-`-MinSizeMB`. Hidden and system libraries are skipped unless you pass `-IncludeHidden`.
-While crawling, only the top web is searched unless you add `-IncludeSubsites` — the
-script reports how many subsites it skipped.
+`-MinSizeMB`. `-Name` is matched against the file name, the item title *and* the last
+segment of the URL, so an item whose title differs from its file name still turns up.
+
+Hidden and system libraries are skipped unless you pass `-IncludeHidden`, and while
+crawling only the top web is searched unless you add `-IncludeSubsites` — the script
+reports per web how many lists it skipped and why. **`-Everything` turns all of that
+off in one go**: every subsite, every hidden and system list, no cap on the hits and
+none on the permission lookups. A crawl still matches names and metadata only; use
+`-Content` to search inside the documents themselves.
 
 **Permissions per hit**
 
@@ -81,7 +87,7 @@ someone else's OneDrive or a site you are not a member of possible.
 | `-SiteUrl` | Yes | Site collection to search (team site, communication site, or a OneDrive) |
 | `-IncludeSubsites` | No | Also crawl every subsite below it |
 | `-Content` | No | Full-text/KQL query — switches to the search index |
-| `-Name` | No | Filter on item/file name, wildcards allowed (`*offerte*`) |
+| `-Name` | No | Filter on the name, wildcards allowed (`*offerte*`) — matched against the file name, the item title *and* the last URL segment |
 | `-Path` | No | Filter on the folder, substring match on the server relative URL |
 | `-Extension` | No | One or more extensions, with or without the dot (`xlsx`,`pdf`) |
 | `-ItemType` | No | `All` (default), `File`, `Folder` or `ListItem` |
@@ -90,11 +96,12 @@ someone else's OneDrive or a site you are not a member of possible.
 | `-ModifiedAfter` / `-ModifiedBefore` | No | Restrict to a change window |
 | `-MinSizeMB` | No | Only files of at least this size |
 | `-IncludeHidden` | No | Also search hidden lists, catalogs and system libraries |
+| `-Everything` | No | Leave nothing out: `-IncludeSubsites -IncludeHidden` plus no caps at all |
 | `-Permissions` | No | `Effective` (default), `Unique` (only broken inheritance) or `None` |
 | `-ExpandGroups` | No | Also list the members of regular SharePoint groups (link groups are always expanded) |
 | `-IncludeLimitedAccess` | No | Keep `Limited Access` assignments in the report |
-| `-MaxItems` | No | Stop after this many matches (default 5000) |
-| `-MaxPermissionLookups` | No | Cap on hits that get their permissions resolved (default 1000) |
+| `-MaxItems` | No | Stop after this many matches (default 5000, `0` = no limit) |
+| `-MaxPermissionLookups` | No | Cap on hits that get their permissions resolved (default 1000, `0` = no limit) |
 | `-PageSize` | No | Items per server call while crawling (default 500) |
 | `-GrantSiteAdmin` | No | Temporarily make yourself site collection admin (SharePoint Administrator required) |
 | `-KeepSiteAdmin` | No | Keep those rights instead of removing them afterwards |
@@ -112,6 +119,10 @@ someone else's OneDrive or a site you are not a member of possible.
 # Full text: which documents mention "salarisschaal", anywhere in the site tree?
 .\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/HR `
     -Content "salarisschaal"
+
+# Leave nothing out: all subsites, all hidden/system lists, no caps
+.\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
+    -Name "*veiligheid*" -Everything
 
 # Everything in the site that is shared differently from the rest
 .\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `

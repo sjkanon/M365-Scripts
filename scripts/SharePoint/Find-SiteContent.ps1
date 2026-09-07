@@ -64,8 +64,9 @@
     Examples: "salarisschaal", "vertrouwelijk AND 2026", "author:jane".
 
 .PARAMETER Name
-    Filter on the item or file name. Wildcards allowed, e.g. "*offerte*" or
-    "Budget*.xlsx".
+    Filter on the name. Wildcards allowed, e.g. "*offerte*" or "Budget*.xlsx".
+    Matched against the file name, the item title and the last segment of the URL,
+    so an item that carries a different title than its file name is still found.
 
 .PARAMETER Path
     Filter on the folder the item lives in - substring match on the server relative
@@ -96,6 +97,13 @@
     Also search hidden lists, catalogs and system libraries. Off by default - they
     are almost never what you are looking for and they are big.
 
+.PARAMETER Everything
+    Leave nothing out: every subsite, every hidden and system list, and no cap on
+    the number of hits or on how many of them get their permissions resolved.
+    Equivalent to -IncludeSubsites -IncludeHidden -MaxItems 0 -MaxPermissionLookups 0.
+    Note that a crawl still matches names and metadata only - add -Content to look
+    inside the documents themselves.
+
 .PARAMETER Permissions
     How much permission detail to resolve per hit:
       Effective  (default) the permissions that actually apply, whether they come
@@ -115,13 +123,13 @@
     on their own and are hidden by default.
 
 .PARAMETER MaxItems
-    Stop after this many matching items. Default 5000.
+    Stop after this many matching items. Default 5000; 0 means no limit.
 
 .PARAMETER MaxPermissionLookups
-    Cap on how many hits get their permissions resolved (default 1000). Resolving
-    permissions costs a few server calls per item, so a very broad search would
-    otherwise run for hours. Hits above the cap are still reported, without
-    permission rows.
+    Cap on how many hits get their permissions resolved (default 1000, 0 means no
+    limit). Resolving permissions costs a few server calls per item, so a very broad
+    search would otherwise run for hours. Hits above the cap are still reported,
+    without permission rows.
 
 .PARAMETER PageSize
     Items fetched per server call while crawling (default 500, max 5000).
@@ -176,6 +184,11 @@
         -ListName "Gedeelde documenten" -Extension pdf -MinSizeMB 10 -ExpandGroups
 
 .EXAMPLE
+    # Leave nothing out: all subsites, all hidden and system lists, no caps
+    .\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
+        -Name "*veiligheid*" -Everything
+
+.EXAMPLE
     # Search someone's OneDrive you have no rights on
     .\Find-SiteContent.ps1 `
         -SiteUrl https://contoso-my.sharepoint.com/personal/jane_doe_contoso_com `
@@ -203,6 +216,7 @@ param(
     [double] $MinSizeMB,
 
     [switch] $IncludeHidden,
+    [switch] $Everything,
 
     [ValidateSet('Effective', 'Unique', 'None')]
     [string] $Permissions = 'Effective',
@@ -210,7 +224,10 @@ param(
     [switch] $ExpandGroups,
     [switch] $IncludeLimitedAccess,
 
+    [ValidateRange(0, [int]::MaxValue)]
     [int] $MaxItems = 5000,
+
+    [ValidateRange(0, [int]::MaxValue)]
     [int] $MaxPermissionLookups = 1000,
 
     [ValidateRange(100, 5000)]
@@ -229,6 +246,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# -- Leave nothing out ---------------------------------------------------------
+# -Everything is the "do not make me think about it" switch: every subsite, every
+# hidden and system list, and no caps on what is reported.
+if ($Everything) {
+    $IncludeSubsites = $true
+    $IncludeHidden   = $true
+    if (-not $PSBoundParameters.ContainsKey('MaxItems'))             { $MaxItems = 0 }
+    if (-not $PSBoundParameters.ContainsKey('MaxPermissionLookups')) { $MaxPermissionLookups = 0 }
+}
 
 # -- Modules -------------------------------------------------------------------
 if (-not (Get-Module -ListAvailable -Name 'PnP.PowerShell')) {
@@ -283,9 +310,33 @@ if ($useModifiedBefore)  { $filterParts += "before $($ModifiedBefore.ToString('y
 if ($useMinSize)         { $filterParts += "min $MinSizeMB MB" }
 if ($filterParts.Count)  { Write-Host "  Filter : $($filterParts -join ' | ')" -ForegroundColor Cyan }
 Write-Host "  Rights : $Permissions" -ForegroundColor Cyan
+if ($Everything) {
+    Write-Host '  Scope  : EVERYTHING - all subsites, hidden and system lists included, no caps' -ForegroundColor Yellow
+}
+if (-not $searchMode) {
+    Write-Host '  Note   : a crawl matches names and metadata - add -Content to search inside documents.' -ForegroundColor DarkGray
+}
 Write-Host ''
 
 # -- Helpers -------------------------------------------------------------------
+function Get-ClientProperty {
+    <#
+        CSOM only ships the properties it was asked for, and PnP's -Includes cannot
+        express value types - asking it for Hidden, ItemCount or BaseType fails with
+        "Argument types do not match". So read the property and only go back to the
+        server when it turns out not to be loaded.
+    #>
+    param($ClientObject, [string] $Property, $Default = $null)
+
+    try { return $ClientObject.$Property } catch { }
+    try {
+        Get-PnPProperty -ClientObject $ClientObject -Property $Property -ErrorAction Stop | Out-Null
+        return $ClientObject.$Property
+    } catch {
+        return $Default
+    }
+}
+
 function Format-Duration {
     param([TimeSpan] $Span)
 
@@ -567,10 +618,11 @@ function Resolve-WebPermissions {
     $entry = [pscustomobject]@{ Source = 'Site'; SourceName = $WebUrl; Rows = @() }
     try {
         $connection = Connect-Site -Url $WebUrl
-        $web = Get-PnPWeb -Connection $connection -Includes HasUniqueRoleAssignments
+        $web = Get-PnPWeb -Connection $connection
+        $unique = [bool](Get-ClientProperty -ClientObject $web -Property 'HasUniqueRoleAssignments' -Default $true)
 
         $parentUrl = ($script:Webs | Where-Object { $_.Url -eq $WebUrl } | Select-Object -First 1).ParentUrl
-        if ($web.HasUniqueRoleAssignments -or -not $parentUrl) {
+        if ($unique -or -not $parentUrl) {
             $entry.Rows = @(Get-PrincipalRows -SecurableObject $web -Connection $connection)
         } else {
             $parentEntry = Resolve-WebPermissions -WebUrl $parentUrl
@@ -642,7 +694,13 @@ function Resolve-ItemPermissions {
 function Test-Match {
     param($Hit)
 
-    if ($Name -and ($Hit.Name -notlike $Name)) { return $false }
+    # A file has a name, a list item has a title, and plenty of items have both with
+    # different values - so -Name matches either, plus the leaf of the URL.
+    if ($Name) {
+        $candidates = @($Hit.Name, $Hit.AltName, [System.IO.Path]::GetFileName("$($Hit.Url)")) |
+            Where-Object { $_ }
+        if (-not @($candidates | Where-Object { $_ -like $Name })) { return $false }
+    }
     if ($Path -and ($Hit.Url -notlike "*$Path*")) { return $false }
     if ($ItemType -ne 'All' -and $Hit.ItemType -ne $ItemType) { return $false }
 
@@ -768,6 +826,7 @@ try {
                 ItemId          = if ($row['ListItemID']) { [int]$row['ListItemID'] } else { 0 }
                 ItemType        = if ($isContainer) { 'Folder' } elseif ($isDocument) { 'File' } else { 'ListItem' }
                 Name            = if ($row['Title']) { "$($row['Title'])" } else { [System.IO.Path]::GetFileName($itemUrl) }
+                AltName         = [System.IO.Path]::GetFileName($itemUrl)
                 Url             = $itemUrl
                 SizeBytes       = if ($row['Size']) { [long]$row['Size'] } else { 0 }
                 Modified        = $modified
@@ -781,7 +840,7 @@ try {
             }
 
             if (-not (Test-Match -Hit $hit)) { continue }
-            if ($hits.Count -ge $MaxItems) { $capped = $true; break }
+            if ($MaxItems -gt 0 -and $hits.Count -ge $MaxItems) { $capped = $true; break }
             $hits.Add($hit)
         }
 
@@ -798,27 +857,37 @@ try {
             if ($capped) { break }
 
             $webConnection = Connect-Site -Url $web.Url
-            $lists = @(Get-PnPList -Connection $webConnection -Includes BaseType, Hidden, ItemCount, RootFolder)
+            $lists = @(Get-PnPList -Connection $webConnection)
 
+            $skippedHidden = 0
+            $skippedByName = 0
             $targetLists = @($lists | Where-Object {
-                if (-not $IncludeHidden -and ($_.Hidden -or $_.Title -in $systemLists)) { return $false }
+                if (-not $IncludeHidden) {
+                    $hidden = [bool](Get-ClientProperty -ClientObject $_ -Property 'Hidden' -Default $false)
+                    if ($hidden -or $_.Title -in $systemLists) { $skippedHidden++; return $false }
+                }
                 if ($ListName) {
                     $title = $_.Title
-                    if (-not @($ListName | Where-Object { $title -like $_ })) { return $false }
+                    if (-not @($ListName | Where-Object { $title -like $_ })) { $skippedByName++; return $false }
                 }
                 return $true
             })
 
-            Write-Host "  [$webIndex/$($webs.Count)] $($web.Url) - $($targetLists.Count) list(s)/librar(ies)" -ForegroundColor DarkGray
+            $skipNote = @()
+            if ($skippedHidden) { $skipNote += "$skippedHidden hidden/system" }
+            if ($skippedByName) { $skipNote += "$skippedByName filtered out" }
+            $skipText = if ($skipNote) { " (skipped: $($skipNote -join ', '))" } else { '' }
+            Write-Host "  [$webIndex/$($webs.Count)] $($web.Url) - $($targetLists.Count) of $($lists.Count) list(s)/librar(ies)$skipText" -ForegroundColor DarkGray
 
             $listIndex = 0
             foreach ($list in $targetLists) {
                 $listIndex++
                 if ($capped) { break }
 
-                $isDocLib = "$($list.BaseType)" -eq 'DocumentLibrary'
+                $isDocLib  = "$(Get-ClientProperty -ClientObject $list -Property 'BaseType')" -eq 'DocumentLibrary'
+                $itemCount = Get-ClientProperty -ClientObject $list -Property 'ItemCount' -Default 0
                 Write-Progress -Id 1 -Activity "Crawling $($web.Url)" `
-                    -Status "$($list.Title) ($listIndex/$($targetLists.Count)) - $($list.ItemCount) item(s), $($hits.Count) hit(s), $(Format-Duration $timer.Elapsed)" `
+                    -Status "$($list.Title) ($listIndex/$($targetLists.Count)) - $itemCount item(s), $($hits.Count) hit(s), $(Format-Duration $timer.Elapsed)" `
                     -PercentComplete ([math]::Min(100, ($listIndex / [math]::Max(1, $targetLists.Count)) * 100))
 
                 $fields = @('ID', 'Title', 'FileLeafRef', 'FileRef', 'FileDirRef', 'FSObjType', 'Modified', 'Created', 'Author', 'Editor')
@@ -847,6 +916,7 @@ try {
                         ItemId          = [int]$item.Id
                         ItemType        = $type
                         Name            = $itemName
+                        AltName         = if ($isDocLib) { "$($fv.Title)" } else { "$($fv.FileLeafRef)" }
                         Url             = "$($fv.FileRef)"
                         SizeBytes       = if ($fv.File_x0020_Size) { [long]$fv.File_x0020_Size } else { 0 }
                         Modified        = $fv.Modified
@@ -860,7 +930,7 @@ try {
                     }
 
                     if (-not (Test-Match -Hit $hit)) { continue }
-                    if ($hits.Count -ge $MaxItems) { $capped = $true; break }
+                    if ($MaxItems -gt 0 -and $hits.Count -ge $MaxItems) { $capped = $true; break }
                     $hits.Add($hit)
                 }
             }
@@ -926,7 +996,7 @@ try {
                 -Status "$index/$($hits.Count) - $($hit.Name) - $(Format-Duration $permTimer.Elapsed)" `
                 -PercentComplete ([math]::Min(100, ($index / $hits.Count) * 100))
 
-            if ($resolved -ge $MaxPermissionLookups) {
+            if ($MaxPermissionLookups -gt 0 -and $resolved -ge $MaxPermissionLookups) {
                 Add-Row -Hit $hit -Entry $null -Principal $null
                 continue
             }
@@ -950,7 +1020,7 @@ try {
                     continue
                 }
                 try {
-                    $list = Get-PnPList -Identity $hit.ListId -Connection $connection -Includes BaseType -ErrorAction Stop
+                    $list = Get-PnPList -Identity $hit.ListId -Connection $connection -ErrorAction Stop
                     $item = Get-PnPListItem -List $hit.ListId -Id $hit.ItemId -Connection $connection -ErrorAction Stop
                     $hit.List = $list.Title
                 } catch {
@@ -1021,7 +1091,7 @@ try {
         if ($linkRows.Count)     { Write-Host "  Sharing links    : $($linkRows.Count) - $((($linkRows.SharingLink | Select-Object -Unique) -join ', '))" -ForegroundColor Yellow }
         if ($externalRows.Count) { Write-Host "  External access  : $($externalRows.Count) assignment(s)" -ForegroundColor Red }
         if ($everyoneRows.Count) { Write-Host "  Everyone (-ish)  : $($everyoneRows.Count) assignment(s)" -ForegroundColor Yellow }
-        if ($resolved -ge $MaxPermissionLookups) {
+        if ($MaxPermissionLookups -gt 0 -and $resolved -ge $MaxPermissionLookups) {
             Write-Host "  Note             : stopped resolving rights after $MaxPermissionLookups item(s) (-MaxPermissionLookups)" -ForegroundColor Yellow
         }
     }
