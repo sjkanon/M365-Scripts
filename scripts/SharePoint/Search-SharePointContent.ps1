@@ -1304,18 +1304,29 @@ Write-Host ''
 if ($Permissions -eq 'Unique' -and $permissionRows.Count -eq 0) {
     Write-Host "  $($hits.Count) item(s) matched and every one of them inherits - nothing is shared differently." -ForegroundColor Green
 } else {
-    $hits | Group-Object Site | Sort-Object Count -Descending | Select-Object -First 15 |
-        ForEach-Object {
-            [pscustomobject]@{
-                Site = $_.Name -replace '^https://[^/]+', ''
-                Hits = $_.Count
-            }
-        } | Format-Table -AutoSize | Out-Host
+    # Where the hits actually are - the first thing you want to know, and the one
+    # thing a permission table cannot tell you.
+    if ($hits.Count -le 50) {
+        $hits | Select-Object `
+            @{ N = 'Kind'; E = { $_.ItemType } },
+            @{ N = 'Name'; E = { $_.Name } },
+            @{ N = 'Where'; E = { [uri]::UnescapeDataString(("$($_.Url)" -replace '^https://[^/]+', '')) } } |
+            Format-Table -AutoSize | Out-Host
+    } else {
+        $hits | Group-Object Site | Sort-Object Count -Descending | Select-Object -First 15 |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Site = $_.Name -replace '^https://[^/]+', ''
+                    Hits = $_.Count
+                }
+            } | Format-Table -AutoSize | Out-Host
+    }
 
     $preview = @($permissionRows | Select-Object -First 25)
     if ($preview.Count -gt 0) {
         $preview | Select-Object `
-            @{ N = 'Item';   E = { if ("$($_.Name)".Length -gt 38) { "$($_.Name)".Substring(0, 37) + '...' } else { $_.Name } } },
+            @{ N = 'Item';   E = { if ("$($_.Name)".Length -gt 30) { "$($_.Name)".Substring(0, 29) + '...' } else { $_.Name } } },
+            @{ N = 'Where';  E = { $folder = [uri]::UnescapeDataString("$($_.FolderPath)"); if ($folder.Length -gt 34) { '...' + $folder.Substring($folder.Length - 33) } else { $folder } } },
             @{ N = 'Src';    E = { $_.PermissionSource } },
             @{ N = 'Who';    E = { if ("$($_.Principal)".Length -gt 32) { "$($_.Principal)".Substring(0, 31) + '...' } else { $_.Principal } } },
             @{ N = 'Rights'; E = { $_.Permission } },

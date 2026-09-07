@@ -1228,13 +1228,22 @@ try {
     if ($Permissions -eq 'Unique' -and $permissionRows.Count -eq 0) {
         Write-Host "  $($hits.Count) item(s) matched and every one of them inherits - nothing is shared differently." -ForegroundColor Green
     } else {
-        $hits | Group-Object List | Sort-Object Count -Descending | Select-Object -First 15 |
-            ForEach-Object {
-                [pscustomobject]@{
-                    List = if ($_.Name) { $_.Name } else { '(from search index)' }
-                    Hits = $_.Count
-                }
-            } | Format-Table -AutoSize | Out-Host
+        # Where the hits actually are, not just how many per library.
+        if ($hits.Count -le 50) {
+            $hits | Select-Object `
+                @{ N = 'Kind'; E = { $_.ItemType } },
+                @{ N = 'Name'; E = { $_.Name } },
+                @{ N = 'Where'; E = { [uri]::UnescapeDataString("$($_.Url)") } } |
+                Format-Table -AutoSize | Out-Host
+        } else {
+            $hits | Group-Object List | Sort-Object Count -Descending | Select-Object -First 15 |
+                ForEach-Object {
+                    [pscustomobject]@{
+                        List = if ($_.Name) { $_.Name } else { '(from search index)' }
+                        Hits = $_.Count
+                    }
+                } | Format-Table -AutoSize | Out-Host
+        }
 
         $preview = @($permissionRows | Select-Object -First 25)
         if ($preview.Count -gt 0) {
