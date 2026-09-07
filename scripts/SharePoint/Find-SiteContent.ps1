@@ -781,7 +781,63 @@ function New-ItemQuery {
     $where      = if ($conditions.Count -eq 1) { $conditions[0] } else { "<And>$($conditions[0])$($conditions[1])</And>" }
     $viewFields = ($Fields | ForEach-Object { "<FieldRef Name='$_' />" }) -join ''
 
-    return "<View Scope='RecursiveAll'><Query><Where>$where</Where></Query><ViewFields>$viewFields</ViewFields><RowLimit Paged='TRUE'>$script:QueryRowLimit</RowLimit></View>"
+    [pscustomobject]@{
+        Where      = $where
+        ViewFields = $viewFields
+        View       = "<View Scope='RecursiveAll'><Query><Where>$where</Where></Query><ViewFields>$viewFields</ViewFields><RowLimit Paged='TRUE'>$script:QueryRowLimit</RowLimit></View>"
+    }
+}
+
+function Get-ListItemsByIdWindow {
+    <#
+        The large-list escape hatch. Past the view threshold SharePoint refuses any
+        query it cannot resolve through an index, and Contains on a file name is
+        never indexed. An ID range always is - so the same filter is asked again in
+        windows of a few thousand IDs, and only the matches come back. Costs one
+        round trip per window instead of hauling the whole library across.
+
+        Returns $null when even this is refused, so the caller can read the list in
+        full rather than report a half answer.
+    #>
+    param($List, [string] $Where, [string] $ViewFields, $Connection, [string] $ListTitle, [int] $Window = 4000)
+
+    $maxId = 0
+    try {
+        $probe = @(Get-PnPListItem -List $List -Connection $Connection -ErrorAction Stop `
+            -Query "<View Scope='RecursiveAll'><Query><OrderBy><FieldRef Name='ID' Ascending='FALSE' /></OrderBy></Query><ViewFields><FieldRef Name='ID' /></ViewFields><RowLimit>1</RowLimit></View>")
+        if ($probe.Count -gt 0) { $maxId = [int]$probe[0].Id }
+    } catch {
+        return $null
+    }
+    if ($maxId -le 0) { return @() }
+
+    $found  = [System.Collections.Generic.List[object]]::new()
+    $from   = 0
+    $timer  = [System.Diagnostics.Stopwatch]::StartNew()
+
+    while ($from -lt $maxId) {
+        $to = $from + $Window
+        $query = "<View Scope='RecursiveAll'><Query><Where><And>" +
+                 "<And><Gt><FieldRef Name='ID' /><Value Type='Counter'>$from</Value></Gt>" +
+                 "<Leq><FieldRef Name='ID' /><Value Type='Counter'>$to</Value></Leq></And>" +
+                 "$Where</And></Where></Query><ViewFields>$ViewFields</ViewFields>" +
+                 "<RowLimit Paged='TRUE'>$script:QueryRowLimit</RowLimit></View>"
+        try {
+            $batch = @(Get-PnPListItem -List $List -Query $query -Connection $Connection -ErrorAction Stop)
+            if ($batch.Count -gt 0) { $found.AddRange($batch) }
+        } catch {
+            Write-Progress -Id 2 -Activity "Filtering '$ListTitle'" -Completed
+            return $null
+        }
+
+        Write-Progress -Id 2 -Activity "Filtering '$ListTitle' on the server" `
+            -Status "ID $to of $maxId - $($found.Count) match(es), $(Format-Duration $timer.Elapsed)" `
+            -PercentComplete ([math]::Min(100, ($to / $maxId) * 100))
+        $from = $to
+    }
+
+    Write-Progress -Id 2 -Activity "Filtering '$ListTitle' on the server" -Completed
+    return $found.ToArray()
 }
 
 # -- Run -----------------------------------------------------------------------
@@ -980,13 +1036,21 @@ try {
 
                 if ($caml) {
                     try {
-                        $filtered = @(Get-PnPListItem -List $list -Query $caml -Connection $webConnection -ErrorAction Stop)
+                        $filtered = @(Get-PnPListItem -List $list -Query $caml.View -Connection $webConnection -ErrorAction Stop)
                         if ($filtered.Count -lt $script:QueryRowLimit) {
                             $items = $filtered
                             $script:ServerFiltered++
                         }
                     } catch {
-                        Write-Host "    server-side filter refused on '$($list.Title)' ($($_.Exception.Message.Trim())) - reading it in full" -ForegroundColor DarkGray
+                        # Past the view threshold the plain query is refused, but the
+                        # same filter inside ID windows is not.
+                        Write-Host "    '$($list.Title)' is past the list view threshold - filtering it in ID windows instead" -ForegroundColor DarkGray
+                        $windowed = Get-ListItemsByIdWindow -List $list -Where $caml.Where -ViewFields $caml.ViewFields `
+                            -Connection $webConnection -ListTitle $list.Title
+                        if ($null -ne $windowed) {
+                            $items = @($windowed)
+                            $script:ServerFiltered++
+                        }
                     }
                 }
 
