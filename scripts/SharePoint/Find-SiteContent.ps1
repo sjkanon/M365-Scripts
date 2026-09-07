@@ -517,7 +517,7 @@ if ($appIsNew) {
 
 # Permission caches - webs and lists are resolved once, items only when they broke
 # inheritance. Script scope so the helper functions share them.
-$script:Unreadable = New-Object System.Collections.Generic.List[object]
+$script:Unreadable = [System.Collections.Generic.List[object]]::new()
 $script:PermCache  = @{}
 $script:GroupCache = @{}
 $script:Webs       = @()
@@ -559,7 +559,7 @@ function Get-PrincipalRows {
     #>
     param($SecurableObject, $Connection)
 
-    $rows = New-Object System.Collections.Generic.List[object]
+    $rows = [System.Collections.Generic.List[object]]::new()
 
     try {
         Get-PnPProperty -ClientObject $SecurableObject -Property RoleAssignments -ErrorAction Stop | Out-Null
@@ -765,7 +765,7 @@ try {
 
     # -- Webs to search --------------------------------------------------------
     $rootWeb = Get-PnPWeb -Connection $siteConnection
-    $webList = New-Object System.Collections.Generic.List[object]
+    $webList = [System.Collections.Generic.List[object]]::new()
     $webList.Add([pscustomobject]@{ Url = "$($rootWeb.Url)".TrimEnd('/'); Title = $rootWeb.Title; ParentUrl = $null })
 
     $subWebs = @()
@@ -795,12 +795,16 @@ try {
             Write-Host "  Webs   : $($webList.Count) (site + $($webList.Count - 1) subsite(s))" -ForegroundColor Cyan
         }
     }
-    $script:Webs = @($webList)
-    $webs = if ($IncludeSubsites) { @($webList) } else { @($webList[0]) }
+    # ToArray, not @(): on PowerShell 7.6.5 / .NET 10 an array subexpression over a
+    # List[object] throws "Argument types do not match".
+    # $script:Webs and $webs would also be one and the same variable at script scope -
+    # PowerShell ignores case - hence the separate name for the webs to crawl.
+    $script:Webs = $webList.ToArray()
+    $targetWebs  = if ($IncludeSubsites) { $webList.ToArray() } else { @($webList[0]) }
     Write-Host ''
 
     # -- Collect hits ----------------------------------------------------------
-    $hits    = New-Object System.Collections.Generic.List[object]
+    $hits    = [System.Collections.Generic.List[object]]::new()
     $scanned = 0
     $capped  = $false
     $timer   = [System.Diagnostics.Stopwatch]::StartNew()
@@ -864,7 +868,7 @@ try {
                          'TaxonomyHiddenList', 'User Information List')
 
         $webIndex = 0
-        foreach ($web in $webs) {
+        foreach ($web in $targetWebs) {
             $webIndex++
             if ($capped) { break }
 
@@ -899,7 +903,7 @@ try {
             if ($skippedHidden) { $skipNote += "$skippedHidden hidden/system" }
             if ($skippedByName) { $skipNote += "$skippedByName filtered out" }
             $skipText = if ($skipNote) { " (skipped: $($skipNote -join ', '))" } else { '' }
-            Write-Host "  [$webIndex/$($webs.Count)] $($web.Url) - $($targetLists.Count) of $($lists.Count) list(s)/librar(ies)$skipText" -ForegroundColor DarkGray
+            Write-Host "  [$webIndex/$($targetWebs.Count)] $($web.Url) - $($targetLists.Count) of $($lists.Count) list(s)/librar(ies)$skipText" -ForegroundColor DarkGray
 
             $listIndex = 0
             foreach ($list in $targetLists) {
@@ -975,7 +979,7 @@ try {
     }
 
     # -- Resolve permissions ---------------------------------------------------
-    $results   = New-Object System.Collections.Generic.List[object]
+    $results   = [System.Collections.Generic.List[object]]::new()
     $permTimer = [System.Diagnostics.Stopwatch]::StartNew()
     $resolved  = 0
 

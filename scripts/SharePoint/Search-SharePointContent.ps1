@@ -532,7 +532,7 @@ Write-Host ''
 
 # Anything in scope the run could not read - the summary reports this, so "nothing
 # found" can be told apart from "could not look".
-$script:Unreadable = New-Object System.Collections.Generic.List[object]
+$script:Unreadable = [System.Collections.Generic.List[object]]::new()
 
 # -- Graph plumbing ------------------------------------------------------------
 $script:GraphRoot = 'https://graph.microsoft.com/v1.0'
@@ -588,7 +588,7 @@ function Get-GraphAll {
     #>
     param([string] $Uri, [string] $Activity, [int] $ProgressId = 3)
 
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = [System.Collections.Generic.List[object]]::new()
     $next  = $Uri
     $page  = 0
 
@@ -657,7 +657,7 @@ function Get-SiteByUrl {
     return Invoke-Graph -Uri $lookup
 }
 
-$sites = New-Object System.Collections.Generic.List[object]
+$sites = [System.Collections.Generic.List[object]]::new()
 $timer = [System.Diagnostics.Stopwatch]::StartNew()
 
 if ($tenantMode) {
@@ -765,7 +765,7 @@ function ConvertTo-Hit {
 }
 
 # -- Collect hits --------------------------------------------------------------
-$hits    = New-Object System.Collections.Generic.List[object]
+$hits    = [System.Collections.Generic.List[object]]::new()
 $scanned = 0
 $capped  = $false
 
@@ -915,7 +915,7 @@ function ConvertFrom-GraphPermission {
     #>
     param($Permission)
 
-    $rows = New-Object System.Collections.Generic.List[object]
+    $rows = [System.Collections.Generic.List[object]]::new()
 
     $roles = @($Permission.roles | ForEach-Object {
         switch ("$_") {
@@ -1034,7 +1034,7 @@ function ConvertFrom-GraphPermission {
     return $rows
 }
 
-$results   = New-Object System.Collections.Generic.List[object]
+$results   = [System.Collections.Generic.List[object]]::new()
 $permTimer = [System.Diagnostics.Stopwatch]::StartNew()
 $resolved  = 0
 $permFailed = 0
@@ -1076,7 +1076,9 @@ if ($Permissions -eq 'None') {
     foreach ($hit in $hits) { Add-Row -Hit $hit -Principal $null -Source '' }
 } else {
     # Batched 20 at a time; the hit list is indexed so each response finds its item.
-    $lookupHits = if ($MaxPermissionLookups -gt 0) { @($hits | Select-Object -First $MaxPermissionLookups) } else { @($hits) }
+    # ToArray rather than @($hits): an array subexpression over a List[object] throws
+    # "Argument types do not match" on PowerShell 7.6.5 / .NET 10.
+    $lookupHits = if ($MaxPermissionLookups -gt 0) { @($hits | Select-Object -First $MaxPermissionLookups) } else { $hits.ToArray() }
     $overflow   = @($hits | Select-Object -Skip $lookupHits.Count)
 
     for ($offset = 0; $offset -lt $lookupHits.Count; $offset += 20) {
@@ -1107,7 +1109,7 @@ if ($Permissions -eq 'None') {
             }
 
             $permissions = @($body.value)
-            $rowsForItem = New-Object System.Collections.Generic.List[object]
+            $rowsForItem = [System.Collections.Generic.List[object]]::new()
             foreach ($permission in $permissions) {
                 $direct = -not $permission.inheritedFrom
                 if ($Permissions -eq 'Unique' -and -not $direct) { continue }
