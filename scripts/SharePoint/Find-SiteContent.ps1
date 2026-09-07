@@ -517,6 +517,7 @@ if ($appIsNew) {
 
 # Permission caches - webs and lists are resolved once, items only when they broke
 # inheritance. Script scope so the helper functions share them.
+$script:Unreadable = New-Object System.Collections.Generic.List[object]
 $script:PermCache  = @{}
 $script:GroupCache = @{}
 $script:Webs       = @()
@@ -867,8 +868,18 @@ try {
             $webIndex++
             if ($capped) { break }
 
-            $webConnection = Connect-Site -Url $web.Url
-            $lists = @(Get-PnPList -Connection $webConnection)
+            # No access to a subsite must not kill the run - record it and carry on,
+            # so the summary can say the search was not complete.
+            $webConnection = $null
+            $lists = @()
+            try {
+                $webConnection = Connect-Site -Url $web.Url
+                $lists = @(Get-PnPList -Connection $webConnection)
+            } catch {
+                Write-Warning "No access to $($web.Url): $($_.Exception.Message)"
+                $script:Unreadable.Add([pscustomobject]@{ Scope = $web.Url; Reason = $_.Exception.Message.Trim() })
+                continue
+            }
 
             $skippedHidden = 0
             $skippedByName = 0
@@ -908,6 +919,7 @@ try {
                     $items = @(Get-PnPListItem -List $list -PageSize $PageSize -Fields $fields -Connection $webConnection -ErrorAction Stop)
                 } catch {
                     Write-Warning "Skipping list '$($list.Title)' on $($web.Url): $($_.Exception.Message)"
+                    $script:Unreadable.Add([pscustomobject]@{ Scope = "$($web.Url) > $($list.Title)"; Reason = $_.Exception.Message.Trim() })
                     continue
                 }
 
@@ -1105,6 +1117,19 @@ try {
         if ($MaxPermissionLookups -gt 0 -and $resolved -ge $MaxPermissionLookups) {
             Write-Host "  Note             : stopped resolving rights after $MaxPermissionLookups item(s) (-MaxPermissionLookups)" -ForegroundColor Yellow
         }
+    }
+
+    # "Did we actually get everywhere?" - answer it, do not leave it to the warnings
+    # that scrolled past.
+    if ($script:Unreadable.Count -gt 0) {
+        Write-Host "  Not readable     : $($script:Unreadable.Count) - the result is INCOMPLETE" -ForegroundColor Red
+        $script:Unreadable | Select-Object -First 10 |
+            Select-Object @{ N = 'Skipped'; E = { $_.Scope } }, @{ N = 'Why'; E = { $_.Reason } } |
+            Format-Table -AutoSize | Out-Host
+        if ($script:Unreadable.Count -gt 10) { Write-Host "  ... and $($script:Unreadable.Count - 10) more." -ForegroundColor DarkGray }
+        Write-Host '  Tip: -GrantSiteAdmin makes you site collection admin for the duration of the run.' -ForegroundColor DarkGray
+    } else {
+        Write-Host '  Access           : everything in scope was readable' -ForegroundColor Green
     }
     Write-Host "  Duration         : $(Format-Duration $timer.Elapsed) total, of which $(Format-Duration $permTimer.Elapsed) on permissions" -ForegroundColor Cyan
     if ($results.Count -gt 0) {

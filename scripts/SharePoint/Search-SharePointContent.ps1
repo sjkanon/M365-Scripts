@@ -509,7 +509,30 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
 }
 if (-not $connected) { throw 'Could not connect to Microsoft Graph.' }
 Write-Host "  Connected app-only as $ClientId" -ForegroundColor Green
+
+# App-only means the token carries roles, not user rights: with Sites.Read.All it
+# reads every site in the tenant regardless of who is a member. Say so, and warn
+# when the role is missing instead of letting sites come back mysteriously empty.
+$grantedRoles = @()
+try { $grantedRoles = @((Get-MgContext).Scopes) } catch { }
+if ($grantedRoles.Count -gt 0) {
+    Write-Host "  Roles  : $($grantedRoles -join ', ')" -ForegroundColor DarkGray
+    $readAll = @('Sites.Read.All', 'Sites.FullControl.All', 'Sites.Manage.All', 'Sites.ReadWrite.All', 'Files.Read.All') |
+        Where-Object { $grantedRoles -contains $_ }
+    if ($readAll) {
+        Write-Host "  Access : tenant-wide through $($readAll[0]) - site membership does not apply to an app role" -ForegroundColor Green
+    } else {
+        Write-Warning 'The token carries no tenant-wide read role (Sites.Read.All). Sites that were not granted to this app individually (Sites.Selected) will come back empty rather than refused.'
+    }
+    if ($ExpandGroups -and $grantedRoles -notcontains 'Group.Read.All') {
+        Write-Warning '-ExpandGroups needs the application role Group.Read.All; group members will be reported as unavailable.'
+    }
+}
 Write-Host ''
+
+# Anything in scope the run could not read - the summary reports this, so "nothing
+# found" can be told apart from "could not look".
+$script:Unreadable = New-Object System.Collections.Generic.List[object]
 
 # -- Graph plumbing ------------------------------------------------------------
 $script:GraphRoot = 'https://graph.microsoft.com/v1.0'
@@ -809,6 +832,7 @@ if ($searchMode) {
             $drives = @(Get-GraphAll -Uri "/sites/$($site.Id)/drives?`$select=id,name,webUrl,driveType")
         } catch {
             Write-Warning "Could not list libraries on $($site.Url): $($_.Exception.Message)"
+            $script:Unreadable.Add([pscustomobject]@{ Scope = $site.Url; Reason = $_.Exception.Message.Trim() })
             continue
         }
 
@@ -829,6 +853,7 @@ if ($searchMode) {
                     -Activity "$($drive.name) - $($site.Url)")
             } catch {
                 Write-Warning "Could not read library '$($drive.name)' on $($site.Url): $($_.Exception.Message)"
+                $script:Unreadable.Add([pscustomobject]@{ Scope = "$($site.Url) > $($drive.name)"; Reason = $_.Exception.Message.Trim() })
                 continue
             }
 
@@ -1157,6 +1182,15 @@ if ($Permissions -ne 'None') {
     if ($MaxPermissionLookups -gt 0 -and $hits.Count -gt $MaxPermissionLookups) {
         Write-Host "  Note             : rights resolved for the first $MaxPermissionLookups item(s) (-MaxPermissionLookups)" -ForegroundColor Yellow
     }
+}
+if ($script:Unreadable.Count -gt 0) {
+    Write-Host "  Not readable     : $($script:Unreadable.Count) - the result is INCOMPLETE" -ForegroundColor Red
+    $script:Unreadable | Select-Object -First 10 |
+        Select-Object @{ N = 'Skipped'; E = { $_.Scope } }, @{ N = 'Why'; E = { $_.Reason } } |
+        Format-Table -AutoSize | Out-Host
+    if ($script:Unreadable.Count -gt 10) { Write-Host "  ... and $($script:Unreadable.Count - 10) more." -ForegroundColor DarkGray }
+} else {
+    Write-Host '  Access           : everything in scope was readable' -ForegroundColor Green
 }
 Write-Host "  Duration         : $(Format-Duration $timer.Elapsed) total, of which $(Format-Duration $permTimer.Elapsed) on permissions" -ForegroundColor Cyan
 if ($results.Count -gt 0) {
