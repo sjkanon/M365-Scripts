@@ -9,7 +9,131 @@ admin sign-in on any (customer) tenant.
 
 | Script | Description |
 |--------|-------------|
+| [`Find-SiteContent.ps1`](#find-sitecontentps1) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit |
 | [`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
+
+---
+
+### Find-SiteContent.ps1
+
+Answers the two questions you normally have at the same time: **where does this live**
+and **who can get at it**. Read-only — the script never changes anything.
+
+**Two engines**
+
+| Engine | When | What it sees |
+|--------|------|--------------|
+| Crawl (default) | No `-Content` given | Walks every list and library item by item. Sees everything, also what the search index has not picked up yet. Slower on big sites |
+| Search (`-Content`) | Full-text query | A KQL query against the search index, scoped to the site path — this is the one that matches text *inside* documents. Fast, but limited to what is indexed and what the signed-in account may see. Covers subsites automatically |
+
+Both engines feed the same filters: `-Name` (wildcards), `-Path`, `-Extension`,
+`-ItemType`, `-ListName`, `-ModifiedBy`, `-ModifiedAfter` / `-ModifiedBefore`,
+`-MinSizeMB`. Hidden and system libraries are skipped unless you pass `-IncludeHidden`.
+While crawling, only the top web is searched unless you add `-IncludeSubsites` — the
+script reports how many subsites it skipped.
+
+**Permissions per hit**
+
+For every match the script works out where the permissions actually come from:
+
+| Source | Meaning |
+|--------|---------|
+| `Item` | The item broke inheritance and carries its own role assignments |
+| `List` | It inherits from a library/list that has unique permissions |
+| `Site` | It inherits all the way up to the (sub)site |
+
+Role assignments are flattened to one CSV row per principal — principal type, login,
+e-mail and the role names (`Full Control`, `Edit`, …). `Limited Access` is hidden
+unless you pass `-IncludeLimitedAccess`; those entries only exist so someone can reach
+a deeper item and grant nothing by themselves.
+
+Three things are called out separately because they are the ones that surprise people:
+
+- **Sharing links** — the `SharingLinks.*` groups behind every "Copy link". Always
+  expanded to the people in them and labelled *Anyone* / *Organization* / *Specific
+  people*, so an anonymous link cannot hide in the noise
+- **External users** — guest accounts (`#ext#`) in any assignment
+- **Everyone** — "Everyone" and "Everyone except external users"
+
+Site and list permissions are read once and cached, item permissions only for items
+that actually broke inheritance, so a search with a handful of hits costs a handful of
+extra calls. `-Permissions Unique` is the fast way to answer "what in this site is
+shared differently from the rest"; `-Permissions None` skips permissions entirely.
+`-MaxPermissionLookups` (default 1000) keeps a too-broad search from running for hours.
+
+**Sign-in**
+
+Same as `Restore-RecycleBinItems.ps1`: the first run against a tenant registers a
+public-client Entra app (delegated `AllSites.FullControl`, admin-consented) and caches
+the client ID per tenant in `pnp.appid.json` in the repo root (gitignored). A client ID
+cached by the other script is reused, so this usually costs nothing. Pass `-ClientId`
+to skip app registration entirely.
+
+Reading permissions requires access to the site. `-GrantSiteAdmin` makes the signed-in
+admin site collection administrator for the duration of the run and removes the rights
+again afterwards (keep them with `-KeepSiteAdmin`) — that is what makes searching
+someone else's OneDrive or a site you are not a member of possible.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-SiteUrl` | Yes | Site collection to search (team site, communication site, or a OneDrive) |
+| `-IncludeSubsites` | No | Also crawl every subsite below it |
+| `-Content` | No | Full-text/KQL query — switches to the search index |
+| `-Name` | No | Filter on item/file name, wildcards allowed (`*offerte*`) |
+| `-Path` | No | Filter on the folder, substring match on the server relative URL |
+| `-Extension` | No | One or more extensions, with or without the dot (`xlsx`,`pdf`) |
+| `-ItemType` | No | `All` (default), `File`, `Folder` or `ListItem` |
+| `-ListName` | No | Only these lists/libraries by title, wildcards allowed |
+| `-ModifiedBy` | No | Who last changed it — display name or e-mail, wildcards allowed |
+| `-ModifiedAfter` / `-ModifiedBefore` | No | Restrict to a change window |
+| `-MinSizeMB` | No | Only files of at least this size |
+| `-IncludeHidden` | No | Also search hidden lists, catalogs and system libraries |
+| `-Permissions` | No | `Effective` (default), `Unique` (only broken inheritance) or `None` |
+| `-ExpandGroups` | No | Also list the members of regular SharePoint groups (link groups are always expanded) |
+| `-IncludeLimitedAccess` | No | Keep `Limited Access` assignments in the report |
+| `-MaxItems` | No | Stop after this many matches (default 5000) |
+| `-MaxPermissionLookups` | No | Cap on hits that get their permissions resolved (default 1000) |
+| `-PageSize` | No | Items per server call while crawling (default 500) |
+| `-GrantSiteAdmin` | No | Temporarily make yourself site collection admin (SharePoint Administrator required) |
+| `-KeepSiteAdmin` | No | Keep those rights instead of removing them afterwards |
+| `-AdminUpn` | No | UPN to grant site admin to (default: the signed-in account) |
+| `-TenantId` / `-ClientId` / `-AppName` | No | Sign-in overrides, as in `Restore-RecycleBinItems.ps1` |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\SharePointFind_<timestamp>.csv`) |
+| `-Disconnect` | No | Sign out of PnP when finished |
+
+**Examples**
+
+```powershell
+# Where does anything with "offerte" in the name live, and who can see it?
+.\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales -Name "*offerte*"
+
+# Full text: which documents mention "salarisschaal", anywhere in the site tree?
+.\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/HR `
+    -Content "salarisschaal"
+
+# Everything in the site that is shared differently from the rest
+.\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
+    -Permissions Unique -IncludeSubsites
+
+# Large PDFs in one library, with the groups behind the permissions expanded
+.\Find-SiteContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
+    -ListName "Gedeelde documenten" -Extension pdf -MinSizeMB 10 -ExpandGroups
+
+# Search a OneDrive you have no rights on
+.\Find-SiteContent.ps1 `
+    -SiteUrl https://contoso-my.sharepoint.com/personal/jane_doe_contoso_com `
+    -Name "*.xlsx" -GrantSiteAdmin
+```
+
+**Notes**
+- The CSV has one row per hit *per principal*, so it filters and pivots well: sort on
+  `SharingLink`, `External` or `UniqueRights` to get straight to the interesting rows.
+- `-Content` only finds what the search index knows. Freshly uploaded or recently
+  changed documents can take minutes to hours to show up — crawl mode always sees them.
+- A crawl reads every item in every library. On a site with hundreds of thousands of
+  items that takes a while; narrow it with `-ListName` or use `-Content` instead.
 
 ---
 

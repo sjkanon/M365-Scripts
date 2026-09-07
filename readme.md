@@ -622,6 +622,7 @@ M365-Scripts/
     │   └── zabbix_sas_monitor.conf
     ├── SharePoint/
     │   ├── readme.md
+    │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
     │   └── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     ├── Teams/
     │   ├── readme.md
@@ -711,6 +712,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-07
+| Change |
+|--------|
+| Added `scripts/SharePoint/Find-SiteContent.ps1` — search an entire SharePoint site or OneDrive for content and report which permissions apply to every hit. Read-only |
+| Two engines: a crawl over every list and library (sees everything, `-IncludeSubsites` for the subsites) and a KQL query against the search index (`-Content`) that also matches text *inside* documents. Both share the filters `-Name`, `-Path`, `-Extension`, `-ItemType`, `-ListName`, `-ModifiedBy`, `-ModifiedAfter`/`-ModifiedBefore` and `-MinSizeMB` |
+| Per hit the script resolves where the permissions come from — the item itself (broken inheritance), its list, or the site — and flattens the role assignments to one CSV row per principal with type, login, e-mail and role names. `Limited Access` is filtered out unless `-IncludeLimitedAccess` |
+| Sharing links (the `SharingLinks.*` groups behind "Copy link") are always expanded to the people in them and labelled Anyone/Organization/Specific people; external guests (`#ext#`) and "Everyone (except external users)" are flagged separately in the summary and the CSV |
+| Site and list permissions are read once and cached and item permissions only for items that broke inheritance, so cost scales with the number of hits, not the size of the site; `-Permissions Unique` reports only what is shared differently, `-Permissions None` skips permissions, and `-MaxPermissionLookups` caps a too-broad search |
+| Reuses the app-registration flow and the per-tenant `pnp.appid.json` cache of `Restore-RecycleBinItems.ps1`, and can temporarily grant itself site collection admin (`-GrantSiteAdmin`) to search a site or OneDrive it has no rights on |
 
 ### 2026-08-28
 | Change |
