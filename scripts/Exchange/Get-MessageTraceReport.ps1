@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Trace exactly where mail went: date/time, sender, recipient, status and the
@@ -33,8 +33,15 @@
     Trace both directions for this address: everything it sent AND everything it
     received. Also pulls that mailbox's forwarding configuration and inbox rules.
 
-.PARAMETER Sender
+.PARAMETER ForwardAddress
+    Known forward/exfiltration address(es) to trace as recipients on top of
+    whatever forwarding configuration is discovered. Use this when the forward
+    has already been removed from the mailbox — there is then no configuration
+    left to discover, but its past deliveries are still in the trace.
+
+.PARAMETER SenderAddress
     Filter on sender address. Combine with -Recipient to trace one specific flow.
+    Aliased as -Sender ($Sender itself is a PowerShell automatic variable).
 
 .PARAMETER Recipient
     Filter on recipient address.
@@ -119,9 +126,13 @@
 [CmdletBinding()]
 param(
     [string]   $Mailbox,
-    [string]   $Sender,
+    # Not named -Sender: $Sender is a PowerShell automatic variable. The alias
+    # keeps -Sender working on the command line.
+    [Alias('Sender')]
+    [string]   $SenderAddress,
     [string]   $Recipient,
     [string]   $Subject,
+    [string[]] $ForwardAddress,
     [string]   $MessageId,
     [int]      $Days = 2,
     [datetime] $StartDate,
@@ -140,7 +151,7 @@ param(
 if (-not $StartDate) { $StartDate = $EndDate.AddDays(-$Days) }
 if ($StartDate -ge $EndDate) { throw "-StartDate must be earlier than -EndDate." }
 if ($StartDate -lt (Get-Date).AddDays(-90)) {
-    Write-Warning "Message trace only retains 90 days — results before $((Get-Date).AddDays(-90).ToString('yyyy-MM-dd')) will be empty."
+    Write-Warning "Message trace only retains 90 days - results before $((Get-Date).AddDays(-90).ToString('yyyy-MM-dd')) will be empty."
 }
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -174,10 +185,10 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host "   Message Trace Report" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Window    : $($StartDate.ToString('yyyy-MM-dd HH:mm')) → $($EndDate.ToString('yyyy-MM-dd HH:mm')) (local)" -ForegroundColor DarkGray
+Write-Host "  Window    : $($StartDate.ToString('yyyy-MM-dd HH:mm')) -> $($EndDate.ToString('yyyy-MM-dd HH:mm')) (local)" -ForegroundColor DarkGray
 Write-Host "  Cmdlet    : $traceCmd" -ForegroundColor DarkGray
 if ($Mailbox)   { Write-Host "  Mailbox   : $Mailbox (sent + received)" -ForegroundColor DarkGray }
-if ($Sender)    { Write-Host "  Sender    : $Sender" -ForegroundColor DarkGray }
+if ($SenderAddress) { Write-Host "  Sender    : $SenderAddress" -ForegroundColor DarkGray }
 if ($Recipient) { Write-Host "  Recipient : $Recipient" -ForegroundColor DarkGray }
 if ($Subject)   { Write-Host "  Subject   : $Subject" -ForegroundColor DarkGray }
 if ($MessageId) { Write-Host "  MessageId : $MessageId" -ForegroundColor DarkGray }
@@ -240,7 +251,7 @@ function Read-ForwardingConfig {
     try {
         $mbx = Get-EXOMailbox -Identity $addr -Properties ForwardingSMTPAddress, ForwardingAddress, DeliverToMailboxAndForward -ErrorAction Stop
     } catch {
-        return @()   # not a mailbox (distribution group, contact, guest, …)
+        return @()   # not a mailbox (distribution group, contact, guest, ...)
     }
 
     $targets = [System.Collections.Generic.List[string]]::new()
@@ -328,7 +339,7 @@ function Invoke-Trace {
                 $batch = @(Get-MessageTraceV2 @p -ErrorAction Stop)
                 foreach ($row in $batch) { $collected.Add($row) }
                 if (-not $Quiet) {
-                    Write-Host ("  Retrieved {0,6} row(s)  [{1} → {2}]" -f $collected.Count,
+                    Write-Host ("  Retrieved {0,6} row(s)  [{1} -> {2}]" -f $collected.Count,
                         $chunkFrom.ToString('yyyy-MM-dd'), $chunkTo.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
                 }
 
@@ -368,7 +379,7 @@ if ($Mailbox) {
     $filters.Add(@{ RecipientAddress = $Mailbox })
 } else {
     $base = @{}
-    if ($Sender)    { $base['SenderAddress']    = $Sender }
+    if ($SenderAddress) { $base['SenderAddress'] = $SenderAddress }
     if ($Recipient) { $base['RecipientAddress'] = $Recipient }
     $filters.Add($base)
 }
@@ -380,15 +391,26 @@ if ($Mailbox) {
 # those addresses as recipients too, so the actual hand-off shows up with its
 # own exact timestamp.
 $seedTargets = [System.Collections.Generic.List[string]]::new()
-foreach ($seed in @($Mailbox, $Recipient, $Sender | Where-Object { $_ })) {
+foreach ($seed in @($Mailbox, $Recipient, $SenderAddress | Where-Object { $_ })) {
     foreach ($t in (Read-ForwardingConfig -Address $seed)) {
         if ($seedTargets -notcontains $t) { $seedTargets.Add($t) }
     }
 }
 foreach ($t in $seedTargets) {
-    Write-Host "  Configured forward found → also tracing deliveries to $t" -ForegroundColor Yellow
+    Write-Host "  Configured forward found -> also tracing deliveries to $t" -ForegroundColor Yellow
     $filters.Add(@{ RecipientAddress = $t })
 }
+
+# A forward that has already been removed leaves no configuration to discover,
+# so -ForwardAddress lets you name the address explicitly and trace it anyway.
+foreach ($t in @($ForwardAddress | Where-Object { $_ })) {
+    $addr = $t.ToLowerInvariant()
+    if ($seedTargets -contains $addr) { continue }
+    Write-Host "  Tracing deliveries to supplied forward address $addr" -ForegroundColor Yellow
+    $seedTargets.Add($addr)
+    $filters.Add(@{ RecipientAddress = $addr })
+}
+
 if ($seedTargets.Count -gt 0) { Write-Host "" }
 
 foreach ($f in $filters) {
@@ -644,23 +666,23 @@ foreach ($r in $results) {
         default                       { 'Yellow' }
     }
     Write-Host ($fmt -f $r.ReceivedLocal,
-                        ("$($r.Sender)"    -replace '^(.{31}).+$', '$1…'),
-                        ("$($r.Recipient)" -replace '^(.{31}).+$', '$1…'),
+                        ("$($r.Sender)"    -replace '^(.{31}).+$', '$1...'),
+                        ("$($r.Recipient)" -replace '^(.{31}).+$', '$1...'),
                         $r.Status,
-                        ("$($r.Subject)"   -replace '^(.{50}).+$', '$1…')) -ForegroundColor $color
+                        ("$($r.Subject)"   -replace '^(.{50}).+$', '$1...')) -ForegroundColor $color
 
     if ($r.ForwardedTo) {
-        Write-Host ("      └─ forwarded to: {0}   [{1}]" -f $r.ForwardedTo, $r.ForwardDetection) -ForegroundColor Magenta
+        Write-Host ("      +-- forwarded to: {0}   [{1}]" -f $r.ForwardedTo, $r.ForwardDetection) -ForegroundColor Magenta
     }
 }
 
 if ($forwardConfig.Count -gt 0) {
     Write-Host ""
-    Write-Host "  ── Configured forwarding on involved mailboxes ──" -ForegroundColor Cyan
+    Write-Host "  -- Configured forwarding on involved mailboxes --" -ForegroundColor Cyan
     foreach ($f in $forwardConfig) {
         $tag = if ($f.Source -eq 'Inbox rule') { "rule '$($f.RuleName)'" } else { 'mailbox setting' }
         $state = if ($f.Enabled -eq $false) { ' (disabled)' } else { '' }
-        Write-Host ("  {0,-40} → {1}   [{2}{3}]" -f $f.Mailbox, $f.ForwardTo, $tag, $state) -ForegroundColor Yellow
+        Write-Host ("  {0,-40} -> {1}   [{2}{3}]" -f $f.Mailbox, $f.ForwardTo, $tag, $state) -ForegroundColor Yellow
     }
 }
 

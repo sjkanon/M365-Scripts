@@ -7,6 +7,7 @@
 ## Table of Contents
 
 - [Getting Started](#getting-started)
+- [Quick Launcher](#quick-launcher)
 - [Requirements](#requirements)
 - [Menu](#menu)
 - [Script Categories](#script-categories)
@@ -14,6 +15,7 @@
   - [Exchange](#-exchange)
   - [Entra ID / Graph](#-entra-id--graph)
   - [Intune & Autopilot](#-intune--autopilot)
+  - [SharePoint & OneDrive](#-sharepoint--onedrive)
   - [Testing & Diagnostics](#-testing--diagnostics)
   - [Reporting](#-reporting)
   - [Infrastructure & Devices](#️-infrastructure--devices)
@@ -57,6 +59,53 @@ To remove the startup shortcut later:
 
 > You can also run `.\menu.ps1` directly — it will ask for your UPN as a fallback.
 > To reinstall or update modules manually: `.\scripts\Startup\Install-Modules.ps1`
+
+---
+
+## Quick Launcher
+
+`f.ps1` creates one short command per script in [scripts/](scripts/), so you no longer have to navigate to a folder first. Dot-source it from your profile:
+
+```powershell
+notepad $PROFILE
+. "C:\Users\<you>\Git\M365-Scripts\f.ps1"
+```
+
+The leading dot is not optional — without it the file runs in its own scope and the commands are gone again immediately. `.\f.ps1 -Install` writes the line for you (and does nothing if it is already there).
+
+After restarting your shell:
+
+```powershell
+f-test-dkimconfig -Domain contoso.com
+f-dkimconfig -Domain contoso.com          # short form, when the noun is unique
+f-get-mailboxsizes
+f-m365                                    # the whole catalogue
+f-m365 mailbox                            # filtered
+```
+
+The wrappers copy the parameter block of the target script from its AST, so `-Dom<Tab>` completes and a `ValidateSet` is enforced before anything runs. Default values are dropped from the wrapper on purpose: only bound parameters are forwarded, so the script's own defaults still apply.
+
+### Fuzzy search
+
+For when you know roughly what a script is called but not exactly, `f` matches on name, folder and `.SYNOPSIS`:
+
+```powershell
+f dkim                    # one match -> runs it
+f entra group             # several matches -> numbered picker
+f dkim -Domain contoso.com
+f -List mailbox           # show matches, run nothing
+f -Show trace             # path, synopsis and parameters
+f -Edit bloatware         # open in $env:EDITOR, VS Code, or notepad
+```
+
+### Notes
+
+| | |
+|---|---|
+| Naming | `f-<full-script-name>` always exists; `f-<noun>` is added only where it stays unambiguous. Stripping the verb collides 11 times here (`Detect-`, `Install-` and `Uninstall-ClaudeDesktop-Intune` become the same noun), so the full name is the one you can always count on. |
+| Cache | Generated wrappers live in `.f-index.json` (gitignored). Parsing every script costs ~500 ms, reading the cache ~30 ms, which is what keeps shell start quick. It refreshes itself when a script is added, removed or changed; `f-refresh` forces it. |
+| Collisions | Existing commands are never overwritten. A profile can load more than one of these — `ScriptRunner.Profile.ps1` in *itce-testing* owns `f-scripts`, which is why this catalogue is called `f-m365`. Anything skipped is reported on load. |
+| Uninstall | `.\f.ps1 -Uninstall` removes the marked block from `$PROFILE`. A hand-written dot-source line is reported, not deleted. |
 
 ---
 
@@ -145,6 +194,11 @@ Scripts for calendar and mailbox management.
 
 - Calendar migration between users
 - Set calendar folder permissions (NL/FR/EN locale support)
+- **Get-MessageTraceReport.ps1** — trace who received what, at what exact time, and where it was forwarded to
+- **Remove-PhishingMessage.ps1** — delete a phishing message from one, several, or all mailboxes; dry-run by default
+  - Two engines: **Purview** Content Search + purge (tenant-wide, the only one that can HardDelete) and **Graph** (per-mailbox, no search-index lag, per-message report)
+  - `Recycle` / `SoftDelete` / `HardDelete`; refuses to run without a content selector so a date range alone can never match every message
+  - Loops purge rounds automatically around Purview's 10-items-per-mailbox limit, and writes a CSV of everything matched and deleted
 
 ---
 
@@ -186,6 +240,27 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
   | `$ImageUrl` | Public URL to the wallpaper image (PNG or JPG) |
   | `$WallpaperStyle` | `10` = Fill · `6` = Fit · `2` = Stretch · `0` = Tile · `22` = Span |
   | `$ClientName` | Customer name — used in log filename and local image path |
+
+---
+
+### 📁 SharePoint & OneDrive
+
+Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
+
+#### Recycle Bin Restore
+
+Restore deleted files and folders from a site or OneDrive recycle bin — dry-run by default, `-Apply` to actually restore.
+
+- One site (`-SiteUrl`, works for OneDrive too) or every SharePoint site in the tenant (`-AllSites`) — the tenant sweep skips OneDrive, system and locked sites, and a failing site does not abort the run
+- Narrow the sweep with `-SiteFilter` and try it on a handful of sites first with `-MaxSites`
+- Filter by name, original folder, who deleted it, and a deletion time window
+- First-stage (user) and second-stage (site collection) recycle bin, or both
+- Restores folders first, shallow paths first — a file cannot be restored into a folder that is itself still deleted
+- Creates the required Entra app registration automatically on the first run against a tenant, then caches the client ID in `pnp.appid.json` (gitignored) — later runs go straight to the interactive login
+- `-GrantSiteAdmin` temporarily makes you site collection admin per site and removes the rights afterwards — needed for another user's OneDrive and effectively required for `-AllSites`
+- Restores in batches of up to 200 via a single server call (`-BatchSize`) — a failed batch falls back to item-by-item so one bad file does not sink the rest
+- Timing throughout: how long reading the bin took, an up-front estimate, a progress bar with live ETA, and the real duration in the summary
+- CSV report of every item, restored or failed, including the site, the SharePoint error, its batch number and how long it took
 
 ---
 
@@ -545,6 +620,9 @@ M365-Scripts/
     │   ├── Setup-SASMonitoring.ps1      ← install script, scheduled task, Zabbix config
     │   ├── Test-SASWorkDirectory.ps1    ← validate WORK directory health
     │   └── zabbix_sas_monitor.conf
+    ├── SharePoint/
+    │   ├── readme.md
+    │   └── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     ├── Teams/
     │   ├── readme.md
     │   └── vias_archiver.ps1        ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
@@ -633,6 +711,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-08-28
+| Change |
+|--------|
+| Added `scripts/SharePoint/` with `Restore-RecycleBinItems.ps1` — restore deleted files/folders from a SharePoint site or OneDrive recycle bin, dry-run by default, with filters on name, original folder, who deleted it, and a deletion time window |
+| Two scopes: `-SiteUrl` for one site collection (OneDrive included), or `-AllSites -TenantUrl` to walk every SharePoint site in the tenant. The tenant sweep excludes OneDrive personal sites, the My Site host, redirect sites and locked sites, supports `-SiteFilter`/`-MaxSites`, and keeps going when a single site errors out — per-site results land in a summary table and in a `Site` column in the CSV |
+| Restores run in batches of up to 200 items through `Restore-PnPRecycleBinItem -IdList` (one server call per batch) instead of one call per item; folders and files never share a batch, and a batch that fails as a whole is retried item by item so per-item errors are still reported. Parallel runspaces were deliberately not used — PnP PowerShell is not thread-safe and concurrent calls against one site collection hit SharePoint throttling |
+| The script reports timing at every step — how long reading the recycle bin took, an up-front estimate of the restore, a progress bar with a live ETA from the measured rate, the real duration in the summary, and a `DurationSeconds` column per item in the CSV |
+| The script registers its own Entra app on the first run against a tenant (public client, delegated `AllSites.FullControl`, admin-consented) because PnP PowerShell no longer ships a shared multi-tenant app; the client ID is cached per tenant in `pnp.appid.json` (added to `.gitignore`) |
 
 ### 2026-07-24 (3)
 | Change |
