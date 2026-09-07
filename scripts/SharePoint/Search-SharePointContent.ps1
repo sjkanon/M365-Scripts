@@ -801,29 +801,36 @@ if ($sites.Count -eq 0) {
 }
 
 # -- Matching ------------------------------------------------------------------
-function Test-Match {
-    param($Hit)
+function Get-MatchFailure {
+    <#
+        Returns the name of the filter that rejected this hit, or $null when it
+        matches. Naming the filter is what makes "found 8, kept 0" explainable.
+        -SkipTypeCheck is for search hits: the KQL already filtered on type, and the
+        index does not return the facets needed to check it a second time.
+    #>
+    param($Hit, [switch] $SkipTypeCheck)
 
     if ($Name) {
         $candidates = @($Hit.Name, [System.IO.Path]::GetFileName("$($Hit.Url)")) | Where-Object { $_ }
-        if (-not @($candidates | Where-Object { $_ -like $Name })) { return $false }
+        if (-not @($candidates | Where-Object { $_ -like $Name })) { return 'name' }
     }
-    if ($Path -and ("$($Hit.FolderPath)" -notlike "*$Path*")) { return $false }
-    # 'Unknown' is a search hit whose kind the index did not report; the KQL already
-    # filtered on type in that case, so it must not be dropped here.
-    if ($ItemType -ne 'All' -and $Hit.ItemType -ne 'Unknown' -and $Hit.ItemType -ne $ItemType) { return $false }
+    if ($Path -and ("$($Hit.FolderPath)" -notlike "*$Path*")) { return 'path' }
+
+    if (-not $SkipTypeCheck -and $ItemType -ne 'All' -and $Hit.ItemType -ne 'Unknown' -and $Hit.ItemType -ne $ItemType) {
+        return 'type'
+    }
 
     if ($extensionFilter.Count -gt 0) {
         $ext = [System.IO.Path]::GetExtension("$($Hit.Name)").TrimStart('.').ToLowerInvariant()
-        if ($ext -notin $extensionFilter) { return $false }
+        if ($ext -notin $extensionFilter) { return 'extension' }
     }
-    if ($ModifiedBy -and "$($Hit.ModifiedBy)" -notlike $ModifiedBy -and "$($Hit.ModifiedByEmail)" -notlike $ModifiedBy) { return $false }
+    if ($ModifiedBy -and "$($Hit.ModifiedBy)" -notlike $ModifiedBy -and "$($Hit.ModifiedByEmail)" -notlike $ModifiedBy) { return 'modified by' }
 
-    if ($useModifiedAfter  -and $Hit.Modified -and $Hit.Modified -lt $ModifiedAfter)  { return $false }
-    if ($useModifiedBefore -and $Hit.Modified -and $Hit.Modified -ge $ModifiedBefore) { return $false }
-    if ($useMinSize -and (($Hit.SizeBytes / 1MB) -lt $MinSizeMB)) { return $false }
+    if ($useModifiedAfter  -and $Hit.Modified -and $Hit.Modified -lt $ModifiedAfter)  { return 'modified after' }
+    if ($useModifiedBefore -and $Hit.Modified -and $Hit.Modified -ge $ModifiedBefore) { return 'modified before' }
+    if ($useMinSize -and (($Hit.SizeBytes / 1MB) -lt $MinSizeMB)) { return 'size' }
 
-    return $true
+    return $null
 }
 
 function ConvertTo-Hit {
@@ -905,6 +912,9 @@ if ($searchMode) {
     $droppedNoResource = 0
     $droppedOutOfScope = 0
     $droppedByFilter   = 0
+    $dropReasons       = @{}
+    $dropSamples       = [System.Collections.Generic.List[object]]::new()
+    $typeFiltered      = [bool]$typeClause
     $from = 0
     do {
         $response = Invoke-GraphSearchPage -Kql $kql -From $from -Size 200
@@ -923,8 +933,18 @@ if ($searchMode) {
             if (-not $inScope) { $droppedOutOfScope++; continue }
             $hit.Site = $inScope
 
-            if (-not (Test-Match -Hit $hit)) { $droppedByFilter++; continue }
-            # The index did the type filtering, so an unknown kind is the kind asked for.
+            $failure = Get-MatchFailure -Hit $hit -SkipTypeCheck:$typeFiltered
+            if ($failure) {
+                $droppedByFilter++
+                if (-not $dropReasons.ContainsKey($failure)) { $dropReasons[$failure] = 0 }
+                $dropReasons[$failure]++
+                if ($dropSamples.Count -lt 3) {
+                    $dropSamples.Add([pscustomobject]@{ Filter = $failure; Name = $hit.Name; Kind = $hit.ItemType; Url = $hit.Url })
+                }
+                continue
+            }
+            # The index did the type filtering, so the kind it did not report is the
+            # kind that was asked for.
             if ($hit.ItemType -eq 'Unknown' -and $ItemType -ne 'All') { $hit.ItemType = $ItemType }
             if ($MaxItems -gt 0 -and $hits.Count -ge $MaxItems) { $capped = $true; break }
             $hits.Add($hit)
@@ -938,9 +958,16 @@ if ($searchMode) {
     if ($hits.Count -lt $scanned) {
         $why = @()
         if ($droppedOutOfScope) { $why += "$droppedOutOfScope outside the site scope" }
-        if ($droppedByFilter)   { $why += "$droppedByFilter filtered out here" }
+        if ($droppedByFilter)   {
+            $detail = ($dropReasons.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object { "$($_.Key): $($_.Value)" }) -join ', '
+            $why += "$droppedByFilter filtered out here ($detail)"
+        }
         if ($droppedNoResource) { $why += "$droppedNoResource without usable detail" }
-        if ($why) { Write-Host "  Dropped: $($why -join ', ')" -ForegroundColor DarkGray }
+        if ($why) { Write-Host "  Dropped: $($why -join '; ')" -ForegroundColor DarkGray }
+        if ($hits.Count -eq 0 -and $dropSamples.Count -gt 0) {
+            $dropSamples | Select-Object @{ N = 'Rejected by'; E = { $_.Filter } }, Name, Kind, Url |
+                Format-Table -AutoSize | Out-Host
+        }
     }
     if ($from -ge 1000 -and $more) {
         Write-Host '  Note   : the search API stops at 1000 results - narrow the query to be sure you saw everything.' -ForegroundColor Yellow
@@ -991,7 +1018,7 @@ if ($searchMode) {
                 $scanned++
 
                 $hit = ConvertTo-Hit -Item $item -SiteUrlValue $site.Url -Library $drive.name -DriveId $drive.id
-                if (-not (Test-Match -Hit $hit)) { continue }
+                if (Get-MatchFailure -Hit $hit) { continue }
                 if ($MaxItems -gt 0 -and $hits.Count -ge $MaxItems) { $capped = $true; break }
                 $hits.Add($hit)
             }
