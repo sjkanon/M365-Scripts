@@ -684,9 +684,9 @@ function Invoke-GraphSearchPage {
     $firstAnswer = $null
 
     while ($queue.Count -gt 0) {
-        $region = $queue.Dequeue()
-        if (-not $region -or $tried.Contains($region)) { continue }
-        $tried.Add($region)
+        $candidateRegion = $queue.Dequeue()
+        if (-not $candidateRegion -or $tried.Contains($candidateRegion)) { continue }
+        $tried.Add($candidateRegion)
 
         $payload = @{
             requests = @(@{
@@ -694,7 +694,7 @@ function Invoke-GraphSearchPage {
                 query       = @{ queryString = $Kql }
                 from        = $From
                 size        = $Size
-                region      = $region
+                region      = $candidateRegion
             })
         }
 
@@ -705,19 +705,19 @@ function Invoke-GraphSearchPage {
             # so take it at its word rather than working through the guesses.
             if ($script:LastGraphError -match 'valid regions are\s+([^."]+)') {
                 foreach ($valid in ($Matches[1] -split '[,;]')) {
-                    $name = $valid.Trim().Trim('.')
-                    if ($name -and -not $tried.Contains($name)) { $queue.Enqueue($name) }
+                    $regionName = $valid.Trim().Trim('.')
+                    if ($regionName -and -not $tried.Contains($regionName)) { $queue.Enqueue($regionName) }
                 }
             }
             continue
         }
 
-        if (-not $firstAnswer) { $firstAnswer = [pscustomobject]@{ Region = $region; Response = $response } }
+        if (-not $firstAnswer) { $firstAnswer = [pscustomobject]@{ Region = $candidateRegion; Response = $response } }
 
         $container = @(@($response.value)[0].hitsContainers)[0]
         if (@($container.hits).Count -gt 0) {
-            if ($script:SearchRegion -ne $region) { Write-Host "  Region : $region" -ForegroundColor DarkGray }
-            $script:SearchRegion = $region
+            if ($script:SearchRegion -ne $candidateRegion) { Write-Host "  Region : $candidateRegion" -ForegroundColor DarkGray }
+            $script:SearchRegion = $candidateRegion
             return $response
         }
     }
@@ -759,11 +759,11 @@ $timer = [System.Diagnostics.Stopwatch]::StartNew()
 
 if ($tenantMode) {
     Write-Host '  Enumerating sites...' -ForegroundColor DarkGray
-    $allSites = Get-GraphAll -Uri '/sites/getAllSites' -Activity 'Enumerating sites'
+    $tenantSites = Get-GraphAll -Uri '/sites/getAllSites' -Activity 'Enumerating sites'
 
     $skippedPersonal = 0
     $skippedFiltered = 0
-    foreach ($site in $allSites) {
+    foreach ($site in $tenantSites) {
         $url = "$($site.webUrl)".TrimEnd('/')
         if (-not $url) { continue }
         $personal = $site.isPersonalSite -eq $true -or $url -match '-my\.sharepoint\.'
@@ -772,7 +772,7 @@ if ($tenantMode) {
         $sites.Add([pscustomobject]@{ Id = $site.id; Url = $url; Title = $site.displayName })
     }
 
-    Write-Host "  Sites found      : $($allSites.Count) in $(Format-Duration $timer.Elapsed)" -ForegroundColor Cyan
+    Write-Host "  Sites found      : $($tenantSites.Count) in $(Format-Duration $timer.Elapsed)" -ForegroundColor Cyan
     Write-Host "  Skipped          : $skippedPersonal personal, $skippedFiltered filtered out" -ForegroundColor DarkGray
 
     if ($MaxSites -and $sites.Count -gt $MaxSites) {
@@ -1263,9 +1263,9 @@ if ($Permissions -eq 'None') {
                 continue
             }
 
-            $permissions = @($body.value)
-            $rowsForItem = [System.Collections.Generic.List[object]]::new()
-            foreach ($permission in $permissions) {
+            $itemPermissions = @($body.value)
+            $rowsForItem     = [System.Collections.Generic.List[object]]::new()
+            foreach ($permission in $itemPermissions) {
                 $direct = -not $permission.inheritedFrom
                 if ($Permissions -eq 'Unique' -and -not $direct) { continue }
                 foreach ($principal in (ConvertFrom-GraphPermission -Permission $permission)) {
