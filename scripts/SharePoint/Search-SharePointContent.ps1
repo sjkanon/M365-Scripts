@@ -809,7 +809,9 @@ function Test-Match {
         if (-not @($candidates | Where-Object { $_ -like $Name })) { return $false }
     }
     if ($Path -and ("$($Hit.FolderPath)" -notlike "*$Path*")) { return $false }
-    if ($ItemType -ne 'All' -and $Hit.ItemType -ne $ItemType) { return $false }
+    # 'Unknown' is a search hit whose kind the index did not report; the KQL already
+    # filtered on type in that case, so it must not be dropped here.
+    if ($ItemType -ne 'All' -and $Hit.ItemType -ne 'Unknown' -and $Hit.ItemType -ne $ItemType) { return $false }
 
     if ($extensionFilter.Count -gt 0) {
         $ext = [System.IO.Path]::GetExtension("$($Hit.Name)").TrimStart('.').ToLowerInvariant()
@@ -847,7 +849,9 @@ function ConvertTo-Hit {
         Library         = $Library
         DriveId         = if ($DriveId) { $DriveId } else { "$($Item.parentReference.driveId)" }
         ItemId          = "$($Item.id)"
-        ItemType        = if ($Item.folder) { 'Folder' } else { 'File' }
+        # The search index does not return the file/folder facets, so a hit whose
+        # kind is genuinely unknown must not be passed off as a file.
+        ItemType        = if ($Item.folder) { 'Folder' } elseif ($Item.file) { 'File' } elseif ($Item.PSObject.Properties.Name -contains 'folder') { 'File' } else { 'Unknown' }
         Name            = "$($Item.name)"
         Url             = "$($Item.webUrl)"
         FolderPath      = $folderPath
@@ -869,12 +873,18 @@ $capped  = $false
 $selectFields = 'id,name,size,webUrl,lastModifiedDateTime,createdDateTime,lastModifiedBy,createdBy,file,folder,parentReference,shared,deleted'
 
 if ($searchMode) {
-    Write-Host "  Query  : $Content" -ForegroundColor DarkGray
-
     $scopes = @($sites | ForEach-Object { "path:`"$($_.Url)`"" })
     $scopeClause = if ($scopes.Count -eq 1) { $scopes[0] } elseif ($scopes.Count -le 20) { "($($scopes -join ' OR '))" } else { '' }
     if (-not $scopeClause -and -not $tenantMode) { $scopeClause = "path:`"$SiteUrl`"" }
-    $kql = if ($scopeClause) { "$Content $scopeClause" } else { $Content }
+    # Folders and files are IsContainer/IsDocument in the index; filtering there
+    # beats filtering here, because the search hit does not carry the facets.
+    $typeClause = switch ($ItemType) {
+        'Folder' { 'IsContainer:true' }
+        'File'   { 'IsDocument:true' }
+        default  { '' }
+    }
+    $kql = (@($Content, $typeClause, $scopeClause) | Where-Object { $_ }) -join ' '
+    Write-Host "  Query  : $kql" -ForegroundColor DarkGray
     if (-not $scopeClause) { Write-Host '  Note   : too many sites to scope the query - searching the whole tenant and filtering afterwards.' -ForegroundColor DarkGray }
 
     # An app-only search must say which geography to run in. A multi-geo tenant
@@ -892,6 +902,9 @@ if ($searchMode) {
     }
 
     $siteUrls = @($sites.Url)
+    $droppedNoResource = 0
+    $droppedOutOfScope = 0
+    $droppedByFilter   = 0
     $from = 0
     do {
         $response = Invoke-GraphSearchPage -Kql $kql -From $from -Size 200
@@ -902,15 +915,17 @@ if ($searchMode) {
         foreach ($row in $rows) {
             $scanned++
             $resource = $row.resource
-            if (-not $resource) { continue }
+            if (-not $resource) { $droppedNoResource++; continue }
 
             $hit = ConvertTo-Hit -Item $resource -SiteUrlValue '' -Library '' -DriveId ''
             # The search index is tenant-wide; keep only what falls inside the scope.
             $inScope = $siteUrls | Where-Object { $hit.Url -like "$_*" } | Select-Object -First 1
-            if (-not $inScope) { continue }
+            if (-not $inScope) { $droppedOutOfScope++; continue }
             $hit.Site = $inScope
 
-            if (-not (Test-Match -Hit $hit)) { continue }
+            if (-not (Test-Match -Hit $hit)) { $droppedByFilter++; continue }
+            # The index did the type filtering, so an unknown kind is the kind asked for.
+            if ($hit.ItemType -eq 'Unknown' -and $ItemType -ne 'All') { $hit.ItemType = $ItemType }
             if ($MaxItems -gt 0 -and $hits.Count -ge $MaxItems) { $capped = $true; break }
             $hits.Add($hit)
         }
@@ -920,6 +935,16 @@ if ($searchMode) {
     } while ($more -and -not $capped -and $from -lt 1000)
 
     Write-Host "  Search returned $scanned result(s) in $(Format-Duration $timer.Elapsed); $($hits.Count) in scope and matching." -ForegroundColor Cyan
+    if ($hits.Count -lt $scanned) {
+        $why = @()
+        if ($droppedOutOfScope) { $why += "$droppedOutOfScope outside the site scope" }
+        if ($droppedByFilter)   { $why += "$droppedByFilter filtered out here" }
+        if ($droppedNoResource) { $why += "$droppedNoResource without usable detail" }
+        if ($why) { Write-Host "  Dropped: $($why -join ', ')" -ForegroundColor DarkGray }
+    }
+    if ($from -ge 1000 -and $more) {
+        Write-Host '  Note   : the search API stops at 1000 results - narrow the query to be sure you saw everything.' -ForegroundColor Yellow
+    }
 } else {
     $siteIndex = 0
     foreach ($site in $sites) {
