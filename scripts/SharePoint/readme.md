@@ -45,7 +45,7 @@ and **who can get at it**. Read-only — the script never changes anything.
 
 | Engine | When | What it sees |
 |--------|------|--------------|
-| Crawl (default) | No `-Content` given | Walks every list and library item by item. Sees everything, also what the search index has not picked up yet. Slower on big sites |
+| Crawl (default) | No `-Content` given | Walks every list and library. `-Name` and `-ItemType` are pushed into a CAML query where possible, so SharePoint returns only the matches; anything CAML cannot express falls back to reading that list in full. Sees everything, also what the search index has not picked up yet |
 | Search (`-Content`) | Full-text query | A KQL query against the search index, scoped to the site path — this is the one that matches text *inside* documents. Fast, but limited to what is indexed and what the signed-in account may see. Covers subsites automatically |
 
 Both engines feed the same filters: `-Name` (wildcards), `-Path`, `-Extension`,

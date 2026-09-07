@@ -10,10 +10,14 @@
 
     Two search engines:
 
-      Crawl  (default)  Walks every list and library in the site item by item and
-                        filters client-side on -Name, -Path, -Extension, -ItemType,
-                        -ModifiedBy and the date/size filters. Sees everything,
-                        including items the search index has not picked up yet.
+      Crawl  (default)  Walks every list and library in the site. Where it can, the
+                        -Name and -ItemType filters are pushed into a CAML query so
+                        SharePoint returns only the matches instead of the whole
+                        library; the rest of the filtering happens here. Sees
+                        everything, including what the search index has not picked
+                        up yet. A name with wildcards CAML cannot express, or a list
+                        that refuses the query (list view threshold), falls back to
+                        reading that list in full - slow but complete.
 
       Search (-Content) Runs a KQL query against the SharePoint search index scoped
                         to the site, so it also matches text *inside* documents.
@@ -732,6 +736,54 @@ function Test-Match {
     return $true
 }
 
+# -- Server-side filtering -----------------------------------------------------
+# How many rows a filtered query may return before we stop trusting that we saw
+# them all and read the list in full instead.
+$script:QueryRowLimit  = 5000
+$script:ServerFiltered = 0
+
+function New-ItemQuery {
+    <#
+        Builds a CAML query for the filters SharePoint can evaluate itself - the name
+        and the item type - so a big library is filtered on the server instead of
+        being pulled across the wire in full. Returns $null when -Name uses wildcards
+        CAML cannot express; the caller then reads the list and filters here.
+    #>
+    param([string[]] $Fields, [switch] $IsDocumentLibrary)
+
+    $conditions = @()
+
+    if ($Name) {
+        $core = $Name.Trim('*')
+        # Only a leading and/or trailing wildcard maps onto CAML.
+        if ($core -and $core -notmatch '[\*\?]') {
+            $value    = [System.Security.SecurityElement]::Escape($core)
+            $operator = if ($Name.StartsWith('*')) { 'Contains' } elseif ($Name.EndsWith('*')) { 'BeginsWith' } else { 'Eq' }
+            $onLeaf   = "<$operator><FieldRef Name='FileLeafRef' /><Value Type='Text'>$value</Value></$operator>"
+
+            $conditions += if ($IsDocumentLibrary) {
+                $onLeaf
+            } else {
+                # A file is named by its leaf name, a list item usually by its Title.
+                "<Or>$onLeaf<$operator><FieldRef Name='Title' /><Value Type='Text'>$value</Value></$operator></Or>"
+            }
+        }
+    }
+
+    if ($ItemType -eq 'Folder') {
+        $conditions += "<Eq><FieldRef Name='FSObjType' /><Value Type='Integer'>1</Value></Eq>"
+    } elseif ($ItemType -in @('File', 'ListItem')) {
+        $conditions += "<Eq><FieldRef Name='FSObjType' /><Value Type='Integer'>0</Value></Eq>"
+    }
+
+    if ($conditions.Count -eq 0) { return $null }
+
+    $where      = if ($conditions.Count -eq 1) { $conditions[0] } else { "<And>$($conditions[0])$($conditions[1])</And>" }
+    $viewFields = ($Fields | ForEach-Object { "<FieldRef Name='$_' />" }) -join ''
+
+    return "<View Scope='RecursiveAll'><Query><Where>$where</Where></Query><ViewFields>$viewFields</ViewFields><RowLimit Paged='TRUE'>$script:QueryRowLimit</RowLimit></View>"
+}
+
 # -- Run -----------------------------------------------------------------------
 $adminConnection  = $null
 $grantedSiteAdmin = $false
@@ -919,12 +971,36 @@ try {
                 $fields = @('ID', 'Title', 'FileLeafRef', 'FileRef', 'FileDirRef', 'FSObjType', 'Modified', 'Created', 'Author', 'Editor')
                 if ($isDocLib) { $fields += 'File_x0020_Size' }
 
-                try {
-                    $items = @(Get-PnPListItem -List $list -PageSize $PageSize -Fields $fields -Connection $webConnection -ErrorAction Stop)
-                } catch {
-                    Write-Warning "Skipping list '$($list.Title)' on $($web.Url): $($_.Exception.Message)"
-                    $script:Unreadable.Add([pscustomobject]@{ Scope = "$($web.Url) > $($list.Title)"; Reason = $_.Exception.Message.Trim() })
-                    continue
+                # Let SharePoint do the filtering where it can: reading a 100k item
+                # library to throw nearly all of it away is what makes a crawl feel
+                # hung. Falls back to reading the list in full whenever the query is
+                # refused (list view threshold) or might have been truncated.
+                $items = $null
+                $caml  = New-ItemQuery -Fields $fields -IsDocumentLibrary:$isDocLib
+
+                if ($caml) {
+                    try {
+                        $filtered = @(Get-PnPListItem -List $list -Query $caml -Connection $webConnection -ErrorAction Stop)
+                        if ($filtered.Count -lt $script:QueryRowLimit) {
+                            $items = $filtered
+                            $script:ServerFiltered++
+                        }
+                    } catch {
+                        Write-Host "    server-side filter refused on '$($list.Title)' ($($_.Exception.Message.Trim())) - reading it in full" -ForegroundColor DarkGray
+                    }
+                }
+
+                if ($null -eq $items) {
+                    if ($itemCount -gt 20000) {
+                        Write-Host "    reading '$($list.Title)' in full - $itemCount item(s), this is the slow one" -ForegroundColor DarkGray
+                    }
+                    try {
+                        $items = @(Get-PnPListItem -List $list -PageSize $PageSize -Fields $fields -Connection $webConnection -ErrorAction Stop)
+                    } catch {
+                        Write-Warning "Skipping list '$($list.Title)' on $($web.Url): $($_.Exception.Message)"
+                        $script:Unreadable.Add([pscustomobject]@{ Scope = "$($web.Url) > $($list.Title)"; Reason = $_.Exception.Message.Trim() })
+                        continue
+                    }
                 }
 
                 foreach ($item in $items) {
@@ -1113,6 +1189,9 @@ try {
     }
 
     Write-Host "  Items found      : $($hits.Count)" -ForegroundColor Cyan
+    if ($script:ServerFiltered -gt 0) {
+        Write-Host "  Filtered by SharePoint in $script:ServerFiltered list(s) - only matches came across the wire" -ForegroundColor DarkGray
+    }
     if ($Permissions -ne 'None') {
         Write-Host "  Unique rights on : $uniqueItems item(s)" -ForegroundColor $(if ($uniqueItems) { 'Yellow' } else { 'Green' })
         if ($linkRows.Count)     { Write-Host "  Sharing links    : $($linkRows.Count) - $((($linkRows.SharingLink | Select-Object -Unique) -join ', '))" -ForegroundColor Yellow }
