@@ -181,7 +181,7 @@ Read-only.
 | Engine | When | What it does |
 |--------|------|--------------|
 | Delta (default) | No `-Content` | `/drives/{id}/root/delta` walks a whole library tree in pages of a thousand items. Filtering happens client-side, so `*contains*` wildcards work |
-| Search (`-Content`) | Full-text query | `/search/query` against the search index — matches text *inside* documents. KQL only does trailing wildcards (`veiligheid*`), not leading ones |
+| Search (`-Content`) | Full-text query | `/search/query` against the search index — matches text *inside* documents. KQL only does trailing wildcards (`veiligheid*`), not leading ones. An app-only search must name a geography; the script reads it from the site's data location, or finds it by trying, and `-Region` overrides |
 
 **Permissions**
 
@@ -237,6 +237,7 @@ so a scheduled task has to run as that same account.
 | `-IncludePersonalSites` | No | With `-AllSites`: include everybody's OneDrive |
 | `-IncludeSubsites` | No | With `-SiteUrl`: also search its subsites |
 | `-Content` | No | Full-text/KQL query — switches to the search index |
+| `-Region` | No | Geography for `-Content` (`EUR`, `NAM`, `DEU`, …). App-only search requires one; detected automatically when possible |
 | `-Name` | No | Filter on the file/folder name, wildcards allowed |
 | `-Path` | No | Filter on the folder path, substring match |
 | `-Extension` | No | One or more extensions, with or without the dot |
