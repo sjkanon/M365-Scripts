@@ -9,8 +9,30 @@ admin sign-in on any (customer) tenant.
 
 | Script | Description |
 |--------|-------------|
-| [`Find-SiteContent.ps1`](#find-sitecontentps1) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit |
+| [`Find-SiteContent.ps1`](#find-sitecontentps1) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
+| [`Search-SharePointContent.ps1`](#search-sharepointcontentps1) | The same question tenant-wide through Microsoft Graph, app-only, no interactive login — files and folders |
 | [`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
+
+---
+
+## Which of the two search scripts?
+
+Both answer "where does this live and who can reach it", and both write the same kind of
+CSV. They differ in what they can see and in what they need from you.
+
+| | `Find-SiteContent.ps1` (PnP) | `Search-SharePointContent.ps1` (Graph) |
+|---|---|---|
+| Sign-in | Interactive, as you | App-only, unattended — fine in a scheduled task |
+| Rights needed | Access to the site, or `-GrantSiteAdmin` per site | One admin consent, once, for the whole tenant |
+| Scope | One site collection (+ subsites) | One site, or **every site in the tenant**, OneDrive included |
+| Files and folders | Yes | Yes, and faster — `delta` reads a library in pages of a thousand and permissions come 20 per `$batch` |
+| Items in ordinary lists | Yes, with their permissions | **No** — Graph exposes permissions for driveItems only |
+| Site- and list-level rights | Yes: "this inherits from the library, which grants Edit to Site Members" | **No** — Graph has no API for SharePoint role assignments; it says *whether* an item inherits and from where, not what the site grants |
+| Sharing links | Yes, from the `SharingLinks.*` groups | Yes, richer: link scope, edit/view, expiry date and the link URL itself |
+
+Rule of thumb: **Graph** for "find it anywhere in the tenant and show me the links and
+guests on it", **PnP** when you need the full permission story of one site, including its
+lists and its groups.
 
 ---
 
@@ -145,6 +167,129 @@ someone else's OneDrive or a site you are not a member of possible.
   changed documents can take minutes to hours to show up — crawl mode always sees them.
 - A crawl reads every item in every library. On a site with hundreds of thousands of
   items that takes a while; narrow it with `-ListName` or use `-Content` instead.
+
+---
+
+### Search-SharePointContent.ps1
+
+The Graph counterpart of `Find-SiteContent.ps1`: same question, app-only, and it reaches
+every site and every OneDrive in the tenant without you having rights on any of them.
+Read-only.
+
+**Two engines**
+
+| Engine | When | What it does |
+|--------|------|--------------|
+| Delta (default) | No `-Content` | `/drives/{id}/root/delta` walks a whole library tree in pages of a thousand items. Filtering happens client-side, so `*contains*` wildcards work |
+| Search (`-Content`) | Full-text query | `/search/query` against the search index — matches text *inside* documents. KQL only does trailing wildcards (`veiligheid*`), not leading ones |
+
+**Permissions**
+
+`/drives/{id}/items/{id}/permissions`, fetched 20 at a time through `/$batch`. That single
+call carries the whole picture per item:
+
+| Field | Reported as |
+|-------|-------------|
+| `roles` | `Read` / `Edit` / `Full Control` |
+| `grantedToV2` / `grantedToIdentitiesV2` | The user, Entra group, SharePoint group or site user — one CSV row each |
+| `link` | `SharingLink` (Anyone / Organization / Specific people, view or edit), `LinkUrl`, `LinkExpires` |
+| `inheritedFrom` | Absent → `PermissionSource = Item` (unique rights). Present → `Inherited`, with the folder it comes from |
+
+"Anyone with the link" permissions are counted separately in the summary and shown in red,
+because those are reachable without signing in at all. External guests (`#EXT#`) and
+"Everyone except external users" get their own counters too.
+
+**What Graph cannot do** — worth knowing before you reach for this one:
+
+- **No site- or list-level permissions.** There is no Graph API for SharePoint role
+  assignments; `/sites/{id}/permissions` only returns app grants (Sites.Selected). This
+  script tells you whether an item inherits and from which folder, not what the site
+  itself grants to which group. Use `Find-SiteContent.ps1` for that.
+- **Libraries only.** Permissions exist for driveItems, not for items in ordinary lists.
+- No role definitions, and no "Limited Access" nuance.
+
+**Sign-in — app-only, created for you**
+
+The first run against a tenant sets the app up:
+
+1. Sign in to Graph as a Global Administrator (once)
+2. Create or reuse an app named after `-AppName`
+3. Grant and admin-consent the **application** role `Sites.Read.All` (plus `Group.Read.All`
+   if you use `-ExpandGroups`)
+4. Create a self-signed certificate in `Cert:\CurrentUser\My` and upload its public key —
+   **no secret is written to disk**
+5. Cache the client ID and thumbprint per tenant in `graph.appid.json` in the repo root
+   (gitignored)
+
+Later runs connect app-only with no prompt at all, which is what makes this one usable from
+a scheduled task. Bring your own app with `-ClientId` plus `-CertificateThumbprint` or
+`-ClientSecret`. The certificate is non-exportable and lives in the creating user's store,
+so a scheduled task has to run as that same account.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-SiteUrl` | * | One site collection (or a OneDrive) to search |
+| `-AllSites` | * | Search every site in the tenant instead |
+| `-SiteFilter` | No | With `-AllSites`: only sites whose URL matches this wildcard |
+| `-MaxSites` | No | With `-AllSites`: stop after this many sites |
+| `-IncludePersonalSites` | No | With `-AllSites`: include everybody's OneDrive |
+| `-IncludeSubsites` | No | With `-SiteUrl`: also search its subsites |
+| `-Content` | No | Full-text/KQL query — switches to the search index |
+| `-Name` | No | Filter on the file/folder name, wildcards allowed |
+| `-Path` | No | Filter on the folder path, substring match |
+| `-Extension` | No | One or more extensions, with or without the dot |
+| `-ItemType` | No | `All` (default), `File` or `Folder` |
+| `-LibraryName` | No | Only these document libraries, wildcards allowed |
+| `-ModifiedBy` | No | Who last changed it — display name or e-mail |
+| `-ModifiedAfter` / `-ModifiedBefore` | No | Restrict to a change window |
+| `-MinSizeMB` | No | Only files of at least this size |
+| `-Permissions` | No | `Effective` (default), `Unique` or `None` |
+| `-ExpandGroups` | No | Also list Entra group members (needs `Group.Read.All`) |
+| `-Everything` | No | Subsites, personal sites, and no caps |
+| `-MaxItems` | No | Stop after this many matches (default 5000, `0` = no limit) |
+| `-MaxPermissionLookups` | No | Cap on permission lookups (default 2000, `0` = no limit) |
+| `-TenantId` | * | Required with `-AllSites`; derived from `-SiteUrl` otherwise |
+| `-ClientId` / `-CertificateThumbprint` / `-ClientSecret` / `-AppName` | No | Bring your own app registration |
+| `-OutputPath` | No | CSV path (default: `C:\Temp\GraphSharePointFind_<timestamp>.csv`) |
+| `-MaxRetries` | No | Retries on throttling (429), default 5 |
+
+**Examples**
+
+```powershell
+# One site plus its subsites, everything with "veiligheid" in the name
+.\Search-SharePointContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
+    -Name "*veiligheid*" -IncludeSubsites
+
+# Tenant-wide full text: which documents mention "salarisschaal"?
+.\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
+    -Content "salarisschaal"
+
+# Everything in the tenant that carries permissions of its own — start with 25 sites
+.\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
+    -Permissions Unique -MaxSites 25
+
+# Unattended, with an app you already have
+.\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
+    -ClientId 0000...-4444 -CertificateThumbprint A1B2C3 `
+    -Name "*.pfx" -OutputPath C:\Reports\keys.csv
+```
+
+**Notes**
+- A tenant-wide delta crawl reads every item of every library it touches. Start with
+  `-MaxSites`, and add `-IncludePersonalSites` only when you mean it — that multiplies the
+  work by the number of users.
+- Throttling (HTTP 429) is handled: single calls and batch sub-requests are retried,
+  honouring `Retry-After`.
+- `-Content` searches the whole tenant index and the results are filtered back to the sites
+  in scope afterwards, so a query with very many hits spends some time on results it drops.
+
+**Required modules**
+```powershell
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser  # to run
+Install-Module Microsoft.Graph.Applications  -Scope CurrentUser   # only for the one-time app registration
+```
 
 ---
 
