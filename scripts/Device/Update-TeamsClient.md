@@ -1,6 +1,6 @@
 # Update-TeamsClient.ps1 — how it works
 
-Reference for [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1): what it decides, in which order, and why it is built the way it is. For the short version (parameters and examples) see the [Device readme](readme.md#update-teamsclientps1).
+Reference for [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1): what it decides, in which order, and why it is built the way it is. For the short version (parameters and examples) see the [Device readme](readme.md#update-teamsclientps1). For the service desk there is a Dutch, support-level-oriented version to paste into IT Glue: [Update-TeamsClient-ITGlue.md](Update-TeamsClient-ITGlue.md).
 
 ---
 
