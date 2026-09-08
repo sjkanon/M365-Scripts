@@ -13,6 +13,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
 | [`Remove-OemBloatware.ps1`](#remove-oembloatwareps1) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
 | [`Test-OpenVpnDiagnostics.ps1`](#test-openvpndiagnosticsps1) | Diagnose OpenVPN Connect issues |
+| [`Update-TeamsClient.ps1`](#update-teamsclientps1) | Reinstall new Teams + Outlook meeting add-in (supports `-WhatIf`) |
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 | [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
@@ -206,6 +207,51 @@ Results are printed to screen with a summary of all issues at the end.
 # Save to a custom path
 .\Test-OpenVpnDiagnostics.ps1 -OutputPath "C:\Support\vpn-report.txt"
 ```
+
+---
+
+## Update-TeamsClient.ps1
+
+Clean reinstall of the new Teams client on an endpoint or AVD session host: uninstalls the Teams Meeting Add-in, removes the `MSTeams` AppX package for all users, downloads `teamsbootstrapper.exe`, provisions Teams for all users and installs the meeting add-in MSI shipped inside the new Teams package. Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine.
+
+**Steps**
+
+| # | Step | Honours `-WhatIf` |
+|---|------|-------------------|
+| 1 | Detect installed `MSTeams` AppX package | read-only |
+| 2 | Uninstall Teams Meeting Add-in (`msiexec /x`) | yes |
+| 3 | Remove `MSTeams` AppX package for all users | yes |
+| 4 | Create working folder + download bootstrapper | yes |
+| 5 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
+| 6 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
+| 7 | Verify add-in registration + provisioned package | reported as skipped under `-WhatIf` |
+
+> The add-in uninstall/verification checks both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone misses it.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-WhatIf` | Show every uninstall/download/install without performing it |
+| `-WorkingDir` | Bootstrapper download folder (default: `C:\IT\AVD\Teams`) |
+| `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL |
+| `-SkipMeetingAddIn` | Only replace the client, leave the meeting add-in untouched |
+| `-Force` | Continue when no Teams installation is detected (clean install) |
+
+**Examples**
+
+```powershell
+# Dry run — show what would be removed and installed
+.\Update-TeamsClient.ps1 -WhatIf
+
+# Actually reinstall Teams plus the Outlook meeting add-in
+.\Update-TeamsClient.ps1
+
+# Install new Teams on a device without any Teams yet
+.\Update-TeamsClient.ps1 -Force
+```
+
+Exits `1` when no Teams is found (without `-Force`), when the download or a required package/MSI is missing, or when the final verification fails.
 
 ---
 
