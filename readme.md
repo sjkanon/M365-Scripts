@@ -575,7 +575,7 @@ M365-Scripts/
     │   ├── Clear-TempFiles.ps1
     │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
-    │   ├── Update-TeamsClient.ps1       ← reinstall new Teams + meeting add-in (-WhatIf)
+    │   ├── Update-TeamsClient.ps1       ← update new Teams + meeting add-in when a newer build exists
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -714,6 +714,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-08 (3)
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient.ps1` no longer reinstalls unconditionally: it asks the Teams client config service (`config.teams.microsoft.com/config/v1/MicrosoftTeams/...`, `BuildSettings.WebView2PreAuth.<arch>.latestVersion` — the same feed the client uses to decide it is out of date) which build is published for this architecture, and leaves an up-to-date device completely alone |
+| Is the client current but the meeting add-in missing? Then only the add-in is installed — no download, no uninstall, no reprovision |
+| `-Quiet` holds back all output until there is news, so a scheduled NinjaOne run prints nothing on an up-to-date device and only surfaces in the activity feed when it found a newer build or hit a problem. Verified: an up-to-date `-Quiet` run produces zero bytes of output and exit code 0 |
+| `-CheckOnly` reports without changing anything and exits `2` when a newer build is available, for use as a Ninja detection/condition job. `-Ring` selects a non-default update ring |
+| When the config service cannot be reached the run stops instead of reinstalling blindly; `-Force` now means "reinstall even though it is current" as well as "continue without Teams or version info" |
+| A transcript is only written when the run actually changes something, so an hourly check leaves no log litter in `C:\Temp` |
 
 ### 2026-09-08 (2)
 | Change |

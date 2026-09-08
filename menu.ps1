@@ -575,10 +575,10 @@ $menu = @(
         }
     }
     [PSCustomObject]@{ Key='T'; FKey=$null; Category='Device'
-        Label='Update-TeamsClient  — reinstall new Teams + Outlook meeting add-in'
+        Label='Update-TeamsClient  — update new Teams + meeting add-in when outdated'
         Script="$ROOT\scripts\Device\Update-TeamsClient.ps1"
         Params={
-            $apply = Read-Host "  Reinstall Teams now (not just preview)? [y/N]"
+            $apply = Read-Host "  Install the update now (not just check)? [y/N]"
             $a = @{}
             if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
             else { $a['Confirm'] = $false }   # already answered here, don't ask twice

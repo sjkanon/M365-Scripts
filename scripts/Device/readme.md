@@ -13,7 +13,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
 | [`Remove-OemBloatware.ps1`](#remove-oembloatwareps1) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
 | [`Test-OpenVpnDiagnostics.ps1`](#test-openvpndiagnosticsps1) | Diagnose OpenVPN Connect issues |
-| [`Update-TeamsClient.ps1`](#update-teamsclientps1) | Reinstall new Teams + Outlook meeting add-in (supports `-WhatIf`) |
+| [`Update-TeamsClient.ps1`](#update-teamsclientps1) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build |
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 | [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
@@ -212,23 +212,29 @@ Results are printed to screen with a summary of all issues at the end.
 
 ## Update-TeamsClient.ps1
 
-Clean reinstall of the new Teams client on an endpoint or AVD session host: downloads and signature-checks `teamsbootstrapper.exe`, uninstalls the Teams Meeting Add-in, removes and deprovisions the `MSTeams` AppX package, provisions Teams for all users and installs the meeting add-in MSI shipped inside the new Teams package. Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine.
+Keeps the new Teams client and the Outlook meeting add-in current on an endpoint or AVD session host. It asks the Teams config service which build Microsoft publishes for this architecture and **only acts when that build is newer than what is installed** — an up-to-date device is left completely alone. When an update is due it downloads and signature-checks `teamsbootstrapper.exe`, uninstalls the meeting add-in, removes and deprovisions the `MSTeams` AppX package, provisions the new build for all users and reinstalls the add-in MSI that ships inside it.
 
-Runs by hand (it elevates itself via UAC and asks for confirmation once) and unattended from an RMM such as NinjaOne.
+Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine. Runs by hand (it elevates itself via UAC and asks for confirmation once) and unattended from an RMM such as NinjaOne.
 
 **Steps**
 
 | # | Step | Honours `-WhatIf` |
 |---|------|-------------------|
 | 1 | Preflight — installed package, add-in, running Teams/Outlook | read-only |
-| 2 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
-| 3 | Uninstall Teams Meeting Add-in (`msiexec /x`) | yes |
-| 4 | Remove `MSTeams` AppX package for all users + deprovision it | yes |
+| 2 | Version check — published build vs installed build | read-only |
+| 3 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
+| 4 | Uninstall add-in, remove `MSTeams` AppX for all users, deprovision it | yes |
 | 5 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
 | 6 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
 | 7 | Verify add-in registration + provisioned package | reported as skipped under `-WhatIf` |
 
-**Why the order matters:** the installer is fetched and verified *before* the first uninstall, so a failed download or a blocked URL can never leave the device without a Teams client.
+If the client is current but only the meeting add-in is missing, steps 3–5 are skipped and just the add-in is installed.
+
+**Why the order matters:** nothing is touched until a newer build is confirmed, and the installer is fetched and verified *before* the first uninstall — so a failed download or a blocked URL can never leave the device without a Teams client.
+
+**Version check**
+
+`https://config.teams.microsoft.com/config/v1/MicrosoftTeams/...` is the feed the Teams client itself uses to decide it is out of date. It returns the current build per architecture (`BuildSettings.WebView2PreAuth.<arch>.latestVersion`). An installed build equal to or newer than that means there is nothing to do. If the service cannot be reached the run stops instead of reinstalling blindly — `-Force` overrides that. `-Ring` selects a different update ring (default `general`).
 
 > The add-in uninstall and verification read both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone misses it. The add-in MSI version comes from the MSI property table (`WindowsInstaller.Installer` COM), not from `Get-AppLockerFileInformation`, which is missing on some editions and breaks under PowerShell 7.
 
@@ -237,45 +243,59 @@ Runs by hand (it elevates itself via UAC and asks for confirmation once) and una
 - `msiexec` and the bootstrapper run with a timeout (`-TimeoutSeconds`, default 900) and are killed if they hang, so an RMM job cannot block the agent.
 - MSI exit code `1618` (another install in progress) is retried twice; `3010` counts as success and flags a pending reboot in the summary.
 - Unexpected errors abort the run instead of continuing half-way.
-- An apply run writes a transcript to `C:\Temp\Update-TeamsClient_<timestamp>.log`.
-- Exit code `0` on success (a `-WhatIf` run included), `1` on failure.
+- A run that actually changes something writes a transcript to `C:\Temp\Update-TeamsClient_<timestamp>.log`; a check that finds nothing to do leaves no log litter behind.
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success, or already up to date |
+| `1` | Failure |
+| `2` | `-CheckOnly` only: a newer build is available |
 
 **Parameters**
 
 | Parameter | Description |
 |-----------|-------------|
-| `-WhatIf` | Show every uninstall/download/install without performing it |
+| `-WhatIf` | Show what an update would do without performing it |
+| `-Quiet` | Print nothing unless there is news: a newer build, an action, or a failure |
+| `-CheckOnly` | Only report whether a newer build exists (exit code 2), change nothing |
 | `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
+| `-Ring` | Update ring queried at the config service (default: `general`) |
 | `-WorkingDir` | Bootstrapper download folder (default: `C:\IT\AVD\Teams`) |
-| `-LogPath` | Transcript folder for apply runs (default: `C:\Temp`) |
+| `-LogPath` | Transcript folder (default: `C:\Temp`) |
 | `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL (https only) |
-| `-SkipMeetingAddIn` | Only replace the client, leave the meeting add-in untouched |
+| `-SkipMeetingAddIn` | Leave the meeting add-in alone, and do not treat a missing add-in as work |
 | `-SkipSignatureCheck` | Accept an installer not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | Per-process timeout for msiexec/bootstrapper (default: `900`) |
-| `-Force` | Continue when no Teams installation is detected (clean install) |
+| `-Force` | Reinstall even when Teams is current, and continue without Teams or version info |
 
 **Examples**
 
 ```powershell
-# Dry run — show what would be removed and installed
+# Dry run — check for a newer build and show what an update would do
 .\Update-TeamsClient.ps1 -WhatIf
 
-# Actually reinstall Teams plus the Outlook meeting add-in
+# Update only if Microsoft published a newer build
 .\Update-TeamsClient.ps1
 
-# Unattended (scheduled task, RMM): no questions asked
-.\Update-TeamsClient.ps1 -Confirm:$false
+# Scheduled RMM run: silent unless there is a newer build or a problem
+.\Update-TeamsClient.ps1 -Quiet -Confirm:$false
 
-# Install new Teams on a device without any Teams yet
+# Detection only: exit code 2 when an update is available
+.\Update-TeamsClient.ps1 -CheckOnly -Quiet
+
+# Repair: reinstall the current build regardless of the version check
 .\Update-TeamsClient.ps1 -Force
 ```
 
 **Running it from NinjaOne**
 
 1. Add the script (Language: PowerShell, Operating System: Windows, Architecture: **All**, Run As: **System**).
-2. Preview a device first: run it with `-WhatIf -Confirm:$false` in the *Parameters* field — the job output shows every uninstall and install it would perform, and the device stays untouched.
-3. For the real run, drop `-WhatIf` and keep `-Confirm:$false`.
-4. Optional script variables (checkboxes `whatIf`, `force`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
+2. Preview a device first: run it with `-WhatIf -Confirm:$false` in the *Parameters* field — the job output shows the version comparison and every step an update would perform, and the device stays untouched.
+3. Schedule the real run with `-Quiet -Confirm:$false`. On an up-to-date device it prints nothing and exits `0`, so the activity feed only shows the devices where it actually did something.
+4. For a detection/condition job use `-CheckOnly -Quiet`: silent and `0` when current, output and exit code `2` when a newer build is published.
+5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
 
 If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `SysNative` first — without that, the registry reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is found.
 
@@ -284,3 +304,4 @@ If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `
 ## Time sync/
 
 Fixes Windows time synchronisation issues by restarting `W32tm` against Dutch NTP pool servers and registering a scheduled task that reruns the sync every 59 minutes. See [`Time sync/readme.md`](Time%20sync/readme.md) for full details.
+
