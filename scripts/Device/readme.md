@@ -13,7 +13,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
 | [`Remove-OemBloatware.ps1`](#remove-oembloatwareps1) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
 | [`Test-OpenVpnDiagnostics.ps1`](#test-openvpndiagnosticsps1) | Diagnose OpenVPN Connect issues |
-| [`Update-TeamsClient.ps1`](#update-teamsclientps1) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build |
+| [`Update-TeamsClient.ps1`](#update-teamsclientps1) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build ([how it works](Update-TeamsClient.md)) |
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 | [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
@@ -212,6 +212,8 @@ Results are printed to screen with a summary of all issues at the end.
 
 ## Update-TeamsClient.ps1
 
+> Full reference: [Update-TeamsClient.md](Update-TeamsClient.md) — decision flow, version check, design decisions and troubleshooting.
+
 Keeps the new Teams client and the Outlook meeting add-in current on an endpoint or AVD session host. It asks the Teams config service which build Microsoft publishes for this architecture and **only acts when that build is newer than what is installed** — an up-to-date device is left completely alone. When an update is due it downloads and signature-checks `teamsbootstrapper.exe`, uninstalls the meeting add-in, removes and deprovisions the `MSTeams` AppX package, provisions the new build for all users and reinstalls the add-in MSI that ships inside it.
 
 Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine. Runs by hand (it elevates itself via UAC and asks for confirmation once) and unattended from an RMM such as NinjaOne.
@@ -304,4 +306,5 @@ If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `
 ## Time sync/
 
 Fixes Windows time synchronisation issues by restarting `W32tm` against Dutch NTP pool servers and registering a scheduled task that reruns the sync every 59 minutes. See [`Time sync/readme.md`](Time%20sync/readme.md) for full details.
+
 
