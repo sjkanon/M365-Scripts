@@ -715,6 +715,18 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-08 (2)
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient.ps1` is now safe to run unattended from an RMM (NinjaOne) *and* by hand. It relaunches itself 64-bit via `SysNative` when the agent starts PowerShell 32-bit — otherwise the HKLM reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is ever found |
+| NinjaOne script variables (`whatIf`, `force`, `skipMeetingAddIn`, `skipSignatureCheck`, `workingDir`, `logPath`) are read from the environment when the matching parameter is not passed, so a preview run can be a checkbox instead of a parameter string |
+| Started by hand without elevation it now asks for UAC and continues in an elevated window, instead of failing on a `#Requires -RunAsAdministrator` line, and an interactive apply run asks for confirmation once. `-Confirm:$false` makes it unattended; the menu passes that because it already asked |
+| Reordered so the bootstrapper is downloaded **and** its Microsoft Authenticode signature verified before the first uninstall — a failed download or a blocked URL can no longer leave a device without a Teams client. TLS 1.2 is forced for the download, and a non-https `-BootstrapperUrl` is refused |
+| `msiexec` and the bootstrapper now run through one helper with a timeout (`-TimeoutSeconds`, default 900, process killed on expiry), a retry on 1618 (another install in progress) and 3010 handled as success with a pending-reboot note, so an RMM job can never hang the agent |
+| The AppX package is also deprovisioned (`Remove-AppxProvisionedPackage`), otherwise new user profiles keep getting the old version staged from the image |
+| Add-in MSI version now comes from the MSI property table via the `WindowsInstaller.Installer` COM object. `Get-AppLockerFileInformation` — what Microsoft's own sample uses — is missing on some editions and under PowerShell 7 it drags in the Windows PowerShell compatibility layer, which fails and floods a `-WhatIf` run with unrelated file-copy output |
+| Apply runs write a transcript to `C:\Temp\Update-TeamsClient_<timestamp>.log`; unexpected errors abort instead of continuing half-way; exit code is 0 on success (`-WhatIf` included) and 1 on failure |
+
 ### 2026-09-08
 | Change |
 |--------|

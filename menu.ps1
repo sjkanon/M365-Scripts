@@ -581,6 +581,7 @@ $menu = @(
             $apply = Read-Host "  Reinstall Teams now (not just preview)? [y/N]"
             $a = @{}
             if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
+            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
             return $a
         }
     }
