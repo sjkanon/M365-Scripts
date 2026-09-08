@@ -576,6 +576,7 @@ M365-Scripts/
     │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── Update-TeamsClient.ps1       ← update new Teams + meeting add-in when a newer build exists
+    │   ├── Update-TeamsClient.md        ← how that script decides, step by step
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -714,6 +715,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-08 (4)
+| Change |
+|--------|
+| Added `scripts/Device/Update-TeamsClient.md` — a reference for that script: the decision tree (behind → full reinstall, current but add-in missing → add-in only, current → nothing at all), the seven steps, the config-service version check with a sample response, output modes and exit codes, the NinjaOne script-variable table, the design decisions behind the order of operations, a troubleshooting table and what has actually been tested. Linked from the Device readme |
 
 ### 2026-09-08 (3)
 | Change |
