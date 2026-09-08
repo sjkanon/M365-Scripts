@@ -1,47 +1,67 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Remove the installed Microsoft Teams client and reinstall the latest new Teams,
-    including the Teams Meeting Add-in for Outlook. Supports -WhatIf.
+    Update the new Microsoft Teams client, including the Teams Meeting Add-in for
+    Outlook, only when Microsoft publishes a newer build. Supports -WhatIf.
 
 .DESCRIPTION
-    Endpoint/AVD script that performs a clean reinstall of new Teams:
+    Endpoint/AVD script that keeps new Teams current:
 
-      1. Preflight  - detect the installed MSTeams AppX package, the meeting add-in
-                      and any running Teams/Outlook process.
-      2. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
+      1. Preflight  - the installed MSTeams AppX package, the meeting add-in and any
+                      running Teams/Outlook process.
+      2. Check      - ask the Teams client config service which build is current for
+                      this architecture and compare it with what is installed. Up to
+                      date and the add-in present? Nothing happens at all.
+      3. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
                       BEFORE anything is uninstalled, so a failed download can never
                       leave the device without a Teams client.
-      3. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
+      4. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
                       users, and the provisioned package.
-      4. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
-      5. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
+      5. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
+      6. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
                       Teams package (ALLUSERS=1).
-      6. Verify     - re-check the add-in registration and the provisioned package.
+      7. Verify     - re-check the add-in registration and the provisioned package.
+
+    When only the meeting add-in is missing and the client itself is current, steps 3
+    to 5 are skipped and just the add-in is installed.
 
     Every state-changing step is wrapped in ShouldProcess, so -WhatIf walks the whole
     flow and reports exactly what would be uninstalled, downloaded, installed and
-    provisioned without touching the machine. Steps that can only be evaluated after
-    a real install (new Teams version, add-in MSI path, final verification) are
-    reported as such under -WhatIf instead of failing the run.
+    provisioned without touching the machine.
+
+    Version check
+    -------------
+    https://config.teams.microsoft.com/config/v1/MicrosoftTeams/... is the feed the
+    Teams client itself uses to decide it is out of date. It returns the current build
+    per architecture (BuildSettings.WebView2PreAuth.<arch>.latestVersion). An
+    installed build that is equal or newer means there is nothing to do. If the
+    service cannot be reached the run stops rather than reinstalling blindly; -Force
+    overrides that.
 
     Safety
     ------
+      - Nothing is touched until a newer build is confirmed (or -Force is given).
       - The installer is downloaded and signature-checked before the first uninstall.
       - Every msiexec/bootstrapper call runs with a timeout and is killed if it hangs,
         so an RMM job can never block the agent indefinitely.
       - MSI exit code 1618 (another install in progress) is retried; 3010 is treated
         as success with a reboot flagged in the summary.
-      - Unexpected errors abort the run instead of continuing half-way, and the exit
-        code is 0 on success (a -WhatIf run included) or 1 on failure.
-      - An apply run writes a transcript to the log folder for after-the-fact review.
+      - Unexpected errors abort the run instead of continuing half-way.
+      - A run that actually changes something writes a transcript to the log folder;
+        a check that finds nothing to do leaves no log litter behind.
+
+    Exit codes
+    ----------
+        0  success, or already up to date
+        1  failure
+        2  -CheckOnly only: a newer build is available
 
     Running it by hand
     ------------------
     From an ordinary PowerShell window the script elevates itself (UAC) and continues
     in a new elevated window that stays open, so no "run as administrator" dance is
-    needed first. An interactive apply run asks for confirmation once before the first
-    uninstall; -Confirm:$false skips that question. A -WhatIf run never asks.
+    needed first. An interactive run that is about to change something asks for
+    confirmation once; -Confirm:$false skips that question. A -WhatIf run never asks.
 
         powershell -ExecutionPolicy Bypass -File .\Update-TeamsClient.ps1 -WhatIf
 
@@ -49,10 +69,14 @@
     --------------
     The script is safe to deploy from NinjaOne (run as System):
 
-      - Script variables arrive as environment variables, so a checkbox named
-        whatIf, force or skipMeetingAddIn, or a text field named workingDir, is
-        picked up when the matching parameter is not passed on the command line.
-        A Parameters field of -WhatIf works just as well.
+      - With -Quiet it prints nothing at all while Teams is up to date, so a scheduled
+        run only shows up in the activity feed when it actually found a newer build or
+        hit a problem. Combine with -CheckOnly for a pure detection job (exit code 2
+        means "update available").
+      - Script variables arrive as environment variables, so checkboxes named whatIf,
+        quiet, checkOnly, force, skipMeetingAddIn or skipSignatureCheck and text
+        fields named workingDir, logPath or ring are picked up when the matching
+        parameter is not passed on the command line.
       - If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit
         via SysNative first. Without that, registry reads are redirected to
         WOW6432Node and $env:ProgramFiles points at the x86 folder, so the AppX
@@ -60,20 +84,32 @@
       - Add -Confirm:$false to the Parameters field so the confirmation question can
         never appear, whatever the agent reports about the session.
 
+.PARAMETER Quiet
+    Print nothing unless there is news: a newer build, an action taken, or a failure.
+    Intended for scheduled RMM runs.
+
+.PARAMETER CheckOnly
+    Only report whether a newer build is available and change nothing. Exit code 2
+    means an update is available, 0 means up to date.
+
+.PARAMETER Ring
+    Update ring queried at the config service (default: general). Both audienceGroup
+    and teamsRing are set to this value.
+
 .PARAMETER WorkingDir
     Folder used for the bootstrapper download (default: C:\IT\AVD\Teams).
 
 .PARAMETER LogPath
-    Folder for the transcript of an apply run (default: C:\Temp). A -WhatIf run
-    writes no transcript.
+    Folder for the transcript of a run that changes something (default: C:\Temp).
+    A -WhatIf, -CheckOnly or up-to-date run writes no transcript.
 
 .PARAMETER BootstrapperUrl
     Download URL for teamsbootstrapper.exe (default: the Microsoft fwlink for new
     Teams). Must be https.
 
 .PARAMETER SkipMeetingAddIn
-    Leave the Teams Meeting Add-in alone - do not uninstall it up front and do not
-    install it afterwards. Only the Teams client itself is replaced.
+    Leave the Teams Meeting Add-in alone - do not uninstall it up front, do not
+    install it afterwards and do not treat a missing add-in as work to do.
 
 .PARAMETER SkipSignatureCheck
     Accept the downloaded bootstrapper without verifying its Authenticode signature.
@@ -85,28 +121,28 @@
     that outlives it is killed and the step is reported as failed.
 
 .PARAMETER Force
-    Continue even when no existing MSTeams package is detected (clean install instead
-    of a reinstall).
+    Reinstall even when Teams is already current, and continue when no Teams
+    installation or no version information is found at all.
 
 .EXAMPLE
-    # Dry run - show every uninstall/download/install this would perform
+    # Dry run - check for a newer build and show what an update would do
     .\Update-TeamsClient.ps1 -WhatIf
 
 .EXAMPLE
-    # Actually reinstall Teams plus the Outlook meeting add-in
+    # Update only if Microsoft published a newer build
     .\Update-TeamsClient.ps1
 
 .EXAMPLE
-    # Install new Teams on a device that has no Teams at all yet
+    # NinjaOne, scheduled: silent unless there is a newer build or a problem
+    .\Update-TeamsClient.ps1 -Quiet -Confirm:$false
+
+.EXAMPLE
+    # NinjaOne, detection only: exit code 2 when an update is available
+    .\Update-TeamsClient.ps1 -CheckOnly -Quiet
+
+.EXAMPLE
+    # Repair: reinstall the current build regardless of the version check
     .\Update-TeamsClient.ps1 -Force
-
-.EXAMPLE
-    # Replace only the client, keep the currently installed meeting add-in
-    .\Update-TeamsClient.ps1 -SkipMeetingAddIn
-
-.EXAMPLE
-    # NinjaOne: preview run driven by a script variable instead of a parameter
-    $env:whatIf = 'true'; .\Update-TeamsClient.ps1
 
 .NOTES
     Author  : Sjoerd Kanon
@@ -114,6 +150,9 @@
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param (
+    [switch] $Quiet,
+    [switch] $CheckOnly,
+    [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
     [string] $BootstrapperUrl = 'https://go.microsoft.com/fwlink/?linkid=2243204&clcid=0x409',
@@ -195,11 +234,14 @@ if (-not (Test-Elevated)) {
 # .\Update-TeamsClient.ps1 -WhatIf keeps working exactly as before.
 $rmmTrue = @('true', '1', 'yes')
 if (-not $PSBoundParameters.ContainsKey('WhatIf')             -and $env:whatIf             -in $rmmTrue) { $WhatIfPreference   = $true }
+if (-not $PSBoundParameters.ContainsKey('Quiet')              -and $env:quiet              -in $rmmTrue) { $Quiet              = $true }
+if (-not $PSBoundParameters.ContainsKey('CheckOnly')          -and $env:checkOnly          -in $rmmTrue) { $CheckOnly          = $true }
 if (-not $PSBoundParameters.ContainsKey('Force')              -and $env:force              -in $rmmTrue) { $Force              = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipMeetingAddIn')   -and $env:skipMeetingAddIn   -in $rmmTrue) { $SkipMeetingAddIn   = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
+if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
 
 $simulate       = [bool] $WhatIfPreference
 $teamsExe       = 'teamsbootstrapper.exe'
@@ -207,7 +249,7 @@ $exePath        = Join-Path $WorkingDir $teamsExe
 $exitCode       = 0
 $rebootRequired = $false
 $transcribing   = $false
-$cancelled      = $false
+$plannedExit    = $null
 
 # -Confirm:$false means "never ask", for an unattended run from a scheduler or RMM.
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
@@ -219,11 +261,39 @@ $UninstallRoots = @(
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
 )
 
-function Write-Step { param([string] $Message) Write-Host "  $Message" -ForegroundColor Cyan }
-function Write-Ok   { param([string] $Message) Write-Host "  [ OK ] $Message" -ForegroundColor Green }
-function Write-Skip { param([string] $Message) Write-Host "  [SKIP] $Message" -ForegroundColor DarkGray }
-function Write-Warn { param([string] $Message) Write-Host "  [WARN] $Message" -ForegroundColor Yellow }
-function Write-Bad  { param([string] $Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
+# -- Output --------------------------------------------------------------------
+# In -Quiet mode every line is held back until something worth reporting happens.
+# A scheduled run on an up-to-date device then produces no output at all.
+$script:heldOutput = [System.Collections.Generic.List[object]]::new()
+$script:holdOutput = [bool] $Quiet
+
+function Write-Out {
+    param([string] $Message = '', [string] $Color = 'Gray')
+    if ($script:holdOutput) { $script:heldOutput.Add([PSCustomObject]@{ Message = $Message; Color = $Color }) }
+    else { Write-Host $Message -ForegroundColor $Color }
+}
+function Show-HeldOutput {
+    if (-not $script:holdOutput) { return }
+    $script:holdOutput = $false
+    foreach ($line in $script:heldOutput) { Write-Host $line.Message -ForegroundColor $line.Color }
+    $script:heldOutput.Clear()
+}
+
+function Write-Step { param([string] $Message) Write-Out "  $Message" 'Cyan' }
+function Write-Ok   { param([string] $Message) Write-Out "  [ OK ] $Message" 'Green' }
+function Write-Skip { param([string] $Message) Write-Out "  [SKIP] $Message" 'DarkGray' }
+function Write-Warn { param([string] $Message) Write-Out "  [WARN] $Message" 'Yellow' }
+function Write-Bad  { param([string] $Message) Write-Out "  [FAIL] $Message" 'Red' }
+function Write-News { param([string] $Message) Write-Out "  [NEW ] $Message" 'Magenta' }
+
+function Get-PropertyValue {
+    <# Property access that returns $null instead of tripping Set-StrictMode. #>
+    param($Object, [string] $Name)
+
+    if ($null -eq $Object) { return $null }
+    if ($Object.PSObject.Properties.Name -notcontains $Name) { return $null }
+    return $Object.$Name
+}
 
 function Get-TeamsMeetingAddInEntry {
     <# Uninstall entries for the Teams Meeting Add-in, from both registry views. #>
@@ -240,6 +310,50 @@ function Get-TeamsMeetingAddInEntry {
             }
         }
     }
+}
+
+function Get-LatestTeamsBuild {
+    <#
+        The build Microsoft currently publishes for this architecture, from the same
+        config service the Teams client uses to decide it is out of date. Returns
+        $null when the service cannot be reached or has no build for this platform.
+    #>
+    param([string] $UpdateRing = 'general')
+
+    $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+        'ARM64' { 'arm64' }
+        'AMD64' { 'x64' }
+        default { if ($env:PROCESSOR_ARCHITEW6432 -eq 'AMD64') { 'x64' } else { 'x86' } }
+    }
+
+    $uri = 'https://config.teams.microsoft.com/config/v1/MicrosoftTeams/0.0.0.0' +
+           "?environment=prod&audienceGroup=$UpdateRing&teamsRing=$UpdateRing&agent=TeamsBuilds"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $config = Invoke-RestMethod -Uri $uri -UseBasicParsing -TimeoutSec 30
+    } catch {
+        Write-Warn "Could not reach the Teams config service: $($_.Exception.Message)"
+        return $null
+    }
+
+    $builds = Get-PropertyValue $config 'BuildSettings'
+    # WebView2PreAuth carries the Windows builds; WebView2 is the older key and still
+    # holds macOS, so both are checked before giving up.
+    foreach ($channel in 'WebView2PreAuth', 'WebView2') {
+        $node = Get-PropertyValue (Get-PropertyValue $builds $channel) $arch
+        $latest = Get-PropertyValue $node 'latestVersion'
+        if ($latest) {
+            return [PSCustomObject]@{
+                Version      = [version] $latest
+                Link         = Get-PropertyValue $node 'buildLink'
+                Architecture = $arch
+                Channel      = $channel
+            }
+        }
+    }
+
+    Write-Warn "The Teams config service returned no build for $arch."
+    return $null
 }
 
 function Get-MsiProductVersion {
@@ -310,16 +424,9 @@ function Invoke-Installer {
 
 # -- Run -----------------------------------------------------------------------
 try {
-    if (-not $simulate) {
-        if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
-        $logFile = Join-Path $LogPath ("Update-TeamsClient_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
-        Start-Transcript -Path $logFile | Out-Null
-        $transcribing = $true
-    }
-
-    Write-Host ''
-    Write-Host "  Mode: $(if ($simulate) { '-WhatIf - nothing will be changed' } else { 'APPLY - Teams will be reinstalled' })" -ForegroundColor Cyan
-    Write-Host ''
+    Write-Out ''
+    Write-Out "  Mode: $(if ($CheckOnly) { 'CHECK ONLY - reporting, never installing' } elseif ($simulate) { '-WhatIf - nothing will be changed' } else { 'APPLY - Teams is updated when a newer build exists' })" 'Cyan'
+    Write-Out ''
 
     # -- 1. Preflight ----------------------------------------------------------
     Write-Step '1. Preflight'
@@ -329,16 +436,82 @@ try {
         throw "Could not enumerate AppX packages ($($_.Exception.Message)). This needs administrator or System rights."
     }
 
-    if ($existingTeams.Count -gt 0) {
-        foreach ($pkg in $existingTeams) { Write-Ok "Found $($pkg.Name) $($pkg.Version)" }
-    } elseif ($Force) {
-        Write-Skip 'No Teams installation detected - continuing because -Force was given'
-    } else {
-        throw 'No Teams installation detected. Use -Force to install new Teams anyway.'
+    $installedVersion = $null
+    foreach ($pkg in $existingTeams) {
+        Write-Ok "Found $($pkg.Name) $($pkg.Version)"
+        $candidate = [version] $pkg.Version
+        if ($null -eq $installedVersion -or $candidate -gt $installedVersion) { $installedVersion = $candidate }
+    }
+    if ($existingTeams.Count -eq 0) {
+        if ($Force) { Write-Skip 'No Teams installation detected - continuing because -Force was given' }
+        else        { throw 'No Teams installation detected. Use -Force to install new Teams anyway.' }
     }
 
-    if (Get-Process -Name 'ms-teams', 'Teams' -ErrorAction SilentlyContinue) {
-        Write-Warn 'Teams is running - it will be closed by the removal; warn the user before an apply run'
+    $addInInstalled = [bool] (Get-TeamsMeetingAddInEntry)
+    if (-not $SkipMeetingAddIn) {
+        if ($addInInstalled) { Write-Ok 'Teams Meeting Add-in is installed' }
+        else                 { Write-Warn 'Teams Meeting Add-in is not installed' }
+    }
+
+    # -- 2. Version check ------------------------------------------------------
+    Write-Out ''
+    Write-Step '2. Version check'
+    $latest = Get-LatestTeamsBuild -UpdateRing $Ring
+
+    if ($latest) {
+        Write-Ok "Latest published build ($($latest.Architecture), ring $Ring): $($latest.Version)"
+    } elseif ($Force) {
+        Write-Skip 'No version information - continuing because -Force was given'
+    } else {
+        throw 'Could not determine the latest published build. Use -Force to reinstall without the check.'
+    }
+
+    $clientOutdated = $false
+    if ($null -eq $installedVersion) {
+        $clientOutdated = $true
+    } elseif ($latest) {
+        if ($installedVersion -lt $latest.Version) {
+            $clientOutdated = $true
+            Write-News "Update available: $installedVersion -> $($latest.Version)"
+        } elseif ($installedVersion -gt $latest.Version) {
+            Write-Ok "Installed build is newer than the published one ($installedVersion) - nothing to update"
+        } else {
+            Write-Ok "Installed build is current ($installedVersion)"
+        }
+    }
+
+    $addInMissing = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
+    $fullReinstall = $clientOutdated -or $Force
+
+    if (-not $fullReinstall -and -not $addInMissing) {
+        $plannedExit = 0
+        throw 'Teams is up to date - nothing to do.'
+    }
+
+    if ($CheckOnly) {
+        Show-HeldOutput
+        if ($clientOutdated) { Write-News 'A newer build is available (exit code 2)' }
+        else                 { Write-News 'The Teams Meeting Add-in is missing (exit code 2)' }
+        $plannedExit = 2
+        throw 'Check only - nothing was changed.'
+    }
+
+    if ($addInMissing -and -not $fullReinstall) {
+        Write-Skip 'Client is current - only the meeting add-in will be installed'
+    }
+
+    # From here the run intends to change something, so it is worth reporting and
+    # worth a transcript.
+    Show-HeldOutput
+    if (-not $simulate) {
+        if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
+        $logFile = Join-Path $LogPath ("Update-TeamsClient_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        Start-Transcript -Path $logFile | Out-Null
+        $transcribing = $true
+    }
+
+    if ($fullReinstall -and (Get-Process -Name 'ms-teams', 'Teams' -ErrorAction SilentlyContinue)) {
+        Write-Warn 'Teams is running - it will be closed by the removal'
     }
     if (-not $SkipMeetingAddIn -and (Get-Process -Name 'OUTLOOK' -ErrorAction SilentlyContinue)) {
         Write-Warn 'Outlook is running - the meeting add-in registers reliably only after Outlook restarts'
@@ -347,123 +520,127 @@ try {
     # Last exit before anything is touched. Only for a hands-on run: an RMM or
     # scheduled session is not interactive, and -Confirm:$false silences it outright.
     if (-not $simulate -and -not $confirmSuppressed -and [Environment]::UserInteractive) {
-        Write-Host ''
+        Write-Out ''
         Write-Warn 'Teams and the meeting add-in will be uninstalled and reinstalled on this device.'
         $answer = Read-Host '  Continue? [y/N]'
         if ($answer -notmatch '^[Yy]') {
-            $cancelled = $true
+            $plannedExit = 0
             throw 'Cancelled - nothing was changed.'
         }
     }
 
-    # -- 2. Download and verify the bootstrapper -------------------------------
+    # -- 3. Download and verify the bootstrapper -------------------------------
     # Deliberately before any uninstall: a failed download must never leave the
     # device without a Teams client.
-    Write-Host ''
-    Write-Step '2. Download new Teams bootstrapper'
-    if ($BootstrapperUrl -notmatch '^https://') {
-        throw "BootstrapperUrl must be https: $BootstrapperUrl"
-    }
-
-    if ($PSCmdlet.ShouldProcess($WorkingDir, 'Create working directory')) {
-        New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
-        Write-Ok "Working directory ready: $WorkingDir"
-    }
-
-    if ($PSCmdlet.ShouldProcess($exePath, "Download $BootstrapperUrl")) {
-        # PowerShell 5.1 on older builds still defaults to TLS 1.0, which the CDN refuses.
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $progressBackup     = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'
-        try {
-            Invoke-WebRequest -Uri $BootstrapperUrl -OutFile $exePath -UseBasicParsing
-        } catch {
-            throw "Download failed: $($_.Exception.Message)"
-        } finally {
-            $ProgressPreference = $progressBackup
-        }
-
-        $downloaded = Get-Item $exePath
-        if ($downloaded.Length -lt 100KB) {
-            throw "Downloaded file is only $($downloaded.Length) bytes - not a valid bootstrapper"
-        }
-        Write-Ok "Downloaded $teamsExe ($([math]::Round($downloaded.Length / 1MB, 1)) MB)"
-
-        if ($SkipSignatureCheck) {
-            Write-Warn 'Signature check skipped (-SkipSignatureCheck)'
-        } else {
-            $signature = Get-AuthenticodeSignature -FilePath $exePath
-            if ($signature.Status -ne 'Valid') {
-                throw "Bootstrapper signature is $($signature.Status) - refusing to run it"
-            }
-            if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
-                throw "Bootstrapper is not signed by Microsoft: $($signature.SignerCertificate.Subject)"
-            }
-            Write-Ok 'Signature verified: Microsoft Corporation'
-        }
-    }
-
-    # -- 3. Uninstall the Teams Meeting Add-in ---------------------------------
-    Write-Host ''
-    Write-Step '3. Teams Meeting Add-in (uninstall)'
-    if ($SkipMeetingAddIn) {
-        Write-Skip 'Skipped (-SkipMeetingAddIn)'
+    Write-Out ''
+    Write-Step '3. Download new Teams bootstrapper'
+    if (-not $fullReinstall) {
+        Write-Skip 'Not needed - the client stays as it is'
     } else {
-        $addInEntries = @(Get-TeamsMeetingAddInEntry)
-        if ($addInEntries.Count -eq 0) { Write-Skip 'Microsoft Teams Meeting Add-in is not installed' }
+        if ($BootstrapperUrl -notmatch '^https://') {
+            throw "BootstrapperUrl must be https: $BootstrapperUrl"
+        }
 
-        foreach ($entry in $addInEntries) {
-            $target = "$($entry.DisplayName) $($entry.Version) [$($entry.ProductCode)]"
-            if ($PSCmdlet.ShouldProcess($target, 'msiexec /x /qn (uninstall)')) {
-                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($entry.ProductCode) /qn /norestart"
-                if ($result.Success) {
-                    Write-Ok "Uninstalled $($entry.DisplayName)"
-                    if ($result.RebootRequired) { $rebootRequired = $true }
+        if ($PSCmdlet.ShouldProcess($WorkingDir, 'Create working directory')) {
+            New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
+            Write-Ok "Working directory ready: $WorkingDir"
+        }
+
+        if ($PSCmdlet.ShouldProcess($exePath, "Download $BootstrapperUrl")) {
+            # PowerShell 5.1 on older builds still defaults to TLS 1.0, which the CDN refuses.
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $progressBackup     = $ProgressPreference
+            $ProgressPreference = 'SilentlyContinue'
+            try {
+                Invoke-WebRequest -Uri $BootstrapperUrl -OutFile $exePath -UseBasicParsing
+            } catch {
+                throw "Download failed: $($_.Exception.Message)"
+            } finally {
+                $ProgressPreference = $progressBackup
+            }
+
+            $downloaded = Get-Item $exePath
+            if ($downloaded.Length -lt 100KB) {
+                throw "Downloaded file is only $($downloaded.Length) bytes - not a valid bootstrapper"
+            }
+            Write-Ok "Downloaded $teamsExe ($([math]::Round($downloaded.Length / 1MB, 1)) MB)"
+
+            if ($SkipSignatureCheck) {
+                Write-Warn 'Signature check skipped (-SkipSignatureCheck)'
+            } else {
+                $signature = Get-AuthenticodeSignature -FilePath $exePath
+                if ($signature.Status -ne 'Valid') {
+                    throw "Bootstrapper signature is $($signature.Status) - refusing to run it"
+                }
+                if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+                    throw "Bootstrapper is not signed by Microsoft: $($signature.SignerCertificate.Subject)"
+                }
+                Write-Ok 'Signature verified: Microsoft Corporation'
+            }
+        }
+    }
+
+    # -- 4. Uninstall the add-in and the current package -----------------------
+    Write-Out ''
+    Write-Step '4. Uninstall current Teams'
+    if (-not $fullReinstall) {
+        Write-Skip 'Not needed - the client stays as it is'
+    } else {
+        if ($SkipMeetingAddIn) {
+            Write-Skip 'Meeting add-in left alone (-SkipMeetingAddIn)'
+        } else {
+            $addInEntries = @(Get-TeamsMeetingAddInEntry)
+            if ($addInEntries.Count -eq 0) { Write-Skip 'Microsoft Teams Meeting Add-in is not installed' }
+
+            foreach ($entry in $addInEntries) {
+                $target = "$($entry.DisplayName) $($entry.Version) [$($entry.ProductCode)]"
+                if ($PSCmdlet.ShouldProcess($target, 'msiexec /x /qn (uninstall)')) {
+                    $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($entry.ProductCode) /qn /norestart"
+                    if ($result.Success) {
+                        Write-Ok "Uninstalled $($entry.DisplayName)"
+                        if ($result.RebootRequired) { $rebootRequired = $true }
+                    } else {
+                        # Not fatal: the reinstall below replaces the add-in anyway.
+                        Write-Warn "Uninstall of $($entry.DisplayName) failed ($($result.Message))"
+                    }
+                }
+            }
+        }
+
+        if ($existingTeams.Count -eq 0) { Write-Skip 'No AppX package to remove' }
+        foreach ($pkg in $existingTeams) {
+            if ($PSCmdlet.ShouldProcess("$($pkg.Name) $($pkg.Version)", 'Remove-AppxPackage -AllUsers')) {
+                $pkg | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+                if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
+                    Write-Warn "$($pkg.Name) is still present after removal - the reinstall will upgrade it in place"
                 } else {
-                    # Not fatal: the reinstall below replaces the add-in anyway.
-                    Write-Warn "Uninstall of $($entry.DisplayName) failed ($($result.Message))"
+                    Write-Ok "Removed $($pkg.Name)"
+                }
+            }
+        }
+
+        # Without dropping the provisioned copy, new user profiles keep getting the
+        # old version staged from the image.
+        $provisioned = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like 'MSTeams*' })
+        if ($provisioned.Count -eq 0) { Write-Skip 'No provisioned MSTeams package to remove' }
+        foreach ($prov in $provisioned) {
+            if ($PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online')) {
+                try {
+                    Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName | Out-Null
+                    Write-Ok "Deprovisioned $($prov.PackageName)"
+                } catch {
+                    Write-Warn "Could not deprovision $($prov.PackageName): $($_.Exception.Message)"
                 }
             }
         }
     }
 
-    # -- 4. Remove the Teams AppX package --------------------------------------
-    Write-Host ''
-    Write-Step '4. Teams AppX package (remove for all users)'
-    if ($existingTeams.Count -eq 0) { Write-Skip 'Nothing to remove' }
-
-    foreach ($pkg in $existingTeams) {
-        if ($PSCmdlet.ShouldProcess("$($pkg.Name) $($pkg.Version)", 'Remove-AppxPackage -AllUsers')) {
-            $pkg | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
-            if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
-                Write-Warn "$($pkg.Name) is still present after removal - the reinstall will upgrade it in place"
-            } else {
-                Write-Ok "Removed $($pkg.Name)"
-            }
-        }
-    }
-
-    # Without dropping the provisioned copy, new user profiles keep getting the old
-    # version staged from the image.
-    $provisioned = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like 'MSTeams*' })
-    if ($provisioned.Count -eq 0) {
-        Write-Skip 'No provisioned MSTeams package to remove'
-    }
-    foreach ($prov in $provisioned) {
-        if ($PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online')) {
-            try {
-                Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName | Out-Null
-                Write-Ok "Deprovisioned $($prov.PackageName)"
-            } catch {
-                Write-Warn "Could not deprovision $($prov.PackageName): $($_.Exception.Message)"
-            }
-        }
-    }
-
     # -- 5. Install / provision new Teams --------------------------------------
-    Write-Host ''
+    Write-Out ''
     Write-Step '5. Install new Teams'
-    if ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
+    if (-not $fullReinstall) {
+        Write-Skip 'Not needed - the client stays as it is'
+    } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
         if (-not (Test-Path $exePath)) { throw "Bootstrapper not found at $exePath" }
 
         $result = Invoke-Installer -FilePath $exePath -Arguments '-p'
@@ -473,7 +650,7 @@ try {
     }
 
     # -- 6. Install the Teams Meeting Add-in for all users ---------------------
-    Write-Host ''
+    Write-Out ''
     Write-Step '6. Teams Meeting Add-in (install)'
     if ($SkipMeetingAddIn) {
         Write-Skip 'Skipped (-SkipMeetingAddIn)'
@@ -512,43 +689,51 @@ try {
     }
 
     # -- 7. Verify -------------------------------------------------------------
-    Write-Host ''
+    Write-Out ''
     Write-Step '7. Verification'
     if ($simulate) {
         Write-Skip 'Skipped - nothing was changed, so there is nothing to verify (-WhatIf)'
-        Write-Host ''
-        Write-Host '  Dry run only - rerun without -WhatIf to apply these changes.' -ForegroundColor Yellow
+        Write-Out ''
+        Write-Out '  Dry run only - rerun without -WhatIf to apply these changes.' 'Yellow'
     } else {
         if (-not $SkipMeetingAddIn) {
             if (Get-TeamsMeetingAddInEntry) { Write-Ok 'Teams Meeting Add-in installed' }
             else { Write-Bad 'Teams Meeting Add-in installation failed'; $exitCode = 1 }
         }
 
-        if (Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq 'MSTeams' }) {
-            Write-Ok 'Teams provisioned for all users'
+        $nowInstalled = Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq 'MSTeams' } | Select-Object -First 1
+        if ($nowInstalled) {
+            Write-Ok "Teams provisioned for all users ($($nowInstalled.Version))"
+            if ($latest -and [version] $nowInstalled.Version -lt $latest.Version) {
+                Write-Warn "Installed build $($nowInstalled.Version) is still older than the published $($latest.Version)"
+            }
         } else {
             Write-Bad 'Teams installation failed'
             $exitCode = 1
         }
 
-        Write-Host ''
+        Write-Out ''
         if ($rebootRequired) { Write-Warn 'A reboot is required to complete the installation (MSI returned 3010)' }
         if ($exitCode -eq 0) { Write-Ok 'Done' }
     }
 } catch {
-    Write-Host ''
-    if ($cancelled) {
+    if ($null -ne $plannedExit) {
+        # A deliberate stop: up to date, check-only, or cancelled by the operator.
+        Write-Out ''
         Write-Skip $_.Exception.Message
+        $exitCode = $plannedExit
     } else {
+        Show-HeldOutput
+        Write-Out ''
         Write-Bad "Aborted: $($_.Exception.Message)"
         $exitCode = 1
     }
 } finally {
     if ($transcribing) {
-        Write-Host ''
+        Write-Out ''
         try { Stop-Transcript | Out-Null } catch { Write-Warning "Transcript not closed cleanly: $($_.Exception.Message)" }
     }
 }
 
-Write-Host ''
+if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
