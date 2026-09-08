@@ -574,6 +574,16 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='T'; FKey=$null; Category='Device'
+        Label='Update-TeamsClient  — reinstall new Teams + Outlook meeting add-in'
+        Script="$ROOT\scripts\Device\Update-TeamsClient.ps1"
+        Params={
+            $apply = Read-Host "  Reinstall Teams now (not just preview)? [y/N]"
+            $a = @{}
+            if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"

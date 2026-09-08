@@ -575,6 +575,7 @@ M365-Scripts/
     │   ├── Clear-TempFiles.ps1
     │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
+    │   ├── Update-TeamsClient.ps1       ← reinstall new Teams + meeting add-in (-WhatIf)
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -713,6 +714,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-08
+| Change |
+|--------|
+| Added `scripts/Device/Update-TeamsClient.ps1` — clean reinstall of new Teams on an endpoint or AVD session host: uninstall the Teams Meeting Add-in, remove the `MSTeams` AppX package for all users, download `teamsbootstrapper.exe`, provision Teams (`-p`) and install the meeting add-in MSI that ships inside the new Teams package |
+| Every state-changing step runs through `ShouldProcess`, so `-WhatIf` walks the whole flow and prints each uninstall/download/install without touching the machine; the steps that only exist after a real install (new Teams version, add-in MSI path, final verification) are reported as such instead of failing the run |
+| The add-in lookup reads both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone never finds it (uninstall and verification both missed it before) |
+| Exit codes and msiexec/bootstrapper exit codes are checked instead of assumed; `-SkipMeetingAddIn` replaces only the client, `-Force` installs on a device without any Teams. Wired into `menu.ps1` (key T), which defaults to a `-WhatIf` preview |
 
 ### 2026-09-07 (2)
 | Change |
