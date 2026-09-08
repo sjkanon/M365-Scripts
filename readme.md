@@ -577,6 +577,7 @@ M365-Scripts/
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── Update-TeamsClient.ps1       ← update new Teams + meeting add-in when a newer build exists
     │   ├── Update-TeamsClient.md        ← how that script decides, step by step
+    │   ├── Update-TeamsClient-ITGlue.md ← servicedeskversie (NL) om in IT Glue te plakken
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -715,6 +716,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-08 (5)
+| Change |
+|--------|
+| Added `scripts/Device/Update-TeamsClient-ITGlue.md` — the service desk version of that documentation, in Dutch, to paste into IT Glue. Layered per support level: L1 checks with `-CheckOnly -Quiet` and reads the labelled output, L2 runs the update from NinjaOne or by hand and verifies afterwards, L3 gets parameters, exit codes, paths and the built-in safeties. Includes an error table with the escalation level per message, an FAQ, and ready-made text for the end user |
+| It leads with the point that trips people up: no output means the device is already current, which is a successful run and not a failure. Download volume per device (~275 MB: a 1.9 MB bootstrapper that pulls a ~273 MB package) was measured, not estimated |
 
 ### 2026-09-08 (4)
 | Change |
