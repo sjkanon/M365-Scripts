@@ -212,30 +212,46 @@ Results are printed to screen with a summary of all issues at the end.
 
 ## Update-TeamsClient.ps1
 
-Clean reinstall of the new Teams client on an endpoint or AVD session host: uninstalls the Teams Meeting Add-in, removes the `MSTeams` AppX package for all users, downloads `teamsbootstrapper.exe`, provisions Teams for all users and installs the meeting add-in MSI shipped inside the new Teams package. Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine.
+Clean reinstall of the new Teams client on an endpoint or AVD session host: downloads and signature-checks `teamsbootstrapper.exe`, uninstalls the Teams Meeting Add-in, removes and deprovisions the `MSTeams` AppX package, provisions Teams for all users and installs the meeting add-in MSI shipped inside the new Teams package. Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine.
+
+Runs by hand (it elevates itself via UAC and asks for confirmation once) and unattended from an RMM such as NinjaOne.
 
 **Steps**
 
 | # | Step | Honours `-WhatIf` |
 |---|------|-------------------|
-| 1 | Detect installed `MSTeams` AppX package | read-only |
-| 2 | Uninstall Teams Meeting Add-in (`msiexec /x`) | yes |
-| 3 | Remove `MSTeams` AppX package for all users | yes |
-| 4 | Create working folder + download bootstrapper | yes |
+| 1 | Preflight — installed package, add-in, running Teams/Outlook | read-only |
+| 2 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
+| 3 | Uninstall Teams Meeting Add-in (`msiexec /x`) | yes |
+| 4 | Remove `MSTeams` AppX package for all users + deprovision it | yes |
 | 5 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
 | 6 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
 | 7 | Verify add-in registration + provisioned package | reported as skipped under `-WhatIf` |
 
-> The add-in uninstall/verification checks both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone misses it.
+**Why the order matters:** the installer is fetched and verified *before* the first uninstall, so a failed download or a blocked URL can never leave the device without a Teams client.
+
+> The add-in uninstall and verification read both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone misses it. The add-in MSI version comes from the MSI property table (`WindowsInstaller.Installer` COM), not from `Get-AppLockerFileInformation`, which is missing on some editions and breaks under PowerShell 7.
+
+**Safety**
+
+- `msiexec` and the bootstrapper run with a timeout (`-TimeoutSeconds`, default 900) and are killed if they hang, so an RMM job cannot block the agent.
+- MSI exit code `1618` (another install in progress) is retried twice; `3010` counts as success and flags a pending reboot in the summary.
+- Unexpected errors abort the run instead of continuing half-way.
+- An apply run writes a transcript to `C:\Temp\Update-TeamsClient_<timestamp>.log`.
+- Exit code `0` on success (a `-WhatIf` run included), `1` on failure.
 
 **Parameters**
 
 | Parameter | Description |
 |-----------|-------------|
 | `-WhatIf` | Show every uninstall/download/install without performing it |
+| `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
 | `-WorkingDir` | Bootstrapper download folder (default: `C:\IT\AVD\Teams`) |
-| `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL |
+| `-LogPath` | Transcript folder for apply runs (default: `C:\Temp`) |
+| `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL (https only) |
 | `-SkipMeetingAddIn` | Only replace the client, leave the meeting add-in untouched |
+| `-SkipSignatureCheck` | Accept an installer not signed by Microsoft (internal mirror) |
+| `-TimeoutSeconds` | Per-process timeout for msiexec/bootstrapper (default: `900`) |
 | `-Force` | Continue when no Teams installation is detected (clean install) |
 
 **Examples**
@@ -247,11 +263,21 @@ Clean reinstall of the new Teams client on an endpoint or AVD session host: unin
 # Actually reinstall Teams plus the Outlook meeting add-in
 .\Update-TeamsClient.ps1
 
+# Unattended (scheduled task, RMM): no questions asked
+.\Update-TeamsClient.ps1 -Confirm:$false
+
 # Install new Teams on a device without any Teams yet
 .\Update-TeamsClient.ps1 -Force
 ```
 
-Exits `1` when no Teams is found (without `-Force`), when the download or a required package/MSI is missing, or when the final verification fails.
+**Running it from NinjaOne**
+
+1. Add the script (Language: PowerShell, Operating System: Windows, Architecture: **All**, Run As: **System**).
+2. Preview a device first: run it with `-WhatIf -Confirm:$false` in the *Parameters* field — the job output shows every uninstall and install it would perform, and the device stays untouched.
+3. For the real run, drop `-WhatIf` and keep `-Confirm:$false`.
+4. Optional script variables (checkboxes `whatIf`, `force`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
+
+If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `SysNative` first — without that, the registry reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is found.
 
 ---
 
