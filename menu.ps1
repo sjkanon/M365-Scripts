@@ -595,6 +595,40 @@ $menu = @(
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"
         Params={ return @{} }
     }
+    [PSCustomObject]@{ Key='S'; FKey=$null; Category='SharePoint'
+        Label='SharePoint-Structure — provision/check metadata, libraries and rights'
+        Action={
+            $dir = Join-Path $ROOT 'scripts\SharePoint\Provisioning'
+            Write-Host ''
+            Write-Host '  1  Metadata      — term set, site columns, content types' -ForegroundColor Gray
+            Write-Host '  2  Libraries     — libraries, channel folders, content types, permissions' -ForegroundColor Gray
+            Write-Host '  3  Share status  — audit sharing and update the Deelstatus column' -ForegroundColor Gray
+            Write-Host '  4  Drift check   — compare the tenant with the config (read only)' -ForegroundColor Gray
+            Write-Host ''
+            $step   = Read-Host '  Step [1-4]'
+            $config = Read-Host "  Config file [petsolutions.config.json]"
+            $client = Read-Host '  ClientId of the PnP app registration'
+
+            $a = @{ Interactive = $true; ClientId = $client }
+            if ($config) { $a['ConfigPath'] = (Join-Path $dir $config) }
+
+            # The drift check never writes, so it is the one step that skips the question.
+            if ($step -ne '4') {
+                $apply = Read-Host '  Apply the changes now (not just -WhatIf)? [y/N]'
+                if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
+            }
+
+            $script = switch ($step) {
+                '1'     { 'New-SharePointMetadata.ps1' }
+                '2'     { 'Set-SharePointLibraries.ps1' }
+                '3'     { 'Update-SharePointShareStatus.ps1' }
+                '4'     { 'Test-SharePointStructure.ps1' }
+                default { $null }
+            }
+            if (-not $script) { Write-Warning 'No such step.'; return }
+            & (Join-Path $dir $script) @a
+        }
+    }
     [PSCustomObject]@{ Key='F'; FKey=$null; Category='Startup'
         Label='Enable-LauncherStartup — run launcher at Windows sign-in'
         Action={

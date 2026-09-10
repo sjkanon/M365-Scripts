@@ -12,6 +12,7 @@ admin sign-in on any (customer) tenant.
 | [`Find-SiteContent.ps1`](#find-sitecontentps1) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
 | [`Search-SharePointContent.ps1`](#search-sharepointcontentps1) | The same question tenant-wide through Microsoft Graph, app-only, no interactive login — files and folders |
 | [`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
+| [`Provisioning/`](Provisioning/readme.md) | Provision and maintain a whole structure — metadata model, content types, libraries and group permissions — from one config file, plus a sharing audit and a drift check |
 
 ---
 

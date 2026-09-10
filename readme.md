@@ -262,6 +262,18 @@ Restore deleted files and folders from a site or OneDrive recycle bin — dry-ru
 - Timing throughout: how long reading the bin took, an up-front estimate, a progress bar with live ETA, and the real duration in the summary
 - CSV report of every item, restored or failed, including the site, the SharePoint error, its batch number and how long it took
 
+#### Structure Provisioning
+
+Provision and maintain a whole SharePoint structure — metadata model, content types, libraries and group permissions — from one JSON config. See [`scripts/SharePoint/Provisioning/`](../scripts/SharePoint/Provisioning/readme.md).
+
+- The model lives in the config, not in the code: a second MSP client is a second config file, not a second fork of four scripts
+- `New-SharePointMetadata.ps1` — managed metadata term set, site columns and content types, on **every** site in the config (a Teams private channel is its own site collection, and a site column does not reach across one)
+- `Set-SharePointLibraries.ps1` — libraries, Teams channel folders, content type binding, per-folder content type order, default column values, grouped views, and one Entra ID security group per pillar per access level; `-EnsureGroups` creates the groups on the way
+- `Update-SharePointShareStatus.ps1` — derives a Deelstatus column from the permissions actually on each file (Anyone link, guest, organisation link, or nothing) and flags anything tagged Intern/Vertrouwelijk sitting behind an external link; exit code 2 for a scheduled RMM job
+- `Test-SharePointStructure.ps1` — read-only drift check classifying every difference as Missing / Different / Extra; exit code 2 means somebody changed something
+- All four are idempotent and support `-WhatIf`; interactive or app-only with a certificate
+- Documented rather than hidden: unique permissions on a **standard**-channel folder are what this model asks for and what Microsoft does not support — members keep seeing the channel and get an error on the Files tab. `-SkipChannelFolderPermissions` is the conservative alternative
+
 ---
 
 ### 🧪 Testing & Diagnostics
@@ -627,7 +639,15 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
     │   ├── Search-SharePointContent.ps1 ← same, tenant-wide via Graph app-only: delta + /permissions, sharing links and guests (files/folders)
-    │   └── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   ├── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
+    │       ├── readme.md
+    │       ├── petsolutions.config.json     ← the model: columns, content types, groups, libraries, permissions
+    │       ├── SharePointStructure.Common.ps1 ← shared helpers (dot-sourced by all four)
+    │       ├── New-SharePointMetadata.ps1   ← term set, site columns, content types (every site in the config)
+    │       ├── Set-SharePointLibraries.ps1  ← libraries/channel folders, content types, defaults, views, group rights
+    │       ├── Update-SharePointShareStatus.ps1 ← derive the Deelstatus column, flag over-sharing (exit 2)
+    │       └── Test-SharePointStructure.ps1 ← read-only drift check vs the config (exit 2)
     ├── Teams/
     │   ├── readme.md
     │   └── vias_archiver.ps1        ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
@@ -717,6 +737,19 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-10 (4)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/` — provision and maintain a whole SharePoint structure (metadata model, content types, libraries, Entra ID group permissions) for an MSP client from one JSON config, with a sharing audit and a read-only drift check. Built for Petsolutions NV (brands Butterstone/Laseto), but nothing in the scripts is client-specific |
+| The model lives in `petsolutions.config.json`, cross-checked at load time: a content type referring to an undefined column, or a container granting a group that is not in the model, fails before anything connects rather than halfway through provisioning. The shipped `CHANGEME` tenant/site URLs are refused outright |
+| Column internal names carry a `Ps` prefix. "Contenttype" and "Status" are display names SharePoint already uses for something else, and the prefix keeps them unambiguous in CAML, in views and in the drift check while users still see plain Dutch labels. Content type IDs are fixed rather than generated, so the same structure is reproducible across tenants |
+| `New-SharePointMetadata.ps1` runs against **every** site in the config, not just the team site: a Teams private channel (MGMT here) is its own site collection and a site column does not reach across one. Making a column required after the fact works — the `Required` flag on an existing field link is updated in place and pushed down to the lists already using the content type |
+| `Set-SharePointLibraries.ps1` sets a per-folder content type order, so the *New* menu inside the Leveranciers channel offers Leveranciersdocument and not the five types belonging to the other pillars — the shared library has to carry them all, the folder does not have to show them. No view is ever made the default: the default view of a Teams library is what every member of the channel sees the second they open Files |
+| Written down rather than hidden: unique permissions on a **standard**-channel folder are what this model asks for and what Microsoft does not support. Members who lose access keep seeing the channel in Teams and get an error on the Files tab instead of a closed door. The script does it, warns per folder, and `-SkipChannelFolderPermissions` leaves those folders inheriting. A private channel, a shared channel or an own library (what FUTECH uses) are the supported ways to close a pillar off |
+| `Update-SharePointShareStatus.ps1` derives the Deelstatus column from the permissions actually on each file. It asks the cheap question first — a file that inherits is not shared — so one round trip per hundred items settles nearly the whole library; only files that broke inheritance get their role assignments read, and of those only specific-people links need expanding (an Anyone or Organization link already says in its name whether a guest can be behind it). Writes with `SystemUpdate` so Modified/Modified By stay put and no version is created |
+| The audit never revokes a link. It reports files tagged Intern or Vertrouwelijk sitting behind an external one and exits `2`, so a scheduled RMM job surfaces exactly when there is a decision for a person to make. `Test-SharePointStructure.ps1` does the same for structural drift, classified as Missing / Different / Extra — "Extra" is never fixed automatically, because an extra column holds data and an extra role assignment is usually somebody's deliberate exception |
+| `SharePointStructure.Common.ps1` is dot-sourced by all four — a deliberate exception to the "every script stands alone" rule elsewhere in this repo, because they share one config schema and three copies of the permission code would drift apart within a month |
+| Menu item `S` added for the set (pick a step, `-WhatIf` unless you confirm; the drift check skips the question because it never writes) |
 ### 2026-09-10 (3)
 | Change |
 |--------|
