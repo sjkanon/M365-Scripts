@@ -226,13 +226,14 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 |---|------|-------------------|
 | 1 | Preflight — installed package, add-in, running Teams/Outlook | read-only |
 | 2 | Version check — published build vs installed build | read-only |
-| 3 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
-| 4 | Uninstall add-in, remove `MSTeams` AppX for all users, deprovision it | yes |
-| 5 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
-| 6 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
-| 7 | Verify add-in registration + provisioned package | reported as skipped under `-WhatIf` |
+| 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector | yes |
+| 4 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
+| 5 | Uninstall add-in, remove `MSTeams` AppX for all users, deprovision it | yes |
+| 6 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
+| 7 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
+| 8 | Verify add-in registration, provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
-If the client is current but only the meeting add-in is missing, steps 3–5 are skipped and just the add-in is installed.
+Only what is missing gets done: a current client with a missing add-in installs just the add-in, and on a session host with `-AvdOptimizations` a missing WebRTC redirector installs just that.
 
 **Why the order matters:** nothing is touched until a newer build is confirmed, and the installer is fetched and verified *before* the first uninstall — so a failed download or a blocked URL can never leave the device without a Teams client.
 
@@ -264,11 +265,13 @@ If the client is current but only the meeting add-in is missing, steps 3–5 are
 | `-WhatIf` | Show what an update would do without performing it |
 | `-Quiet` | Print nothing unless there is news: a newer build, an action, or a failure |
 | `-CheckOnly` | Only report whether a newer build exists (exit code 2), change nothing |
+| `-AvdOptimizations` | AVD/VDI session hosts: enforce the `IsWVDEnvironment` flag and the WebRTC redirector |
 | `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
 | `-Ring` | Update ring queried at the config service (default: `general`) |
 | `-WorkingDir` | Bootstrapper download folder (default: `C:\IT\AVD\Teams`) |
 | `-LogPath` | Transcript folder (default: `C:\Temp`) |
 | `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL (https only) |
+| `-WebRtcUrl` | Override the WebRTC redirector MSI URL (https only) |
 | `-SkipMeetingAddIn` | Leave the meeting add-in alone, and do not treat a missing add-in as work |
 | `-SkipSignatureCheck` | Accept an installer not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | Per-process timeout for msiexec/bootstrapper (default: `900`) |
@@ -299,7 +302,7 @@ If the client is current but only the meeting add-in is missing, steps 3–5 are
 2. Preview a device first: run it with `-WhatIf -Confirm:$false` in the *Parameters* field — the job output shows the version comparison and every step an update would perform, and the device stays untouched.
 3. Schedule the real run with `-Quiet -Confirm:$false`. On an up-to-date device it prints nothing and exits `0`, so the activity feed only shows the devices where it actually did something.
 4. For a detection/condition job use `-CheckOnly -Quiet`: silent and `0` when current, output and exit code `2` when a newer build is published.
-5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
+5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `avdOptimizations`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`, `webRtcUrl`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
 
 If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `SysNative` first — without that, the registry reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is found.
 
@@ -308,6 +311,7 @@ If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `
 ## Time sync/
 
 Fixes Windows time synchronisation issues by restarting `W32tm` against Dutch NTP pool servers and registering a scheduled task that reruns the sync every 59 minutes. See [`Time sync/readme.md`](Time%20sync/readme.md) for full details.
+
 
 
 

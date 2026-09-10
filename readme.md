@@ -717,6 +717,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-10 (2)
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient.ps1` absorbs the AVD/VDI parts of the older gap-fill installer behind `-AvdOptimizations`: the `IsWVDEnvironment` media flag (set in step 3, before the client is provisioned, because Teams reads it at startup to pick its media path) and the Remote Desktop WebRTC Redirector Service from `aka.ms/msrdcwebrtcsvc/msi` |
+| Deliberately a switch and not autodetection: setting that flag on a normal endpoint tells Teams to hand media to a redirector that is not there. Without the switch the script only *reports* that a device looks like a session host (`HKLM:\SOFTWARE\Microsoft\RDInfraAgent`) |
+| Both components are installed only when missing (`-Force` reinstalls the redirector), so a scheduled run on a configured session host still downloads nothing and prints nothing under `-Quiet`. Verified end to end, including that the redirector MSI (1.7 MB, `1.54.2408.19001`) passes the Microsoft signature check |
+| The add-in step now also skips itself when the add-in is present and the client was not replaced — before this it would reinstall the add-in on a run that was only there to fix the AVD components |
+| Download and signature verification moved into one `Save-VerifiedDownload` helper shared by the bootstrapper and the redirector: https-only, minimum size, Authenticode `Valid` and signed by `O=Microsoft Corporation`, or it throws |
+| Corrected in the docs: Ninja script-variable names are **not** case-sensitive. Windows environment lookups are case-insensitive, so variables named `Quiet` or `Force` work exactly like `quiet` and `force` |
+
 ### 2026-09-10
 | Change |
 |--------|

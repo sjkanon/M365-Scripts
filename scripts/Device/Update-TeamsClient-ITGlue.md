@@ -165,6 +165,33 @@ Via het beheermenu van de scriptrepo kan het ook: `menu.ps1`, toets **T**. Dat v
 
 ---
 
+## AVD- en VDI-sessiehosts
+
+Op een Azure Virtual Desktop- of VDI-sessiehost heeft Teams twee extra dingen nodig om beeld en geluid goed te laten lopen. Zonder die twee draait de video *in* de sessie: schokkerig beeld, hoge CPU-belasting en klachten over haperend geluid.
+
+| Onderdeel | Waarvoor | Wanneer installeert het script het |
+|-----------|----------|-------------------------------------|
+| Registervlag `IsWVDEnvironment` | Vertelt Teams dat hij op een sessiehost draait en media moet doorgeven | Als de vlag nog niet op `1` staat |
+| Remote Desktop WebRTC Redirector Service | Handelt beeld en geluid af op het lokale apparaat van de gebruiker in plaats van in de sessie | Als hij nog niet geïnstalleerd is |
+
+Je krijgt dit **alleen** als je de optie expliciet aanzet — met het vinkje `avdOptimizations` of de parameter `-AvdOptimizations`:
+
+```
+-AvdOptimizations -Quiet -Confirm:$false
+```
+
+> Zet dit **niet** aan op gewone laptops en desktops. De vlag vertelt Teams daar dat hij media moet doorgeven aan een redirector die er niet is.
+
+Draait het script op een werkplek die eruitziet als een sessiehost terwijl de optie uitstaat, dan krijg je een tip in de output:
+
+```
+  [SKIP] This looks like an AVD session host - consider -AvdOptimizations for the media flag and the WebRTC redirector
+```
+
+Staan beide onderdelen al goed, dan gebeurt er niets extra's en wordt er niets gedownload.
+
+---
+
 ## Level 3 — details
 
 ### Parameters
@@ -176,6 +203,8 @@ Via het beheermenu van de scriptrepo kan het ook: `menu.ps1`, toets **T**. Dat v
 | `-CheckOnly` | Alleen controleren en melden (exitcode 2 = update beschikbaar) |
 | `-Confirm:$false` | Nooit om bevestiging vragen — verplicht bij onbeheerde runs |
 | `-Force` | Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams |
+| `-AvdOptimizations` | Alleen op AVD/VDI-sessiehosts: zet de mediavlag `IsWVDEnvironment` en installeert de WebRTC-redirector |
+| `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
 | `-SkipMeetingAddIn` | Alleen de client, de Outlook-add-in met rust laten |
 | `-TimeoutSeconds` | Standaard 900. Verhogen op trage werkplekken |
 | `-Ring` | Andere update-ring dan `general` |
@@ -282,12 +311,13 @@ Met script variables krijgt de collega die het script draait vinkjes in plaats v
 | `quiet` | Checkbox | Alleen melden als er nieuws is |
 | `checkOnly` | Checkbox | Alleen controleren, niets installeren |
 | `force` | Checkbox | Herinstalleren ook als de versie al actueel is |
+| `avdOptimizations` | Checkbox | AVD/VDI: mediavlag + WebRTC-redirector afdwingen |
 | `skipMeetingAddIn` | Checkbox | Outlook-add-in met rust laten |
 | `workingDir` | Text | Andere downloadmap |
 | `logPath` | Text | Andere logmap |
 | `ring` | Text | Andere update-ring |
 
-De namen moeten exact zo geschreven zijn (hoofdlettergevoelig in de betekenis: `checkOnly`, niet `CheckOnly` of `check_only`). Ninja zet ze klaar als environment-variabelen, en het script leest ze alleen als dezelfde parameter niet al op de commandoregel staat.
+De naam moet inhoudelijk kloppen (`checkOnly`, niet `check_only`), maar **hoofdletters maken niet uit**: `Quiet`, `quiet` en `QUIET` werken allemaal, want environment-lookups zijn in Windows hoofdletterongevoelig. Ninja zet de variabelen klaar als environment-variabelen, en het script leest ze alleen als dezelfde parameter niet al op de commandoregel staat.
 
 **Controleer het één keer:** draai het script met alleen het vinkje *whatIf* aan. De eerste regel van de output moet zijn:
 
@@ -319,6 +349,14 @@ Je ziet de versievergelijking en, als er een update is, alle stappen die uitgevo
 | Schedule | Bijvoorbeeld wekelijks buiten kantooruren |
 
 Door `-Quiet` blijft het stil op werkplekken die al bij zijn. Alleen werkplekken waar echt iets gebeurde of misging verschijnen in de activity feed.
+
+Heb je AVD- of VDI-sessiehosts? Maak daarvoor een **tweede** scheduled automation aan, met hetzelfde script maar deze parameters:
+
+```
+-AvdOptimizations -Quiet -Confirm:$false
+```
+
+Richt die op het beleid van de sessiehosts, niet op gewone werkplekken. Zie [AVD- en VDI-sessiehosts](#avd--en-vdi-sessiehosts).
 
 > `-Confirm:$false` is geen overbodige luxe: het maakt het onmogelijk dat het script op een bevestigingsvraag blijft wachten, ongeacht wat de agent over de sessie meldt.
 
@@ -359,3 +397,5 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
+
