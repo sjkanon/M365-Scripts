@@ -170,6 +170,8 @@ powershell -ExecutionPolicy Bypass -File .\Update-TeamsClient.ps1 -WhatIf
 
 ## Running it from NinjaOne
 
+> Setting it up for the first time (script fields, script variables, scheduled automation, detection job) is written out step by step in [Update-TeamsClient-ITGlue.md](Update-TeamsClient-ITGlue.md#bijlage--het-script-in-ninjaone-zetten-eenmalig-level-3).
+
 1. Add the script — Language **PowerShell**, OS **Windows**, Architecture **All**, Run As **System**.
 2. **Preview on one device first**: Parameters `-WhatIf -Confirm:$false`. The job output shows the version comparison and every step an update would take; the device is untouched.
 3. **Schedule the real run**: Parameters `-Quiet -Confirm:$false`. Up-to-date devices print nothing and exit `0`, so the activity feed only shows devices where something actually happened.

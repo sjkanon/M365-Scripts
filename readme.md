@@ -717,6 +717,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-10
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient-ITGlue.md` gained a NinjaOne setup appendix: which values to pick per field when adding the script (PowerShell 5.1 rather than 7, 64-bit, Run As System), the script-variable names with a way to verify they actually arrive, the test run on one device, the scheduled automation with `-Quiet -Confirm:$false`, and the optional detection job |
+| Written down explicitly because it will otherwise be reported as a bug: `-CheckOnly` exits `2` when an update is available, and NinjaOne shows every non-zero exit code as a failed job. That is the intent — those are the devices needing attention — and it is what a script result condition can key on |
+| Also flagged: the Ninja script timeout must exceed `-TimeoutSeconds` (900 s) plus the ~275 MB download, otherwise Ninja kills the job mid-install |
+
 ### 2026-09-08 (5)
 | Change |
 |--------|

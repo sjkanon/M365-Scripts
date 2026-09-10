@@ -248,6 +248,108 @@ Dat kan als geplande NinjaOne-taak met `-Quiet -Confirm:$false`. Werkplekken die
 
 ---
 
+## Bijlage — het script in NinjaOne zetten (eenmalig, level 3)
+
+Dit hoef je maar één keer per Ninja-omgeving te doen. Daarna kan level 1 en 2 er gewoon mee werken.
+
+> Menupaden verschillen per Ninja-versie en per taalinstelling. De veldnamen hieronder kloppen; het pad ernaartoe kan bij jou net anders heten.
+
+### Stap 1 — het script toevoegen
+
+**Administration → Library → Automation → Add → New Script** (in oudere versies: *Configuration → Scripting*).
+
+Plak de volledige inhoud van `Update-TeamsClient.ps1` in de editor en zet de velden zo:
+
+| Veld | Waarde | Waarom |
+|------|--------|--------|
+| Name | `Update Teams client + Outlook add-in` | — |
+| Description | `Werkt nieuwe Teams bij als Microsoft een nieuwere build publiceert. Doet niets op een werkplek die al bij is.` | Zodat collega's het niet verwarren met een herinstallatie-script |
+| Categories | Bijvoorbeeld `Applications` of `Microsoft 365` | Vindbaarheid |
+| Language | **PowerShell** (dus 5.1, niet PowerShell 7) | De AppX-commando's zijn daar native; onder 7 lopen ze via een compatibiliteitslaag |
+| Operating System | **Windows** | — |
+| Architecture | **64-bit** als je die keuze hebt, anders **All** | Het script vangt 32-bit zelf op, maar 64-bit scheelt een herstart van zichzelf |
+| Run As | **System** | Nodig voor AppX, MSI en het register |
+
+Opslaan.
+
+### Stap 2 — script variables (optioneel, maar handig)
+
+Met script variables krijgt de collega die het script draait vinkjes in plaats van een parameterregel. Voeg ze toe onder **Script Variables** bij het script:
+
+| Variable name | Type | Label voor de collega |
+|---------------|------|------------------------|
+| `whatIf` | Checkbox | Alleen tonen wat er zou gebeuren |
+| `quiet` | Checkbox | Alleen melden als er nieuws is |
+| `checkOnly` | Checkbox | Alleen controleren, niets installeren |
+| `force` | Checkbox | Herinstalleren ook als de versie al actueel is |
+| `skipMeetingAddIn` | Checkbox | Outlook-add-in met rust laten |
+| `workingDir` | Text | Andere downloadmap |
+| `logPath` | Text | Andere logmap |
+| `ring` | Text | Andere update-ring |
+
+De namen moeten exact zo geschreven zijn (hoofdlettergevoelig in de betekenis: `checkOnly`, niet `CheckOnly` of `check_only`). Ninja zet ze klaar als environment-variabelen, en het script leest ze alleen als dezelfde parameter niet al op de commandoregel staat.
+
+**Controleer het één keer:** draai het script met alleen het vinkje *whatIf* aan. De eerste regel van de output moet zijn:
+
+```
+  Mode: -WhatIf - nothing will be changed
+```
+
+Staat er `Mode: APPLY`, dan komt de variabele niet door — gebruik dan gewoon het Parameters-veld (stap 3).
+
+### Stap 3 — testen op één werkplek
+
+Zoek een testwerkplek op, **Run Script**, en vul bij **Parameters** in:
+
+```
+-WhatIf -Confirm:$false
+```
+
+Je ziet de versievergelijking en, als er een update is, alle stappen die uitgevoerd zouden worden. Er verandert niets op de werkplek. Resultaat moet **geslaagd** zijn.
+
+### Stap 4 — inplannen voor de hele omgeving
+
+**Policies → (het beleid van de werkplekken) → Scheduled Automations → Add → Script**.
+
+| Instelling | Waarde |
+|------------|--------|
+| Script | `Update Teams client + Outlook add-in` |
+| Parameters | `-Quiet -Confirm:$false` |
+| Run As | System |
+| Schedule | Bijvoorbeeld wekelijks buiten kantooruren |
+
+Door `-Quiet` blijft het stil op werkplekken die al bij zijn. Alleen werkplekken waar echt iets gebeurde of misging verschijnen in de activity feed.
+
+> `-Confirm:$false` is geen overbodige luxe: het maakt het onmogelijk dat het script op een bevestigingsvraag blijft wachten, ongeacht wat de agent over de sessie meldt.
+
+### Stap 5 — optioneel: detectie in plaats van installatie
+
+Wil je eerst zien op hoeveel werkplekken een update klaarstaat, zonder iets te installeren? Plan dan een tweede automation in met:
+
+```
+-CheckOnly -Quiet
+```
+
+| Uitkomst | Exitcode | Hoe Ninja het toont |
+|----------|----------|---------------------|
+| Werkplek is bij | `0` | Geslaagd, geen output |
+| Update beschikbaar | `2` | **Mislukt** (elke exitcode ≠ 0 is voor Ninja een fout) — met de versievergelijking in de output |
+| Controle lukte niet | `1` | Mislukt, met de reden in de output |
+
+Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die aandacht nodig hebben. Heeft jullie Ninja-versie *script result conditions*, dan kun je die exitcode gebruiken om er een echte conditie/alert van te maken.
+
+### Aandachtspunten
+
+| Punt | Waar je op let |
+|------|----------------|
+| Script-timeout in Ninja | Moet ruimer staan dan `-TimeoutSeconds` (standaard 900 s) plus de downloadtijd van ~275 MB. Staat de Ninja-timeout korter, dan breekt Ninja de job af midden in een installatie |
+| Draaien als System | Zonder System krijg je `Administrator rights are required` en stopt het script netjes met exitcode 1 |
+| Netwerk | `config.teams.microsoft.com` en `statics.teams.cdn.office.net` moeten bereikbaar zijn. Blokkeert de proxy die, dan meldt het script dat en verandert het niets |
+| Logbestand | Alleen bij een run die iets wijzigt: `C:\Temp\Update-TeamsClient_<datum-tijd>.log` op de werkplek zelf |
+| Bijwerken van het script | Nieuwe versie uit de repo opnieuw in hetzelfde Ninja-script plakken; geplande automations blijven verwijzen naar hetzelfde script |
+
+---
+
 ## Tekst voor de gebruiker
 
 **Vooraf:**
