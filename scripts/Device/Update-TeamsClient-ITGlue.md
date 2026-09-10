@@ -192,6 +192,53 @@ Staan beide onderdelen al goed, dan gebeurt er niets extra's en wordt er niets g
 
 ---
 
+## Melding "Teams optimization for your virtual desktop will soon be unsupported"
+
+Gebruikers op een virtuele werkplek krijgen sinds medio 2026 deze banner in Teams:
+
+> *Teams optimization for your virtual desktop will soon be unsupported. Starting October 1, 2026, we will no longer support the AVD Media optimization technology based on WebRTC.*
+
+**Dit is geen storing.** Beeld en geluid werken gewoon door. Microsoft vervangt de techniek achter de media-optimalisatie en waarschuwt vooraf.
+
+| Datum | Wat er gebeurt |
+|-------|----------------|
+| 1 oktober 2026 | Einde **ondersteuning** van de WebRTC-optimalisatie. Het blijft werken, maar Microsoft lost er geen problemen meer in op |
+| 1 april 2027 | Einde **beschikbaarheid**: WebRTC stopt met werken. Zonder de nieuwe techniek worden gesprekken dan in de sessie zelf verwerkt — schokkerig beeld en hoge CPU-belasting op de sessiehost |
+
+### Waar zit de oplossing? Op het lokale apparaat, niet op de sessiehost
+
+De opvolger heet **SlimCore**. Die hoeft niemand apart te installeren: hij zit al in de nieuwe Teams-app op de sessiehost, en in **Windows App** op het apparaat waarmee de gebruiker inlogt. Wat bepaalt of de nieuwe techniek gebruikt wordt, is dus de **versie van Windows App op de lokale pc of laptop van de gebruiker**.
+
+| Kant | Wat er moet gebeuren |
+|------|----------------------|
+| Sessiehost (AVD/VDI) | Niets extra's installeren. Nieuwe Teams actueel houden (dat doet `Update-TeamsClient.ps1`) en `IsWVDEnvironment` op 1 laten staan |
+| Lokaal apparaat van de gebruiker | **Windows App bijwerken naar de nieuwste versie.** Gebruikt iemand nog de oude *Remote Desktop* client (`msrdc`)? Laat die overstappen naar Windows App |
+
+> De precieze minimumversie van Windows App verschilt per bron en schuift op. Rol daarom simpelweg de nieuwste versie uit — dan zit je onder elke genoemde ondergrens.
+
+### Controleren of het al goed staat
+
+Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen → Over Teams**. Onderin staat een van deze meldingen:
+
+| Melding | Betekenis |
+|---------|-----------|
+| `AVD SlimCore Media Optimized` | Nieuwe techniek actief — klaar, banner verdwijnt |
+| `AVD Media Optimized` | Nog op WebRTC — Windows App op het lokale apparaat bijwerken |
+| `AVD Media not connected` | Geen optimalisatie actief — Teams afsluiten en opnieuw starten, daarna opnieuw kijken |
+
+### Antwoord voor de gebruiker
+
+> Bedankt voor de melding. Dit is een aankondiging van Microsoft, geen storing: je gesprekken en vergaderingen blijven gewoon werken. De techniek erachter wordt vervangen. Wij zorgen dat de app waarmee je verbinding maakt met de virtuele werkplek wordt bijgewerkt; daarna verdwijnt de melding vanzelf. Je hoeft zelf niets te doen.
+
+### Wat wij intern moeten doen
+
+1. **Inventariseer de Windows App-versie** op de lokale apparaten van alle gebruikers die op de virtuele werkplek inloggen. Dat is het echte werk — de sessiehosts zijn niet het probleem.
+2. Rol de nieuwste Windows App uit op die apparaten.
+3. Laat `-AvdOptimizations` voorlopig aan staan: Microsoft adviseert de WebRTC-redirector te behouden als terugvaloptie voor apparaten die SlimCore nog niet aankunnen. Vóór april 2027 opnieuw beoordelen.
+4. Draai `Update-TeamsClient.ps1 -AvdOptimizations -CheckOnly` op een sessiehost om te zien of SlimCore daar aanwezig is. De regel `[ OK ] SlimCore is present (...)` bevestigt de sessiehostkant; de rest hangt af van het lokale apparaat.
+
+---
+
 ## Level 3 — details
 
 ### Parameters

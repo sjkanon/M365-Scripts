@@ -95,6 +95,19 @@ The flag is step 3, before the client is provisioned, because Teams reads it at 
 
 Both are only touched when missing, so a scheduled run on a fully configured session host still downloads nothing and, with `-Quiet`, prints nothing. Without the switch the script does not change any of this — it only points out that the device looks like a session host (`HKLM:\SOFTWARE\Microsoft\RDInfraAgent` exists).
 
+### WebRTC is on its way out
+
+Microsoft is retiring the WebRTC-based media optimization: **end of support 1 October 2026, end of availability 1 April 2027**. Teams shows users a banner about it. Its replacement, **SlimCore**, needs nothing installed on the session host — it ships inside new Teams and inside Windows App on the endpoint. Verified on a device with Teams `26225.1806.5074.1452`:
+
+```
+Microsoft.Teams.SlimCoreVdiHost.win-x64          2026.31.1.16
+Microsoft.Teams.SlimCoreVdiFwk.win-x64.2026.31   2026.31.1.16   (plus older framework versions)
+```
+
+Preflight reports that package when `-AvdOptimizations` is used, but it is **informational only**: which path is actually taken depends on the Windows App version on the endpoint the user connects from, and a script on the session host cannot see that. Auditing endpoint client versions is the real migration work.
+
+`IsWVDEnvironment` stays required either way, and Microsoft's current guidance is to keep the redirector installed as a fallback for endpoints that cannot do SlimCore — so `-AvdOptimizations` keeps installing it. Revisit before April 2027.
+
 ---
 
 ## The meeting add-in: machine-wide versus per user
@@ -304,6 +317,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Version check via the live config service | Returned `26225.1806.5074.1452`, matching the installed build |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 
