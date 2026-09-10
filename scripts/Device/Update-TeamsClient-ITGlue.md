@@ -270,7 +270,10 @@ Nee. Die staan in Microsoft 365, niet in de app.
 Meestal niet — de aanmelding komt van Windows. Gebeurt het toch, dan is dat normaal na een herinstallatie.
 
 **De vergaderknop in Outlook is nog steeds weg.**
-Outlook volledig afsluiten (ook in de taakbalk) en opnieuw openen. Blijft het weg, dan doorzetten naar level 2.
+Outlook volledig afsluiten (ook in de taakbalk) en opnieuw openen. Outlook laadt invoegtoepassingen **per gebruiker**, dus de knop verschijnt pas bij de eerstvolgende start van Outlook van die gebruiker. Blijft het weg, dan doorzetten naar level 2.
+
+**Wordt de add-in voor alle gebruikers geïnstalleerd?**
+Ja. Het script installeert hem machinebreed (`ALLUSERS=1`) in `C:\Program Files (x86)\Microsoft\TeamsMeetingAddin\`, zodat iedereen die op die werkplek inlogt hem heeft — van belang op sessiehosts en gedeelde werkplekken. Op een gewone werkplek installeert en update Teams de add-in daarnaast zelf per gebruiker; daar is `-SkipMeetingAddIn` een verdedigbare keuze. In beide gevallen pikt Outlook hem per gebruiker op bij de volgende start.
 
 **Moet ik dit op alle werkplekken draaien?**
 Dat kan als geplande NinjaOne-taak met `-Quiet -Confirm:$false`. Werkplekken die bij zijn worden overgeslagen en verschijnen niet in de activity feed — alleen waar echt iets gebeurde of misging.
@@ -397,5 +400,6 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 

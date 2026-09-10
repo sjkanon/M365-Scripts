@@ -133,7 +133,10 @@
 
 .PARAMETER SkipMeetingAddIn
     Leave the Teams Meeting Add-in alone - do not uninstall it up front, do not
-    install it afterwards and do not treat a missing add-in as work to do.
+    install it afterwards and do not treat a missing add-in as work to do. Reasonable
+    on ordinary endpoints, where the Teams client installs and updates the add-in per
+    user by itself; the machine-wide install this script performs is what a shared
+    machine or session host needs.
 
 .PARAMETER SkipSignatureCheck
     Accept the downloaded bootstrapper without verifying its Authenticode signature.
@@ -293,8 +296,9 @@ $AvdRegistryPath = 'HKLM:\SOFTWARE\Microsoft\Teams'
 # -Confirm:$false means "never ask", for an unattended run from a scheduler or RMM.
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
 
-# The add-in MSI installs 32-bit, so on x64 its uninstall entry lands in the
-# WOW6432Node hive - checking only the 64-bit hive misses it.
+# Which hive the add-in's uninstall entry lands in is not fixed: measured as 64-bit
+# for 1.26.21803 on Windows 11, WOW6432Node on other builds. Scanning both is the
+# only thing that reliably finds it.
 $UninstallRoots = @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
     'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
