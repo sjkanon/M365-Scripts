@@ -1,0 +1,353 @@
+{
+  "client": "Petsolutions NV",
+  "description": "SharePoint-structuur, metadata en groepsrechten voor Petsolutions NV (merken Butterstone en Laseto).",
+
+  "tenant": "CHANGEME.onmicrosoft.com",
+
+  "sites": {
+    "team": "https://CHANGEME.sharepoint.com/sites/CHANGEME",
+    "mgmt": "https://CHANGEME.sharepoint.com/sites/CHANGEME-MGMT"
+  },
+
+  "columnGroup": "Petsolutions",
+  "contentTypeGroup": "Petsolutions",
+
+  "termStore": {
+    "group": "Petsolutions",
+    "termSet": "Leveranciers",
+    "description": "Leveranciers van Petsolutions NV - uitbreidbaar, beheerd in de term store.",
+    "terms": [ "Lev. 1", "Lev. 2", "Lev. 3" ]
+  },
+
+  "columns": [
+    {
+      "internalName": "PsMerk",
+      "displayName": "Merk",
+      "type": "Choice",
+      "description": "Merk waar dit bestand bij hoort. Blijft een tag - merken krijgen bewust geen eigen site of groep.",
+      "choices": [ "Butterstone", "Laseto", "Beide" ]
+    },
+    {
+      "internalName": "PsPijler",
+      "displayName": "Pijler",
+      "type": "Choice",
+      "description": "Bedrijfspijler. Wordt per bibliotheek/kanaal als standaardwaarde gezet.",
+      "choices": [ "MGMT", "Leveranciers", "Verkopers", "Klanten", "Marketing", "TD" ]
+    },
+    {
+      "internalName": "PsRegio",
+      "displayName": "Regio",
+      "type": "Choice",
+      "description": "Verkoopregio. Alleen relevant binnen de pijler Verkopers.",
+      "choices": [ "Benelux", "Duitsland", "Frankrijk", "Export" ]
+    },
+    {
+      "internalName": "PsLeverancier",
+      "displayName": "Leverancier",
+      "type": "Taxonomy",
+      "description": "Leverancier uit de term set - uitbreidbaar zonder de kolom aan te passen.",
+      "termSet": "Leveranciers",
+      "multiValue": false
+    },
+    {
+      "internalName": "PsTaal",
+      "displayName": "Taal",
+      "type": "MultiChoice",
+      "description": "Taal of talen van het document. Meerdere waarden toegestaan.",
+      "choices": [ "NL", "FR", "DE", "EN", "Geen taal" ]
+    },
+    {
+      "internalName": "PsContenttype",
+      "displayName": "Contenttype",
+      "type": "Choice",
+      "description": "Soort document. Let op: dit is een metadatakolom, niet het SharePoint content type.",
+      "choices": [ "Catalogus", "Prijslijst", "Schrijfrichtlijn", "Afbeelding+certificaat", "Marketingslag" ]
+    },
+    {
+      "internalName": "PsVertrouwelijkheid",
+      "displayName": "Vertrouwelijkheid",
+      "type": "Choice",
+      "description": "Hoe ver dit bestand mag reizen. Stuurt de beoordeling van de deelstatus-audit.",
+      "choices": [ "Intern", "Deelbaar met klant", "Vertrouwelijk" ],
+      "defaultValue": "Intern"
+    },
+    {
+      "internalName": "PsDeelstatus",
+      "displayName": "Deelstatus",
+      "type": "Choice",
+      "description": "Automatisch bijgehouden door Update-SharePointShareStatus.ps1. Niet met de hand invullen.",
+      "choices": [ "Niet gedeeld", "Intern gedeeld", "Extern - alleen bekijken", "Extern - bewerken" ],
+      "defaultValue": "Niet gedeeld",
+      "readOnlyInForms": true
+    },
+    {
+      "internalName": "PsStatus",
+      "displayName": "Status",
+      "type": "Choice",
+      "description": "Levenscyclus van het document.",
+      "choices": [ "Actief", "Te archiveren", "Verouderd" ],
+      "defaultValue": "Actief"
+    }
+  ],
+
+  "contentTypes": [
+    {
+      "name": "MGMT-document",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B101",
+      "description": "Directie- en beheerdocumenten. Vertrouwelijkheid is verplicht omdat hier het meeste in staat dat niet mag reizen.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsVertrouwelijkheid", "required": true },
+        { "internalName": "PsPijler", "required": false, "defaultValue": "MGMT" },
+        { "internalName": "PsTaal", "required": false },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    },
+    {
+      "name": "Leveranciersdocument",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B102",
+      "description": "Catalogi, prijslijsten en certificaten van een leverancier.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsLeverancier", "required": true },
+        { "internalName": "PsContenttype", "required": true },
+        { "internalName": "PsTaal", "required": true },
+        { "internalName": "PsVertrouwelijkheid", "required": true },
+        { "internalName": "PsPijler", "required": false, "defaultValue": "Leveranciers" },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    },
+    {
+      "name": "Verkoopdocument",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B103",
+      "description": "Verkoopmateriaal. Regio is hier verplicht - dit is de enige pijler waar die vraag zin heeft.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsRegio", "required": true },
+        { "internalName": "PsContenttype", "required": true },
+        { "internalName": "PsTaal", "required": true },
+        { "internalName": "PsVertrouwelijkheid", "required": false },
+        { "internalName": "PsPijler", "required": false, "defaultValue": "Verkopers" },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    },
+    {
+      "name": "Klantdocument",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B104",
+      "description": "Documenten rond een klantdossier.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsVertrouwelijkheid", "required": true },
+        { "internalName": "PsTaal", "required": true },
+        { "internalName": "PsContenttype", "required": false },
+        { "internalName": "PsPijler", "required": false, "defaultValue": "Klanten" },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    },
+    {
+      "name": "Marketingdocument",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B105",
+      "description": "Marketingmateriaal. Taal en contenttype zijn verplicht - zonder die twee is het materiaal onvindbaar.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsTaal", "required": true },
+        { "internalName": "PsContenttype", "required": true },
+        { "internalName": "PsVertrouwelijkheid", "required": false },
+        { "internalName": "PsPijler", "required": false, "defaultValue": "Marketing" },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    },
+    {
+      "name": "TD-document",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B106",
+      "description": "Technische dienst: handleidingen, schemas, technische fiches.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsContenttype", "required": true },
+        { "internalName": "PsTaal", "required": false },
+        { "internalName": "PsVertrouwelijkheid", "required": false },
+        { "internalName": "PsPijler", "required": false, "defaultValue": "TD" },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    },
+    {
+      "name": "FUTECH-media",
+      "id": "0x0101007B1A4C2E5D3F44A9B8C6D5E4F3A2B107",
+      "description": "Beeld- en videomateriaal dat met de klant gedeeld wordt. Vertrouwelijkheid staat standaard op 'Deelbaar met klant'.",
+      "fields": [
+        { "internalName": "PsMerk", "required": true },
+        { "internalName": "PsContenttype", "required": true },
+        { "internalName": "PsTaal", "required": true },
+        { "internalName": "PsVertrouwelijkheid", "required": false, "defaultValue": "Deelbaar met klant" },
+        { "internalName": "PsStatus", "required": false },
+        { "internalName": "PsDeelstatus", "required": false }
+      ]
+    }
+  ],
+
+  "groups": [
+    { "displayName": "SG-PETSOL-MGMT-RW",          "mailNickname": "sg-petsol-mgmt-rw",          "description": "Petsolutions - MGMT - bewerken" },
+    { "displayName": "SG-PETSOL-MGMT-RO",          "mailNickname": "sg-petsol-mgmt-ro",          "description": "Petsolutions - MGMT - alleen lezen" },
+    { "displayName": "SG-PETSOL-Leveranciers-RW",  "mailNickname": "sg-petsol-leveranciers-rw",  "description": "Petsolutions - Leveranciers - bewerken" },
+    { "displayName": "SG-PETSOL-Leveranciers-RO",  "mailNickname": "sg-petsol-leveranciers-ro",  "description": "Petsolutions - Leveranciers - alleen lezen" },
+    { "displayName": "SG-PETSOL-Verkopers-RW",     "mailNickname": "sg-petsol-verkopers-rw",     "description": "Petsolutions - Verkopers - bewerken" },
+    { "displayName": "SG-PETSOL-Verkopers-RO",     "mailNickname": "sg-petsol-verkopers-ro",     "description": "Petsolutions - Verkopers - alleen lezen" },
+    { "displayName": "SG-PETSOL-Klanten-RW",       "mailNickname": "sg-petsol-klanten-rw",       "description": "Petsolutions - Klanten - bewerken" },
+    { "displayName": "SG-PETSOL-Klanten-RO",       "mailNickname": "sg-petsol-klanten-ro",       "description": "Petsolutions - Klanten - alleen lezen" },
+    { "displayName": "SG-PETSOL-Marketing-RW",     "mailNickname": "sg-petsol-marketing-rw",     "description": "Petsolutions - Marketing - bewerken" },
+    { "displayName": "SG-PETSOL-Marketing-RO",     "mailNickname": "sg-petsol-marketing-ro",     "description": "Petsolutions - Marketing - alleen lezen" },
+    { "displayName": "SG-PETSOL-TD-RW",            "mailNickname": "sg-petsol-td-rw",            "description": "Petsolutions - TD - bewerken" },
+    { "displayName": "SG-PETSOL-TD-RO",            "mailNickname": "sg-petsol-td-ro",            "description": "Petsolutions - TD - alleen lezen" },
+    { "displayName": "SG-PETSOL-FUTECH-Klanten",   "mailNickname": "sg-petsol-futech-klanten",   "description": "Petsolutions - externe klanten met leestoegang tot FUTECH Images and videos" }
+  ],
+
+  "containers": [
+    {
+      "key": "MGMT",
+      "title": "MGMT",
+      "kind": "ChannelFolder",
+      "site": "mgmt",
+      "list": "Documents",
+      "folder": "MGMT",
+      "pillar": "MGMT",
+      "contentTypes": [ "MGMT-document" ],
+      "defaultContentType": "MGMT-document",
+      "uniquePermissions": false,
+      "note": "Privekanaal - Teams beheert de rechten via het lidmaatschap van de kanaalsite. Niet met de hand breken.",
+      "permissions": []
+    },
+    {
+      "key": "Leveranciers",
+      "title": "Leveranciers",
+      "kind": "ChannelFolder",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Leveranciers",
+      "pillar": "Leveranciers",
+      "contentTypes": [ "Leveranciersdocument" ],
+      "defaultContentType": "Leveranciersdocument",
+      "uniquePermissions": true,
+      "view": {
+        "title": "Op leverancier",
+        "fields": [ "DocIcon", "LinkFilename", "PsLeverancier", "PsMerk", "PsContenttype", "PsTaal", "PsVertrouwelijkheid", "PsDeelstatus", "PsStatus", "Modified" ],
+        "groupBy": "PsLeverancier"
+      },
+      "permissions": [
+        { "group": "SG-PETSOL-Leveranciers-RW", "role": "Contribute" },
+        { "group": "SG-PETSOL-Leveranciers-RO", "role": "Read" }
+      ]
+    },
+    {
+      "key": "Verkopers",
+      "title": "Verkopers",
+      "kind": "ChannelFolder",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Verkopers",
+      "pillar": "Verkopers",
+      "contentTypes": [ "Verkoopdocument" ],
+      "defaultContentType": "Verkoopdocument",
+      "uniquePermissions": true,
+      "view": {
+        "title": "Op regio",
+        "fields": [ "DocIcon", "LinkFilename", "PsRegio", "PsMerk", "PsContenttype", "PsTaal", "PsDeelstatus", "PsStatus", "Modified" ],
+        "groupBy": "PsRegio"
+      },
+      "permissions": [
+        { "group": "SG-PETSOL-Verkopers-RW", "role": "Contribute" },
+        { "group": "SG-PETSOL-Verkopers-RO", "role": "Read" }
+      ]
+    },
+    {
+      "key": "Klanten",
+      "title": "Klanten",
+      "kind": "ChannelFolder",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Klanten",
+      "pillar": "Klanten",
+      "contentTypes": [ "Klantdocument" ],
+      "defaultContentType": "Klantdocument",
+      "uniquePermissions": true,
+      "view": {
+        "title": "Op vertrouwelijkheid",
+        "fields": [ "DocIcon", "LinkFilename", "PsVertrouwelijkheid", "PsMerk", "PsTaal", "PsDeelstatus", "PsStatus", "Modified" ],
+        "groupBy": "PsVertrouwelijkheid"
+      },
+      "permissions": [
+        { "group": "SG-PETSOL-Klanten-RW", "role": "Contribute" },
+        { "group": "SG-PETSOL-Klanten-RO", "role": "Read" }
+      ]
+    },
+    {
+      "key": "Marketing",
+      "title": "Marketing",
+      "kind": "ChannelFolder",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Marketing",
+      "pillar": "Marketing",
+      "contentTypes": [ "Marketingdocument" ],
+      "defaultContentType": "Marketingdocument",
+      "uniquePermissions": true,
+      "view": {
+        "title": "Op merk en taal",
+        "fields": [ "DocIcon", "LinkFilename", "PsMerk", "PsTaal", "PsContenttype", "PsDeelstatus", "PsStatus", "Modified" ],
+        "groupBy": "PsMerk"
+      },
+      "permissions": [
+        { "group": "SG-PETSOL-Marketing-RW", "role": "Contribute" },
+        { "group": "SG-PETSOL-Marketing-RO", "role": "Read" }
+      ]
+    },
+    {
+      "key": "TD",
+      "title": "TD",
+      "kind": "ChannelFolder",
+      "site": "team",
+      "list": "Documents",
+      "folder": "TD",
+      "pillar": "TD",
+      "contentTypes": [ "TD-document" ],
+      "defaultContentType": "TD-document",
+      "uniquePermissions": true,
+      "view": {
+        "title": "Op contenttype",
+        "fields": [ "DocIcon", "LinkFilename", "PsContenttype", "PsMerk", "PsTaal", "PsDeelstatus", "PsStatus", "Modified" ],
+        "groupBy": "PsContenttype"
+      },
+      "permissions": [
+        { "group": "SG-PETSOL-TD-RW", "role": "Contribute" },
+        { "group": "SG-PETSOL-TD-RO", "role": "Read" }
+      ]
+    },
+    {
+      "key": "FUTECH",
+      "title": "FUTECH Images and videos",
+      "kind": "Library",
+      "site": "team",
+      "list": "FUTECH Images and videos",
+      "pillar": "Marketing",
+      "contentTypes": [ "FUTECH-media" ],
+      "defaultContentType": "FUTECH-media",
+      "uniquePermissions": true,
+      "keepExistingPermissions": false,
+      "view": {
+        "title": "Op merk",
+        "fields": [ "DocIcon", "LinkFilename", "PsMerk", "PsContenttype", "PsTaal", "PsDeelstatus", "PsStatus", "Modified" ],
+        "groupBy": "PsMerk"
+      },
+      "permissions": [
+        { "group": "SG-PETSOL-Marketing-RW",   "role": "Contribute" },
+        { "group": "SG-PETSOL-Klanten-RW",     "role": "Contribute" },
+        { "group": "SG-PETSOL-FUTECH-Klanten", "role": "Read" }
+      ]
+    }
+  ]
+}
