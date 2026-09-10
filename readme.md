@@ -717,6 +717,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-10 (3)
+| Change |
+|--------|
+| Corrected a wrong claim in the Teams docs and in the script comment: the meeting add-in's uninstall entry does **not** always live in `WOW6432Node`. Measured on a Windows 11 endpoint, add-in `1.26.21803` registers in the **64-bit** hive, with `InstallSource` pointing at a per-user MSI cache. Scanning both hives (which the script already did) is right — the stated reason was not |
+| Documented how the add-in actually reaches a device, measured rather than assumed: the script installs it machine-wide (`ALLUSERS=1`, `Program Files (x86)`) for shared machines and session hosts, while on an ordinary endpoint the Teams client installs and updates it **per user** from `%LOCALAPPDATA%\Microsoft\TeamsMeetingAddinMsis` into `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in`, registering only in `HKCU\...\Office\Outlook\Addins` |
+| Written down with it: what step 8 actually proves. It reads the HKLM uninstall keys, so it confirms the machine-wide install succeeded — not that a given user's Outlook shows the button. Run as System the script cannot see a user's `HKCU` at all |
+
 ### 2026-09-10 (2)
 | Change |
 |--------|

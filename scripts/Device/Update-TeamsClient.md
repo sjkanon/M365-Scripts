@@ -10,6 +10,8 @@ Reference for [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1): what it decide
 - [The decision](#the-decision)
 - [The eight steps](#the-eight-steps)
 - [AVD / VDI](#avd--vdi)
+- [The meeting add-in: machine-wide versus per user](#the-meeting-add-in-machine-wide-versus-per-user)
+- [The meeting add-in: machine-wide versus per user](#the-meeting-add-in-machine-wide-versus-per-user)
 - [The version check](#the-version-check)
 - [Output modes](#output-modes)
 - [Exit codes](#exit-codes)
@@ -92,6 +94,30 @@ Only what is actually missing gets done: steps 4–6 are skipped when the client
 The flag is step 3, before the client is provisioned, because Teams reads it at startup to decide which media path to use.
 
 Both are only touched when missing, so a scheduled run on a fully configured session host still downloads nothing and, with `-Quiet`, prints nothing. Without the switch the script does not change any of this — it only points out that the device looks like a session host (`HKLM:\SOFTWARE\Microsoft\RDInfraAgent` exists).
+
+---
+
+## The meeting add-in: machine-wide versus per user
+
+The script installs the add-in MSI with `ALLUSERS=1` into `%ProgramFiles(x86)%\Microsoft\TeamsMeetingAddin\<version>` — a **per-machine** install, which is what Microsoft prescribes for a shared machine or an AVD/RDS session host so that every user who logs on has it.
+
+That is not the only way the add-in gets onto a device. On an ordinary endpoint the Teams client installs and updates it **per user**, by itself. Measured on a Windows 11 endpoint with Teams `26225.1806.5074.1452`:
+
+| What | Where |
+|------|-------|
+| Add-in files | `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\1.26.21803` (note the hyphen) |
+| MSI the client installed it from | `%LOCALAPPDATA%\Microsoft\TeamsMeetingAddinMsis\1.26.21803\` — seven cached versions, one per Teams update since April |
+| Outlook COM registration | `HKCU\SOFTWARE\Microsoft\Office\Outlook\Addins\TeamsAddin.FastConnect`, `LoadBehavior=3` |
+| Machine-wide Outlook registration | none — no Teams entry under `HKLM\...\Office\Outlook\Addins` at all |
+| Uninstall entry | `HKLM` **64-bit** hive, product code `{A7AB73A3-...}`, `InstallSource` pointing at that per-user MSI cache |
+
+Three consequences worth knowing:
+
+- **Outlook loads add-ins per user.** A machine-wide install makes the add-in *available* to everyone; each user's Outlook still picks it up on its next start. That is why the script warns when Outlook is running.
+- **What the verification proves.** Step 8 reads the `HKLM` uninstall keys. That confirms the machine-wide install succeeded — it does not prove that a particular user's Outlook has the button. Run as System (the normal RMM case) the script sees `HKCU` of the System account, so a per-user-only install is invisible to it.
+- **`-SkipMeetingAddIn` is defensible on normal endpoints.** There the client keeps the add-in current on its own; the machine-wide install is what session hosts and shared machines need.
+
+> The uninstall entry landed in the **64-bit** hive here, not in `WOW6432Node`. It is not fixed which one it is, which is exactly why both are scanned.
 
 ---
 
@@ -223,7 +249,7 @@ Why the script looks the way it does — most of these are scars from a real fai
 
 **Download before uninstall.** The obvious order (remove Teams, then fetch the installer) leaves a device with no Teams client at all when the download fails, the URL is blocked by a proxy, or the CDN is having a day. The installer is fetched *and* signature-checked first; only then is anything removed.
 
-**Both uninstall hives.** The meeting add-in installs 32-bit, so on x64 its uninstall entry lands under `HKLM:\SOFTWARE\WOW6432Node\...`. A lookup in the 64-bit hive alone silently finds nothing — the uninstall is skipped and the final verification reports failure on a perfectly good install.
+**Both uninstall hives.** The meeting add-in's uninstall entry does not always land in the same place — on a Windows 11 endpoint with add-in 1.26.21803 it was the 64-bit hive, other builds put it under `HKLM:\SOFTWARE\WOW6432Node\...`. A lookup in one hive alone silently finds nothing, and then the uninstall is skipped and the final verification reports failure on a perfectly good install.
 
 **Relaunch 64-bit.** An RMM agent may start PowerShell 32-bit. Under WOW64 the HKLM reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at `Program Files (x86)`, so neither the AppX package nor the add-in MSI is found. The script re-executes itself through `%WINDIR%\SysNative\WindowsPowerShell\v1.0\powershell.exe` with the same parameters before doing any work.
 
@@ -278,6 +304,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Version check via the live config service | Returned `26225.1806.5074.1452`, matching the installed build |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 

@@ -241,7 +241,7 @@ Only what is missing gets done: a current client with a missing add-in installs 
 
 `https://config.teams.microsoft.com/config/v1/MicrosoftTeams/...` is the feed the Teams client itself uses to decide it is out of date. It returns the current build per architecture (`BuildSettings.WebView2PreAuth.<arch>.latestVersion`). An installed build equal to or newer than that means there is nothing to do. If the service cannot be reached the run stops instead of reinstalling blindly — `-Force` overrides that. `-Ring` selects a different update ring (default `general`).
 
-> The add-in uninstall and verification read both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone misses it. The add-in MSI version comes from the MSI property table (`WindowsInstaller.Installer` COM), not from `Get-AppLockerFileInformation`, which is missing on some editions and breaks under PowerShell 7.
+> The add-in uninstall and verification read both the 64-bit and the `WOW6432Node` uninstall hive, because which one the entry lands in is not fixed (measured: 64-bit for add-in 1.26.21803 on Windows 11). The add-in MSI version comes from the MSI property table (`WindowsInstaller.Installer` COM), not from `Get-AppLockerFileInformation`, which is missing on some editions and breaks under PowerShell 7.
 
 **Safety**
 
@@ -272,7 +272,7 @@ Only what is missing gets done: a current client with a missing add-in installs 
 | `-LogPath` | Transcript folder (default: `C:\Temp`) |
 | `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL (https only) |
 | `-WebRtcUrl` | Override the WebRTC redirector MSI URL (https only) |
-| `-SkipMeetingAddIn` | Leave the meeting add-in alone, and do not treat a missing add-in as work |
+| `-SkipMeetingAddIn` | Leave the meeting add-in alone, and do not treat a missing add-in as work. Defensible on ordinary endpoints, where the Teams client keeps the add-in current per user by itself |
 | `-SkipSignatureCheck` | Accept an installer not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | Per-process timeout for msiexec/bootstrapper (default: `900`) |
 | `-Force` | Reinstall even when Teams is current, and continue without Teams or version info |
@@ -311,6 +311,7 @@ If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `
 ## Time sync/
 
 Fixes Windows time synchronisation issues by restarting `W32tm` against Dutch NTP pool servers and registering a scheduled task that reruns the sync every 59 minutes. See [`Time sync/readme.md`](Time%20sync/readme.md) for full details.
+
 
 
 
