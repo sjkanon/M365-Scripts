@@ -750,6 +750,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 | The audit never revokes a link. It reports files tagged Intern or Vertrouwelijk sitting behind an external one and exits `2`, so a scheduled RMM job surfaces exactly when there is a decision for a person to make. `Test-SharePointStructure.ps1` does the same for structural drift, classified as Missing / Different / Extra — "Extra" is never fixed automatically, because an extra column holds data and an extra role assignment is usually somebody's deliberate exception |
 | `SharePointStructure.Common.ps1` is dot-sourced by all four — a deliberate exception to the "every script stands alone" rule elsewhere in this repo, because they share one config schema and three copies of the permission code would drift apart within a month |
 | Menu item `S` added for the set (pick a step, `-WhatIf` unless you confirm; the drift check skips the question because it never writes) |
+### 2026-09-10 (4)
+| Change |
+|--------|
+| Attached the expiry date to the `-AvdOptimizations` feature: Microsoft retires the WebRTC-based AVD media optimization on **1 October 2026** (end of support) and **1 April 2027** (end of availability), and Teams already shows users a banner about it. The switch keeps installing the redirector because Microsoft still advises it as a fallback — with a note to revisit before April 2027 |
+| Its replacement, SlimCore, needs nothing on the session host: it ships inside new Teams. Confirmed on a device with Teams `26225.1806.5074.1452`, which carries `Microsoft.Teams.SlimCoreVdiHost.win-x64` `2026.31.1.16` plus several framework packages. Preflight now reports that package under `-AvdOptimizations` |
+| That report is deliberately informational and creates no work item: which media path is used depends on the Windows App version on the endpoint the user connects from, which a script running on the session host cannot see. Auditing endpoint client versions is the actual migration work |
+| Added a service desk section to the IT Glue doc for the banner users are reporting: what it means (an announcement, not an outage), the two dates, that the fix is on the local device rather than the session host, how to read the `AVD SlimCore Media Optimized` / `AVD Media Optimized` line under Teams > About, and ready-made text for the user |
+
 ### 2026-09-10 (3)
 | Change |
 |--------|

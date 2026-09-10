@@ -39,6 +39,15 @@
     reinstalls the redirector as well. Without the switch the script only points out
     that the device looks like a session host.
 
+    WebRTC is being retired: end of support 1 October 2026, end of availability
+    1 April 2027. Its replacement, SlimCore, needs nothing installed here - it ships
+    inside new Teams (the Microsoft.Teams.SlimCore* packages, reported in preflight)
+    and inside Windows App on the endpoint the user connects from. The endpoint's
+    Windows App version is what decides which path is used, and this script cannot see
+    that from the session host. IsWVDEnvironment stays required either way, and
+    Microsoft still advises keeping the redirector as a fallback for endpoints that
+    cannot do SlimCore, so the switch keeps installing it. Revisit before April 2027.
+
     Every state-changing step is wrapped in ShouldProcess, so -WhatIf walks the whole
     flow and reports exactly what would be uninstalled, downloaded, installed and
     provisioned without touching the machine.
@@ -580,6 +589,17 @@ try {
 
         if ($webRtcEntry) { Write-Ok "WebRTC Redirector is installed ($($webRtcEntry.Version))" }
         else              { Write-Warn 'Remote Desktop WebRTC Redirector is not installed' }
+
+        # Informational only. SlimCore replaces WebRTC (support ends 1 October 2026)
+        # and ships with new Teams, but whether it is actually used depends on the
+        # Windows App version on the endpoint, which is invisible from here.
+        $slimCoreHost = @(Get-AppxPackage -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
+                        Select-Object -First 1
+        if ($slimCoreHost) {
+            Write-Ok "SlimCore is present ($($slimCoreHost.Version)) - the endpoint's Windows App version decides whether it is used"
+        } else {
+            Write-Warn 'SlimCore packages not found - this host still depends on WebRTC, which loses support on 1 October 2026'
+        }
     } elseif (Test-AvdSessionHost) {
         Write-Skip 'This looks like an AVD session host - consider -AvdOptimizations for the media flag and the WebRTC redirector'
     }
