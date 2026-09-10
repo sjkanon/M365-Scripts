@@ -98,7 +98,7 @@
       "fields": [
         { "internalName": "PsMerk", "required": true },
         { "internalName": "PsVertrouwelijkheid", "required": true },
-        { "internalName": "PsPijler", "required": false, "defaultValue": "MGMT" },
+        { "internalName": "PsPijler", "required": false },
         { "internalName": "PsTaal", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
@@ -114,7 +114,7 @@
         { "internalName": "PsContenttype", "required": true },
         { "internalName": "PsTaal", "required": true },
         { "internalName": "PsVertrouwelijkheid", "required": true },
-        { "internalName": "PsPijler", "required": false, "defaultValue": "Leveranciers" },
+        { "internalName": "PsPijler", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
       ]
@@ -129,7 +129,7 @@
         { "internalName": "PsContenttype", "required": true },
         { "internalName": "PsTaal", "required": true },
         { "internalName": "PsVertrouwelijkheid", "required": false },
-        { "internalName": "PsPijler", "required": false, "defaultValue": "Verkopers" },
+        { "internalName": "PsPijler", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
       ]
@@ -143,7 +143,7 @@
         { "internalName": "PsVertrouwelijkheid", "required": true },
         { "internalName": "PsTaal", "required": true },
         { "internalName": "PsContenttype", "required": false },
-        { "internalName": "PsPijler", "required": false, "defaultValue": "Klanten" },
+        { "internalName": "PsPijler", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
       ]
@@ -157,7 +157,7 @@
         { "internalName": "PsTaal", "required": true },
         { "internalName": "PsContenttype", "required": true },
         { "internalName": "PsVertrouwelijkheid", "required": false },
-        { "internalName": "PsPijler", "required": false, "defaultValue": "Marketing" },
+        { "internalName": "PsPijler", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
       ]
@@ -171,7 +171,7 @@
         { "internalName": "PsContenttype", "required": true },
         { "internalName": "PsTaal", "required": false },
         { "internalName": "PsVertrouwelijkheid", "required": false },
-        { "internalName": "PsPijler", "required": false, "defaultValue": "TD" },
+        { "internalName": "PsPijler", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
       ]
@@ -184,7 +184,7 @@
         { "internalName": "PsMerk", "required": true },
         { "internalName": "PsContenttype", "required": true },
         { "internalName": "PsTaal", "required": true },
-        { "internalName": "PsVertrouwelijkheid", "required": false, "defaultValue": "Deelbaar met klant" },
+        { "internalName": "PsVertrouwelijkheid", "required": false },
         { "internalName": "PsStatus", "required": false },
         { "internalName": "PsDeelstatus", "required": false }
       ]
@@ -216,6 +216,7 @@
       "list": "Documents",
       "folder": "MGMT",
       "pillar": "MGMT",
+      "defaultColumnValues": { "PsPijler": "MGMT", "PsStatus": "Actief" },
       "contentTypes": [ "MGMT-document" ],
       "defaultContentType": "MGMT-document",
       "uniquePermissions": false,
@@ -230,6 +231,7 @@
       "list": "Documents",
       "folder": "Leveranciers",
       "pillar": "Leveranciers",
+      "defaultColumnValues": { "PsPijler": "Leveranciers", "PsStatus": "Actief" },
       "contentTypes": [ "Leveranciersdocument" ],
       "defaultContentType": "Leveranciersdocument",
       "uniquePermissions": true,
@@ -251,6 +253,7 @@
       "list": "Documents",
       "folder": "Verkopers",
       "pillar": "Verkopers",
+      "defaultColumnValues": { "PsPijler": "Verkopers", "PsStatus": "Actief" },
       "contentTypes": [ "Verkoopdocument" ],
       "defaultContentType": "Verkoopdocument",
       "uniquePermissions": true,
@@ -272,6 +275,7 @@
       "list": "Documents",
       "folder": "Klanten",
       "pillar": "Klanten",
+      "defaultColumnValues": { "PsPijler": "Klanten", "PsStatus": "Actief" },
       "contentTypes": [ "Klantdocument" ],
       "defaultContentType": "Klantdocument",
       "uniquePermissions": true,
@@ -293,6 +297,7 @@
       "list": "Documents",
       "folder": "Marketing",
       "pillar": "Marketing",
+      "defaultColumnValues": { "PsPijler": "Marketing", "PsStatus": "Actief" },
       "contentTypes": [ "Marketingdocument" ],
       "defaultContentType": "Marketingdocument",
       "uniquePermissions": true,
@@ -314,6 +319,7 @@
       "list": "Documents",
       "folder": "TD",
       "pillar": "TD",
+      "defaultColumnValues": { "PsPijler": "TD", "PsStatus": "Actief" },
       "contentTypes": [ "TD-document" ],
       "defaultContentType": "TD-document",
       "uniquePermissions": true,
@@ -334,6 +340,7 @@
       "site": "team",
       "list": "FUTECH Images and videos",
       "pillar": "Marketing",
+      "defaultColumnValues": { "PsPijler": "Marketing", "PsStatus": "Actief", "PsVertrouwelijkheid": "Deelbaar met klant" },
       "contentTypes": [ "FUTECH-media" ],
       "defaultContentType": "FUTECH-media",
       "uniquePermissions": true,

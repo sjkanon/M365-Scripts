@@ -255,6 +255,24 @@ function Set-FieldLinkRequired {
     return $true
 }
 
+function Get-FieldChoiceValue {
+    <#
+        The choices of a Choice/MultiChoice site column, read from the schema XML.
+        The typed Choices property needs a cast to FieldChoice and an extra round
+        trip; the schema is already on the object Get-PnPField handed back.
+    #>
+    param([Parameter(Mandatory)] $Field)
+
+    try {
+        $schema = [xml] $Field.SchemaXml
+    } catch {
+        return @()
+    }
+    $node = $schema.Field.SelectSingleNode('CHOICES')
+    if (-not $node) { return @() }
+    return @($node.ChildNodes | ForEach-Object { $_.InnerText })
+}
+
 function Get-SecurablePrincipal {
     <#
         Resolve an Entra ID security group to a SharePoint principal.
