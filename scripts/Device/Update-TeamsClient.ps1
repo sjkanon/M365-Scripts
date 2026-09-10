@@ -11,19 +11,33 @@
                       running Teams/Outlook process.
       2. Check      - ask the Teams client config service which build is current for
                       this architecture and compare it with what is installed. Up to
-                      date and the add-in present? Nothing happens at all.
-      3. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
+                      date and nothing missing? Nothing happens at all.
+      3. AVD        - only with -AvdOptimizations: the IsWVDEnvironment media flag and
+                      the Remote Desktop WebRTC Redirector Service.
+      4. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
                       BEFORE anything is uninstalled, so a failed download can never
                       leave the device without a Teams client.
-      4. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
+      5. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
                       users, and the provisioned package.
-      5. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
-      6. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
+      6. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
+      7. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
                       Teams package (ALLUSERS=1).
-      7. Verify     - re-check the add-in registration and the provisioned package.
+      8. Verify     - re-check the add-in registration, the provisioned package and,
+                      where applicable, the AVD components.
 
-    When only the meeting add-in is missing and the client itself is current, steps 3
-    to 5 are skipped and just the add-in is installed.
+    Each part is only done when it is actually needed. A current client with a missing
+    add-in installs just the add-in; a current client on an AVD host with the WebRTC
+    redirector missing installs just that.
+
+    AVD / VDI
+    ---------
+    -AvdOptimizations adds the two things a session host needs for media optimization:
+    HKLM:\SOFTWARE\Microsoft\Teams\IsWVDEnvironment = 1 (set before Teams is
+    provisioned, which is why it is step 3) and the Remote Desktop WebRTC Redirector
+    Service from https://aka.ms/msrdcwebrtcsvc/msi. Both are installed only when
+    missing, so a scheduled run on a session host costs no extra download. -Force
+    reinstalls the redirector as well. Without the switch the script only points out
+    that the device looks like a session host.
 
     Every state-changing step is wrapped in ShouldProcess, so -WhatIf walks the whole
     flow and reports exactly what would be uninstalled, downloaded, installed and
@@ -74,9 +88,10 @@
         hit a problem. Combine with -CheckOnly for a pure detection job (exit code 2
         means "update available").
       - Script variables arrive as environment variables, so checkboxes named whatIf,
-        quiet, checkOnly, force, skipMeetingAddIn or skipSignatureCheck and text
-        fields named workingDir, logPath or ring are picked up when the matching
-        parameter is not passed on the command line.
+        quiet, checkOnly, force, avdOptimizations, skipMeetingAddIn or
+        skipSignatureCheck and text fields named workingDir, logPath or ring are
+        picked up when the matching parameter is not passed on the command line.
+        Capitalisation does not matter - environment lookups are case-insensitive.
       - If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit
         via SysNative first. Without that, registry reads are redirected to
         WOW6432Node and $env:ProgramFiles points at the x86 folder, so the AppX
@@ -96,8 +111,17 @@
     Update ring queried at the config service (default: general). Both audienceGroup
     and teamsRing are set to this value.
 
+.PARAMETER AvdOptimizations
+    Also enforce the AVD/VDI media optimizations: the IsWVDEnvironment registry flag
+    and the Remote Desktop WebRTC Redirector Service. Both only when missing, unless
+    -Force is given.
+
+.PARAMETER WebRtcUrl
+    Download URL for the Remote Desktop WebRTC Redirector MSI (default: the Microsoft
+    aka.ms link). Must be https. Only used with -AvdOptimizations.
+
 .PARAMETER WorkingDir
-    Folder used for the bootstrapper download (default: C:\IT\AVD\Teams).
+    Folder used for the installer downloads (default: C:\IT\AVD\Teams).
 
 .PARAMETER LogPath
     Folder for the transcript of a run that changes something (default: C:\Temp).
@@ -141,6 +165,10 @@
     .\Update-TeamsClient.ps1 -CheckOnly -Quiet
 
 .EXAMPLE
+    # AVD session host: Teams plus the media flag and the WebRTC redirector
+    .\Update-TeamsClient.ps1 -AvdOptimizations -Quiet -Confirm:$false
+
+.EXAMPLE
     # Repair: reinstall the current build regardless of the version check
     .\Update-TeamsClient.ps1 -Force
 
@@ -152,10 +180,12 @@
 param (
     [switch] $Quiet,
     [switch] $CheckOnly,
+    [switch] $AvdOptimizations,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
     [string] $BootstrapperUrl = 'https://go.microsoft.com/fwlink/?linkid=2243204&clcid=0x409',
+    [string] $WebRtcUrl       = 'https://aka.ms/msrdcwebrtcsvc/msi',
     [switch] $SkipMeetingAddIn,
     [switch] $SkipSignatureCheck,
     [ValidateRange(60, 7200)]
@@ -231,7 +261,8 @@ if (-not (Test-Elevated)) {
 # -- RMM: script variables -----------------------------------------------------
 # NinjaOne exposes script variables as environment variables. Honour them only
 # when the matching parameter was not passed on the command line, so a plain
-# .\Update-TeamsClient.ps1 -WhatIf keeps working exactly as before.
+# .\Update-TeamsClient.ps1 -WhatIf keeps working exactly as before. Environment
+# lookups are case-insensitive, so a variable named Quiet or QUIET works too.
 $rmmTrue = @('true', '1', 'yes')
 if (-not $PSBoundParameters.ContainsKey('WhatIf')             -and $env:whatIf             -in $rmmTrue) { $WhatIfPreference   = $true }
 if (-not $PSBoundParameters.ContainsKey('Quiet')              -and $env:quiet              -in $rmmTrue) { $Quiet              = $true }
@@ -239,17 +270,25 @@ if (-not $PSBoundParameters.ContainsKey('CheckOnly')          -and $env:checkOnl
 if (-not $PSBoundParameters.ContainsKey('Force')              -and $env:force              -in $rmmTrue) { $Force              = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipMeetingAddIn')   -and $env:skipMeetingAddIn   -in $rmmTrue) { $SkipMeetingAddIn   = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
+if (-not $PSBoundParameters.ContainsKey('AvdOptimizations')   -and $env:avdOptimizations   -in $rmmTrue) { $AvdOptimizations   = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
+if (-not $PSBoundParameters.ContainsKey('WebRtcUrl')          -and $env:webRtcUrl)                       { $WebRtcUrl          = $env:webRtcUrl }
 
-$simulate       = [bool] $WhatIfPreference
-$teamsExe       = 'teamsbootstrapper.exe'
-$exePath        = Join-Path $WorkingDir $teamsExe
-$exitCode       = 0
-$rebootRequired = $false
-$transcribing   = $false
-$plannedExit    = $null
+$simulate         = [bool] $WhatIfPreference
+$teamsExe         = 'teamsbootstrapper.exe'
+$exePath          = Join-Path $WorkingDir $teamsExe
+$webRtcMsi        = Join-Path $WorkingDir 'MsRdcWebRTCSvc_x64.msi'
+$exitCode         = 0
+$rebootRequired   = $false
+$transcribing     = $false
+$plannedExit      = $null
+$workingDirReady  = $false
+
+# Teams reads this flag to switch to VDI media optimization; it has to be there
+# before the client is provisioned.
+$AvdRegistryPath = 'HKLM:\SOFTWARE\Microsoft\Teams'
 
 # -Confirm:$false means "never ask", for an unattended run from a scheduler or RMM.
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
@@ -310,6 +349,79 @@ function Get-TeamsMeetingAddInEntry {
             }
         }
     }
+}
+
+function Get-WebRtcRedirectorEntry {
+    <# Uninstall entry for the Remote Desktop WebRTC Redirector Service, if any. #>
+    foreach ($root in $UninstallRoots) {
+        if (-not (Test-Path $root)) { continue }
+        foreach ($key in Get-ChildItem $root) {
+            $name = $key.GetValue('DisplayName')
+            if ($name -like '*Remote Desktop WebRTC Redirector Service*') {
+                [PSCustomObject]@{
+                    ProductCode = $key.PSChildName
+                    DisplayName = $name
+                    Version     = $key.GetValue('DisplayVersion')
+                }
+            }
+        }
+    }
+}
+
+function Get-WvdEnvironmentFlag {
+    <# Current value of IsWVDEnvironment, or $null when it is not set at all. #>
+    if (-not (Test-Path $AvdRegistryPath)) { return $null }
+    return Get-PropertyValue (Get-ItemProperty -Path $AvdRegistryPath -ErrorAction SilentlyContinue) 'IsWVDEnvironment'
+}
+
+function Test-AvdSessionHost {
+    <# The AVD agent registers itself here - good enough to recognise a session host. #>
+    return (Test-Path 'HKLM:\SOFTWARE\Microsoft\RDInfraAgent')
+}
+
+function Save-VerifiedDownload {
+    <#
+        Download a Microsoft installer and refuse anything that is not what it claims
+        to be: a proxy error page, a truncated file, or a binary that is not signed by
+        Microsoft. Throws on all three.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Uri,
+        [Parameter(Mandatory)] [string] $Path,
+        [int] $MinimumBytes = 100KB
+    )
+
+    if ($Uri -notmatch '^https://') { throw "Download URL must be https: $Uri" }
+
+    # PowerShell 5.1 on older builds still defaults to TLS 1.0, which the CDN refuses.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $progressBackup     = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $Path -UseBasicParsing
+    } catch {
+        throw "Download failed ($Uri): $($_.Exception.Message)"
+    } finally {
+        $ProgressPreference = $progressBackup
+    }
+
+    $file = Get-Item $Path
+    if ($file.Length -lt $MinimumBytes) {
+        throw "Downloaded file is only $($file.Length) bytes - not a valid installer ($Uri)"
+    }
+
+    if ($SkipSignatureCheck) {
+        Write-Warn "Signature check skipped for $($file.Name) (-SkipSignatureCheck)"
+    } else {
+        $signature = Get-AuthenticodeSignature -FilePath $Path
+        if ($signature.Status -ne 'Valid') {
+            throw "$($file.Name) signature is $($signature.Status) - refusing to run it"
+        }
+        if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "$($file.Name) is not signed by Microsoft: $($signature.SignerCertificate.Subject)"
+        }
+    }
+    return $file
 }
 
 function Get-LatestTeamsBuild {
@@ -453,6 +565,21 @@ try {
         else                 { Write-Warn 'Teams Meeting Add-in is not installed' }
     }
 
+    $avdFlagSet  = $false
+    $webRtcEntry = $null
+    if ($AvdOptimizations) {
+        $avdFlagSet  = ((Get-WvdEnvironmentFlag) -eq 1)
+        $webRtcEntry = @(Get-WebRtcRedirectorEntry) | Select-Object -First 1
+
+        if ($avdFlagSet) { Write-Ok 'AVD media flag IsWVDEnvironment is set' }
+        else             { Write-Warn 'AVD media flag IsWVDEnvironment is not set' }
+
+        if ($webRtcEntry) { Write-Ok "WebRTC Redirector is installed ($($webRtcEntry.Version))" }
+        else              { Write-Warn 'Remote Desktop WebRTC Redirector is not installed' }
+    } elseif (Test-AvdSessionHost) {
+        Write-Skip 'This looks like an AVD session host - consider -AvdOptimizations for the media flag and the WebRTC redirector'
+    }
+
     # -- 2. Version check ------------------------------------------------------
     Write-Out ''
     Write-Step '2. Version check'
@@ -480,24 +607,33 @@ try {
         }
     }
 
-    $addInMissing = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
+    $addInMissing  = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
+    $avdWork       = $AvdOptimizations -and ((-not $avdFlagSet) -or (-not $webRtcEntry) -or $Force)
     $fullReinstall = $clientOutdated -or $Force
 
-    if (-not $fullReinstall -and -not $addInMissing) {
+    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork) {
         $plannedExit = 0
         throw 'Teams is up to date - nothing to do.'
     }
 
+    $reasons = @()
+    if ($clientOutdated) { $reasons += 'a newer build is available' }
+    if ($addInMissing)   { $reasons += 'the Teams Meeting Add-in is missing' }
+    if ($avdWork)        { $reasons += 'the AVD optimizations are incomplete' }
+    if ($Force)          { $reasons += '-Force was given' }
+
     if ($CheckOnly) {
         Show-HeldOutput
-        if ($clientOutdated) { Write-News 'A newer build is available (exit code 2)' }
-        else                 { Write-News 'The Teams Meeting Add-in is missing (exit code 2)' }
+        Write-News ('Work is due: {0} (exit code 2)' -f ($reasons -join ', '))
         $plannedExit = 2
         throw 'Check only - nothing was changed.'
     }
 
-    if ($addInMissing -and -not $fullReinstall) {
-        Write-Skip 'Client is current - only the meeting add-in will be installed'
+    if (-not $fullReinstall) {
+        $parts = @()
+        if ($avdWork)      { $parts += 'the AVD optimizations' }
+        if ($addInMissing) { $parts += 'the meeting add-in' }
+        Write-Skip ('Client is current - only {0} will be handled' -f ($parts -join ' and '))
     }
 
     # From here the run intends to change something, so it is worth reporting and
@@ -529,11 +665,54 @@ try {
         }
     }
 
-    # -- 3. Download and verify the bootstrapper -------------------------------
+    # -- 3. AVD / VDI optimizations --------------------------------------------
+    # Before the client is provisioned: Teams reads IsWVDEnvironment at startup to
+    # decide whether to hand media off to the redirector.
+    Write-Out ''
+    Write-Step '3. AVD optimizations'
+    if (-not $AvdOptimizations) {
+        Write-Skip 'Skipped - use -AvdOptimizations on an AVD/VDI session host'
+    } else {
+        if ($WebRtcUrl -notmatch '^https://') { throw "WebRtcUrl must be https: $WebRtcUrl" }
+
+        if ($avdFlagSet) {
+            Write-Skip 'IsWVDEnvironment is already 1'
+        } elseif ($PSCmdlet.ShouldProcess("$AvdRegistryPath\IsWVDEnvironment", 'Set to 1 (DWORD)')) {
+            if (-not (Test-Path $AvdRegistryPath)) { New-Item -Path $AvdRegistryPath -Force | Out-Null }
+            New-ItemProperty -Path $AvdRegistryPath -Name 'IsWVDEnvironment' -PropertyType DWORD -Value 1 -Force | Out-Null
+            Write-Ok 'IsWVDEnvironment set to 1'
+        }
+
+        if ($webRtcEntry -and -not $Force) {
+            Write-Skip "WebRTC Redirector already installed ($($webRtcEntry.Version))"
+        } else {
+            if (-not $workingDirReady) {
+                if ($PSCmdlet.ShouldProcess($WorkingDir, 'Create working directory')) {
+                    New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
+                    Write-Ok "Working directory ready: $WorkingDir"
+                }
+                $workingDirReady = $true
+            }
+
+            if ($PSCmdlet.ShouldProcess($webRtcMsi, "Download $WebRtcUrl")) {
+                $file = Save-VerifiedDownload -Uri $WebRtcUrl -Path $webRtcMsi
+                Write-Ok "Downloaded $($file.Name) ($([math]::Round($file.Length / 1MB, 1)) MB), signature verified"
+            }
+
+            if ($PSCmdlet.ShouldProcess('Remote Desktop WebRTC Redirector Service', 'msiexec /i /qn (install)')) {
+                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/i `"$webRtcMsi`" /qn /norestart"
+                if (-not $result.Success) { throw "WebRTC Redirector install failed ($($result.Message))" }
+                if ($result.RebootRequired) { $rebootRequired = $true }
+                Write-Ok 'WebRTC Redirector installed'
+            }
+        }
+    }
+
+    # -- 4. Download and verify the bootstrapper -------------------------------
     # Deliberately before any uninstall: a failed download must never leave the
     # device without a Teams client.
     Write-Out ''
-    Write-Step '3. Download new Teams bootstrapper'
+    Write-Step '4. Download new Teams bootstrapper'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } else {
@@ -541,48 +720,23 @@ try {
             throw "BootstrapperUrl must be https: $BootstrapperUrl"
         }
 
-        if ($PSCmdlet.ShouldProcess($WorkingDir, 'Create working directory')) {
-            New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
-            Write-Ok "Working directory ready: $WorkingDir"
+        if (-not $workingDirReady) {
+            if ($PSCmdlet.ShouldProcess($WorkingDir, 'Create working directory')) {
+                New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
+                Write-Ok "Working directory ready: $WorkingDir"
+            }
+            $workingDirReady = $true
         }
 
         if ($PSCmdlet.ShouldProcess($exePath, "Download $BootstrapperUrl")) {
-            # PowerShell 5.1 on older builds still defaults to TLS 1.0, which the CDN refuses.
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $progressBackup     = $ProgressPreference
-            $ProgressPreference = 'SilentlyContinue'
-            try {
-                Invoke-WebRequest -Uri $BootstrapperUrl -OutFile $exePath -UseBasicParsing
-            } catch {
-                throw "Download failed: $($_.Exception.Message)"
-            } finally {
-                $ProgressPreference = $progressBackup
-            }
-
-            $downloaded = Get-Item $exePath
-            if ($downloaded.Length -lt 100KB) {
-                throw "Downloaded file is only $($downloaded.Length) bytes - not a valid bootstrapper"
-            }
-            Write-Ok "Downloaded $teamsExe ($([math]::Round($downloaded.Length / 1MB, 1)) MB)"
-
-            if ($SkipSignatureCheck) {
-                Write-Warn 'Signature check skipped (-SkipSignatureCheck)'
-            } else {
-                $signature = Get-AuthenticodeSignature -FilePath $exePath
-                if ($signature.Status -ne 'Valid') {
-                    throw "Bootstrapper signature is $($signature.Status) - refusing to run it"
-                }
-                if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
-                    throw "Bootstrapper is not signed by Microsoft: $($signature.SignerCertificate.Subject)"
-                }
-                Write-Ok 'Signature verified: Microsoft Corporation'
-            }
+            $file = Save-VerifiedDownload -Uri $BootstrapperUrl -Path $exePath
+            Write-Ok "Downloaded $($file.Name) ($([math]::Round($file.Length / 1MB, 1)) MB), signature verified"
         }
     }
 
-    # -- 4. Uninstall the add-in and the current package -----------------------
+    # -- 5. Uninstall the add-in and the current package -----------------------
     Write-Out ''
-    Write-Step '4. Uninstall current Teams'
+    Write-Step '5. Uninstall current Teams'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } else {
@@ -635,9 +789,9 @@ try {
         }
     }
 
-    # -- 5. Install / provision new Teams --------------------------------------
+    # -- 6. Install / provision new Teams --------------------------------------
     Write-Out ''
-    Write-Step '5. Install new Teams'
+    Write-Step '6. Install new Teams'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
@@ -649,11 +803,13 @@ try {
         Write-Ok 'Bootstrapper completed'
     }
 
-    # -- 6. Install the Teams Meeting Add-in for all users ---------------------
+    # -- 7. Install the Teams Meeting Add-in for all users ---------------------
     Write-Out ''
-    Write-Step '6. Teams Meeting Add-in (install)'
+    Write-Step '7. Teams Meeting Add-in (install)'
     if ($SkipMeetingAddIn) {
         Write-Skip 'Skipped (-SkipMeetingAddIn)'
+    } elseif (-not $fullReinstall -and -not $addInMissing) {
+        Write-Skip 'Already installed and the client was not replaced'
     } else {
         $newTeams        = Get-AppxPackage -Name 'MSTeams' -ErrorAction SilentlyContinue
         $newTeamsVersion = if ($newTeams) { $newTeams.Version } else { $null }
@@ -688,14 +844,23 @@ try {
         }
     }
 
-    # -- 7. Verify -------------------------------------------------------------
+    # -- 8. Verify -------------------------------------------------------------
     Write-Out ''
-    Write-Step '7. Verification'
+    Write-Step '8. Verification'
     if ($simulate) {
         Write-Skip 'Skipped - nothing was changed, so there is nothing to verify (-WhatIf)'
         Write-Out ''
         Write-Out '  Dry run only - rerun without -WhatIf to apply these changes.' 'Yellow'
     } else {
+        if ($AvdOptimizations) {
+            if ((Get-WvdEnvironmentFlag) -eq 1) { Write-Ok 'AVD media flag IsWVDEnvironment is 1' }
+            else { Write-Bad 'AVD media flag IsWVDEnvironment is not set'; $exitCode = 1 }
+
+            $webRtcNow = @(Get-WebRtcRedirectorEntry) | Select-Object -First 1
+            if ($webRtcNow) { Write-Ok "WebRTC Redirector installed ($($webRtcNow.Version))" }
+            else { Write-Bad 'WebRTC Redirector installation failed'; $exitCode = 1 }
+        }
+
         if (-not $SkipMeetingAddIn) {
             if (Get-TeamsMeetingAddInEntry) { Write-Ok 'Teams Meeting Add-in installed' }
             else { Write-Bad 'Teams Meeting Add-in installation failed'; $exitCode = 1 }
