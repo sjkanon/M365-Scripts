@@ -13,6 +13,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
 | [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
 | [`Test-CalendarPermissions.ps1`](#test-calendarpermissionsps1) | Audit calendar folder permissions |
+| [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) | Where each calendar is actually mapped in Outlook, next to the rights behind it |
 | [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1) | Audit Full Access, Send As, Send on Behalf delegation |
 | [`Test-DistributionGroupPermissions.ps1`](#test-distributiongrouppermissionsps1) | Audit DG managers, Send As, Send on Behalf, member counts |
 | [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
@@ -293,6 +294,87 @@ Retrieves calendar folder permissions for one or all mailboxes. Uses `FolderType
 # Custom output path
 .\Test-CalendarPermissions.ps1 -OutputPath "C:\Reports\calendar.csv"
 ```
+
+---
+
+### Get-CalendarMappings.ps1
+
+Shows **where each calendar is mapped**: the calendars that actually sit in a user's calendar list in Outlook, next to the rights behind them. `Test-CalendarPermissions.ps1` answers "who *may* open this calendar"; this script answers "where *is* it" and flags where the two disagree. Read-only.
+
+For every mailbox it reads over Microsoft Graph:
+
+- the **calendar list** (`/users/{id}/calendars`). Every calendar in it owned by somebody else is a mapping: a colleague, a shared mailbox, a room, a Microsoft 365 group, or someone outside the organisation
+- the **permissions on its own main calendar** (`/users/{id}/calendar/calendarPermissions`)
+
+and folds both into one row per calendar owner + user:
+
+| Status | Meaning |
+|--------|---------|
+| `Mapped` | In the user's calendar list, and the user has an explicit right |
+| `MappedWithoutRight` | In the list, but no explicit right on the owner's main calendar. Access then comes from the organisation-wide default, a group, a secondary calendar of the owner — or the right was removed and the entry is left over (the user gets an error when opening it) |
+| `MappedGroupCalendar` | A Microsoft 365 group calendar — access follows group membership |
+| `MappedOwnerMissing` | The owner no longer exists in the tenant — a stale entry in the user's list |
+| `MappedExternal` | The owner is outside the tenant |
+| `NotMapped` | Explicit right, but the calendar is not in the user's list — a clean-up candidate |
+| `NotChecked` | Explicit right, but the user's calendar list could not be read |
+| `GrantedToGroup` | A right granted to a group; members are not expanded |
+| `GrantedToMissing` | A right for an address or account that no longer exists — clean-up candidate |
+| `SharedExternally` | A right for an address outside the tenant |
+| `OrgWideDefault` | *My Organization* gets more than free/busy — every internal user can open the calendar |
+
+> **Why Graph and not Exchange Online PowerShell:** the Exchange cmdlets see folders and the permissions on them, not the entries a user added to their own calendar list. Those are only readable over Graph.
+
+**Not visible in this report**
+
+- **Full Access with AutoMapping** adds a whole mailbox to Outlook, calendar included. That is a mailbox permission, not a calendar entry — see [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1)
+- A calendar opened in classic Outlook with *shared calendar improvements* turned off may live only in that Outlook profile and not in the list Graph returns
+- Rights are compared against the owner's **main** calendar. A secondary calendar the owner shared shows up as `MappedWithoutRight`
+
+**Scope**
+
+Without `-Mailbox` every mailbox in the tenant is scanned — the only way to find mappings that rest on the organisation-wide default or on a group. With `-Mailbox` the report is limited to rows where one of those mailboxes is the **owner or the user**: their own calendar lists are read, plus the lists of everyone with an explicit right on their calendar. For a complete "where is X's calendar mapped", run without `-Mailbox` and filter the CSV on `Owner`.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Mailbox` | No | One or more mailbox addresses. Limits the report to rows where they are owner or user. If omitted, every mailbox is scanned |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
+| `-TenantId` | No | Tenant ID or domain. Optional for the temporary-app route — the sign-in then decides, and the tenant is printed |
+| `-ClientId` | No | Your own App Registration for app-only Graph access |
+| `-ClientSecret` | No | Client secret for `-ClientId` (plain REST, no Graph SDK) |
+| `-CertificateThumbprint` | No | Certificate thumbprint for `-ClientId` (via `Connect-MgGraph`) |
+
+**Examples**
+
+```powershell
+# Where is every calendar in the tenant mapped?
+.\Get-CalendarMappings.ps1 -TenantId contoso.com
+
+# Where is Jan's calendar mapped, and which calendars has Jan mapped?
+.\Get-CalendarMappings.ps1 -Mailbox jan@contoso.com
+
+# Own App Registration
+.\Get-CalendarMappings.ps1 -TenantId contoso.com -ClientId <appId> -ClientSecret <secret>
+```
+
+**Graph access**
+
+Needs application permissions `Calendars.Read` and `User.Read.All`, plus `Group.Read.All` to tell a group calendar from a removed mailbox (without it, group calendars show up as `MappedOwnerMissing` with a note saying so). Obtained the same three ways as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1):
+
+| # | Route | What it needs |
+|---|-------|---------------|
+| 1 | An app-only Graph session you already established | Nothing — used as-is |
+| 2 | `-ClientId` + `-ClientSecret` or `-CertificateThumbprint` | Your own app with the permissions above, admin consent granted. A broader permission (`Calendars.ReadWrite`, `Directory.Read.All`) is accepted too |
+| 3 | **Automatic** — device code sign-in, a short-lived App Registration that self-grants the three read permissions, removed again when the run ends (also on failure) | Global Administrator or Privileged Role Administrator for that sign-in. No extra modules |
+
+No Exchange Online connection is made, so the Exchange/Graph MSAL clash described under `Remove-PhishingMessage.ps1` does not apply. GDAP-aware like the other Graph scripts: under a GDAP session `-TenantId` is resolved from the selected customer tenant.
+
+**Notes**
+
+- Requests go through Graph `$batch`, 20 mailboxes per call. Throttled items are retried after the `Retry-After` the service asks for
+- Users with an address but no Exchange Online mailbox (404) are skipped and counted. A mailbox that cannot be read is listed separately, never reported as "nothing mapped". A 403 there usually means an Application Access Policy or RBAC for Applications limits the app
+- Shared mailboxes and rooms are disabled accounts in Entra ID, so they are included — no `accountEnabled` filter
 
 ---
 

@@ -157,6 +157,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `D` | Get-MailboxSizes — mailbox size report sorted by storage used |
 | `E` | Move-InboxToArchive — archive Inbox messages to Archive folder |
 | `F` | Set-DL-Dynamic-Static — resolve a dynamic distribution group into a static group |
+| `H` | Get-CalendarMappings — where each calendar is mapped in Outlook, next to the rights (all or selected mailboxes) |
 
 **Entra ID submenu (`D`)**
 
@@ -544,6 +545,7 @@ M365-Scripts/
     │   ├── Set-Distributionlist-dynamic-static.ps1
     │   ├── Move-InboxToArchive.ps1
     │   ├── Test-CalendarPermissions.ps1
+    │   ├── Get-CalendarMappings.ps1  ← where each calendar is mapped in Outlook, next to the rights behind it
     │   ├── Test-MailboxPermissions.ps1
     │   ├── Test-DistributionGroupPermissions.ps1
     │   ├── Test-DkimConfig.ps1
@@ -736,6 +738,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-11
+| Change |
+|--------|
+| Added `scripts/Exchange/Get-CalendarMappings.ps1` — shows where each calendar is actually mapped: for every mailbox it reads the calendar list in Outlook and the rights on its own main calendar, and folds both into one row per owner + user with a status (`Mapped`, `MappedWithoutRight`, `NotMapped`, `MappedOwnerMissing`, `SharedExternally`, …). `Test-CalendarPermissions.ps1` says who *may* open a calendar; this says where it *is*, and where the two disagree |
+| Graph rather than Exchange Online PowerShell, because the entries a user added to their own calendar list are not visible to any Exchange cmdlet. App-only access follows the same three routes as `Remove-PhishingMessage.ps1` (existing session, own app, or a temporary app that is removed in a `finally`), with read-only permissions `Calendars.Read`, `User.Read.All` and `Group.Read.All`. No Exchange connection, so no MSAL clash |
+| Tenant-wide runs go through `$batch` (20 mailboxes per call) with throttled items retried. A mailbox that cannot be read is reported as such rather than as "nothing mapped" |
+| Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
+| Exchange submenu (`C`) option `H` added |
 
 ### 2026-09-10 (4)
 | Change |
