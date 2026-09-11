@@ -268,6 +268,24 @@ $ExchangeSubmenu = @(
         }
         & "$ROOT\scripts\Exchange\Get-CalendarMappings.ps1" @p
     }}
+    @{ Key='I'; Label='Convert-SharedCalendar   — move a shared calendar out of a user mailbox into a room/equipment mailbox'; Action={
+        $path = Join-Path $ROOT 'scripts\Exchange\Convert-SharedCalendarToResource.ps1'
+        $mbx  = Read-Host "  User mailbox that holds the calendar"
+        $cal  = Read-Host "  Calendar name, e.g. Balie"
+        $name = Read-Host "  Name of the new resource mailbox [$cal]"
+        $type = Read-Host "  [R]oom or [E]quipment [R]"
+        $p = @{ Mailbox = $mbx; Calendar = $cal }
+        if ($name) { $p['ResourceName'] = $name }
+        if ($type -match '^[Ee]') { $p['ResourceType'] = 'Equipment' }
+        # Always a preview first; the real run is a second, explicit step.
+        & $path @p
+        $apply = Read-Host "  Preview done. Create the mailbox and copy everything now? [y/N]"
+        if ($apply -notmatch '^[Yy]') { return }
+        $p['Apply'] = $true
+        if ((Read-Host "  Send users a sharing invitation? [Y/n]") -notmatch '^[Nn]') { $p['SendSharingInvitation'] = $true }
+        if ((Read-Host "  Remove the original calendar once every item is verified? [y/N]") -match '^[Yy]') { $p['RemoveSourceCalendar'] = $true }
+        & $path @p
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"

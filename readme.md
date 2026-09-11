@@ -158,6 +158,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `E` | Move-InboxToArchive — archive Inbox messages to Archive folder |
 | `F` | Set-DL-Dynamic-Static — resolve a dynamic distribution group into a static group |
 | `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
+| `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 
 **Entra ID submenu (`D`)**
 
@@ -541,6 +542,7 @@ M365-Scripts/
     ├── Exchange/
     │   ├── readme.md
     │   ├── Migrate-Calendar.ps1
+    │   ├── Convert-SharedCalendarToResource.ps1  ← shared calendar in a user's mailbox → its own room/equipment mailbox
     │   ├── Set-Calendar-rights.ps1
     │   ├── Set-Distributionlist-dynamic-static.ps1
     │   ├── Move-InboxToArchive.ps1
@@ -738,6 +740,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-11 (3)
+| Change |
+|--------|
+| Added `scripts/Exchange/Convert-SharedCalendarToResource.ps1` — moves a shared calendar (the "Balie" calendar in one person's mailbox) into a Room or Equipment mailbox of its own, with every item and every permission, then removes the original on request. Preview by default; `-Apply` creates and copies, `-RemoveSourceCalendar` removes the original only after every item has a verified copy and the calendar's name has been typed as confirmation |
+| Items are copied faithfully rather than approximately: recurring series stay series with their moved and cancelled occurrences applied (matched occurrence by occurrence, and left alone with a warning if the two series do not line up), times are written back in the time zone they were created in so weekly items survive a daylight saving switch, categories keep their colour, attachments up to 3 MB are copied and larger ones saved to the backup folder. Attendees are listed in the body instead of copied, so nobody receives a fresh invitation |
+| Permissions carry their exact Exchange access rights, custom rights included; `-SendSharingInvitation` sends users the standard invitation. External people, deleted accounts and delegate flags are reported, not silently dropped |
+| Every copy carries its source item's id in a hidden property, so a run that stops halfway continues where it left off; a half-finished series is redone. A JSON backup of everything read is written before anything is created |
+| Exchange submenu (`C`) option `I` added: always a preview first, then an explicit second step |
 
 ### 2026-09-11 (2)
 | Change |
