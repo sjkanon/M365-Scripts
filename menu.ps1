@@ -257,6 +257,12 @@ $ExchangeSubmenu = @(
         if ($det -match '^[Yy]') { $p['IncludeDetails'] = $true }
         & "$ROOT\scripts\Exchange\Get-MessageTraceReport.ps1" @p
     }}
+    @{ Key='H'; Label='Get-CalendarMappings     — where each calendar is mapped in Outlook, next to the rights'; Action={
+        $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for all mailboxes)"
+        $p = @{}
+        if ($mbx) { $p['Mailbox'] = @($mbx -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        & "$ROOT\scripts\Exchange\Get-CalendarMappings.ps1" @p
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"
