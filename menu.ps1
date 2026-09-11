@@ -286,6 +286,16 @@ $ExchangeSubmenu = @(
         if ((Read-Host "  Remove the original calendar once every item is verified? [y/N]") -match '^[Yy]') { $p['RemoveSourceCalendar'] = $true }
         & $path @p
     }}
+    @{ Key='J'; Label='Move-SharedCalendar      — all in one: find a calendar by keyword and move it to a resource mailbox'; Action={
+        $kw   = Read-Host "  Calendar keyword, e.g. balie"
+        $type = Read-Host "  [R]oom or [E]quipment [R]"
+        $keep = Read-Host "  Give the original owner rights on the new calendar? [Y/n] (n for an archived mailbox)"
+        $p = @{ Search = $kw }
+        if ($type -match '^[Ee]') { $p['ResourceType'] = 'Equipment' }
+        if ($keep -match '^[Nn]') { $p['SourceOwnerRights'] = 'None' }
+        # The script previews first and then asks itself whether to go ahead.
+        & "$ROOT\scripts\Exchange\Move-SharedCalendar.ps1" @p
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"
