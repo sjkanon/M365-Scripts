@@ -159,6 +159,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `F` | Set-DL-Dynamic-Static — resolve a dynamic distribution group into a static group |
 | `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
+| `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
 
 **Entra ID submenu (`D`)**
 
@@ -543,6 +544,7 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Migrate-Calendar.ps1
     │   ├── Convert-SharedCalendarToResource.ps1  ← shared calendar in a user's mailbox → its own room/equipment mailbox
+    │   ├── Move-SharedCalendar.ps1  ← all in one: search by keyword + convert + who has to switch
     │   ├── Set-Calendar-rights.ps1
     │   ├── Set-Distributionlist-dynamic-static.ps1
     │   ├── Move-InboxToArchive.ps1
@@ -740,6 +742,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-11 (5)
+| Change |
+|--------|
+| Added `scripts/Exchange/Move-SharedCalendar.ps1` — all in one: `-Search balie` finds the calendar, shows who uses it, moves it into a resource mailbox with `Convert-SharedCalendarToResource.ps1` and lists who has to switch. One temporary App Registration with the permissions of both scripts, created once and removed at the end, so there is one sign-in instead of two. Several matches are picked from a list or narrowed with `-Owner`; a non-interactive run lists them and stops rather than guessing. The two scripts are called, not copied, so there is one implementation of each step |
+| Fixed `Convert-SharedCalendarToResource.ps1`: in a non-interactive session the typed confirmation was skipped and the original calendar removed without `-Force`. It is now left in place with a warning unless `-Force` is given |
+| Both calendar scripts: an explicit `-ClientId` now takes precedence over an existing app-only Graph session, so a calling script's app is really used. `Convert-SharedCalendarToResource.ps1` gains `-PassThru` (result object for callers) |
+| Exchange submenu (`C`) option `J` added |
 
 ### 2026-09-11 (4)
 | Change |

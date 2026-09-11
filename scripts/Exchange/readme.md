@@ -9,6 +9,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | Script | Description |
 |--------|-------------|
 | [`Migrate-Calendar.ps1`](#migrate-calendarps1) | Migrate a shared M365 Group calendar to a Room Mailbox |
+| [`Move-SharedCalendar.ps1`](#move-sharedcalendarps1) | **All in one**: find a calendar by keyword, move it into a resource mailbox, list who has to switch — one sign-in |
 | [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) | Move a shared calendar out of a user's mailbox into its own room/equipment mailbox — items, series, attachments and rights included |
 | [`Set-Calendar-rights.ps1`](#set-calendar-rightsps1) | Grant calendar folder permissions to a user |
 | [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
@@ -265,6 +266,58 @@ Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 
 ---
 
+### Move-SharedCalendar.ps1
+
+**All in one:** from "where is the Balie calendar?" to "it has its own resource mailbox" in one run, with one sign-in. It chains [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) and [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) — both have to sit in the same folder.
+
+| Step | |
+|------|--|
+| 1. Find | `Get-CalendarMappings.ps1 -Search <keyword>`: where the calendar lives, who has it in Outlook, who has rights on it |
+| 2. Pick | The matching calendar that can be moved. Several matches: pick one from a numbered list, or narrow it down with `-Owner`. A non-interactive run never guesses — it lists the candidates and stops |
+| 3. Move | `Convert-SharedCalendarToResource.ps1`: preview, then three questions — go ahead? send invitations? remove the original? `-Apply` skips the preview round |
+| 4. Tell | Who had the old calendar in Outlook and who only had rights: the people who have to switch |
+
+**One sign-in.** A temporary App Registration with everything both scripts need (`Calendars.ReadWrite`, `User.Read.All`, `Group.Read.All`, `MailboxSettings.ReadWrite`) is created once, handed to both, and removed at the end — also when something fails. Exchange Online is connected once too. An existing app-only Graph session or `-ClientId` / `-ClientSecret` is used instead when given.
+
+A mailbox whose **main** calendar matches (a `balie@` account that is itself the shared calendar) cannot be moved out; the script says so and names the in-place alternative, `Set-Mailbox -Type Room`.
+
+A run that changes something is logged to `SharedCalendarMove_<timestamp>.log`, next to the mapping report and the backup.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Search` | Yes | Keyword: owner name/address or calendar name. Alias `-Keyword` |
+| `-Owner` | No | Narrows several matches down to one owner (part of the name or address) |
+| `-ResourceType` | No | `Room` (default) or `Equipment` |
+| `-ResourceName` / `-ResourceAddress` | No | Name and address of the new mailbox (default: the calendar's name, at the owner's domain) |
+| `-SourceOwnerRights` | No | Rights for the original owner: `Owner` (default) … `None` — use `None` for an archived mailbox |
+| `-SendSharingInvitation` | No | Invite users to the new calendar (asked when not given) |
+| `-Apply` | No | Go ahead without the preview round |
+| `-RemoveSourceCalendar` | No | Remove the original after a clean verification (asked when not given) |
+| `-Force` | No | Skip the typed confirmation — required to remove unattended |
+| `-OutputPath` | No | Folder for report, backup and log (default `C:\Temp`) |
+| `-TenantId` / `-ClientId` / `-ClientSecret` | No | Tenant, or your own App Registration instead of a temporary one |
+
+**Examples**
+
+```powershell
+# Find, preview, answer the questions
+.\Move-SharedCalendar.ps1 -Search balie
+
+# "Balie planning" in an archived mailbox: Equipment mailbox, users invited, original kept for now
+.\Move-SharedCalendar.ps1 -Search "balie planning" -ResourceType Equipment -SourceOwnerRights None `
+    -SendSharingInvitation -Apply
+
+# Once everyone has switched: the same command removes the original
+.\Move-SharedCalendar.ps1 -Search "balie planning" -ResourceType Equipment -SourceOwnerRights None `
+    -Apply -RemoveSourceCalendar
+```
+
+The second run skips every item that is already copied, copies what was added in the meantime, and only then removes the original.
+
+---
+
 ### Convert-SharedCalendarToResource.ps1
 
 Moves a shared calendar out of a user's mailbox into a **resource mailbox of its own** (Room or Equipment), with every item and every permission, and then — on request — removes the original. Built for the typical "Balie" calendar: an extra calendar in one person's mailbox that the whole front desk uses, and that leaves with that person.
@@ -308,7 +361,8 @@ Moves a shared calendar out of a user's mailbox into a **resource mailbox of its
 | `-SendSharingInvitation` | No | Send users a sharing invitation (only possible for Reviewer, Editor, LimitedDetails, AvailabilityOnly) |
 | `-Apply` | No | Actually create, grant and copy. Without it: preview |
 | `-RemoveSourceCalendar` | No | Remove the original after a clean verification. Needs `-Apply` |
-| `-Force` | No | Skip the typed confirmation before removal |
+| `-Force` | No | Skip the typed confirmation before removal. A non-interactive session (scheduler, RMM) cannot type it, so there the original is only removed with `-Force` |
+| `-PassThru` | No | Return a result object (`ResourceAddress`, `Items`, `Verified`, `SourceRemoved`, `BackupPath`) for a calling script |
 | `-SeriesHorizonDays` | No | How far ahead exceptions of open-ended series are compared (default 1095) |
 | `-BackupPath` | No | Backup folder (default `C:\Temp\CalendarConvert_<calendar>_<timestamp>`) |
 | `-TenantId` | No | Tenant ID or domain (default: the Exchange session's tenant) |
