@@ -157,7 +157,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `D` | Get-MailboxSizes — mailbox size report sorted by storage used |
 | `E` | Move-InboxToArchive — archive Inbox messages to Archive folder |
 | `F` | Set-DL-Dynamic-Static — resolve a dynamic distribution group into a static group |
-| `H` | Get-CalendarMappings — where each calendar is mapped in Outlook, next to the rights (all or selected mailboxes) |
+| `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
 
 **Entra ID submenu (`D`)**
 
@@ -738,6 +738,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-11 (2)
+| Change |
+|--------|
+| `Get-CalendarMappings.ps1` gains `-Search` (alias `-Keyword`): "where is the Balie calendar?" in one run. The keyword is matched against the owner's name and every address (a shared mailbox `balie@`, a room, a group) and against calendar names (a secondary calendar *Balie* in somebody's mailbox). The report shows where the calendar lives (new status `Source`), who has it in their calendar list, and who has rights on it |
+| A matching **secondary** calendar now gets its own permissions read, instead of being compared against the owner's main calendar and landing on `MappedWithoutRight`. A new `Calendar` column says which of the owner's calendars a row is about |
+| A calendar list entry carries no link back to the folder it came from, so a shared secondary calendar is matched by name. When a user has it under another name, the `NotMapped` row names the entry that is probably it rather than leaving a silent false negative |
+| Menu option `H` asks for a keyword first; blank falls back to the full or per-mailbox report |
 
 ### 2026-09-11
 | Change |
