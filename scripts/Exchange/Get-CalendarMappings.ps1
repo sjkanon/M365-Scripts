@@ -3,6 +3,8 @@
 .SYNOPSIS
     Show where every calendar is mapped: which mailboxes have which other people's
     calendars in their calendar list, side by side with the rights behind them.
+    -Search finds one calendar by keyword ("balie") and shows where it lives and
+    where it is mapped.
 
 .DESCRIPTION
     Test-CalendarPermissions.ps1 answers "who MAY open this calendar". This script
@@ -18,8 +20,9 @@
 
     Both are folded into one row per calendar owner + user pair, with a status:
 
+      Source              -Search only: the matching calendar lives in this mailbox.
       Mapped              In the user's list, and the user has an explicit right.
-      MappedWithoutRight  In the list, but no explicit right on the owner's main
+      MappedWithoutRight  In the list, but no explicit right on the owner's
                           calendar. Access then comes from the organisation-wide
                           default, a group, another calendar of the owner - or the
                           right was removed and the entry is left over.
@@ -37,6 +40,24 @@
     and the permissions on them, not the entries a user added to their own
     calendar list. Those are only readable over Graph.
 
+    Search
+    ------
+    -Search balie finds every calendar where the keyword appears in the owner's
+    name or address (the shared mailbox balie@, a room, a group called Balie) or
+    in the calendar's own name (a secondary calendar "Balie" in somebody's
+    mailbox). The keyword is matched anywhere in the text, case-insensitive;
+    wildcards (* and ?) are used as given.
+
+    For each match the report shows where the calendar lives (Source), every
+    mailbox that has it in its calendar list, and everyone with an explicit
+    right on it - including a secondary calendar's own rights, which a normal run
+    does not read. Every calendar list is still read, because a mapping can sit in
+    any mailbox; only the permissions of the matching calendars are read.
+
+    A shared secondary calendar is recognised in someone's list by its name
+    matching the keyword. If a user has it under another name, it shows up as
+    NotMapped with a note naming the entry that is probably it.
+
     Not visible here
     ----------------
       - Full Access with AutoMapping adds a whole mailbox to Outlook, calendar
@@ -45,8 +66,8 @@
       - A calendar opened in classic Outlook with "shared calendar improvements"
         turned off may live only in that Outlook profile's navigation pane and not
         in the list Graph returns.
-      - Rights are compared against the owner's MAIN calendar. A secondary calendar
-        the owner shared shows up as MappedWithoutRight.
+      - Without -Search, rights are compared against the owner's MAIN calendar. A
+        secondary calendar the owner shared shows up as MappedWithoutRight.
 
     Scope
     -----
@@ -54,7 +75,8 @@
     to find mappings that rest on the organisation-wide default or on a group.
     With -Mailbox the report is limited to rows where one of those mailboxes is the
     owner or the user: their own calendar lists are read, plus the lists of
-    everyone with an explicit right on their calendar.
+    everyone with an explicit right on their calendar. -Mailbox and -Search
+    cannot be combined.
 
     Graph access
     ------------
@@ -78,6 +100,10 @@
     Connect-Tenant / load.ps1) -TenantId is resolved from the selected customer
     tenant ($global:cid) when not supplied. $env:M365_CUSTOMER_TENANTID /
     $env:M365_AUTH_MODE are honoured too.
+
+.PARAMETER Search
+    Keyword to find one calendar by: matched against the owner's name and
+    addresses and against the calendar's own name. Alias: -Keyword.
 
 .PARAMETER Mailbox
     One or more mailbox addresses (UPN or SMTP). Limits the report to rows where
@@ -103,6 +129,10 @@
     Certificate thumbprint for -ClientId. Goes through Connect-MgGraph.
 
 .EXAMPLE
+    # Where is the Balie calendar, and who has it mapped?
+    .\Get-CalendarMappings.ps1 -Search balie
+
+.EXAMPLE
     # Where is every calendar in the tenant mapped?
     .\Get-CalendarMappings.ps1 -TenantId contoso.com
 
@@ -119,6 +149,8 @@
 #>
 [CmdletBinding()]
 param(
+    [Alias('Keyword')]
+    [string]   $Search,
     [string[]] $Mailbox,
     [string]   $OutputPath,
     [string]   $TenantId,
@@ -126,6 +158,11 @@ param(
     [string]   $ClientSecret,
     [string]   $CertificateThumbprint
 )
+
+if ($Search -and $Mailbox) {
+    throw "Use either -Search or -Mailbox, not both."
+}
+$Search = ([string]$Search).Trim()
 
 # -- Output folder ------------------------------------------------------------
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -137,7 +174,9 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host "   Calendar Mappings" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
-if ($Mailbox) {
+if ($Search) {
+    Write-Host "  Search    : '$Search' in owner name/address or calendar name" -ForegroundColor DarkGray
+} elseif ($Mailbox) {
     Write-Host "  Scope     : $($Mailbox -join ', ') (as owner or as user)" -ForegroundColor DarkGray
 } else {
     Write-Host "  Scope     : every mailbox in the tenant" -ForegroundColor DarkGray
@@ -586,28 +625,34 @@ function Invoke-GraphBatch {
     return $results
 }
 
-function Get-MailboxCollection {
+function New-UserRequest {
+    # The same relative path for a set of users, keyed by user id.
+    param([string[]] $UserIds, [string] $Path)
+    $requests = [ordered]@{}
+    foreach ($id in $UserIds) { $requests[$id] = "/users/$id/$Path" }
+    return $requests
+}
+
+function Get-GraphCollection {
     <#
-        Reads one collection (the calendar list, or the main calendar's
-        permissions) for a set of users. A 404 means the user has no Exchange
-        Online mailbox; anything else that is not 200 is a mailbox that could not
-        be checked, and is kept apart so it is never reported as "nothing found".
+        Reads one collection per request (a calendar list, or a calendar's
+        permissions). A 404 means the user has no Exchange Online mailbox;
+        anything else that is not 200 is a mailbox that could not be checked, and
+        is kept apart so it is never reported as "nothing found".
     #>
-    param([string[]] $UserIds, [string] $Path, [string] $Activity)
+    param([System.Collections.IDictionary] $Requests, [string] $Activity)
 
     $out = [PSCustomObject]@{
         Ok        = @{}
         NoMailbox = [System.Collections.Generic.List[string]]::new()
         Failed    = @{}
     }
-    if (-not $UserIds -or $UserIds.Count -eq 0) { return $out }
+    if (-not $Requests -or $Requests.Count -eq 0) { return $out }
 
-    $requests = [ordered]@{}
-    foreach ($id in $UserIds) { $requests[$id] = "/users/$id/$Path" }
-    $raw = Invoke-GraphBatch -Requests $requests -Activity $Activity
+    $raw = Invoke-GraphBatch -Requests $Requests -Activity $Activity
 
-    foreach ($id in $UserIds) {
-        $r = $raw[$id]
+    foreach ($key in @($Requests.Keys)) {
+        $r = $raw[$key]
         if ($r.Status -eq 200) {
             $items = [System.Collections.Generic.List[object]]::new()
             if ($r.Body.value) { foreach ($v in $r.Body.value) { $items.Add($v) } }
@@ -616,15 +661,15 @@ function Get-MailboxCollection {
                 try {
                     foreach ($v in (Get-GraphPaged -Uri $next)) { $items.Add($v) }
                 } catch {
-                    $out.Failed[$id] = "next page failed: $($_.Exception.Message)"
+                    $out.Failed[$key] = "next page failed: $($_.Exception.Message)"
                     continue
                 }
             }
-            $out.Ok[$id] = $items.ToArray()
+            $out.Ok[$key] = $items.ToArray()
         } elseif ($r.Status -eq 404) {
-            $out.NoMailbox.Add($id)
+            $out.NoMailbox.Add($key)
         } else {
-            $out.Failed[$id] = if ($r.Body.error) { "$($r.Status) $($r.Body.error.code): $($r.Body.error.message)" } else { "HTTP $($r.Status)" }
+            $out.Failed[$key] = if ($r.Body.error) { "$($r.Status) $($r.Body.error.code): $($r.Body.error.message)" } else { "HTTP $($r.Status)" }
         }
     }
     return $out
@@ -688,18 +733,52 @@ function Resolve-Principal {
     return $principal
 }
 
+function Test-OwnCalendar {
+    # Main, secondary, birthdays, holidays: calendars the user owns are not mappings.
+    param($User, $Calendar)
+    $ownerAddress = $Calendar.owner.address
+    return (-not $ownerAddress -or $User.Addresses.Contains([string]$ownerAddress))
+}
+
+# -- Search -------------------------------------------------------------------
+# A bare keyword matches anywhere in the text; wildcards are taken as given.
+$searchPattern = if ($Search -match '[*?]') { $Search } else { "*$Search*" }
+
+function Test-SearchMatch {
+    param([string[]] $Value)
+    foreach ($v in $Value) { if ($v -and $v -like $searchPattern) { return $true } }
+    return $false
+}
+
+function Test-OwnerMatch {
+    # Owner name, primary address and every alias.
+    param($Principal)
+    $values = @($Principal.Name, $Principal.Address)
+    if ($Principal.Addresses) { $values += @($Principal.Addresses) }
+    return (Test-SearchMatch -Value $values)
+}
+
 # -- Report rows --------------------------------------------------------------
+# One row per owner + user + calendar of that owner. 'main' is the owner's main
+# calendar; a secondary calendar is keyed by its id, and is only read by -Search.
 $script:Pairs = [ordered]@{}
 
+function Get-PairKey {
+    param($Owner, $User, [string] $CalendarKey = 'main')
+    return "$($Owner.Key)|$($User.Key)|$CalendarKey"
+}
+
 function Get-PairRow {
-    # One row per owner + user, shared by the mapping pass and the rights pass.
-    param($Owner, $User)
-    $key = "$($Owner.Key)|$($User.Key)"
+    # Shared by the mapping pass and the rights pass.
+    param($Owner, $User, [string] $CalendarKey = 'main', [string] $CalendarName)
+    $key = Get-PairKey -Owner $Owner -User $User -CalendarKey $CalendarKey
     if (-not $script:Pairs.Contains($key)) {
+        $isMailbox = $Owner.Kind -eq 'Mailbox'
         $script:Pairs[$key] = [PSCustomObject]@{
             Owner          = $Owner.Name
             OwnerAddress   = $Owner.Address
             OwnerType      = $Owner.Kind
+            Calendar       = $(if ($CalendarKey -ne 'main') { $CalendarName } elseif ($isMailbox) { 'Main' } else { '' })
             User           = $User.Name
             UserAddress    = $User.Address
             UserType       = $User.Kind
@@ -712,6 +791,9 @@ function Get-PairRow {
             Note           = ''
             OwnerKey       = $Owner.Key
             UserKey        = $User.Key
+            # Which permission read backs this row: the owner id for the main
+            # calendar, owner id + calendar id for a secondary one.
+            GrantKey       = $(if (-not $isMailbox) { $null } elseif ($CalendarKey -eq 'main') { $Owner.Id } else { "$($Owner.Id)|$CalendarKey" })
         }
     }
     return $script:Pairs[$key]
@@ -766,11 +848,19 @@ try {
         [void]$focus.Add($p.Id)
     }
 
+    # Permission reads whose every grant is reported. Other reads only fill in the
+    # Rights column of rows that are already there.
+    $reportEverything = ($focus.Count -eq 0) -and -not $Search
+    $reportGrantKeys  = [System.Collections.Generic.HashSet[string]]::new()
+    $calendarNames    = @{}
+    $sources          = [System.Collections.Generic.List[object]]::new()
+
     # -- Read calendar lists and rights ---------------------------------------------
     if ($focus.Count -gt 0) {
         # Rights on the focus calendars first: their grantees are the people who
         # can have mapped them, so their lists are read too.
-        $grants = Get-MailboxCollection -UserIds @($focus) -Path 'calendar/calendarPermissions' -Activity 'Reading calendar permissions'
+        $grants = Get-GraphCollection -Requests (New-UserRequest -UserIds @($focus) -Path 'calendar/calendarPermissions') -Activity 'Reading calendar permissions'
+        foreach ($id in $focus) { [void]$reportGrantKeys.Add($id) }
 
         $scanIds = [System.Collections.Generic.HashSet[string]]::new($focus)
         foreach ($oid in $grants.Ok.Keys) {
@@ -781,7 +871,7 @@ try {
             }
         }
         Write-Host "  Reading the calendar lists of $($scanIds.Count) mailbox(es)..." -ForegroundColor DarkGray
-        $lists = Get-MailboxCollection -UserIds @($scanIds) -Path 'calendars' -Activity 'Reading calendar lists'
+        $lists = Get-GraphCollection -Requests (New-UserRequest -UserIds @($scanIds) -Path 'calendars') -Activity 'Reading calendar lists'
 
         # Owners the focus mailboxes mapped: their rights fill in the Rights column.
         $extraOwners = [System.Collections.Generic.HashSet[string]]::new()
@@ -795,30 +885,89 @@ try {
                 }
             }
         }
-        $more = Get-MailboxCollection -UserIds @($extraOwners) -Path 'calendar/calendarPermissions' -Activity 'Reading calendar permissions'
+        $more = Get-GraphCollection -Requests (New-UserRequest -UserIds @($extraOwners) -Path 'calendar/calendarPermissions') -Activity 'Reading calendar permissions'
         foreach ($k in $more.Ok.Keys)     { $grants.Ok[$k]     = $more.Ok[$k] }
         foreach ($k in $more.Failed.Keys) { $grants.Failed[$k] = $more.Failed[$k] }
     } else {
         $allIds = @($script:UserById.Keys)
         Write-Host "  Reading the calendar lists of $($allIds.Count) mailbox(es)..." -ForegroundColor DarkGray
-        $lists = Get-MailboxCollection -UserIds $allIds -Path 'calendars' -Activity 'Reading calendar lists'
+        $lists = Get-GraphCollection -Requests (New-UserRequest -UserIds $allIds -Path 'calendars') -Activity 'Reading calendar lists'
 
-        Write-Host "  Reading the permissions on $($lists.Ok.Count) main calendar(s)..." -ForegroundColor DarkGray
-        $grants = Get-MailboxCollection -UserIds @($lists.Ok.Keys) -Path 'calendar/calendarPermissions' -Activity 'Reading calendar permissions'
+        if ($Search) {
+            # Only the permissions of what matches: the main calendar of an owner
+            # whose name or address matches, and every own calendar whose name
+            # matches - including a secondary one, which has rights of its own.
+            $grantRequests = [ordered]@{}
+            foreach ($uid in @($lists.Ok.Keys)) {
+                $user = $script:UserById[$uid]
+                if (Test-OwnerMatch -Principal $user) {
+                    $grantRequests[$uid] = "/users/$uid/calendar/calendarPermissions"
+                    [void]$reportGrantKeys.Add($uid)
+                    $main = @($lists.Ok[$uid] | Where-Object { $_.isDefaultCalendar }) | Select-Object -First 1
+                    $sources.Add([PSCustomObject]@{ Owner = $user; CalendarKey = 'main'; Name = $(if ($main) { $main.name } else { 'Main' }) })
+                }
+                foreach ($cal in $lists.Ok[$uid]) {
+                    if ($cal.isDefaultCalendar -or -not (Test-OwnCalendar -User $user -Calendar $cal)) { continue }
+                    if (-not (Test-SearchMatch -Value $cal.name)) { continue }
+                    $key = "$uid|$($cal.id)"
+                    $grantRequests[$key] = "/users/$uid/calendars/$([uri]::EscapeDataString([string]$cal.id))/calendarPermissions"
+                    [void]$reportGrantKeys.Add($key)
+                    $calendarNames[$key] = $cal.name
+                    $sources.Add([PSCustomObject]@{ Owner = $user; CalendarKey = [string]$cal.id; Name = $cal.name })
+                }
+            }
+            # The owner of a matching entry in somebody's list: its main rights
+            # fill in the Rights column when no matching own calendar explains it.
+            foreach ($uid in @($lists.Ok.Keys)) {
+                $user = $script:UserById[$uid]
+                foreach ($cal in $lists.Ok[$uid]) {
+                    if ((Test-OwnCalendar -User $user -Calendar $cal) -or -not (Test-SearchMatch -Value $cal.name)) { continue }
+                    $p = Resolve-Principal -Address $cal.owner.address -Name $cal.owner.name
+                    if ($p.Kind -eq 'Mailbox' -and -not $grantRequests.Contains($p.Id)) {
+                        $grantRequests[$p.Id] = "/users/$($p.Id)/calendar/calendarPermissions"
+                    }
+                }
+            }
+            Write-Host "  Reading the permissions on $($grantRequests.Count) matching calendar(s)..." -ForegroundColor DarkGray
+            $grants = Get-GraphCollection -Requests $grantRequests -Activity 'Reading calendar permissions'
+        } else {
+            Write-Host "  Reading the permissions on $($lists.Ok.Count) main calendar(s)..." -ForegroundColor DarkGray
+            $grants = Get-GraphCollection -Requests (New-UserRequest -UserIds @($lists.Ok.Keys) -Path 'calendar/calendarPermissions') -Activity 'Reading calendar permissions'
+        }
     }
 
     # -- Pass 1: what is in each calendar list ------------------------------------
+    $assignedEntries = [System.Collections.Generic.HashSet[string]]::new()
     foreach ($uid in $lists.Ok.Keys) {
         $user = $script:UserById[$uid]
         foreach ($cal in $lists.Ok[$uid]) {
-            $ownerAddress = $cal.owner.address
-            # Own calendars (main, secondary, birthdays, holidays) are not mappings.
-            if (-not $ownerAddress -or $user.Addresses.Contains([string]$ownerAddress)) { continue }
+            if (Test-OwnCalendar -User $user -Calendar $cal) { continue }
 
-            $owner = Resolve-Principal -Address $ownerAddress -Name $cal.owner.name
+            $owner = Resolve-Principal -Address $cal.owner.address -Name $cal.owner.name
             if ($owner.Key -eq $user.Key) { continue }
 
-            $row = Get-PairRow -Owner $owner -User $user
+            $calendarKey  = 'main'
+            $calendarName = $null
+            if ($Search) {
+                $nameHit = Test-SearchMatch -Value $cal.name
+                if (-not $nameHit -and -not (Test-OwnerMatch -Principal $owner)) { continue }
+
+                # An entry named after the keyword, from an owner who has a matching
+                # secondary calendar, is taken to be that calendar - the list entry
+                # itself carries no link back to the folder it came from.
+                if ($nameHit -and $owner.Kind -eq 'Mailbox') {
+                    $candidates = @($sources | Where-Object { $_.Owner.Id -eq $owner.Id -and $_.CalendarKey -ne 'main' })
+                    if ($candidates.Count -gt 0) {
+                        $pick = @($candidates | Where-Object { $_.Name -eq $cal.name })[0]
+                        if (-not $pick) { $pick = $candidates[0] }
+                        $calendarKey  = $pick.CalendarKey
+                        $calendarName = $pick.Name
+                    }
+                }
+            }
+
+            $row = Get-PairRow -Owner $owner -User $user -CalendarKey $calendarKey -CalendarName $calendarName
+            [void]$assignedEntries.Add("$uid|$($cal.id)")
             $row.Mapped   = 'Yes'
             $row.MappedAs = (@(@($row.MappedAs -split '; ') + $cal.name) | Where-Object { $_ } | Select-Object -Unique) -join '; '
             if ($cal.canEdit)             { $row.CanEdit        = 'Yes' } elseif (-not $row.CanEdit)        { $row.CanEdit        = 'No' }
@@ -826,25 +975,26 @@ try {
         }
     }
 
-    # -- Pass 2: the explicit rights on each main calendar ------------------------
+    # -- Pass 2: the explicit rights on each calendar that was read ---------------
     $orgDefault = @{}
-    foreach ($oid in $grants.Ok.Keys) {
-        $owner = $script:UserById[$oid]
-        # Rights of owners outside a -Mailbox scope only fill in the Rights column
-        # of rows that are already in scope; they are not reported on their own.
-        $reportAll = ($focus.Count -eq 0) -or $focus.Contains($oid)
+    foreach ($gk in @($grants.Ok.Keys)) {
+        $ownerId      = $gk.Split('|')[0]
+        $calendarKey  = if ($gk.Contains('|')) { $gk.Substring($gk.IndexOf('|') + 1) } else { 'main' }
+        $calendarName = $calendarNames[$gk]
+        $owner        = $script:UserById[$ownerId]
+        $reportAll    = $reportEverything -or $reportGrantKeys.Contains($gk)
 
-        foreach ($g in $grants.Ok[$oid]) {
+        foreach ($g in $grants.Ok[$gk]) {
             $address = $g.emailAddress.address
             $role    = [string]$g.role
 
             if (-not $address) {
                 if (-not $g.isRemovable) {
                     # "My Organization" - the default for every internal user.
-                    $orgDefault[$oid] = $role
+                    $orgDefault[$gk] = $role
                     if ($reportAll -and $role -notin @('none', 'freeBusyRead')) {
                         $org = [PSCustomObject]@{ Key = 'org'; Kind = 'Organization'; Name = $g.emailAddress.name; Address = '' }
-                        $row = Get-PairRow -Owner $owner -User $org
+                        $row = Get-PairRow -Owner $owner -User $org -CalendarKey $calendarKey -CalendarName $calendarName
                         $row.Rights = $role
                         $row.Status = 'OrgWideDefault'
                         $row.Mapped = ''
@@ -854,7 +1004,7 @@ try {
                     # An entry without an address is an orphaned permission, typically
                     # left behind by a deleted account.
                     $orphan = [PSCustomObject]@{ Key = "orphan:$($g.id)"; Kind = 'Missing'; Name = $g.emailAddress.name; Address = '' }
-                    $row = Get-PairRow -Owner $owner -User $orphan
+                    $row = Get-PairRow -Owner $owner -User $orphan -CalendarKey $calendarKey -CalendarName $calendarName
                     $row.Rights = $role
                     $row.Status = 'GrantedToMissing'
                     $row.Mapped = ''
@@ -865,37 +1015,41 @@ try {
             $grantee = Resolve-Principal -Address $address -Name $g.emailAddress.name
             if ($grantee.Key -eq $owner.Key) { continue }
 
+            if ($grantee.Kind -eq 'Mailbox') {
+                $pairKey = Get-PairKey -Owner $owner -User $grantee -CalendarKey $calendarKey
+                if (-not $reportAll -and -not $focus.Contains($grantee.Id) -and -not $script:Pairs.Contains($pairKey)) { continue }
+                $row = Get-PairRow -Owner $owner -User $grantee -CalendarKey $calendarKey -CalendarName $calendarName
+                $row.Rights = $role
+                continue
+            }
+            if (-not $reportAll) { continue }
+
+            $row = Get-PairRow -Owner $owner -User $grantee -CalendarKey $calendarKey -CalendarName $calendarName
+            $row.Rights = $role
+            $row.Mapped = ''
             switch ($grantee.Kind) {
-                'Mailbox' {
-                    if (-not $reportAll -and -not $focus.Contains($grantee.Id)) { continue }
-                    $row = Get-PairRow -Owner $owner -User $grantee
-                    $row.Rights = $role
-                }
                 'Group' {
-                    if (-not $reportAll) { continue }
-                    $row = Get-PairRow -Owner $owner -User $grantee
-                    $row.Rights = $role
                     $row.Status = 'GrantedToGroup'
-                    $row.Mapped = ''
                     $row.Note   = 'Members are not expanded - check the group calendar list of each member'
                 }
                 'Missing' {
-                    if (-not $reportAll) { continue }
-                    $row = Get-PairRow -Owner $owner -User $grantee
-                    $row.Rights = $role
                     $row.Status = 'GrantedToMissing'
-                    $row.Mapped = ''
                     if ($script:SkipGroups) { $row.Note = 'Groups could not be read - this may be a group rather than a removed mailbox' }
                 }
-                'External' {
-                    if (-not $reportAll) { continue }
-                    $row = Get-PairRow -Owner $owner -User $grantee
-                    $row.Rights = $role
-                    $row.Status = 'SharedExternally'
-                    $row.Mapped = ''
-                }
+                'External' { $row.Status = 'SharedExternally' }
             }
         }
+    }
+
+    # -- Source: where a searched calendar lives ----------------------------------
+    foreach ($src in $sources) {
+        $here = [PSCustomObject]@{ Key = 'source'; Kind = ''; Name = ''; Address = '' }
+        $row = Get-PairRow -Owner $src.Owner -User $here -CalendarKey $src.CalendarKey -CalendarName $src.Name
+        $row.Status   = 'Source'
+        $row.Mapped   = ''
+        $row.MappedAs = $src.Name
+        $row.Note     = if ($src.CalendarKey -eq 'main') { "The calendar lives in this mailbox (main calendar '$($src.Name)')" }
+                        else { 'The calendar lives in this mailbox (secondary calendar)' }
     }
 
     # -- Status -------------------------------------------------------------------
@@ -913,16 +1067,16 @@ try {
                 default {
                     # Without the owner's rights there is nothing to compare with,
                     # so "without right" would be a guess - say so instead.
-                    if (-not $grants.Ok.ContainsKey($row.OwnerKey)) {
+                    if (-not $grants.Ok.ContainsKey($row.GrantKey)) {
                         $row.Status = 'Mapped'
                         $row.Rights = 'unknown'
-                        $row.Note   = if ($grants.Failed.ContainsKey($row.OwnerKey)) { "Rights of this owner could not be read: $($grants.Failed[$row.OwnerKey])" }
+                        $row.Note   = if ($grants.Failed.ContainsKey($row.GrantKey)) { "Rights of this owner could not be read: $($grants.Failed[$row.GrantKey])" }
                                       else { 'Rights of this owner were not read (no mailbox, or its calendar list failed)' }
                     } elseif ($row.Rights -and $row.Rights -ne 'none') {
                         $row.Status = 'Mapped'
                     } else {
                         $row.Status = 'MappedWithoutRight'
-                        $default = $orgDefault[$row.OwnerKey]
+                        $default = $orgDefault[$row.GrantKey]
                         $row.Note = if ($row.Rights -eq 'none') { "Explicit right is 'none'" }
                                     else { "No explicit right - organisation default is '$default'; a group or a secondary calendar may also explain it" }
                     }
@@ -936,6 +1090,16 @@ try {
         if ($row.Rights -eq 'none') { $row.Status = 'Drop'; continue }
         if ($lists.Ok.ContainsKey($row.UserKey)) {
             $row.Status = 'NotMapped'
+            # A calendar of this owner the user does have, under a name that was
+            # not matched to anything, is most likely this one.
+            $userKey = $row.UserKey
+            $other = @($lists.Ok[$userKey] | Where-Object {
+                $_.owner.address -and -not $assignedEntries.Contains("$userKey|$($_.id)") -and
+                (Resolve-Principal -Address $_.owner.address -Name $_.owner.name).Key -eq $row.OwnerKey
+            } | ForEach-Object { $_.name })
+            if ($other.Count -gt 0) {
+                $row.Note = "Has a calendar of this owner as '$($other -join "', '")' - probably this one"
+            }
         } else {
             $row.Status = 'NotChecked'
             $row.Mapped = 'Unknown'
@@ -948,28 +1112,35 @@ try {
     if ($focus.Count -gt 0) {
         $results = @($results | Where-Object { $focus.Contains([string]$_.OwnerKey) -or $focus.Contains([string]$_.UserKey) })
     }
-    $results = @($results | Sort-Object Owner, Status, User)
+    # Per calendar: where it lives first, then who has it.
+    $results = @($results | Sort-Object Owner, Calendar, @{ Expression = { if ($_.Status -eq 'Source') { 0 } else { 1 } } }, Status, User)
 
     # -- Output -------------------------------------------------------------------
     Write-Host ""
     if ($results.Count -eq 0) {
-        Write-Host "  No mapped or shared calendars found." -ForegroundColor DarkGray
+        if ($Search) { Write-Host "  No calendar or owner matches '$Search'." -ForegroundColor DarkGray }
+        else         { Write-Host "  No mapped or shared calendars found." -ForegroundColor DarkGray }
     } else {
-        $results | Format-Table Owner, User, Status, Rights, MappedAs -AutoSize | Out-Host
+        if ($Search) {
+            $results | Format-Table Owner, Calendar, User, Status, Rights, MappedAs -AutoSize | Out-Host
+        } else {
+            $results | Format-Table Owner, User, Status, Rights, MappedAs -AutoSize | Out-Host
+        }
 
         if (-not $OutputPath) {
             $OutputPath = Join-Path $outputDir ("CalendarMappings_{0}.csv" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
         }
         $results |
-            Select-Object Owner, OwnerAddress, OwnerType, User, UserAddress, UserType, Status, Mapped, MappedAs, Rights, CanEdit, CanViewPrivate, Note |
+            Select-Object Owner, OwnerAddress, OwnerType, Calendar, User, UserAddress, UserType, Status, Mapped, MappedAs, Rights, CanEdit, CanViewPrivate, Note |
             Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
         Write-Host "  Report saved: $OutputPath" -ForegroundColor Green
     }
 
     # -- Summary ------------------------------------------------------------------
     $explain = [ordered]@{
+        Source              = 'where the searched calendar lives'
         Mapped              = 'in the calendar list, with an explicit right'
-        MappedWithoutRight  = 'in the list without an explicit right on the main calendar'
+        MappedWithoutRight  = 'in the list without an explicit right on that calendar'
         MappedGroupCalendar = 'Microsoft 365 group calendar'
         MappedOwnerMissing  = 'owner no longer exists - stale entry'
         MappedExternal      = 'owner outside the tenant'
@@ -992,14 +1163,20 @@ try {
     if ($lists.NoMailbox.Count -gt 0) {
         Write-Host "  $($lists.NoMailbox.Count) user(s) have an address but no Exchange Online mailbox - skipped." -ForegroundColor DarkGray
     }
-    $failed = @($lists.Failed.Keys) + @($grants.Failed.Keys | Where-Object { -not $lists.Failed.ContainsKey($_) })
-    if ($failed.Count -gt 0) {
-        Write-Host "  [WARN] $($failed.Count) mailbox(es) could not be read completely:" -ForegroundColor Yellow
-        foreach ($id in ($failed | Select-Object -First 10)) {
-            $reason = if ($lists.Failed.ContainsKey($id)) { $lists.Failed[$id] } else { $grants.Failed[$id] }
-            Write-Host "         $($script:UserById[$id].Address): $reason" -ForegroundColor Yellow
+
+    # Permission reads are keyed by owner id, or owner id + calendar id.
+    $problems = [ordered]@{}
+    foreach ($k in $lists.Failed.Keys)  { $problems[$k] = $lists.Failed[$k] }
+    foreach ($k in $grants.Failed.Keys) {
+        $id = $k.Split('|')[0]
+        if (-not $problems.Contains($id)) { $problems[$id] = $grants.Failed[$k] }
+    }
+    if ($problems.Count -gt 0) {
+        Write-Host "  [WARN] $($problems.Count) mailbox(es) could not be read completely:" -ForegroundColor Yellow
+        foreach ($id in (@($problems.Keys) | Select-Object -First 10)) {
+            Write-Host "         $($script:UserById[$id].Address): $($problems[$id])" -ForegroundColor Yellow
         }
-        if ($failed.Count -gt 10) { Write-Host "         ... and $($failed.Count - 10) more" -ForegroundColor Yellow }
+        if ($problems.Count -gt 10) { Write-Host "         ... and $($problems.Count - 10) more" -ForegroundColor Yellow }
         Write-Host "         403 here usually means an Application Access Policy or RBAC for Applications scopes the app." -ForegroundColor DarkGray
     }
     Write-Host ""
