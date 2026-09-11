@@ -1091,10 +1091,23 @@ try {
         if ($lists.Ok.ContainsKey($row.UserKey)) {
             $row.Status = 'NotMapped'
             # A calendar of this owner the user does have, under a name that was
-            # not matched to anything, is most likely this one.
-            $userKey = $row.UserKey
+            # not matched to anything, may well be this one. Not when that name is
+            # another calendar the owner has - an owner can share several - and,
+            # for a secondary calendar, not when it is the owner's own name: that
+            # entry is their main calendar.
+            $userKey  = $row.UserKey
+            $ownerKey = [string]$row.OwnerKey
+            $notThis  = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            if ($lists.Ok.ContainsKey($ownerKey)) {
+                $ownerUser = $script:UserById[$ownerKey]
+                foreach ($c in $lists.Ok[$ownerKey]) {
+                    if ((Test-OwnCalendar -User $ownerUser -Calendar $c) -and [string]$c.name -ne [string]$row.Calendar) { [void]$notThis.Add([string]$c.name) }
+                }
+            }
+            if ($row.Calendar -ne 'Main' -and $row.Owner) { [void]$notThis.Add([string]$row.Owner) }
             $other = @($lists.Ok[$userKey] | Where-Object {
                 $_.owner.address -and -not $assignedEntries.Contains("$userKey|$($_.id)") -and
+                -not $notThis.Contains([string]$_.name) -and
                 (Resolve-Principal -Address $_.owner.address -Name $_.owner.name).Key -eq $row.OwnerKey
             } | ForEach-Object { $_.name })
             if ($other.Count -gt 0) {

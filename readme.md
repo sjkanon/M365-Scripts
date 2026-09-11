@@ -741,6 +741,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-11 (4)
+| Change |
+|--------|
+| `Get-CalendarMappings.ps1` — first real run (a tenant where "Balie planning" turned out to be a secondary calendar in an archived mailbox) confirmed the Graph assumptions: app-only reads return the calendars users added, and a shared secondary calendar appears in their list under its own name. It also exposed a wrong hint: a `NotMapped` row pointed at "Reservering vergaderzaal LBM" as "probably this one", while that is a *second* calendar the same owner shares. The hint now skips entries named after another calendar of the owner, and - for a secondary calendar - entries named after the owner, which are their main calendar |
+
 ### 2026-09-11 (3)
 | Change |
 |--------|
