@@ -9,6 +9,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | Script | Description |
 |--------|-------------|
 | [`Migrate-Calendar.ps1`](#migrate-calendarps1) | Migrate a shared M365 Group calendar to a Room Mailbox |
+| [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) | Move a shared calendar out of a user's mailbox into its own room/equipment mailbox — items, series, attachments and rights included |
 | [`Set-Calendar-rights.ps1`](#set-calendar-rightsps1) | Grant calendar folder permissions to a user |
 | [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
 | [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
@@ -261,6 +262,86 @@ Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
 Install-Module Microsoft.Graph.Applications    -Scope CurrentUser
 Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 ```
+
+---
+
+### Convert-SharedCalendarToResource.ps1
+
+Moves a shared calendar out of a user's mailbox into a **resource mailbox of its own** (Room or Equipment), with every item and every permission, and then — on request — removes the original. Built for the typical "Balie" calendar: an extra calendar in one person's mailbox that the whole front desk uses, and that leaves with that person.
+
+**Preview by default.** Without `-Apply` the script only reads and reports: how many items, series and exceptions, which permissions it would carry over, and which mailbox it would create. The original is only removed with `-RemoveSourceCalendar`, only after every item has a verified copy, and only after you type the calendar's name (skip with `-Force`).
+
+**What happens on `-Apply`**
+
+| Step | |
+|------|--|
+| Backup | Every item (bodies included), every series occurrence and every permission to `calendar-backup.json`, before anything is created |
+| Mailbox | Room (default) or Equipment mailbox with the source mailbox's language and time zone. Calendar processing for a shared calendar: auto-accept, overlapping items allowed, nothing in an item rewritten, booking window 1080 days (the service maximum) |
+| Rights | Every permission with its **exact** Exchange access rights (custom rights too), `Default` and `Anonymous` as they were, the original owner as `-SourceOwnerRights` (default `Owner`). `-SendSharingInvitation` sends the usual "shared a calendar with you" mail |
+| Categories | The categories in use are created in the new mailbox with their colour |
+| Items | Every item copied — see below |
+| Verify | Every source item must have a complete copy |
+| Remove | Only with `-RemoveSourceCalendar` and a clean verification |
+
+**How items are copied**
+
+- **Series stay series.** Moved or edited occurrences are applied to the copy and cancelled occurrences are cancelled in it, by matching both series occurrence by occurrence. For a series without an end date that is done up to `-SeriesHorizonDays` (1095) ahead. If the two series do not line up, the script leaves that series alone and says so rather than cancelling the wrong occurrences
+- **Times keep their time zone.** Graph returns UTC; each item is written back in the zone it was created in, so a weekly 9:00 item is still 9:00 after the daylight saving switch
+- **Nobody is invited.** Copying a meeting with its attendees would send every attendee a new invitation from the resource mailbox. Organizer and attendees are listed at the bottom of the body instead; the resource mailbox is the organizer of every copy
+- **Attachments** up to 3 MB are copied, inline images included. Larger files and attached Outlook items are saved to the backup folder and listed at the end
+- **Rerunnable.** Every copy carries its source item's id in a hidden property. A run that stops halfway is continued by running the same command: complete copies are skipped, a half-finished series is removed and copied again
+
+**Not carried over, and reported:** delegate flags (a resource mailbox has no delegates), people outside the tenant (re-share by hand), permissions of deleted accounts, attachments on individual series exceptions. A published calendar (`Anonymous`) gets a new link.
+
+> **The main calendar cannot be converted this way.** If the whole mailbox *is* the shared calendar (a `balie@` user account), convert it in place instead — that keeps everything: `Set-Mailbox balie@contoso.com -Type Room`. The script refuses the main calendar and points at that.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Mailbox` | Yes | User mailbox that holds the calendar |
+| `-Calendar` | Yes | Calendar name as shown in Outlook (e.g. `Balie`). Must be owned by that user and not their main calendar |
+| `-ResourceName` | No | Display name of the new mailbox (default: the calendar's name) |
+| `-ResourceAddress` | No | SMTP address (default: the name as alias at the user's domain). An existing room/equipment mailbox at this address is reused |
+| `-ResourceType` | No | `Room` (default) or `Equipment` |
+| `-SourceOwnerRights` | No | Rights for the original owner: `Owner` (default), `PublishingEditor`, `Editor`, `Reviewer`, `None` |
+| `-SendSharingInvitation` | No | Send users a sharing invitation (only possible for Reviewer, Editor, LimitedDetails, AvailabilityOnly) |
+| `-Apply` | No | Actually create, grant and copy. Without it: preview |
+| `-RemoveSourceCalendar` | No | Remove the original after a clean verification. Needs `-Apply` |
+| `-Force` | No | Skip the typed confirmation before removal |
+| `-SeriesHorizonDays` | No | How far ahead exceptions of open-ended series are compared (default 1095) |
+| `-BackupPath` | No | Backup folder (default `C:\Temp\CalendarConvert_<calendar>_<timestamp>`) |
+| `-TenantId` | No | Tenant ID or domain (default: the Exchange session's tenant) |
+| `-ClientId` / `-ClientSecret` / `-CertificateThumbprint` | No | Your own App Registration for app-only Graph access |
+
+**Examples**
+
+```powershell
+# 1. Preview
+.\Convert-SharedCalendarToResource.ps1 -Mailbox jan@contoso.com -Calendar Balie
+
+# 2. Create the room mailbox, copy everything, invite the users - the original stays
+.\Convert-SharedCalendarToResource.ps1 -Mailbox jan@contoso.com -Calendar Balie -Apply -SendSharingInvitation
+
+# 3. Once users have switched: find who still has the old calendar, then remove it
+.\Get-CalendarMappings.ps1 -Search Balie
+.\Convert-SharedCalendarToResource.ps1 -Mailbox jan@contoso.com -Calendar Balie -Apply -RemoveSourceCalendar
+```
+
+Step 3 reruns the copy first: everything already copied is skipped, anything added to the original in the meantime is copied, and only then is the original removed.
+
+**Access**
+
+| | |
+|--|--|
+| Exchange Online | Exchange Administrator (`New-Mailbox`, folder permissions). An existing session is reused |
+| Graph | Application permission `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` for category colours (optional). Same three routes as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): existing app-only session, own App Registration, or a temporary one that is removed when the run ends. Plain REST, so no Exchange/Graph MSAL clash |
+
+**Notes**
+
+- The copy is a snapshot. Run it when the calendar is quiet and tell users to switch right after; step 3 above picks up what was added in between
+- Users who had the original calendar in their list keep an entry that stops working once it is removed — find them first with `Get-CalendarMappings.ps1 -Search`
+- Differs from `Migrate-Calendar.ps1` (group calendar → room): that script copies items without body, series or time zone. This one is meant to be a faithful move
 
 ---
 
