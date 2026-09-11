@@ -13,7 +13,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
 | [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
 | [`Test-CalendarPermissions.ps1`](#test-calendarpermissionsps1) | Audit calendar folder permissions |
-| [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) | Where each calendar is actually mapped in Outlook, next to the rights behind it |
+| [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) | Where each calendar is actually mapped in Outlook, next to the rights behind it — or find one calendar by keyword (`-Search balie`) |
 | [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1) | Audit Full Access, Send As, Send on Behalf delegation |
 | [`Test-DistributionGroupPermissions.ps1`](#test-distributiongrouppermissionsps1) | Audit DG managers, Send As, Send on Behalf, member counts |
 | [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
@@ -301,6 +301,8 @@ Retrieves calendar folder permissions for one or all mailboxes. Uses `FolderType
 
 Shows **where each calendar is mapped**: the calendars that actually sit in a user's calendar list in Outlook, next to the rights behind them. `Test-CalendarPermissions.ps1` answers "who *may* open this calendar"; this script answers "where *is* it" and flags where the two disagree. Read-only.
 
+Looking for one calendar? `-Search balie` finds it by keyword — see *Search by keyword* below.
+
 For every mailbox it reads over Microsoft Graph:
 
 - the **calendar list** (`/users/{id}/calendars`). Every calendar in it owned by somebody else is a mapping: a colleague, a shared mailbox, a room, a Microsoft 365 group, or someone outside the organisation
@@ -310,6 +312,7 @@ and folds both into one row per calendar owner + user:
 
 | Status | Meaning |
 |--------|---------|
+| `Source` | `-Search` only: the matching calendar lives in this mailbox (its main or a secondary calendar) |
 | `Mapped` | In the user's calendar list, and the user has an explicit right |
 | `MappedWithoutRight` | In the list, but no explicit right on the owner's main calendar. Access then comes from the organisation-wide default, a group, a secondary calendar of the owner — or the right was removed and the entry is left over (the user gets an error when opening it) |
 | `MappedGroupCalendar` | A Microsoft 365 group calendar — access follows group membership |
@@ -328,16 +331,43 @@ and folds both into one row per calendar owner + user:
 
 - **Full Access with AutoMapping** adds a whole mailbox to Outlook, calendar included. That is a mailbox permission, not a calendar entry — see [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1)
 - A calendar opened in classic Outlook with *shared calendar improvements* turned off may live only in that Outlook profile and not in the list Graph returns
-- Rights are compared against the owner's **main** calendar. A secondary calendar the owner shared shows up as `MappedWithoutRight`
+- Without `-Search`, rights are compared against the owner's **main** calendar. A secondary calendar the owner shared shows up as `MappedWithoutRight`; `-Search` reads a matching secondary calendar's own rights
+
+**Search by keyword**
+
+`-Search balie` (alias `-Keyword`) answers "where is the Balie calendar?". The keyword is matched case-insensitive, anywhere in the text, against:
+
+- the owner's **name and every address** — the shared mailbox `balie@`, a room, a group called *Balie-team*
+- the calendar's **own name** — a secondary calendar *Balie* in somebody's mailbox
+
+Wildcards (`*`, `?`) are used as given. For each match the report shows where the calendar lives (`Source`), every mailbox that has it in its calendar list, and everyone with an explicit right on it — for a secondary calendar its own rights, which a normal run does not read. The `Calendar` column says which calendar of the owner a row is about.
+
+```
+Owner      Calendar       User Status              Rights MappedAs
+-----      --------       ---- ------              ------ --------
+Anna       Balie Planning      Source                     Balie Planning
+Anna       Balie Planning Lisa Mapped              read   Balie Planning
+Anna       Balie Planning Jan  NotMapped           write
+Balie      Main                Source                     Agenda
+Balie      Main           Kees Mapped              read   Balie
+Balie      Main           Piet Mapped              write  Balie
+Balie      Main           Lisa NotMapped           read
+Balie-team                Kees MappedGroupCalendar        Balie-team
+```
+
+Every calendar list is still read — a mapping can sit in any mailbox — so a search takes about as long as a full scan for the lists, but only reads the permissions of the matching calendars.
+
+> A calendar list entry carries no link back to the calendar it came from. A shared secondary calendar is therefore recognised by its name matching the keyword. If a user has it under another name, it shows up as `NotMapped` with a note naming the entry that is probably it (*"Has a calendar of this owner as 'Planning Anna' - probably this one"*).
 
 **Scope**
 
-Without `-Mailbox` every mailbox in the tenant is scanned — the only way to find mappings that rest on the organisation-wide default or on a group. With `-Mailbox` the report is limited to rows where one of those mailboxes is the **owner or the user**: their own calendar lists are read, plus the lists of everyone with an explicit right on their calendar. For a complete "where is X's calendar mapped", run without `-Mailbox` and filter the CSV on `Owner`.
+Without `-Mailbox` every mailbox in the tenant is scanned — the only way to find mappings that rest on the organisation-wide default or on a group. With `-Mailbox` the report is limited to rows where one of those mailboxes is the **owner or the user**: their own calendar lists are read, plus the lists of everyone with an explicit right on their calendar. For a complete "where is X's calendar mapped", use `-Search` instead. `-Mailbox` and `-Search` cannot be combined.
 
 **Parameters**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
+| `-Search` | No | Keyword to find one calendar by (owner name/address or calendar name). Alias `-Keyword`. Cannot be combined with `-Mailbox` |
 | `-Mailbox` | No | One or more mailbox addresses. Limits the report to rows where they are owner or user. If omitted, every mailbox is scanned |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
 | `-TenantId` | No | Tenant ID or domain. Optional for the temporary-app route — the sign-in then decides, and the tenant is printed |
@@ -348,6 +378,9 @@ Without `-Mailbox` every mailbox in the tenant is scanned — the only way to fi
 **Examples**
 
 ```powershell
+# Where is the Balie calendar, and who has it mapped?
+.\Get-CalendarMappings.ps1 -Search balie
+
 # Where is every calendar in the tenant mapped?
 .\Get-CalendarMappings.ps1 -TenantId contoso.com
 
