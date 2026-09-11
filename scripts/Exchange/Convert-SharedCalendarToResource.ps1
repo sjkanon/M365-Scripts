@@ -117,7 +117,13 @@
     Asks for the calendar name as confirmation unless -Force is given.
 
 .PARAMETER Force
-    Skip the typed confirmation before the original calendar is removed.
+    Skip the typed confirmation before the original calendar is removed. In a
+    non-interactive session (a scheduler, an RMM agent) nobody can type it, so
+    there the original is only removed with -Force.
+
+.PARAMETER PassThru
+    Return a result object (ResourceAddress, Items, Verified, SourceRemoved,
+    BackupPath) for a calling script. Move-SharedCalendar.ps1 uses it.
 
 .PARAMETER SeriesHorizonDays
     How far ahead exceptions and cancellations of a series without an end date
@@ -168,6 +174,7 @@ param(
     [switch] $Apply,
     [switch] $RemoveSourceCalendar,
     [switch] $Force,
+    [switch] $PassThru,
     [ValidateRange(30, 3650)]
     [int]    $SeriesHorizonDays = 1095,
     [string] $BackupPath,
@@ -187,6 +194,12 @@ function Write-Step { param([string] $Message) Write-Host ""; Write-Host "  $Mes
 function Write-Ok   { param([string] $Message) Write-Host "  [OK]   $Message" -ForegroundColor Green }
 function Write-Warn { param([string] $Message) Write-Host "  [WARN] $Message" -ForegroundColor Yellow }
 function Write-Info { param([string] $Message) Write-Host "         $Message" -ForegroundColor DarkGray }
+
+function Test-CanPrompt {
+    # Read-Host needs a person: not in a service, not under -NonInteractive.
+    if (-not [Environment]::UserInteractive) { return $false }
+    return -not ([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^-noni' })
+}
 
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
@@ -419,9 +432,10 @@ function Connect-GraphForCalendar {
     <# Establishes app-only Calendars.ReadWrite. Returns $true when Graph is usable. #>
     param([string] $Tenant)
 
-    # 1. An app-only session the caller already established.
+    # 1. An app-only session the caller already established - unless an app was
+    #    named with -ClientId, which always wins.
     $ctx = $null
-    try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {}
+    if (-not $ClientId) { try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {} }
     if ($ctx -and $ctx.AuthType -eq 'AppOnly') {
         $have = @($ctx.Scopes)
         if ((Get-MissingRole -Have $have -Wanted $RequiredRoles).Count -gt 0) {
@@ -1128,6 +1142,10 @@ try {
         Write-Info "- copy $($sourceEvents.Count) item(s) and verify every one"
         Write-Info "- $(if ($RemoveSourceCalendar) { 'then remove the original calendar' } else { 'keep the original (add -RemoveSourceCalendar to remove it)' })"
         Write-Host ""
+        if ($PassThru) {
+            [PSCustomObject]@{ Applied = $false; ResourceName = $ResourceName; ResourceAddress = $ResourceAddress; ResourceType = $ResourceType
+                               Items = $sourceEvents.Count; Verified = $false; SourceRemoved = $false; BackupPath = $null }
+        }
         return
     }
 
@@ -1302,22 +1320,29 @@ try {
     }
 
     # -- Remove the original -----------------------------------------------------
+    $removed = $false
     Write-Step '9. Original calendar'
     if (-not $RemoveSourceCalendar) {
         Write-Ok "Kept - add -RemoveSourceCalendar once users have switched"
     } elseif (-not $clean) {
         Write-Warn "NOT removed - the copy is incomplete. Fix the items above and run the same command again."
     } else {
-        $go = $true
-        if (-not $Force -and [Environment]::UserInteractive) {
-            Write-Host ""
-            $answer = Read-Host "  Type the calendar name '$($cal.name)' to remove it from $($script:SourceUpn)"
-            $go = ($answer -ceq [string]$cal.name)
+        # Removal needs a typed confirmation or an explicit -Force. Without a
+        # person at the keyboard there is nobody to confirm, so no removal.
+        $go = [bool]$Force
+        if (-not $Force) {
+            if (Test-CanPrompt) {
+                Write-Host ""
+                $answer = Read-Host "  Type the calendar name '$($cal.name)' to remove it from $($script:SourceUpn)"
+                $go = ($answer -ceq [string]$cal.name)
+                if (-not $go) { Write-Warn "Not confirmed - the original calendar stays." }
+            } else {
+                Write-Warn "NOT removed - a non-interactive session cannot confirm it. Add -Force to remove it unattended."
+            }
         }
-        if (-not $go) {
-            Write-Warn "Not confirmed - the original calendar stays."
-        } else {
+        if ($go) {
             Invoke-Graph -Method DELETE -Uri "https://graph.microsoft.com/v1.0/users/$($script:SourceId)/calendars/$calId" | Out-Null
+            $removed = $true
             Write-Ok "Calendar '$($cal.name)' removed from $($script:SourceUpn) - the backup is in $BackupPath"
         }
     }
@@ -1337,6 +1362,10 @@ try {
     Write-Info "Who still has the old calendar in their list:"
     Write-Info "  .\Get-CalendarMappings.ps1 -Search '$($cal.name)'"
     Write-Host ""
+    if ($PassThru) {
+        [PSCustomObject]@{ Applied = $true; ResourceName = $ResourceName; ResourceAddress = $ResourceAddress; ResourceType = $ResourceType
+                           Items = $total; Verified = $clean; SourceRemoved = $removed; BackupPath = $BackupPath }
+    }
 } finally {
     Remove-TempApp
     if ($script:ConnectedExo) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }

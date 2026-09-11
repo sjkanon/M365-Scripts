@@ -425,9 +425,10 @@ function Get-DelegatedTokenByDeviceCode {
 function Connect-GraphForCalendars {
     <# Establishes app-only read access. Returns $true when Graph is usable. #>
 
-    # 1. An app-only session the caller already established.
+    # 1. An app-only session the caller already established - unless an app was
+    #    named with -ClientId, which always wins.
     $ctx = $null
-    try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {}
+    if (-not $ClientId) { try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {} }
     if ($ctx -and $ctx.AuthType -eq 'AppOnly') {
         $have = @($ctx.Scopes)
         $missing = Get-MissingRole -Have $have -Wanted $RequiredRoles
