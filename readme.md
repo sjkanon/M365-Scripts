@@ -787,6 +787,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-15 (3)
+| Change |
+|--------|
+| `New-StructureConfig.ps1 -All` asks for the names that were still being derived behind the operator's back: per pillar the channel name, the folder, the content type and both group names and the view title; plus the library behind the channels, the column and content type groups, the term set, the team site URL and the label every column carries for the user. Each keeps its derivation as the suggestion, so `-All` is still mostly Enters |
+| Only the column *internal* names stay fixed. They are never shown to anyone, and changing one after documents carry it loses the metadata on those documents |
+| Fixed: an optional question could never be turned down, because Enter means "take the suggestion". Optional questions now say `(of "geen")` and accept geen/none/nee/- as a real "none" — before this, answering nothing to "customer library" still created FUTECH |
+| Fixed a one-item list coming back as a bare string: PowerShell unrolls a single-element array on return, so a client with one brand crashed the wizard on `.Count`. Returned with a leading comma now |
+| Fixed two `$x = if (...) { @() }` assignments that yield `$null` rather than an empty array — a configuration with no sales pillar or no suppliers died at the summary |
+| All three paths verified end to end against the config validator: the full six-pillar default, a `-All` run with deliberately different names throughout, and a minimal two-pillar tenant with no private channel, no suppliers, no regions and no customer library |
 ### 2026-09-15 (2)
 | Change |
 |--------|

@@ -169,6 +169,28 @@ brackets, so a standard build is mostly Enters and two real answers:
 Everything else is derived: per pillar a channel, a content type, two security groups and
 a grouped view; per brand a view spanning every pillar.
 
+Optional questions say `(of "geen")` in the hint — type that to turn the suggestion down,
+because Enter means "take it".
+
+#### `-All` — decide every name yourself
+
+`New-StructureConfig.ps1 -All` also asks for the names that are otherwise derived, each
+still with the derivation as its suggestion:
+
+| Asked with `-All` | Suggestion |
+|---|---|
+| Team site URL | `https://<tenant>.sharepoint.com/sites/<alias>` |
+| The library behind the channels | `Documents` — ask this on a non-English tenant |
+| Column group and content type group | the team name |
+| Term set name | `Leveranciers` |
+| The label of every column, as users see it | Merk, Pijler, Regio, Leverancier, Taal, Contenttype, … |
+| Per pillar: channel name, folder, content type, both group names, view title | derived from the pillar name |
+| Customer library: group and content type name | `<prefix>-Klanten-Extern`, `Klantmedia` |
+
+The column *internal* names (`PsMerk`, `PsTaal`, …) stay fixed either way. They are never
+shown to anyone, and changing one after documents carry it loses the metadata on those
+documents.
+
 **Two things are generated once and then fixed**, because SharePoint keys data to them:
 the column internal names (`PsMerk`, `PsTaal`, …) and the content type IDs. Display names,
 channel names and group names can all be changed afterwards; those two cannot without
