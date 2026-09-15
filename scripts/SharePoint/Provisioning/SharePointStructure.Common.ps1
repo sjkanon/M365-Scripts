@@ -680,12 +680,14 @@ function New-StructureApp {
     #   AllSites.FullControl   content types, list permissions, breaking inheritance
     #   TermStore.ReadWrite    the Leverancier term set
     #   User.Read.All          resolving people behind sharing links
-    #   Group.ReadWrite.All    creating the pillar security groups (-EnsureGroups)
+    #   Group.ReadWrite.All    the pillar security groups, and creating the team
+    #   Channel.Create         the channels, the private MGMT one included
     $resources = @(
         @{ AppId = '00000003-0000-0ff1-ce00-000000000000'; Name = 'SharePoint'
            Scopes = @('AllSites.FullControl', 'TermStore.ReadWrite.All', 'User.Read.All') }
         @{ AppId = '00000003-0000-0000-c000-000000000000'; Name = 'Graph'
-           Scopes = @('User.Read', 'Group.ReadWrite.All', 'Directory.Read.All') }
+           Scopes = @('User.Read', 'Group.ReadWrite.All', 'Directory.Read.All',
+                      'Channel.Create', 'ChannelSettings.ReadWrite.All', 'Team.Create') }
     )
 
     foreach ($resource in $resources) {

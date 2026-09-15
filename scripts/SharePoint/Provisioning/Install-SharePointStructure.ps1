@@ -131,6 +131,8 @@ param(
     [string] $ClientId,
     [string] $Tenant,
 
+    [switch] $SkipTeam,
+    [string] $Owner,
     [switch] $RunAudit,
     [switch] $SkipChannelFolderPermissions,
     [switch] $RemoveStockContentType,
@@ -145,9 +147,36 @@ Set-StrictMode -Version Latest
 
 $simulate = [bool] $WhatIfPreference
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'petsolutions.config.json' }
-$config = Import-StructureConfig -Path $ConfigPath
+# No configuration named, or the one lying here is still the shipped example? Then ask
+# the questions instead of telling the operator to go and edit JSON.
+if (-not $ConfigPath) {
+    $candidates = @(Get-ChildItem -Path $PSScriptRoot -Filter '*.config.json' -ErrorAction SilentlyContinue |
+                    Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'CHANGEME' })
+
+    if ($candidates.Count -eq 1) {
+        $ConfigPath = $candidates[0].FullName
+        Write-Host "  Configuratie: $($candidates[0].Name)" -ForegroundColor DarkGray
+    } elseif ($candidates.Count -gt 1) {
+        throw ("More than one configuration here - pass -ConfigPath. Found: {0}" -f (($candidates | ForEach-Object { $_.Name }) -join ', '))
+    } else {
+        Write-Host ''
+        Write-Host '  Nog geen configuratie voor deze klant. Ik stel eerst een paar vragen.' -ForegroundColor Cyan
+        & (Join-Path $PSScriptRoot 'New-StructureConfig.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Configuration was not created.' }
+
+        $made = @(Get-ChildItem -Path $PSScriptRoot -Filter '*.config.json' |
+                  Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'CHANGEME' } |
+                  Sort-Object LastWriteTime -Descending)
+        if ($made.Count -eq 0) { throw 'Configuration was not created.' }
+        $ConfigPath = $made[0].FullName
+    }
+}
+
+# Unless the team already exists, the site URLs are what step 1 discovers and writes
+# back - so placeholders there are expected rather than an error.
+$config = Import-StructureConfig -Path $ConfigPath -AllowPlaceholders:(-not $SkipTeam)
 if (-not $Tenant) { $Tenant = $config.tenant }
+if ($Tenant -match 'CHANGEME') { throw "Fill in the tenant in $ConfigPath first, or delete that file and rerun to be asked instead." }
 
 Assert-PnPModule
 
@@ -256,8 +285,33 @@ try {
         exit 0
     }
 
-    # -- 1. Metadata -----------------------------------------------------------
-    Invoke-Step -Name '1. Metadata model (term set, columns, content types)' `
+    # -- 1. Team and channels --------------------------------------------------
+    # First, because everything below needs a site to connect to - and the private
+    # channel's site URL does not exist until the channel does.
+    if ($SkipTeam) {
+        Write-Head '1. Team and channels'
+        Write-Skip 'Skipped (-SkipTeam) - the team and its channels are assumed to exist'
+    } else {
+        $teamArgs = @{ ConfigPath = $ConfigPath; Tenant = $Tenant; Interactive = $true }
+        if ($ClientId) { $teamArgs['ClientId'] = $ClientId }
+        if ($Owner)    { $teamArgs['Owner'] = $Owner }
+        if ($simulate) { $teamArgs['WhatIf'] = $true }
+
+        Invoke-Step -Name '1. Team and channels (incl. the private MGMT channel)' `
+            -Script 'New-SharePointTeam.ps1' -Arguments $teamArgs | Out-Null
+
+        # That step writes the discovered site URLs back into the file, so everything
+        # below has to read the config again rather than the copy loaded at startup.
+        if (-not $simulate) {
+            $config = Import-StructureConfig -Path $ConfigPath
+            foreach ($property in $config.sites.PSObject.Properties) {
+                Write-Ok "site '$($property.Name)' -> $($property.Value)"
+            }
+        }
+    }
+
+    # -- 2. Metadata -----------------------------------------------------------
+    Invoke-Step -Name '2. Metadata model (term set, columns, content types)' `
         -Script 'New-SharePointMetadata.ps1' -Arguments $common | Out-Null
 
     # -- 2. Libraries, groups, views and permissions ----------------------------
@@ -266,19 +320,19 @@ try {
     if ($SkipChannelFolderPermissions) { $librariesArgs['SkipChannelFolderPermissions'] = $true }
     if ($RemoveStockContentType)       { $librariesArgs['RemoveStockContentType'] = $true }
 
-    Invoke-Step -Name '2. Libraries, groups, views and permissions' `
+    Invoke-Step -Name '3. Libraries, groups, views and permissions' `
         -Script 'Set-SharePointLibraries.ps1' -Arguments $librariesArgs | Out-Null
 
     # -- 3. Verify -------------------------------------------------------------
     # Exit code 2 is drift, not a failure: on a -WhatIf run everything is "missing"
     # because nothing was built, and that is the expected answer.
     if ($SkipVerify) {
-        Write-Head '3. Verification'
+        Write-Head '4. Verification'
         Write-Skip 'Skipped (-SkipVerify)'
     } else {
         $verifyArgs = @{ ConfigPath = $ConfigPath; Tenant = $Tenant; Interactive = $true; IncludeGroups = $true }
         if ($ClientId) { $verifyArgs['ClientId'] = $ClientId }
-        $verify = Invoke-Step -Name '3. Verification (read only)' `
+        $verify = Invoke-Step -Name '4. Verification (read only)' `
             -Script 'Test-SharePointStructure.ps1' -Arguments $verifyArgs -AcceptExitCode @(0, 2)
         if ($verify -eq 2 -and -not $simulate) { $exitCode = 2 }
     }
@@ -288,7 +342,7 @@ try {
         $auditArgs = $common.Clone()
         # Exit 2 means "something is shared wider than its tag allows" - worth knowing
         # on day one, but not a reason to call the build failed.
-        Invoke-Step -Name '4. First deelstatus audit' `
+        Invoke-Step -Name '5. First deelstatus audit' `
             -Script 'Update-SharePointShareStatus.ps1' -Arguments $auditArgs -AcceptExitCode @(0, 2) | Out-Null
     }
 
