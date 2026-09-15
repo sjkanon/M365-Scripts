@@ -367,18 +367,24 @@ function Set-StructureContentType {
     if (-not $contentType) {
         if (-not $PSCmdlet.ShouldProcess($Definition.name, 'Create content type')) { return }
 
-        $parent = Get-PnPContentType -Identity '0x0101' -Connection $Connection
         $addSplat = @{
-            Name              = $Definition.name
-            Description       = (Get-ConfigValue $Definition 'description' '')
-            Group             = (Get-ConfigValue $config 'contentTypeGroup' 'Custom')
-            ParentContentType = $parent
-            Connection        = $Connection
+            Name        = $Definition.name
+            Description = (Get-ConfigValue $Definition 'description' '')
+            Group       = (Get-ConfigValue $config 'contentTypeGroup' 'Custom')
+            Connection  = $Connection
         }
-        # A fixed ID keeps the structure reproducible across tenants, which is what
-        # makes the drift check able to say "this is the same content type".
+
+        # The ID or the parent, never both - PnP refuses the combination, and it is
+        # right to: a content type ID already names its parent. Ours are
+        # 0x0101 + 00 + a GUID, so 0x0101 (Document) is the parent by construction.
+        # Keeping the fixed ID is what lets the drift check say "this is the same
+        # content type" on another tenant.
         $id = Get-ConfigValue $Definition 'id'
-        if ($id) { $addSplat['ContentTypeId'] = $id }
+        if ($id) {
+            $addSplat['ContentTypeId'] = $id
+        } else {
+            $addSplat['ParentContentType'] = Get-PnPContentType -Identity '0x0101' -Connection $Connection
+        }
 
         $contentType = Add-PnPContentType @addSplat
         Write-Change "content type '$($Definition.name)' created"
