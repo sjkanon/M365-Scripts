@@ -273,6 +273,39 @@ function Get-FieldChoiceValue {
     return @($node.ChildNodes | ForEach-Object { $_.InnerText })
 }
 
+function Test-FieldHiddenInForms {
+    <#
+        Whether a column is already kept out of the new and edit forms. Read from the
+        schema XML, which is on the object Get-PnPField handed back - the typed
+        properties would each cost their own round trip.
+    #>
+    param([Parameter(Mandatory)] $Field)
+
+    $schema = [string] $Field.SchemaXml
+    return ($schema -match 'ShowInNewForm="FALSE"') -and ($schema -match 'ShowInEditForm="FALSE"')
+}
+
+function Set-FieldHiddenInForms {
+    <#
+        Take a column out of the new and edit forms while leaving it in the views and
+        in the details pane. That is what a script-maintained column needs: Deelstatus
+        says what IS, so asking a user to fill it in is asking for a wrong answer.
+
+        Not the same as hiding the field outright - it stays readable, filterable and
+        groupable, it just stops being a question.
+    #>
+    param(
+        [Parameter(Mandatory)] $Field,
+        [Parameter(Mandatory)] $Connection
+    )
+
+    $Field.SetShowInNewForm($false)
+    $Field.SetShowInEditForm($false)
+    # $true: reach the lists that already use the column, not just new ones.
+    $Field.UpdateAndPushChanges($true)
+    Invoke-PnPQuery -Connection $Connection
+}
+
 function Get-SecurablePrincipal {
     <#
         Resolve an Entra ID security group to a SharePoint principal.

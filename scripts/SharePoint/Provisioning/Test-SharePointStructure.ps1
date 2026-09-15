@@ -243,6 +243,12 @@ function Test-StructureColumn {
                 -Expected $group -Actual $field.Group
         }
 
+        if ((Get-ConfigValue $definition 'readOnlyInForms' $false) -and -not (Test-FieldHiddenInForms -Field $field)) {
+            $issues += 'form visibility'
+            Add-Finding -Kind Different -Area 'Column' -SiteKey $SiteKey -Object "$name in the new/edit form" `
+                -Expected 'hidden - the audit maintains it' -Actual 'shown as a question'
+        }
+
         if ($definition.type -in @('Choice', 'MultiChoice')) {
             $wanted  = @(Get-ConfigValue $definition 'choices' @())
             $current = Get-FieldChoiceValue -Field $field

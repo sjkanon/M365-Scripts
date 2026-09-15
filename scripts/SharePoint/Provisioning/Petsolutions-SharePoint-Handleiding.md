@@ -84,11 +84,13 @@ zien en je bent klaar.
  ─────────────────────────────────────────────
   Pijler              Leveranciers               ← vult zichzelf in
   Status              Actief                     ← vult zichzelf in
-  Deelstatus          Niet gedeeld               ← wordt automatisch bijgehouden
 ```
 
-De velden met een `*` zijn verplicht. De drie onderste vullen zichzelf in — daar hoef je
-niets mee te doen.
+De velden met een `*` zijn verplicht; onder elk veld staat een regeltje uitleg. De twee
+onderste vullen zichzelf in — daar hoef je niets mee te doen.
+
+**Deelstatus staat niet in het formulier.** Die kolom wordt automatisch bijgehouden, dus
+er wordt niet naar gevraagd. Je ziet hem wel in de bestandslijst staan.
 
 ### C. Slepen of via de gesynchroniseerde map — let op
 
@@ -147,7 +149,7 @@ Dit is de vraag die het vaakst gesteld wordt. Het antwoord is geruststellend:
 | **Vertrouwelijkheid** | Intern / Deelbaar met klant / Vertrouwelijk | Staat standaard op Intern. Zet hem op "Deelbaar met klant" als een klant het mag krijgen |
 | **Status** | Actief / Te archiveren / Verouderd | Staat op Actief. Zet op "Te archiveren" wat weg mag maar nog niet verwijderd |
 | **Pijler** | — | Vult zichzelf in op basis van het kanaal |
-| **Deelstatus** | — | **Niet invullen.** Dit wordt automatisch bijgehouden, zie punt 7 |
+| **Deelstatus** | — | Staat niet in het formulier — wordt automatisch bijgehouden, zie punt 7 |
 
 ---
 
