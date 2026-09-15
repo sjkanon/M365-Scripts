@@ -480,6 +480,21 @@ try {
                 Test-StructureContainer -Definition $entry -Connection $connection
             }
         }
+
+        foreach ($group in (Get-ConfigValue $config 'libraryViews' @() | Where-Object { $_.site -eq $siteKey })) {
+            Write-Step "Cross-cutting views on '$($group.list)'"
+            if (-not (Get-PnPList -Identity $group.list -Connection $connection -ErrorAction SilentlyContinue)) {
+                Add-Finding -Kind Missing -Area 'View' -SiteKey $siteKey -Object "library '$($group.list)'"
+                continue
+            }
+            foreach ($view in $group.views) {
+                if (Get-PnPView -List $group.list -Identity $view.title -Connection $connection -ErrorAction SilentlyContinue) {
+                    Write-Pass "view '$($view.title)'"
+                } else {
+                    Add-Finding -Kind Missing -Area 'View' -SiteKey $siteKey -Object "$($group.list) / '$($view.title)'"
+                }
+            }
+        }
     }
 
     if ($IncludeGroups) {

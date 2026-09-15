@@ -207,6 +207,67 @@
     { "displayName": "SG-PETSOL-FUTECH-Klanten",   "mailNickname": "sg-petsol-futech-klanten",   "description": "Petsolutions - externe klanten met leestoegang tot FUTECH Images and videos" }
   ],
 
+  "libraryViews": [
+    {
+      "site": "team",
+      "list": "Documents",
+      "views": [
+        {
+          "title": "Alles - Butterstone",
+          "description": "Elk bestand met Merk = Butterstone of Beide, dwars door alle pijlers heen.",
+          "recursive": true,
+          "groupBy": "PsPijler",
+          "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Butterstone</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
+          "fields": [ "DocIcon", "LinkFilename", "PsPijler", "PsContenttype", "PsTaal", "PsVertrouwelijkheid", "PsDeelstatus", "PsStatus", "Modified" ]
+        },
+        {
+          "title": "Alles - Laseto",
+          "description": "Elk bestand met Merk = Laseto of Beide, dwars door alle pijlers heen.",
+          "recursive": true,
+          "groupBy": "PsPijler",
+          "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Laseto</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
+          "fields": [ "DocIcon", "LinkFilename", "PsPijler", "PsContenttype", "PsTaal", "PsVertrouwelijkheid", "PsDeelstatus", "PsStatus", "Modified" ]
+        },
+        {
+          "title": "Nog te taggen",
+          "description": "Bestanden zonder merk - meestal binnengesleept of via de gesynchroniseerde map gekopieerd.",
+          "recursive": true,
+          "where": "<IsNull><FieldRef Name='PsMerk' /></IsNull>",
+          "fields": [ "DocIcon", "LinkFilename", "PsPijler", "Editor", "Modified" ]
+        },
+        {
+          "title": "Extern gedeeld",
+          "description": "Alles wat buiten de organisatie open staat. Gevuld door de deelstatus-audit.",
+          "recursive": true,
+          "groupBy": "PsVertrouwelijkheid",
+          "where": "<Contains><FieldRef Name='PsDeelstatus' /><Value Type='Text'>Extern</Value></Contains>",
+          "fields": [ "DocIcon", "LinkFilename", "PsDeelstatus", "PsVertrouwelijkheid", "PsPijler", "PsMerk", "Modified" ]
+        },
+        {
+          "title": "Te archiveren",
+          "description": "Alles met Status = Te archiveren of Verouderd, om periodiek op te ruimen.",
+          "recursive": true,
+          "groupBy": "PsStatus",
+          "where": "<Or><Eq><FieldRef Name='PsStatus' /><Value Type='Text'>Te archiveren</Value></Eq><Eq><FieldRef Name='PsStatus' /><Value Type='Text'>Verouderd</Value></Eq></Or>",
+          "fields": [ "DocIcon", "LinkFilename", "PsStatus", "PsPijler", "PsMerk", "Editor", "Modified" ]
+        }
+      ]
+    },
+    {
+      "site": "team",
+      "list": "FUTECH Images and videos",
+      "views": [
+        {
+          "title": "Nog te taggen",
+          "description": "Media zonder merk.",
+          "recursive": true,
+          "where": "<IsNull><FieldRef Name='PsMerk' /></IsNull>",
+          "fields": [ "DocIcon", "LinkFilename", "Editor", "Modified" ]
+        }
+      ]
+    }
+  ],
+
   "containers": [
     {
       "key": "MGMT",

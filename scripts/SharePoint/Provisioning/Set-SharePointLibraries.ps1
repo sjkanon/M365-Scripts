@@ -439,27 +439,14 @@ function Set-StructureContainer {
         # On a shared channel library the views are list-wide, so the pillar name goes
         # in the title - six views called "Op merk" would be unusable.
         $viewTitle = if ($kind -eq 'ChannelFolder') { "$($Definition.title) - $($view.title)" } else { $view.title }
-        $existing  = Get-PnPView -List $listTitle -Identity $viewTitle -Connection $Connection -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Ok "view '$viewTitle'"
-        } elseif ($PSCmdlet.ShouldProcess("$listTitle / $viewTitle", 'Create view')) {
-            $query = ''
-            $groupBy = Get-ConfigValue $view 'groupBy'
-            if ($groupBy) {
-                $query = "<GroupBy Collapse=`"TRUE`" GroupLimit=`"100`"><FieldRef Name=`"$groupBy`" /></GroupBy>"
+        if ($PSCmdlet.ShouldProcess("$listTitle / $viewTitle", 'Create view')) {
+            if (Add-StructureView -ListTitle $listTitle -Title $viewTitle -Definition $view `
+                    -Connection $Connection -WhatIfMode:$simulate) {
+                Write-Change "view '$viewTitle' created"
+                $script:changeCount++
+            } else {
+                Write-Ok "view '$viewTitle'"
             }
-            $viewSplat = @{
-                List       = $listTitle
-                Title      = $viewTitle
-                Fields     = @(Get-ConfigValue $view 'fields' @())
-                Connection = $Connection
-            }
-            if ($query) { $viewSplat['Query'] = $query }
-            # Never -SetAsDefault: the default view of a Teams library is what every
-            # member of the channel sees the moment they open Files.
-            Add-PnPView @viewSplat | Out-Null
-            Write-Change "view '$viewTitle' created"
-            $script:changeCount++
         }
     }
 
@@ -550,6 +537,31 @@ try {
 
         foreach ($entry in ($containers | Where-Object { $_.site -eq $siteKey })) {
             Set-StructureContainer -Definition $entry -Connection $connection
+        }
+
+        # Cross-cutting views, after the containers: these span every pillar folder in
+        # one library, which is what makes "everything of one brand" a flat list. They
+        # only make sense once the columns are on the library, so they come last.
+        foreach ($group in (Get-ConfigValue $config 'libraryViews' @() | Where-Object { $_.site -eq $siteKey })) {
+            if ($Container -and -not (
+                $containers | Where-Object { (Get-ConfigValue $_ 'list' $_.title) -eq $group.list })) {
+                continue   # -Container narrowed the run past this library
+            }
+            Write-Step "Cross-cutting views on '$($group.list)'"
+            if (-not (Get-PnPList -Identity $group.list -Connection $connection -ErrorAction SilentlyContinue)) {
+                Write-Skip "library '$($group.list)' not found - skipped"
+                continue
+            }
+            foreach ($view in $group.views) {
+                if (-not $PSCmdlet.ShouldProcess("$($group.list) / $($view.title)", 'Create view')) { continue }
+                if (Add-StructureView -ListTitle $group.list -Title $view.title -Definition $view `
+                        -Connection $connection -WhatIfMode:$simulate) {
+                    Write-Change "view '$($view.title)' created"
+                    $changeCount++
+                } else {
+                    Write-Ok "view '$($view.title)'"
+                }
+            }
         }
     }
 

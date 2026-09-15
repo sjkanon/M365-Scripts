@@ -430,6 +430,61 @@ function Get-StructureRoleReport {
     }
 }
 
+function Add-StructureView {
+    <#
+        Create one view from a configuration entry, if it is not already there.
+
+        Handles the three things the config can ask for beyond a column list:
+          groupBy    a GroupBy clause - never on a multi-value column, SharePoint
+                     refuses to group on those
+          where      raw CAML, so a brand view can say "Butterstone OR Beide" without
+                     this script growing a query language of its own
+          recursive  Scope = RecursiveAll: show every file in the library regardless
+                     of which pillar folder it sits in. This is what makes "everything
+                     of one brand" a flat list instead of a folder hunt.
+
+        Returns $true when it created the view.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $ListTitle,
+        [Parameter(Mandatory)] [string] $Title,
+        [Parameter(Mandatory)] $Definition,
+        [Parameter(Mandatory)] $Connection,
+        [switch] $WhatIfMode
+    )
+
+    if (Get-PnPView -List $ListTitle -Identity $Title -Connection $Connection -ErrorAction SilentlyContinue) {
+        return $false
+    }
+    if ($WhatIfMode) { return $true }
+
+    $query = ''
+    $where = Get-ConfigValue $Definition 'where'
+    if ($where) { $query += "<Where>$where</Where>" }
+
+    $groupBy = Get-ConfigValue $Definition 'groupBy'
+    if ($groupBy) { $query += "<GroupBy Collapse=`"TRUE`" GroupLimit=`"100`"><FieldRef Name=`"$groupBy`" /></GroupBy>" }
+
+    $splat = @{
+        List       = $ListTitle
+        Title      = $Title
+        Fields     = @(Get-ConfigValue $Definition 'fields' @())
+        Connection = $Connection
+    }
+    if ($query) { $splat['Query'] = $query }
+    # Never -SetAsDefault: the default view of a Teams library is what every member of
+    # the channel sees the second they open Files.
+    $view = Add-PnPView @splat
+
+    if (Get-ConfigValue $Definition 'recursive' $false) {
+        # Add-PnPView cannot express the scope, so it is set afterwards.
+        $view.Scope = [Microsoft.SharePoint.Client.ViewScope]::RecursiveAll
+        $view.Update()
+        Invoke-PnPQuery -Connection $Connection
+    }
+    return $true
+}
+
 function Get-ChannelFolderItem {
     <#
         The list item behind a channel folder, which is the securable object you need
@@ -482,10 +537,197 @@ function Connect-StructureGraph {
 
     if ($Thumbprint -and $ClientId) {
         Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint -NoWelcome | Out-Null
+    } elseif ($ClientId) {
+        # An app this set provisioned already carries the Graph scopes, so signing in
+        # with it keeps the whole run on one app registration. An app that came from
+        # somewhere else may not, hence the fallback to the Graph SDK's own app.
+        try {
+            Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -NoWelcome -ContextScope Process -ErrorAction Stop | Out-Null
+        } catch {
+            Write-Warn "App $ClientId could not be used for Graph ($($_.Exception.Message.Trim())) - falling back to the Microsoft Graph PowerShell app."
+            Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process | Out-Null
+        }
     } else {
         Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process | Out-Null
     }
     Write-Ok "Graph connected as $((Get-MgContext).Account ?? 'app-only')"
+}
+
+# -- App registration ----------------------------------------------------------
+# PnP.PowerShell no longer ships a shared multi-tenant app, so every tenant needs one
+# of its own. The client ID is cached in pnp.appid.json at the repo root - the same
+# store Find-SiteContent.ps1 and Restore-RecycleBinItems.ps1 use, so an app created
+# by one of them is reused here and the other way round.
+
+function Get-StructureAppStorePath {
+    $repoRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
+    return (Join-Path $repoRoot 'pnp.appid.json')
+}
+
+function Get-CachedStructureClientId {
+    param([Parameter(Mandatory)] [string] $Tenant)
+
+    $store = Get-StructureAppStorePath
+    if (-not (Test-Path $store)) { return $null }
+    try {
+        return (Get-Content $store -Raw | ConvertFrom-Json).$Tenant
+    } catch {
+        Write-Warn "Could not read ${store}: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Set-CachedStructureClientId {
+    param([Parameter(Mandatory)] [string] $Tenant, [Parameter(Mandatory)] [string] $Id)
+
+    $path  = Get-StructureAppStorePath
+    $store = @{}
+    if (Test-Path $path) {
+        try {
+            (Get-Content $path -Raw | ConvertFrom-Json).PSObject.Properties |
+                ForEach-Object { $store[$_.Name] = $_.Value }
+        } catch { }
+    }
+    $store[$Tenant] = $Id
+    $store | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
+    Write-Ok "Client ID cached in $path"
+}
+
+function New-StructureApp {
+    <#
+        Create (or reuse) the public-client app registration this set signs in with,
+        and admin-consent the delegated scopes it needs. Returns an object with the
+        app id, the directory object id and whether it was created just now - the
+        last one is what lets the caller clean up a temporary app afterwards.
+
+        Needs a Graph sign-in as Global or Application Administrator, once.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Tenant,
+        [Parameter(Mandatory)] [string] $DisplayName
+    )
+
+    foreach ($module in @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Applications')) {
+        if (-not (Get-Module -ListAvailable -Name $module)) {
+            throw "Module '$module' is required to create the app registration. Run: Install-Module $module -Scope CurrentUser"
+        }
+    }
+    Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+
+    Write-Step "Signing in as a Global Administrator of $Tenant to register the app..."
+    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @(
+        'Application.ReadWrite.All'
+        'DelegatedPermissionGrant.ReadWrite.All'
+        'Directory.Read.All'
+    ) | Out-Null
+    Write-Ok "Signed in as $((Get-MgContext).Account)"
+
+    $escaped = $DisplayName -replace "'", "''"
+    $app     = @(Get-MgApplication -Filter "displayName eq '$escaped'" -All) | Select-Object -First 1
+    $created = $false
+
+    if ($app) {
+        Write-Ok "Reusing app '$DisplayName' ($($app.AppId))"
+    } else {
+        $app = New-MgApplication -DisplayName $DisplayName `
+            -SignInAudience 'AzureADMyOrg' `
+            -IsFallbackPublicClient `
+            -PublicClient @{ RedirectUris = @('http://localhost') }
+        $created = $true
+        Write-Change "App registration created: $($app.AppId)"
+    }
+
+    $sp = @(Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -All) | Select-Object -First 1
+    if (-not $sp) {
+        $sp = New-MgServicePrincipal -AppId $app.AppId
+        Write-Change 'Service principal created.'
+    }
+
+    # Everything this set does, in delegated form:
+    #   AllSites.FullControl   content types, list permissions, breaking inheritance
+    #   TermStore.ReadWrite    the Leverancier term set
+    #   User.Read.All          resolving people behind sharing links
+    #   Group.ReadWrite.All    creating the pillar security groups (-EnsureGroups)
+    $resources = @(
+        @{ AppId = '00000003-0000-0ff1-ce00-000000000000'; Name = 'SharePoint'
+           Scopes = @('AllSites.FullControl', 'TermStore.ReadWrite.All', 'User.Read.All') }
+        @{ AppId = '00000003-0000-0000-c000-000000000000'; Name = 'Graph'
+           Scopes = @('User.Read', 'Group.ReadWrite.All', 'Directory.Read.All') }
+    )
+
+    foreach ($resource in $resources) {
+        $resourceSp = @(Get-MgServicePrincipal -Filter "appId eq '$($resource.AppId)'" -All) | Select-Object -First 1
+        if (-not $resourceSp) {
+            Write-Warn "Service principal for $($resource.Name) not found - skipped."
+            continue
+        }
+
+        $valid = @($resource.Scopes | Where-Object { $resourceSp.Oauth2PermissionScopes.Value -contains $_ })
+        if ($valid.Count -eq 0) { continue }
+
+        $grant = @(Get-MgOauth2PermissionGrant -All -Filter "clientId eq '$($sp.Id)' and consentType eq 'AllPrincipals'") |
+                 Where-Object { $_.ResourceId -eq $resourceSp.Id } | Select-Object -First 1
+
+        $existing = if ($grant -and $grant.Scope) { $grant.Scope -split ' ' } else { @() }
+        $missing  = @($valid | Where-Object { $_ -notin $existing })
+        if ($missing.Count -eq 0) {
+            Write-Ok "$($resource.Name): scopes already consented."
+            continue
+        }
+
+        $merged = ((@($existing) + $valid) | Where-Object { $_ } | Select-Object -Unique) -join ' '
+        if ($grant) {
+            Update-MgOauth2PermissionGrant -OAuth2PermissionGrantId $grant.Id -Scope $merged | Out-Null
+        } else {
+            New-MgOauth2PermissionGrant -ClientId $sp.Id -ResourceId $resourceSp.Id `
+                -ConsentType 'AllPrincipals' -Scope $merged | Out-Null
+        }
+        Write-Change "$($resource.Name): consented $($missing -join ', ')"
+    }
+
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+
+    return [PSCustomObject]@{
+        AppId    = $app.AppId
+        ObjectId = $app.Id
+        Created  = $created
+        Name     = $DisplayName
+    }
+}
+
+function Remove-StructureApp {
+    <#
+        Delete an app registration this run created. Only ever called for an app that
+        New-StructureApp reported as Created - an app that was already there predates
+        this run and is somebody else's to remove.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Tenant,
+        [Parameter(Mandatory)] [string] $ObjectId,
+        [Parameter(Mandatory)] [string] $DisplayName
+    )
+
+    Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @('Application.ReadWrite.All') | Out-Null
+    Remove-MgApplication -ApplicationId $ObjectId -ErrorAction Stop
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Write-Change "Temporary app registration '$DisplayName' removed."
+
+    # The cache must not keep pointing at an app that no longer exists.
+    $path = Get-StructureAppStorePath
+    if (Test-Path $path) {
+        try {
+            $store = @{}
+            (Get-Content $path -Raw | ConvertFrom-Json).PSObject.Properties |
+                ForEach-Object { $store[$_.Name] = $_.Value }
+            if ($store.ContainsKey($Tenant)) {
+                $store.Remove($Tenant)
+                $store | ConvertTo-Json | Set-Content -Path $path -Encoding UTF8
+            }
+        } catch {
+            Write-Warn "Could not clean the client ID cache: $($_.Exception.Message)"
+        }
+    }
 }
 
 function Resolve-StructureGroup {
