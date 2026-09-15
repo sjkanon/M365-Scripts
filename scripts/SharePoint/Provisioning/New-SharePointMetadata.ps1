@@ -274,6 +274,16 @@ function Set-StructureColumn {
         }
     }
 
+    # A script-maintained column must not be a question in the form. Deelstatus
+    # reports what is; asking a user to fill it in only invites a wrong answer.
+    if ((Get-ConfigValue $Definition 'readOnlyInForms' $false) -and -not (Test-FieldHiddenInForms -Field $field)) {
+        if ($PSCmdlet.ShouldProcess($name, 'Hide from the new and edit forms')) {
+            Set-FieldHiddenInForms -Field $field -Connection $Connection
+            Write-Change "column '$name' hidden from the new/edit forms (still visible in views)"
+            $script:changeCount++
+        }
+    }
+
     if ($Definition.type -in @('Choice', 'MultiChoice')) {
         $wanted  = @(Get-ConfigValue $Definition 'choices' @())
         $current = Get-FieldChoiceValue -Field $field

@@ -24,28 +24,28 @@
       "internalName": "PsMerk",
       "displayName": "Merk",
       "type": "Choice",
-      "description": "Merk waar dit bestand bij hoort. Blijft een tag - merken krijgen bewust geen eigen site of groep.",
+      "description": "Voor welk merk is dit? Hoort het bij allebei, kies Beide - dan verschijnt het in beide merkoverzichten. Geen kopie nodig.",
       "choices": [ "Butterstone", "Laseto", "Beide" ]
     },
     {
       "internalName": "PsPijler",
       "displayName": "Pijler",
       "type": "Choice",
-      "description": "Bedrijfspijler. Wordt per bibliotheek/kanaal als standaardwaarde gezet.",
+      "description": "Vult zichzelf in op basis van het kanaal. Je hoeft hier niets te doen.",
       "choices": [ "MGMT", "Leveranciers", "Verkopers", "Klanten", "Marketing", "TD" ]
     },
     {
       "internalName": "PsRegio",
       "displayName": "Regio",
       "type": "Choice",
-      "description": "Verkoopregio. Alleen relevant binnen de pijler Verkopers.",
+      "description": "Voor welke verkoopregio is dit bedoeld?",
       "choices": [ "Benelux", "Duitsland", "Frankrijk", "Export" ]
     },
     {
       "internalName": "PsLeverancier",
       "displayName": "Leverancier",
       "type": "Taxonomy",
-      "description": "Leverancier uit de term set - uitbreidbaar zonder de kolom aan te passen.",
+      "description": "Typ de eerste letters van de leverancier, dan vult hij aan. Staat hij er niet bij? Vraag IT om hem toe te voegen.",
       "termSet": "Leveranciers",
       "multiValue": false
     },
@@ -53,21 +53,21 @@
       "internalName": "PsTaal",
       "displayName": "Taal",
       "type": "MultiChoice",
-      "description": "Taal of talen van het document. Meerdere waarden toegestaan.",
+      "description": "In welke taal of talen is dit document? Meerdere aanvinken mag. Staat er geen tekst in, kies Geen taal.",
       "choices": [ "NL", "FR", "DE", "EN", "Geen taal" ]
     },
     {
       "internalName": "PsContenttype",
       "displayName": "Contenttype",
       "type": "Choice",
-      "description": "Soort document. Let op: dit is een metadatakolom, niet het SharePoint content type.",
+      "description": "Wat voor soort document is dit?",
       "choices": [ "Catalogus", "Prijslijst", "Schrijfrichtlijn", "Afbeelding+certificaat", "Marketingslag" ]
     },
     {
       "internalName": "PsVertrouwelijkheid",
       "displayName": "Vertrouwelijkheid",
       "type": "Choice",
-      "description": "Hoe ver dit bestand mag reizen. Stuurt de beoordeling van de deelstatus-audit.",
+      "description": "Mag dit naar buiten? Intern blijft binnen Petsolutions. Deelbaar met klant mag je met een klant delen.",
       "choices": [ "Intern", "Deelbaar met klant", "Vertrouwelijk" ],
       "defaultValue": "Intern"
     },
@@ -75,7 +75,7 @@
       "internalName": "PsDeelstatus",
       "displayName": "Deelstatus",
       "type": "Choice",
-      "description": "Automatisch bijgehouden door Update-SharePointShareStatus.ps1. Niet met de hand invullen.",
+      "description": "Wordt automatisch bijgehouden en toont of dit bestand buiten Petsolutions open staat. Niet zelf invullen.",
       "choices": [ "Niet gedeeld", "Intern gedeeld", "Extern - alleen bekijken", "Extern - bewerken" ],
       "defaultValue": "Niet gedeeld",
       "readOnlyInForms": true
@@ -84,7 +84,7 @@
       "internalName": "PsStatus",
       "displayName": "Status",
       "type": "Choice",
-      "description": "Levenscyclus van het document.",
+      "description": "Laat Actief staan. Zet op Te archiveren wat weg mag maar nog niet verwijderd hoeft.",
       "choices": [ "Actief", "Te archiveren", "Verouderd" ],
       "defaultValue": "Actief"
     }
