@@ -225,7 +225,6 @@ function Set-FolderContentTypeOrder {
 
     $context = Get-PnPContext -Connection $Connection
     $context.Load($List.ContentTypes)
-    $context.Load($Folder, 'ContentTypeOrder', 'UniqueContentTypeOrder')
     $context.ExecuteQuery()
 
     $wanted = @()
@@ -235,8 +234,20 @@ function Set-FolderContentTypeOrder {
     }
     if ($wanted.Count -eq 0) { return $false }
 
+    # UniqueContentTypeOrder is not in the folder's default property set, and CSOM's
+    # Load cannot take property names as strings from PowerShell - it wants typed
+    # lambdas C# has and this does not. Get-PnPProperty is the way in.
     $current = @()
-    if ($Folder.UniqueContentTypeOrder) { $current = @($Folder.UniqueContentTypeOrder | ForEach-Object { $_.StringValue }) }
+    try {
+        Get-PnPProperty -ClientObject $Folder -Property UniqueContentTypeOrder -Connection $Connection -ErrorAction Stop | Out-Null
+        if ($Folder.UniqueContentTypeOrder) {
+            $current = @($Folder.UniqueContentTypeOrder | ForEach-Object { $_.StringValue })
+        }
+    } catch {
+        # Never set on this folder: it inherits the library's order, which is what an
+        # empty list means here.
+        $current = @()
+    }
     $wantedStrings = @($wanted | ForEach-Object { $_.StringValue })
 
     if (($current -join '|') -eq ($wantedStrings -join '|')) { return $false }
