@@ -161,7 +161,67 @@ function Invoke-Graph {
         $splat['Body']        = ($Body | ConvertTo-Json -Depth 8)
         $splat['ContentType'] = 'application/json'
     }
-    return Invoke-MgGraphRequest @splat
+
+    try {
+        return Invoke-MgGraphRequest @splat
+    } catch {
+        # "BadRequest" on its own is useless. Graph puts the reason in the response
+        # body, and that is the difference between guessing and knowing.
+        $detail = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            try {
+                $parsed = $_.ErrorDetails.Message | ConvertFrom-Json
+                if ($parsed.error) { $detail = "$($parsed.error.code): $($parsed.error.message)" }
+            } catch {
+                $detail = $_.ErrorDetails.Message
+            }
+        }
+        if (-not $detail) { $detail = $_.Exception.Message }
+        throw "$Method $Url -> $detail"
+    }
+}
+
+function Enable-Team {
+    <#
+        Turn a Microsoft 365 group into a team, retrying while it replicates.
+
+        PUT /groups/{id}/team, not POST /teams: the POST form binds a group *and* a
+        template and is fussy about both, while the PUT is the documented way to
+        team-enable a group that already exists. A group created seconds ago answers
+        404, and sometimes 400, for a minute or two.
+    #>
+    param([Parameter(Mandatory)] [string] $GroupId, [int] $Attempts = 12)
+
+    $lastError = ''
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            Invoke-Graph -Url "v1.0/groups/$GroupId/team" -Method PUT -Body @{
+                memberSettings    = @{ allowCreatePrivateChannels = $true; allowCreateUpdateChannels = $true }
+                messagingSettings = @{ allowUserEditMessages = $true; allowUserDeleteMessages = $true }
+            } | Out-Null
+            return
+        } catch {
+            $lastError = $_.Exception.Message
+            if ($attempt -eq $Attempts) { break }
+            Write-Skip "not ready yet (attempt $attempt): $lastError"
+            Start-Sleep -Seconds 15
+        }
+    }
+    throw ("The group could not be turned into a team. Last answer from Graph:`n    $lastError`n" +
+           "    The group exists as $GroupId - rerun this script and it picks up from there, " +
+           'or team-enable it once by hand in the Teams admin centre.')
+}
+
+function Test-IsTeam {
+    <# Whether a group has already been team-enabled. #>
+    param([Parameter(Mandatory)] [string] $GroupId)
+
+    try {
+        Invoke-Graph -Url "v1.0/teams/$GroupId" | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 function Wait-ChannelSite {
@@ -224,9 +284,21 @@ try {
     $teamId = $null
     if ($existing) {
         $teamId = $existing.id
-        Write-Ok "Team '$($existing.displayName)' already exists ($teamId)"
         if ($existing.displayName -ne $team.displayName) {
             Write-Warn "Its display name is '$($existing.displayName)', the config says '$($team.displayName)' - left as is, renaming a team is yours to decide."
+        }
+
+        # A group can exist without being a team - a run that got this far and then
+        # failed leaves exactly that behind, and it has to be finishable.
+        if (Test-IsTeam -GroupId $teamId) {
+            Write-Ok "Team '$($existing.displayName)' already exists ($teamId)"
+        } elseif ($PSCmdlet.ShouldProcess($existing.displayName, 'Turn the existing group into a team')) {
+            Write-Warn "Group '$($existing.displayName)' exists but is not a team yet - finishing that now."
+            Enable-Team -GroupId $teamId
+            Write-Change "Group '$($existing.displayName)' is now a team"
+            $changeCount++
+            Write-Step 'Waiting 30s for the team site to settle...'
+            Start-Sleep -Seconds 30
         }
     } elseif ($PSCmdlet.ShouldProcess($team.displayName, 'Create Microsoft 365 team')) {
         # Two steps on purpose: the group first, then team-enable it. Creating a team
@@ -250,21 +322,14 @@ try {
         Write-Change "Microsoft 365 group '$($team.displayName)' created ($teamId)"
 
         # The group has to exist everywhere before it can be team-enabled; a fresh one
-        # answers 404 for a while.
+        # answers 404, and sometimes 400, for a minute or two.
+        #
+        # PUT /groups/{id}/team, not POST /teams: the POST form binds a group *and* a
+        # template and is fussy about both, while the PUT is the documented way to
+        # team-enable a group that already exists.
         Write-Step 'Waiting for the group to replicate before turning it into a team...'
-        $teamed = $false
-        for ($attempt = 1; $attempt -le 12 -and -not $teamed; $attempt++) {
-            Start-Sleep -Seconds 15
-            try {
-                Invoke-Graph -Url "v1.0/teams" -Method POST -Body @{
-                    'group@odata.bind' = "https://graph.microsoft.com/v1.0/groups('$teamId')"
-                } | Out-Null
-                $teamed = $true
-            } catch {
-                if ($attempt -eq 12) { throw "The group was created but could not be turned into a team: $($_.Exception.Message)" }
-                Write-Skip "not ready yet (attempt $attempt)..."
-            }
-        }
+        Start-Sleep -Seconds 15
+        Enable-Team -GroupId $teamId
         Write-Change "Team '$($team.displayName)' created"
         $changeCount++
         Write-Step 'Waiting 30s for the team site to settle...'

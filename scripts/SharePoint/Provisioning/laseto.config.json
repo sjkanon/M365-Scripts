@@ -1,11 +1,11 @@
 {
-  "client": "laseto",
-  "description": "SharePoint-structuur, metadata en groepsrechten voor laseto.",
+  "client": "Laseto",
+  "description": "SharePoint-structuur, metadata en groepsrechten voor Laseto.",
   "tenant": "futpetlas.onmicrosoft.com",
   "team": {
     "displayName": "Laseto-NewTeams",
     "mailNickname": "lasetonewteams",
-    "description": "Documentbeheer laseto.",
+    "description": "Documentbeheer Laseto.",
     "visibility": "Private",
     "owners": [
       "itceadmin@futpetlas.onmicrosoft.com"
@@ -26,7 +26,7 @@
   "termStore": {
     "group": "Laseto-NewTeams",
     "termSet": "Leveranciers",
-    "description": "Leveranciers van laseto - uitbreidbaar vanuit de term store.",
+    "description": "Leveranciers van Laseto - uitbreidbaar vanuit de term store.",
     "terms": [
       "Lev. 1",
       "Lev. 2",
@@ -131,7 +131,7 @@
   "contentTypes": [
     {
       "name": "MGMT-document",
-      "id": "0x0101000CE6DFC48BFF4AEEA192CE09C30B6844",
+      "id": "0x010100AF0938789CC44C8DADCF629740185569",
       "description": "Documenten van de pijler MGMT.",
       "fields": [
         {
@@ -162,7 +162,7 @@
     },
     {
       "name": "Leveranciers-document",
-      "id": "0x0101007F141E2291A342998BA4CA285B8CA323",
+      "id": "0x01010098FB32A8578246A48DC0561669BBD229",
       "description": "Documenten van de pijler Leveranciers.",
       "fields": [
         {
@@ -197,11 +197,15 @@
     },
     {
       "name": "Verkopers-document",
-      "id": "0x0101007AC77DC259B24806870ECB70009411D1",
+      "id": "0x010100DF4D6107711F468CB03E874C1B68C5B5",
       "description": "Documenten van de pijler Verkopers.",
       "fields": [
         {
           "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsRegio",
           "required": true
         },
         {
@@ -228,7 +232,7 @@
     },
     {
       "name": "Klanten-document",
-      "id": "0x0101003896988D5565429CB04272455B44936C",
+      "id": "0x010100E46CE1FD12824FF29B5912DDD14CB8A4",
       "description": "Documenten van de pijler Klanten.",
       "fields": [
         {
@@ -259,7 +263,7 @@
     },
     {
       "name": "Marketing-document",
-      "id": "0x010100BB33C7C5293141B79BA5715F88AB910F",
+      "id": "0x010100FC3BEE1F31364A6390D1E715C877618A",
       "description": "Documenten van de pijler Marketing.",
       "fields": [
         {
@@ -290,7 +294,7 @@
     },
     {
       "name": "TD-document",
-      "id": "0x010100059F34A9C25E4D4EA5E3A6CFF4B66977",
+      "id": "0x010100FEA902818A94423EA6C316DEF017903E",
       "description": "Documenten van de pijler TD.",
       "fields": [
         {
@@ -321,7 +325,7 @@
     },
     {
       "name": "Klantmedia",
-      "id": "0x010100F217326DCF174F08B1C54BFE7F5FA77E",
+      "id": "0x01010008A261399D0D41EFAEFA72241BE27EE7",
       "description": "Materiaal dat met klanten gedeeld wordt.",
       "fields": [
         {
@@ -351,67 +355,67 @@
     {
       "displayName": "SG-LASETO-MGMT-RW",
       "mailNickname": "sglasetomgmtrw",
-      "description": "laseto - MGMT - bewerken"
+      "description": "Laseto - MGMT - bewerken"
     },
     {
       "displayName": "SG-LASETO-MGMT-RO",
       "mailNickname": "sglasetomgmtro",
-      "description": "laseto - MGMT - alleen lezen"
+      "description": "Laseto - MGMT - alleen lezen"
     },
     {
       "displayName": "SG-LASETO-Leveranciers-RW",
       "mailNickname": "sglasetoleveranciersrw",
-      "description": "laseto - Leveranciers - bewerken"
+      "description": "Laseto - Leveranciers - bewerken"
     },
     {
       "displayName": "SG-LASETO-Leveranciers-RO",
       "mailNickname": "sglasetoleveranciersro",
-      "description": "laseto - Leveranciers - alleen lezen"
+      "description": "Laseto - Leveranciers - alleen lezen"
     },
     {
       "displayName": "SG-LASETO-Verkopers-RW",
       "mailNickname": "sglasetoverkopersrw",
-      "description": "laseto - Verkopers - bewerken"
+      "description": "Laseto - Verkopers - bewerken"
     },
     {
       "displayName": "SG-LASETO-Verkopers-RO",
       "mailNickname": "sglasetoverkopersro",
-      "description": "laseto - Verkopers - alleen lezen"
+      "description": "Laseto - Verkopers - alleen lezen"
     },
     {
       "displayName": "SG-LASETO-Klanten-RW",
       "mailNickname": "sglasetoklantenrw",
-      "description": "laseto - Klanten - bewerken"
+      "description": "Laseto - Klanten - bewerken"
     },
     {
       "displayName": "SG-LASETO-Klanten-RO",
       "mailNickname": "sglasetoklantenro",
-      "description": "laseto - Klanten - alleen lezen"
+      "description": "Laseto - Klanten - alleen lezen"
     },
     {
       "displayName": "SG-LASETO-Marketing-RW",
       "mailNickname": "sglasetomarketingrw",
-      "description": "laseto - Marketing - bewerken"
+      "description": "Laseto - Marketing - bewerken"
     },
     {
       "displayName": "SG-LASETO-Marketing-RO",
       "mailNickname": "sglasetomarketingro",
-      "description": "laseto - Marketing - alleen lezen"
+      "description": "Laseto - Marketing - alleen lezen"
     },
     {
       "displayName": "SG-LASETO-TD-RW",
       "mailNickname": "sglasetotdrw",
-      "description": "laseto - TD - bewerken"
+      "description": "Laseto - TD - bewerken"
     },
     {
       "displayName": "SG-LASETO-TD-RO",
       "mailNickname": "sglasetotdro",
-      "description": "laseto - TD - alleen lezen"
+      "description": "Laseto - TD - alleen lezen"
     },
     {
       "displayName": "SG-LASETO-Klanten-Extern",
       "mailNickname": "sglasetoklantenextern",
-      "description": "laseto - externe klanten met leestoegang tot \"geen\""
+      "description": "Laseto - externe klanten met leestoegang tot FUTECH Images and videos"
     }
   ],
   "libraryViews": [
@@ -565,12 +569,12 @@
       "defaultContentType": "Verkopers-document",
       "uniquePermissions": false,
       "view": {
-        "title": "Op contenttype",
-        "groupBy": "PsContenttype",
+        "title": "Op regio",
+        "groupBy": "PsRegio",
         "fields": [
           "DocIcon",
           "LinkFilename",
-          "PsContenttype",
+          "PsRegio",
           "PsMerk",
           "PsTaal",
           "PsVertrouwelijkheid",
@@ -720,10 +724,10 @@
     },
     {
       "key": "KlantBibliotheek",
-      "title": "\"geen\"",
+      "title": "FUTECH Images and videos",
       "kind": "Library",
       "site": "team",
-      "list": "\"geen\"",
+      "list": "FUTECH Images and videos",
       "defaultColumnValues": {
         "PsStatus": "Actief",
         "PsVertrouwelijkheid": "Deelbaar met klant"
