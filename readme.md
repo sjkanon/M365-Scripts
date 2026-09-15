@@ -787,6 +787,18 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-15 (2)
+| Change |
+|--------|
+| `New-StructureConfig.ps1` asks what everything should be called and writes the configuration itself — nobody should have to open a JSON file to name a channel. Enter accepts the suggestion in brackets, so a standard build is mostly Enters plus the tenant and the team owner |
+| Everything else is derived from those answers: per pillar a channel, a content type, two security groups and a grouped view; per brand a cross-cutting view spanning every pillar folder. Which pillar handles suppliers and which handles sales is what decides where Leverancier and Regio become required fields |
+| Two of the answers are the ones that cost something later, so they are asked last and default to no: maintaining the share-status column (the only nightly script) and enforcing per-pillar rights on standard-channel folders (the part Microsoft does not support) |
+| `New-SharePointTeam.ps1` creates the Microsoft 365 team and its channels, the private MGMT one included, so the structure can be built from an empty tenant. A private channel's site collection is provisioned asynchronously and its URL cannot be known in advance — the script polls for it and writes it back into the configuration, which is what lets the following steps connect to something |
+| Never renames or deletes a channel: a channel whose name does not match the config is reported, not corrected, because renaming one moves its folder and breaks every link anyone has shared |
+| `Install-SharePointStructure.ps1` runs the wizard by itself when it finds no configuration for the tenant, and the team step is now step 1 of six. `-SkipTeam` for a team that already exists |
+| Column internal names and content type IDs are generated once and then fixed — SharePoint keys document metadata to both — which is why the wizard refuses to overwrite an existing configuration without `-Force`. Display names, channel names and group names stay changeable |
+| Removed the last hardcoded column names: the share-status audit reads which column is which from a new `fieldRoles` section instead of assuming `PsDeelstatus` and `PsVertrouwelijkheid` |
+| The app registration now also consents `Channel.Create`, `ChannelSettings.ReadWrite.All` and `Team.Create`, which the team step needs |
 ### 2026-09-15
 | Change |
 |--------|

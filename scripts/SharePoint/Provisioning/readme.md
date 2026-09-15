@@ -64,7 +64,9 @@ without Regio.
 
 | Script | What it does | Writes? |
 |---|---|---|
-| [`Install-SharePointStructure.ps1`](#install-sharepointstructureps1) | **Start here.** Builds everything in one run: app registration, all three steps, verification | yes |
+| [`Install-SharePointStructure.ps1`](#install-sharepointstructureps1) | **Start here.** Asks what everything should be called, then builds the lot: app registration, team, channels, metadata, libraries, permissions, verification | yes |
+| [`New-StructureConfig.ps1`](#you-are-asked-not-handed-a-json-file) | The questions. Runs by itself from the installer; run it alone to prepare a configuration up front | writes the config |
+| [`New-SharePointTeam.ps1`](#install-sharepointstructureps1) | The Microsoft 365 team and its channels, private ones included, and the site URLs written back | yes |
 | [`New-SharePointMetadata.ps1`](#new-sharepointmetadataps1) | Term set, site columns, content types — on every site in the config | yes |
 | [`Set-SharePointLibraries.ps1`](#set-sharepointlibrariesps1) | Libraries, channel folders, content type binding, default metadata, views, group permissions | yes |
 | [`Update-SharePointShareStatus.ps1`](#update-sharepointsharestatusps1) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
@@ -135,10 +137,43 @@ that fails five minutes into a run.
 ### The short version
 
 ```powershell
-.\Install-SharePointStructure.ps1 -WhatIf     # always this first
-.\Install-SharePointStructure.ps1             # build it
-# then: put people in the SG-PETSOL-* groups, and hand out the Handleiding
+.\Install-SharePointStructure.ps1
 ```
+
+That is the whole thing. With no configuration for this tenant it asks what everything
+should be called, writes the configuration itself, then creates the team, the channels
+(the private one included), the metadata model, the libraries, the groups, the views and
+the permissions — and verifies the result.
+
+Afterwards: put people in the security groups, and hand out the
+[Handleiding](Petsolutions-SharePoint-Handleiding.md).
+
+### You are asked, not handed a JSON file
+
+`New-StructureConfig.ps1` runs by itself the first time. Enter accepts the suggestion in
+brackets, so a standard build is mostly Enters and two real answers:
+
+| Asked | Suggestion |
+|---|---|
+| Client, tenant | — |
+| Team name, alias (decides the site URL), owner | derived from the client name |
+| Brands, and what "belongs to all of them" is called | Butterstone, Laseto, Beide |
+| Pillars, and which are a private channel | MGMT, Leveranciers, Verkopers, Klanten, Marketing, TD — MGMT private |
+| Which pillar handles suppliers / sales | decides where Leverancier and Regio become required |
+| Customer library | FUTECH Images and videos |
+| Group prefix and the edit/read suffixes | `SG-<CLIENT>` · RW · RO |
+| Languages, regions, document kinds, confidentiality levels, statuses, starting suppliers | the Dutch defaults |
+| **Maintain the share-status column?** | no — this is the only answer that costs you a nightly script |
+| **Enforce per-pillar rights on channel folders?** | no — see the note on standard channels below |
+
+Everything else is derived: per pillar a channel, a content type, two security groups and
+a grouped view; per brand a view spanning every pillar.
+
+**Two things are generated once and then fixed**, because SharePoint keys data to them:
+the column internal names (`PsMerk`, `PsTaal`, …) and the content type IDs. Display names,
+channel names and group names can all be changed afterwards; those two cannot without
+losing the metadata on documents that already carry them. That is why the wizard refuses
+to overwrite an existing configuration without `-Force`.
 
 ### Install-SharePointStructure.ps1
 
@@ -147,10 +182,17 @@ One run, five steps, stopping at the first failure rather than building on a bro
 | Step | What |
 |---|---|
 | 0 | App registration — created and admin-consented, or reused from `pnp.appid.json` |
-| 1 | `New-SharePointMetadata.ps1` — term set, columns, content types, on every site |
-| 2 | `Set-SharePointLibraries.ps1 -EnsureGroups` — groups, libraries, folders, content types, defaults, views, permissions |
-| 3 | `Test-SharePointStructure.ps1` — read-only verification of what just landed |
-| 4 | `Update-SharePointShareStatus.ps1` with `-RunAudit` — the first deelstatus pass |
+| 1 | `New-SharePointTeam.ps1` — the Microsoft 365 team, the channels including the private one, and the site URLs written back into the configuration |
+| 2 | `New-SharePointMetadata.ps1` — term set, columns, content types, on every site |
+| 3 | `Set-SharePointLibraries.ps1 -EnsureGroups` — groups, libraries, folders, content types, defaults, views, permissions |
+| 4 | `Test-SharePointStructure.ps1` — read-only verification of what just landed |
+| 5 | `Update-SharePointShareStatus.ps1` with `-RunAudit` — the first deelstatus pass |
+
+**Step 1 is why this works from an empty tenant.** A private channel's site collection is
+provisioned asynchronously and its URL cannot be known in advance — SharePoint invents it
+from the team and channel name. The script polls for it (a couple of minutes is normal)
+and writes it into the configuration, so the steps below have somewhere to connect to.
+Pass `-SkipTeam` when the team already exists.
 
 ```powershell
 # One-off build on a tenant you do not manage day to day: leave nothing behind
