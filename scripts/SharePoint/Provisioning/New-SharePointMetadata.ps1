@@ -176,6 +176,26 @@ function Set-StructureTermSet {
     $termStore = Get-ConfigValue $config 'termStore'
     if (-not $termStore) { Write-Skip 'No termStore section in the configuration'; return }
 
+    # A term set and a term are both created *in a language*, and PnP will not guess:
+    # without -Lcid it passes whatever it read off the store, which on a freshly
+    # provisioned term store is 0 - hence "argument out of range, parameter lcid".
+    # Config wins, then the store's own default, then en-US.
+    $lcid = Get-ConfigValue $termStore 'lcid'
+    if (-not $lcid) {
+        try {
+            $store = Get-PnPTermStore -Connection $Connection -ErrorAction Stop
+            $lcid  = [int] $store.DefaultLanguage
+        } catch {
+            # No term store cmdlet, or the property was never loaded - either way the
+            # fallback below is the answer, not a crash.
+            $lcid = 0
+        }
+    }
+    if (-not $lcid -or $lcid -le 0) {
+        $lcid = 1033
+        Write-Skip "Term store reported no working language - creating terms in en-US (1033). Set termStore.lcid to override."
+    }
+
     $group = Get-PnPTermGroup -Identity $termStore.group -Connection $Connection -ErrorAction SilentlyContinue
     if (-not $group) {
         if ($PSCmdlet.ShouldProcess($termStore.group, 'Create term group')) {
@@ -191,9 +211,9 @@ function Set-StructureTermSet {
     $set = Get-PnPTermSet -Identity $termStore.termSet -TermGroup $termStore.group -Connection $Connection -ErrorAction SilentlyContinue
     if (-not $set) {
         if ($PSCmdlet.ShouldProcess("$($termStore.group)|$($termStore.termSet)", 'Create term set')) {
-            $set = New-PnPTermSet -Name $termStore.termSet -TermGroup $termStore.group `
+            $set = New-PnPTermSet -Name $termStore.termSet -TermGroup $termStore.group -Lcid $lcid `
                 -Description (Get-ConfigValue $termStore 'description' '') -Connection $Connection
-            Write-Change "term set '$($termStore.termSet)' created"
+            Write-Change "term set '$($termStore.termSet)' created (taal $lcid)"
             $script:changeCount++
         }
     } else {
@@ -206,7 +226,8 @@ function Set-StructureTermSet {
     foreach ($term in (Get-ConfigValue $termStore 'terms' @())) {
         if ($term -in $existing) { Write-Ok "term '$term'"; continue }
         if ($PSCmdlet.ShouldProcess($term, 'Create term')) {
-            New-PnPTerm -Name $term -TermSet $termStore.termSet -TermGroup $termStore.group -Connection $Connection | Out-Null
+            New-PnPTerm -Name $term -TermSet $termStore.termSet -TermGroup $termStore.group -Lcid $lcid `
+                -Connection $Connection | Out-Null
             Write-Change "term '$term' created"
             $script:changeCount++
         }
