@@ -278,18 +278,24 @@ try {
             Write-Skip 'The steps below cannot connect without one, so they are reported from the configuration only'
         }
     } else {
-        $ClientId = Get-CachedStructureClientId -Tenant $Tenant
-        if ($ClientId) {
-            Write-Ok "Reusing the cached app registration $ClientId"
-            if ($TemporaryApp) {
-                Write-Warn 'This app was already cached, so -TemporaryApp will not remove it - it is not ours to delete.'
-            }
-        } else {
-            $app = New-StructureApp -Tenant $Tenant -DisplayName $AppName
-            $ClientId = $app.AppId
-            if (-not $TemporaryApp) { Set-CachedStructureClientId -Tenant $Tenant -Id $ClientId }
-            else { Write-Skip 'Not cached - -TemporaryApp removes this registration at the end of the run' }
+        # Deliberately not "whatever is in pnp.appid.json". That cache is shared with
+        # the other PnP scripts in this repo, and the app Find-SiteContent registers
+        # carries AllSites.FullControl but not TermStore.ReadWrite.All - so reusing it
+        # blindly means the term set step fails on rights, five minutes in.
+        #
+        # New-StructureApp is idempotent: it reuses the app with this display name and
+        # consents whatever scopes are still missing, so this is cheap on a rerun.
+        $cached = Get-CachedStructureClientId -Tenant $Tenant
+        if ($cached) { Write-Skip "Cached app $cached found - checking it carries every scope this set needs" }
 
+        $app      = New-StructureApp -Tenant $Tenant -DisplayName $AppName
+        $ClientId = $app.AppId
+
+        if (-not $TemporaryApp) { Set-CachedStructureClientId -Tenant $Tenant -Id $ClientId }
+        elseif ($app.Created)   { Write-Skip 'Not cached - -TemporaryApp removes this registration at the end of the run' }
+        else                    { Write-Warn 'This app already existed, so -TemporaryApp will not remove it - it is not ours to delete.' }
+
+        if ($app.Created) {
             # A brand new registration is not replicated to every region yet, and the
             # first sign-in against it otherwise fails with "application not found".
             Write-Step 'Waiting 20s for the app registration to propagate...'
