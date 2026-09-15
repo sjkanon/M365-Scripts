@@ -599,3 +599,7 @@ Write-Host '  Nu bouwen:' -ForegroundColor Cyan
 Write-Host "    .\Install-SharePointStructure.ps1 -ConfigPath `"$Path`" -WhatIf" -ForegroundColor Gray
 Write-Host "    .\Install-SharePointStructure.ps1 -ConfigPath `"$Path`"" -ForegroundColor Gray
 Write-Host ''
+
+# The path is the only thing on the pipeline - everything above is Write-Host - so a
+# caller can pick up what was written instead of guessing at the folder afterwards.
+Write-Output $Path

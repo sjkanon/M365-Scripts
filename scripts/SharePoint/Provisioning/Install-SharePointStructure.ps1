@@ -5,27 +5,39 @@
     libraries, permissions, views and a verification pass. Supports -WhatIf.
 
 .DESCRIPTION
-    The one-command version of this folder. It registers the app it needs, runs the
-    three provisioning steps in the only order that works, verifies the result and -
-    with -TemporaryApp - removes the app registration again on the way out.
+    The one-command version of this folder: from an empty tenant to a working
+    structure, asking what everything should be called on the way.
 
-        0. App        create or reuse the Entra app registration and admin-consent the
-                      delegated scopes. Cached in pnp.appid.json, shared with the other
-                      PnP scripts in this repo.
-        1. Metadata   New-SharePointMetadata.ps1 - term set, site columns, content
-                      types, on every site in the configuration.
-        2. Libraries  Set-SharePointLibraries.ps1 -EnsureGroups - Entra ID security
-                      groups, libraries, channel folders, content type binding, default
-                      metadata, the pillar views, the cross-cutting brand views and the
-                      permissions.
-        3. Verify     Test-SharePointStructure.ps1 - read-only, reports anything that
-                      did not land.
-        4. Audit      optional (-RunAudit): the first deelstatus pass, so the column
-                      has a value on every existing document from day one.
+        Ask       with no configuration for this tenant, New-StructureConfig.ps1 runs
+                  first and asks the questions - client, tenant, team, brands,
+                  pillars, groups, labels. Enter takes the suggestion. -AllNames asks
+                  for the derived names too. Nobody has to open a JSON file.
+        0. App    create or reuse the Entra app registration and admin-consent the
+                  delegated scopes. Cached in pnp.appid.json, shared with the other
+                  PnP scripts in this repo.
+        1. Team   New-SharePointTeam.ps1 - the Microsoft 365 team, its channels
+                  including the private ones, and the site URLs read back from Graph
+                  and written into the configuration. -SkipTeam when it exists.
+        2. Metadata  New-SharePointMetadata.ps1 - term set, site columns, content
+                  types, on every site in the configuration.
+        3. Libraries  Set-SharePointLibraries.ps1 -EnsureGroups - Entra ID security
+                  groups, libraries, channel folders, content type binding, default
+                  metadata, the pillar views, the cross-cutting brand views and the
+                  permissions.
+        4. Verify Test-SharePointStructure.ps1 - read-only, reports anything that did
+                  not land.
+        5. Audit  optional (-RunAudit): the first deelstatus pass, so the column has a
+                  value on every existing document from day one.
 
     Each step is a separate script, so anything that goes wrong can be rerun on its
     own without starting over. This one just runs them in order and stops at the first
     failure rather than building on top of a broken step.
+
+    Which configuration it uses
+    ---------------------------
+    Without -ConfigPath it looks beside itself for a *.config.json that no longer
+    contains the CHANGEME placeholders. Exactly one: that one. More than one: it says
+    so and asks for -ConfigPath. None: it runs the wizard and uses what that writes.
 
     Dry run first
     -------------
@@ -66,6 +78,10 @@
     Path to the structure configuration JSON.
     Default: petsolutions.config.json next to this script.
 
+.PARAMETER AllNames
+    Passed to the wizard when it runs: ask for every name, including the channel,
+    folder, content type, group and view names that are otherwise derived.
+
 .PARAMETER TemporaryApp
     Delete the app registration again when the run finishes, if this run created it.
 
@@ -97,12 +113,16 @@
     Sign out of PnP and Graph when finished.
 
 .EXAMPLE
-    # Always do this one first
-    .\Install-SharePointStructure.ps1 -WhatIf
+    # From an empty tenant: it asks what everything should be called, then builds
+    .\Install-SharePointStructure.ps1
 
 .EXAMPLE
-    # Build it, keep the app registration for the scheduled audit
-    .\Install-SharePointStructure.ps1
+    # Same, but decide every single name yourself
+    .\Install-SharePointStructure.ps1 -AllNames
+
+.EXAMPLE
+    # Dry run against a configuration that already exists
+    .\Install-SharePointStructure.ps1 -WhatIf
 
 .EXAMPLE
     # One-off build on a tenant you do not manage: leave nothing behind
@@ -131,6 +151,7 @@ param(
     [string] $ClientId,
     [string] $Tenant,
 
+    [switch] $AllNames,
     [switch] $SkipTeam,
     [string] $Owner,
     [switch] $RunAudit,
@@ -161,14 +182,18 @@ if (-not $ConfigPath) {
     } else {
         Write-Host ''
         Write-Host '  Nog geen configuratie voor deze klant. Ik stel eerst een paar vragen.' -ForegroundColor Cyan
-        & (Join-Path $PSScriptRoot 'New-StructureConfig.ps1')
-        if ($LASTEXITCODE -ne 0) { throw 'Configuration was not created.' }
 
-        $made = @(Get-ChildItem -Path $PSScriptRoot -Filter '*.config.json' |
-                  Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'CHANGEME' } |
-                  Sort-Object LastWriteTime -Descending)
-        if ($made.Count -eq 0) { throw 'Configuration was not created.' }
-        $ConfigPath = $made[0].FullName
+        # The wizard puts the path it wrote on the pipeline and nothing else, so take
+        # it from there. Its exit code is no use: a script that simply ends sets none,
+        # and the stale value from whatever ran before would be read instead.
+        $wizardArgs = @{}
+        if ($AllNames) { $wizardArgs['All'] = $true }
+        $ConfigPath = & (Join-Path $PSScriptRoot 'New-StructureConfig.ps1') @wizardArgs |
+                      Select-Object -Last 1
+
+        if (-not $ConfigPath -or -not (Test-Path $ConfigPath)) {
+            throw 'No configuration was created - nothing to build.'
+        }
     }
 }
 
