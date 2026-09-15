@@ -9,8 +9,25 @@
     "mgmt": "https://CHANGEME.sharepoint.com/sites/CHANGEME-MGMT"
   },
 
+  "team": {
+    "displayName": "Petsolutions",
+    "mailNickname": "Petsolutions",
+    "description": "Documentbeheer Petsolutions NV - Butterstone en Laseto.",
+    "visibility": "Private",
+    "owners": [ "CHANGEME@CHANGEME.onmicrosoft.com" ],
+    "note": "mailNickname bepaalt de site-URL: .../sites/<mailNickname>. Het privekanaal krijgt daar zijn eigen site naast, en New-SharePointTeam.ps1 schrijft die terug naar sites.mgmt."
+  },
+
   "columnGroup": "Petsolutions",
   "contentTypeGroup": "Petsolutions",
+
+  "fieldRoles": {
+    "brand": "PsMerk",
+    "pillar": "PsPijler",
+    "confidentiality": "PsVertrouwelijkheid",
+    "shareStatus": "PsDeelstatus",
+    "lifecycle": "PsStatus"
+  },
 
   "termStore": {
     "group": "Petsolutions",
@@ -273,6 +290,7 @@
       "key": "MGMT",
       "title": "MGMT",
       "kind": "ChannelFolder",
+      "channelType": "Private",
       "site": "mgmt",
       "list": "Documents",
       "folder": "MGMT",
@@ -288,6 +306,7 @@
       "key": "Leveranciers",
       "title": "Leveranciers",
       "kind": "ChannelFolder",
+      "channelType": "Standard",
       "site": "team",
       "list": "Documents",
       "folder": "Leveranciers",
@@ -310,6 +329,7 @@
       "key": "Verkopers",
       "title": "Verkopers",
       "kind": "ChannelFolder",
+      "channelType": "Standard",
       "site": "team",
       "list": "Documents",
       "folder": "Verkopers",
@@ -332,6 +352,7 @@
       "key": "Klanten",
       "title": "Klanten",
       "kind": "ChannelFolder",
+      "channelType": "Standard",
       "site": "team",
       "list": "Documents",
       "folder": "Klanten",
@@ -354,6 +375,7 @@
       "key": "Marketing",
       "title": "Marketing",
       "kind": "ChannelFolder",
+      "channelType": "Standard",
       "site": "team",
       "list": "Documents",
       "folder": "Marketing",
@@ -376,6 +398,7 @@
       "key": "TD",
       "title": "TD",
       "kind": "ChannelFolder",
+      "channelType": "Standard",
       "site": "team",
       "list": "Documents",
       "folder": "TD",

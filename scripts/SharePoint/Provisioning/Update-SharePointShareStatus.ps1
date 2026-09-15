@@ -180,9 +180,11 @@ $connectSplat = @{
     Interactive         = $Interactive
 }
 
-# Column names come from the config so a client that renamed them still works.
-$statusField = 'PsDeelstatus'
-$secretField = 'PsVertrouwelijkheid'
+# Column names come from the config's fieldRoles, so a client that renamed the
+# columns still works without editing this script.
+$roles       = Get-ConfigValue $config 'fieldRoles'
+$statusField = Get-ConfigValue $roles 'shareStatus'    'PsDeelstatus'
+$secretField = Get-ConfigValue $roles 'confidentiality' 'PsVertrouwelijkheid'
 $statusChoices = @($config.columns | Where-Object { $_.internalName -eq $statusField } |
                    ForEach-Object { Get-ConfigValue $_ 'choices' @() })
 if ($statusChoices.Count -lt 4) {
