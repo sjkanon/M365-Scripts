@@ -85,7 +85,7 @@
 
 .NOTES
     Author  : Sjoerd Kanon
-    Requires: PnP.PowerShell 2.x
+    Requires: PnP.PowerShell 2.x and Microsoft.Graph.Authentication
     Rights  : Teams administrator or a user allowed to create teams, and the app needs
               the delegated Group.ReadWrite.All and Channel.Create scopes.
 #>
@@ -133,8 +133,6 @@ if (-not $Owner) {
 }
 
 $simulate  = [bool] $WhatIfPreference
-$tenantName = ($Tenant -split '\.')[0]
-$rootUrl    = "https://$tenantName.sharepoint.com"
 
 $discovered = @{}
 $changeCount = 0
@@ -147,12 +145,23 @@ Write-Host "  Mode   : $(if ($simulate) { '-WhatIf - nothing will be created' } 
     -ForegroundColor $(if ($simulate) { 'Yellow' } else { 'Cyan' })
 
 function Invoke-Graph {
-    <# Graph through the PnP connection, so the whole run stays on one app. #>
-    param([Parameter(Mandatory)] [string] $Url, [string] $Method = 'GET', $Body, $Connection)
+    <#
+        A Graph call on the Graph sign-in this script makes itself.
 
-    $splat = @{ Url = $Url; Method = $Method; Connection = $Connection; ErrorAction = 'Stop' }
-    if ($Body) { $splat['Content'] = ($Body | ConvertTo-Json -Depth 8) }
-    return Invoke-PnPGraphMethod @splat
+        Deliberately not routed through the PnP connection: that would use whichever
+        app registration PnP happens to be signed in with, and an app cached by
+        another script in this repo carries the SharePoint scopes but not
+        Group.ReadWrite.All or Channel.Create. The call then comes back 403 halfway
+        through creating a team, which is a miserable place to find out.
+    #>
+    param([Parameter(Mandatory)] [string] $Url, [string] $Method = 'GET', $Body)
+
+    $splat = @{ Uri = "https://graph.microsoft.com/$Url"; Method = $Method; ErrorAction = 'Stop' }
+    if ($Body) {
+        $splat['Body']        = ($Body | ConvertTo-Json -Depth 8)
+        $splat['ContentType'] = 'application/json'
+    }
+    return Invoke-MgGraphRequest @splat
 }
 
 function Wait-ChannelSite {
@@ -164,8 +173,7 @@ function Wait-ChannelSite {
     param(
         [Parameter(Mandatory)] [string] $TeamId,
         [Parameter(Mandatory)] [string] $ChannelId,
-        [Parameter(Mandatory)] [string] $ChannelName,
-        [Parameter(Mandatory)] $Connection
+        [Parameter(Mandatory)] [string] $ChannelName
     )
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
@@ -173,8 +181,8 @@ function Wait-ChannelSite {
     while ((Get-Date) -lt $deadline) {
         $attempt++
         try {
-            $folder = Invoke-Graph -Url "v1.0/teams/$TeamId/channels/$ChannelId/filesFolder" -Connection $Connection
-            $webUrl = Get-ConfigValue $folder 'webUrl'
+            $folder = Invoke-Graph -Url "v1.0/teams/$TeamId/channels/$ChannelId/filesFolder"
+            $webUrl = [string] $folder.webUrl
             if ($webUrl) {
                 # .../sites/Petsolutions-MGMT/Shared%20Documents -> .../sites/Petsolutions-MGMT
                 if ($webUrl -match '^(https://[^/]+/sites/[^/]+)') { return $Matches[1] }
@@ -193,15 +201,22 @@ try {
     # -- 1. The team -----------------------------------------------------------
     Write-Head '1. Microsoft 365 group and team'
 
-    # Any site will do as a connection for the Graph calls; the tenant root always
-    # exists, and the team site does not yet.
-    $connection = Connect-Structure -Url $rootUrl -Tenant $Tenant -ClientId $ClientId -Interactive:$Interactive
+    # Sign in to Graph for the team and channel work, asking for exactly the scopes
+    # this needs. Creating a team and a private channel is Graph, not SharePoint.
+    Connect-StructureGraph -Tenant $Tenant -AuthenticationOnly -Scopes @(
+        'Group.ReadWrite.All'
+        'Directory.Read.All'
+        'Team.Create'
+        'Channel.Create'
+        'ChannelSettings.ReadWrite.All'
+        'Sites.Read.All'
+    )
 
     $existing = $null
     try {
         $escaped  = $team.mailNickname -replace "'", "''"
-        $found    = Invoke-Graph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'" -Connection $connection
-        $existing = @(Get-ConfigValue $found 'value' @()) | Select-Object -First 1
+        $found    = Invoke-Graph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'"
+        $existing = @($found.value) | Select-Object -First 1
     } catch {
         throw "Could not query Microsoft 365 groups: $($_.Exception.Message)"
     }
@@ -214,16 +229,45 @@ try {
             Write-Warn "Its display name is '$($existing.displayName)', the config says '$($team.displayName)' - left as is, renaming a team is yours to decide."
         }
     } elseif ($PSCmdlet.ShouldProcess($team.displayName, 'Create Microsoft 365 team')) {
-        $newTeam = New-PnPTeamsTeam -DisplayName $team.displayName `
-            -MailNickName $team.mailNickname `
-            -Description (Get-ConfigValue $team 'description' '') `
-            -Visibility (Get-ConfigValue $team 'visibility' 'Private') `
-            -Owners $(if ($Owner) { @($Owner) } else { @() }) `
-            -Connection $connection
-        $teamId = $newTeam.GroupId
-        Write-Change "Team '$($team.displayName)' created ($teamId)"
+        # Two steps on purpose: the group first, then team-enable it. Creating a team
+        # straight from a template gives no control over the mailNickname, and that
+        # nickname is what decides the site URL the rest of this set connects to.
+        if (-not $Owner) { throw 'A new team needs an owner. Pass -Owner, or fill in team.owners in the configuration.' }
+
+        $ownerObject = Invoke-Graph -Url "v1.0/users/$([uri]::EscapeDataString($Owner))"
+        $group = Invoke-Graph -Url 'v1.0/groups' -Method POST -Body @{
+            displayName          = $team.displayName
+            mailNickname         = $team.mailNickname
+            description          = (Get-ConfigValue $team 'description' '')
+            visibility           = (Get-ConfigValue $team 'visibility' 'Private')
+            groupTypes           = @('Unified')
+            mailEnabled          = $true
+            securityEnabled      = $false
+            'owners@odata.bind'  = @("https://graph.microsoft.com/v1.0/users/$($ownerObject.id)")
+            'members@odata.bind' = @("https://graph.microsoft.com/v1.0/users/$($ownerObject.id)")
+        }
+        $teamId = $group.id
+        Write-Change "Microsoft 365 group '$($team.displayName)' created ($teamId)"
+
+        # The group has to exist everywhere before it can be team-enabled; a fresh one
+        # answers 404 for a while.
+        Write-Step 'Waiting for the group to replicate before turning it into a team...'
+        $teamed = $false
+        for ($attempt = 1; $attempt -le 12 -and -not $teamed; $attempt++) {
+            Start-Sleep -Seconds 15
+            try {
+                Invoke-Graph -Url "v1.0/teams" -Method POST -Body @{
+                    'group@odata.bind' = "https://graph.microsoft.com/v1.0/groups('$teamId')"
+                } | Out-Null
+                $teamed = $true
+            } catch {
+                if ($attempt -eq 12) { throw "The group was created but could not be turned into a team: $($_.Exception.Message)" }
+                Write-Skip "not ready yet (attempt $attempt)..."
+            }
+        }
+        Write-Change "Team '$($team.displayName)' created"
         $changeCount++
-        Write-Step 'Waiting 30s for the team and its site to settle...'
+        Write-Step 'Waiting 30s for the team site to settle...'
         Start-Sleep -Seconds 30
     }
 
@@ -237,15 +281,14 @@ try {
     }
 
     # -- 2. The team site URL --------------------------------------------------
-    $site = Invoke-Graph -Url "v1.0/groups/$teamId/sites/root" -Connection $connection
-    $teamSiteUrl = (Get-ConfigValue $site 'webUrl').TrimEnd('/')
+    $site = Invoke-Graph -Url "v1.0/groups/$teamId/sites/root"
+    $teamSiteUrl = ([string] $site.webUrl).TrimEnd('/')
     $discovered['team'] = $teamSiteUrl
     Write-Ok "Team site: $teamSiteUrl"
 
     # -- 3. Channels -----------------------------------------------------------
     Write-Head '2. Channels'
-    $channels = @(Invoke-Graph -Url "v1.0/teams/$teamId/channels" -Connection $connection |
-                  ForEach-Object { Get-ConfigValue $_ 'value' @() })
+    $channels = @((Invoke-Graph -Url "v1.0/teams/$teamId/channels").value)
 
     foreach ($entry in $config.containers) {
         $channelType = Get-ConfigValue $entry 'channelType'
@@ -258,17 +301,23 @@ try {
         if ($live) {
             Write-Ok "channel '$($entry.title)' ($($live.membershipType))"
         } elseif ($PSCmdlet.ShouldProcess($entry.title, "Create $channelType channel")) {
-            $addSplat = @{
-                Team        = $teamId
-                DisplayName = $entry.title
-                Connection  = $connection
+            $body = @{
+                displayName    = $entry.title
+                description    = "Pijler $($entry.key)"
+                membershipType = $(if ($channelType -eq 'Private') { 'private' } else { 'standard' })
             }
             if ($channelType -eq 'Private') {
-                if (-not $Owner) { throw "A private channel needs an owner. Pass -Owner, or fill in team.owners." }
-                $addSplat['ChannelType'] = 'Private'
-                $addSplat['OwnerUPN']    = $Owner
+                if (-not $Owner) { throw 'A private channel needs an owner. Pass -Owner, or fill in team.owners.' }
+                # A private channel is created with its owner in one call - Graph
+                # refuses to create one with no members at all.
+                $ownerObject = Invoke-Graph -Url "v1.0/users/$([uri]::EscapeDataString($Owner))"
+                $body['members'] = @(@{
+                    '@odata.type'     = '#microsoft.graph.aadUserConversationMember'
+                    'user@odata.bind' = "https://graph.microsoft.com/v1.0/users('$($ownerObject.id)')"
+                    roles             = @('owner')
+                })
             }
-            $live = Add-PnPTeamsChannel @addSplat
+            $live = Invoke-Graph -Url "v1.0/teams/$teamId/channels" -Method POST -Body $body
             Write-Change "$($channelType.ToLower()) channel '$($entry.title)' created"
             $changeCount++
         }
@@ -277,7 +326,7 @@ try {
         # A private channel has its own site collection, and only Graph knows its URL.
         if ($channelType -eq 'Private') {
             $siteKey = Get-ConfigValue $entry 'site'
-            $url     = Wait-ChannelSite -TeamId $teamId -ChannelId $live.id -ChannelName $entry.title -Connection $connection
+            $url     = Wait-ChannelSite -TeamId $teamId -ChannelId $live.id -ChannelName $entry.title
             $discovered[$siteKey] = $url
             Write-Ok "site for '$($entry.title)': $url"
         }
