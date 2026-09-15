@@ -20,12 +20,20 @@
 
     Everything else is derived. Per pillar you get a channel, a content type, two
     security groups and a grouped view; per brand you get a view that spans every
-    pillar. The column internal names are fixed on purpose - they are never shown to
-    anyone, and changing one after documents carry it loses the data on those
-    documents.
+    pillar.
+
+    -All asks for those derived names too - the channel name, the folder inside the
+    library, the content type, both group names, the view title, the library behind
+    the channels, the column and content type groups, the term set, and the label
+    each column carries for the user. Nothing about the finished structure is then
+    decided behind your back.
+
+    The column internal names stay fixed either way. They are never shown to anyone,
+    and changing one after documents carry it loses the data on those documents.
 
     Press Enter at any question to accept the suggestion in brackets. Lists are
-    comma-separated.
+    comma-separated. Where a question is optional the hint says (of "geen") - type
+    that to turn the suggestion down, because Enter means "take it".
 
     What you cannot change later
     ----------------------------
@@ -38,6 +46,11 @@
 .PARAMETER Path
     Where to write the configuration.
     Default: <client>.config.json next to this script, named after the client.
+
+.PARAMETER All
+    Ask for every name, including the ones that are otherwise derived: channel,
+    folder, content type, group and view names per pillar, plus the library, column
+    group, content type group, term set and the label of every column.
 
 .PARAMETER Force
     Overwrite an existing configuration file. Generates new content type IDs, so only
@@ -52,6 +65,10 @@
     .\Install-SharePointStructure.ps1 -ConfigPath .\petsolutions-nv.config.json
 
 .EXAMPLE
+    # Decide every name yourself, nothing derived
+    .\New-StructureConfig.ps1 -All
+
+.EXAMPLE
     # See what it would write without writing it
     .\New-StructureConfig.ps1 -ShowJson
 
@@ -61,6 +78,7 @@
 [CmdletBinding()]
 param(
     [string] $Path,
+    [switch] $All,
     [switch] $Force,
     [switch] $ShowJson
 )
@@ -75,9 +93,15 @@ function Read-Value {
 
     while ($true) {
         $hint = if ($Default) { " [$Default]" } else { '' }
+        if ($AllowEmpty) { $hint += ' (of "geen")' }
         Write-Host "  $Question$hint" -NoNewline -ForegroundColor Cyan
         Write-Host ': ' -NoNewline
         $answer = Read-Host
+
+        # Enter means "take the suggestion", so an optional question needs a word for
+        # "actually, none" - otherwise the default can never be turned down.
+        if ($AllowEmpty -and $answer -match '^\s*(geen|none|nee|-)\s*$') { return '' }
+
         if (-not $answer) { $answer = $Default }
         if ($answer -or $AllowEmpty) { return $answer }
         Write-Host '    Dit is verplicht.' -ForegroundColor Yellow
@@ -85,10 +109,13 @@ function Read-Value {
 }
 
 function Read-List {
-    param([string] $Question, [string[]] $Default)
+    param([string] $Question, [string[]] $Default, [switch] $AllowEmpty)
 
-    $answer = Read-Value -Question "$Question (komma's ertussen)" -Default ($Default -join ', ')
-    return @($answer -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $answer = Read-Value -Question "$Question (komma's ertussen)" -Default ($Default -join ', ') -AllowEmpty:$AllowEmpty
+    $list   = @($answer -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    # The comma keeps a one-item list a list: PowerShell unrolls a single-element
+    # array on return, and one brand would come back as a bare string.
+    return ,$list
 }
 
 function Read-YesNo {
@@ -100,6 +127,18 @@ function Read-YesNo {
     $answer = Read-Host
     if (-not $answer) { return $Default }
     return $answer -match '^[jJyY]'
+}
+
+function Read-Detail {
+    <#
+        A name that has a sensible derivation. Without -All it is taken silently;
+        with -All it becomes a question like any other, so nothing about the finished
+        structure is decided behind the operator's back.
+    #>
+    param([string] $Question, [string] $Default, [switch] $AllowEmpty)
+
+    if (-not $All) { return $Default }
+    return Read-Value -Question $Question -Default $Default -AllowEmpty:$AllowEmpty
 }
 
 function Get-Slug {
@@ -122,6 +161,11 @@ Write-Host '  ┌─────────────────────
 Write-Host '  │  Hoe moet alles heten?                                     │' -ForegroundColor Cyan
 Write-Host '  └────────────────────────────────────────────────────────────┘' -ForegroundColor Cyan
 Write-Host '  Enter = de waarde tussen haakjes overnemen.' -ForegroundColor DarkGray
+if ($All) {
+    Write-Host '  -All: elke naam wordt gevraagd, ook de afleidbare.' -ForegroundColor DarkGray
+} else {
+    Write-Host '  Tip: -All vraagt ook naar kanaal-, map-, documenttype- en groepsnamen.' -ForegroundColor DarkGray
+}
 Write-Host ''
 
 # -- 1. Client and tenant ------------------------------------------------------
@@ -154,18 +198,18 @@ Write-Host '  Elke pijler wordt een kanaal, een documenttype, twee groepen' -For
 Write-Host '  en een gegroepeerde weergave.' -ForegroundColor DarkGray
 $pillars = Read-List -Question 'Pijlers' -Default @('MGMT', 'Leveranciers', 'Verkopers', 'Klanten', 'Marketing', 'TD')
 
-$privatePillars = Read-List -Question 'Welke daarvan zijn een privekanaal (eigen site, alleen leden)' -Default @($pillars[0])
+$privatePillars = Read-List -Question 'Welke daarvan zijn een privekanaal (eigen site, alleen leden)' -Default @($pillars[0]) -AllowEmpty
 foreach ($p in $privatePillars) {
     if ($p -notin $pillars) { throw "'$p' staat niet in de pijlerlijst." }
 }
 
-$supplierPillar = Read-Value -Question 'Welke pijler gaat over leveranciers (leeg = geen)' -Default 'Leveranciers' -AllowEmpty
-$salesPillar    = Read-Value -Question 'Welke pijler gaat over verkoop, met regios (leeg = geen)' -Default 'Verkopers' -AllowEmpty
+$supplierPillar = Read-Value -Question 'Welke pijler gaat over leveranciers' -Default 'Leveranciers' -AllowEmpty
+$salesPillar    = Read-Value -Question 'Welke pijler gaat over verkoop, met regios' -Default 'Verkopers' -AllowEmpty
 
 # -- 5. External library -------------------------------------------------------
 Write-Host ''
 Write-Host '  ── Bibliotheek voor klanten ──────────────────────────────' -ForegroundColor DarkGray
-$extLibrary = Read-Value -Question 'Naam van de klantbibliotheek (leeg = geen)' -Default 'FUTECH Images and videos' -AllowEmpty
+$extLibrary = Read-Value -Question 'Naam van de aparte bibliotheek voor klanten' -Default 'FUTECH Images and videos' -AllowEmpty
 
 # -- 6. Groups -----------------------------------------------------------------
 Write-Host ''
@@ -178,11 +222,15 @@ $roSuffix    = Read-Value -Question 'Achtervoegsel voor alleen lezen' -Default '
 Write-Host ''
 Write-Host '  ── De labels ─────────────────────────────────────────────' -ForegroundColor DarkGray
 $languages  = Read-List -Question 'Talen' -Default @('NL', 'FR', 'DE', 'EN', 'Geen taal')
-$regions    = if ($salesPillar) { Read-List -Question 'Verkoopregios' -Default @('Benelux', 'Duitsland', 'Frankrijk', 'Export') } else { @() }
+# Assigned before the if: an if-block whose only output is @() yields $null, not an
+# empty array, and everything downstream asks these for their Count.
+$regions = @()
+if ($salesPillar) { $regions = Read-List -Question 'Verkoopregios' -Default @('Benelux', 'Duitsland', 'Frankrijk', 'Export') -AllowEmpty }
 $docKinds   = Read-List -Question 'Soorten document' -Default @('Catalogus', 'Prijslijst', 'Schrijfrichtlijn', 'Afbeelding+certificaat', 'Marketingslag')
 $confLevels = Read-List -Question 'Vertrouwelijkheidsniveaus' -Default @('Intern', 'Deelbaar met klant', 'Vertrouwelijk')
 $lifecycle  = Read-List -Question 'Statuswaarden' -Default @('Actief', 'Te archiveren', 'Verouderd')
-$suppliers  = if ($supplierPillar) { Read-List -Question 'Leveranciers om mee te beginnen (later uitbreidbaar)' -Default @('Lev. 1', 'Lev. 2', 'Lev. 3') } else { @() }
+$suppliers = @()
+if ($supplierPillar) { $suppliers = Read-List -Question 'Leveranciers om mee te beginnen (later uitbreidbaar)' -Default @('Lev. 1', 'Lev. 2', 'Lev. 3') -AllowEmpty }
 
 # -- 8. The one real choice ----------------------------------------------------
 Write-Host ''
@@ -194,44 +242,111 @@ $wantShareStatus = Read-YesNo -Question 'Deelstatus bijhouden' -Default $false
 
 $tightenChannels = Read-YesNo -Question 'Rechten per pijler afdwingen op de kanaalmappen (niet ondersteund door Microsoft)' -Default $false
 
-# -- Build ---------------------------------------------------------------------
+# -- 9. Everything that is otherwise derived -----------------------------------
 $tenantName = ($tenant -split '\.')[0]
 $teamSite   = "https://$tenantName.sharepoint.com/sites/$teamAlias"
+
+if ($All) {
+    Write-Host ''
+    Write-Host '  ── Namen die anders worden afgeleid ──────────────────────' -ForegroundColor DarkGray
+}
+$teamSite     = (Read-Detail -Question 'URL van de teamsite' -Default $teamSite).TrimEnd('/')
+$channelList  = Read-Detail -Question 'Naam van de bibliotheek achter de kanalen' -Default 'Documents'
+$columnGroup  = Read-Detail -Question 'Groepsnaam voor de sitekolommen (in de kolommenlijst)' -Default $teamName
+$ctGroup      = Read-Detail -Question 'Groepsnaam voor de documenttypes' -Default $teamName
+$termSetName  = if ($suppliers.Count -gt 0) { Read-Detail -Question 'Naam van de leveranciers-termenset' -Default 'Leveranciers' } else { 'Leveranciers' }
+
+# Column display names. The internal names stay fixed - they are never shown and
+# changing one after documents carry it loses the data on those documents.
+if ($All) {
+    Write-Host ''
+    Write-Host '  ── Hoe de labels heten voor de gebruiker ─────────────────' -ForegroundColor DarkGray
+}
+$labelBrand = Read-Detail -Question 'Label voor het merk'            -Default 'Merk'
+$labelPil   = Read-Detail -Question 'Label voor de pijler'           -Default 'Pijler'
+$labelReg   = Read-Detail -Question 'Label voor de regio'            -Default 'Regio'
+$labelSup   = Read-Detail -Question 'Label voor de leverancier'      -Default 'Leverancier'
+$labelLang  = Read-Detail -Question 'Label voor de taal'             -Default 'Taal'
+$labelKind  = Read-Detail -Question 'Label voor het soort document'  -Default 'Contenttype'
+$labelConf  = Read-Detail -Question 'Label voor de vertrouwelijkheid' -Default 'Vertrouwelijkheid'
+$labelShare = Read-Detail -Question 'Label voor de deelstatus'       -Default 'Deelstatus'
+$labelLife  = Read-Detail -Question 'Label voor de status'           -Default 'Status'
+
+# Per pillar: the channel, its folder, its content type, its two groups and its view.
+$detail = [ordered]@{}
+foreach ($pillar in $pillars) {
+    if ($All) {
+        Write-Host ''
+        Write-Host "  ── Pijler $pillar ─────────────────────────────────" -ForegroundColor DarkGray
+    }
+    $defaultGroupBy = if ($pillar -eq $supplierPillar -and $suppliers.Count -gt 0) { $labelSup }
+                      elseif ($pillar -eq $salesPillar -and $regions.Count -gt 0)  { $labelReg }
+                      else                                                          { $labelKind }
+    $groupByField   = switch ($defaultGroupBy) {
+        $labelSup  { 'PsLeverancier' }
+        $labelReg  { 'PsRegio' }
+        default    { 'PsContenttype' }
+    }
+
+    $channel = Read-Detail -Question "Kanaalnaam"                  -Default $pillar
+    $detail[$pillar] = [ordered]@{
+        Channel     = $channel
+        Folder      = (Read-Detail -Question 'Mapnaam in de bibliotheek'  -Default $channel)
+        ContentType = (Read-Detail -Question 'Naam van het documenttype'  -Default "$pillar-document")
+        GroupRw     = (Read-Detail -Question 'Groep die mag bewerken'     -Default "$groupPrefix-$pillar-$rwSuffix")
+        GroupRo     = (Read-Detail -Question 'Groep die mag lezen'        -Default "$groupPrefix-$pillar-$roSuffix")
+        ViewTitle   = (Read-Detail -Question 'Naam van de weergave'       -Default "Op $($defaultGroupBy.ToLowerInvariant())")
+        GroupBy     = $groupByField
+    }
+}
+
+$extGroupName = ''
+$extCtName    = ''
+if ($extLibrary) {
+    if ($All) {
+        Write-Host ''
+        Write-Host "  ── Klantbibliotheek ──────────────────────────────" -ForegroundColor DarkGray
+    }
+    $extGroupName = Read-Detail -Question 'Groep voor de externe klanten' -Default "$groupPrefix-Klanten-Extern"
+    $extCtName    = Read-Detail -Question 'Naam van het documenttype'     -Default 'Klantmedia'
+}
+
+# -- Build ---------------------------------------------------------------------
 
 $brandChoices = @($brands)
 if ($bothName) { $brandChoices += $bothName }
 
 $columns = [System.Collections.Generic.List[object]]::new()
-$columns.Add([ordered]@{ internalName = 'PsMerk'; displayName = 'Merk'; type = 'Choice'
+$columns.Add([ordered]@{ internalName = 'PsMerk'; displayName = $labelBrand; type = 'Choice'
     description = "Voor welk merk is dit?$(if ($bothName) { " Hoort het bij allebei, kies $bothName - dan verschijnt het in beide merkoverzichten. Geen kopie nodig." })"
     choices = $brandChoices })
-$columns.Add([ordered]@{ internalName = 'PsPijler'; displayName = 'Pijler'; type = 'Choice'
+$columns.Add([ordered]@{ internalName = 'PsPijler'; displayName = $labelPil; type = 'Choice'
     description = 'Vult zichzelf in op basis van het kanaal. Je hoeft hier niets te doen.'
     choices = @($pillars) })
 if ($regions.Count -gt 0) {
-    $columns.Add([ordered]@{ internalName = 'PsRegio'; displayName = 'Regio'; type = 'Choice'
+    $columns.Add([ordered]@{ internalName = 'PsRegio'; displayName = $labelReg; type = 'Choice'
         description = 'Voor welke verkoopregio is dit bedoeld?'; choices = @($regions) })
 }
 if ($suppliers.Count -gt 0) {
-    $columns.Add([ordered]@{ internalName = 'PsLeverancier'; displayName = 'Leverancier'; type = 'Taxonomy'
+    $columns.Add([ordered]@{ internalName = 'PsLeverancier'; displayName = $labelSup; type = 'Taxonomy'
         description = 'Typ de eerste letters van de leverancier, dan vult hij aan. Staat hij er niet bij? Vraag IT om hem toe te voegen.'
-        termSet = 'Leveranciers'; multiValue = $false })
+        termSet = $termSetName; multiValue = $false })
 }
-$columns.Add([ordered]@{ internalName = 'PsTaal'; displayName = 'Taal'; type = 'MultiChoice'
+$columns.Add([ordered]@{ internalName = 'PsTaal'; displayName = $labelLang; type = 'MultiChoice'
     description = 'In welke taal of talen is dit document? Meerdere aanvinken mag.'
     choices = @($languages) })
-$columns.Add([ordered]@{ internalName = 'PsContenttype'; displayName = 'Contenttype'; type = 'Choice'
+$columns.Add([ordered]@{ internalName = 'PsContenttype'; displayName = $labelKind; type = 'Choice'
     description = 'Wat voor soort document is dit?'; choices = @($docKinds) })
-$columns.Add([ordered]@{ internalName = 'PsVertrouwelijkheid'; displayName = 'Vertrouwelijkheid'; type = 'Choice'
+$columns.Add([ordered]@{ internalName = 'PsVertrouwelijkheid'; displayName = $labelConf; type = 'Choice'
     description = "Mag dit naar buiten? $($confLevels[0]) blijft binnen $teamName."
     choices = @($confLevels); defaultValue = $confLevels[0] })
 if ($wantShareStatus) {
-    $columns.Add([ordered]@{ internalName = 'PsDeelstatus'; displayName = 'Deelstatus'; type = 'Choice'
+    $columns.Add([ordered]@{ internalName = 'PsDeelstatus'; displayName = $labelShare; type = 'Choice'
         description = 'Wordt automatisch bijgehouden en toont of dit bestand buiten de organisatie open staat. Niet zelf invullen.'
         choices = @('Niet gedeeld', 'Intern gedeeld', 'Extern - alleen bekijken', 'Extern - bewerken')
         defaultValue = 'Niet gedeeld'; readOnlyInForms = $true })
 }
-$columns.Add([ordered]@{ internalName = 'PsStatus'; displayName = 'Status'; type = 'Choice'
+$columns.Add([ordered]@{ internalName = 'PsStatus'; displayName = $labelLife; type = 'Choice'
     description = "Laat $($lifecycle[0]) staan. Zet op $($lifecycle[1]) wat weg mag maar nog niet verwijderd hoeft."
     choices = @($lifecycle); defaultValue = $lifecycle[0] })
 
@@ -270,10 +385,13 @@ $viewFieldsTail = @('PsMerk', 'PsTaal', 'PsVertrouwelijkheid') +
                   @('PsStatus', 'Modified')
 
 foreach ($pillar in $pillars) {
-    $ctName    = "$pillar-document"
+    $d         = $detail[$pillar]
+    $ctName    = $d.ContentType
     $isPrivate = $pillar -in $privatePillars
     $siteKey   = if ($isPrivate) { Get-Slug $pillar } else { 'team' }
-    if ($isPrivate) { $sites[$siteKey] = "$teamSite-$(Get-Slug $pillar)" }
+    # SharePoint builds a private channel's site as <teamsite>-<channel>; the team step
+    # reads the real URL back from Graph afterwards, this is only the starting guess.
+    if ($isPrivate) { $sites[$siteKey] = "$teamSite-$(Get-Slug $d.Channel)" }
 
     $contentTypes.Add([ordered]@{
         name        = $ctName
@@ -282,28 +400,27 @@ foreach ($pillar in $pillars) {
         fields      = (New-PillarFields -Pillar $pillar)
     })
 
-    foreach ($suffix in @($rwSuffix, $roSuffix)) {
-        $name = "$groupPrefix-$pillar-$suffix"
+    foreach ($pair in @(@($d.GroupRw, 'bewerken'), @($d.GroupRo, 'alleen lezen'))) {
         $groups.Add([ordered]@{
-            displayName  = $name
-            mailNickname = (Get-Slug $name)
-            description  = "$client - $pillar - $(if ($suffix -eq $rwSuffix) { 'bewerken' } else { 'alleen lezen' })"
+            displayName  = $pair[0]
+            mailNickname = (Get-Slug $pair[0])
+            description  = "$client - $pillar - $($pair[1])"
         })
     }
 
-    # Group the view on the label that actually distinguishes documents in this pillar.
-    $groupBy = if ($pillar -eq $supplierPillar -and 'PsLeverancier' -in $columnNames) { 'PsLeverancier' }
-               elseif ($pillar -eq $salesPillar -and 'PsRegio' -in $columnNames)      { 'PsRegio' }
-               else                                                                    { 'PsContenttype' }
+    # The view groups on the label that actually distinguishes documents in this
+    # pillar, but only where that column exists at all.
+    $groupBy = $d.GroupBy
+    if ($groupBy -notin $columnNames) { $groupBy = 'PsContenttype' }
 
     $container = [ordered]@{
         key                 = $pillar
-        title               = $pillar
+        title               = $d.Channel
         kind                = 'ChannelFolder'
         channelType         = $(if ($isPrivate) { 'Private' } else { 'Standard' })
         site                = $siteKey
-        list                = 'Documents'
-        folder              = $pillar
+        list                = $channelList
+        folder              = $d.Folder
         pillar              = $pillar
         defaultColumnValues = [ordered]@{ PsPijler = $pillar; PsStatus = $lifecycle[0] }
         contentTypes        = @($ctName)
@@ -312,13 +429,13 @@ foreach ($pillar in $pillars) {
         # fight Teams for control of the same thing.
         uniquePermissions   = (-not $isPrivate -and $tightenChannels)
         view                = [ordered]@{
-            title   = "Op $(($groupBy -replace '^Ps', '').ToLowerInvariant())"
+            title   = $d.ViewTitle
             groupBy = $groupBy
             fields  = $viewFieldsBase + @($groupBy) + $viewFieldsTail
         }
         permissions         = @(
-            [ordered]@{ group = "$groupPrefix-$pillar-$rwSuffix"; role = 'Contribute' }
-            [ordered]@{ group = "$groupPrefix-$pillar-$roSuffix"; role = 'Read' }
+            [ordered]@{ group = $d.GroupRw; role = 'Contribute' }
+            [ordered]@{ group = $d.GroupRo; role = 'Read' }
         )
     }
     if ($isPrivate) {
@@ -330,12 +447,12 @@ foreach ($pillar in $pillars) {
 
 # The external customer library, if there is one.
 if ($extLibrary) {
-    $extGroup = "$groupPrefix-Klanten-Extern"
+    $extGroup = $extGroupName
     $groups.Add([ordered]@{
         displayName = $extGroup; mailNickname = (Get-Slug $extGroup)
         description = "$client - externe klanten met leestoegang tot $extLibrary"
     })
-    $extCt = 'Klantmedia'
+    $extCt = $extCtName
     $extFields = [System.Collections.Generic.List[object]]::new()
     $extFields.Add([ordered]@{ internalName = 'PsMerk'; required = $true })
     $extFields.Add([ordered]@{ internalName = 'PsContenttype'; required = $true })
@@ -353,9 +470,10 @@ if ($extLibrary) {
     $defaults = [ordered]@{ PsStatus = $lifecycle[0] }
     if ($confLevels.Count -gt 1) { $defaults['PsVertrouwelijkheid'] = $confLevels[1] }
 
-    $marketingRw = @($pillars | Where-Object { $_ -match 'Marketing' } | Select-Object -First 1)
+    # Whoever curates marketing keeps write access to the customer library.
+    $marketingPillar = @($pillars | Where-Object { $_ -match 'Marketing' } | Select-Object -First 1)
     $ownerGroups = @()
-    if ($marketingRw) { $ownerGroups += [ordered]@{ group = "$groupPrefix-$marketingRw-$rwSuffix"; role = 'Contribute' } }
+    if ($marketingPillar) { $ownerGroups += [ordered]@{ group = $detail[$marketingPillar].GroupRw; role = 'Contribute' } }
     $ownerGroups += [ordered]@{ group = $extGroup; role = 'Read' }
 
     $containers.Add([ordered]@{
@@ -426,13 +544,13 @@ $config = [ordered]@{
         owners       = @($teamOwner)
     }
     sites            = $sites
-    columnGroup      = $teamName
-    contentTypeGroup = $teamName
+    columnGroup      = $columnGroup
+    contentTypeGroup = $ctGroup
     fieldRoles       = $fieldRoles
 }
 if ($suppliers.Count -gt 0) {
     $config['termStore'] = [ordered]@{
-        group = $teamName; termSet = 'Leveranciers'
+        group = $columnGroup; termSet = $termSetName
         description = "Leveranciers van $client - uitbreidbaar vanuit de term store."
         terms = @($suppliers)
     }
@@ -440,7 +558,7 @@ if ($suppliers.Count -gt 0) {
 $config['columns']      = @($columns)
 $config['contentTypes'] = @($contentTypes)
 $config['groups']       = @($groups)
-$config['libraryViews'] = @(@{ site = 'team'; list = 'Documents'; views = @($crossViews) })
+$config['libraryViews'] = @(@{ site = 'team'; list = $channelList; views = @($crossViews) })
 $config['containers']   = @($containers)
 
 $json = $config | ConvertTo-Json -Depth 12
