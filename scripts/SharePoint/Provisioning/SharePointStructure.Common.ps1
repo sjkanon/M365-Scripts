@@ -681,6 +681,30 @@ function New-StructureApp {
         Write-Change "App registration created: $($app.AppId)"
     }
 
+    # Windows signs in through the Web Account Manager broker by default, and the
+    # broker uses a redirect URI built from the app's own id - which cannot be
+    # registered before the app exists, so it is patched in here. Without it the
+    # sign-in dies on AADTS50011 (redirect URI mismatch) and the app looks broken.
+    $wantedUris = @(
+        'http://localhost'
+        "ms-appx-web://Microsoft.AAD.BrokerPlugin/$($app.AppId)"
+        'https://login.microsoftonline.com/common/oauth2/nativeclient'
+    )
+    $currentUris = @()
+    if ($app.PublicClient -and $app.PublicClient.RedirectUris) { $currentUris = @($app.PublicClient.RedirectUris) }
+    $missingUris = @($wantedUris | Where-Object { $_ -notin $currentUris })
+
+    if ($missingUris.Count -gt 0) {
+        $merged = @(($currentUris + $wantedUris) | Select-Object -Unique)
+        Update-MgApplication -ApplicationId $app.Id -PublicClient @{ RedirectUris = $merged } | Out-Null
+        Write-Change "Redirect URIs added: $($missingUris.Count) (broker sign-in on Windows)"
+        # A redirect URI is checked at sign-in against a replicated copy, so the first
+        # attempt right after this still fails if we do not give it a moment.
+        Start-Sleep -Seconds 10
+    } else {
+        Write-Ok 'Redirect URIs already in place.'
+    }
+
     $sp = @(Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -All) | Select-Object -First 1
     if (-not $sp) {
         $sp = New-MgServicePrincipal -AppId $app.AppId
