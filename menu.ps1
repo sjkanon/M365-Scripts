@@ -639,25 +639,17 @@ $menu = @(
         Action={
             $dir = Join-Path $ROOT 'scripts\SharePoint\Provisioning'
             Write-Host ''
+            Write-Host '  0  Build it all  — app registration + steps 1-3 + verification' -ForegroundColor White
             Write-Host '  1  Metadata      — term set, site columns, content types' -ForegroundColor Gray
-            Write-Host '  2  Libraries     — libraries, channel folders, content types, permissions' -ForegroundColor Gray
+            Write-Host '  2  Libraries     — libraries, channel folders, content types, views, permissions' -ForegroundColor Gray
             Write-Host '  3  Share status  — audit sharing and update the Deelstatus column' -ForegroundColor Gray
             Write-Host '  4  Drift check   — compare the tenant with the config (read only)' -ForegroundColor Gray
             Write-Host ''
-            $step   = Read-Host '  Step [1-4]'
-            $config = Read-Host "  Config file [petsolutions.config.json]"
-            $client = Read-Host '  ClientId of the PnP app registration'
-
-            $a = @{ Interactive = $true; ClientId = $client }
-            if ($config) { $a['ConfigPath'] = (Join-Path $dir $config) }
-
-            # The drift check never writes, so it is the one step that skips the question.
-            if ($step -ne '4') {
-                $apply = Read-Host '  Apply the changes now (not just -WhatIf)? [y/N]'
-                if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
-            }
+            $step   = Read-Host '  Step [0-4]'
+            $config = Read-Host '  Config file [petsolutions.config.json]'
 
             $script = switch ($step) {
+                '0'     { 'Install-SharePointStructure.ps1' }
                 '1'     { 'New-SharePointMetadata.ps1' }
                 '2'     { 'Set-SharePointLibraries.ps1' }
                 '3'     { 'Update-SharePointShareStatus.ps1' }
@@ -665,6 +657,26 @@ $menu = @(
                 default { $null }
             }
             if (-not $script) { Write-Warning 'No such step.'; return }
+
+            $a = @{}
+            if ($config) { $a['ConfigPath'] = (Join-Path $dir $config) }
+
+            if ($step -eq '0') {
+                # The all-in-one registers its own app, so it asks for nothing here.
+                $temp = Read-Host '  Remove the app registration again afterwards? [y/N]'
+                if ($temp -match '^[Yy]') { $a['TemporaryApp'] = $true }
+            } else {
+                $a['Interactive'] = $true
+                $client = Read-Host '  ClientId of the PnP app registration'
+                if ($client) { $a['ClientId'] = $client }
+            }
+
+            # The drift check never writes, so it is the one step that skips the question.
+            if ($step -ne '4') {
+                $apply = Read-Host '  Apply the changes now (not just -WhatIf)? [y/N]'
+                if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
+            }
+
             & (Join-Path $dir $script) @a
         }
     }
