@@ -64,11 +64,13 @@ without Regio.
 
 | Script | What it does | Writes? |
 |---|---|---|
+| [`Install-SharePointStructure.ps1`](#install-sharepointstructureps1) | **Start here.** Builds everything in one run: app registration, all three steps, verification | yes |
 | [`New-SharePointMetadata.ps1`](#new-sharepointmetadataps1) | Term set, site columns, content types — on every site in the config | yes |
 | [`Set-SharePointLibraries.ps1`](#set-sharepointlibrariesps1) | Libraries, channel folders, content type binding, default metadata, views, group permissions | yes |
 | [`Update-SharePointShareStatus.ps1`](#update-sharepointsharestatusps1) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
 | [`Test-SharePointStructure.ps1`](#test-sharepointstructureps1) | Compares the tenant with the config and reports every difference | never |
 | `SharePointStructure.Common.ps1` | Shared helpers — dot-sourced, not run on its own | — |
+| [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
 | `petsolutions.config.json` | The model | — |
 
 Every writing script supports `-WhatIf` and is idempotent: a second run reports `[ OK ]`
@@ -129,6 +131,55 @@ that fails five minutes into a run.
 ---
 
 ## Order of operations
+
+### The short version
+
+```powershell
+.\Install-SharePointStructure.ps1 -WhatIf     # always this first
+.\Install-SharePointStructure.ps1             # build it
+# then: put people in the SG-PETSOL-* groups, and hand out the Handleiding
+```
+
+### Install-SharePointStructure.ps1
+
+One run, five steps, stopping at the first failure rather than building on a broken one:
+
+| Step | What |
+|---|---|
+| 0 | App registration — created and admin-consented, or reused from `pnp.appid.json` |
+| 1 | `New-SharePointMetadata.ps1` — term set, columns, content types, on every site |
+| 2 | `Set-SharePointLibraries.ps1 -EnsureGroups` — groups, libraries, folders, content types, defaults, views, permissions |
+| 3 | `Test-SharePointStructure.ps1` — read-only verification of what just landed |
+| 4 | `Update-SharePointShareStatus.ps1` with `-RunAudit` — the first deelstatus pass |
+
+```powershell
+# One-off build on a tenant you do not manage day to day: leave nothing behind
+.\Install-SharePointStructure.ps1 -TemporaryApp -RunAudit
+
+# Conservative: everything except the unsupported channel-folder permissions
+.\Install-SharePointStructure.ps1 -SkipChannelFolderPermissions
+
+# Use an app registration you already have
+.\Install-SharePointStructure.ps1 -ClientId <app-id>
+```
+
+| Exit code | Meaning |
+|---|---|
+| 0 | built and verified |
+| 1 | a step failed |
+| 2 | built, but the verification found differences |
+
+**About `-TemporaryApp`.** It deletes the app registration at the end — but only one
+*this run created*. An app that was already cached predates the run and is somebody
+else's to remove, so the script says so instead of quietly deleting it. Without the
+switch the app stays and the client ID is cached, which is what the scheduled audit and
+later drift checks need.
+
+**A `-WhatIf` run needs an app to sign in with.** With no cached app for the tenant there
+is nothing to connect as, so the dry run validates the configuration and stops there. Run
+it once for real, or pass `-ClientId` of an existing app, to dry-run step by step.
+
+### Or step by step
 
 ```powershell
 # 1. Look before you leap - both of these change nothing
@@ -194,6 +245,39 @@ default column values, a grouped view, and the role assignments.
 
 No view is ever made the default. The default view of a Teams library is what every
 member of the channel sees the second they open Files.
+
+#### Cross-cutting views — what makes "brand as a tag" real
+
+Per-pillar views only ever show one channel folder. The `libraryViews` section adds views
+on the shared library itself with `Scope = RecursiveAll`, so they span **every** pillar
+folder in one flat list:
+
+| View | Shows |
+|---|---|
+| `Alles - Butterstone` | every file tagged Butterstone **or Beide**, across all pillars, grouped by pillar |
+| `Alles - Laseto` | the same for Laseto |
+| `Nog te taggen` | files with no Merk — what drag-and-drop and OneDrive sync leave behind |
+| `Extern gedeeld` | everything the audit found sitting outside the organisation |
+| `Te archiveren` | Status is Te archiveren or Verouderd |
+
+This is the answer to "one file, two brands": a file tagged `Beide` is stored once and
+appears in both brand views. No copies to drift apart.
+
+The filter is raw CAML in the config rather than a mini query language of this script's
+own invention:
+
+```jsonc
+{
+  "title": "Alles - Butterstone",
+  "recursive": true,
+  "groupBy": "PsPijler",
+  "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Butterstone</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
+  "fields": [ "DocIcon", "LinkFilename", "PsPijler", "PsContenttype", "PsTaal", "..." ]
+}
+```
+
+Never group a view on `PsTaal` — SharePoint refuses to group on a multi-value column.
+Filtering on it works fine.
 
 ### Update-SharePointShareStatus.ps1
 
@@ -325,6 +409,27 @@ A weekly drift check alongside it:
 pwsh -NoProfile -File .\Test-SharePointStructure.ps1 `
     -ClientId <app-id> -Thumbprint <thumbprint> -Quiet -IncludeGroups
 ```
+
+---
+
+## Handing it over to the customer
+
+[`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) is
+written for the people who will actually upload files — in Dutch, no jargon, five minutes
+to read. It covers the three ways of adding a file and why they behave differently, what
+each label means, and what happens the moment you tag something.
+
+Two things in there are worth knowing about as the administrator, because they are the
+questions that come back:
+
+- **Drag-and-drop and OneDrive sync ask nothing.** Required columns are enforced by the
+  upload form, not by the library. Files dropped in bulk land with empty labels and a
+  "Required info" prompt — they are not blocked. The `Nog te taggen` view is the cleanup
+  list, and the guide tells users to work it with a multi-select and the details pane.
+- **A label is not a lock.** Setting Vertrouwelijkheid to Vertrouwelijk shuts nobody out;
+  it is an agreement, plus the signal the nightly audit uses to flag over-sharing. Access
+  comes from the security groups. The guide says this in a call-out box, because users
+  will otherwise assume the opposite.
 
 ---
 

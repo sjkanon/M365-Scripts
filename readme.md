@@ -269,12 +269,15 @@ Restore deleted files and folders from a site or OneDrive recycle bin — dry-ru
 
 Provision and maintain a whole SharePoint structure — metadata model, content types, libraries and group permissions — from one JSON config. See [`scripts/SharePoint/Provisioning/`](../scripts/SharePoint/Provisioning/readme.md).
 
+- `Install-SharePointStructure.ps1` — **the one-command build**: registers the Entra app itself, runs the three provisioning steps in the only order that works, verifies the result, and with `-TemporaryApp` removes the app registration again so nothing is left behind in a tenant you do not manage day to day
 - The model lives in the config, not in the code: a second MSP client is a second config file, not a second fork of four scripts
 - `New-SharePointMetadata.ps1` — managed metadata term set, site columns and content types, on **every** site in the config (a Teams private channel is its own site collection, and a site column does not reach across one)
 - `Set-SharePointLibraries.ps1` — libraries, Teams channel folders, content type binding, per-folder content type order, default column values, grouped views, and one Entra ID security group per pillar per access level; `-EnsureGroups` creates the groups on the way
 - `Update-SharePointShareStatus.ps1` — derives a Deelstatus column from the permissions actually on each file (Anyone link, guest, organisation link, or nothing) and flags anything tagged Intern/Vertrouwelijk sitting behind an external link; exit code 2 for a scheduled RMM job
 - `Test-SharePointStructure.ps1` — read-only drift check classifying every difference as Missing / Different / Extra; exit code 2 means somebody changed something
 - All four are idempotent and support `-WhatIf`; interactive or app-only with a certificate
+- Cross-cutting brand views (`Scope = RecursiveAll`) make "brand as a tag" real: *Alles - Butterstone* is one flat list across every pillar folder, including everything tagged **Beide** — one file, two brands, no copies. Plus *Nog te taggen*, *Extern gedeeld* and *Te archiveren*
+- [`Petsolutions-SharePoint-Handleiding.md`](../scripts/SharePoint/Provisioning/Petsolutions-SharePoint-Handleiding.md) — end-user documentation in Dutch to hand to the customer: the three ways of adding a file and why they behave differently, what each label means, and what happens the moment you tag something
 - Documented rather than hidden: unique permissions on a **standard**-channel folder are what this model asks for and what Microsoft does not support — members keep seeing the channel and get an error on the Files tab. `-SkipChannelFolderPermissions` is the conservative alternative
 
 ---
@@ -648,7 +651,9 @@ M365-Scripts/
     │   ├── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── readme.md
-    │       ├── petsolutions.config.json     ← the model: columns, content types, groups, libraries, permissions
+    │       ├── Petsolutions-SharePoint-Handleiding.md ← end-user guide (NL) to hand to the customer
+    │       ├── petsolutions.config.json     ← the model: columns, content types, groups, libraries, views, permissions
+    │       ├── Install-SharePointStructure.ps1 ← build it all in one run, incl. (temporary) app registration
     │       ├── SharePointStructure.Common.ps1 ← shared helpers (dot-sourced by all four)
     │       ├── New-SharePointMetadata.ps1   ← term set, site columns, content types (every site in the config)
     │       ├── Set-SharePointLibraries.ps1  ← libraries/channel folders, content types, defaults, views, group rights
@@ -781,6 +786,18 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Tenant-wide runs go through `$batch` (20 mailboxes per call) with throttled items retried. A mailbox that cannot be read is reported as such rather than as "nothing mapped" |
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
+
+### 2026-09-15
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Install-SharePointStructure.ps1` — builds the whole structure in one run: registers the Entra app itself and admin-consents its delegated scopes, then metadata → libraries/groups/permissions → verification, optionally the first deelstatus audit. Each step stays its own script, so a failure is rerun on its own instead of starting over |
+| `-TemporaryApp` deletes the app registration again at the end, for a one-off build on a tenant you do not manage day to day. It only ever deletes an app **this run created** — one that was already cached predates the run and is somebody else's to remove, so the script says so rather than quietly deleting it. Without the switch the app stays and the client ID is cached in `pnp.appid.json`, shared with the other PnP scripts in this repo |
+| Flagged in the docs because it will otherwise be reported as a bug: a `-WhatIf` run needs an app to sign in with. With no cached app for the tenant there is nothing to connect as, so the dry run validates the config and stops there — run once for real, or pass `-ClientId`, to dry-run step by step |
+| Closed the gap that made "merk als tag" only half true: cross-cutting views on the shared library with `Scope = RecursiveAll`, so *Alles - Butterstone* is one flat list across every pillar folder, **including everything tagged Beide** — one file, two brands, no copies to drift apart. Plus *Nog te taggen* (what drag-and-drop and OneDrive sync leave behind), *Extern gedeeld* and *Te archiveren*. The filter is raw CAML in the config rather than a mini query language of the script's own invention |
+| Never group a view on `PsTaal`: SharePoint refuses to group on a multi-value column. Filtering on it works fine, and no shipped view groups on it |
+| Added `Petsolutions-SharePoint-Handleiding.md` — end-user documentation in Dutch to hand to the customer. Covers the three ways of adding a file and why they behave differently, what each label means, and what happens the moment you tag something (the file does not move, links keep working, `Beide` shows up in both brand views, search lags a few minutes behind the views) |
+| Two things the guide says out loud because users assume the opposite: **drag-and-drop and OneDrive sync ask nothing** — required columns are enforced by the upload form, not by the library, so bulk-dropped files land with empty labels and a "Required info" prompt rather than being blocked; and **a label is not a lock** — Vertrouwelijkheid shuts nobody out, it is an agreement plus the signal the nightly audit uses to flag over-sharing |
+| Menu item `S` gained step `0` for the all-in-one build; the per-step options are unchanged |
 
 ### 2026-09-10 (4)
 | Change |
