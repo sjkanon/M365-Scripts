@@ -96,7 +96,11 @@ function Read-Value {
         if ($AllowEmpty) { $hint += ' (of "geen")' }
         Write-Host "  $Question$hint" -NoNewline -ForegroundColor Cyan
         Write-Host ': ' -NoNewline
-        $answer = Read-Host
+        $answer = (Read-Host).Trim()
+
+        # People quote their answers - the prompt is a console, not a shell, so
+        # "geen" and geen have to mean the same thing. Strip a matched pair.
+        if ($answer -match '^"(.*)"$' -or $answer -match "^'(.*)'$") { $answer = $Matches[1].Trim() }
 
         # Enter means "take the suggestion", so an optional question needs a word for
         # "actually, none" - otherwise the default can never be turned down.
@@ -112,10 +116,29 @@ function Read-List {
     param([string] $Question, [string[]] $Default, [switch] $AllowEmpty)
 
     $answer = Read-Value -Question "$Question (komma's ertussen)" -Default ($Default -join ', ') -AllowEmpty:$AllowEmpty
-    $list   = @($answer -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $list   = @($answer -split ',' |
+                ForEach-Object { $_.Trim() } |
+                ForEach-Object { if ($_ -match '^"(.*)"$' -or $_ -match "^'(.*)'$") { $Matches[1].Trim() } else { $_ } } |
+                Where-Object { $_ })
     # The comma keeps a one-item list a list: PowerShell unrolls a single-element
     # array on return, and one brand would come back as a bare string.
     return ,$list
+}
+
+function Read-OneOf {
+    <#
+        A question whose answer has to be one of a known set - re-asked until it is.
+        Without this a typo, or a list where one name was wanted, is accepted and
+        quietly produces a structure that does not match what was meant.
+    #>
+    param([string] $Question, [string] $Default, [string[]] $Options, [switch] $AllowEmpty)
+
+    while ($true) {
+        $answer = Read-Value -Question $Question -Default $Default -AllowEmpty:$AllowEmpty
+        if (-not $answer -and $AllowEmpty) { return '' }
+        if ($answer -in $Options) { return $answer }
+        Write-Host "    '$answer' staat daar niet tussen. Kies uit: $($Options -join ', ')" -ForegroundColor Yellow
+    }
 }
 
 function Read-YesNo {
@@ -200,11 +223,15 @@ $pillars = Read-List -Question 'Pijlers' -Default @('MGMT', 'Leveranciers', 'Ver
 
 $privatePillars = Read-List -Question 'Welke daarvan zijn een privekanaal (eigen site, alleen leden)' -Default @($pillars[0]) -AllowEmpty
 foreach ($p in $privatePillars) {
-    if ($p -notin $pillars) { throw "'$p' staat niet in de pijlerlijst." }
+    if ($p -notin $pillars) {
+        throw "'$p' staat niet tussen de pijlers. Kies uit: $($pillars -join ', ')"
+    }
 }
 
-$supplierPillar = Read-Value -Question 'Welke pijler gaat over leveranciers' -Default 'Leveranciers' -AllowEmpty
-$salesPillar    = Read-Value -Question 'Welke pijler gaat over verkoop, met regios' -Default 'Verkopers' -AllowEmpty
+$supplierPillar = Read-OneOf -Question 'Welke pijler gaat over leveranciers' -Options $pillars `
+                  -Default $(if ('Leveranciers' -in $pillars) { 'Leveranciers' } else { '' }) -AllowEmpty
+$salesPillar    = Read-OneOf -Question 'Welke pijler gaat over verkoop, met regios' -Options $pillars `
+                  -Default $(if ('Verkopers' -in $pillars) { 'Verkopers' } else { '' }) -AllowEmpty
 
 # -- 5. External library -------------------------------------------------------
 Write-Host ''

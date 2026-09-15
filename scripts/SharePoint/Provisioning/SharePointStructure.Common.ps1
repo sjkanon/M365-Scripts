@@ -22,6 +22,11 @@
 
 Set-StrictMode -Version Latest
 
+# Declared here, not on first use. Every script in this folder runs under StrictMode,
+# where reading a variable that was never assigned is an error - so the usual
+# "if (-not $script:X) { $script:X = @{} }" throws instead of initialising it.
+$script:StructureConnections = @{}
+
 # -- Output --------------------------------------------------------------------
 # Same vocabulary in all four scripts, so a run reads the same whichever one you
 # started: [ OK ] nothing to do, [ >> ] something changed, [DIFF] drift found.
@@ -159,7 +164,6 @@ function Connect-Structure {
         [switch] $Interactive
     )
 
-    if (-not $script:StructureConnections) { $script:StructureConnections = @{} }
     $key = $Url.TrimEnd('/').ToLowerInvariant()
     if ($script:StructureConnections.ContainsKey($key)) { return $script:StructureConnections[$key] }
 
@@ -204,7 +208,6 @@ function Connect-Structure {
 
 function Disconnect-Structure {
     <# Close every cached connection - only worth calling at the end of a run. #>
-    if (-not $script:StructureConnections) { return }
     foreach ($connection in $script:StructureConnections.Values) {
         try { Disconnect-PnPOnline -Connection $connection -ErrorAction SilentlyContinue } catch { }
     }
@@ -558,19 +561,27 @@ function Connect-StructureGraph {
         [Parameter(Mandatory)] [string] $Tenant,
         [string] $ClientId,
         [string] $Thumbprint,
-        [string[]] $Scopes = @('Group.ReadWrite.All', 'Directory.Read.All')
+        [string[]] $Scopes = @('Group.ReadWrite.All', 'Directory.Read.All'),
+        [switch] $AuthenticationOnly
     )
 
-    foreach ($module in @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Groups')) {
-        if (-not (Get-Module -ListAvailable -Name $module)) {
-            throw "Module '$module' is required for the Entra ID groups. Run: Install-Module $module -Scope CurrentUser"
-        }
+    if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication')) {
+        throw "Module 'Microsoft.Graph.Authentication' is required. Run: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser"
     }
-    Import-Module Microsoft.Graph.Groups -ErrorAction Stop
+    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+
+    # Only the group work needs the Groups cmdlets; the team step talks raw Graph and
+    # should not be blocked on a module it never calls.
+    if (-not $AuthenticationOnly) {
+        if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Groups')) {
+            throw "Module 'Microsoft.Graph.Groups' is required for the Entra ID groups. Run: Install-Module Microsoft.Graph.Groups -Scope CurrentUser"
+        }
+        Import-Module Microsoft.Graph.Groups -ErrorAction Stop
+    }
 
     if ($Thumbprint -and $ClientId) {
         Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint -NoWelcome | Out-Null
-    } elseif ($ClientId) {
+    } elseif ($ClientId -and -not $PSBoundParameters.ContainsKey('Scopes')) {
         # An app this set provisioned already carries the Graph scopes, so signing in
         # with it keeps the whole run on one app registration. An app that came from
         # somewhere else may not, hence the fallback to the Graph SDK's own app.
