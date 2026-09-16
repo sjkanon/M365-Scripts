@@ -45,8 +45,9 @@
     with what they will cost before they run.
 
     A deleted Microsoft 365 group is soft-deleted for 30 days and can be restored in
-    the Entra portal; a deleted channel sits in its own 30-day recycle. Files in a
-    removed library go to the site recycle bin.
+    the Entra portal; a deleted channel sits in its own 30-day recycle. A removed
+    library, however, is deleted outright - Remove-PnPList only recycles when asked
+    to, and it is not asked here - so the files in it do not come back either.
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON. Default: the single *.config.json next
@@ -225,6 +226,28 @@ function Get-TeamId {
 }
 
 
+function Get-ListsUsingContentType {
+    <#
+        The titles of the lists on this site that actually carry a content type.
+
+        The config knows which lists were meant to carry it; SharePoint knows which
+        ones do. Only the second answer can unbind it, and only the second answer can
+        say why a removal was refused - "another site or list is still using this
+        content type" names nothing, and the list it means may never have been in the
+        model at all.
+    #>
+    param([Parameter(Mandatory)] $Connection, [Parameter(Mandatory)] [string] $Name)
+
+    $holders = [System.Collections.Generic.List[string]]::new()
+    foreach ($list in @(Get-PnPList -Connection $Connection -ErrorAction SilentlyContinue)) {
+        $bound = @(Get-PnPContentType -List $list.Title -Connection $Connection -ErrorAction SilentlyContinue |
+                   Where-Object { (Get-ConfigValue $_ 'Name') -eq $Name })
+        if ($bound.Count) { $holders.Add($list.Title) }
+    }
+    return , $holders.ToArray()
+}
+
+
 function Resolve-Team {
     <#
         Get-TeamId's answer, and nothing else that may have reached the output stream
@@ -370,7 +393,10 @@ try {
                     if (-not $Apply) { Add-Row -What 'library' -Name $title -Result 'would' -Detail "$count item(s)"; continue }
                     try {
                         Remove-PnPList -Identity $title -Force -Connection $connection
-                        Add-Row -What 'library' -Name $title -Result 'removed' -Detail "$count item(s) to the recycle bin"
+                        # Not "to the recycle bin": Remove-PnPList only recycles when it
+                        # is given -Recycle, and it is not. Saying otherwise promised a
+                        # way back from a destructive script that does not have one.
+                        Add-Row -What 'library' -Name $title -Result 'removed' -Detail "$count item(s), deleted permanently"
                     } catch {
                         Add-Row -What 'library' -Name $title -Result 'failed' -Detail $_.Exception.Message
                     }
@@ -386,13 +412,17 @@ try {
                     if (-not $Apply) { Add-Row -What 'content type' -Name $definition.name -Result 'would'; continue }
 
                     # Unbind first: a content type still attached to a list cannot go.
-                    foreach ($entry in ($config.containers | Where-Object { $_.site -eq $siteKey })) {
-                        $listTitle = Get-ConfigValue $entry 'list' $entry.title
-                        if ($definition.name -notin @(Get-ConfigValue $entry 'contentTypes' @())) { continue }
+                    # Asked of the site rather than of the config on purpose - the model
+                    # says which lists were meant to carry it, and removal has to deal
+                    # with what is there. A library made by hand, or the team library
+                    # this script never removes, holds a binding the config knows
+                    # nothing about, and one content type left behind takes every column
+                    # in it down with it.
+                    foreach ($listTitle in (Get-ListsUsingContentType -Connection $connection -Name $definition.name)) {
                         try {
                             Remove-PnPContentTypeFromList -List $listTitle -ContentType $definition.name -Connection $connection -ErrorAction Stop
                         } catch {
-                            # The list may be gone already, which is fine.
+                            # Whether this mattered shows up in the removal below.
                         }
                     }
 
@@ -400,7 +430,12 @@ try {
                         Remove-PnPContentType -Identity $definition.name -Force -Connection $connection -ErrorAction Stop
                         Add-Row -What 'content type' -Name $definition.name -Result 'removed'
                     } catch {
-                        Add-Row -What 'content type' -Name $definition.name -Result 'failed' -Detail $_.Exception.Message
+                        # "Another site or list is still using this content type" without
+                        # naming the list leaves you to find it by hand.
+                        $detail = $_.Exception.Message
+                        $still  = @(Get-ListsUsingContentType -Connection $connection -Name $definition.name)
+                        if ($still.Count) { $detail = "still on $($still -join ', ') - $detail" }
+                        Add-Row -What 'content type' -Name $definition.name -Result 'failed' -Detail $detail
                     }
                 }
             }
@@ -419,7 +454,20 @@ try {
                         Remove-PnPField -Identity $definition.internalName -Force -Connection $connection -ErrorAction Stop
                         Add-Row -What 'column' -Name $definition.internalName -Result 'removed'
                     } catch {
-                        Add-Row -What 'column' -Name $definition.internalName -Result 'failed' -Detail $_.Exception.Message
+                        # These come in groups: one content type that would not go holds
+                        # six columns, and six unexplained failures look like six
+                        # problems instead of the one they are.
+                        $detail   = $_.Exception.Message
+                        $blockers = @()
+                        foreach ($ct in $config.contentTypes) {
+                            $fields = @(Get-ConfigValue $ct 'fields' @() | ForEach-Object { Get-ConfigValue $_ 'internalName' })
+                            if ($definition.internalName -notin $fields) { continue }
+                            if (Get-PnPContentType -Identity $ct.name -Connection $connection -ErrorAction SilentlyContinue) {
+                                $blockers += $ct.name
+                            }
+                        }
+                        if ($blockers.Count) { $detail = "held by content type $($blockers -join ', ') - $detail" }
+                        Add-Row -What 'column' -Name $definition.internalName -Result 'failed' -Detail $detail
                     }
                 }
             }
