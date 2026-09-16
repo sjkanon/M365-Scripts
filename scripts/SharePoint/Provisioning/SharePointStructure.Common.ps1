@@ -63,7 +63,12 @@ function Get-ConfigValue {
         return $value
     }
 
-    if ($Object -isnot [psobject]) { return $Default }
+    # No [psobject] test guards what follows, on purpose. -is [psobject] is False for
+    # an ErrorRecord, for an Exception and for a plain array, so a guard here made this
+    # helper answer "not there" for every field of exactly the objects the error paths
+    # inspect - which is how a failed Graph call came back as "no detail returned".
+    # PSObject.Properties is available on any object at all, so probing it directly is
+    # both safer and wider than asking what the object is first.
 
     # Enumerated one by one rather than as .Properties.Name: member enumeration over
     # an empty property collection is itself an error under StrictMode, so an object
