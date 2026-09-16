@@ -72,6 +72,7 @@ without Regio.
 | [`Update-SharePointShareStatus.ps1`](#update-sharepointsharestatusps1) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
 | [`Test-SharePointStructure.ps1`](#test-sharepointstructureps1) | Compares the tenant with the config and reports every difference | never |
 | [`Sync-SharePointChannelMember.ps1`](#private-channels-and-groups) | Makes a security group the source of truth for who is in a private channel | channel roster |
+| [`Remove-SharePointStructure.ps1`](#undoing-it) | Removes what was built — reports only unless you pass `-Apply` | yes, on purpose |
 | `SharePointStructure.Common.ps1` | Shared helpers — dot-sourced, not run on its own | — |
 | [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
 | `petsolutions.config.json` | The model | — |
@@ -578,6 +579,50 @@ questions that come back:
   it is an agreement, plus the signal the nightly audit uses to flag over-sharing. Access
   comes from the security groups. The guide says this in a call-out box, because users
   will otherwise assume the opposite.
+
+---
+
+## Undoing it
+
+[`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) takes the same
+configuration apart, deepest first. **It has the reverse default of everything else
+here: without `-Apply` it changes nothing.** Forgetting `-WhatIf` on a destructive
+script is the dangerous direction, so the safe state is the one you get for free.
+
+```powershell
+.\Remove-SharePointStructure.ps1                                   # what would go
+.\Remove-SharePointStructure.ps1 -Scope Channels,Groups -Apply     # part of it
+.\Remove-SharePointStructure.ps1 -Scope All,Team -IncludeContent -Apply   # start over
+```
+
+| `-Scope` | Removes |
+|---|---|
+| `Tabs` | the library tabs added to channels |
+| `Channels` | the configured channels, and the files in their folders |
+| `Libraries` | the libraries a container owns (`kind: Library`) |
+| `ContentTypes` | unbound from the lists first, then removed |
+| `Columns` | the site columns, on every site in the config |
+| `TermSet` | the term set, its group and its terms |
+| `Groups` | the Entra ID security groups |
+| `Team` | the Microsoft 365 group — the site, every library, every file, every chat |
+| `All` | everything above **except** `Team` |
+
+`All` never includes the team. Deleting a client's whole team is not something you
+should get by asking for "all" — you have to name it, and then type the team's name to
+confirm.
+
+**What it refuses to do:**
+
+- A library or channel folder that still holds files is skipped unless `-IncludeContent`.
+  The item count is reported either way.
+- The General channel and the team's own Documents library are never removed.
+- A content type still in use is reported, not forced.
+
+**What no recycle bin brings back:** removing the term set orphans the Leverancier value
+on every document that carried one — the field keeps a GUID that resolves to nothing.
+Removing a column takes its data with it. Both are reported with that cost before they
+run. A deleted group or team is soft-deleted for 30 days; a deleted channel has its own
+30-day recycle; files from a removed library go to the site recycle bin.
 
 ---
 
