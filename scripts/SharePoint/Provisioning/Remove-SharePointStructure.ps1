@@ -166,31 +166,14 @@ function Connect-Graph {
     $script:graphReady = $true
 }
 
-function Invoke-Graph {
-    param([Parameter(Mandatory)] [string] $Url, [string] $Method = 'GET', $Body)
-
-    $splat = @{ Uri = "https://graph.microsoft.com/$Url"; Method = $Method; ErrorAction = 'Stop' }
-    if ($Body) { $splat['Body'] = ($Body | ConvertTo-Json -Depth 8); $splat['ContentType'] = 'application/json' }
-    try {
-        return Invoke-MgGraphRequest @splat
-    } catch {
-        $detail = ''
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-            try   { $detail = ($_.ErrorDetails.Message | ConvertFrom-Json).error.message }
-            catch { $detail = $_.ErrorDetails.Message }
-        }
-        if (-not $detail) { $detail = $_.Exception.Message }
-        throw "$Method $Url -> $detail"
-    }
-}
 
 function Get-TeamId {
     Connect-Graph
     $team = Get-ConfigValue $config 'team'
     if (-not $team) { return $null }
     $escaped = $team.mailNickname -replace "'", "''"
-    $found   = Invoke-Graph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id,displayName"
-    return (@($found.value) | Select-Object -First 1)
+    $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id,displayName"
+    return (@(Get-ConfigValue $found 'value' @()) | Select-Object -First 1)
 }
 
 Write-Host ''
@@ -214,7 +197,7 @@ try {
         if (-not $teamGroup) {
             Write-Skip 'no team found - nothing to do'
         } else {
-            $channels = @((Invoke-Graph -Url "v1.0/teams/$($teamGroup.id)/channels").value)
+            $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$($teamGroup.id)/channels")
             foreach ($entry in $config.containers) {
                 $tab = Get-ConfigValue $entry 'tab'
                 if (-not $tab) { continue }
@@ -222,13 +205,13 @@ try {
                 if (-not $channel) { continue }
 
                 $tabName = Get-ConfigValue $tab 'name' $entry.title
-                $live = @((Invoke-Graph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)/tabs").value) |
+                $live = @(Get-StructureGraphCollection -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)/tabs") |
                         Where-Object { $_.displayName -eq $tabName } | Select-Object -First 1
                 if (-not $live) { continue }
 
                 if (-not $Apply) { Add-Row -What 'tab' -Name "$($entry.title)/$tabName" -Result 'would'; continue }
                 try {
-                    Invoke-Graph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)/tabs/$($live.id)" -Method DELETE | Out-Null
+                    Invoke-StructureGraph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)/tabs/$($live.id)" -Method DELETE | Out-Null
                     Add-Row -What 'tab' -Name "$($entry.title)/$tabName" -Result 'removed'
                 } catch {
                     Add-Row -What 'tab' -Name "$($entry.title)/$tabName" -Result 'failed' -Detail $_.Exception.Message
@@ -244,7 +227,7 @@ try {
         if (-not $teamGroup) {
             Write-Skip 'no team found - nothing to do'
         } else {
-            $channels = @((Invoke-Graph -Url "v1.0/teams/$($teamGroup.id)/channels").value)
+            $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$($teamGroup.id)/channels")
             foreach ($entry in $config.containers) {
                 if (-not (Get-ConfigValue $entry 'channelType')) { continue }
                 $channel = $channels | Where-Object { $_.displayName -eq $entry.title } | Select-Object -First 1
@@ -262,7 +245,7 @@ try {
                     continue
                 }
                 try {
-                    Invoke-Graph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)" -Method DELETE | Out-Null
+                    Invoke-StructureGraph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)" -Method DELETE | Out-Null
                     Add-Row -What 'channel' -Name $entry.title -Result 'removed' -Detail 'recoverable for 30 days'
                 } catch {
                     Add-Row -What 'channel' -Name $entry.title -Result 'failed' -Detail $_.Exception.Message
@@ -395,12 +378,12 @@ try {
         Connect-Graph
         foreach ($definition in (Get-ConfigValue $config 'groups' @())) {
             $escaped = $definition.displayName -replace "'", "''"
-            $found   = Invoke-Graph -Url "v1.0/groups?`$filter=displayName eq '$escaped'&`$select=id,displayName"
-            $group   = @($found.value) | Select-Object -First 1
+            $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=displayName eq '$escaped'&`$select=id,displayName"
+            $group   = @(Get-ConfigValue $found 'value' @()) | Select-Object -First 1
             if (-not $group) { Add-Row -What 'group' -Name $definition.displayName -Result 'gone' -Detail 'not there'; continue }
             if (-not $Apply) { Add-Row -What 'group' -Name $definition.displayName -Result 'would'; continue }
             try {
-                Invoke-Graph -Url "v1.0/groups/$($group.id)" -Method DELETE | Out-Null
+                Invoke-StructureGraph -Url "v1.0/groups/$($group.id)" -Method DELETE | Out-Null
                 Add-Row -What 'group' -Name $definition.displayName -Result 'removed'
             } catch {
                 Add-Row -What 'group' -Name $definition.displayName -Result 'failed' -Detail $_.Exception.Message
@@ -427,7 +410,7 @@ try {
                 Add-Row -What 'team' -Name $teamGroup.displayName -Result 'skipped' -Detail 'name not confirmed'
             } else {
                 try {
-                    Invoke-Graph -Url "v1.0/groups/$($teamGroup.id)" -Method DELETE | Out-Null
+                    Invoke-StructureGraph -Url "v1.0/groups/$($teamGroup.id)" -Method DELETE | Out-Null
                     Add-Row -What 'team' -Name $teamGroup.displayName -Result 'removed' -Detail 'restorable for 30 days in Entra ID'
                 } catch {
                     Add-Row -What 'team' -Name $teamGroup.displayName -Result 'failed' -Detail $_.Exception.Message

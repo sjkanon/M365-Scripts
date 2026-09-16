@@ -522,15 +522,15 @@ function Set-StructureTab {
 
     $tabName = Get-ConfigValue $tab 'name' $Definition.title
     $escaped = $team.mailNickname -replace "'", "''"
-    $found   = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id" -ErrorAction Stop
-    $teamId  = (@($found.value) | Select-Object -First 1).id
+    $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id"
+    $teamId  = Get-ConfigValue (@(Get-ConfigValue $found 'value' @()) | Select-Object -First 1) 'id'
     if (-not $teamId) { Write-Warn "team '$($team.mailNickname)' not found - tab skipped"; $script:warningCount++; return }
 
-    $channels = @((Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/teams/$teamId/channels" -ErrorAction Stop).value)
+    $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels")
     $channel  = $channels | Where-Object { $_.displayName -eq $Definition.title } | Select-Object -First 1
     if (-not $channel) { Write-Warn "channel '$($Definition.title)' not found - tab skipped"; $script:warningCount++; return }
 
-    $tabs = @((Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/teams/$teamId/channels/$($channel.id)/tabs" -ErrorAction Stop).value)
+    $tabs = @(Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels/$($channel.id)/tabs")
     if ($tabs | Where-Object { $_.displayName -eq $tabName }) {
         Write-Ok "tab '$tabName' in channel '$($Definition.title)'"
         return
@@ -546,9 +546,7 @@ function Set-StructureTab {
         configuration        = @{ entityId = ''; contentUrl = $listUrl; removeUrl = $null; websiteUrl = $listUrl }
     }
     try {
-        Invoke-MgGraphRequest -Method POST -ContentType 'application/json' `
-            -Uri "https://graph.microsoft.com/v1.0/teams/$teamId/channels/$($channel.id)/tabs" `
-            -Body ($body | ConvertTo-Json -Depth 6) -ErrorAction Stop | Out-Null
+        Invoke-StructureGraph -Url "v1.0/teams/$teamId/channels/$($channel.id)/tabs" -Method POST -Body $body | Out-Null
         Write-Change "tab '$tabName' added to channel '$($Definition.title)' -> $listUrl"
         $script:changeCount++
     } catch {

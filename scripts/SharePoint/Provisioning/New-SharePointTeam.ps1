@@ -144,43 +144,6 @@ Write-Host "  Owner  : $(if ($Owner) { $Owner } else { 'the signed-in account' }
 Write-Host "  Mode   : $(if ($simulate) { '-WhatIf - nothing will be created' } else { 'APPLY' })" `
     -ForegroundColor $(if ($simulate) { 'Yellow' } else { 'Cyan' })
 
-function Invoke-Graph {
-    <#
-        A Graph call on the Graph sign-in this script makes itself.
-
-        Deliberately not routed through the PnP connection: that would use whichever
-        app registration PnP happens to be signed in with, and an app cached by
-        another script in this repo carries the SharePoint scopes but not
-        Group.ReadWrite.All or Channel.Create. The call then comes back 403 halfway
-        through creating a team, which is a miserable place to find out.
-    #>
-    param([Parameter(Mandatory)] [string] $Url, [string] $Method = 'GET', $Body)
-
-    $splat = @{ Uri = "https://graph.microsoft.com/$Url"; Method = $Method; ErrorAction = 'Stop' }
-    if ($Body) {
-        $splat['Body']        = ($Body | ConvertTo-Json -Depth 8)
-        $splat['ContentType'] = 'application/json'
-    }
-
-    try {
-        return Invoke-MgGraphRequest @splat
-    } catch {
-        # "BadRequest" on its own is useless. Graph puts the reason in the response
-        # body, and that is the difference between guessing and knowing.
-        $detail = ''
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-            try {
-                $parsed = $_.ErrorDetails.Message | ConvertFrom-Json
-                if ($parsed.error) { $detail = "$($parsed.error.code): $($parsed.error.message)" }
-            } catch {
-                $detail = $_.ErrorDetails.Message
-            }
-        }
-        if (-not $detail) { $detail = $_.Exception.Message }
-        throw "$Method $Url -> $detail"
-    }
-}
-
 function Enable-Team {
     <#
         Turn a Microsoft 365 group into a team, retrying while it replicates.
@@ -195,7 +158,7 @@ function Enable-Team {
     $lastError = ''
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         try {
-            Invoke-Graph -Url "v1.0/groups/$GroupId/team" -Method PUT -Body @{
+            Invoke-StructureGraph -Url "v1.0/groups/$GroupId/team" -Method PUT -Body @{
                 memberSettings    = @{ allowCreatePrivateChannels = $true; allowCreateUpdateChannels = $true }
                 messagingSettings = @{ allowUserEditMessages = $true; allowUserDeleteMessages = $true }
             } | Out-Null
@@ -217,7 +180,7 @@ function Test-IsTeam {
     param([Parameter(Mandatory)] [string] $GroupId)
 
     try {
-        Invoke-Graph -Url "v1.0/teams/$GroupId" | Out-Null
+        Invoke-StructureGraph -Url "v1.0/teams/$GroupId" | Out-Null
         return $true
     } catch {
         return $false
@@ -241,8 +204,8 @@ function Wait-ChannelSite {
     while ((Get-Date) -lt $deadline) {
         $attempt++
         try {
-            $folder = Invoke-Graph -Url "v1.0/teams/$TeamId/channels/$ChannelId/filesFolder"
-            $webUrl = [string] $folder.webUrl
+            $folder = Invoke-StructureGraph -Url "v1.0/teams/$TeamId/channels/$ChannelId/filesFolder"
+            $webUrl = [string] (Get-ConfigValue $folder 'webUrl')
             if ($webUrl) {
                 # .../sites/Petsolutions-MGMT/Shared%20Documents -> .../sites/Petsolutions-MGMT
                 if ($webUrl -match '^(https://[^/]+/sites/[^/]+)') { return $Matches[1] }
@@ -275,8 +238,8 @@ try {
     $existing = $null
     try {
         $escaped  = $team.mailNickname -replace "'", "''"
-        $found    = Invoke-Graph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'"
-        $existing = @($found.value) | Select-Object -First 1
+        $found    = Invoke-StructureGraph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'"
+        $existing = @(Get-ConfigValue $found 'value' @()) | Select-Object -First 1
     } catch {
         throw "Could not query Microsoft 365 groups: $($_.Exception.Message)"
     }
@@ -306,8 +269,8 @@ try {
         # nickname is what decides the site URL the rest of this set connects to.
         if (-not $Owner) { throw 'A new team needs an owner. Pass -Owner, or fill in team.owners in the configuration.' }
 
-        $ownerObject = Invoke-Graph -Url "v1.0/users/$([uri]::EscapeDataString($Owner))"
-        $group = Invoke-Graph -Url 'v1.0/groups' -Method POST -Body @{
+        $ownerObject = Invoke-StructureGraph -Url "v1.0/users/$([uri]::EscapeDataString($Owner))"
+        $group = Invoke-StructureGraph -Url 'v1.0/groups' -Method POST -Body @{
             displayName          = $team.displayName
             mailNickname         = $team.mailNickname
             description          = (Get-ConfigValue $team 'description' '')
@@ -315,10 +278,10 @@ try {
             groupTypes           = @('Unified')
             mailEnabled          = $true
             securityEnabled      = $false
-            'owners@odata.bind'  = @("https://graph.microsoft.com/v1.0/users/$($ownerObject.id)")
-            'members@odata.bind' = @("https://graph.microsoft.com/v1.0/users/$($ownerObject.id)")
+            'owners@odata.bind'  = @("https://graph.microsoft.com/v1.0/users/$(Get-ConfigValue $ownerObject 'id')")
+            'members@odata.bind' = @("https://graph.microsoft.com/v1.0/users/$(Get-ConfigValue $ownerObject 'id')")
         }
-        $teamId = $group.id
+        $teamId = Get-ConfigValue $group 'id'
         Write-Change "Microsoft 365 group '$($team.displayName)' created ($teamId)"
 
         # The group has to exist everywhere before it can be team-enabled; a fresh one
@@ -346,14 +309,14 @@ try {
     }
 
     # -- 2. The team site URL --------------------------------------------------
-    $site = Invoke-Graph -Url "v1.0/groups/$teamId/sites/root"
-    $teamSiteUrl = ([string] $site.webUrl).TrimEnd('/')
+    $site = Invoke-StructureGraph -Url "v1.0/groups/$teamId/sites/root"
+    $teamSiteUrl = ([string] (Get-ConfigValue $site 'webUrl')).TrimEnd('/')
     $discovered['team'] = $teamSiteUrl
     Write-Ok "Team site: $teamSiteUrl"
 
     # -- 3. Channels -----------------------------------------------------------
     Write-Head '2. Channels'
-    $channels = @((Invoke-Graph -Url "v1.0/teams/$teamId/channels").value)
+    $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels")
 
     foreach ($entry in $config.containers) {
         $channelType = Get-ConfigValue $entry 'channelType'
@@ -375,14 +338,14 @@ try {
                 if (-not $Owner) { throw 'A private channel needs an owner. Pass -Owner, or fill in team.owners.' }
                 # A private channel is created with its owner in one call - Graph
                 # refuses to create one with no members at all.
-                $ownerObject = Invoke-Graph -Url "v1.0/users/$([uri]::EscapeDataString($Owner))"
+                $ownerObject = Invoke-StructureGraph -Url "v1.0/users/$([uri]::EscapeDataString($Owner))"
                 $body['members'] = @(@{
                     '@odata.type'     = '#microsoft.graph.aadUserConversationMember'
-                    'user@odata.bind' = "https://graph.microsoft.com/v1.0/users('$($ownerObject.id)')"
+                    'user@odata.bind' = "https://graph.microsoft.com/v1.0/users('$(Get-ConfigValue $ownerObject 'id')')"
                     roles             = @('owner')
                 })
             }
-            $live = Invoke-Graph -Url "v1.0/teams/$teamId/channels" -Method POST -Body $body
+            $live = Invoke-StructureGraph -Url "v1.0/teams/$teamId/channels" -Method POST -Body $body
             Write-Change "$($channelType.ToLower()) channel '$($entry.title)' created"
             $changeCount++
         }

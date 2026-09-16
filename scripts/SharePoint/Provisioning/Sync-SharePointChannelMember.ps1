@@ -141,44 +141,6 @@ $added   = 0
 $removed = 0
 $warned  = 0
 
-function Invoke-Graph {
-    <# Graph with the reason Graph gives, not just the status code. #>
-    param([Parameter(Mandatory)] [string] $Url, [string] $Method = 'GET', $Body)
-
-    $splat = @{ Uri = "https://graph.microsoft.com/$Url"; Method = $Method; ErrorAction = 'Stop' }
-    if ($Body) {
-        $splat['Body']        = ($Body | ConvertTo-Json -Depth 8)
-        $splat['ContentType'] = 'application/json'
-    }
-    try {
-        return Invoke-MgGraphRequest @splat
-    } catch {
-        $detail = ''
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-            try   { $detail = ($_.ErrorDetails.Message | ConvertFrom-Json).error.message }
-            catch { $detail = $_.ErrorDetails.Message }
-        }
-        if (-not $detail) { $detail = $_.Exception.Message }
-        throw "$Method $Url -> $detail"
-    }
-}
-
-function Get-GraphPage {
-    <# Every page of a collection, followed through @odata.nextLink. #>
-    param([Parameter(Mandatory)] [string] $Url)
-
-    $items = [System.Collections.Generic.List[object]]::new()
-    $next  = $Url
-    while ($next) {
-        $page = Invoke-Graph -Url $next
-        foreach ($item in @($page.value)) { $items.Add($item) }
-        $link = Get-ConfigValue $page '@odata.nextLink'
-        # nextLink comes back absolute; Invoke-Graph prefixes the host itself.
-        $next = if ($link) { $link -replace '^https://graph\.microsoft\.com/', '' } else { $null }
-    }
-    return ,$items
-}
-
 function Get-ChannelGroup {
     <#
         The groups that decide who is in this channel. Explicit channelMembers wins;
@@ -207,15 +169,15 @@ function Get-GroupUser {
     param([Parameter(Mandatory)] [string] $GroupName)
 
     $escaped = $GroupName -replace "'", "''"
-    $found   = Invoke-Graph -Url "v1.0/groups?`$filter=displayName eq '$escaped'&`$select=id,displayName"
-    $group   = @($found.value) | Select-Object -First 1
+    $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=displayName eq '$escaped'&`$select=id,displayName"
+    $group   = @(Get-ConfigValue $found 'value' @()) | Select-Object -First 1
     if (-not $group) {
         Write-Warn "group '$GroupName' does not exist - skipped"
         $script:warned++
         return ,@()
     }
 
-    $members = Get-GraphPage -Url "v1.0/groups/$($group.id)/transitiveMembers?`$select=id,displayName,userPrincipalName"
+    $members = Get-StructureGraphCollection -Url "v1.0/groups/$($group.id)/transitiveMembers?`$select=id,displayName,userPrincipalName"
     $users   = @($members | Where-Object { (Get-ConfigValue $_ '@odata.type') -eq '#microsoft.graph.user' })
     return ,$users
 }
@@ -244,12 +206,12 @@ try {
     )
 
     $escaped = $team.mailNickname -replace "'", "''"
-    $found   = Invoke-Graph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id,displayName"
-    $teamId  = (@($found.value) | Select-Object -First 1).id
+    $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id,displayName"
+    $teamId  = Get-ConfigValue (@(Get-ConfigValue $found 'value' @()) | Select-Object -First 1) 'id'
     if (-not $teamId) { throw "Team '$($team.displayName)' (alias $($team.mailNickname)) not found." }
 
-    $channels    = @((Invoke-Graph -Url "v1.0/teams/$teamId/channels").value)
-    $teamMembers = Get-GraphPage -Url "v1.0/teams/$teamId/members"
+    $channels    = @(Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels")
+    $teamMembers = Get-StructureGraphCollection -Url "v1.0/teams/$teamId/members"
     $teamUserIds = @($teamMembers | ForEach-Object { Get-ConfigValue $_ 'userId' } | Where-Object { $_ })
 
     foreach ($entry in $private) {
@@ -275,7 +237,7 @@ try {
         }
 
         # -- who is in it
-        $current   = Get-GraphPage -Url "v1.0/teams/$teamId/channels/$($channel.id)/members"
+        $current   = Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels/$($channel.id)/members"
         $currentIds = @($current | ForEach-Object { Get-ConfigValue $_ 'userId' } | Where-Object { $_ })
 
         foreach ($id in $wanted.Keys) {
@@ -290,7 +252,7 @@ try {
                 # the message it returns does not mention that - so put them on the
                 # team first.
                 if ($id -notin $teamUserIds) {
-                    Invoke-Graph -Url "v1.0/teams/$teamId/members" -Method POST -Body @{
+                    Invoke-StructureGraph -Url "v1.0/teams/$teamId/members" -Method POST -Body @{
                         '@odata.type'     = '#microsoft.graph.aadUserConversationMember'
                         'user@odata.bind' = "https://graph.microsoft.com/v1.0/users('$id')"
                         roles             = @()
@@ -299,7 +261,7 @@ try {
                     Write-Change "$who added to the team"
                 }
 
-                Invoke-Graph -Url "v1.0/teams/$teamId/channels/$($channel.id)/members" -Method POST -Body @{
+                Invoke-StructureGraph -Url "v1.0/teams/$teamId/channels/$($channel.id)/members" -Method POST -Body @{
                     '@odata.type'     = '#microsoft.graph.aadUserConversationMember'
                     'user@odata.bind' = "https://graph.microsoft.com/v1.0/users('$id')"
                     roles             = @()
@@ -328,7 +290,7 @@ try {
                 if (-not $PSCmdlet.ShouldProcess("$($entry.title) / $who", 'Remove from private channel')) { continue }
 
                 try {
-                    Invoke-Graph -Url "v1.0/teams/$teamId/channels/$($channel.id)/members/$($member.id)" -Method DELETE | Out-Null
+                    Invoke-StructureGraph -Url "v1.0/teams/$teamId/channels/$($channel.id)/members/$($member.id)" -Method DELETE | Out-Null
                     Write-Change "$who removed from '$($entry.title)'"
                     $report.Add([PSCustomObject]@{ Channel = $entry.title; Action = 'removed'; User = $who })
                     $removed++
