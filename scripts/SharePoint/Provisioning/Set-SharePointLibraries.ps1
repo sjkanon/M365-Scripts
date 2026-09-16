@@ -509,11 +509,11 @@ function Set-StructurePermission {
     }
     if (-not $securable) { Write-Skip 'nothing to secure yet (-WhatIf on a container that does not exist)'; return }
 
-    $changes = Set-SecurableRole -Securable $securable -Desired $wanted -Connection $Connection `
+    $changes = @(Set-SecurableRole -Securable $securable -Desired $wanted -Connection $Connection `
         -PrincipalMap $map `
         -KeepExisting:([bool](Get-ConfigValue $Definition 'keepExistingPermissions' $true)) `
         -RemoveOther:$RemoveOtherPermissions `
-        -WhatIfMode:$simulate
+        -WhatIfMode:$simulate)
 
     if ($changes.Count -eq 0) {
         Write-Ok 'permissions already match the configuration'
