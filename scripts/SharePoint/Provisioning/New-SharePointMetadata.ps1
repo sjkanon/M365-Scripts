@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     Provision the metadata model - managed metadata term set, site columns and
@@ -176,24 +176,41 @@ function Set-StructureTermSet {
     $termStore = Get-ConfigValue $config 'termStore'
     if (-not $termStore) { Write-Skip 'No termStore section in the configuration'; return }
 
-    # A term set and a term are both created *in a language*, and PnP will not guess:
-    # without -Lcid it passes whatever it read off the store, which on a freshly
-    # provisioned term store is 0 - hence "argument out of range, parameter lcid".
-    # Config wins, then the store's own default, then en-US.
-    $lcid = Get-ConfigValue $termStore 'lcid'
-    if (-not $lcid) {
-        try {
-            $store = Get-PnPTermStore -Connection $Connection -ErrorAction Stop
-            $lcid  = [int] $store.DefaultLanguage
-        } catch {
-            # No term store cmdlet, or the property was never loaded - either way the
-            # fallback below is the answer, not a crash.
-            $lcid = 0
-        }
+    # A term set and a term are both created *in a language*, and the language has to
+    # be one the term store actually works in. Asking for one it does not know does not
+    # say so - CSOM answers "Specified argument was out of the range of valid values.
+    # Parameter name: index", which names nothing you can act on.
+    #
+    # The store used to be read with Get-PnPTermStore, which does not exist in
+    # PnP.PowerShell 3.x. That call always threw, the catch always set 0, and every
+    # term was created in en-US - fine on an English tenant, an index error on a Dutch
+    # one. Get-PnPSiteCollectionTermStore is the cmdlet that does exist.
+    $languages = @()
+    $default   = 0
+    try {
+        $store = Get-PnPSiteCollectionTermStore -Connection $Connection -ErrorAction Stop
+        # Languages is a lazy CSOM property: readable only once it has been loaded.
+        $context = Get-PnPContext -Connection $Connection
+        $context.Load($store)
+        $context.ExecuteQuery()
+        $default   = [int] $store.DefaultLanguage
+        $languages = @($store.Languages | ForEach-Object { [int] $_ })
+    } catch {
+        Write-Skip "Could not read the term store's languages ($($_.Exception.Message.Trim())) - falling back to the configured or default language."
     }
-    if (-not $lcid -or $lcid -le 0) {
-        $lcid = 1033
-        Write-Skip "Term store reported no working language - creating terms in en-US (1033). Set termStore.lcid to override."
+
+    # Config wins, then the store's default, then whatever it does work in, then en-US.
+    $lcid = [int] (Get-ConfigValue $termStore 'lcid' 0)
+    if ($lcid -le 0) { $lcid = $default }
+    if ($lcid -le 0 -and $languages.Count) { $lcid = $languages[0] }
+    if ($lcid -le 0) { $lcid = 1033 }
+
+    # Checked rather than attempted: a language the store does not carry fails on the
+    # first term, halfway through the build, with an error naming an index.
+    if ($languages.Count -and $lcid -notin $languages) {
+        $fallback = if ($default -gt 0) { $default } else { $languages[0] }
+        Write-Warn "the term store does not work in language $lcid (it has: $($languages -join ', ')) - using $fallback instead. Set termStore.lcid to choose."
+        $lcid = $fallback
     }
 
     $group = Get-PnPTermGroup -Identity $termStore.group -Connection $Connection -ErrorAction SilentlyContinue
