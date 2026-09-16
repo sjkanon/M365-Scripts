@@ -563,6 +563,30 @@ settings, so try one channel before moving anything that matters.
 
 ## Handing it over to the customer
 
+The explanation belongs on the site, not in this repo. `Add-SharePointHelpPage.ps1`
+writes it there as a SharePoint page, generated from the same configuration the
+structure was built from:
+
+```powershell
+.\Add-SharePointHelpPage.ps1 -WhatIf                      # what would it say
+.\Add-SharePointHelpPage.ps1 -Interactive -ClientId <app-id>
+.\Add-SharePointHelpPage.ps1 -Interactive -ClientId <app-id> -Force   # after a change
+```
+
+Because it is generated, it cannot drift: the channels it lists are the channels that
+exist, the labels it explains carry the same help text users see under each field, and
+the required fields per document type are read off the content types. Rename a channel,
+rerun it, and the page says the new thing.
+
+It is written for the person uploading a catalogue. No group names, no internal column
+names, no content types or site columns. Two things from the configuration are
+deliberately kept off it: the `note` on a container, which names security groups, and
+the `description` on a view, which talks about pillars and synced folders — their titles
+are plain enough on their own. Permissions are not on it at all: who may see what is not
+something a user can act on, and explaining it only invites the question of why they
+cannot.
+
+
 [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) is
 written for the people who will actually upload files — in Dutch, no jargon, five minutes
 to read. It covers the three ways of adding a file and why they behave differently, what
