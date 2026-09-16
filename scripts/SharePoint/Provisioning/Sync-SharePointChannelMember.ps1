@@ -316,7 +316,8 @@ try {
     Write-Host ''
 } catch {
     Write-Host ''
-    Write-Bad "Aborted: $($_.Exception.Message)"
+    Write-Bad "Aborted at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    if ($_.InvocationInfo.Line) { Write-Host "    $($_.InvocationInfo.Line.Trim())" -ForegroundColor DarkRed }
     Write-Host ''
     exit 1
 }

@@ -197,21 +197,21 @@ try {
         if (-not $teamGroup) {
             Write-Skip 'no team found - nothing to do'
         } else {
-            $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$($teamGroup.id)/channels")
+            $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$(Get-ConfigValue $teamGroup 'id')/channels")
             foreach ($entry in $config.containers) {
                 $tab = Get-ConfigValue $entry 'tab'
                 if (-not $tab) { continue }
-                $channel = $channels | Where-Object { $_.displayName -eq $entry.title } | Select-Object -First 1
+                $channel = $channels | Where-Object { (Get-ConfigValue $_ 'displayName') -eq $entry.title } | Select-Object -First 1
                 if (-not $channel) { continue }
 
                 $tabName = Get-ConfigValue $tab 'name' $entry.title
-                $live = @(Get-StructureGraphCollection -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)/tabs") |
-                        Where-Object { $_.displayName -eq $tabName } | Select-Object -First 1
+                $live = @(Get-StructureGraphCollection -Url "v1.0/teams/$(Get-ConfigValue $teamGroup 'id')/channels/$(Get-ConfigValue $channel 'id')/tabs") |
+                        Where-Object { (Get-ConfigValue $_ 'displayName') -eq $tabName } | Select-Object -First 1
                 if (-not $live) { continue }
 
                 if (-not $Apply) { Add-Row -What 'tab' -Name "$($entry.title)/$tabName" -Result 'would'; continue }
                 try {
-                    Invoke-StructureGraph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)/tabs/$($live.id)" -Method DELETE | Out-Null
+                    Invoke-StructureGraph -Url "v1.0/teams/$(Get-ConfigValue $teamGroup 'id')/channels/$(Get-ConfigValue $channel 'id')/tabs/$(Get-ConfigValue $live 'id')" -Method DELETE | Out-Null
                     Add-Row -What 'tab' -Name "$($entry.title)/$tabName" -Result 'removed'
                 } catch {
                     Add-Row -What 'tab' -Name "$($entry.title)/$tabName" -Result 'failed' -Detail $_.Exception.Message
@@ -227,15 +227,15 @@ try {
         if (-not $teamGroup) {
             Write-Skip 'no team found - nothing to do'
         } else {
-            $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$($teamGroup.id)/channels")
+            $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$(Get-ConfigValue $teamGroup 'id')/channels")
             foreach ($entry in $config.containers) {
                 if (-not (Get-ConfigValue $entry 'channelType')) { continue }
-                $channel = $channels | Where-Object { $_.displayName -eq $entry.title } | Select-Object -First 1
+                $channel = $channels | Where-Object { (Get-ConfigValue $_ 'displayName') -eq $entry.title } | Select-Object -First 1
                 if (-not $channel) { Add-Row -What 'channel' -Name $entry.title -Result 'gone' -Detail 'not there'; continue }
 
                 # The default channel cannot be removed - Teams refuses, and so does
                 # this. Its name follows the team's language, hence both spellings.
-                if ($channel.displayName -in @('General', 'Algemeen')) {
+                if ((Get-ConfigValue $channel 'displayName') -in @('General', 'Algemeen')) {
                     Add-Row -What 'channel' -Name $entry.title -Result 'skipped' -Detail 'the General channel cannot be removed'
                     continue
                 }
@@ -245,7 +245,7 @@ try {
                     continue
                 }
                 try {
-                    Invoke-StructureGraph -Url "v1.0/teams/$($teamGroup.id)/channels/$($channel.id)" -Method DELETE | Out-Null
+                    Invoke-StructureGraph -Url "v1.0/teams/$(Get-ConfigValue $teamGroup 'id')/channels/$(Get-ConfigValue $channel 'id')" -Method DELETE | Out-Null
                     Add-Row -What 'channel' -Name $entry.title -Result 'removed' -Detail 'recoverable for 30 days'
                 } catch {
                     Add-Row -What 'channel' -Name $entry.title -Result 'failed' -Detail $_.Exception.Message
@@ -383,7 +383,7 @@ try {
             if (-not $group) { Add-Row -What 'group' -Name $definition.displayName -Result 'gone' -Detail 'not there'; continue }
             if (-not $Apply) { Add-Row -What 'group' -Name $definition.displayName -Result 'would'; continue }
             try {
-                Invoke-StructureGraph -Url "v1.0/groups/$($group.id)" -Method DELETE | Out-Null
+                Invoke-StructureGraph -Url "v1.0/groups/$(Get-ConfigValue $group 'id')" -Method DELETE | Out-Null
                 Add-Row -What 'group' -Name $definition.displayName -Result 'removed'
             } catch {
                 Add-Row -What 'group' -Name $definition.displayName -Result 'failed' -Detail $_.Exception.Message
@@ -398,22 +398,22 @@ try {
         if (-not $teamGroup) {
             Add-Row -What 'team' -Name (Get-ConfigValue $config.team 'displayName' '?') -Result 'gone' -Detail 'not there'
         } elseif (-not $Apply) {
-            Add-Row -What 'team' -Name $teamGroup.displayName -Result 'would' `
+            Add-Row -What 'team' -Name (Get-ConfigValue $teamGroup 'displayName') -Result 'would' `
                 -Detail 'the site, every library, every file and every chat message'
         } else {
             Write-Host ''
-            Write-Warn "This removes the team '$($teamGroup.displayName)', its SharePoint site, every library,"
+            Write-Warn "This removes the team '$(Get-ConfigValue $teamGroup 'displayName')', its SharePoint site, every library,"
             Write-Warn 'every file in them and every chat message. Soft-deleted for 30 days.'
             Write-Host "  Type the team name to confirm: " -NoNewline -ForegroundColor Red
             $typed = Read-Host
-            if ($typed -ne $teamGroup.displayName) {
-                Add-Row -What 'team' -Name $teamGroup.displayName -Result 'skipped' -Detail 'name not confirmed'
+            if ($typed -ne (Get-ConfigValue $teamGroup 'displayName')) {
+                Add-Row -What 'team' -Name (Get-ConfigValue $teamGroup 'displayName') -Result 'skipped' -Detail 'name not confirmed'
             } else {
                 try {
-                    Invoke-StructureGraph -Url "v1.0/groups/$($teamGroup.id)" -Method DELETE | Out-Null
-                    Add-Row -What 'team' -Name $teamGroup.displayName -Result 'removed' -Detail 'restorable for 30 days in Entra ID'
+                    Invoke-StructureGraph -Url "v1.0/groups/$(Get-ConfigValue $teamGroup 'id')" -Method DELETE | Out-Null
+                    Add-Row -What 'team' -Name (Get-ConfigValue $teamGroup 'displayName') -Result 'removed' -Detail 'restorable for 30 days in Entra ID'
                 } catch {
-                    Add-Row -What 'team' -Name $teamGroup.displayName -Result 'failed' -Detail $_.Exception.Message
+                    Add-Row -What 'team' -Name (Get-ConfigValue $teamGroup 'displayName') -Result 'failed' -Detail $_.Exception.Message
                 }
             }
         }
@@ -440,8 +440,14 @@ try {
     if ($report.Count -gt 0) { Write-Host "    Report  : $ReportPath" -ForegroundColor Cyan }
     Write-Host ''
 } catch {
+    # Name the line and the statement. "Aborted: the property 'id' cannot be found"
+    # with nothing else attached is a riddle, and this script is the one you reach for
+    # when something already went wrong.
     Write-Host ''
-    Write-Bad "Aborted: $($_.Exception.Message)"
+    Write-Bad "Aborted at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    if ($_.InvocationInfo.Line) {
+        Write-Host "    $($_.InvocationInfo.Line.Trim())" -ForegroundColor DarkRed
+    }
     Write-Host ''
     exit 1
 }
