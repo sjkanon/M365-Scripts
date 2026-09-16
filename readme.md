@@ -787,6 +787,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-16 (5)
+| Change |
+|--------|
+| The explanation page is now step 4 of the one-command build rather than a separate script somebody remembers a week later. A structure nobody was told about is a structure nobody uses, and because the page is generated from the same configuration it describes exactly what the run just made |
+| `-SkipHelpPage` leaves it out, `-HelpContact` says who people should ask. The installer passes `-Force`, because it owns that page: rerunning the build brings the explanation back in line with what the build made |
+| Verification and the deelstatus audit shifted to steps 5 and 6, and the stale "step 2 changes permissions on a live team" warnings now name step 3 |
 ### 2026-09-16 (4)
 | Change |
 |--------|
