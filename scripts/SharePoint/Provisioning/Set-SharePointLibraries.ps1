@@ -47,10 +47,18 @@
 
     Entra ID groups
     ---------------
-    Groups are matched by display name. -EnsureGroups creates the ones that do not
-    exist yet (Microsoft.Graph.Groups required); without it a missing group is
-    reported and its grant skipped, so a typo in the config cannot silently leave a
-    library wide open.
+    Groups are matched by display name. -EnsureGroups creates every group in the
+    configuration that does not exist yet (Microsoft.Graph.Groups required) - not only
+    the ones a library grants to. A private channel grants nothing here, because Teams
+    decides who gets into it, and its groups are exactly the ones you go looking for
+    first when they are not there.
+
+    Worth knowing about that pillar: a security group cannot be a member of a private
+    channel. Teams tracks private-channel membership per person, so the MGMT groups
+    are there to manage who those people are, not to hand out access by themselves.
+
+    Without -EnsureGroups a missing group is reported and its grant skipped, so a typo
+    in the config cannot silently leave a library wide open.
 
     Nothing is removed unless -RemoveOtherPermissions is given. That switch strips
     role assignments the config does not mention, which is what you want on the
@@ -268,30 +276,49 @@ function Initialize-StructureGroup {
         A group that cannot be resolved is reported here rather than per library, so
         the operator sees the whole problem in one place before anything is changed.
     #>
-    $needed = @()
+    $granted = @()
     foreach ($entry in $containers) {
-        foreach ($permission in (Get-ConfigValue $entry 'permissions' @())) { $needed += $permission.group }
+        foreach ($permission in (Get-ConfigValue $entry 'permissions' @())) { $granted += $permission.group }
     }
-    $needed = @($needed | Select-Object -Unique)
-    if ($needed.Count -eq 0) { Write-Skip 'No group grants in scope'; return }
+    $granted = @($granted | Select-Object -Unique)
+
+    # -EnsureGroups means every group in the model, not only the ones a library
+    # happens to grant to. A private channel grants nothing here - Teams manages its
+    # membership - so its two groups were never created, which is exactly the pillar
+    # whose groups you go looking for first.
+    $configured = @(Get-ConfigValue $config 'groups' @() | ForEach-Object { $_.displayName })
+    $needed     = if ($EnsureGroups) { @(($granted + $configured) | Select-Object -Unique) } else { $granted }
+
+    if ($needed.Count -eq 0) { Write-Skip 'No groups in scope'; return }
 
     Connect-StructureGraph -Tenant $Tenant -ClientId $ClientId -Thumbprint $Thumbprint
 
     foreach ($name in $needed) {
         $definition = @(Get-ConfigValue $config 'groups' @() | Where-Object { $_.displayName -eq $name }) | Select-Object -First 1
+        if (-not $definition) { continue }
+
         $group = Resolve-StructureGroup -Definition $definition -Create:$EnsureGroups -WhatIfMode:$simulate
 
         if ($group) {
             $groupObjectId[$name] = $group.Id
-            Write-Ok "group '$name' ($($group.Id))"
+            if ($name -in $granted) {
+                Write-Ok "group '$name' ($($group.Id))"
+            } else {
+                # Worth saying out loud: the group exists, but nothing in SharePoint
+                # points at it. For a private channel that is correct - who gets in is
+                # decided by the channel's own membership, in Teams.
+                Write-Ok "group '$name' ($($group.Id)) - no library grants it; for a private channel the channel membership decides access"
+            }
             if ($EnsureGroups -and -not $simulate) { $script:changeCount++ }
-        } else {
+        } elseif ($name -in $granted) {
             $script:warningCount++
             if ($EnsureGroups) {
                 Write-Warn "group '$name' would be created - its grants are skipped in this -WhatIf run"
             } else {
                 Write-Warn "group '$name' does not exist - its grants are skipped. Rerun with -EnsureGroups to create it."
             }
+        } else {
+            Write-Skip "group '$name' would be created (-WhatIf)"
         }
     }
 }
