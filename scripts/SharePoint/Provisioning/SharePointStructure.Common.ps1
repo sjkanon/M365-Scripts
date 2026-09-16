@@ -599,6 +599,11 @@ function Connect-StructureGraph {
         Import-Module Microsoft.Graph.Groups -ErrorAction Stop
     }
 
+    # Announced before it happens, not after: a browser sign-in can take a minute, a
+    # cached one takes none and prints nothing, and without this line a failure
+    # anywhere around here is impossible to place in the sequence.
+    Write-Step "Signing in to Graph on $Tenant..."
+
     if ($Thumbprint -and $ClientId) {
         Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint -NoWelcome | Out-Null
     } elseif ($ClientId -and -not $PSBoundParameters.ContainsKey('Scopes')) {
@@ -614,7 +619,11 @@ function Connect-StructureGraph {
     } else {
         Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process | Out-Null
     }
-    Write-Ok "Graph connected as $((Get-MgContext).Account ?? 'app-only')"
+    # Get-MgContext comes back $null when the sign-in silently did not take, and
+    # reading .Account off that is a property error blamed on the wrong line.
+    $context = Get-MgContext
+    if (-not $context) { throw "Graph sign-in did not take on $Tenant - no context afterwards." }
+    Write-Ok "Graph connected as $((Get-ConfigValue $context 'Account') ?? 'app-only')"
 }
 
 # -- Graph ---------------------------------------------------------------------
