@@ -632,45 +632,62 @@ function Connect-StructureGraph {
         [switch] $AuthenticationOnly
     )
 
-    if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication')) {
-        throw "Module 'Microsoft.Graph.Authentication' is required. Run: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser"
-    }
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    # Everything the sign-in writes to the output stream is discarded here, at the one
+    # boundary that can see all of it.
+    #
+    # -NoWelcome on each Connect-MgGraph is not enough. The SDK's welcome banner came
+    # out of this function anyway, and a caller that assigns the result got the banner
+    # as its value: Get-TeamId returned it instead of a team, which is what built
+    # "v1.0/teams//channels" and later failed on a missing 'Id'. A sign-in helper has
+    # no return value, so nothing is lost by making that literally true.
+    #
+    # Write-Host progress still prints and a throw still propagates - neither travels
+    # the output stream. $PSBoundParameters is read before the scriptblock because a
+    # nested one has its own, which would read as "no Scopes given" every time.
+    $scopesGiven = $PSBoundParameters.ContainsKey('Scopes')
 
-    # Only the group work needs the Groups cmdlets; the team step talks raw Graph and
-    # should not be blocked on a module it never calls.
-    if (-not $AuthenticationOnly) {
-        if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Groups')) {
-            throw "Module 'Microsoft.Graph.Groups' is required for the Entra ID groups. Run: Install-Module Microsoft.Graph.Groups -Scope CurrentUser"
+    & {
+        if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication')) {
+            throw "Module 'Microsoft.Graph.Authentication' is required. Run: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser"
         }
-        Import-Module Microsoft.Graph.Groups -ErrorAction Stop
-    }
+        Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 
-    # Announced before it happens, not after: a browser sign-in can take a minute, a
-    # cached one takes none and prints nothing, and without this line a failure
-    # anywhere around here is impossible to place in the sequence.
-    Write-Step "Signing in to Graph on $Tenant..."
-
-    if ($Thumbprint -and $ClientId) {
-        Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint -NoWelcome | Out-Null
-    } elseif ($ClientId -and -not $PSBoundParameters.ContainsKey('Scopes')) {
-        # An app this set provisioned already carries the Graph scopes, so signing in
-        # with it keeps the whole run on one app registration. An app that came from
-        # somewhere else may not, hence the fallback to the Graph SDK's own app.
-        try {
-            Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -NoWelcome -ContextScope Process -ErrorAction Stop | Out-Null
-        } catch {
-            Write-Warn "App $ClientId could not be used for Graph ($($_.Exception.Message.Trim())) - falling back to the Microsoft Graph PowerShell app."
-            Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process | Out-Null
+        # Only the group work needs the Groups cmdlets; the team step talks raw Graph
+        # and should not be blocked on a module it never calls.
+        if (-not $AuthenticationOnly) {
+            if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Groups')) {
+                throw "Module 'Microsoft.Graph.Groups' is required for the Entra ID groups. Run: Install-Module Microsoft.Graph.Groups -Scope CurrentUser"
+            }
+            Import-Module Microsoft.Graph.Groups -ErrorAction Stop
         }
-    } else {
-        Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process | Out-Null
-    }
-    # Get-MgContext comes back $null when the sign-in silently did not take, and
-    # reading .Account off that is a property error blamed on the wrong line.
-    $context = Get-MgContext
-    if (-not $context) { throw "Graph sign-in did not take on $Tenant - no context afterwards." }
-    Write-Ok "Graph connected as $((Get-ConfigValue $context 'Account') ?? 'app-only')"
+
+        # Announced before it happens, not after: a browser sign-in can take a minute,
+        # a cached one takes none and prints nothing, and without this line a failure
+        # anywhere around here is impossible to place in the sequence.
+        Write-Step "Signing in to Graph on $Tenant..."
+
+        if ($Thumbprint -and $ClientId) {
+            Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint -NoWelcome
+        } elseif ($ClientId -and -not $scopesGiven) {
+            # An app this set provisioned already carries the Graph scopes, so signing
+            # in with it keeps the whole run on one app registration. An app that came
+            # from somewhere else may not, hence the fallback to the SDK's own app.
+            try {
+                Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -NoWelcome -ContextScope Process -ErrorAction Stop
+            } catch {
+                Write-Warn "App $ClientId could not be used for Graph ($($_.Exception.Message.Trim())) - falling back to the Microsoft Graph PowerShell app."
+                Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process
+            }
+        } else {
+            Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process
+        }
+
+        # Get-MgContext comes back $null when the sign-in silently did not take, and
+        # reading .Account off that is a property error blamed on the wrong line.
+        $context = Get-MgContext
+        if (-not $context) { throw "Graph sign-in did not take on $Tenant - no context afterwards." }
+        Write-Ok "Graph connected as $((Get-ConfigValue $context 'Account') ?? 'app-only')"
+    } | Out-Null
 }
 
 # -- Graph ---------------------------------------------------------------------
