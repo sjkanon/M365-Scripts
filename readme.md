@@ -787,6 +787,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-16
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Sync-SharePointChannelMember.ps1` — makes an Entra ID security group the source of truth for who is in a private Teams channel. A private channel cannot be given rights through a group at all: Teams tracks its roster one person at a time and Graph accepts only individual users there, so the group feeds the roster instead |
+| The obvious workaround is a trap and is documented as one: adding the group to the private channel site's SharePoint permissions works until Teams syncs the roster back over it, and in the meantime those people reach the files while the channel stays invisible to them in Teams. Unsupported by Microsoft |
+| Nested groups are followed, non-users are dropped, and everyone is added to the parent team first — Teams refuses a private-channel member who is not on the team, and the error it returns does not mention that. `-Prune` also removes people the groups no longer list; channel owners are never removed |
+| Written down because it changes the design, not just the script: **a private channel has no read-only role.** Owners and members, and members may post, edit and delete. A group named `-RO` cannot mean "may look" there, so the run reports per group how many people it brought in rather than letting that pass unnoticed. Where read-only genuinely matters, a document library with its own permissions is the right shape |
+| `-EnsureGroups` now creates every group in the model rather than only the ones a library grants to. A private channel grants nothing, so the MGMT pair sat in the configuration and was never created — which is exactly the pillar whose groups you go looking for first |
+| The wizard writes a `channelMembers` section for private pillars naming the groups that feed the roster; a configuration written before that key existed falls back to the configured groups named after the container, and reports the fallback |
+| Menu step `5` runs the sync; it signs in to Graph on its own, so it asks for no PnP app registration |
 ### 2026-09-15 (3)
 | Change |
 |--------|

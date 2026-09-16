@@ -466,8 +466,15 @@ foreach ($pillar in $pillars) {
         )
     }
     if ($isPrivate) {
-        $container['note'] = 'Privekanaal - Teams beheert de rechten via het lidmaatschap van de kanaalsite.'
+        $container['note'] = 'Privekanaal - Teams beheert de toegang via de ledenlijst van het kanaal, niet via siterechten.'
         $container['permissions'] = @()
+        # A private channel takes no group grants - Teams tracks its roster per person.
+        # These name the groups Sync-SharePointChannelMember.ps1 reads to fill that
+        # roster, so the group stays the place you manage it.
+        $container['channelMembers'] = @(
+            [ordered]@{ group = $d.GroupRw }
+            [ordered]@{ group = $d.GroupRo }
+        )
     }
     $containers.Add($container)
 }
