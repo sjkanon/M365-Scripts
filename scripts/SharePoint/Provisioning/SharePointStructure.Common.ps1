@@ -42,12 +42,27 @@ function Write-Diff   { param([string] $Message) Write-Host "    [DIFF] $Message
 
 function Get-ConfigValue {
     <#
-        Property access on a ConvertFrom-Json object that returns $null instead of
-        tripping Set-StrictMode when the key is simply absent from the file.
+        Property access that returns a default instead of tripping Set-StrictMode when
+        the field is simply not there. Used on configuration objects, on Graph
+        responses and on whatever shape a PnP cmdlet decides to hand back.
+
+        Hashtables are handled separately on purpose: PSObject.Properties on a
+        Hashtable lists the *Hashtable's own* members - Count, Keys, Values - and not
+        its keys, so without this branch every lookup against one would quietly answer
+        "not there". Quietly wrong is worse than an error, and that is exactly the
+        shape Invoke-MgGraphRequest returns unless it is asked for PSObject.
     #>
     param($Object, [string] $Name, $Default = $null)
 
     if ($null -eq $Object) { return $Default }
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if (-not $Object.Contains($Name)) { return $Default }
+        $value = $Object[$Name]
+        if ($null -eq $value) { return $Default }
+        return $value
+    }
+
     if ($Object -isnot [psobject]) { return $Default }
     if ($Object.PSObject.Properties.Name -notcontains $Name) { return $Default }
     $value = $Object.$Name
@@ -600,6 +615,62 @@ function Connect-StructureGraph {
         Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process | Out-Null
     }
     Write-Ok "Graph connected as $((Get-MgContext).Account ?? 'app-only')"
+}
+
+# -- Graph ---------------------------------------------------------------------
+function Invoke-StructureGraph {
+    <#
+        One Graph call, shaped so the rest of this set can trust what comes back.
+
+        Two things Invoke-MgGraphRequest gets wrong for us by default. It hands back a
+        Hashtable, and under StrictMode - which every script here runs under - asking
+        it for a key that is not there is fatal rather than empty; -OutputType PSObject
+        plus Get-ConfigValue makes a missing field read as $null instead. And it
+        surfaces only the HTTP status, while Graph puts the reason in the body, so
+        "BadRequest" is all you get unless the body is unpacked.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Url,
+        [string] $Method = 'GET',
+        $Body
+    )
+
+    $uri   = if ($Url -match '^https://') { $Url } else { "https://graph.microsoft.com/$Url" }
+    $splat = @{ Uri = $uri; Method = $Method; OutputType = 'PSObject'; ErrorAction = 'Stop' }
+    if ($Body) {
+        $splat['Body']        = ($Body | ConvertTo-Json -Depth 8)
+        $splat['ContentType'] = 'application/json'
+    }
+
+    try {
+        return Invoke-MgGraphRequest @splat
+    } catch {
+        $detail = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            try   { $detail = (Get-ConfigValue ($_.ErrorDetails.Message | ConvertFrom-Json) 'error').message }
+            catch { $detail = $_.ErrorDetails.Message }
+        }
+        if (-not $detail) { $detail = $_.Exception.Message }
+        throw "$Method $Url -> $detail"
+    }
+}
+
+function Get-StructureGraphCollection {
+    <#
+        Every item of a Graph collection, following @odata.nextLink. Always an array,
+        even for none or one - the comma keeps PowerShell from unrolling it on the way
+        out.
+    #>
+    param([Parameter(Mandatory)] [string] $Url)
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    $next  = $Url
+    while ($next) {
+        $page = Invoke-StructureGraph -Url $next
+        foreach ($item in @(Get-ConfigValue $page 'value' @())) { $items.Add($item) }
+        $next = Get-ConfigValue $page '@odata.nextLink'
+    }
+    return ,$items.ToArray()
 }
 
 # -- App registration ----------------------------------------------------------
