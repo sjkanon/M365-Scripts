@@ -72,6 +72,7 @@ without Regio.
 | [`Update-SharePointShareStatus.ps1`](#update-sharepointsharestatusps1) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
 | [`Test-SharePointStructure.ps1`](#test-sharepointstructureps1) | Compares the tenant with the config and reports every difference | never |
 | [`Sync-SharePointChannelMember.ps1`](#private-channels-and-groups) | Makes a security group the source of truth for who is in a private channel | channel roster |
+| [`Add-SharePointHelpPage.ps1`](#handing-it-over-to-the-customer) | Writes the end-user explanation onto the team site, generated from the config | yes |
 | [`Remove-SharePointStructure.ps1`](#undoing-it) | Removes what was built — reports only unless you pass `-Apply` | yes, on purpose |
 | `SharePointStructure.Common.ps1` | Shared helpers — dot-sourced, not run on its own | — |
 | [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
@@ -147,8 +148,8 @@ should be called, writes the configuration itself, then creates the team, the ch
 (the private one included), the metadata model, the libraries, the groups, the views and
 the permissions — and verifies the result.
 
-Afterwards: put people in the security groups, and hand out the
-[Handleiding](Petsolutions-SharePoint-Handleiding.md).
+Afterwards: put people in the security groups. The explanation for them is already
+on the site, in the left-hand navigation — the build put it there.
 
 ### You are asked, not handed a JSON file
 
@@ -209,8 +210,14 @@ One run, five steps, stopping at the first failure rather than building on a bro
 | 1 | `New-SharePointTeam.ps1` — the Microsoft 365 team, the channels including the private one, and the site URLs written back into the configuration |
 | 2 | `New-SharePointMetadata.ps1` — term set, columns, content types, on every site |
 | 3 | `Set-SharePointLibraries.ps1 -EnsureGroups` — groups, libraries, folders, content types, defaults, views, permissions |
-| 4 | `Test-SharePointStructure.ps1` — read-only verification of what just landed |
-| 5 | `Update-SharePointShareStatus.ps1` with `-RunAudit` — the first deelstatus pass |
+| 4 | `Add-SharePointHelpPage.ps1` — the explanation, on the site, for the people who will use it |
+| 5 | `Test-SharePointStructure.ps1` — read-only verification of what just landed |
+| 6 | `Update-SharePointShareStatus.ps1` with `-RunAudit` — the first deelstatus pass |
+
+**Step 4 is part of building it, not an errand for later.** A structure nobody was told
+about is a structure nobody uses, and the page is generated from the same configuration,
+so it describes what the run just made. `-SkipHelpPage` leaves it out; `-HelpContact`
+says who people should ask.
 
 **Step 1 is why this works from an empty tenant.** A private channel's site collection is
 provisioned asynchronously and its URL cannot be known in advance — SharePoint invents it

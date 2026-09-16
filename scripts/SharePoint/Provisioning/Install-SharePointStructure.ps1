@@ -24,9 +24,12 @@
                   groups, libraries, channel folders, content type binding, default
                   metadata, the pillar views, the cross-cutting brand views and the
                   permissions.
-        4. Verify Test-SharePointStructure.ps1 - read-only, reports anything that did
+        4. Explain Add-SharePointHelpPage.ps1 - the end-user explanation as a page on
+                  the team site, generated from this same configuration. Part of
+                  building it: a structure nobody was told about is one nobody uses.
+        5. Verify Test-SharePointStructure.ps1 - read-only, reports anything that did
                   not land.
-        5. Audit  optional (-RunAudit): the first deelstatus pass, so the column has a
+        6. Audit  optional (-RunAudit): the first deelstatus pass, so the column has a
                   value on every existing document from day one.
 
     Each step is a separate script, so anything that goes wrong can be rerun on its
@@ -63,7 +66,7 @@
 
     A word on what this changes
     ---------------------------
-    Step 2 changes permissions on a live team: pillars get their own security groups
+    Step 3 changes permissions on a live team: pillars get their own security groups
     and the folders stop inheriting from the team. Members who are not in the right
     group lose access to that channel's files. Run it with -WhatIf first, and have the
     group membership ready before you run it for real.
@@ -100,11 +103,17 @@
     value in the Deelstatus column immediately.
 
 .PARAMETER SkipChannelFolderPermissions
-    Passed to step 2: leave Teams channel folders inheriting instead of giving them
+    Passed to step 3: leave Teams channel folders inheriting instead of giving them
     unique permissions. See the note on standard channels in the readme.
 
 .PARAMETER RemoveStockContentType
-    Passed to step 2: remove the built-in Document content type from the libraries.
+    Passed to step 3: remove the built-in Document content type from the libraries.
+
+.PARAMETER SkipHelpPage
+    Do not write the explanation page on the team site.
+
+.PARAMETER HelpContact
+    Who the explanation page tells people to contact. Default: "de IT-servicedesk".
 
 .PARAMETER SkipVerify
     Do not run the verification pass.
@@ -157,6 +166,8 @@ param(
     [switch] $RunAudit,
     [switch] $SkipChannelFolderPermissions,
     [switch] $RemoveStockContentType,
+    [switch] $SkipHelpPage,
+    [string] $HelpContact,
     [switch] $SkipVerify,
     [switch] $Disconnect
 )
@@ -260,7 +271,7 @@ try {
 
     if (-not $simulate) {
         Write-Host ''
-        Write-Warn 'Step 2 changes permissions on a live team: each pillar folder stops inheriting'
+        Write-Warn 'Step 3 changes permissions on a live team: each pillar folder stops inheriting'
         Write-Warn 'and only its own security group keeps access. Make sure the groups have members.'
     }
 
@@ -354,16 +365,35 @@ try {
     Invoke-Step -Name '3. Libraries, groups, views and permissions' `
         -Script 'Set-SharePointLibraries.ps1' -Arguments $librariesArgs | Out-Null
 
-    # -- 3. Verify -------------------------------------------------------------
+    # -- 4. The explanation on the site ----------------------------------------
+    # Part of building it, not an errand somebody remembers a week later. A
+    # structure nobody was told about is a structure nobody uses, and the page is
+    # generated from this same configuration so it says what was actually built.
+    if ($SkipHelpPage) {
+        Write-Head '4. Explanation page'
+        Write-Skip 'Skipped (-SkipHelpPage)'
+    } else {
+        # -Force because the installer owns this page: rerunning the build should
+        # bring the explanation back in line with what the build just made.
+        $helpArgs = @{ ConfigPath = $ConfigPath; Tenant = $Tenant; Interactive = $true; Force = $true }
+        if ($ClientId)    { $helpArgs['ClientId'] = $ClientId }
+        if ($HelpContact) { $helpArgs['Contact']  = $HelpContact }
+        if ($simulate)    { $helpArgs['WhatIf']   = $true }
+
+        Invoke-Step -Name '4. Explanation page for the people who will use it' `
+            -Script 'Add-SharePointHelpPage.ps1' -Arguments $helpArgs | Out-Null
+    }
+
+    # -- 5. Verify -------------------------------------------------------------
     # Exit code 2 is drift, not a failure: on a -WhatIf run everything is "missing"
     # because nothing was built, and that is the expected answer.
     if ($SkipVerify) {
-        Write-Head '4. Verification'
+        Write-Head '5. Verification'
         Write-Skip 'Skipped (-SkipVerify)'
     } else {
         $verifyArgs = @{ ConfigPath = $ConfigPath; Tenant = $Tenant; Interactive = $true; IncludeGroups = $true }
         if ($ClientId) { $verifyArgs['ClientId'] = $ClientId }
-        $verify = Invoke-Step -Name '4. Verification (read only)' `
+        $verify = Invoke-Step -Name '5. Verification (read only)' `
             -Script 'Test-SharePointStructure.ps1' -Arguments $verifyArgs -AcceptExitCode @(0, 2)
         if ($verify -eq 2 -and -not $simulate) { $exitCode = 2 }
     }
@@ -373,7 +403,7 @@ try {
         $auditArgs = $common.Clone()
         # Exit 2 means "something is shared wider than its tag allows" - worth knowing
         # on day one, but not a reason to call the build failed.
-        Invoke-Step -Name '5. First deelstatus audit' `
+        Invoke-Step -Name '6. First deelstatus audit' `
             -Script 'Update-SharePointShareStatus.ps1' -Arguments $auditArgs -AcceptExitCode @(0, 2) | Out-Null
     }
 
@@ -391,7 +421,7 @@ try {
         Write-Host ''
         Write-Host '    Next:' -ForegroundColor Cyan
         Write-Host '      1. Put people in the SG-PETSOL-* security groups (Entra ID portal)' -ForegroundColor Gray
-        Write-Host '      2. Hand the users Petsolutions-SharePoint-Handleiding.md' -ForegroundColor Gray
+        Write-Host '      2. Point people at the explanation page in the site navigation' -ForegroundColor Gray
         Write-Host '      3. Schedule Update-SharePointShareStatus.ps1 nightly and' -ForegroundColor Gray
         Write-Host '         Test-SharePointStructure.ps1 weekly' -ForegroundColor Gray
     }
