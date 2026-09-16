@@ -374,7 +374,7 @@ $columns.Add([ordered]@{ internalName = 'PsTaal'; displayName = $labelLang; type
 $columns.Add([ordered]@{ internalName = 'PsContenttype'; displayName = $labelKind; type = 'Choice'
     description = 'Wat voor soort document is dit?'; choices = @($docKinds) })
 $columns.Add([ordered]@{ internalName = 'PsVertrouwelijkheid'; displayName = $labelConf; type = 'Choice'
-    description = "Mag dit naar buiten? $($confLevels[0]) blijft binnen $teamName."
+    description = "Mag dit naar buiten? $($confLevels[0]) blijft binnen $client."
     choices = @($confLevels); defaultValue = $confLevels[0] })
 if ($wantShareStatus) {
     $columns.Add([ordered]@{ internalName = 'PsDeelstatus'; displayName = $labelShare; type = 'Choice'

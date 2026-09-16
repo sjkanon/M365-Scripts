@@ -787,6 +787,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-16 (4)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Add-SharePointHelpPage.ps1` — puts the end-user explanation on the team site as a SharePoint page, linked from the left-hand navigation. A handleiding in a repo is read by nobody; this writes it where the people who upload files already are |
+| The page is generated from the configuration rather than typed out, so it cannot drift from what the libraries actually do: the channels it lists are the ones that exist, the labels carry the same help text that appears under each field in the upload form, and the required fields per document type are read off the content types |
+| Written for the person uploading a catalogue. Two pieces of the configuration are deliberately kept off it: the `note` on a container, which names security groups, and the `description` on a view, which talks about pillars and synced folders. Permissions are left out entirely — who may see what is not something a user can act on |
+| Fixed along the way, found by rendering the page rather than reading the code: it announced three ways of adding a file and listed two, and the wizard was writing the team name where the company name belonged ("Intern blijft binnen Laseto-NewTeams") |
 ### 2026-09-16 (3)
 | Change |
 |--------|
