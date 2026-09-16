@@ -266,14 +266,17 @@ function Get-FieldChoiceValue {
     #>
     param([Parameter(Mandatory)] $Field)
 
+    # Every return is comma-wrapped: PowerShell unrolls an array on the way out, so a
+    # column with one choice would come back as a bare string and an empty one as
+    # $null - and under StrictMode the caller then dies on .Count.
     try {
         $schema = [xml] $Field.SchemaXml
     } catch {
-        return @()
+        return ,@()
     }
     $node = $schema.Field.SelectSingleNode('CHOICES')
-    if (-not $node) { return @() }
-    return @($node.ChildNodes | ForEach-Object { $_.InnerText })
+    if (-not $node) { return ,@() }
+    return ,@($node.ChildNodes | ForEach-Object { $_.InnerText })
 }
 
 function Test-FieldHiddenInForms {
@@ -432,7 +435,9 @@ function Set-SecurableRole {
         }
     }
 
-    return $changes
+    # Comma-wrapped: an empty list of changes is the normal case - everything already
+    # matched - and returning it bare hands the caller $null instead.
+    return ,$changes
 }
 
 function Get-StructureRoleReport {
