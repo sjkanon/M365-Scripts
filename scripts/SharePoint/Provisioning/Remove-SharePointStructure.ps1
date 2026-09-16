@@ -186,15 +186,18 @@ function Get-TeamId {
     $escaped = $team.mailNickname -replace "'", "''"
     $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id,displayName"
     $group   = @(Get-ConfigValue $found 'value' @()) | Select-Object -First 1
-    if (-not $group) { return $null }
+    if (-not $group) {
+        Write-Warn "no group has mailNickname '$($team.mailNickname)' - Graph answered $(Get-ValueShape $found)"
+        return $null
+    }
 
     $id   = [string] (Get-ConfigValue $group 'id')
     $guid = [guid]::Empty
     if (-not [guid]::TryParse($id, [ref] $guid)) {
         # Found something, but nothing that can be removed by id. Said out loud rather
-        # than skipped quietly: "no team found" would be a different answer, and the
-        # alias that produced this is only in hand right here.
-        Write-Warn "group '$($team.mailNickname)' came back without a usable id - nothing to remove by id"
+        # than skipped quietly: "no team found" would be a different answer, and both
+        # the alias and the shape that produced this are only in hand right here.
+        Write-Warn "group '$($team.mailNickname)' has no usable id - it came back as $(Get-ValueShape $group)"
         return $null
     }
 
@@ -202,6 +205,28 @@ function Get-TeamId {
         Id          = $id
         DisplayName = [string] (Get-ConfigValue $group 'displayName' $team.mailNickname)
     }
+}
+
+
+function Resolve-Team {
+    <#
+        Get-TeamId's answer, and nothing else that may have reached the output stream
+        on the way here.
+
+        Three runs failed on a $teamGroup that was truthy and had no Id, which none of
+        Get-TeamId's return paths can produce - every one of them is either $null or an
+        object that has one. That only happens if something besides the return value
+        arrived as well. Rather than guess which line wrote it, the lookup is read as
+        what it is - a stream - the one usable object is taken from it, and anything
+        else is named rather than silently used as if it were a team.
+    #>
+    $team = $null
+    foreach ($item in @(Get-TeamId)) {
+        if ($null -eq $item) { continue }
+        if (-not $team -and (Get-ConfigValue $item 'Id')) { $team = $item; continue }
+        Write-Warn "the team lookup also wrote $(Get-ValueShape $item) to its output - ignored"
+    }
+    return $team
 }
 
 Write-Host ''
@@ -221,7 +246,7 @@ try {
     # -- Tabs ------------------------------------------------------------------
     if ('Tabs' -in $wanted -or 'Channels' -in $wanted) {
         Write-Head 'Tabs'
-        $teamGroup = Get-TeamId
+        $teamGroup = Resolve-Team
         if (-not $teamGroup) {
             Write-Skip 'no team found - nothing to do'
         } else {
@@ -251,7 +276,7 @@ try {
     # -- Channels --------------------------------------------------------------
     if ('Channels' -in $wanted) {
         Write-Head 'Channels'
-        $teamGroup = Get-TeamId
+        $teamGroup = Resolve-Team
         if (-not $teamGroup) {
             Write-Skip 'no team found - nothing to do'
         } else {
@@ -422,7 +447,7 @@ try {
     # -- The team --------------------------------------------------------------
     if ('Team' -in $wanted) {
         Write-Head 'The team itself'
-        $teamGroup = Get-TeamId
+        $teamGroup = Resolve-Team
         if (-not $teamGroup) {
             Add-Row -What 'team' -Name (Get-ConfigValue $config.team 'displayName' '?') -Result 'gone' -Detail 'not there'
         } elseif (-not $Apply) {
