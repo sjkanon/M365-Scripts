@@ -221,7 +221,16 @@ Write-Host '  Elke pijler wordt een kanaal, een documenttype, twee groepen' -For
 Write-Host '  en een gegroepeerde weergave.' -ForegroundColor DarkGray
 $pillars = Read-List -Question 'Pijlers' -Default @('MGMT', 'Leveranciers', 'Verkopers', 'Klanten', 'Marketing', 'TD')
 
-$privatePillars = Read-List -Question 'Welke daarvan zijn een privekanaal (eigen site, alleen leden)' -Default @($pillars[0]) -AllowEmpty
+Write-Host '  Een afgeschermde pijler kan twee vormen hebben:' -ForegroundColor DarkGray
+Write-Host '    bibliotheek  kanaal + eigen bibliotheek met echte rechten - bewerken EN alleen lezen' -ForegroundColor DarkGray
+Write-Host '    privekanaal  eigen site, alleen leden - maar Teams kent daar geen leesrol:' -ForegroundColor DarkGray
+Write-Host '                 wie erin zit mag alles' -ForegroundColor DarkGray
+$privatePillars = Read-List -Question 'Welke pijlers moeten afgeschermd worden' -Default @($pillars[0]) -AllowEmpty
+
+$restrictedShape = 'bibliotheek'
+if ($privatePillars.Count -gt 0) {
+    $restrictedShape = Read-OneOf -Question 'In welke vorm' -Options @('bibliotheek', 'privekanaal') -Default 'bibliotheek'
+}
 foreach ($p in $privatePillars) {
     if ($p -notin $pillars) {
         throw "'$p' staat niet tussen de pijlers. Kies uit: $($pillars -join ', ')"
@@ -412,10 +421,15 @@ $viewFieldsTail = @('PsMerk', 'PsTaal', 'PsVertrouwelijkheid') +
                   @('PsStatus', 'Modified')
 
 foreach ($pillar in $pillars) {
-    $d         = $detail[$pillar]
-    $ctName    = $d.ContentType
-    $isPrivate = $pillar -in $privatePillars
-    $siteKey   = if ($isPrivate) { Get-Slug $pillar } else { 'team' }
+    $d          = $detail[$pillar]
+    $ctName     = $d.ContentType
+    $restricted = $pillar -in $privatePillars
+    # Two shapes of "restricted". A private channel gets its own site collection and no
+    # read role at all; an own library stays on the team site and has real Contribute
+    # and Read. The channel exists either way - the library one gets it as a tab.
+    $isPrivate  = $restricted -and $restrictedShape -eq 'privekanaal'
+    $ownLibrary = $restricted -and $restrictedShape -eq 'bibliotheek'
+    $siteKey    = if ($isPrivate) { Get-Slug $pillar } else { 'team' }
     # SharePoint builds a private channel's site as <teamsite>-<channel>; the team step
     # reads the real URL back from Graph afterwards, this is only the starting guess.
     if ($isPrivate) { $sites[$siteKey] = "$teamSite-$(Get-Slug $d.Channel)" }
@@ -443,18 +457,22 @@ foreach ($pillar in $pillars) {
     $container = [ordered]@{
         key                 = $pillar
         title               = $d.Channel
-        kind                = 'ChannelFolder'
+        # An own library is kind Library with a channel in front of it: the channel is
+        # created as usual, the library gets the permissions, and a tab in the channel
+        # points at it. That is the only shape where "alleen lezen" is a real role.
+        kind                = $(if ($ownLibrary) { 'Library' } else { 'ChannelFolder' })
         channelType         = $(if ($isPrivate) { 'Private' } else { 'Standard' })
         site                = $siteKey
-        list                = $channelList
-        folder              = $d.Folder
+        list                = $(if ($ownLibrary) { $d.Folder } else { $channelList })
         pillar              = $pillar
         defaultColumnValues = [ordered]@{ PsPijler = $pillar; PsStatus = $lifecycle[0] }
         contentTypes        = @($ctName)
         defaultContentType  = $ctName
-        # A private channel has its own membership - breaking inheritance there would
-        # fight Teams for control of the same thing.
-        uniquePermissions   = (-not $isPrivate -and $tightenChannels)
+        # An own library always gets its own permissions - that is the whole point of
+        # the shape. A private channel never does: Teams controls that, and breaking
+        # inheritance there fights it over the same thing. An ordinary channel folder
+        # only when the operator asked for it.
+        uniquePermissions   = $(if ($ownLibrary) { $true } elseif ($isPrivate) { $false } else { $tightenChannels })
         view                = [ordered]@{
             title   = $d.ViewTitle
             groupBy = $groupBy
@@ -464,6 +482,21 @@ foreach ($pillar in $pillars) {
             [ordered]@{ group = $d.GroupRw; role = 'Contribute' }
             [ordered]@{ group = $d.GroupRo; role = 'Read' }
         )
+    }
+    if ($ownLibrary) {
+        # The point of "nobody else gets in": break inheritance WITHOUT copying what
+        # the team site grants. Copying would carry every team member across as an
+        # editor, which is exactly the door this shape is meant to close. What
+        # survives is the site's own owners plus the two groups below.
+        $container['keepExistingPermissions'] = $false
+        $container['note'] = "Eigen bibliotheek met eigen rechten - alleen $($d.GroupRw) (bewerken) en $($d.GroupRo) (alleen lezen). Teamleden komen er niet in."
+        # A standard channel's Files tab points at the team library, so the restricted
+        # library is surfaced as a second tab in the channel.
+        $container['tab'] = [ordered]@{ name = $d.Folder }
+    } else {
+        # A channel folder lives inside the shared library, so it needs its name; an
+        # own library is the container itself and has no folder.
+        $container['folder'] = $d.Folder
     }
     if ($isPrivate) {
         $container['note'] = 'Privekanaal - Teams beheert de toegang via de ledenlijst van het kanaal, niet via siterechten.'

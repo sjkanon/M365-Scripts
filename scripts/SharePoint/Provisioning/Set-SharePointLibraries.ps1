@@ -204,6 +204,7 @@ $connectSplat = @{
 $changeCount   = 0
 $warningCount  = 0
 $report        = [System.Collections.Generic.List[object]]::new()
+$script:graphReady = $false   # Graph is connected lazily, only when a tab needs it
 $groupObjectId = @{}          # display name -> Entra object id, resolved once
 $principalMap  = @{}          # "<site key>|<display name>" -> SharePoint principal
 
@@ -490,6 +491,71 @@ function Set-StructureContainer {
 
     # -- permissions
     Set-StructurePermission -Definition $Definition -List $list -Folder $folder -Connection $Connection
+
+    # -- tab, last: it points at a library that has to exist and be locked down first
+    Set-StructureTab -Definition $Definition -Connection $Connection
+}
+
+function Set-StructureTab {
+    <#
+        Surface a restricted library as a tab in its channel.
+
+        A standard channel's own Files tab always points at the team library, and that
+        cannot be repointed. So a pillar that keeps its files in a library of its own
+        gets a second tab beside it. That is what makes "a channel, but only these
+        people in the files" possible at all: the channel stays ordinary and visible,
+        the permissions live on the library, and Read is a real role there.
+    #>
+    param($Definition, $Connection)
+
+    $tab = Get-ConfigValue $Definition 'tab'
+    if (-not $tab) { return }
+
+    $team = Get-ConfigValue $config 'team'
+    if (-not $team) { Write-Skip 'no team section in the configuration - tab skipped'; return }
+
+    if (-not $script:graphReady) {
+        Connect-StructureGraph -Tenant $Tenant -ClientId $ClientId -Thumbprint $Thumbprint -AuthenticationOnly `
+            -Scopes @('Group.Read.All', 'TeamsTab.ReadWrite.All')
+        $script:graphReady = $true
+    }
+
+    $tabName = Get-ConfigValue $tab 'name' $Definition.title
+    $escaped = $team.mailNickname -replace "'", "''"
+    $found   = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id" -ErrorAction Stop
+    $teamId  = (@($found.value) | Select-Object -First 1).id
+    if (-not $teamId) { Write-Warn "team '$($team.mailNickname)' not found - tab skipped"; $script:warningCount++; return }
+
+    $channels = @((Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/teams/$teamId/channels" -ErrorAction Stop).value)
+    $channel  = $channels | Where-Object { $_.displayName -eq $Definition.title } | Select-Object -First 1
+    if (-not $channel) { Write-Warn "channel '$($Definition.title)' not found - tab skipped"; $script:warningCount++; return }
+
+    $tabs = @((Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/teams/$teamId/channels/$($channel.id)/tabs" -ErrorAction Stop).value)
+    if ($tabs | Where-Object { $_.displayName -eq $tabName }) {
+        Write-Ok "tab '$tabName' in channel '$($Definition.title)'"
+        return
+    }
+    if (-not $PSCmdlet.ShouldProcess("$($Definition.title) / $tabName", 'Add document library tab')) { return }
+
+    $siteUrl = (Get-StructureSiteUrl -Config $config -SiteKey $Definition.site)
+    $listUrl = "$siteUrl/$(Get-ConfigValue $Definition 'list' $Definition.title)"
+
+    $body = @{
+        displayName          = $tabName
+        'teamsApp@odata.bind' = 'https://graph.microsoft.com/v1.0/appCatalogs/teamsApps/com.microsoft.teamspace.tab.files.sharepoint'
+        configuration        = @{ entityId = ''; contentUrl = $listUrl; removeUrl = $null; websiteUrl = $listUrl }
+    }
+    try {
+        Invoke-MgGraphRequest -Method POST -ContentType 'application/json' `
+            -Uri "https://graph.microsoft.com/v1.0/teams/$teamId/channels/$($channel.id)/tabs" `
+            -Body ($body | ConvertTo-Json -Depth 6) -ErrorAction Stop | Out-Null
+        Write-Change "tab '$tabName' added to channel '$($Definition.title)' -> $listUrl"
+        $script:changeCount++
+    } catch {
+        $detail = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+        Write-Warn "could not add the tab to '$($Definition.title)': $detail"
+        $script:warningCount++
+    }
 }
 
 function Set-StructurePermission {

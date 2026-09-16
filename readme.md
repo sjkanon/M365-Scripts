@@ -787,6 +787,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-16 (2)
+| Change |
+|--------|
+| A restricted pillar can now be shaped as **its own library behind an ordinary channel**, which is the only arrangement that gives a real read-only role and still puts a channel in Teams. The wizard asks which pillars are restricted and then in which form - `bibliotheek` (the default) or `privekanaal` |
+| The library form breaks inheritance **without copying it**, which is the whole point: copying carries every team member across as an editor, which is exactly the door the shape is meant to close. What survives is the site's own owners plus the pillar's two groups - Contribute and Read |
+| A private channel offers no read-only role at all: owners and members, and members may post, edit and delete. So a pillar that needs "may look" cannot be a private channel, and the wizard now says so at the point where the choice is made |
+| The channel is created as usual but gets no folder in the shared library, and the restricted library is surfaced as a tab in that channel - a standard channel's own Files tab always points at the team library and cannot be repointed, so it sits beside it |
+| Flagged in the readme because it will otherwise be reported as a bug: that built-in Files tab stays, pointing at a folder nobody uses. Either point people at the named tab, or remove the Files tab from the channel once by hand |
 ### 2026-09-16
 | Change |
 |--------|
