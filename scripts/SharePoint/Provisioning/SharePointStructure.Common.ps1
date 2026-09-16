@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     Shared helpers for the SharePoint structure scripts in this folder. Dot-sourced,
@@ -79,6 +79,42 @@ function Get-ConfigValue {
     $value = $Object.$Name
     if ($null -eq $value) { return $Default }
     return $value
+}
+
+function Get-ValueShape {
+    <#
+        A short, printable description of what a value *is* - its type and the names
+        of its fields, never its contents. For the moments where the useful question
+        is not what an API said but what shape it said it in, which is exactly when
+        something turns out not to have the property everything downstream assumed.
+
+        Contents are left out on purpose: this goes in warnings, and a group's fields
+        are safe to print where its data is not.
+    #>
+    param($Value, [int] $Depth = 0)
+
+    if ($null -eq $Value)       { return '<null>' }
+    $type = $Value.GetType().Name
+    if ($Value -is [string])    { return "$type '$Value'" }
+    if ($Value -is [ValueType]) { return "$type '$Value'" }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        return "$type{$(@($Value.Keys | ForEach-Object { [string] $_ }) -join ', ')}"
+    }
+
+    # Depth-limited rather than fully recursive: one level in is enough to tell a
+    # collection of groups from a collection of something else, and a cyclic object
+    # graph should not be able to hang a warning.
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = @($Value)
+        if ($items.Count -eq 0) { return "$type(empty)" }
+        $inner = if ($Depth -lt 2) { Get-ValueShape $items[0] ($Depth + 1) } else { '...' }
+        return "$type($($items.Count)) of $inner"
+    }
+
+    $names = @($Value.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($names.Count -eq 0) { return $type }
+    return "$type{$($names -join ', ')}"
 }
 
 # -- Configuration -------------------------------------------------------------
