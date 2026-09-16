@@ -644,8 +644,9 @@ $menu = @(
             Write-Host '  2  Libraries     — libraries, channel folders, content types, views, permissions' -ForegroundColor Gray
             Write-Host '  3  Share status  — audit sharing and update the Deelstatus column' -ForegroundColor Gray
             Write-Host '  4  Drift check   — compare the tenant with the config (read only)' -ForegroundColor Gray
+            Write-Host '  5  Channel members — put the security group''s people into the private channel' -ForegroundColor Gray
             Write-Host ''
-            $step   = Read-Host '  Step [0-4]'
+            $step   = Read-Host '  Step [0-5]'
             $config = Read-Host '  Config file [petsolutions.config.json]'
 
             $script = switch ($step) {
@@ -654,6 +655,7 @@ $menu = @(
                 '2'     { 'Set-SharePointLibraries.ps1' }
                 '3'     { 'Update-SharePointShareStatus.ps1' }
                 '4'     { 'Test-SharePointStructure.ps1' }
+                '5'     { 'Sync-SharePointChannelMember.ps1' }
                 default { $null }
             }
             if (-not $script) { Write-Warning 'No such step.'; return }
@@ -665,6 +667,10 @@ $menu = @(
                 # The all-in-one registers its own app, so it asks for nothing here.
                 $temp = Read-Host '  Remove the app registration again afterwards? [y/N]'
                 if ($temp -match '^[Yy]') { $a['TemporaryApp'] = $true }
+            } elseif ($step -eq '5') {
+                # Signs in to Graph on its own - no PnP app registration involved.
+                $prune = Read-Host '  Also remove people the groups no longer list? [y/N]'
+                if ($prune -match '^[Yy]') { $a['Prune'] = $true }
             } else {
                 $a['Interactive'] = $true
                 $client = Read-Host '  ClientId of the PnP app registration'

@@ -71,6 +71,7 @@ without Regio.
 | [`Set-SharePointLibraries.ps1`](#set-sharepointlibrariesps1) | Libraries, channel folders, content type binding, default metadata, views, group permissions | yes |
 | [`Update-SharePointShareStatus.ps1`](#update-sharepointsharestatusps1) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
 | [`Test-SharePointStructure.ps1`](#test-sharepointstructureps1) | Compares the tenant with the config and reports every difference | never |
+| [`Sync-SharePointChannelMember.ps1`](#private-channels-and-groups) | Makes a security group the source of truth for who is in a private channel | channel roster |
 | `SharePointStructure.Common.ps1` | Shared helpers — dot-sourced, not run on its own | — |
 | [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
 | `petsolutions.config.json` | The model | — |
@@ -473,6 +474,51 @@ A weekly drift check alongside it:
 pwsh -NoProfile -File .\Test-SharePointStructure.ps1 `
     -ClientId <app-id> -Thumbprint <thumbprint> -Quiet -IncludeGroups
 ```
+
+---
+
+## Private channels and groups
+
+**A private channel cannot be given rights through a group.** Teams tracks its
+membership one person at a time, and Graph only accepts individual users there. There
+is no way around that, and the obvious workaround is a trap:
+
+| Approach | Verdict |
+|---|---|
+| Add the group as a channel member | Not possible — Graph takes users only |
+| Add the group to the channel site's SharePoint permissions | Works for about a day. Teams syncs the channel roster back over it, and in the meantime those people reach the files while the channel stays invisible to them in Teams. Unsupported |
+| **Let the group feed the roster** | What `Sync-SharePointChannelMember.ps1` does |
+
+```powershell
+.\Sync-SharePointChannelMember.ps1 -WhatIf     # who would be added
+.\Sync-SharePointChannelMember.ps1             # add them
+.\Sync-SharePointChannelMember.ps1 -Prune      # and remove who the groups no longer list
+```
+
+You manage the group; the script puts its people in the channel. Nested groups are
+followed, non-users are dropped, and everyone is made a member of the parent team first
+— Teams refuses a private-channel member who is not on the team, and the error it gives
+does not say so.
+
+Which groups feed which channel comes from the container's `channelMembers`. A
+configuration written before that key existed falls back to the configured groups named
+after the container, and says that it did.
+
+> ### There is no read-only role in a private channel
+>
+> A private channel has owners and members, and members may post, edit and delete
+> files. A group named `-RO` therefore cannot mean "may look" there — everyone this
+> script adds can write. The run reports per group how many people it brought in, so
+> that is visible rather than assumed.
+>
+> If read-only genuinely matters for a pillar, a private channel is the wrong shape for
+> it. Use a document library with its own permissions, where Read is a real role — the
+> customer library already works that way.
+
+**The alternative worth knowing about:** a *shared* channel does support group-based
+membership. Moving a pillar there is the supported way to have groups decide access to
+a channel. Behaviour varies with the tenant's external-sharing and B2B direct connect
+settings, so try one channel before moving anything that matters.
 
 ---
 
