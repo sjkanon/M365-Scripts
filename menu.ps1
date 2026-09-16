@@ -645,8 +645,9 @@ $menu = @(
             Write-Host '  3  Share status  — audit sharing and update the Deelstatus column' -ForegroundColor Gray
             Write-Host '  4  Drift check   — compare the tenant with the config (read only)' -ForegroundColor Gray
             Write-Host '  5  Channel members — put the security group''s people into the private channel' -ForegroundColor Gray
+            Write-Host '  6  Cleanup       — remove what was built (reports only unless you confirm)' -ForegroundColor DarkYellow
             Write-Host ''
-            $step   = Read-Host '  Step [0-5]'
+            $step   = Read-Host '  Step [0-6]'
             $config = Read-Host '  Config file [petsolutions.config.json]'
 
             $script = switch ($step) {
@@ -656,6 +657,7 @@ $menu = @(
                 '3'     { 'Update-SharePointShareStatus.ps1' }
                 '4'     { 'Test-SharePointStructure.ps1' }
                 '5'     { 'Sync-SharePointChannelMember.ps1' }
+                '6'     { 'Remove-SharePointStructure.ps1' }
                 default { $null }
             }
             if (-not $script) { Write-Warning 'No such step.'; return }
@@ -671,6 +673,21 @@ $menu = @(
                 # Signs in to Graph on its own - no PnP app registration involved.
                 $prune = Read-Host '  Also remove people the groups no longer list? [y/N]'
                 if ($prune -match '^[Yy]') { $a['Prune'] = $true }
+            } elseif ($step -eq '6') {
+                # Reports unless -Apply, so the question here is the one that matters.
+                $a['Interactive'] = $true
+                $client = Read-Host '  ClientId of the PnP app registration'
+                if ($client) { $a['ClientId'] = $client }
+                Write-Host ''
+                Write-Host '  Without confirmation this only reports what it would remove.' -ForegroundColor DarkGray
+                $go = Read-Host '  Actually remove? [y/N]'
+                if ($go -match '^[Yy]') {
+                    $a['Apply'] = $true
+                    $files = Read-Host '  Also remove libraries that still hold files? [y/N]'
+                    if ($files -match '^[Yy]') { $a['IncludeContent'] = $true }
+                    $team = Read-Host '  Also remove the Team itself, with all its files? [y/N]'
+                    if ($team -match '^[Yy]') { $a['Scope'] = @('All', 'Team') }
+                }
             } else {
                 $a['Interactive'] = $true
                 $client = Read-Host '  ClientId of the PnP app registration'
@@ -678,7 +695,7 @@ $menu = @(
             }
 
             # The drift check never writes, so it is the one step that skips the question.
-            if ($step -ne '4') {
+            if ($step -notin @('4', '6')) {
                 $apply = Read-Host '  Apply the changes now (not just -WhatIf)? [y/N]'
                 if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
             }

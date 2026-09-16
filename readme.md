@@ -787,6 +787,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
 | Exchange submenu (`C`) option `H` added |
 
+### 2026-09-16 (3)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Remove-SharePointStructure.ps1` — takes the same configuration apart, deepest first: tabs, channels, libraries, content types (unbound from their lists first), site columns, term set, security groups, and the team itself |
+| **Deliberately the reverse default of everything else in the folder: without `-Apply` it changes nothing.** Forgetting `-WhatIf` on a destructive script is the dangerous direction, so the safe state is the one you get for free |
+| `-Scope All` never includes the team. Deleting a client's whole team is not something anyone should get by asking for "all" — it has to be named, and then the team's name typed to confirm |
+| Refuses by default rather than asking forgiveness: a library or channel folder that still holds files is skipped unless `-IncludeContent` (the item count is reported either way), the General channel and the team's own Documents library are never removed, and a content type still in use is reported rather than forced |
+| Reported with their cost before they run, because no recycle bin brings them back: removing the term set orphans the Leverancier value on every document that carried one, and removing a column takes its data with it. What *is* recoverable is said too — a deleted group or team is soft-deleted for 30 days, a channel has its own 30-day recycle, and files from a removed library land in the site recycle bin |
+| Menu step `6` runs it; the menu asks about applying, about files, and about the team as three separate questions rather than one |
 ### 2026-09-16 (2)
 | Change |
 |--------|
