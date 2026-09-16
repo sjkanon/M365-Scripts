@@ -173,7 +173,14 @@ function Get-TeamId {
     if (-not $team) { return $null }
     $escaped = $team.mailNickname -replace "'", "''"
     $found   = Invoke-StructureGraph -Url "v1.0/groups?`$filter=mailNickname eq '$escaped'&`$select=id,displayName"
-    return (@(Get-ConfigValue $found 'value' @()) | Select-Object -First 1)
+    $group   = @(Get-ConfigValue $found 'value' @()) | Select-Object -First 1
+
+    # Every caller drops the id straight into a URL, so a group without one is worse
+    # than no group at all: it builds "v1.0/teams//channels", which asks the wrong
+    # endpoint and fails with nothing useful to say. Callers already handle "no team,
+    # nothing to remove", so an id-less hit is reported as exactly that.
+    if (-not (Get-ConfigValue $group 'id')) { return $null }
+    return $group
 }
 
 Write-Host ''
