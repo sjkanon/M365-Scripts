@@ -738,6 +738,18 @@ function Invoke-StructureGraph {
             $inner   = Get-ConfigValue $parsed 'error'
             $code    = Get-ConfigValue $inner 'code'
             $message = Get-ConfigValue $inner 'message'
+
+            # Graph often puts a generic "BadRequest" at the top and the reason that
+            # actually helps in details[]. The outer message can be forty lines of
+            # backend plumbing - request URLs, telemetry ids, an escaped JSON body -
+            # wrapped around one sentence like "Channel DisplayName already exists".
+            # When that sentence is there, it is the whole answer, so it wins.
+            $specific = @(Get-ConfigValue $inner 'details' @()) |
+                        Where-Object { Get-ConfigValue $_ 'message' } | Select-Object -First 1
+            if ($specific) {
+                $code    = Get-ConfigValue $specific 'code' $code
+                $message = Get-ConfigValue $specific 'message' $message
+            }
             # Not JSON, or not shaped like a Graph error? Then the body itself is the
             # most informative thing available.
             $detail  = if ($message) { "$code`: $message" } else { [string] $raw }

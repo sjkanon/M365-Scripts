@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     Create the Microsoft 365 Team and its channels - including the private MGMT
@@ -316,7 +316,8 @@ try {
 
     # -- 3. Channels -----------------------------------------------------------
     Write-Head '2. Channels'
-    $channels = @(Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels")
+    $channels    = @(Get-StructureGraphCollection -Url "v1.0/teams/$teamId/channels")
+    $nameClashes = [System.Collections.Generic.List[string]]::new()
 
     foreach ($entry in $config.containers) {
         $channelType = Get-ConfigValue $entry 'channelType'
@@ -345,7 +346,19 @@ try {
                     roles             = @('owner')
                 })
             }
-            $live = Invoke-StructureGraph -Url "v1.0/teams/$teamId/channels" -Method POST -Body $body
+            try {
+                $live = Invoke-StructureGraph -Url "v1.0/teams/$teamId/channels" -Method POST -Body $body
+            } catch {
+                # A channel deleted in the last 30 days keeps its display name, and
+                # Graph does not list it - so the check above cannot see it and the
+                # create is the first thing to find out. Collected rather than thrown
+                # on the spot: the other channels can still be made, and one message
+                # naming all of them beats stopping the build on the first.
+                if ("$_" -notmatch 'ChannelNameAlreadyExist') { throw }
+                Write-Warn "channel '$($entry.title)' already exists but is not listed - one deleted in the last 30 days keeps its name"
+                $nameClashes.Add($entry.title)
+                continue
+            }
             Write-Change "$($channelType.ToLower()) channel '$($entry.title)' created"
             $changeCount++
         }
@@ -358,6 +371,11 @@ try {
             $discovered[$siteKey] = $url
             Write-Ok "site for '$($entry.title)': $url"
         }
+    }
+
+    if ($nameClashes.Count -gt 0) {
+        throw ("Cannot create {0}: the name is still held by a channel deleted in the last 30 days. " -f ($nameClashes -join ', ') +
+               'Restore it in Teams (Manage team > Channels > Deleted), delete it permanently there, or wait for the name to be released.')
     }
 
     # -- 4. Channel folders ----------------------------------------------------
