@@ -64,7 +64,13 @@ function Get-ConfigValue {
     }
 
     if ($Object -isnot [psobject]) { return $Default }
-    if ($Object.PSObject.Properties.Name -notcontains $Name) { return $Default }
+
+    # Enumerated one by one rather than as .Properties.Name: member enumeration over
+    # an empty property collection is itself an error under StrictMode, so an object
+    # with no properties at all would break the very helper meant to survive that.
+    $names = @($Object.PSObject.Properties | ForEach-Object { $_.Name })
+    if ($names -notcontains $Name) { return $Default }
+
     $value = $Object.$Name
     if ($null -eq $value) { return $Default }
     return $value
@@ -654,12 +660,30 @@ function Invoke-StructureGraph {
     try {
         return Invoke-MgGraphRequest @splat
     } catch {
+        # $_ is captured first and never read again. A nested try inside a catch
+        # rebinds $_ to its own error, so the handler that was meant to explain the
+        # failure reports itself instead - and the real one is never seen. That is
+        # worth more care than the happy path: this is the code that runs precisely
+        # when you have no other information.
+        $err    = $_
         $detail = ''
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-            try   { $detail = (Get-ConfigValue ($_.ErrorDetails.Message | ConvertFrom-Json) 'error').message }
-            catch { $detail = $_.ErrorDetails.Message }
+
+        $raw = Get-ConfigValue (Get-ConfigValue $err 'ErrorDetails') 'Message'
+        if ($raw) {
+            $parsed = $null
+            try { $parsed = $raw | ConvertFrom-Json -ErrorAction Stop } catch { $parsed = $null }
+
+            $inner   = Get-ConfigValue $parsed 'error'
+            $code    = Get-ConfigValue $inner 'code'
+            $message = Get-ConfigValue $inner 'message'
+            # Not JSON, or not shaped like a Graph error? Then the body itself is the
+            # most informative thing available.
+            $detail  = if ($message) { "$code`: $message" } else { [string] $raw }
         }
-        if (-not $detail) { $detail = $_.Exception.Message }
+
+        if (-not $detail) { $detail = [string] (Get-ConfigValue (Get-ConfigValue $err 'Exception') 'Message') }
+        if (-not $detail) { $detail = 'no detail returned' }
+
         throw "$Method $Url -> $detail"
     }
 }
