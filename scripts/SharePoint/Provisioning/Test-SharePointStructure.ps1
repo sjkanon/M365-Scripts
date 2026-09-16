@@ -353,13 +353,25 @@ function Test-StructureContainer {
                 -Object "$($Definition.key) / default column values" -Actual "could not be read: $($_.Exception.Message)"
         }
         foreach ($property in $defaults.PSObject.Properties) {
-            $match = $live | Where-Object { $_.Field -eq $property.Name -and $_.Folder -like "*$target" } | Select-Object -First 1
+            # What Get-PnPDefaultColumnValues hands back is shaped differently across
+            # PnP versions - the folder is Folder on one, FolderRelativePath on
+            # another - and under StrictMode asking for the wrong one is fatal rather
+            # than empty. Read whichever exists, and fall back to matching on the
+            # field alone when the folder is not reported at all.
+            $match = $live | Where-Object {
+                if ((Get-ConfigValue $_ 'Field') -ne $property.Name) { return $false }
+                $folder = Get-ConfigValue $_ 'Folder'
+                if (-not $folder) { $folder = Get-ConfigValue $_ 'FolderRelativePath' }
+                if (-not $folder) { $folder = Get-ConfigValue $_ 'Path' }
+                if (-not $folder) { return $true }
+                return ($folder -like "*$target")
+            } | Select-Object -First 1
             if (-not $match) {
                 Add-Finding -Kind Missing -Area 'Container' -SiteKey $siteKey `
                     -Object "$($Definition.key) / default $($property.Name)" -Expected $property.Value
-            } elseif ("$($match.Value)" -ne "$($property.Value)") {
+            } elseif ("$(Get-ConfigValue $match 'Value')" -ne "$($property.Value)") {
                 Add-Finding -Kind Different -Area 'Container' -SiteKey $siteKey `
-                    -Object "$($Definition.key) / default $($property.Name)" -Expected $property.Value -Actual "$($match.Value)"
+                    -Object "$($Definition.key) / default $($property.Name)" -Expected $property.Value -Actual "$(Get-ConfigValue $match 'Value')"
             } else {
                 Write-Pass "  default $($property.Name) = $($property.Value)"
             }
