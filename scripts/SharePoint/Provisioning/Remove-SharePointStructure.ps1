@@ -126,6 +126,23 @@ if (-not $ConfigPath) {
 $config = Import-StructureConfig -Path $ConfigPath -AllowPlaceholders
 if (-not $Tenant) { $Tenant = $config.tenant }
 
+# The app registration this set provisions is cached per tenant in pnp.appid.json, and
+# Install-SharePointStructure puts it there. Cleaning up is the same job in reverse
+# against the same sites, so asking for -ClientId again - and failing every site
+# connect when it is left out - made the removal harder to run than the install.
+#
+# Reused, not created: if there is no cached app there is nothing this script can do
+# about it, and the message already says what to pass.
+if (-not $ClientId) {
+    $ClientId = Get-CachedStructureClientId -Tenant $Tenant
+    if ($ClientId) {
+        Write-Ok "Using the cached app registration for ${Tenant}: $ClientId"
+        # A cached app plus no certificate means the sign-in is a browser one; saying
+        # so beats Connect-Structure refusing with a message about flags.
+        if (-not $Interactive) { $Interactive = [switch]::Present }
+    }
+}
+
 # 'All' is everything except the team: deleting a client's whole team is never
 # something you should get by asking for "all".
 $allScopes = @('Tabs', 'Channels', 'Libraries', 'ContentTypes', 'Columns', 'TermSet', 'Groups')
@@ -224,6 +241,14 @@ function Resolve-Team {
     foreach ($item in @(Get-TeamId)) {
         if ($null -eq $item) { continue }
         if (-not $team -and (Get-ConfigValue $item 'Id')) { $team = $item; continue }
+
+        # The Graph SDK's welcome banner arrives here as a bare string - despite
+        # -NoWelcome on every Connect-MgGraph, and despite the sign-in helper now
+        # discarding its own output stream. It is written outside any pipeline this
+        # code controls, so it is caught rather than prevented. A string can never be
+        # a team, so it goes quietly; anything else is worth saying out loud, because
+        # anything else would mean something new is wrong.
+        if ($item -is [string]) { continue }
         Write-Warn "the team lookup also wrote $(Get-ValueShape $item) to its output - ignored"
     }
     return $team

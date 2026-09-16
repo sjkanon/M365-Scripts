@@ -781,11 +781,17 @@ function Get-CachedStructureClientId {
     $store = Get-StructureAppStorePath
     if (-not (Test-Path $store)) { return $null }
     try {
-        return (Get-Content $store -Raw | ConvertFrom-Json).$Tenant
+        $cache = Get-Content $store -Raw | ConvertFrom-Json
     } catch {
         Write-Warn "Could not read ${store}: $($_.Exception.Message)"
         return $null
     }
+
+    # A tenant that simply is not in the store is not a read failure. Reading .$Tenant
+    # straight off the object made it look like one under StrictMode - "could not read
+    # pnp.appid.json" sends you to a file that is perfectly fine, for a tenant that was
+    # only ever missing from it.
+    return Get-ConfigValue $cache $Tenant
 }
 
 function Set-CachedStructureClientId {
