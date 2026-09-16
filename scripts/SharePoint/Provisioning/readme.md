@@ -477,6 +477,44 @@ pwsh -NoProfile -File .\Test-SharePointStructure.ps1 `
 
 ---
 
+## A channel where only one group gets in
+
+This is the shape to reach for when a pillar has to be closed off **and** keep a real
+read-only role. The wizard asks for it as `bibliotheek`:
+
+```
+Welke pijlers moeten afgeschermd worden [MGMT]:
+In welke vorm [bibliotheek]:
+```
+
+What it builds:
+
+| Piece | Where |
+|---|---|
+| A normal channel in the team | everyone sees it in Teams, as a channel should be |
+| Its own document library | on the team site, not a folder in the shared one |
+| **Unique permissions, inheritance broken without copying** | so team members do **not** come across as editors |
+| `-RW` → Contribute, `-RO` → **Read** | a real read-only role, which a private channel cannot offer |
+| A tab in the channel pointing at the library | the channel's own Files tab cannot be repointed, so the library sits beside it |
+
+The permissions that survive are the site's own owners plus those two groups. That is
+what `keepExistingPermissions: false` on the container means, and it is the difference
+between "closed off" and "closed off in theory".
+
+> **The channel's built-in Files tab still points at the team library.** It will hold a
+> folder that nobody uses. Tell people to use the named tab, or remove the Files tab
+> from the channel by hand once.
+
+Compared with the alternatives:
+
+| Shape | Read-only role | Channel visible to non-members | Supported |
+|---|---|---|---|
+| **Own library + channel** | yes | yes (files are not) | yes |
+| Private channel | no — members may edit, full stop | no | yes |
+| Standard-channel folder with unique rights | yes | yes, but the Files tab errors | no |
+
+---
+
 ## Private channels and groups
 
 **A private channel cannot be given rights through a group.** Teams tracks its

@@ -403,7 +403,14 @@ try {
     # has clicked on yet.
     Write-Head '3. Channel folders'
     $teamConnection = Connect-Structure -Url $teamSiteUrl -Tenant $Tenant -ClientId $ClientId -Interactive:$Interactive
-    foreach ($entry in ($config.containers | Where-Object { (Get-ConfigValue $_ 'channelType') -eq 'Standard' })) {
+    # Only containers that actually live as a folder in the shared library. A pillar
+    # with its own library has a channel too, but its files are not in there - the
+    # library is surfaced as a tab instead, which Set-SharePointLibraries wires up.
+    $folderContainers = @($config.containers | Where-Object {
+        (Get-ConfigValue $_ 'channelType') -eq 'Standard' -and
+        (Get-ConfigValue $_ 'kind' 'Library') -eq 'ChannelFolder'
+    })
+    foreach ($entry in $folderContainers) {
         $listTitle  = Get-ConfigValue $entry 'list' 'Documents'
         $folderName = Get-ConfigValue $entry 'folder' $entry.title
 
