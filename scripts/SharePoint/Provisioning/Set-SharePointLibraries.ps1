@@ -550,7 +550,9 @@ function Set-StructureTab {
         Write-Change "tab '$tabName' added to channel '$($Definition.title)' -> $listUrl"
         $script:changeCount++
     } catch {
-        $detail = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+        $err    = $_
+        $detail = [string] (Get-ConfigValue (Get-ConfigValue $err 'ErrorDetails') 'Message')
+        if (-not $detail) { $detail = [string] (Get-ConfigValue (Get-ConfigValue $err 'Exception') 'Message') }
         Write-Warn "could not add the tab to '$($Definition.title)': $detail"
         $script:warningCount++
     }
