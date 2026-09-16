@@ -244,7 +244,11 @@ function Get-ListsUsingContentType {
                    Where-Object { (Get-ConfigValue $_ 'Name') -eq $Name })
         if ($bound.Count) { $holders.Add($list.Title) }
     }
-    return , $holders.ToArray()
+    # Plain, not ",$array": the callers wrap this in @(), and @() around a
+    # comma-returned array yields one element holding the array - which is how the
+    # refusal came out as "still on System.String[]", and how an empty result would
+    # have counted as one.
+    return $holders.ToArray()
 }
 
 

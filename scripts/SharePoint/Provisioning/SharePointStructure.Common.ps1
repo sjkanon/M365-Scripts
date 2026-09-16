@@ -497,9 +497,13 @@ function Set-SecurableRole {
         }
     }
 
-    # Comma-wrapped: an empty list of changes is the normal case - everything already
-    # matched - and returning it bare hands the caller $null instead.
-    return ,$changes
+    # Returned plain, for the caller's @() to wrap. The comma this used to carry was
+    # meant to keep an empty result from arriving as $null - the normal case, when
+    # everything already matched - but the one caller writes @(Set-SecurableRole ...),
+    # and @() around a comma-returned array gives one element holding the array. So no
+    # changes counted as one change: "permissions already match" was never reported,
+    # and every run added one to the change count for a securable it had not touched.
+    return $changes
 }
 
 function Get-StructureRoleReport {
@@ -748,9 +752,15 @@ function Invoke-StructureGraph {
 
 function Get-StructureGraphCollection {
     <#
-        Every item of a Graph collection, following @odata.nextLink. Always an array,
-        even for none or one - the comma keeps PowerShell from unrolling it on the way
-        out.
+        Every item of a Graph collection, following @odata.nextLink.
+
+        Returned plain, for @() at the call site to wrap. It used to return ",$array"
+        to survive unrolling, but every caller here writes @(Get-StructureGraphCollection
+        ...) - and @() around a comma-returned array gives a one-element array holding
+        the array, not the items. Channels and tabs were then compared against an array
+        object, matched nothing, and every one of them was reported as already gone.
+        Callers that pipe straight into Where-Object or ForEach-Object were never
+        affected either way, so plain suits both.
     #>
     param([Parameter(Mandatory)] [string] $Url)
 
@@ -761,7 +771,7 @@ function Get-StructureGraphCollection {
         foreach ($item in @(Get-ConfigValue $page 'value' @())) { $items.Add($item) }
         $next = Get-ConfigValue $page '@odata.nextLink'
     }
-    return ,$items.ToArray()
+    return $items.ToArray()
 }
 
 # -- App registration ----------------------------------------------------------
