@@ -11,7 +11,6 @@ Reference for [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1): what it decide
 - [The eight steps](#the-eight-steps)
 - [AVD / VDI](#avd--vdi)
 - [The meeting add-in: machine-wide versus per user](#the-meeting-add-in-machine-wide-versus-per-user)
-- [The meeting add-in: machine-wide versus per user](#the-meeting-add-in-machine-wide-versus-per-user)
 - [The version check](#the-version-check)
 - [Output modes](#output-modes)
 - [Exit codes](#exit-codes)
@@ -67,14 +66,14 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 
 | # | Step | What happens | `-WhatIf` |
 |---|------|--------------|-----------|
-| 1 | Preflight | Enumerate `*MSTEAMS*` AppX packages for all users, find the meeting add-in in both uninstall hives, check the AVD components, note running Teams/Outlook | read-only |
+| 1 | Preflight | Inventory every place Teams can live: `*MSTEAMS*` AppX packages per user, the provisioned package, classic Teams (machine-wide installer and per-profile installs), the meeting add-in in both uninstall hives, whether Outlook has it registered, the AVD components, running Teams/Outlook | read-only |
 | 2 | Version check | Ask the Teams config service for the published build, compare, decide | read-only |
 | 3 | AVD | Only with `-AvdOptimizations`: set `IsWVDEnvironment`, install the WebRTC redirector | guarded |
 | 4 | Download | Create the working folder, download `teamsbootstrapper.exe`, check size and Authenticode signature | guarded |
 | 5 | Uninstall | `msiexec /x` the add-in, `Remove-AppxPackage -AllUsers`, `Remove-AppxProvisionedPackage` | guarded |
 | 6 | Install | `teamsbootstrapper.exe -p` (provision for all users) | guarded |
 | 7 | Add-in | Locate `MicrosoftTeamsMeetingAddinInstaller.msi` inside the installed package, install it with `ALLUSERS=1` | guarded |
-| 8 | Verify | Re-read the add-in registration, the provisioned package and the AVD components, compare against the published build | reported as skipped |
+| 8 | Verify | Re-read the add-in registration machine-wide **and** per signed-in user in Outlook, the provisioned package and the AVD components, compare against the published build | reported as skipped |
 
 "Guarded" means the step is wrapped in `$PSCmdlet.ShouldProcess(...)`, so under `-WhatIf` it prints what it would do and changes nothing.
 
@@ -127,7 +126,7 @@ That is not the only way the add-in gets onto a device. On an ordinary endpoint 
 Three consequences worth knowing:
 
 - **Outlook loads add-ins per user.** A machine-wide install makes the add-in *available* to everyone; each user's Outlook still picks it up on its next start. That is why the script warns when Outlook is running.
-- **What the verification proves.** Step 8 reads the `HKLM` uninstall keys. That confirms the machine-wide install succeeded — it does not prove that a particular user's Outlook has the button. Run as System (the normal RMM case) the script sees `HKCU` of the System account, so a per-user-only install is invisible to it.
+- **What the verification proves.** Step 8 reads the `HKLM` uninstall keys *and* asks whether Outlook itself has the add-in registered, for every signed-in user: `HKEY_USERS\<sid>\SOFTWARE\Microsoft\Office\Outlook\Addins\TeamsAddin.FastConnect`, plus the machine-wide equivalent under `HKLM`. `LoadBehavior 3` means Outlook loads it at startup; `2` or `0` means Outlook switched it off, which is the real "the button is gone" case and needs a human. A profile nobody is signed into cannot be read at all — not broken, just unseen — so none of this is treated as a failure.
 - **`-SkipMeetingAddIn` is defensible on normal endpoints.** There the client keeps the add-in current on its own; the machine-wide install is what session hosts and shared machines need.
 
 > The uninstall entry landed in the **64-bit** hive here, not in `WOW6432Node`. It is not fixed which one it is, which is exactly why both are scanned.
@@ -163,7 +162,8 @@ The relevant part of the response:
 - The architecture is derived from `PROCESSOR_ARCHITECTURE` (with a `PROCESSOR_ARCHITEW6432` fallback for a WOW64 process) and maps to `x64`, `x86` or `arm64`.
 - `WebView2PreAuth` holds the Windows builds; the older `WebView2` key is checked as a fallback (it still carries macOS).
 - `-Ring` replaces both `audienceGroup` and `teamsRing`, for tenants on a non-default update ring.
-- The comparison is a `[version]` comparison against the installed AppX package version. **Equal or newer means nothing to do** — a device on an insider build is left alone rather than downgraded.
+- The comparison is a `[version]` comparison against the installed AppX package version, falling back to the **provisioned** package version when no user has Teams installed yet. That fallback matters: on a pooled session host or a fresh image, Teams is often only provisioned, and without it the version check has nothing to compare, declares the host outdated and reinstalls ~275 MB on every scheduled run.
+- **Equal or newer means nothing to do** — a device on an insider build is left alone rather than downgraded.
 - If the service cannot be reached, the run **stops** instead of reinstalling blindly. `-Force` overrides that.
 
 ---
@@ -276,6 +276,10 @@ Why the script looks the way it does — most of these are scars from a real fai
 
 **AVD behind a switch, not autodetected.** A session host needs the `IsWVDEnvironment` flag and the WebRTC redirector; a normal endpoint needs neither, and setting the flag there tells Teams to hand media to a redirector that is not present. Autodetecting AVD would make that a silent, machine-dependent side effect, so it is an explicit switch — the script only *mentions* that a device looks like a session host.
 
+**No SID whitelist.** Enumerating user profiles by matching `S-1-5-21-*` looks right and silently breaks on Entra-joined devices, where user SIDs are `S-1-12-1-*`. Measured on this machine: the whitelist skipped the only real user, and the Outlook check reported "nobody has it registered" while `LoadBehavior=3` was sitting right there. The filter excludes the service SIDs (`S-1-5-18/19/20`), `.DEFAULT` and the `_Classes` hives instead.
+
+**Read-only checks ignore -WhatIf.** `New-PSDrive` supports `ShouldProcess`, so mounting `HKEY_USERS` as a drive meant that under `-WhatIf` the drive was never created and the Outlook check falsely reported nothing registered. An inspection must give the same answer in a dry run as in a real one, so the hives are addressed through `Registry::HKEY_USERS` directly, with no drive to create.
+
 **Output buffering.** `-Quiet` exists because a fleet-wide scheduled job that prints on every device makes the one device that needs attention invisible. Lines are held in a list and flushed at the first sign of news; if the run ends with nothing to report, they are simply dropped.
 
 ---
@@ -315,8 +319,14 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | WebRTC redirector MSI from `aka.ms/msrdcwebrtcsvc/msi` | 1.7 MB, Authenticode `Valid`, signed by `O=Microsoft Corporation` - passes the signature check |
 | `-BootstrapperUrl http://...` | Refused before any change, exit `1` |
 | Version check via the live config service | Returned `26225.1806.5074.1452`, matching the installed build |
+| Only provisioned, no per-user install (pooled session host) | Reports `Provisioned MSTeams <version>`, compares correctly, does nothing, exit `0` |
+| Outlook add-in registration on an Entra-joined device | Found `AzureAD\<user>` with `LoadBehavior 3`; the earlier `S-1-5-21` whitelist found nobody |
+| Outlook check under `-WhatIf` | Same answer as a real run, after dropping `New-PSDrive` |
+| Classic Teams detection | Neither the machine-wide installer nor a per-profile install is present on the test device, so the positive path is **untested** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
+
 
 
 

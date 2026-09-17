@@ -143,6 +143,16 @@ Voorbeeld van een werkplek die achterloopt:
 
 > Wil je eerst zien wat er zou gebeuren zonder iets te wijzigen? Gebruik `-WhatIf -Confirm:$false`. Het script laat dan de hele update zien maar voert niets uit.
 
+### De drie draaiwijzen
+
+| Doel | Parameters | Wat het doet |
+|------|-----------|--------------|
+| Alleen controleren | `-CheckOnly -Quiet` | Wijzigt niets. Exitcode 2 als er werk ligt |
+| Bijwerken als het nodig is | `-Quiet -Confirm:$false` | Doet niets op een actuele werkplek; werkt bij als er een nieuwere build is |
+| Volledige herinstallatie (reparatie) | `-Force -Confirm:$false` | Herinstalleert Teams en de add-in ook als de versie al actueel is. Hiervoor kiezen bij een kapotte Teams, niet als routine |
+
+Voeg `-AvdOptimizations` toe op AVD/VDI-sessiehosts.
+
 ### Handmatig op de werkplek
 
 1. Open PowerShell (hoeft niet als administrator — het script vraagt zelf om rechten en gaat verder in een nieuw venster).
@@ -162,6 +172,38 @@ Via het beheermenu van de scriptrepo kan het ook: `menu.ps1`, toets **T**. Dat v
 1. Start Teams — hij moet normaal opstarten en ingelogd zijn.
 2. Start Outlook opnieuw en controleer of **Nieuwe Teams-vergadering** in de agenda staat.
 3. Ziet het script `A reboot is required`? Plan dan een herstart in met de gebruiker.
+
+---
+
+## Controleren of Outlook de vergaderknop ziet
+
+De add-in machinebreed installeren is één ding; of **Outlook** hem laadt is een tweede. Outlook doet dat per gebruiker. Het script controleert dat nu ook en zet het in de output, zowel in de preflight als in de eindverificatie.
+
+| Regel in de output | Betekenis | Actie |
+|--------------------|-----------|-------|
+| `[ OK ] Outlook loads the add-in for DOMEIN\gebruiker` | Outlook laadt de add-in bij het opstarten | Geen |
+| `[WARN] Outlook has not registered the add-in for any signed-in user yet` | Nog niemand ingelogd, of Outlook is nog niet gestart sinds de installatie | Gebruiker laten in- en uitloggen of Outlook opnieuw starten, daarna opnieuw controleren |
+| `[WARN] Outlook has the add-in switched off for ... (LoadBehavior 2)` | **Outlook heeft de add-in zelf uitgeschakeld** — meestal na een crash of een trage start | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Blijft het terugvallen, doorzetten naar level 3 |
+| `[WARN] Outlook knows the add-in ... but has no LoadBehavior set` | Registratie half aangelegd | Outlook opnieuw starten en opnieuw controleren |
+
+> Draait het script als System via NinjaOne, dan ziet het alleen de profielen van gebruikers die op dat moment **ingelogd** zijn. Een profiel waar niemand in zit kan het niet uitlezen. Dat is geen fout en laat de job dus ook niet mislukken.
+
+---
+
+## Waar het script naar Teams zoekt
+
+De preflight inventariseert elke plek waar Teams kan staan, zodat je in één oogopslag ziet wat er op de werkplek leeft:
+
+| Wat | Waar het naar kijkt |
+|-----|---------------------|
+| Nieuwe Teams per gebruiker | AppX-pakket `MSTeams` voor alle gebruikersprofielen |
+| Nieuwe Teams in de image | Het geprovisioneerde pakket — op een sessiehost staat Teams vaak alleen daar, zonder dat een gebruiker hem al heeft |
+| Classic Teams (machinebreed) | De oude *Teams Machine-Wide Installer* |
+| Classic Teams per gebruiker | `Teams.exe` in het profiel van elke gebruiker |
+| Vergader-add-in | Beide uninstall-hives (64-bit en 32-bit) |
+| Outlook-registratie | Per ingelogde gebruiker |
+
+> **Classic Teams wordt niet verwijderd door dit script.** Het meldt hem alleen. Die versie loopt op dezelfde datum uit support (1 oktober 2026) en een achtergebleven machine-wide installer blijft hem in nieuwe profielen zetten. Opruimen is een aparte, bewuste actie — overleg met level 3.
 
 ---
 
@@ -447,6 +489,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 
