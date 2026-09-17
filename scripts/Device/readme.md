@@ -224,14 +224,14 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 
 | # | Step | Honours `-WhatIf` |
 |---|------|-------------------|
-| 1 | Preflight — installed package, add-in, running Teams/Outlook | read-only |
+| 1 | Preflight — inventory: AppX per user + provisioned, classic Teams (machine-wide + per profile), add-in, Outlook registration, running Teams/Outlook | read-only |
 | 2 | Version check — published build vs installed build | read-only |
 | 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector | yes |
 | 4 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
 | 5 | Uninstall add-in, remove `MSTeams` AppX for all users, deprovision it | yes |
 | 6 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
 | 7 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
-| 8 | Verify add-in registration, provisioned package and AVD components | reported as skipped under `-WhatIf` |
+| 8 | Verify add-in registration (machine-wide + per signed-in user in Outlook), provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
 Only what is missing gets done: a current client with a missing add-in installs just the add-in, and on a session host with `-AvdOptimizations` a missing WebRTC redirector installs just that.
 
@@ -292,8 +292,8 @@ Only what is missing gets done: a current client with a missing add-in installs 
 # Detection only: exit code 2 when an update is available
 .\Update-TeamsClient.ps1 -CheckOnly -Quiet
 
-# Repair: reinstall the current build regardless of the version check
-.\Update-TeamsClient.ps1 -Force
+# Repair: full reinstall regardless of the version check
+.\Update-TeamsClient.ps1 -Force -Confirm:$false
 ```
 
 **Running it from NinjaOne**
@@ -311,6 +311,7 @@ If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `
 ## Time sync/
 
 Fixes Windows time synchronisation issues by restarting `W32tm` against Dutch NTP pool servers and registering a scheduled task that reruns the sync every 59 minutes. See [`Time sync/readme.md`](Time%20sync/readme.md) for full details.
+
 
 
 

@@ -748,6 +748,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-17
+| Change |
+|--------|
+| Fixed a bug a real session-host run exposed: `Get-AppxPackage -AllUsers` finds nothing when Teams is only *provisioned* and no user has it yet, so the version check had nothing to compare, declared the host outdated and reinstalled ~275 MB on every scheduled run. The installed version now falls back to the provisioned package version. Verified against that exact scenario: reports `Provisioned MSTeams <version>`, compares, does nothing |
+| `Update-TeamsClient.ps1` now checks whether **Outlook itself** sees the meeting add-in, not only that the MSI installed. It reads `HKEY_USERS\<sid>\...\Outlook\Addins\TeamsAddin.FastConnect` per signed-in user plus the machine-wide key: `LoadBehavior 3` = loaded, `2`/`0` = Outlook switched it off (the real "the button is gone" case). Reported in preflight and verification, never as a failure — a profile nobody is signed into cannot be read |
+| Preflight became a full inventory of everywhere Teams can live: AppX per user, the provisioned package, the classic *Teams Machine-Wide Installer*, classic per-profile installs, the add-in in both hives, the Outlook registration. Classic Teams is reported, not removed — it shares the October 2026 end-of-support date and a leftover machine-wide installer keeps restaging it into new profiles |
+| Two bugs found by running it rather than reading it. Enumerating profiles with an `S-1-5-21-*` whitelist skips **every** user on an Entra-joined device, where SIDs are `S-1-12-1-*` — the check claimed nobody had the add-in registered while `LoadBehavior=3` sat right there. And `New-PSDrive` honours `ShouldProcess`, so under `-WhatIf` the `HKEY_USERS` drive was never created and the same read-only check lied; the hives are addressed through `Registry::HKEY_USERS` now, with no drive to create |
+
 ### 2026-09-11 (5)
 | Change |
 |--------|

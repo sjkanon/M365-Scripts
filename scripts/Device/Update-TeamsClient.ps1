@@ -7,7 +7,10 @@
 .DESCRIPTION
     Endpoint/AVD script that keeps new Teams current:
 
-      1. Preflight  - the installed MSTeams AppX package, the meeting add-in and any
+      1. Preflight  - inventory of every place Teams can live on the device: the
+                      MSTeams AppX package (per user and provisioned), classic Teams
+                      (machine-wide installer and per-profile installs), the meeting
+                      add-in, whether Outlook itself has it registered, and any
                       running Teams/Outlook process.
       2. Check      - ask the Teams client config service which build is current for
                       this architecture and compare it with what is installed. Up to
@@ -22,8 +25,9 @@
       6. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
       7. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
                       Teams package (ALLUSERS=1).
-      8. Verify     - re-check the add-in registration, the provisioned package and,
-                      where applicable, the AVD components.
+      8. Verify     - re-check the add-in registration (machine-wide *and* whether
+                      Outlook sees it, per signed-in user), the provisioned package
+                      and, where applicable, the AVD components.
 
     Each part is only done when it is actually needed. A current client with a missing
     add-in installs just the add-in; a current client on an AVD host with the WebRTC
@@ -57,9 +61,12 @@
     https://config.teams.microsoft.com/config/v1/MicrosoftTeams/... is the feed the
     Teams client itself uses to decide it is out of date. It returns the current build
     per architecture (BuildSettings.WebView2PreAuth.<arch>.latestVersion). An
-    installed build that is equal or newer means there is nothing to do. If the
-    service cannot be reached the run stops rather than reinstalling blindly; -Force
-    overrides that.
+    installed build that is equal or newer means there is nothing to do. The installed
+    build comes from the per-user AppX packages, falling back to the provisioned
+    package - on a pooled session host or a fresh image Teams is often provisioned
+    without any user having it yet, and without that fallback every run would call the
+    host outdated and reinstall it. If the service cannot be reached the run stops
+    rather than reinstalling blindly; -Force overrides that.
 
     Safety
     ------
@@ -364,6 +371,132 @@ function Get-TeamsMeetingAddInEntry {
     }
 }
 
+function Get-ClassicTeamsEntry {
+    <# The classic Teams Machine-Wide Installer MSI, from both registry views. #>
+    foreach ($root in $UninstallRoots) {
+        if (-not (Test-Path $root)) { continue }
+        foreach ($key in Get-ChildItem $root) {
+            $name = $key.GetValue('DisplayName')
+            if ($name -like '*Teams Machine-Wide Installer*') {
+                [PSCustomObject]@{
+                    ProductCode = $key.PSChildName
+                    DisplayName = $name
+                    Version     = $key.GetValue('DisplayVersion')
+                }
+            }
+        }
+    }
+}
+
+function Test-UserProfileSid {
+    <#
+        A real user profile, as opposed to a service account or a helper hive.
+        Deliberately not a whitelist on S-1-5-21: an Entra-joined device hands out
+        S-1-12-1 SIDs, and matching on the domain format skips every user there.
+    #>
+    param([string] $Sid)
+
+    if (-not $Sid -or $Sid -notlike 'S-1-*') { return $false }
+    if ($Sid -like '*_Classes') { return $false }
+    return ($Sid -notin @('S-1-5-18', 'S-1-5-19', 'S-1-5-20'))
+}
+
+function Get-ClassicTeamsUserInstall {
+    <#
+        Classic Teams installs itself into every user profile. Enumerating the profile
+        list rather than Get-ChildItem C:\Users keeps it accurate when profiles live
+        on another drive or a redirected path.
+    #>
+    $profileList = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    if (-not (Test-Path $profileList)) { return }
+
+    foreach ($key in Get-ChildItem $profileList) {
+        $sid = $key.PSChildName
+        if (-not (Test-UserProfileSid $sid)) { continue }
+
+        $profilePath = $key.GetValue('ProfileImagePath')
+        if (-not $profilePath) { continue }
+
+        $exe = Join-Path $profilePath 'AppData\Local\Microsoft\Teams\current\Teams.exe'
+        if (-not (Test-Path $exe)) { continue }
+
+        [PSCustomObject]@{
+            Account = Resolve-SidName $sid
+            Path    = $exe
+            Version = (Get-Item $exe -ErrorAction SilentlyContinue).VersionInfo.FileVersion
+        }
+    }
+}
+
+function Resolve-SidName {
+    <# SID to DOMAIN\user, or the SID itself when it cannot be translated. #>
+    param([Parameter(Mandatory)] [string] $Sid)
+
+    try { return (New-Object Security.Principal.SecurityIdentifier $Sid).Translate([Security.Principal.NTAccount]).Value }
+    catch { return $Sid }
+}
+
+function Get-OutlookAddInRegistration {
+    <#
+        Whether Outlook itself sees the add-in. The MSI in Program Files proves the
+        machine-wide install; Outlook loads COM add-ins from its own key, so that is
+        what decides whether the meeting button is actually there. LoadBehavior 3 =
+        loaded at startup, 2 or 0 = Outlook switched it off.
+
+        Run as System only the hives of signed-in users are mounted under HKEY_USERS,
+        so a profile nobody is logged into is invisible here - not broken, just unseen.
+    #>
+    $suffix  = 'Microsoft\Office\Outlook\Addins\TeamsAddin.FastConnect'
+    $results = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($machinePath in "HKLM:\SOFTWARE\$suffix", "HKLM:\SOFTWARE\WOW6432Node\$suffix") {
+        if (-not (Test-Path $machinePath)) { continue }
+        $results.Add([PSCustomObject]@{
+            Account      = 'all users (machine-wide)'
+            LoadBehavior = Get-PropertyValue (Get-ItemProperty $machinePath -ErrorAction SilentlyContinue) 'LoadBehavior'
+        })
+    }
+
+    # Addressed through the provider directly instead of New-PSDrive: that cmdlet
+    # supports ShouldProcess, so under -WhatIf the drive would not be created and this
+    # read-only check would wrongly report that nobody has the add-in registered.
+    foreach ($hive in (Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue)) {
+        $sid = $hive.PSChildName
+        if (-not (Test-UserProfileSid $sid)) { continue }
+
+        $userPath = "Registry::HKEY_USERS\$sid\SOFTWARE\$suffix"
+        if (-not (Test-Path $userPath)) { continue }
+        $results.Add([PSCustomObject]@{
+            Account      = Resolve-SidName $sid
+            LoadBehavior = Get-PropertyValue (Get-ItemProperty $userPath -ErrorAction SilentlyContinue) 'LoadBehavior'
+        })
+    }
+
+    return $results
+}
+
+function Write-OutlookAddInStatus {
+    <# Report the Outlook-side registration. Informational: a missing per-user entry
+       appears by itself at the next Outlook start, and a profile that is not signed
+       in cannot be inspected at all, so neither is treated as a failure. #>
+    $registrations = @(Get-OutlookAddInRegistration)
+
+    if ($registrations.Count -eq 0) {
+        Write-Warn 'Outlook has not registered the add-in for any signed-in user yet - it registers itself at the next Outlook start'
+        return
+    }
+
+    foreach ($reg in $registrations) {
+        if ($reg.LoadBehavior -eq 3) {
+            Write-Ok "Outlook loads the add-in for $($reg.Account)"
+        } elseif ($null -eq $reg.LoadBehavior) {
+            Write-Warn "Outlook knows the add-in for $($reg.Account) but has no LoadBehavior set - it should appear at the next Outlook start"
+        } else {
+            Write-Warn "Outlook has the add-in switched off for $($reg.Account) (LoadBehavior $($reg.LoadBehavior)) - re-enable it under Outlook > Options > Add-ins"
+        }
+    }
+}
+
 function Get-WebRtcRedirectorEntry {
     <# Uninstall entry for the Remote Desktop WebRTC Redirector Service, if any. #>
     foreach ($root in $UninstallRoots) {
@@ -563,19 +696,52 @@ try {
 
     $installedVersion = $null
     foreach ($pkg in $existingTeams) {
-        Write-Ok "Found $($pkg.Name) $($pkg.Version)"
+        $users = $null
+        try { $users = @($pkg.PackageUserInformation).Count } catch { $users = $null }
+        $forWhom = if ($users) { " - installed for $users user profile(s)" } else { '' }
+        Write-Ok "New Teams (AppX) $($pkg.Name) $($pkg.Version)$forWhom"
+
         $candidate = [version] $pkg.Version
         if ($null -eq $installedVersion -or $candidate -gt $installedVersion) { $installedVersion = $candidate }
     }
-    if ($existingTeams.Count -eq 0) {
+
+    # A pooled session host or a fresh image often has Teams provisioned without any
+    # user having it installed yet. Without this fallback the version check has
+    # nothing to compare, calls the host outdated and reinstalls on every single run.
+    $provisionedVersion = $null
+    try {
+        $provisionedPkg = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq 'MSTeams' }) |
+                          Select-Object -First 1
+        if ($provisionedPkg) { $provisionedVersion = [version] $provisionedPkg.Version }
+    } catch {
+        Write-Warn "Could not read the provisioned packages: $($_.Exception.Message)"
+    }
+
+    if ($null -eq $installedVersion -and $provisionedVersion) {
+        $installedVersion = $provisionedVersion
+        Write-Ok "Provisioned MSTeams $provisionedVersion (not installed for any user yet - normal on a session host or a fresh image)"
+    }
+
+    if ($null -eq $installedVersion) {
         if ($Force) { Write-Skip 'No Teams installation detected - continuing because -Force was given' }
         else        { throw 'No Teams installation detected. Use -Force to install new Teams anyway.' }
+    }
+
+    # Everywhere else Teams can still live. Classic Teams is not touched by this
+    # script - reported because it shares the October 2026 end-of-support date and
+    # because a leftover machine-wide installer keeps restaging it into new profiles.
+    foreach ($classic in @(Get-ClassicTeamsEntry)) {
+        Write-Warn "Classic Teams machine-wide installer present ($($classic.Version)) - support ended 1 October 2026, not removed by this script"
+    }
+    foreach ($classic in @(Get-ClassicTeamsUserInstall)) {
+        Write-Warn "Classic Teams installed for $($classic.Account) ($($classic.Version)) - left alone by this script"
     }
 
     $addInInstalled = [bool] (Get-TeamsMeetingAddInEntry)
     if (-not $SkipMeetingAddIn) {
         if ($addInInstalled) { Write-Ok 'Teams Meeting Add-in is installed' }
         else                 { Write-Warn 'Teams Meeting Add-in is not installed' }
+        Write-OutlookAddInStatus
     }
 
     $avdFlagSet  = $false
@@ -886,8 +1052,13 @@ try {
         }
 
         if (-not $SkipMeetingAddIn) {
-            if (Get-TeamsMeetingAddInEntry) { Write-Ok 'Teams Meeting Add-in installed' }
+            if (Get-TeamsMeetingAddInEntry) { Write-Ok 'Teams Meeting Add-in installed (machine-wide)' }
             else { Write-Bad 'Teams Meeting Add-in installation failed'; $exitCode = 1 }
+
+            # Does Outlook itself see it? Not a pass/fail: a profile that is not
+            # signed in cannot be read, and a fresh registration appears at the next
+            # Outlook start. Reported so a technician knows what to check with.
+            Write-OutlookAddInStatus
         }
 
         $nowInstalled = Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq 'MSTeams' } | Select-Object -First 1
@@ -926,3 +1097,5 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
+
