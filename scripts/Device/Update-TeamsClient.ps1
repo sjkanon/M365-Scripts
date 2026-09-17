@@ -17,17 +17,19 @@
                       date and nothing missing? Nothing happens at all.
       3. AVD        - only with -AvdOptimizations: the IsWVDEnvironment media flag and
                       the Remote Desktop WebRTC Redirector Service.
-      4. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
+      4. Classic    - only with -RemoveClassicTeams: uninstall the classic Teams
+                      machine-wide installer and clear the per-profile installs.
+      5. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
                       BEFORE anything is uninstalled, so a failed download can never
                       leave the device without a Teams client.
-      5. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
+      6. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
                       users, and the provisioned package.
-      6. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
-      7. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
+      7. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
+      8. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
                       Teams package (ALLUSERS=1).
-      8. Verify     - re-check the add-in registration (machine-wide *and* whether
-                      Outlook sees it, per signed-in user), the provisioned package
-                      and, where applicable, the AVD components.
+      9. Verify     - re-check the add-in registration (machine-wide *and* whether
+                      Outlook sees it, per signed-in user), the provisioned package,
+                      the classic removal and, where applicable, the AVD components.
 
     Each part is only done when it is actually needed. A current client with a missing
     add-in installs just the add-in; a current client on an AVD host with the WebRTC
@@ -51,6 +53,18 @@
     that from the session host. IsWVDEnvironment stays required either way, and
     Microsoft still advises keeping the redirector as a fallback for endpoints that
     cannot do SlimCore, so the switch keeps installing it. Revisit before April 2027.
+
+    Classic Teams
+    -------------
+    -RemoveClassicTeams removes the old client as well. The machine-wide installer
+    goes through msiexec; that one matters most, because as long as it is there
+    Windows keeps staging classic Teams into every new profile. Per profile the
+    install root, the Run entry (com.squirrel.Teams.Teams) and the stale uninstall
+    key are removed. The documented per-user uninstall (Update.exe --uninstall -s)
+    has to run as the profile owner, which System cannot do, so the files are removed
+    instead. A profile whose files are locked by a running classic Teams finishes on
+    a later run; a machine-wide installer that survives is treated as a failure.
+    Roaming data in %APPDATA%\Microsoft\Teams is left alone.
 
     Every state-changing step is wrapped in ShouldProcess, so -WhatIf walks the whole
     flow and reports exactly what would be uninstalled, downloaded, installed and
@@ -104,9 +118,9 @@
         hit a problem. Combine with -CheckOnly for a pure detection job (exit code 2
         means "update available").
       - Script variables arrive as environment variables, so checkboxes named whatIf,
-        quiet, checkOnly, force, avdOptimizations, skipMeetingAddIn or
-        skipSignatureCheck and text fields named workingDir, logPath or ring are
-        picked up when the matching parameter is not passed on the command line.
+        quiet, checkOnly, force, avdOptimizations, removeClassicTeams,
+        skipMeetingAddIn or skipSignatureCheck and text fields named workingDir,
+        logPath or ring are picked up when the matching parameter is not passed.
         Capitalisation does not matter - environment lookups are case-insensitive.
       - If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit
         via SysNative first. Without that, registry reads are redirected to
@@ -131,6 +145,12 @@
     Also enforce the AVD/VDI media optimizations: the IsWVDEnvironment registry flag
     and the Remote Desktop WebRTC Redirector Service. Both only when missing, unless
     -Force is given.
+
+.PARAMETER RemoveClassicTeams
+    Also remove the classic Teams client: uninstall the Teams Machine-Wide Installer
+    and clear the per-profile installs (install folder, autostart entry and the stale
+    uninstall key). Off by default - taking an app away from users is not something an
+    update job should decide by itself.
 
 .PARAMETER WebRtcUrl
     Download URL for the Remote Desktop WebRTC Redirector MSI (default: the Microsoft
@@ -188,8 +208,12 @@
     .\Update-TeamsClient.ps1 -AvdOptimizations -Quiet -Confirm:$false
 
 .EXAMPLE
+    # Clean up the old client while keeping new Teams current
+    .\Update-TeamsClient.ps1 -RemoveClassicTeams -Quiet -Confirm:$false
+
+.EXAMPLE
     # Repair: reinstall the current build regardless of the version check
-    .\Update-TeamsClient.ps1 -Force
+    .\Update-TeamsClient.ps1 -Force -Confirm:$false
 
 .NOTES
     Author  : Sjoerd Kanon
@@ -200,6 +224,7 @@ param (
     [switch] $Quiet,
     [switch] $CheckOnly,
     [switch] $AvdOptimizations,
+    [switch] $RemoveClassicTeams,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
@@ -290,6 +315,7 @@ if (-not $PSBoundParameters.ContainsKey('Force')              -and $env:force   
 if (-not $PSBoundParameters.ContainsKey('SkipMeetingAddIn')   -and $env:skipMeetingAddIn   -in $rmmTrue) { $SkipMeetingAddIn   = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
 if (-not $PSBoundParameters.ContainsKey('AvdOptimizations')   -and $env:avdOptimizations   -in $rmmTrue) { $AvdOptimizations   = $true }
+if (-not $PSBoundParameters.ContainsKey('RemoveClassicTeams') -and $env:removeClassicTeams -in $rmmTrue) { $RemoveClassicTeams = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
@@ -421,9 +447,11 @@ function Get-ClassicTeamsUserInstall {
         if (-not (Test-Path $exe)) { continue }
 
         [PSCustomObject]@{
-            Account = Resolve-SidName $sid
-            Path    = $exe
-            Version = (Get-Item $exe -ErrorAction SilentlyContinue).VersionInfo.FileVersion
+            Sid         = $sid
+            Account     = Resolve-SidName $sid
+            Path        = $exe
+            InstallRoot = Join-Path $profilePath 'AppData\Local\Microsoft\Teams'
+            Version     = (Get-Item $exe -ErrorAction SilentlyContinue).VersionInfo.FileVersion
         }
     }
 }
@@ -449,10 +477,16 @@ function Get-OutlookAddInRegistration {
     $suffix  = 'Microsoft\Office\Outlook\Addins\TeamsAddin.FastConnect'
     $results = [System.Collections.Generic.List[object]]::new()
 
-    foreach ($machinePath in "HKLM:\SOFTWARE\$suffix", "HKLM:\SOFTWARE\WOW6432Node\$suffix") {
+    # Both registry views are read, and both can hold an entry, so they are labelled
+    # apart - two identical "all users" lines only look like a bug in the output.
+    $machineViews = [ordered] @{
+        "HKLM:\SOFTWARE\$suffix"                = 'all users (machine-wide, 64-bit)'
+        "HKLM:\SOFTWARE\WOW6432Node\$suffix"    = 'all users (machine-wide, 32-bit)'
+    }
+    foreach ($machinePath in $machineViews.Keys) {
         if (-not (Test-Path $machinePath)) { continue }
         $results.Add([PSCustomObject]@{
-            Account      = 'all users (machine-wide)'
+            Account      = $machineViews[$machinePath]
             LoadBehavior = Get-PropertyValue (Get-ItemProperty $machinePath -ErrorAction SilentlyContinue) 'LoadBehavior'
         })
     }
@@ -614,6 +648,26 @@ function Get-LatestTeamsBuild {
     return $null
 }
 
+function Get-TeamsAddInInstaller {
+    <#
+        The meeting add-in MSI inside the staged new Teams package, newest first.
+
+        Deliberately found by looking in WindowsApps rather than by asking
+        Get-AppxPackage for a version: teamsbootstrapper.exe -p *provisions* the
+        package, which stages it for future sign-ins without installing it for
+        whoever ran the script. On a session host Get-AppxPackage then returns
+        nothing and the add-in step fails even though the install worked.
+    #>
+    $pattern = Join-Path $env:ProgramFiles 'WindowsApps\MSTeams_*_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi'
+
+    return Get-Item -Path $pattern -ErrorAction SilentlyContinue |
+           Sort-Object -Property @{ Expression = {
+               $raw = $_.Directory.Name -replace '^MSTeams_', '' -replace '_x64__8wekyb3d8bbwe$', ''
+               try { [version] $raw } catch { [version] '0.0.0.0' }
+           } } |
+           Select-Object -Last 1
+}
+
 function Get-MsiProductVersion {
     <#
         ProductVersion straight from the MSI property table. Microsoft's own sample
@@ -727,14 +781,19 @@ try {
         else        { throw 'No Teams installation detected. Use -Force to install new Teams anyway.' }
     }
 
-    # Everywhere else Teams can still live. Classic Teams is not touched by this
-    # script - reported because it shares the October 2026 end-of-support date and
-    # because a leftover machine-wide installer keeps restaging it into new profiles.
-    foreach ($classic in @(Get-ClassicTeamsEntry)) {
-        Write-Warn "Classic Teams machine-wide installer present ($($classic.Version)) - support ended 1 October 2026, not removed by this script"
+    # Everywhere else Teams can still live. Classic Teams is only removed when asked
+    # for: it shares the October 2026 end-of-support date and a leftover machine-wide
+    # installer keeps restaging it into new profiles, but taking an app away from a
+    # user is not something an update job should decide by itself.
+    $classicMachineWide = @(Get-ClassicTeamsEntry)
+    $classicUserInstall = @(Get-ClassicTeamsUserInstall)
+    $classicNote = if ($RemoveClassicTeams) { 'will be removed' } else { 'left alone - use -RemoveClassicTeams' }
+
+    foreach ($classic in $classicMachineWide) {
+        Write-Warn "Classic Teams machine-wide installer present ($($classic.Version)) - $classicNote"
     }
-    foreach ($classic in @(Get-ClassicTeamsUserInstall)) {
-        Write-Warn "Classic Teams installed for $($classic.Account) ($($classic.Version)) - left alone by this script"
+    foreach ($classic in $classicUserInstall) {
+        Write-Warn "Classic Teams installed for $($classic.Account) ($($classic.Version)) - $classicNote"
     }
 
     $addInInstalled = [bool] (Get-TeamsMeetingAddInEntry)
@@ -759,8 +818,14 @@ try {
         # Informational only. SlimCore replaces WebRTC (support ends 1 October 2026)
         # and ships with new Teams, but whether it is actually used depends on the
         # Windows App version on the endpoint, which is invisible from here.
-        $slimCoreHost = @(Get-AppxPackage -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
+        # -AllUsers matters: the packages belong to whoever has Teams, which on a
+        # session host is not the account running this script.
+        $slimCoreHost = @(Get-AppxPackage -AllUsers -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
                         Select-Object -First 1
+        if (-not $slimCoreHost) {
+            $slimCoreHost = @(Get-AppxPackage -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
+                            Select-Object -First 1
+        }
         if ($slimCoreHost) {
             Write-Ok "SlimCore is present ($($slimCoreHost.Version)) - the endpoint's Windows App version decides whether it is used"
         } else {
@@ -799,9 +864,10 @@ try {
 
     $addInMissing  = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
     $avdWork       = $AvdOptimizations -and ((-not $avdFlagSet) -or (-not $webRtcEntry) -or $Force)
+    $classicWork   = $RemoveClassicTeams -and (($classicMachineWide.Count + $classicUserInstall.Count) -gt 0)
     $fullReinstall = $clientOutdated -or $Force
 
-    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork) {
+    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork -and -not $classicWork) {
         $plannedExit = 0
         throw 'Teams is up to date - nothing to do.'
     }
@@ -810,6 +876,7 @@ try {
     if ($clientOutdated) { $reasons += 'a newer build is available' }
     if ($addInMissing)   { $reasons += 'the Teams Meeting Add-in is missing' }
     if ($avdWork)        { $reasons += 'the AVD optimizations are incomplete' }
+    if ($classicWork)    { $reasons += 'classic Teams is still installed' }
     if ($Force)          { $reasons += '-Force was given' }
 
     if ($CheckOnly) {
@@ -822,6 +889,7 @@ try {
     if (-not $fullReinstall) {
         $parts = @()
         if ($avdWork)      { $parts += 'the AVD optimizations' }
+        if ($classicWork)  { $parts += 'the classic Teams removal' }
         if ($addInMissing) { $parts += 'the meeting add-in' }
         Write-Skip ('Client is current - only {0} will be handled' -f ($parts -join ' and '))
     }
@@ -898,11 +966,74 @@ try {
         }
     }
 
-    # -- 4. Download and verify the bootstrapper -------------------------------
+    # -- 4. Remove classic Teams -----------------------------------------------
+    Write-Out ''
+    Write-Step '4. Classic Teams'
+    if (-not $RemoveClassicTeams) {
+        if ($classicMachineWide.Count + $classicUserInstall.Count -gt 0) {
+            Write-Skip 'Found but left alone - use -RemoveClassicTeams to remove it'
+        } else {
+            Write-Skip 'Not installed'
+        }
+    } else {
+        if ($classicMachineWide.Count + $classicUserInstall.Count -eq 0) {
+            Write-Skip 'Nothing to remove'
+        }
+
+        if (Get-Process -Name 'Teams' -ErrorAction SilentlyContinue) {
+            Write-Warn 'Classic Teams is running - its files are locked, so a per-user removal may only finish after the user signs out'
+        }
+
+        foreach ($entry in $classicMachineWide) {
+            $target = "$($entry.DisplayName) $($entry.Version) [$($entry.ProductCode)]"
+            if ($PSCmdlet.ShouldProcess($target, 'msiexec /x /qn (uninstall)')) {
+                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($entry.ProductCode) /qn /norestart"
+                if ($result.Success) {
+                    Write-Ok "Uninstalled $($entry.DisplayName)"
+                    if ($result.RebootRequired) { $rebootRequired = $true }
+                } else {
+                    throw "Uninstall of $($entry.DisplayName) failed ($($result.Message))"
+                }
+            }
+        }
+
+        # The documented per-user uninstall is Update.exe --uninstall -s, but that
+        # has to run as the user who owns the profile. From System the install root,
+        # the autostart entry and the stale uninstall key are removed instead.
+        foreach ($user in $classicUserInstall) {
+            if ($PSCmdlet.ShouldProcess("$($user.Account): $($user.InstallRoot)", 'Remove classic Teams install folder')) {
+                Remove-Item -LiteralPath $user.InstallRoot -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path $user.InstallRoot) {
+                    Write-Warn "Could not fully remove $($user.InstallRoot) - files in use; it will finish on a later run"
+                } else {
+                    Write-Ok "Removed classic Teams for $($user.Account)"
+                }
+            }
+
+            $hive   = "Registry::HKEY_USERS\$($user.Sid)"
+            $runKey = "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+            if ((Test-Path $runKey) -and (Get-PropertyValue (Get-ItemProperty $runKey -ErrorAction SilentlyContinue) 'com.squirrel.Teams.Teams')) {
+                if ($PSCmdlet.ShouldProcess("$($user.Account): Run\com.squirrel.Teams.Teams", 'Remove autostart entry')) {
+                    Remove-ItemProperty -Path $runKey -Name 'com.squirrel.Teams.Teams' -Force -ErrorAction SilentlyContinue
+                    Write-Ok "Removed the classic Teams autostart entry for $($user.Account)"
+                }
+            }
+
+            $uninstallKey = "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Teams"
+            if (Test-Path $uninstallKey) {
+                if ($PSCmdlet.ShouldProcess("$($user.Account): Uninstall\Teams", 'Remove stale uninstall entry')) {
+                    Remove-Item -Path $uninstallKey -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Ok "Removed the stale uninstall entry for $($user.Account)"
+                }
+            }
+        }
+    }
+
+    # -- 5. Download and verify the bootstrapper -------------------------------
     # Deliberately before any uninstall: a failed download must never leave the
     # device without a Teams client.
     Write-Out ''
-    Write-Step '4. Download new Teams bootstrapper'
+    Write-Step '5. Download new Teams bootstrapper'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } else {
@@ -924,9 +1055,9 @@ try {
         }
     }
 
-    # -- 5. Uninstall the add-in and the current package -----------------------
+    # -- 6. Uninstall the add-in and the current package -----------------------
     Write-Out ''
-    Write-Step '5. Uninstall current Teams'
+    Write-Step '6. Uninstall current Teams'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } else {
@@ -979,9 +1110,9 @@ try {
         }
     }
 
-    # -- 6. Install / provision new Teams --------------------------------------
+    # -- 7. Install / provision new Teams --------------------------------------
     Write-Out ''
-    Write-Step '6. Install new Teams'
+    Write-Step '7. Install new Teams'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
@@ -993,50 +1124,42 @@ try {
         Write-Ok 'Bootstrapper completed'
     }
 
-    # -- 7. Install the Teams Meeting Add-in for all users ---------------------
+    # -- 8. Install the Teams Meeting Add-in for all users ---------------------
     Write-Out ''
-    Write-Step '7. Teams Meeting Add-in (install)'
+    Write-Step '8. Teams Meeting Add-in (install)'
     if ($SkipMeetingAddIn) {
         Write-Skip 'Skipped (-SkipMeetingAddIn)'
     } elseif (-not $fullReinstall -and -not $addInMissing) {
         Write-Skip 'Already installed and the client was not replaced'
     } else {
-        $newTeams        = Get-AppxPackage -Name 'MSTeams' -ErrorAction SilentlyContinue
-        $newTeamsVersion = if ($newTeams) { $newTeams.Version } else { $null }
+        $tmaMsi = Get-TeamsAddInInstaller
 
-        if (-not $newTeamsVersion -and $simulate) {
-            Write-Skip 'New Teams is not installed yet - on a real run the add-in MSI comes from the freshly installed package folder'
+        if (-not $tmaMsi -and $simulate) {
+            Write-Skip 'Nothing was installed in this dry run, so the staged package is not there either - a real run takes the MSI from it'
             Write-Skip 'Would run: msiexec.exe /i "<ProgramFiles>\WindowsApps\MSTeams_<version>_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi" TARGETDIR="<ProgramFiles(x86)>\Microsoft\TeamsMeetingAddin\<version>\" /qn ALLUSERS=1'
-        } elseif (-not $newTeamsVersion) {
-            throw 'New Teams package not found after install. Check the bootstrapper output.'
+        } elseif (-not $tmaMsi) {
+            throw "No add-in MSI found under $env:ProgramFiles\WindowsApps - did the bootstrapper stage the package?"
         } else {
-            Write-Ok "Found new Teams version: $newTeamsVersion"
+            Write-Ok "Add-in MSI from staged package $($tmaMsi.Directory.Name)"
+            $tmaVersion = Get-MsiProductVersion -Path $tmaMsi.FullName
+            if (-not $tmaVersion) { throw "Could not read the product version from $($tmaMsi.FullName)" }
 
-            $tmaPath    = '{0}\WindowsApps\MSTeams_{1}_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi' -f $env:ProgramFiles, $newTeamsVersion
-            $tmaVersion = if (Test-Path $tmaPath) { Get-MsiProductVersion -Path $tmaPath } else { $null }
+            Write-Ok "Found Teams Meeting Add-in version: $tmaVersion"
+            $targetDir = '{0}\Microsoft\TeamsMeetingAddin\{1}\' -f ${env:ProgramFiles(x86)}, $tmaVersion
+            $params    = '/i "{0}" TARGETDIR="{1}" /qn /norestart ALLUSERS=1' -f $tmaMsi.FullName, $targetDir
 
-            if (-not $tmaVersion -and $simulate) {
-                Write-Skip "Add-in MSI not present in the current package - a real run takes it from $tmaPath"
-            } elseif (-not $tmaVersion) {
-                throw "Teams Meeting Add-in installer not found at $tmaPath"
-            } else {
-                Write-Ok "Found Teams Meeting Add-in version: $tmaVersion"
-                $targetDir = '{0}\Microsoft\TeamsMeetingAddin\{1}\' -f ${env:ProgramFiles(x86)}, $tmaVersion
-                $params    = '/i "{0}" TARGETDIR="{1}" /qn /norestart ALLUSERS=1' -f $tmaPath, $targetDir
-
-                if ($PSCmdlet.ShouldProcess("Teams Meeting Add-in $tmaVersion", "msiexec.exe $params")) {
-                    $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments $params
-                    if (-not $result.Success) { throw "Teams Meeting Add-in install failed ($($result.Message))" }
-                    if ($result.RebootRequired) { $rebootRequired = $true }
-                    Write-Ok "Installed Teams Meeting Add-in to $targetDir"
-                }
+            if ($PSCmdlet.ShouldProcess("Teams Meeting Add-in $tmaVersion", "msiexec.exe $params")) {
+                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments $params
+                if (-not $result.Success) { throw "Teams Meeting Add-in install failed ($($result.Message))" }
+                if ($result.RebootRequired) { $rebootRequired = $true }
+                Write-Ok "Installed Teams Meeting Add-in to $targetDir"
             }
         }
     }
 
-    # -- 8. Verify -------------------------------------------------------------
+    # -- 9. Verify -------------------------------------------------------------
     Write-Out ''
-    Write-Step '8. Verification'
+    Write-Step '9. Verification'
     if ($simulate) {
         Write-Skip 'Skipped - nothing was changed, so there is nothing to verify (-WhatIf)'
         Write-Out ''
@@ -1049,6 +1172,27 @@ try {
             $webRtcNow = @(Get-WebRtcRedirectorEntry) | Select-Object -First 1
             if ($webRtcNow) { Write-Ok "WebRTC Redirector installed ($($webRtcNow.Version))" }
             else { Write-Bad 'WebRTC Redirector installation failed'; $exitCode = 1 }
+        }
+
+        if ($RemoveClassicTeams) {
+            # A machine-wide installer that survives is a genuine failure. A per-user
+            # folder that survives is usually a file lock, which the next run clears
+            # once the user has signed out.
+            if (@(Get-ClassicTeamsEntry).Count -gt 0) {
+                Write-Bad 'The classic Teams machine-wide installer is still present'
+                $exitCode = 1
+            } else {
+                Write-Ok 'No classic Teams machine-wide installer'
+            }
+
+            $classicLeft = @(Get-ClassicTeamsUserInstall)
+            if ($classicLeft.Count -eq 0) {
+                Write-Ok 'No per-user classic Teams left'
+            } else {
+                foreach ($left in $classicLeft) {
+                    Write-Warn "Classic Teams still present for $($left.Account) - files in use; it clears on a later run"
+                }
+            }
         }
 
         if (-not $SkipMeetingAddIn) {
@@ -1097,5 +1241,8 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
+
+
 
 

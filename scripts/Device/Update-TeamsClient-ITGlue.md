@@ -203,7 +203,30 @@ De preflight inventariseert elke plek waar Teams kan staan, zodat je in één oo
 | Vergader-add-in | Beide uninstall-hives (64-bit en 32-bit) |
 | Outlook-registratie | Per ingelogde gebruiker |
 
-> **Classic Teams wordt niet verwijderd door dit script.** Het meldt hem alleen. Die versie loopt op dezelfde datum uit support (1 oktober 2026) en een achtergebleven machine-wide installer blijft hem in nieuwe profielen zetten. Opruimen is een aparte, bewuste actie — overleg met level 3.
+### Classic Teams opruimen
+
+Classic Teams wordt **standaard alleen gemeld, niet verwijderd**. Wil je hem weg hebben, zet dan het vinkje `removeClassicTeams` aan of gebruik de parameter:
+
+```
+-RemoveClassicTeams -Quiet -Confirm:$false
+```
+
+| Wat het verwijdert | Waarom |
+|--------------------|--------|
+| De *Teams Machine-Wide Installer* | Zolang die er staat, zet Windows classic Teams in elk nieuw gebruikersprofiel terug |
+| De installatiemap in het profiel van elke gebruiker | Daar staat de per-gebruiker-kopie |
+| De autostart-regel en de verouderde uninstall-sleutel | Anders probeert Windows iets te starten dat er niet meer is |
+
+Roaming-gegevens in `%APPDATA%\Microsoft\Teams` blijven staan; die doen niets meer zodra de client weg is.
+
+> **Overleg dit met de klant voordat je het breed uitrolt.** Gebruikers die classic Teams nog gebruiken, verliezen hem. Draai het eerst met `-WhatIf` om te zien wat er op een toestel weg zou gaan.
+
+Twee uitkomsten om te kennen:
+
+| Regel in de output | Betekenis | Actie |
+|--------------------|-----------|-------|
+| `[FAIL] The classic Teams machine-wide installer is still present` | De uninstall is niet gelukt | Doorzetten naar level 3; de job faalt (exitcode 1) |
+| `[WARN] Classic Teams still present for ... - files in use` | Classic Teams draaide nog; de bestanden zaten vast | Gebruiker laten uitloggen; de volgende run maakt het af. Geen fout |
 
 ---
 
@@ -293,6 +316,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-Confirm:$false` | Nooit om bevestiging vragen — verplicht bij onbeheerde runs |
 | `-Force` | Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams |
 | `-AvdOptimizations` | Alleen op AVD/VDI-sessiehosts: zet de mediavlag `IsWVDEnvironment` en installeert de WebRTC-redirector |
+| `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
 | `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
 | `-SkipMeetingAddIn` | Alleen de client, de Outlook-add-in met rust laten |
 | `-TimeoutSeconds` | Standaard 900. Verhogen op trage werkplekken |
@@ -339,6 +363,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `timed out after 900 seconds and was killed` | Installatie bleef hangen | Werkplek herstarten en opnieuw proberen; anders `-TimeoutSeconds` verhogen | L2 |
 | `Another installation is in progress (1618)` | Er loopt al een installatie | Geen actie — het script probeert het zelf opnieuw | L1 |
 | `Teams Meeting Add-in installation failed` | Client staat er, add-in niet | Outlook volledig sluiten en het script opnieuw draaien | L2 |
+| `Outlook has the add-in switched off for ... (LoadBehavior 2)` | Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet | L2 |
 | `Teams installation failed` | De installatie is niet doorgekomen | Log in `C:\Temp` lezen en doorzetten | L3 |
 | `A reboot is required` | Windows wil herstarten om af te ronden | Herstart inplannen met de gebruiker | L1 |
 
@@ -404,6 +429,7 @@ Met script variables krijgt de collega die het script draait vinkjes in plaats v
 | `checkOnly` | Checkbox | Alleen controleren, niets installeren |
 | `force` | Checkbox | Herinstalleren ook als de versie al actueel is |
 | `avdOptimizations` | Checkbox | AVD/VDI: mediavlag + WebRTC-redirector afdwingen |
+| `removeClassicTeams` | Checkbox | Classic Teams verwijderen (machinebreed + per gebruiker) |
 | `skipMeetingAddIn` | Checkbox | Outlook-add-in met rust laten |
 | `workingDir` | Text | Andere downloadmap |
 | `logPath` | Text | Andere logmap |
@@ -489,6 +515,9 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
+
+
 
 
 

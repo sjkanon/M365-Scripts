@@ -748,6 +748,22 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-17 (3)
+| Change |
+|--------|
+| Fixed the bug a production run on an AVD session host surfaced: `teamsbootstrapper.exe -p` **provisions** the package for future sign-ins, it does not install it for whoever ran the script. The bootstrapper reported success and the add-in step then died on `New Teams package not found after install`, because `Get-AppxPackage -Name MSTeams` asks about the current user and the admin running the script had no Teams |
+| The add-in MSI is now found by globbing `%ProgramFiles%\WindowsApps\MSTeams_*_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi` and taking the newest version, so it works whether or not any user has the package installed. Re-tested for a per-user install, a provisioned-only host and a `-Force` run |
+| Same per-user blind spot in the SlimCore check, which reported "not found" on a host that has new Teams for one profile: it now asks `-AllUsers` first. And the two machine-wide Outlook registry views are labelled 64-bit/32-bit apart, because that run printed two identical `all users (machine-wide)` lines, which reads like a bug |
+| That run also earned the new checks their keep: it removed a real per-profile classic Teams `1.4.00.11161`, and found `LoadBehavior 2` for one account - Outlook had switched the add-in off, which no amount of reinstalling fixes |
+
+### 2026-09-17 (2)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` can now remove classic Teams as well, behind `-RemoveClassicTeams` (Ninja variable `removeClassicTeams`). Off by default: taking an application away from users is not a decision an update job should make on its own. It uninstalls the *Teams Machine-Wide Installer* through msiexec — the one that matters, because while it is present Windows keeps staging classic Teams into every new profile — and per profile clears the install root, the `Run\com.squirrel.Teams.Teams` autostart entry and the stale `Uninstall\Teams` key |
+| The documented per-user uninstall (`Update.exe --uninstall -s`) has to run as the profile owner, which System cannot do, so the files are removed instead. Roaming data in `%APPDATA%\Microsoft\Teams` is left alone |
+| Failure handling splits the two cases on purpose: a machine-wide installer that survives the uninstall is a real failure (exit 1), while a per-profile folder that survives is almost always a file lock from a running classic Teams — a warning, cleared by the next run after the user signs out |
+| Tested with detection faked, since the test device has neither variant: `-WhatIf` plans the msiexec uninstall and the folder removal and skips steps 5-8, and an applied run removed a faked profile folder with the verification reporting it clean. The msiexec path itself has **not** been run against a real Machine-Wide Installer — written down in the docs rather than implied |
+
 ### 2026-09-17
 | Change |
 |--------|

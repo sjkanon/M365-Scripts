@@ -8,8 +8,9 @@ Reference for [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1): what it decide
 
 - [What it is for](#what-it-is-for)
 - [The decision](#the-decision)
-- [The eight steps](#the-eight-steps)
+- [The nine steps](#the-nine-steps)
 - [AVD / VDI](#avd--vdi)
+- [Classic Teams](#classic-teams)
 - [The meeting add-in: machine-wide versus per user](#the-meeting-add-in-machine-wide-versus-per-user)
 - [The version check](#the-version-check)
 - [Output modes](#output-modes)
@@ -62,22 +63,23 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 
 ---
 
-## The eight steps
+## The nine steps
 
 | # | Step | What happens | `-WhatIf` |
 |---|------|--------------|-----------|
 | 1 | Preflight | Inventory every place Teams can live: `*MSTEAMS*` AppX packages per user, the provisioned package, classic Teams (machine-wide installer and per-profile installs), the meeting add-in in both uninstall hives, whether Outlook has it registered, the AVD components, running Teams/Outlook | read-only |
 | 2 | Version check | Ask the Teams config service for the published build, compare, decide | read-only |
 | 3 | AVD | Only with `-AvdOptimizations`: set `IsWVDEnvironment`, install the WebRTC redirector | guarded |
-| 4 | Download | Create the working folder, download `teamsbootstrapper.exe`, check size and Authenticode signature | guarded |
-| 5 | Uninstall | `msiexec /x` the add-in, `Remove-AppxPackage -AllUsers`, `Remove-AppxProvisionedPackage` | guarded |
-| 6 | Install | `teamsbootstrapper.exe -p` (provision for all users) | guarded |
-| 7 | Add-in | Locate `MicrosoftTeamsMeetingAddinInstaller.msi` inside the installed package, install it with `ALLUSERS=1` | guarded |
-| 8 | Verify | Re-read the add-in registration machine-wide **and** per signed-in user in Outlook, the provisioned package and the AVD components, compare against the published build | reported as skipped |
+| 4 | Classic | Only with `-RemoveClassicTeams`: uninstall the Teams Machine-Wide Installer, clear the per-profile installs | guarded |
+| 5 | Download | Create the working folder, download `teamsbootstrapper.exe`, check size and Authenticode signature | guarded |
+| 6 | Uninstall | `msiexec /x` the add-in, `Remove-AppxPackage -AllUsers`, `Remove-AppxProvisionedPackage` | guarded |
+| 7 | Install | `teamsbootstrapper.exe -p` (provision for all users) | guarded |
+| 8 | Add-in | Locate `MicrosoftTeamsMeetingAddinInstaller.msi` inside the installed package, install it with `ALLUSERS=1` | guarded |
+| 9 | Verify | Re-read the add-in registration machine-wide **and** per signed-in user in Outlook, the provisioned package, the classic removal and the AVD components, compare against the published build | reported as skipped |
 
 "Guarded" means the step is wrapped in `$PSCmdlet.ShouldProcess(...)`, so under `-WhatIf` it prints what it would do and changes nothing.
 
-Only what is actually missing gets done: steps 4–6 are skipped when the client is current, step 7 when the add-in is already there and the client was not replaced, and step 3 unless `-AvdOptimizations` is given.
+Only what is actually missing gets done: steps 5–7 are skipped when the client is current, step 8 when the add-in is already there and the client was not replaced, step 3 unless `-AvdOptimizations` is given and step 4 unless `-RemoveClassicTeams` is given.
 
 ---
 
@@ -106,6 +108,28 @@ Microsoft.Teams.SlimCoreVdiFwk.win-x64.2026.31   2026.31.1.16   (plus older fram
 Preflight reports that package when `-AvdOptimizations` is used, but it is **informational only**: which path is actually taken depends on the Windows App version on the endpoint the user connects from, and a script on the session host cannot see that. Auditing endpoint client versions is the real migration work.
 
 `IsWVDEnvironment` stays required either way, and Microsoft's current guidance is to keep the redirector installed as a fallback for endpoints that cannot do SlimCore — so `-AvdOptimizations` keeps installing it. Revisit before April 2027.
+
+---
+
+## Classic Teams
+
+`-RemoveClassicTeams` removes the old client as well. Off by default: taking an application away from users is not a decision an update job should make on its own, and the switch keeps that decision with whoever schedules the job.
+
+| What | How | Why it matters |
+|------|-----|----------------|
+| Teams Machine-Wide Installer | `msiexec /x <ProductCode> /qn /norestart` | The important one — while it is installed, Windows keeps staging classic Teams into every new user profile |
+| Per-profile install root | Remove `%LOCALAPPDATA%\Microsoft\Teams` | Where the per-user copy actually lives |
+| Autostart entry | Remove `Run\com.squirrel.Teams.Teams` from that user's hive | Otherwise Windows tries to start something that is gone |
+| Stale uninstall key | Remove `Uninstall\Teams` from that user's hive | Keeps Programs and Features honest |
+
+The documented per-user uninstall is `Update.exe --uninstall -s`, but that has to run as the profile owner, which System cannot do — so the files are removed instead. Roaming data in `%APPDATA%\Microsoft\Teams` is left alone; it is inert once the client is gone.
+
+Failure handling splits the two deliberately:
+
+- A **machine-wide installer that survives** the uninstall is a real failure → `[FAIL]`, exit `1`.
+- A **per-profile folder that survives** is almost always a file lock from a running classic Teams → `[WARN]`, and the next run clears it once the user has signed out. The script warns up front when it sees `Teams.exe` running.
+
+Classic Teams reached end of support on **1 October 2026** (end of availability 1 April 2027), the same date as the WebRTC optimisation, which is why both show up in the same inventory.
 
 ---
 
@@ -243,6 +267,7 @@ Script variables are read from the environment when the matching parameter is no
 | `checkOnly` | checkbox | `-CheckOnly` |
 | `force` | checkbox | `-Force` |
 | `avdOptimizations` | checkbox | `-AvdOptimizations` |
+| `removeClassicTeams` | checkbox | `-RemoveClassicTeams` |
 | `skipMeetingAddIn` | checkbox | `-SkipMeetingAddIn` |
 | `skipSignatureCheck` | checkbox | `-SkipSignatureCheck` |
 | `workingDir` | text | `-WorkingDir` |
@@ -276,6 +301,8 @@ Why the script looks the way it does — most of these are scars from a real fai
 
 **AVD behind a switch, not autodetected.** A session host needs the `IsWVDEnvironment` flag and the WebRTC redirector; a normal endpoint needs neither, and setting the flag there tells Teams to hand media to a redirector that is not present. Autodetecting AVD would make that a silent, machine-dependent side effect, so it is an explicit switch — the script only *mentions* that a device looks like a session host.
 
+**Provisioning is not installing.** `teamsbootstrapper.exe -p` stages the package for future sign-ins; it does not install it for whoever ran the script. A first production run on a session host proved the point: the bootstrapper reported success and the add-in step then died on `New Teams package not found after install`, because `Get-AppxPackage -Name MSTeams` looks at the current user and the admin running the script had no Teams. The add-in MSI is therefore located by globbing `%ProgramFiles%\WindowsApps\MSTeams_*_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi` and taking the newest version, which works whether or not any user has the package installed. The same blind spot applied to the SlimCore check, which now asks `-AllUsers` first.
+
 **No SID whitelist.** Enumerating user profiles by matching `S-1-5-21-*` looks right and silently breaks on Entra-joined devices, where user SIDs are `S-1-12-1-*`. Measured on this machine: the whitelist skipped the only real user, and the Outlook check reported "nobody has it registered" while `LoadBehavior=3` was sitting right there. The filter excludes the service SIDs (`S-1-5-18/19/20`), `.DEFAULT` and the `_Classes` hives instead.
 
 **Read-only checks ignore -WhatIf.** `New-PSDrive` supports `ShouldProcess`, so mounting `HKEY_USERS` as a drive meant that under `-WhatIf` the drive was never created and the Outlook check falsely reported nothing registered. An inspection must give the same answer in a dry run as in a real one, so the hives are addressed through `Registry::HKEY_USERS` directly, with no drive to create.
@@ -294,7 +321,7 @@ Why the script looks the way it does — most of these are scars from a real fai
 | `Bootstrapper signature is NotSigned/HashMismatch` | The download was intercepted or is a proxy error page. Check `-BootstrapperUrl` and the proxy; `-SkipSignatureCheck` only for a deliberate internal mirror |
 | `Downloaded file is only N bytes` | Same cause — a captive portal or error page instead of the installer |
 | `timed out after 900 seconds and was killed` | A hung msiexec or a slow image. Raise `-TimeoutSeconds`; check whether another installation is running |
-| `Teams Meeting Add-in installer not found` | The installed package has no add-in MSI (an unexpected build). Re-run; if it persists, install the client first and check the `WindowsApps` folder |
+| `No add-in MSI found under ...\WindowsApps` | The bootstrapper did not stage a package. Check the step 7 output and `C:\Program Files\WindowsApps` for an `MSTeams_*` folder |
 | Add-in installed but not visible in Outlook | Outlook has to restart. The script warns when Outlook is running during the install |
 | Nothing happens at all | That is the point: the device is current. Run with `-WhatIf` (without `-Quiet`) to see the comparison |
 
@@ -322,9 +349,17 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Only provisioned, no per-user install (pooled session host) | Reports `Provisioned MSTeams <version>`, compares correctly, does nothing, exit `0` |
 | Outlook add-in registration on an Entra-joined device | Found `AzureAD\<user>` with `LoadBehavior 3`; the earlier `S-1-5-21` whitelist found nobody |
 | Outlook check under `-WhatIf` | Same answer as a real run, after dropping `New-PSDrive` |
-| Classic Teams detection | Neither the machine-wide installer nor a per-profile install is present on the test device, so the positive path is **untested** |
+| Classic Teams detection | Neither variant is present on the test device, so detection's positive path is **untested** against a real install |
+| Classic removal, `-WhatIf` | With detection faked, plans the msiexec uninstall and the per-profile folder removal, skips steps 5-8, exit `0` |
+| Classic removal, applied | Against a faked profile folder in a scratch directory: folder removed, verification reports `No per-user classic Teams left`, exit `0` |
+| Classic removal on a real session host | `-Force -RemoveClassicTeams -AvdOptimizations` on an AVD host removed a real per-profile classic Teams `1.4.00.11161`. The machine-wide msiexec path is still **untested** - that host had no Machine-Wide Installer |
+| Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
+| Outlook add-in switched off | That production run found `LoadBehavior 2` for one account - the check earns its keep on the first real device it saw |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
+
+
 
 
 
