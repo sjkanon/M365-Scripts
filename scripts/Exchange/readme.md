@@ -703,9 +703,36 @@ The workbook has two sheets, both filterable tables with a frozen header row:
 | `Overzicht` | list | Lijst, E-mailadres, Type, Aantal leden, Eigenaar(s), Alias, Verborgen in adresboek, Alleen interne afzenders, Aangemaakt op |
 | `Leden` | member | Lijst, E-mailadres lijst, Type lijst, Lid, E-mailadres lid, Extern adres, Type lid |
 
+With `-Recurse` the sheets gain `Aantal personen` and `Via groep`; with `-Member` they gain `Treffers` and `Treffer op`.
+
 `Extern adres` is filled for mail contacts and mail users. Their primary SMTP address is an internal placeholder — the address that actually receives the mail is the external one, and for a report about external members that is the column that matters.
 
 The sheet headers and the recipient types are Dutch — `MailUniversalSecurityGroup` means nothing to the person reading the report, `Beveiligingsgroep (mail-enabled)` does. The script itself stays English like the rest of the repo.
+
+**Nested lists — read this before trusting the output**
+
+Exchange only ever returns **direct** members. A list containing another list reports that list as *one member* and never the people inside it. So by default:
+
+- someone who receives mail only through a nested group does not appear in the report;
+- `-Member` reports **no hits** on a list that does in fact deliver to that person.
+
+That second one is the dangerous half: it is a wrong answer that looks like a confident one. `-Recurse` expands nested groups so the report lists the people who actually receive the mail:
+
+```powershell
+# "Does anything still reach that domain?" - the form to use for that question
+.\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
+```
+
+| | Without `-Recurse` | With `-Recurse` |
+|---|---|---|
+| Nested list | one member row, nobody behind it | one member row **plus** the people inside it |
+| `Via groep` column | — | names the group a person came in through, empty for a direct member |
+| `Aantal leden` | direct members (what Exchange and the EAC show) | unchanged |
+| `Aantal personen` | — | the real recipients the list reaches |
+
+It costs one extra query per nested group. A group already expanded is not expanded again, which is also what keeps a membership cycle (A contains B, B contains A) from recursing forever; nesting deeper than 20 levels is reported and left alone. Someone reachable by several routes gets one row with the routes joined, not a row per route.
+
+The nested group itself stays in the report as its own row, so the structure remains visible.
 
 **Filtering on an address or a domain**
 
@@ -741,6 +768,7 @@ Direct membership only — someone inside a nested group is not a match. The nes
 |-----------|----------|-------------|
 | `-Group` | No | One list (name, alias or e-mail). If omitted, every list is reported |
 | `-Member` | No | Only the lists holding this address, or any address on this domain (`@be.verizon.com`) |
+| `-Recurse` | No | Expand nested groups, so the people behind a nested list are reported too |
 | `-IncludeDynamic` | No | Also report dynamic distribution groups (evaluated live, one query per group) |
 | `-IncludeM365Groups` | No | Also report Microsoft 365 groups, Teams-backed ones included |
 | `-OutputPath` | No | Path of the `.xlsx` (default: `C:\Temp\Distributielijsten_<timestamp>.xlsx`) |
@@ -759,6 +787,9 @@ Direct membership only — someone inside a nested group is not a match. The nes
 # Which lists still hold addresses on a partner domain?
 .\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com"
 
+# The same, but also finding people who sit inside a nested list
+.\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
+
 # One list, to a fixed path
 .\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
 
@@ -769,6 +800,7 @@ Direct membership only — someone inside a nested group is not a match. The nes
 **Notes**
 - Needs [ImportExcel](https://github.com/dfinke/ImportExcel) for the `.xlsx`. If it is missing the script offers to install it, and writes two CSV files (`*-overzicht.csv`, `*-leden.csv`) if you decline — a missing module never costs you the report. `Install-Modules.ps1` installs it
 - A list with no members gets a `(geen leden)` row in the `Leden` sheet rather than quietly missing from it — an empty list is exactly what a customer wants to spot
+- Membership is read per group, so a person who is on no list at all appears nowhere — the report covers group membership, not the user directory
 - A domain filter that matches nothing reports *"No distribution list has a member on @x"* and writes no file — an empty workbook reads as a failed report rather than as the answer it is
 - CSV output uses `-UseCulture`, so a Dutch Excel opens it as columns instead of one wall of comma-separated text
 - An existing workbook at `-OutputPath` is replaced, not appended to — `Export-Excel` would otherwise stack a second run on top of the first
