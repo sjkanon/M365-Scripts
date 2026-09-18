@@ -160,6 +160,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
+| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists one address is on |
 
 **Entra ID submenu (`D`)**
 
@@ -557,7 +558,8 @@ M365-Scripts/
     │   ├── Test-DistributionGroupPermissions.ps1
     │   ├── Test-DkimConfig.ps1
     │   ├── Get-ExternalForwards.ps1
-    │   └── Get-MailboxSizes.ps1
+    │   ├── Get-MailboxSizes.ps1
+    │   └── Get-DistributionGroupMembers.ps1  ← who is on which distribution list, as an Excel workbook for the customer
     ├── Graph/
     │   ├── readme.md
     │   └── logic-permissies.ps1     ← grant a Graph app role to a Logic App managed identity
@@ -747,6 +749,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-18
+| Change |
+|--------|
+| Added `Get-DistributionGroupMembers.ps1` — every distribution list with its members in one Excel workbook: an `Overzicht` sheet (one row per list) and a `Leden` sheet (one row per member), both filterable tables with a frozen header row. Sheet headers and recipient types are in Dutch, because the workbook is what the customer reads |
+| `-Member user@domain` answers "which lists is this person on?" server-side via `Get-Recipient -Filter "Members -eq '<DN>'"` instead of walking every group, and still exports the matched lists in full so the customer sees who else is on them |
+| `-IncludeDynamic` and `-IncludeM365Groups` widen the report beyond plain distribution groups; dynamic groups are evaluated live, since they store no membership to query |
+| Falls back to two CSV files when `ImportExcel` is missing (and offers to install it first), so a missing module never costs you the report. `ImportExcel` added to `Install-Modules.ps1` — `vias_archiver.ps1` already needed it |
+| Exchange submenu: `K` Get-DLMembers |
 
 ### 2026-09-17 (3)
 | Change |

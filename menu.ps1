@@ -296,6 +296,18 @@ $ExchangeSubmenu = @(
         # The script previews first and then asks itself whether to go ahead.
         & "$ROOT\scripts\Exchange\Move-SharedCalendar.ps1" @p
     }}
+    @{ Key='K'; Label='Get-DLMembers            — export distribution list members to Excel (filter by member address)'; Action={
+        $grp = Read-Host "  List email or name (leave blank for all lists)"
+        $mbr = Read-Host "  Only lists containing this address (optional)"
+        $dyn = Read-Host "  Include dynamic distribution groups? [y/N]"
+        $m365 = Read-Host "  Include Microsoft 365 groups? [y/N]"
+        $p = @{}
+        if ($grp)  { $p['Group']  = $grp }
+        if ($mbr)  { $p['Member'] = $mbr }
+        if ($dyn  -match '^[Yy]') { $p['IncludeDynamic']    = $true }
+        if ($m365 -match '^[Yy]') { $p['IncludeM365Groups'] = $true }
+        & "$ROOT\scripts\Exchange\Get-DistributionGroupMembers.ps1" @p
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"
