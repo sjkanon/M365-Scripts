@@ -299,11 +299,13 @@ $ExchangeSubmenu = @(
     @{ Key='K'; Label='Get-DLMembers            — export distribution list members to Excel (filter by address or domain)'; Action={
         $grp = Read-Host "  List email or name (leave blank for all lists)"
         $mbr = Read-Host "  Only lists containing this address or domain, e.g. @be.verizon.com (optional)"
+        $rec = Read-Host "  Expand nested lists (slower, but finds people behind a nested group)? [y/N]"
         $dyn = Read-Host "  Include dynamic distribution groups? [y/N]"
         $m365 = Read-Host "  Include Microsoft 365 groups? [y/N]"
         $p = @{}
         if ($grp)  { $p['Group']  = $grp }
         if ($mbr)  { $p['Member'] = $mbr }
+        if ($rec  -match '^[Yy]') { $p['Recurse']           = $true }
         if ($dyn  -match '^[Yy]') { $p['IncludeDynamic']    = $true }
         if ($m365 -match '^[Yy]') { $p['IncludeM365Groups'] = $true }
         & "$ROOT\scripts\Exchange\Get-DistributionGroupMembers.ps1" @p

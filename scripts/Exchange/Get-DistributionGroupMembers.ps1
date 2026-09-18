@@ -13,11 +13,13 @@
     The workbook has two sheets, both filterable tables with a frozen header row:
 
       Overzicht  one row per list: name, address, type, member count, owners
-      Leden      one row per member: which list, who, which address, what kind of member
+      Leden      one row per member: which list, who, which address, what kind of
+                 member, and the external address when the member is a contact
 
     With -Member both sheets gain a column for the filter: 'Treffers' (how many
     members of this list matched) and 'Treffer op' (the address this member matched
-    on, empty when it did not).
+    on, empty when it did not). With -Recurse they gain 'Aantal personen' and
+    'Via groep'.
 
     The sheet headers are Dutch because the workbook is what goes to the customer;
     the script itself stays English like the rest of the repo.
@@ -45,8 +47,30 @@
     else is on them; a 'Treffer op' column names the address each hit matched on -
     which is the only way to see why someone matched on an alias.
 
-    Direct membership only: a person inside a nested group is not a match, but the
-    nested group itself shows up as a member row.
+    Direct membership only, unless -Recurse is used: without it a person inside a
+    nested group is not a match, and the nested group itself shows up as one member
+    row. See -Recurse - for a domain filter this is usually the difference between a
+    complete answer and a confident wrong one.
+
+.PARAMETER Recurse
+    Expand nested groups, so the report lists the people who actually receive the mail
+    instead of the group standing in for them.
+
+    Exchange only ever returns DIRECT members. A list containing another list therefore
+    reports that list as one member and never the people inside it - so by default
+    someone who only receives mail through a nested group is invisible, and -Member
+    reports "no hits" on a list that does deliver to them. For a domain filter that is
+    usually the difference between a complete answer and a confident wrong one.
+
+    Costs one extra query per nested group. A group already expanded is not expanded
+    again, which is also what keeps a membership cycle (A contains B, B contains A)
+    from recursing forever; nesting deeper than 20 levels is reported and left alone.
+
+    The nested group itself stays in the report as its own row, so the structure is
+    still visible. 'Via groep' names the group a person came in through, empty for a
+    direct member; someone reachable by several routes gets one row with the routes
+    joined. 'Aantal leden' keeps counting direct members - that is the number Exchange
+    and the EAC show - and 'Aantal personen' counts the real recipients reached.
 
 .PARAMETER IncludeDynamic
     Also report dynamic distribution groups. Their membership is evaluated live, which
@@ -78,6 +102,11 @@
     the 'Treffer op' column.
 
 .EXAMPLE
+    .\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
+    The same, but also finding the people who sit inside a nested group. This is the
+    form to use when the question is "does anything still reach that domain?".
+
+.EXAMPLE
     .\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
 
 .EXAMPLE
@@ -91,6 +120,7 @@
 param(
     [string] $Group,
     [string] $Member,
+    [switch] $Recurse,
     [switch] $IncludeDynamic,
     [switch] $IncludeM365Groups,
     [string] $OutputPath,
@@ -154,6 +184,59 @@ function Get-DynamicMember {
         -OrganizationalUnit $DynamicGroup.RecipientContainer -ErrorAction Stop
 }
 
+# Which recipient types are themselves a group, and which cmdlet reads their members.
+$groupKinds = @{
+    'MailUniversalDistributionGroup' = 'Static'
+    'MailUniversalSecurityGroup'     = 'Static'
+    'MailNonUniversalGroup'          = 'Static'
+    'RoomList'                       = 'Static'
+    'DynamicDistributionGroup'       = 'Dynamic'
+    'GroupMailbox'                   = 'Unified'
+}
+
+function Get-DirectMember {
+    param($List, [string] $Kind)
+    switch ($Kind) {
+        'Dynamic' { @(Get-DynamicMember -DynamicGroup $List) }
+        'Unified' { @(Get-UnifiedGroupLinks -Identity $List.Identity -LinkType Members -ResultSize Unlimited -ErrorAction Stop) }
+        default   { @(Get-DistributionGroupMember -Identity $List.Identity -ResultSize Unlimited -ErrorAction Stop) }
+    }
+}
+
+# Walk nested groups. Exchange only ever hands back DIRECT members, so without this a
+# list containing another list reports that list as one member and never the people
+# inside it - and a filter then reports "no hits" on a list that does deliver mail to
+# the person you asked about.
+$script:MaxNestDepth = 20
+
+function Expand-Member {
+    param($Direct, [hashtable] $Seen, [string] $Via = '', [int] $Depth = 0)
+    foreach ($m in $Direct) {
+        [PSCustomObject]@{ Recipient = $m; Via = $Via }
+
+        $kind = $groupKinds[[string]$m.RecipientTypeDetails]
+        if (-not $kind) { continue }
+
+        # A group already expanded is skipped, which is also what stops a membership
+        # cycle (A contains B, B contains A) from recursing forever.
+        $dn = [string]$m.DistinguishedName
+        if (-not $dn -or $Seen.ContainsKey($dn)) { continue }
+        $Seen[$dn] = $true
+
+        if ($Depth -ge $script:MaxNestDepth) {
+            Write-Host "  [WARN] Nesting deeper than $script:MaxNestDepth levels at '$($m.DisplayName)' - not expanded." -ForegroundColor Yellow
+            continue
+        }
+
+        try {
+            Expand-Member -Direct (Get-DirectMember -List $m -Kind $kind) -Seen $Seen `
+                          -Via $m.DisplayName -Depth ($Depth + 1)
+        } catch {
+            Write-Host "  [WARN] Nested group '$($m.DisplayName)': $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
 # Every address a member can be reached on. An external party is usually a mail
 # contact, and then the address that matters is ExternalEmailAddress - the primary
 # SMTP is an internal placeholder. Missing that is missing exactly the members a
@@ -191,7 +274,7 @@ if ($Member) {
 # A member row, built the same way for a real member and for the placeholder an empty
 # list gets - so every row in the sheet keeps the same columns.
 function New-MemberRow {
-    param($List, $Name, $Address = '', $External = '', $Type = '', $Hit = '')
+    param($List, $Name, $Address = '', $External = '', $Type = '', $Via = '', $Hit = '')
     $row = [ordered]@{
         'Lijst'             = $List.DisplayName
         'E-mailadres lijst' = [string]$List.PrimarySmtpAddress
@@ -201,6 +284,7 @@ function New-MemberRow {
         'Extern adres'      = $External
         'Type lid'          = $Type
     }
+    if ($Recurse)               { $row['Via groep']  = $Via }
     if ($filterMode -ne 'None') { $row['Treffer op'] = $Hit }
     [PSCustomObject]$row
 }
@@ -323,27 +407,43 @@ foreach ($entry in $lists) {
     Write-Progress -Activity "Distribution lists" -Status $list.DisplayName `
         -PercentComplete ([int](100 * $index / $lists.Count))
 
-    $groupMembers = @()
-    $owners       = ''
+    $directMembers = @()
+    $owners        = ''
 
     try {
-        switch ($entry.Kind) {
-            'Static' {
-                $groupMembers = @(Get-DistributionGroupMember -Identity $list.Identity -ResultSize Unlimited -ErrorAction Stop)
-                $owners = ($list.ManagedBy | ForEach-Object { ($_ -split '/')[-1] }) -join '; '
-            }
-            'Dynamic' {
-                $groupMembers = @(Get-DynamicMember -DynamicGroup $list)
-                $owners = ($list.ManagedBy | ForEach-Object { ($_ -split '/')[-1] }) -join '; '
-            }
-            'Unified' {
-                $groupMembers = @(Get-UnifiedGroupLinks -Identity $list.Identity -LinkType Members -ResultSize Unlimited -ErrorAction Stop)
-                $owners = (@(Get-UnifiedGroupLinks -Identity $list.Identity -LinkType Owners -ResultSize Unlimited -ErrorAction SilentlyContinue) |
-                           ForEach-Object { $_.DisplayName }) -join '; '
-            }
+        $directMembers = Get-DirectMember -List $list -Kind $entry.Kind
+        if ($entry.Kind -eq 'Unified') {
+            $owners = (@(Get-UnifiedGroupLinks -Identity $list.Identity -LinkType Owners -ResultSize Unlimited -ErrorAction SilentlyContinue) |
+                       ForEach-Object { $_.DisplayName }) -join '; '
+        } else {
+            $owners = ($list.ManagedBy | ForEach-Object { ($_ -split '/')[-1] }) -join '; '
         }
     } catch {
         Write-Host "  [WARN] $($list.DisplayName): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # Direct members become { Recipient, Via } either way, so one code path serves both
+    # modes. Without -Recurse a nested group stays a single row, as Exchange reports it.
+    if ($Recurse) {
+        $seen = @{ ([string]$list.DistinguishedName) = $true }
+        $walked = @(Expand-Member -Direct $directMembers -Seen $seen)
+
+        # The same person can hang under several nested groups. One row each, with the
+        # routes joined - a duplicate row per route reads as a data error to a customer.
+        $byDn = [ordered]@{}
+        foreach ($w in $walked) {
+            $dn = [string]$w.Recipient.DistinguishedName
+            if (-not $dn) { $dn = "$($w.Recipient.DisplayName)|$($w.Recipient.PrimarySmtpAddress)" }
+            if (-not $byDn.Contains($dn)) { $byDn[$dn] = $w; continue }
+
+            # Direct membership wins over any route: it is the plainer fact.
+            $kept = $byDn[$dn]
+            if (-not $kept.Via -or -not $w.Via) { continue }
+            if (($kept.Via -split '; ') -notcontains $w.Via) { $kept.Via = "$($kept.Via); $($w.Via)" }
+        }
+        $groupMembers = @($byDn.Values)
+    } else {
+        $groupMembers = @($directMembers | ForEach-Object { [PSCustomObject]@{ Recipient = $_; Via = '' } })
     }
 
     # Which members the filter hits, keyed by DN, holding the address that matched. A
@@ -352,8 +452,8 @@ foreach ($entry in $lists) {
     $matchHits = @{}
     if ($filterMode -ne 'None') {
         foreach ($gm in $groupMembers) {
-            $hitAddress = Get-MemberMatch $gm
-            if ($hitAddress) { $matchHits[[string]$gm.DistinguishedName] = $hitAddress }
+            $hitAddress = Get-MemberMatch $gm.Recipient
+            if ($hitAddress) { $matchHits[[string]$gm.Recipient.DistinguishedName] = $hitAddress }
         }
     }
     if ($filterMode -eq 'Domain' -and $matchHits.Count -eq 0) { continue }
@@ -366,7 +466,13 @@ foreach ($entry in $lists) {
         'Lijst'        = $list.DisplayName
         'E-mailadres'  = [string]$list.PrimarySmtpAddress
         'Type'         = Get-FriendlyType $list.RecipientTypeDetails
-        'Aantal leden' = $groupMembers.Count
+        'Aantal leden' = $directMembers.Count
+    }
+    if ($Recurse) {
+        # Direct members are what Exchange and the EAC show, so that count stays put.
+        # What people actually want to know when nesting is in play is how many real
+        # recipients the list reaches, which is a different number.
+        $listRow['Aantal personen'] = @($groupMembers | Where-Object { -not $groupKinds[[string]$_.Recipient.RecipientTypeDetails] }).Count
     }
     if ($filterMode -ne 'None') { $listRow['Treffers'] = $matchHits.Count }
     $listRow['Eigenaar(s)']              = $owners
@@ -383,7 +489,9 @@ foreach ($entry in $lists) {
         continue
     }
 
-    foreach ($m in ($groupMembers | Sort-Object DisplayName)) {
+    foreach ($w in ($groupMembers | Sort-Object { $_.Recipient.DisplayName })) {
+        $m = $w.Recipient
+
         # A mail contact's real address lives in ExternalEmailAddress; its primary SMTP
         # is an internal placeholder, so both belong in the report.
         $external = [string]$m.ExternalEmailAddress -replace '^(?i)smtp:', ''
@@ -394,6 +502,7 @@ foreach ($entry in $lists) {
                                     -Address  ([string]$m.PrimarySmtpAddress) `
                                     -External $external `
                                     -Type     (Get-FriendlyType $m.RecipientTypeDetails) `
+                                    -Via      $w.Via `
                                     -Hit      ([string]$matchHits[[string]$m.DistinguishedName])))
     }
 }
@@ -414,6 +523,7 @@ if ($overviewSorted.Count -eq 0) {
 }
 
 $columns = @('Lijst', 'E-mailadres', 'Type', 'Aantal leden')
+if ($Recurse)               { $columns += 'Aantal personen' }
 if ($filterMode -ne 'None') { $columns += 'Treffers' }
 $columns += 'Eigenaar(s)'
 $overviewSorted | Format-Table $columns -AutoSize

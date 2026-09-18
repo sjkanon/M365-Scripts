@@ -160,7 +160,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
-| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address or a whole domain |
+| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address or a whole domain (`-Recurse` to expand nested lists) |
 
 **Entra ID submenu (`D`)**
 
@@ -198,6 +198,10 @@ Scripts for calendar and mailbox management.
 
 - Calendar migration between users
 - Set calendar folder permissions (NL/FR/EN locale support)
+- **Get-DistributionGroupMembers.ps1** — who is on which distribution list, as one Excel workbook meant to go straight to the customer
+  - `Overzicht` sheet (one row per list) and `Leden` sheet (one row per member), both filterable tables with a frozen header row, headers in Dutch
+  - `-Member jan@contoso.com` answers "which lists is this person on?"; `-Member @be.verizon.com` answers it for a whole domain, matching aliases and `ExternalEmailAddress` so external contacts are actually found
+  - `-Recurse` expands nested lists — without it someone who only receives mail through a nested group is invisible, and a filter reports "no hits" on a list that does deliver to them
 - **Get-MessageTraceReport.ps1** — trace who received what, at what exact time, and where it was forwarded to
 - **Remove-PhishingMessage.ps1** — delete a phishing message from one, several, or all mailboxes; dry-run by default
   - Two engines: **Purview** Content Search + purge (tenant-wide, the only one that can HardDelete) and **Graph** (per-mailbox, no search-index lag, per-message report)
@@ -749,6 +753,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-18 (3)
+| Change |
+|--------|
+| `Get-DistributionGroupMembers.ps1` — **`-Recurse`**, after checking whether the report really covered everyone: it did not. Exchange only ever returns *direct* members, so a list containing another list reported that list as one member and never the people inside it. Someone who receives mail only through a nested group was invisible, and `-Member` reported "no hits" on a list that does deliver to them — a wrong answer that looks like a confident one |
+| `Via groep` names the group a person came in through (empty for a direct member), and someone reachable by several routes gets one row with the routes joined rather than a row per route |
+| `Aantal leden` keeps counting direct members, because that is the number Exchange and the EAC show; the new `Aantal personen` counts the real recipients reached |
+| A group already expanded is not expanded again, which is also what stops a membership cycle (A contains B, B contains A) from recursing forever. Verified against a deliberately cyclic pair of test lists; nesting past 20 levels is reported and left alone |
+| Documented what the report still does *not* cover: it reads group membership, so a user on no list at all appears nowhere |
 
 ### 2026-09-18 (2)
 | Change |
