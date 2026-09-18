@@ -160,7 +160,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
-| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address or a whole domain (`-Recurse` to expand nested lists) |
+| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
 
 **Entra ID submenu (`D`)**
 
@@ -200,7 +200,7 @@ Scripts for calendar and mailbox management.
 - Set calendar folder permissions (NL/FR/EN locale support)
 - **Get-DistributionGroupMembers.ps1** — who is on which distribution list, as one Excel workbook meant to go straight to the customer
   - `Overzicht` sheet (one row per list) and `Leden` sheet (one row per member), both filterable tables with a frozen header row, headers in Dutch
-  - `-Member jan@contoso.com` answers "which lists is this person on?"; `-Member @be.verizon.com` answers it for a whole domain, matching aliases and `ExternalEmailAddress` so external contacts are actually found
+  - `-Member jan@contoso.com` answers "which lists is this person on?"; `-Member @be.verizon.com` answers it for one domain and `-Member *.verizon.com` for a domain and every subdomain, matching aliases and `ExternalEmailAddress` so external contacts are actually found
   - `-Recurse` expands nested lists — without it someone who only receives mail through a nested group is invisible, and a filter reports "no hits" on a list that does deliver to them
 - **Get-MessageTraceReport.ps1** — trace who received what, at what exact time, and where it was forwarded to
 - **Remove-PhishingMessage.ps1** — delete a phishing message from one, several, or all mailboxes; dry-run by default
@@ -753,6 +753,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-18 (4)
+| Change |
+|--------|
+| `Get-DistributionGroupMembers.ps1` — `-Member "*.verizon.com"` now matches a domain **and every subdomain of it** (`.verizon.com` and `*@*.verizon.com` are the same thing). Without the leading `*.` the filter stays on that one domain, so `@be.verizon.com` still deliberately does not reach `@us.verizon.com` |
+| The run says which of the two it is doing — *"scanning N list(s) for members on verizon.com and its subdomains"* — because a filter whose scope you have to infer is a filter you cannot trust in a customer report |
+| Matching is on the full domain label, verified against `@notverizon.com` and the suffix trick `@verizon.com.evil.test`; neither matches a `*.verizon.com` run. A wildcard anywhere but the front is escaped rather than quietly widening the filter |
 
 ### 2026-09-18 (3)
 | Change |
