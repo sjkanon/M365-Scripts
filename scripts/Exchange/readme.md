@@ -21,7 +21,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
 | [`Get-ExternalForwards.ps1`](#get-externalforwardsps1) | Audit mailboxes with external forwarding |
 | [`Get-MailboxSizes.ps1`](#get-mailboxsizesps1) | Report mailbox sizes and item counts |
-| [`Get-DistributionGroupMembers.ps1`](#get-distributiongroupmembersps1) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists one address is on (`-Member jan@contoso.com`) |
+| [`Get-DistributionGroupMembers.ps1`](#get-distributiongroupmembersps1) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists holding one address (`-Member jan@contoso.com`) or a whole domain (`-Member @be.verizon.com`) |
 | [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Trace who received what, at what exact time, and where it was forwarded to |
 | [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
 
@@ -701,13 +701,37 @@ The workbook has two sheets, both filterable tables with a frozen header row:
 | Sheet | One row per | Columns |
 |-------|-------------|---------|
 | `Overzicht` | list | Lijst, E-mailadres, Type, Aantal leden, Eigenaar(s), Alias, Verborgen in adresboek, Alleen interne afzenders, Aangemaakt op |
-| `Leden` | member | Lijst, E-mailadres lijst, Type lijst, Lid, E-mailadres lid, Type lid |
+| `Leden` | member | Lijst, E-mailadres lijst, Type lijst, Lid, E-mailadres lid, Extern adres, Type lid |
+
+`Extern adres` is filled for mail contacts and mail users. Their primary SMTP address is an internal placeholder — the address that actually receives the mail is the external one, and for a report about external members that is the column that matters.
 
 The sheet headers and the recipient types are Dutch — `MailUniversalSecurityGroup` means nothing to the person reading the report, `Beveiligingsgroep (mail-enabled)` does. The script itself stays English like the rest of the repo.
 
-**Filtering on one address**
+**Filtering on an address or a domain**
 
-`-Member jan@contoso.com` answers the question you actually get asked: *which lists is Jan on?* It resolves the address to its DN and lets Exchange do the matching (`Get-Recipient -Filter "Members -eq '<DN>'"`), so it does not walk every group in the tenant. The matched lists are still exported **in full**, so the customer sees who else is on them.
+`-Member` takes either one address or a whole domain:
+
+```powershell
+-Member "jan@contoso.com"     # which lists is Jan on?
+-Member "@be.verizon.com"     # which lists have members from this domain?
+```
+
+A domain may also be written `be.verizon.com` or `*@be.verizon.com` — all three mean the same thing. The match is on the full domain, so `@be.verizon.com` does not match `@notbe.verizon.com`.
+
+The two are not equally cheap. **An address** is resolved to its DN and matched by Exchange itself (`Get-Recipient -Filter "Members -eq '<DN>'"`), so it does not walk every group in the tenant. **A domain** cannot be: there is no server-side filter for *"has a member whose address ends in @x"*, so every list is read and then filtered. On a large tenant that is one `Get-DistributionGroupMember` call per list — slower, and worth knowing before you run it against thousands of groups.
+
+Matching covers the primary address, **every alias**, and — for mail contacts and mail users — `ExternalEmailAddress`. That last one is the point: a Verizon contact in a distribution list is typically a mail contact whose primary SMTP is something like `marc.dubois@contoso.onmicrosoft.com`, with `@be.verizon.com` only in its external address. Matching on the primary address alone would find nothing.
+
+With a filter active both sheets gain a column:
+
+| Column | Sheet | Meaning |
+|--------|-------|---------|
+| `Treffers` | `Overzicht` | how many members of this list matched |
+| `Treffer op` | `Leden` | the address this member matched on, empty when it did not |
+
+`Treffer op` holds the **address**, not a Ja/Nee — someone can match on an alias that appears nowhere else in the report, and `Ja` next to `sara@contoso.com` only raises the question why. `sara.willems@be.verizon.com` answers it.
+
+Matched lists are exported **in full**, so the customer sees who else is on them; sort or filter on `Treffer op` to get just the hits.
 
 Direct membership only — someone inside a nested group is not a match. The nested group itself does show up as a member row, with `Distributielijst` as its member type.
 
@@ -716,7 +740,7 @@ Direct membership only — someone inside a nested group is not a match. The nes
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Group` | No | One list (name, alias or e-mail). If omitted, every list is reported |
-| `-Member` | No | Only the lists this address is a direct member of |
+| `-Member` | No | Only the lists holding this address, or any address on this domain (`@be.verizon.com`) |
 | `-IncludeDynamic` | No | Also report dynamic distribution groups (evaluated live, one query per group) |
 | `-IncludeM365Groups` | No | Also report Microsoft 365 groups, Teams-backed ones included |
 | `-OutputPath` | No | Path of the `.xlsx` (default: `C:\Temp\Distributielijsten_<timestamp>.xlsx`) |
@@ -732,6 +756,9 @@ Direct membership only — someone inside a nested group is not a match. The nes
 # Which lists is Jan on? (and who else is on them)
 .\Get-DistributionGroupMembers.ps1 -Member "jan@contoso.com"
 
+# Which lists still hold addresses on a partner domain?
+.\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com"
+
 # One list, to a fixed path
 .\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
 
@@ -742,6 +769,7 @@ Direct membership only — someone inside a nested group is not a match. The nes
 **Notes**
 - Needs [ImportExcel](https://github.com/dfinke/ImportExcel) for the `.xlsx`. If it is missing the script offers to install it, and writes two CSV files (`*-overzicht.csv`, `*-leden.csv`) if you decline — a missing module never costs you the report. `Install-Modules.ps1` installs it
 - A list with no members gets a `(geen leden)` row in the `Leden` sheet rather than quietly missing from it — an empty list is exactly what a customer wants to spot
+- A domain filter that matches nothing reports *"No distribution list has a member on @x"* and writes no file — an empty workbook reads as a failed report rather than as the answer it is
 - CSV output uses `-UseCulture`, so a Dutch Excel opens it as columns instead of one wall of comma-separated text
 - An existing workbook at `-OutputPath` is replaced, not appended to — `Export-Excel` would otherwise stack a second run on top of the first
 

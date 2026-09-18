@@ -296,9 +296,9 @@ $ExchangeSubmenu = @(
         # The script previews first and then asks itself whether to go ahead.
         & "$ROOT\scripts\Exchange\Move-SharedCalendar.ps1" @p
     }}
-    @{ Key='K'; Label='Get-DLMembers            — export distribution list members to Excel (filter by member address)'; Action={
+    @{ Key='K'; Label='Get-DLMembers            — export distribution list members to Excel (filter by address or domain)'; Action={
         $grp = Read-Host "  List email or name (leave blank for all lists)"
-        $mbr = Read-Host "  Only lists containing this address (optional)"
+        $mbr = Read-Host "  Only lists containing this address or domain, e.g. @be.verizon.com (optional)"
         $dyn = Read-Host "  Include dynamic distribution groups? [y/N]"
         $m365 = Read-Host "  Include Microsoft 365 groups? [y/N]"
         $p = @{}
