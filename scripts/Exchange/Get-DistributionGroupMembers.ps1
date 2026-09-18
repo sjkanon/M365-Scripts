@@ -33,9 +33,16 @@
 .PARAMETER Member
     Narrow the report to the lists that contain a given member. Takes either:
 
-      one address   jan@contoso.com      - which lists is this person on?
-      a domain      @be.verizon.com      - which lists have members from this domain?
-                    (also "be.verizon.com" or "*@be.verizon.com")
+      one address     jan@contoso.com    which lists is this person on?
+      one domain      @be.verizon.com    members on exactly that domain
+                      (also "be.verizon.com", "*@be.verizon.com")
+      a domain tree   *.verizon.com      verizon.com AND every subdomain of it -
+                      (also ".verizon.com",   be.verizon.com, us.verizon.com, ...
+                       "*@*.verizon.com")
+
+    Without the leading "*." the match is on that one domain, so @be.verizon.com
+    deliberately does not match @notbe.verizon.com or @us.verizon.com. With it, the
+    apex and every subdomain are in scope. The run says which of the two it is doing.
 
     An address is resolved server-side and stays fast in a large tenant. A domain
     cannot be: Exchange has no filter for "member whose address ends in @x", so every
@@ -100,6 +107,10 @@
     .\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com"
     Every list with a member on that domain, with the matching address of each hit in
     the 'Treffer op' column.
+
+.EXAMPLE
+    .\Get-DistributionGroupMembers.ps1 -Member "*.verizon.com" -Recurse
+    Everything Verizon: verizon.com and every subdomain, nested lists expanded.
 
 .EXAMPLE
     .\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
@@ -256,18 +267,36 @@ function Get-AllAddress {
 }
 
 # ── Filter mode ───────────────────────────────────────────────────────────────
-# -Member takes either one address or a whole domain. A value without a local part
-# ("@be.verizon.com", "*@be.verizon.com", "be.verizon.com") is a domain.
+# -Member takes one address, one domain, or a domain and everything under it:
+#
+#   jan@contoso.com                            one address
+#   @be.verizon.com  be.verizon.com  *@be...   that domain exactly
+#   *.verizon.com    .verizon.com   *@*.ver…   verizon.com AND every subdomain
+#
+# Anything carrying a wildcard is a domain - an address never does.
 $filterMode   = 'None'
-$filterDomain = $null
+$filterDomain = $null      # the bare domain, no @ and no leading dot
+$filterSubs   = $false     # also match subdomains of it
+$filterLabel  = $null      # how the filter is written back to the user
 
 if ($Member) {
-    $trimmed = $Member.Trim() -replace '^\*', ''      # a leading wildcard is implied
-    if ($trimmed.StartsWith('@') -or $trimmed -notlike '*@*') {
-        $filterMode   = 'Domain'
-        $filterDomain = '@' + $trimmed.TrimStart('@')
-    } else {
+    $raw = $Member.Trim()
+
+    if ($raw -match '^[^@*]+@[^@*]+$') {
         $filterMode = 'Address'
+    } else {
+        $filterMode = 'Domain'
+
+        # Take what sits after the last @, so "*@*.verizon.com" reduces to "*.verizon.com".
+        $dom = if ($raw -match '@') { ($raw -split '@')[-1] } else { $raw }
+        $dom = $dom.TrimStart('*')
+        $filterSubs = $dom.StartsWith('.')
+        $dom = $dom.TrimStart('.')
+
+        # A wildcard anywhere else is not a thing this supports, and passing it into
+        # -like would quietly match something nobody asked for.
+        $filterDomain = [System.Management.Automation.WildcardPattern]::Escape($dom)
+        $filterLabel  = if ($filterSubs) { "$dom and its subdomains" } else { "@$dom" }
     }
 }
 
@@ -296,7 +325,12 @@ function Get-MemberMatch {
     param($Recipient)
     switch ($filterMode) {
         'Domain' {
-            foreach ($a in Get-AllAddress $Recipient) { if ($a -like "*$filterDomain") { return $a } }
+            foreach ($a in Get-AllAddress $Recipient) {
+                # "*@x" is the domain itself; "*.x" is anything under it. Matching on
+                # the dot is what keeps @notbe.verizon.com out of a @be.verizon.com run.
+                if ($a -like "*@$filterDomain")                 { return $a }
+                if ($filterSubs -and $a -like "*.$filterDomain") { return $a }
+            }
         }
         'Address' {
             foreach ($a in Get-AllAddress $Recipient) { if ($a -eq $Member) { return $a } }
@@ -390,7 +424,7 @@ if ($lists.Count -eq 0) {
 }
 
 if ($filterMode -eq 'Domain') {
-    Write-Host "  Scanning $($lists.Count) list(s) for members on $filterDomain..." -ForegroundColor DarkGray
+    Write-Host "  Scanning $($lists.Count) list(s) for members on $filterLabel..." -ForegroundColor DarkGray
 } else {
     Write-Host "  Reading members of $($lists.Count) list(s)..." -ForegroundColor DarkGray
 }
@@ -516,7 +550,7 @@ if ($overviewSorted.Count -eq 0) {
     # Only a domain filter can get this far and end up empty: the lists existed, none
     # of them had a member on that domain. Writing an empty workbook would read as
     # "the report failed" rather than as the answer it is.
-    Write-Host "  No distribution list has a member on $filterDomain." -ForegroundColor Yellow
+    Write-Host "  No distribution list has a member on $filterLabel." -ForegroundColor Yellow
     Write-Host ""
     if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
     return
@@ -531,7 +565,7 @@ $overviewSorted | Format-Table $columns -AutoSize
 # ── Report ────────────────────────────────────────────────────────────────────
 $ts   = Get-Date -Format 'yyyyMMdd_HHmmss'
 $stem = switch ($filterMode) {
-    'Domain'  { "Distributielijsten_$($filterDomain.TrimStart('@') -replace '[^\w.-]', '_')" }
+    'Domain'  { "Distributielijsten_$(if ($filterSubs) { 'sub_' })$($filterDomain -replace '[^\w.-]', '_')" }
     'Address' { "Distributielijsten_$($Member -replace '[^\w.-]', '_')" }
     default   { 'Distributielijsten' }
 }
@@ -594,7 +628,7 @@ Write-Host ""
 switch ($filterMode) {
     'Domain' {
         Write-Host ("  {0} list(s) have a member on {1} - {2} matching member(s), {3} member row(s) exported." -f
-                    $overviewSorted.Count, $filterDomain, $hitRows, $memberRows) -ForegroundColor Cyan
+                    $overviewSorted.Count, $filterLabel, $hitRows, $memberRows) -ForegroundColor Cyan
     }
     'Address' {
         Write-Host ("  {0} is a member of {1} list(s) - {2} member row(s) exported." -f

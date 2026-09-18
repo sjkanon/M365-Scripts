@@ -736,14 +736,22 @@ The nested group itself stays in the report as its own row, so the structure rem
 
 **Filtering on an address or a domain**
 
-`-Member` takes either one address or a whole domain:
+`-Member` takes one address, one domain, or a domain and everything under it:
 
 ```powershell
 -Member "jan@contoso.com"     # which lists is Jan on?
--Member "@be.verizon.com"     # which lists have members from this domain?
+-Member "@be.verizon.com"     # members on exactly that domain
+-Member "*.verizon.com"       # verizon.com AND every subdomain of it
 ```
 
-A domain may also be written `be.verizon.com` or `*@be.verizon.com` — all three mean the same thing. The match is on the full domain, so `@be.verizon.com` does not match `@notbe.verizon.com`.
+| Written as | Matches | Does not match |
+|---|---|---|
+| `@be.verizon.com`, `be.verizon.com`, `*@be.verizon.com` | `jan@be.verizon.com` | `jan@verizon.com`, `jan@us.verizon.com`, `jan@notbe.verizon.com` |
+| `*.verizon.com`, `.verizon.com`, `*@*.verizon.com` | `jan@verizon.com`, `jan@be.verizon.com`, `jan@us.verizon.com` | `jan@notverizon.com`, `jan@verizon.com.evil.test` |
+
+Without the leading `*.` the match is on that **one** domain — `@be.verizon.com` deliberately does not reach a sibling like `@us.verizon.com`. With it, the apex and every subdomain are in scope. The run prints which of the two it is doing (`...for members on verizon.com and its subdomains`), so the scope is never left to guesswork.
+
+The match is on the full domain label either way, which is what keeps `@notverizon.com` and the suffix trick `@verizon.com.evil.test` out of a `*.verizon.com` run. A wildcard anywhere other than the front is not supported and is treated as a literal character rather than quietly widening the filter.
 
 The two are not equally cheap. **An address** is resolved to its DN and matched by Exchange itself (`Get-Recipient -Filter "Members -eq '<DN>'"`), so it does not walk every group in the tenant. **A domain** cannot be: there is no server-side filter for *"has a member whose address ends in @x"*, so every list is read and then filtered. On a large tenant that is one `Get-DistributionGroupMember` call per list — slower, and worth knowing before you run it against thousands of groups.
 
@@ -767,7 +775,7 @@ Direct membership only — someone inside a nested group is not a match. The nes
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-Group` | No | One list (name, alias or e-mail). If omitted, every list is reported |
-| `-Member` | No | Only the lists holding this address, or any address on this domain (`@be.verizon.com`) |
+| `-Member` | No | Only the lists holding this address (`jan@contoso.com`), this domain (`@be.verizon.com`), or this domain and its subdomains (`*.verizon.com`) |
 | `-Recurse` | No | Expand nested groups, so the people behind a nested list are reported too |
 | `-IncludeDynamic` | No | Also report dynamic distribution groups (evaluated live, one query per group) |
 | `-IncludeM365Groups` | No | Also report Microsoft 365 groups, Teams-backed ones included |
@@ -789,6 +797,9 @@ Direct membership only — someone inside a nested group is not a match. The nes
 
 # The same, but also finding people who sit inside a nested list
 .\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
+
+# Everything Verizon: the apex and every subdomain, nested lists expanded
+.\Get-DistributionGroupMembers.ps1 -Member "*.verizon.com" -Recurse
 
 # One list, to a fixed path
 .\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
