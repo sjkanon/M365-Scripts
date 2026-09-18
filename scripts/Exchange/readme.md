@@ -21,6 +21,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
 | [`Get-ExternalForwards.ps1`](#get-externalforwardsps1) | Audit mailboxes with external forwarding |
 | [`Get-MailboxSizes.ps1`](#get-mailboxsizesps1) | Report mailbox sizes and item counts |
+| [`Get-DistributionGroupMembers.ps1`](#get-distributiongroupmembersps1) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists one address is on (`-Member jan@contoso.com`) |
 | [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Trace who received what, at what exact time, and where it was forwarded to |
 | [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
 
@@ -688,6 +689,61 @@ Reports mailbox sizes (MB/GB), item counts, and quota status. Sorted by size des
 # Single mailbox
 .\Get-MailboxSizes.ps1 -Mailbox "user@contoso.com"
 ```
+
+---
+
+### Get-DistributionGroupMembers.ps1
+
+Exports every distribution list with its members to one Excel workbook, meant to be sent to the customer as-is.
+
+The workbook has two sheets, both filterable tables with a frozen header row:
+
+| Sheet | One row per | Columns |
+|-------|-------------|---------|
+| `Overzicht` | list | Lijst, E-mailadres, Type, Aantal leden, Eigenaar(s), Alias, Verborgen in adresboek, Alleen interne afzenders, Aangemaakt op |
+| `Leden` | member | Lijst, E-mailadres lijst, Type lijst, Lid, E-mailadres lid, Type lid |
+
+The sheet headers and the recipient types are Dutch — `MailUniversalSecurityGroup` means nothing to the person reading the report, `Beveiligingsgroep (mail-enabled)` does. The script itself stays English like the rest of the repo.
+
+**Filtering on one address**
+
+`-Member jan@contoso.com` answers the question you actually get asked: *which lists is Jan on?* It resolves the address to its DN and lets Exchange do the matching (`Get-Recipient -Filter "Members -eq '<DN>'"`), so it does not walk every group in the tenant. The matched lists are still exported **in full**, so the customer sees who else is on them.
+
+Direct membership only — someone inside a nested group is not a match. The nested group itself does show up as a member row, with `Distributielijst` as its member type.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Group` | No | One list (name, alias or e-mail). If omitted, every list is reported |
+| `-Member` | No | Only the lists this address is a direct member of |
+| `-IncludeDynamic` | No | Also report dynamic distribution groups (evaluated live, one query per group) |
+| `-IncludeM365Groups` | No | Also report Microsoft 365 groups, Teams-backed ones included |
+| `-OutputPath` | No | Path of the `.xlsx` (default: `C:\Temp\Distributielijsten_<timestamp>.xlsx`) |
+| `-Csv` | No | Write two CSV files instead of Excel |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Every distribution list with all of its members
+.\Get-DistributionGroupMembers.ps1
+
+# Which lists is Jan on? (and who else is on them)
+.\Get-DistributionGroupMembers.ps1 -Member "jan@contoso.com"
+
+# One list, to a fixed path
+.\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
+
+# Everything that can receive mail as a group
+.\Get-DistributionGroupMembers.ps1 -IncludeDynamic -IncludeM365Groups
+```
+
+**Notes**
+- Needs [ImportExcel](https://github.com/dfinke/ImportExcel) for the `.xlsx`. If it is missing the script offers to install it, and writes two CSV files (`*-overzicht.csv`, `*-leden.csv`) if you decline — a missing module never costs you the report. `Install-Modules.ps1` installs it
+- A list with no members gets a `(geen leden)` row in the `Leden` sheet rather than quietly missing from it — an empty list is exactly what a customer wants to spot
+- CSV output uses `-UseCulture`, so a Dutch Excel opens it as columns instead of one wall of comma-separated text
+- An existing workbook at `-OutputPath` is replaced, not appended to — `Export-Excel` would otherwise stack a second run on top of the first
 
 ---
 
