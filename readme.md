@@ -160,7 +160,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
-| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists one address is on |
+| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address or a whole domain |
 
 **Entra ID submenu (`D`)**
 
@@ -749,6 +749,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-18 (2)
+| Change |
+|--------|
+| `Get-DistributionGroupMembers.ps1` — `-Member` now also takes a **domain**: `-Member "@be.verizon.com"` reports every list that still holds an address on that domain (`be.verizon.com` and `*@be.verizon.com` mean the same). An address is matched by Exchange itself; a domain cannot be, so every list is read and then filtered — slower, and documented as such |
+| Matching covers the primary address, every alias, **and `ExternalEmailAddress`**. That is the whole point for a partner domain: such a member is usually a mail contact whose primary SMTP is `...@contoso.onmicrosoft.com`, with the real `@be.verizon.com` only in its external address. Matching on the primary address would have found nothing and reported "none" with a straight face |
+| New `Extern adres` column in the `Leden` sheet, so the address that actually receives the mail is visible for contacts instead of only the internal placeholder |
+| With a filter active: `Treffers` per list in `Overzicht`, and `Treffer op` per member in `Leden`. `Treffer op` holds the matching **address**, not Ja/Nee — a hit on an alias is otherwise unexplainable in a report that does not show aliases |
+| A domain filter that matches nothing says so and writes no file, rather than handing over an empty workbook that reads as a failed export |
 
 ### 2026-09-18
 | Change |

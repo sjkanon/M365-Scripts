@@ -15,6 +15,10 @@
       Overzicht  one row per list: name, address, type, member count, owners
       Leden      one row per member: which list, who, which address, what kind of member
 
+    With -Member both sheets gain a column for the filter: 'Treffers' (how many
+    members of this list matched) and 'Treffer op' (the address this member matched
+    on, empty when it did not).
+
     The sheet headers are Dutch because the workbook is what goes to the customer;
     the script itself stays English like the rest of the repo.
 
@@ -25,11 +29,24 @@
     One list (name, alias or e-mail). Without it every list is reported.
 
 .PARAMETER Member
-    Only report the lists this address is a member of - the answer to "which lists
-    is this person on?". Resolved server-side, so it stays fast in a large tenant.
-    The matched lists are still exported in full, so the customer sees who else is on
-    them. Direct membership only: a person inside a nested group is not a match, but
-    the nested group itself shows up as a member row.
+    Narrow the report to the lists that contain a given member. Takes either:
+
+      one address   jan@contoso.com      - which lists is this person on?
+      a domain      @be.verizon.com      - which lists have members from this domain?
+                    (also "be.verizon.com" or "*@be.verizon.com")
+
+    An address is resolved server-side and stays fast in a large tenant. A domain
+    cannot be: Exchange has no filter for "member whose address ends in @x", so every
+    list is read and then filtered, and only the lists with a hit are kept.
+
+    Matching covers the primary address, every alias, and - for mail contacts and
+    mail users - ExternalEmailAddress, which is where an external party's real
+    address lives. The matched lists are exported in full, so the customer sees who
+    else is on them; a 'Treffer op' column names the address each hit matched on -
+    which is the only way to see why someone matched on an alias.
+
+    Direct membership only: a person inside a nested group is not a match, but the
+    nested group itself shows up as a member row.
 
 .PARAMETER IncludeDynamic
     Also report dynamic distribution groups. Their membership is evaluated live, which
@@ -54,6 +71,11 @@
 .EXAMPLE
     .\Get-DistributionGroupMembers.ps1 -Member "jan@contoso.com"
     Only the lists Jan is on - including the other members of those lists.
+
+.EXAMPLE
+    .\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com"
+    Every list with a member on that domain, with the matching address of each hit in
+    the 'Treffer op' column.
 
 .EXAMPLE
     .\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
@@ -132,6 +154,76 @@ function Get-DynamicMember {
         -OrganizationalUnit $DynamicGroup.RecipientContainer -ErrorAction Stop
 }
 
+# Every address a member can be reached on. An external party is usually a mail
+# contact, and then the address that matters is ExternalEmailAddress - the primary
+# SMTP is an internal placeholder. Missing that is missing exactly the members a
+# domain filter is used to find.
+function Get-AllAddress {
+    param($Recipient)
+    $raw = @($Recipient.PrimarySmtpAddress, $Recipient.ExternalEmailAddress) + @($Recipient.EmailAddresses)
+    foreach ($a in $raw) {
+        if (-not $a) { continue }
+        $s = [string]$a
+        # Proxy addresses are prefixed: SMTP: (primary), smtp: (alias), X500:, SIP: ...
+        # Only the SMTP ones are e-mail addresses; the rest would never match anyway.
+        if ($s -match '^(?i)smtp:') { $s = $s -replace '^(?i)smtp:', '' }
+        elseif ($s -match '^[A-Za-z0-9]+:')  { continue }
+        if ($s) { $s }
+    }
+}
+
+# ── Filter mode ───────────────────────────────────────────────────────────────
+# -Member takes either one address or a whole domain. A value without a local part
+# ("@be.verizon.com", "*@be.verizon.com", "be.verizon.com") is a domain.
+$filterMode   = 'None'
+$filterDomain = $null
+
+if ($Member) {
+    $trimmed = $Member.Trim() -replace '^\*', ''      # a leading wildcard is implied
+    if ($trimmed.StartsWith('@') -or $trimmed -notlike '*@*') {
+        $filterMode   = 'Domain'
+        $filterDomain = '@' + $trimmed.TrimStart('@')
+    } else {
+        $filterMode = 'Address'
+    }
+}
+
+# A member row, built the same way for a real member and for the placeholder an empty
+# list gets - so every row in the sheet keeps the same columns.
+function New-MemberRow {
+    param($List, $Name, $Address = '', $External = '', $Type = '', $Hit = '')
+    $row = [ordered]@{
+        'Lijst'             = $List.DisplayName
+        'E-mailadres lijst' = [string]$List.PrimarySmtpAddress
+        'Type lijst'        = Get-FriendlyType $List.RecipientTypeDetails
+        'Lid'               = $Name
+        'E-mailadres lid'   = $Address
+        'Extern adres'      = $External
+        'Type lid'          = $Type
+    }
+    if ($filterMode -ne 'None') { $row['Treffer op'] = $Hit }
+    [PSCustomObject]$row
+}
+
+# Returns the address that matched, not just $true. A member can match on an alias
+# that appears nowhere else in the report, and "Treffer: Ja" on a row whose visible
+# address is sara@contoso.com only raises the question why.
+function Get-MemberMatch {
+    param($Recipient)
+    switch ($filterMode) {
+        'Domain' {
+            foreach ($a in Get-AllAddress $Recipient) { if ($a -like "*$filterDomain") { return $a } }
+        }
+        'Address' {
+            foreach ($a in Get-AllAddress $Recipient) { if ($a -eq $Member) { return $a } }
+            if ($script:FilterDn -and $Recipient.DistinguishedName -eq $script:FilterDn) {
+                return [string]$Recipient.PrimarySmtpAddress
+            }
+        }
+    }
+    return $null
+}
+
 # ── Collect the lists ─────────────────────────────────────────────────────────
 # Every entry is normalised to { Object, Kind } so the member lookup below only has
 # to branch on Kind, not on which cmdlet happened to produce the object.
@@ -155,9 +247,10 @@ if ($Group) {
     }
     $lists.Add([PSCustomObject]@{ Object = $found; Kind = $kind })
 
-} elseif ($Member) {
+} elseif ($filterMode -eq 'Address') {
     # Resolve the address first: the membership filter matches on DN, not on SMTP.
     $recipient = Get-Recipient -Identity $Member -ErrorAction Stop
+    $script:FilterDn = $recipient.DistinguishedName
     Write-Host "  Looking up lists for $($recipient.PrimarySmtpAddress)..." -ForegroundColor DarkGray
 
     $dn   = $recipient.DistinguishedName -replace "'", "''"
@@ -187,6 +280,8 @@ if ($Group) {
     }
 
 } else {
+    # Also the path for a domain filter: no server-side query can answer "has a member
+    # whose address ends in @be.verizon.com", so every list is read and then filtered.
     Write-Host "  Retrieving distribution lists..." -ForegroundColor DarkGray
     foreach ($dg in @(Get-DistributionGroup -ResultSize Unlimited)) {
         $lists.Add([PSCustomObject]@{ Object = $dg; Kind = 'Static' })
@@ -204,13 +299,17 @@ if ($Group) {
 }
 
 if ($lists.Count -eq 0) {
-    if ($Member) { Write-Host "  $Member is not a direct member of any distribution list." -ForegroundColor Yellow }
-    else         { Write-Host "  No distribution lists found." -ForegroundColor Yellow }
+    if ($filterMode -eq 'Address') { Write-Host "  $Member is not a direct member of any distribution list." -ForegroundColor Yellow }
+    else                           { Write-Host "  No distribution lists found." -ForegroundColor Yellow }
     if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
     return
 }
 
-Write-Host "  Reading members of $($lists.Count) list(s)..." -ForegroundColor DarkGray
+if ($filterMode -eq 'Domain') {
+    Write-Host "  Scanning $($lists.Count) list(s) for members on $filterDomain..." -ForegroundColor DarkGray
+} else {
+    Write-Host "  Reading members of $($lists.Count) list(s)..." -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # ── Read the members ──────────────────────────────────────────────────────────
@@ -247,45 +346,55 @@ foreach ($entry in $lists) {
         Write-Host "  [WARN] $($list.DisplayName): $($_.Exception.Message)" -ForegroundColor Yellow
     }
 
+    # Which members the filter hits, keyed by DN, holding the address that matched. A
+    # domain filter drops a list without a single hit; a filter on one address arrives
+    # here already narrowed down by the server, so there this only fills the column.
+    $matchHits = @{}
+    if ($filterMode -ne 'None') {
+        foreach ($gm in $groupMembers) {
+            $hitAddress = Get-MemberMatch $gm
+            if ($hitAddress) { $matchHits[[string]$gm.DistinguishedName] = $hitAddress }
+        }
+    }
+    if ($filterMode -eq 'Domain' -and $matchHits.Count -eq 0) { continue }
+
     $internalOnly = if ($null -ne $list.RequireSenderAuthenticationEnabled) {
         if ($list.RequireSenderAuthenticationEnabled) { 'Ja' } else { 'Nee' }
     } else { '' }
 
-    $overview.Add([PSCustomObject]@{
-        'Lijst'                    = $list.DisplayName
-        'E-mailadres'              = [string]$list.PrimarySmtpAddress
-        'Type'                     = Get-FriendlyType $list.RecipientTypeDetails
-        'Aantal leden'             = $groupMembers.Count
-        'Eigenaar(s)'              = $owners
-        'Alias'                    = $list.Alias
-        'Verborgen in adresboek'   = if ($list.HiddenFromAddressListsEnabled) { 'Ja' } else { 'Nee' }
-        'Alleen interne afzenders' = $internalOnly
-        'Aangemaakt op'            = if ($list.WhenCreated) { (Get-Date $list.WhenCreated -Format 'dd-MM-yyyy') } else { '' }
-    })
+    $listRow = [ordered]@{
+        'Lijst'        = $list.DisplayName
+        'E-mailadres'  = [string]$list.PrimarySmtpAddress
+        'Type'         = Get-FriendlyType $list.RecipientTypeDetails
+        'Aantal leden' = $groupMembers.Count
+    }
+    if ($filterMode -ne 'None') { $listRow['Treffers'] = $matchHits.Count }
+    $listRow['Eigenaar(s)']              = $owners
+    $listRow['Alias']                    = $list.Alias
+    $listRow['Verborgen in adresboek']   = if ($list.HiddenFromAddressListsEnabled) { 'Ja' } else { 'Nee' }
+    $listRow['Alleen interne afzenders'] = $internalOnly
+    $listRow['Aangemaakt op']            = if ($list.WhenCreated) { (Get-Date $list.WhenCreated -Format 'dd-MM-yyyy') } else { '' }
+    $overview.Add([PSCustomObject]$listRow)
 
     if ($groupMembers.Count -eq 0) {
         # An empty list is exactly what a customer wants to spot, so it gets a row of
         # its own instead of quietly missing from the member sheet.
-        $members.Add([PSCustomObject]@{
-            'Lijst'             = $list.DisplayName
-            'E-mailadres lijst' = [string]$list.PrimarySmtpAddress
-            'Type lijst'        = Get-FriendlyType $list.RecipientTypeDetails
-            'Lid'               = '(geen leden)'
-            'E-mailadres lid'   = ''
-            'Type lid'          = ''
-        })
+        $members.Add((New-MemberRow -List $list -Name '(geen leden)'))
         continue
     }
 
     foreach ($m in ($groupMembers | Sort-Object DisplayName)) {
-        $members.Add([PSCustomObject]@{
-            'Lijst'             = $list.DisplayName
-            'E-mailadres lijst' = [string]$list.PrimarySmtpAddress
-            'Type lijst'        = Get-FriendlyType $list.RecipientTypeDetails
-            'Lid'               = $m.DisplayName
-            'E-mailadres lid'   = [string]$m.PrimarySmtpAddress
-            'Type lid'          = Get-FriendlyType $m.RecipientTypeDetails
-        })
+        # A mail contact's real address lives in ExternalEmailAddress; its primary SMTP
+        # is an internal placeholder, so both belong in the report.
+        $external = [string]$m.ExternalEmailAddress -replace '^(?i)smtp:', ''
+        if ($external -eq [string]$m.PrimarySmtpAddress) { $external = '' }
+
+        $members.Add((New-MemberRow -List $list `
+                                    -Name     $m.DisplayName `
+                                    -Address  ([string]$m.PrimarySmtpAddress) `
+                                    -External $external `
+                                    -Type     (Get-FriendlyType $m.RecipientTypeDetails) `
+                                    -Hit      ([string]$matchHits[[string]$m.DistinguishedName])))
     }
 }
 Write-Progress -Activity "Distribution lists" -Completed
@@ -294,11 +403,28 @@ $overviewSorted = @($overview | Sort-Object 'Lijst')
 $membersSorted  = @($members  | Sort-Object 'Lijst', 'Lid')
 
 # ── Console summary ───────────────────────────────────────────────────────────
-$overviewSorted | Format-Table 'Lijst', 'E-mailadres', 'Type', 'Aantal leden', 'Eigenaar(s)' -AutoSize
+if ($overviewSorted.Count -eq 0) {
+    # Only a domain filter can get this far and end up empty: the lists existed, none
+    # of them had a member on that domain. Writing an empty workbook would read as
+    # "the report failed" rather than as the answer it is.
+    Write-Host "  No distribution list has a member on $filterDomain." -ForegroundColor Yellow
+    Write-Host ""
+    if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+    return
+}
+
+$columns = @('Lijst', 'E-mailadres', 'Type', 'Aantal leden')
+if ($filterMode -ne 'None') { $columns += 'Treffers' }
+$columns += 'Eigenaar(s)'
+$overviewSorted | Format-Table $columns -AutoSize
 
 # ── Report ────────────────────────────────────────────────────────────────────
 $ts   = Get-Date -Format 'yyyyMMdd_HHmmss'
-$stem = if ($Member) { "Distributielijsten_$($Member -replace '[^\w.-]', '_')" } else { 'Distributielijsten' }
+$stem = switch ($filterMode) {
+    'Domain'  { "Distributielijsten_$($filterDomain.TrimStart('@') -replace '[^\w.-]', '_')" }
+    'Address' { "Distributielijsten_$($Member -replace '[^\w.-]', '_')" }
+    default   { 'Distributielijsten' }
+}
 
 $useExcel = -not $Csv
 if ($useExcel -and -not (Get-Module -ListAvailable -Name ImportExcel)) {
@@ -353,11 +479,20 @@ if ($useExcel) {
 }
 
 $memberRows = @($membersSorted | Where-Object { $_.'E-mailadres lid' }).Count
+$hitRows    = @($membersSorted | Where-Object { $_.'Treffer op' }).Count
 Write-Host ""
-if ($Member) {
-    Write-Host ("  {0} is a member of {1} list(s) - {2} member row(s) exported." -f $Member, $overviewSorted.Count, $memberRows) -ForegroundColor Cyan
-} else {
-    Write-Host ("  {0} list(s) - {1} member row(s) exported." -f $overviewSorted.Count, $memberRows) -ForegroundColor Cyan
+switch ($filterMode) {
+    'Domain' {
+        Write-Host ("  {0} list(s) have a member on {1} - {2} matching member(s), {3} member row(s) exported." -f
+                    $overviewSorted.Count, $filterDomain, $hitRows, $memberRows) -ForegroundColor Cyan
+    }
+    'Address' {
+        Write-Host ("  {0} is a member of {1} list(s) - {2} member row(s) exported." -f
+                    $Member, $overviewSorted.Count, $memberRows) -ForegroundColor Cyan
+    }
+    default {
+        Write-Host ("  {0} list(s) - {1} member row(s) exported." -f $overviewSorted.Count, $memberRows) -ForegroundColor Cyan
+    }
 }
 Write-Host ""
 
