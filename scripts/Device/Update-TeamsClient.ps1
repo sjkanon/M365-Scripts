@@ -22,8 +22,10 @@
       5. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
                       BEFORE anything is uninstalled, so a failed download can never
                       leave the device without a Teams client.
-      6. Uninstall  - Teams Meeting Add-in (MSI), the MSTeams AppX package for all
-                      users, and the provisioned package.
+      6. Uninstall  - every copy of the Teams Meeting Add-in (the MSI, the folders
+                      under Program Files (x86) and in each profile, and the per-user
+                      COM registrations), the MSTeams AppX package for all users, and
+                      the provisioned package.
       7. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
       8. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
                       Teams package (ALLUSERS=1).
@@ -58,6 +60,15 @@
     AllowAllTrustedApps and AppLocker. IsWVDEnvironment stays required either way, and
     Microsoft still advises keeping the redirector as a fallback for endpoints that
     cannot do SlimCore, so the switch keeps installing it. Revisit before April 2027.
+
+    The meeting add-in
+    ------------------
+    A full reinstall removes every copy before putting the new one back: the MSI,
+    the machine-wide folder, the per-profile folders under
+    %LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in, and the per-user COM registrations
+    in each loaded hive. Leaving any of those behind is what creates a user whose own
+    registration shadows the fresh machine-wide one and points at files that are no
+    longer there - Outlook then fails to load it and parks LoadBehavior at 2.
 
     Classic Teams
     -------------
@@ -513,6 +524,34 @@ function Get-UninspectableProfile {
             Sid         = $sid
             Account     = Resolve-SidName $sid
             ProfilePath = $key.GetValue('ProfileImagePath')
+        }
+    }
+}
+
+function Get-TeamsAddInFolder {
+    <#
+        Every folder a meeting add-in copy can sit in: the machine-wide one this
+        script installs, and the per-profile one the Teams client installs by itself
+        (note the hyphen - the two spellings are not a typo, Microsoft uses both).
+    #>
+    $machineWide = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\TeamsMeetingAddin'
+    if (Test-Path $machineWide) {
+        [PSCustomObject]@{ Account = 'all users (machine-wide)'; Path = $machineWide; Sid = $null }
+    }
+
+    $profileList = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    if (-not (Test-Path $profileList)) { return }
+
+    foreach ($key in Get-ChildItem $profileList) {
+        $sid = $key.PSChildName
+        if (-not (Test-UserProfileSid $sid)) { continue }
+
+        $profilePath = $key.GetValue('ProfileImagePath')
+        if (-not $profilePath) { continue }
+
+        $perUser = Join-Path $profilePath 'AppData\Local\Microsoft\TeamsMeetingAdd-in'
+        if (Test-Path $perUser) {
+            [PSCustomObject]@{ Account = (Resolve-SidName $sid); Path = $perUser; Sid = $sid }
         }
     }
 }
@@ -1308,6 +1347,39 @@ try {
                     }
                 }
             }
+
+            # The MSI clears one copy. Every other one has to go too, or the reinstall
+            # hands a user a registration pointing at a folder that is about to be
+            # replaced - which is exactly how a shadowing LoadBehavior 2 is born.
+            foreach ($folder in @(Get-TeamsAddInFolder)) {
+                if ($PSCmdlet.ShouldProcess("$($folder.Account): $($folder.Path)", 'Remove leftover add-in folder')) {
+                    Remove-Item -LiteralPath $folder.Path -Recurse -Force -ErrorAction SilentlyContinue
+                    if (Test-Path $folder.Path) {
+                        Write-Warn "Could not fully remove $($folder.Path) - files in use; Outlook or Teams may still hold them"
+                    } else {
+                        Write-Ok "Removed the add-in copy for $($folder.Account)"
+                    }
+                }
+            }
+
+            # With the files gone every per-user COM registration is dangling, so they
+            # go as well; the fresh machine-wide install is what users resolve to.
+            foreach ($reg in @(Get-OutlookAddInRegistration | Where-Object { $_.Sid })) {
+                foreach ($clsidKey in @(Get-AddInClsidKey $reg.ClassesRoot)) {
+                    if ($PSCmdlet.ShouldProcess("$($reg.Account): $clsidKey", 'Remove the per-user COM registration')) {
+                        Remove-Item -Path $clsidKey -Recurse -Force -ErrorAction SilentlyContinue
+                        if (-not (Test-Path $clsidKey)) {
+                            Write-Ok "Cleared the per-user COM registration for $($reg.Account)"
+                        }
+                    }
+                }
+
+                if ($reg.LoadBehavior -ne 3 -and
+                    $PSCmdlet.ShouldProcess("$($reg.Account): LoadBehavior", 'Set to 3 (load at startup)')) {
+                    Set-ItemProperty -Path $reg.AddInKeyPath -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction SilentlyContinue
+                    Write-Ok "Set LoadBehavior back to 3 for $($reg.Account)"
+                }
+            }
         }
 
         if ($existingTeams.Count -eq 0) { Write-Skip 'No AppX package to remove' }
@@ -1507,6 +1579,7 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
 
 
 

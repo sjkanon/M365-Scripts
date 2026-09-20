@@ -754,6 +754,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (7)
+| Change |
+|--------|
+| A full reinstall now removes **every** copy of the meeting add-in before installing the new one, not just the one the MSI knows about: the machine-wide folder, the per-profile folders under `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in`, and the per-user COM registrations in each loaded hive |
+| That closes the loop on the `LoadBehavior 2` this script has been chasing for two days. A copy left behind during a reinstall is precisely what becomes a per-user registration shadowing the fresh machine-wide one while pointing at files that no longer exist — which is how `admin` ended up registered against add-in `1.24.19202` |
+| `Get-TeamsAddInFolder` verified against this device: it finds the real per-profile copy. The `-WhatIf` plan shows the folder and both CLSID views being removed before the reinstall. The removal itself reuses mechanics already proven live in the classic-Teams and repair tests, but the sweep as a whole runs for the first time on a production host |
+
 ### 2026-09-20 (6)
 | Change |
 |--------|
