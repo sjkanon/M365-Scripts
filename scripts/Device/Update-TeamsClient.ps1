@@ -120,7 +120,7 @@
         hit a problem. Combine with -CheckOnly for a pure detection job (exit code 2
         means "update available").
       - Script variables arrive as environment variables, so checkboxes named whatIf,
-        quiet, checkOnly, force, avdOptimizations, removeClassicTeams,
+        quiet, checkOnly, force, avdOptimizations, removeClassicTeams, repairOutlookAddIn,
         skipMeetingAddIn or skipSignatureCheck and text fields named workingDir,
         logPath or ring are picked up when the matching parameter is not passed.
         Capitalisation does not matter - environment lookups are case-insensitive.
@@ -153,6 +153,12 @@
     and clear the per-profile installs (install folder, autostart entry and the stale
     uninstall key). Off by default - taking an app away from users is not something an
     update job should decide by itself.
+
+.PARAMETER RepairOutlookAddIn
+    Clear a per-user Outlook registration that points at an add-in DLL which no
+    longer exists, so the machine-wide registration takes over again. Only acts when
+    that machine-wide registration is healthy. Off by default: it writes into another
+    user's hive, which is not something an update job should do unasked.
 
 .PARAMETER WebRtcUrl
     Download URL for the Remote Desktop WebRTC Redirector MSI (default: the Microsoft
@@ -227,6 +233,7 @@ param (
     [switch] $CheckOnly,
     [switch] $AvdOptimizations,
     [switch] $RemoveClassicTeams,
+    [switch] $RepairOutlookAddIn,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
@@ -318,6 +325,7 @@ if (-not $PSBoundParameters.ContainsKey('SkipMeetingAddIn')   -and $env:skipMeet
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
 if (-not $PSBoundParameters.ContainsKey('AvdOptimizations')   -and $env:avdOptimizations   -in $rmmTrue) { $AvdOptimizations   = $true }
 if (-not $PSBoundParameters.ContainsKey('RemoveClassicTeams') -and $env:removeClassicTeams -in $rmmTrue) { $RemoveClassicTeams = $true }
+if (-not $PSBoundParameters.ContainsKey('RepairOutlookAddIn') -and $env:repairOutlookAddIn -in $rmmTrue) { $RepairOutlookAddIn = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
@@ -516,6 +524,15 @@ function Get-AddInDllPath {
     return $null
 }
 
+function Get-AddInClsidKey {
+    <# The CLSID keys a hive holds for the add-in, in either registry view. #>
+    param([Parameter(Mandatory)] [string] $ClassesRoot)
+
+    foreach ($candidate in "$ClassesRoot\CLSID\$AddInClsid", "$ClassesRoot\WOW6432Node\CLSID\$AddInClsid") {
+        if (Test-Path $candidate) { $candidate }
+    }
+}
+
 function Get-OutlookAddInRegistration {
     <#
         Whether Outlook itself sees the add-in. The MSI in Program Files proves the
@@ -539,8 +556,11 @@ function Get-OutlookAddInRegistration {
         if (-not (Test-Path $machinePath)) { continue }
         $dll = Get-AddInDllPath 'HKLM:\SOFTWARE\Classes'
         $results.Add([PSCustomObject]@{
+            Sid          = $null
             Account      = $machineViews[$machinePath]
             LoadBehavior = Get-PropertyValue (Get-ItemProperty $machinePath -ErrorAction SilentlyContinue) 'LoadBehavior'
+            AddInKeyPath = $machinePath
+            ClassesRoot  = 'HKLM:\SOFTWARE\Classes'
             DllPath      = $dll
             DllMissing   = ($dll -and -not (Test-Path $dll))
         })
@@ -557,8 +577,11 @@ function Get-OutlookAddInRegistration {
         if (-not (Test-Path $userPath)) { continue }
         $dll = Get-AddInDllPath "Registry::HKEY_USERS\$sid\SOFTWARE\Classes"
         $results.Add([PSCustomObject]@{
+            Sid          = $sid
             Account      = Resolve-SidName $sid
             LoadBehavior = Get-PropertyValue (Get-ItemProperty $userPath -ErrorAction SilentlyContinue) 'LoadBehavior'
+            AddInKeyPath = $userPath
+            ClassesRoot  = "Registry::HKEY_USERS\$sid\SOFTWARE\Classes"
             DllPath      = $dll
             DllMissing   = ($dll -and -not (Test-Path $dll))
         })
@@ -571,7 +594,9 @@ function Write-OutlookAddInStatus {
     <# Report the Outlook-side registration. Informational: a missing per-user entry
        appears by itself at the next Outlook start, and a profile that is not signed
        in cannot be inspected at all, so neither is treated as a failure. #>
-    $registrations = @(Get-OutlookAddInRegistration)
+    param($Registrations)
+
+    $registrations = if ($Registrations) { @($Registrations) } else { @(Get-OutlookAddInRegistration) }
     $machineWideOk = [bool] ($registrations | Where-Object { $_.Account -like 'all users*' -and -not $_.DllMissing })
 
     # Profiles nobody is signed into cannot be read. Say so, with names: a profile
@@ -879,11 +904,18 @@ try {
         Write-Warn "Classic Teams installed for $($classic.Account) ($($classic.Version)) - $classicNote"
     }
 
-    $addInInstalled = [bool] (Get-TeamsMeetingAddInEntry)
+    $addInInstalled     = [bool] (Get-TeamsMeetingAddInEntry)
+    $machineWideAddInOk = $false
+    $brokenAddInUsers   = @()
+
     if (-not $SkipMeetingAddIn) {
         if ($addInInstalled) { Write-Ok 'Teams Meeting Add-in is installed' }
         else                 { Write-Warn 'Teams Meeting Add-in is not installed' }
-        Write-OutlookAddInStatus
+
+        $addInRegistrations = @(Get-OutlookAddInRegistration)
+        $machineWideAddInOk = [bool] ($addInRegistrations | Where-Object { $_.Account -like 'all users*' -and -not $_.DllMissing })
+        $brokenAddInUsers   = @($addInRegistrations | Where-Object { $_.Sid -and $_.DllMissing })
+        Write-OutlookAddInStatus -Registrations $addInRegistrations
     }
 
     $avdFlagSet  = $false
@@ -948,9 +980,10 @@ try {
     $addInMissing  = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
     $avdWork       = $AvdOptimizations -and ((-not $avdFlagSet) -or (-not $webRtcEntry) -or $Force)
     $classicWork   = $RemoveClassicTeams -and (($classicMachineWide.Count + $classicUserInstall.Count) -gt 0)
+    $repairWork    = $RepairOutlookAddIn -and $brokenAddInUsers.Count -gt 0
     $fullReinstall = $clientOutdated -or $Force
 
-    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork -and -not $classicWork) {
+    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork -and -not $classicWork -and -not $repairWork) {
         $plannedExit = 0
         throw 'Teams is up to date - nothing to do.'
     }
@@ -960,6 +993,7 @@ try {
     if ($addInMissing)   { $reasons += 'the Teams Meeting Add-in is missing' }
     if ($avdWork)        { $reasons += 'the AVD optimizations are incomplete' }
     if ($classicWork)    { $reasons += 'classic Teams is still installed' }
+    if ($repairWork)     { $reasons += 'a user registration points at a removed add-in DLL' }
     if ($Force)          { $reasons += '-Force was given' }
 
     if ($CheckOnly) {
@@ -973,6 +1007,7 @@ try {
         $parts = @()
         if ($avdWork)      { $parts += 'the AVD optimizations' }
         if ($classicWork)  { $parts += 'the classic Teams removal' }
+        if ($repairWork)   { $parts += 'the per-user registration repair' }
         if ($addInMissing) { $parts += 'the meeting add-in' }
         Write-Skip ('Client is current - only {0} will be handled' -f ($parts -join ' and '))
     }
@@ -1287,6 +1322,44 @@ try {
         }
     }
 
+    # -- 8b. Repair per-user registrations that point at a removed DLL ---------
+    # A user whose own HKCU registration survives an older add-in keeps shadowing
+    # the machine-wide one: HKCU\SOFTWARE\Classes wins, Outlook loads nothing and
+    # switches the add-in off. Dropping that stale class lets the machine-wide
+    # registration take over, which is why this only runs when that one is healthy.
+    if (-not $SkipMeetingAddIn -and $brokenAddInUsers.Count -gt 0) {
+        Write-Out ''
+        Write-Step '8b. Per-user Outlook registration'
+
+        if (-not $RepairOutlookAddIn) {
+            Write-Skip ('{0} user(s) point at a removed DLL - use -RepairOutlookAddIn to clear those registrations' -f $brokenAddInUsers.Count)
+        } elseif (-not $machineWideAddInOk) {
+            Write-Warn 'Not repairing: there is no healthy machine-wide registration for these users to fall back on'
+        } else {
+            foreach ($reg in $brokenAddInUsers) {
+                foreach ($clsidKey in @(Get-AddInClsidKey $reg.ClassesRoot)) {
+                    if ($PSCmdlet.ShouldProcess("$($reg.Account): $clsidKey", 'Remove the stale COM registration')) {
+                        Remove-Item -Path $clsidKey -Recurse -Force -ErrorAction SilentlyContinue
+                        if (Test-Path $clsidKey) {
+                            Write-Warn "Could not remove $clsidKey"
+                        } else {
+                            Write-Ok "Cleared the stale COM registration for $($reg.Account)"
+                        }
+                    }
+                }
+
+                # Outlook parked the add-in at 2 (or 0) when the load failed; with the
+                # class gone it would otherwise stay parked.
+                if ($reg.LoadBehavior -ne 3 -and
+                    $PSCmdlet.ShouldProcess("$($reg.Account): LoadBehavior", 'Set to 3 (load at startup)')) {
+                    Set-ItemProperty -Path $reg.AddInKeyPath -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction SilentlyContinue
+                    Write-Ok "Set LoadBehavior back to 3 for $($reg.Account)"
+                }
+            }
+            Write-Skip 'Those users get the add-in from the machine-wide registration at their next Outlook start'
+        }
+    }
+
     # -- 9. Verify -------------------------------------------------------------
     Write-Out ''
     Write-Step '9. Verification'
@@ -1371,6 +1444,9 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
+
+
 
 
 
