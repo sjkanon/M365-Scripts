@@ -226,6 +226,7 @@ Twee uitkomsten om te kennen:
 | Regel in de output | Betekenis | Actie |
 |--------------------|-----------|-------|
 | `[FAIL] The classic Teams machine-wide installer is still present` | De uninstall is niet gelukt | Doorzetten naar level 3; de job faalt (exitcode 1) |
+| `[WARN] ... is no longer registered with Windows Installer (1605)` | De vermelding in Programma's en onderdelen stond er nog, maar Windows kent het product niet meer | Geen actie. Het script ruimt die verouderde vermelding zelf op en gaat door |
 | `[WARN] Classic Teams still present for ... - files in use` | Classic Teams draaide nog; de bestanden zaten vast | Gebruiker laten uitloggen; de volgende run maakt het af. Geen fout |
 
 ---
@@ -516,6 +517,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 
