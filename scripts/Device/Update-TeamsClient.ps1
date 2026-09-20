@@ -474,6 +474,31 @@ function Resolve-SidName {
     catch { return $Sid }
 }
 
+function Get-UninspectableProfile {
+    <#
+        Profiles that exist on this machine but whose hive is not mounted, so their
+        Outlook registration cannot be read at all. Reporting them by name beats
+        leaving them out of the output: "not listed" and "fine" look identical
+        otherwise, which is exactly the question a technician asks when the add-in
+        does not appear for everyone.
+    #>
+    $loaded      = @(Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty PSChildName)
+    $profileList = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+    if (-not (Test-Path $profileList)) { return }
+
+    foreach ($key in Get-ChildItem $profileList) {
+        $sid = $key.PSChildName
+        if (-not (Test-UserProfileSid $sid)) { continue }
+        if ($loaded -contains $sid) { continue }
+
+        [PSCustomObject]@{
+            Sid         = $sid
+            Account     = Resolve-SidName $sid
+            ProfilePath = $key.GetValue('ProfileImagePath')
+        }
+    }
+}
+
 function Get-AddInDllPath {
     <#
         Where a hive's COM registration says the add-in loader lives. Outlook resolves
@@ -547,6 +572,20 @@ function Write-OutlookAddInStatus {
        appears by itself at the next Outlook start, and a profile that is not signed
        in cannot be inspected at all, so neither is treated as a failure. #>
     $registrations = @(Get-OutlookAddInRegistration)
+    $machineWideOk = [bool] ($registrations | Where-Object { $_.Account -like 'all users*' -and -not $_.DllMissing })
+
+    # Profiles nobody is signed into cannot be read. Say so, with names: a profile
+    # that is simply absent from the output is indistinguishable from a healthy one.
+    $unseen = @(Get-UninspectableProfile)
+    if ($unseen.Count -gt 0) {
+        $consequence = if ($machineWideOk) {
+            'they pick up the machine-wide registration the first time that user starts Outlook'
+        } else {
+            'and there is no machine-wide registration for them to fall back on'
+        }
+        Write-Skip ("{0} profile(s) are not signed in, so their Outlook registration cannot be read ({1}) - {2}" -f
+                    $unseen.Count, (($unseen | Select-Object -ExpandProperty Account) -join ', '), $consequence)
+    }
 
     if ($registrations.Count -eq 0) {
         Write-Warn 'Outlook has not registered the add-in for any signed-in user yet - it registers itself at the next Outlook start'
