@@ -187,6 +187,20 @@ De add-in machinebreed installeren is één ding; of **Outlook** hem laadt is ee
 | `[WARN] Outlook knows the add-in ... but has no LoadBehavior set` | Registratie half aangelegd | Outlook opnieuw starten en opnieuw controleren |
 | `[WARN] The add-in is registered for ... but its DLL is gone (...)` | De eigen registratie van die gebruiker wijst naar een bestand dat er niet meer is en overschaduwt de machinebrede installatie | **Vinkje terugzetten helpt niet.** Draai het script met `-RepairOutlookAddIn` (of vink `repairOutlookAddIn` aan): dat ruimt die verouderde registratie op, waarna de machinebrede versie het overneemt bij de volgende Outlook-start |
 
+### De add-in laadt nog steeds niet — waarom?
+
+Als een registratie er wél staat maar Outlook hem niet laadt, zet het script de reden eronder met `why:`. Drie oorzaken laten geen spoor na in `LoadBehavior` zelf:
+
+| `why:`-regel | Wat er aan de hand is | Oplossing |
+|--------------|------------------------|-----------|
+| `Outlook is x64 but this registration points at the x86 loader` | Outlook kan alleen een DLL van zijn eigen bitness laden | De juiste versie registreren; meestal lost een volledige herinstallatie (`-Force`) dit op |
+| `Outlook parked the add-in in its DisabledItems/CrashedAddins list` | Outlook heeft hem zelf uitgezet na een crash of trage start, en houdt hem uit | Outlook → Bestand → Opties → Invoegtoepassingen → Beheren: **Uitgeschakelde items** → inschakelen. Blijft het terugkomen, zet hem dan via beleid op de `DoNotDisableAddinList` |
+| `Group policy sets LoadBehavior ... for this add-in` | Een GPO overschrijft de instelling van de gebruiker | Dat beleid aanpassen of verwijderen |
+
+> Staat er **`why: nothing on this machine blocks it`**, dan is er op de werkplek zelf niets mis. Wat dan nog rest: Outlook helemaal afsluiten (ook uit de taakbalk) en opnieuw starten, en zorgen dat de gebruiker minstens één keer in Teams is ingelogd.
+
+---
+
 > Draait het script als System via NinjaOne, dan ziet het alleen de profielen van gebruikers die op dat moment **ingelogd** zijn. Een profiel waar niemand in zit kan het niet uitlezen. Dat is geen fout en laat de job dus ook niet mislukken.
 
 **"Ik zie hem nog niet geladen op alle profielen"** — meestal geen storing. Het script meldt die profielen expliciet:

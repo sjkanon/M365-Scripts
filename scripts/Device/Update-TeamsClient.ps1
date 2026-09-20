@@ -639,6 +639,66 @@ function Get-OutlookAddInRegistration {
     return $results
 }
 
+function Get-OfficeBitness {
+    <# x64 or x86, from the Click-to-Run configuration. $null when it cannot be read. #>
+    $cfg = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration' -ErrorAction SilentlyContinue
+    return (Get-PropertyValue $cfg 'Platform')
+}
+
+function Get-AddInLoadBlocker {
+    <#
+        Why Outlook would refuse to load the add-in, beyond the registration being
+        present. These are the three that leave no trace in LoadBehavior alone:
+        a bitness mismatch, Outlook's own resiliency lists, and a policy-managed
+        load behaviour that overrides whatever the user has.
+    #>
+    param([Parameter(Mandatory)] $Registration)
+
+    $reasons = [System.Collections.Generic.List[string]]::new()
+
+    # Outlook can only load a loader of its own bitness, and the add-in ships both.
+    $bitness = Get-OfficeBitness
+    if ($bitness -and $Registration.DllPath) {
+        $dllArch = if ($Registration.DllPath -match '\\x86\\') { 'x86' }
+                   elseif ($Registration.DllPath -match '\\x64\\') { 'x64' }
+                   else { $null }
+        if ($dllArch -and $dllArch -ne $bitness) {
+            $reasons.Add("Outlook is $bitness but this registration points at the $dllArch loader ($($Registration.DllPath)) - a mismatched DLL cannot load")
+        }
+    }
+
+    # Outlook parks add-ins that crashed or started slowly, and keeps them parked.
+    if ($Registration.Sid) {
+        foreach ($office in '16.0', '15.0') {
+            foreach ($leaf in 'DisabledItems', 'CrashedAddins') {
+                $key = "Registry::HKEY_USERS\$($Registration.Sid)\Software\Microsoft\Office\$office\Outlook\Resiliency\$leaf"
+                if (-not (Test-Path $key)) { continue }
+
+                $entries = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+                foreach ($property in $entries.PSObject.Properties) {
+                    if ($property.Name -like 'PS*') { continue }
+                    $text = ''
+                    try { $text = [Text.Encoding]::Unicode.GetString([byte[]] $property.Value) } catch { $text = '' }
+                    if ($text -match 'TeamsMeetingAdd|TeamsAddin|AddinLoader') {
+                        $reasons.Add("Outlook parked the add-in in its $leaf list (Office $office) after a crash or a slow start - clear it under File > Options > Add-ins > Manage: Disabled Items, and keep it out with the DoNotDisableAddinList policy")
+                    }
+                }
+            }
+        }
+    }
+
+    # A policy-set load behaviour wins over whatever the user has.
+    foreach ($office in '16.0', '15.0') {
+        $policy = Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Office\$office\Outlook\Addins\TeamsAddin.FastConnect" -ErrorAction SilentlyContinue
+        $policyBehavior = Get-PropertyValue $policy 'LoadBehavior'
+        if ($null -ne $policyBehavior -and $policyBehavior -ne 3) {
+            $reasons.Add("Group policy sets LoadBehavior $policyBehavior for this add-in (Office $office) - the policy overrides the user's own setting")
+        }
+    }
+
+    return ($reasons | Select-Object -Unique)
+}
+
 function Write-OutlookAddInStatus {
     <# Report the Outlook-side registration. Informational: a missing per-user entry
        appears by itself at the next Outlook start, and a profile that is not signed
@@ -673,15 +733,24 @@ function Write-OutlookAddInStatus {
         # user does, so the two cases are reported apart.
         if ($reg.DllMissing) {
             Write-Warn "The add-in is registered for $($reg.Account) but its DLL is gone ($($reg.DllPath)) - re-enabling it in Outlook will not stick; the add-in has to be installed again for that user"
-            continue
-        }
-
-        if ($reg.LoadBehavior -eq 3) {
+        } elseif ($reg.LoadBehavior -eq 3) {
             Write-Ok "Outlook loads the add-in for $($reg.Account)"
         } elseif ($null -eq $reg.LoadBehavior) {
             Write-Warn "Outlook knows the add-in for $($reg.Account) but has no LoadBehavior set - it should appear at the next Outlook start"
         } else {
-            Write-Warn "Outlook has the add-in switched off for $($reg.Account) (LoadBehavior $($reg.LoadBehavior)) - re-enable it under Outlook > Options > Add-ins"
+            Write-Warn "Outlook has the add-in switched off for $($reg.Account) (LoadBehavior $($reg.LoadBehavior))"
+        }
+
+        # Anything that is not plainly loading gets a reason, or an explicit "no
+        # reason found here" - "it does not work" without a cause is what turns a
+        # ticket into three more.
+        if ($reg.DllMissing -or $reg.LoadBehavior -ne 3) {
+            $blockers = @(Get-AddInLoadBlocker -Registration $reg)
+            if ($blockers.Count -gt 0) {
+                foreach ($blocker in $blockers) { Write-Warn "  why: $blocker" }
+            } elseif (-not $reg.DllMissing) {
+                Write-Skip '  why: nothing on this machine blocks it - Outlook has to be fully closed and started once, and the user must have signed in to Teams at least once'
+            }
         }
     }
 }

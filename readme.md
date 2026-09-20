@@ -754,6 +754,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (8)
+| Change |
+|--------|
+| "The add-in still does not load" now gets an answer instead of a status. A registration that is present but not loading is checked against the three causes that leave no trace in `LoadBehavior` itself, each reported as a `why:` line: a bitness mismatch between Outlook and the registered loader, Outlook having parked the add-in in its `DisabledItems`/`CrashedAddins` resiliency lists, and a group policy overriding the user's load behaviour |
+| The resiliency check decodes the binary values in that user's hive and matches on the add-in path, so it reports the one cause a technician cannot see from `LoadBehavior` at all — Outlook disables a crashed add-in and keeps it disabled, which is why ticking the box back on does not stick |
+| When nothing on the machine blocks it, it says that too, which is also an answer: what remains is a full Outlook restart and a user who has signed in to Teams at least once |
+| Both detections exercised: an x86 loader path against this x64 Office produces the bitness reason, and a planted binary `CrashedAddins` value is decoded and reported. A healthy registration produces no `why:` line |
+
 ### 2026-09-20 (7)
 | Change |
 |--------|
