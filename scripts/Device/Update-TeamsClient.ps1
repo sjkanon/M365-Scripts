@@ -337,6 +337,10 @@ $workingDirReady  = $false
 # before the client is provisioned.
 $AvdRegistryPath = 'HKLM:\SOFTWARE\Microsoft\Teams'
 
+# The meeting add-in's COM class. Stable across versions, and the only way to find
+# out which DLL Outlook would actually load for a given user.
+$AddInClsid = '{19A6E644-14E6-4A60-B8D7-DD20610A871D}'
+
 # -Confirm:$false means "never ask", for an unattended run from a scheduler or RMM.
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
 
@@ -470,6 +474,23 @@ function Resolve-SidName {
     catch { return $Sid }
 }
 
+function Get-AddInDllPath {
+    <#
+        Where a hive's COM registration says the add-in loader lives. Outlook resolves
+        the add-in through this CLSID, so a path that no longer exists is the real
+        reason behind a LoadBehavior that keeps dropping back to 2.
+    #>
+    param([Parameter(Mandatory)] [string] $ClassesRoot)
+
+    foreach ($candidate in "$ClassesRoot\CLSID\$AddInClsid\InprocServer32",
+                           "$ClassesRoot\WOW6432Node\CLSID\$AddInClsid\InprocServer32") {
+        if (-not (Test-Path $candidate)) { continue }
+        $dll = Get-PropertyValue (Get-ItemProperty $candidate -ErrorAction SilentlyContinue) '(default)'
+        if ($dll) { return $dll }
+    }
+    return $null
+}
+
 function Get-OutlookAddInRegistration {
     <#
         Whether Outlook itself sees the add-in. The MSI in Program Files proves the
@@ -491,9 +512,12 @@ function Get-OutlookAddInRegistration {
     }
     foreach ($machinePath in $machineViews.Keys) {
         if (-not (Test-Path $machinePath)) { continue }
+        $dll = Get-AddInDllPath 'HKLM:\SOFTWARE\Classes'
         $results.Add([PSCustomObject]@{
             Account      = $machineViews[$machinePath]
             LoadBehavior = Get-PropertyValue (Get-ItemProperty $machinePath -ErrorAction SilentlyContinue) 'LoadBehavior'
+            DllPath      = $dll
+            DllMissing   = ($dll -and -not (Test-Path $dll))
         })
     }
 
@@ -506,9 +530,12 @@ function Get-OutlookAddInRegistration {
 
         $userPath = "Registry::HKEY_USERS\$sid\SOFTWARE\$suffix"
         if (-not (Test-Path $userPath)) { continue }
+        $dll = Get-AddInDllPath "Registry::HKEY_USERS\$sid\SOFTWARE\Classes"
         $results.Add([PSCustomObject]@{
             Account      = Resolve-SidName $sid
             LoadBehavior = Get-PropertyValue (Get-ItemProperty $userPath -ErrorAction SilentlyContinue) 'LoadBehavior'
+            DllPath      = $dll
+            DllMissing   = ($dll -and -not (Test-Path $dll))
         })
     }
 
@@ -527,6 +554,15 @@ function Write-OutlookAddInStatus {
     }
 
     foreach ($reg in $registrations) {
+        # A registration pointing at a DLL that is gone is the reason a LoadBehavior
+        # keeps falling back to 2: Outlook tries, fails and switches the add-in off
+        # again. Ticking the box back on does not survive that, a reinstall for that
+        # user does, so the two cases are reported apart.
+        if ($reg.DllMissing) {
+            Write-Warn "The add-in is registered for $($reg.Account) but its DLL is gone ($($reg.DllPath)) - re-enabling it in Outlook will not stick; the add-in has to be installed again for that user"
+            continue
+        }
+
         if ($reg.LoadBehavior -eq 3) {
             Write-Ok "Outlook loads the add-in for $($reg.Account)"
         } elseif ($null -eq $reg.LoadBehavior) {
@@ -1296,6 +1332,7 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
 
 
 

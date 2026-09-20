@@ -754,6 +754,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (3)
+| Change |
+|--------|
+| Answered a question the script could not: **why** an account shows `LoadBehavior 2`. Outlook resolves the add-in through `Classes\CLSID\{19A6E644-...}\InprocServer32`, and a per-user registration in `HKCU\SOFTWARE\Classes` outranks the machine-wide one — so a user keeps loading the copy from their own profile even after an `ALLUSERS=1` install lands in `Program Files (x86)`. Measured on a device: the class resolves to `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\<version>\x64\Microsoft.Teams.AddinLoader.dll` |
+| The script now resolves that path per signed-in user and reports the two cases apart, because they need different fixes: the add-in switched off but its DLL present (tick the box back on) versus a registration pointing at a DLL that is gone (ticking will not stick — it has to be installed again for that user). The targeted lookup across loaded hives costs ~100 ms |
+| Tested with a planted registration pointing at a missing DLL, without touching the real one |
+
 ### 2026-09-20 (2)
 | Change |
 |--------|
