@@ -26,7 +26,7 @@ In gewone taal:
 1. Het kijkt welke Teams-versie op de werkplek staat.
 2. Het vraagt bij Microsoft op welke versie op dit moment de nieuwste is.
 3. **Is de werkplek al bij?** Dan gebeurt er niets. Het script stopt zonder iets aan te raken.
-4. **Loopt de werkplek achter?** Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug.
+4. **Loopt de werkplek achter?** Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams **en elke kopie van de vergader-add-in**, installeert de nieuwe en zet de vergaderknop in Outlook terug.
 5. Daarna controleert het of alles er ook echt staat, en meldt of het gelukt is.
 
 ### Wat het script **niet** doet
@@ -211,6 +211,7 @@ De preflight inventariseert elke plek waar Teams kan staan, zodat je in één oo
 | Classic Teams (machinebreed) | De oude *Teams Machine-Wide Installer* |
 | Classic Teams per gebruiker | `Teams.exe` in het profiel van elke gebruiker |
 | Vergader-add-in | Beide uninstall-hives (64-bit en 32-bit) |
+| Add-in-kopieën | De machinebrede map plus de map in elk gebruikersprofiel (`%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in`) |
 | Outlook-registratie | Per ingelogde gebruiker |
 
 ### Classic Teams opruimen
@@ -541,6 +542,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 

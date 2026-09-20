@@ -72,7 +72,7 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 | 3 | AVD | Only with `-AvdOptimizations`: set `IsWVDEnvironment`, install the WebRTC redirector | guarded |
 | 4 | Classic | Only with `-RemoveClassicTeams`: uninstall the Teams Machine-Wide Installer, clear the per-profile installs | guarded |
 | 5 | Download | Create the working folder, download `teamsbootstrapper.exe`, check size and Authenticode signature | guarded |
-| 6 | Uninstall | `msiexec /x` the add-in, `Remove-AppxPackage -AllUsers`, `Remove-AppxProvisionedPackage` | guarded |
+| 6 | Uninstall | `msiexec /x` the add-in **and every other copy of it** (machine-wide folder, per-profile folders, per-user COM registrations), `Remove-AppxPackage -AllUsers`, `Remove-AppxProvisionedPackage` | guarded |
 | 7 | Install | `teamsbootstrapper.exe -p` (provision for all users) | guarded |
 | 8 | Add-in | Locate `MicrosoftTeamsMeetingAddinInstaller.msi` inside the installed package, install it with `ALLUSERS=1` | guarded |
 | 8b | Repair | Only with `-RepairOutlookAddIn`: clear a per-user registration that points at a removed DLL, put `LoadBehavior` back to 3 | guarded |
@@ -158,6 +158,7 @@ Three consequences worth knowing:
 - **A per-user registration outranks the machine-wide one.** `HKCU\SOFTWARE\Classes` wins over `HKLM\SOFTWARE\Classes` for that user, so a user who already has the client-installed copy keeps loading the DLL from their own profile even after a machine-wide install lands in `Program Files (x86)`. Which also means the two are not interchangeable: the machine-wide install does not repair a broken per-user one.
 - **A profile that is not signed in is not broken, just unreadable.** Its hive is not mounted, so nothing can be said about it. With a healthy machine-wide registration in place that profile picks the add-in up the first time that user starts Outlook — which is why "not loaded on every profile yet" is usually a matter of waiting rather than a fault. The script lists those profiles by name instead of leaving them out, because an absent profile and a healthy one look identical in the output otherwise.
 - **A dangling registration is what `LoadBehavior 2` usually means.** If that `InprocServer32` path no longer exists — the profile copy was removed while the registration stayed — Outlook tries, fails and switches the add-in off again. Ticking the box back on does not survive that; the add-in has to be installed again for that user. The script resolves the CLSID per signed-in user and reports the two cases apart, because they need different fixes.
+- **A reinstall sweeps every copy first.** The MSI clears one. The machine-wide folder, the per-profile folders under `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in` and the per-user COM registrations are removed with it, because a copy left behind is exactly what becomes a shadowing registration pointing at files that no longer exist. `-RepairOutlookAddIn` exists for the devices where that already happened.
 - **Repairing it means removing the shadow, not adding another install.** `-RepairOutlookAddIn` deletes the user''s stale `Classes\CLSID\{19A6E644-...}` key so COM resolves to the machine-wide registration again, and puts `LoadBehavior` back to 3. It only acts when that machine-wide registration is healthy — clearing the shadow with nothing behind it would leave the user worse off. Off by default: it writes into another user''s hive.
 - **`-SkipMeetingAddIn` is defensible on normal endpoints.** There the client keeps the add-in current on its own; the machine-wide install is what session hosts and shared machines need.
 
@@ -371,6 +372,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
 | Outlook add-in switched off | That production run found `LoadBehavior 2` for one account - the check earns its keep on the first real device it saw |
 | Profiles that cannot be read | Listed by name with what it means for them: with a machine-wide registration they pick it up at the next Outlook start, without one there is nothing to fall back on. Both messages verified against stubbed profile lists |
+| Add-in sweep before reinstall | `Get-TeamsAddInFolder` verified against this device (finds the real per-profile copy), and the `-WhatIf` plan shows the folder plus both CLSID views being removed before the reinstall. The removal itself reuses mechanics proven live in the classic-Teams and repair tests; the sweep as a whole runs for the first time on a production host |
 | Per-user registration repair | Planted a stale CLSID (both registry views) plus `LoadBehavior 2` against a healthy machine-wide registration: `-WhatIf` planned both actions, an applied run cleared the keys and set `LoadBehavior` to 3, exit `0`. The real fix on a production host is still to be confirmed |
 | Dangling add-in registration | Measured here: the COM class resolves to `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\1.26.21803\x64\Microsoft.Teams.AddinLoader.dll`, a targeted lookup across loaded hives costs ~100 ms, and a planted registration pointing at a missing DLL is reported as "re-enabling will not stick" |
 | SlimCore reporting | Verified on both sides: on this endpoint it finds `Microsoft.Teams.SlimCoreVdiHost.win-x64 2026.31.1.16`; with `RDInfraAgent` faked it reports the session-host wording instead. The three blocker policies were exercised against stubbed registry reads |
@@ -378,6 +380,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Stale machine-wide classic entry | That same host then failed on `1605` from the classic uninstall. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes the stale registry entry, continues and verifies clean, exit `0`. A classic uninstall that actually removes a registered product is still **untested** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 
