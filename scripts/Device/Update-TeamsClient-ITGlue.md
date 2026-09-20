@@ -283,14 +283,25 @@ Gebruikers op een virtuele werkplek krijgen sinds medio 2026 deze banner in Team
 
 ### Waar zit de oplossing? Op het lokale apparaat, niet op de sessiehost
 
+> **SlimCore kun je niet op de sessiehost installeren.** Microsoft laat de plugin in Windows App het pakket (~50 MB) downloaden en registreren op het apparaat waarmee de gebruiker inlogt. Er is dus niets uit te rollen op de server; de enige actie zit op het endpoint.
+
 De opvolger heet **SlimCore**. Die hoeft niemand apart te installeren: hij zit al in de nieuwe Teams-app op de sessiehost, en in **Windows App** op het apparaat waarmee de gebruiker inlogt. Wat bepaalt of de nieuwe techniek gebruikt wordt, is dus de **versie van Windows App op de lokale pc of laptop van de gebruiker**.
 
 | Kant | Wat er moet gebeuren |
 |------|----------------------|
 | Sessiehost (AVD/VDI) | Niets extra's installeren. Nieuwe Teams actueel houden (dat doet `Update-TeamsClient.ps1`) en `IsWVDEnvironment` op 1 laten staan |
-| Lokaal apparaat van de gebruiker | **Windows App bijwerken naar de nieuwste versie.** Gebruikt iemand nog de oude *Remote Desktop* client (`msrdc`)? Laat die overstappen naar Windows App |
+| Lokaal apparaat van de gebruiker | **Windows App bijwerken** naar minimaal `2.0.352.0` (macOS: `11.3.4`, de losse `.pkg`, niet die uit de App Store). De oude *Remote Desktop*-client wordt hiervoor niet meer ondersteund |
+| Sessiehost | Teams minimaal `24193.1805.3040.8975` — die eis haal je ruimschoots |
 
-> De precieze minimumversie van Windows App verschilt per bron en schuift op. Rol daarom simpelweg de nieuwste versie uit — dan zit je onder elke genoemde ondergrens.
+Lukt het op een apparaat niet, dan blokkeert meestal een beleidsinstelling de installatie. Het script controleert deze drie en noemt de Teams-foutcode erbij:
+
+| Beleid | Gevolg | Teams-fout |
+|--------|--------|------------|
+| `BlockNonAdminUserInstall = 1` | Een gebruiker zonder beheerrechten kan het pakket niet registreren | `16389` |
+| `AllowAllTrustedApps = 0` | Sideloading staat uit, het MSIX kan niet installeren | `15615` |
+| AppLocker actief | Heeft een uitzondering nodig voor de SlimCoreVdi-pakketten | `10083` |
+
+> Teams heeft **één herstart** nodig om van WebRTC naar SlimCore over te stappen nadat de plugin gevonden is.
 
 ### Controleren of het al goed staat
 
@@ -530,6 +541,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 

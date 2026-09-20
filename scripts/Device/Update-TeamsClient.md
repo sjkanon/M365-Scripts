@@ -312,6 +312,8 @@ Why the script looks the way it does — most of these are scars from a real fai
 
 **The redirector MSI does not upgrade itself.** It keeps one ProductCode across versions, so `msiexec /i` over an existing install answers `1638` ("another version of this product is already installed") instead of upgrading — which is exactly what a `-Force` run on a configured session host hit. The script now compares the downloaded ProductVersion with what is registered: same version means a repair (`REINSTALL=ALL REINSTALLMODE=vomus`), a different version means the old one is uninstalled first, and a `1638` that still slips through is reported as "leaving the existing one in place" instead of failing the run.
 
+**SlimCore is not ours to install.** An earlier version of this script warned "SlimCore packages not found" on session hosts, which was wrong twice over: the packages are staged on the endpoint by the plugin, not on the VM, and no script can install them there on the endpoint''s behalf. The check now reports whichever side it is standing on, and on an endpoint it looks for the policies that actually stop the staging. That mistake is worth remembering: a check that looks in the wrong place does not fail, it lies.
+
 **Provisioning is not installing.** `teamsbootstrapper.exe -p` stages the package for future sign-ins; it does not install it for whoever ran the script. A first production run on a session host proved the point: the bootstrapper reported success and the add-in step then died on `New Teams package not found after install`, because `Get-AppxPackage -Name MSTeams` looks at the current user and the admin running the script had no Teams. The add-in MSI is therefore located by globbing `%ProgramFiles%\WindowsApps\MSTeams_*_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi` and taking the newest version, which works whether or not any user has the package installed. The same blind spot applied to the SlimCore check, which now asks `-AllUsers` first.
 
 **No SID whitelist.** Enumerating user profiles by matching `S-1-5-21-*` looks right and silently breaks on Entra-joined devices, where user SIDs are `S-1-12-1-*`. Measured on this machine: the whitelist skipped the only real user, and the Outlook check reported "nobody has it registered" while `LoadBehavior=3` was sitting right there. The filter excludes the service SIDs (`S-1-5-18/19/20`), `.DEFAULT` and the `_Classes` hives instead.
@@ -371,10 +373,13 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Profiles that cannot be read | Listed by name with what it means for them: with a machine-wide registration they pick it up at the next Outlook start, without one there is nothing to fall back on. Both messages verified against stubbed profile lists |
 | Per-user registration repair | Planted a stale CLSID (both registry views) plus `LoadBehavior 2` against a healthy machine-wide registration: `-WhatIf` planned both actions, an applied run cleared the keys and set `LoadBehavior` to 3, exit `0`. The real fix on a production host is still to be confirmed |
 | Dangling add-in registration | Measured here: the COM class resolves to `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\1.26.21803\x64\Microsoft.Teams.AddinLoader.dll`, a targeted lookup across loaded hives costs ~100 ms, and a planted registration pointing at a missing DLL is reported as "re-enabling will not stick" |
+| SlimCore reporting | Verified on both sides: on this endpoint it finds `Microsoft.Teams.SlimCoreVdiHost.win-x64 2026.31.1.16`; with `RDInfraAgent` faked it reports the session-host wording instead. The three blocker policies were exercised against stubbed registry reads |
 | Redirector replacement | A second session host failed on `1638` with redirector `1.54.2408.19001` installed while `aka.ms` now serves `1.56.2603.20001`. Both paths are now planned correctly under `-WhatIf` (replace: `/x` then `/i`; same version: `REINSTALL=ALL`), but **neither msiexec call has been run for real** |
 | Stale machine-wide classic entry | That same host then failed on `1605` from the classic uninstall. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes the stale registry entry, continues and verifies clean, exit `0`. A classic uninstall that actually removes a registered product is still **untested** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
+
 
 
 
