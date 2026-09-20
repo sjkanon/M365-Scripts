@@ -90,7 +90,7 @@ Only what is actually missing gets done: steps 5–7 are skipped when the client
 | Component | What it is | When it is installed |
 |-----------|------------|----------------------|
 | `HKLM:\SOFTWARE\Microsoft\Teams\IsWVDEnvironment` (DWORD `1`) | Tells Teams to hand media to the redirector instead of rendering it in the session | When not already `1` |
-| Remote Desktop WebRTC Redirector Service | MSI from `https://aka.ms/msrdcwebrtcsvc/msi` (~1.7 MB, signed by Microsoft) | When not already installed, or with `-Force` |
+| Remote Desktop WebRTC Redirector Service | MSI from `https://aka.ms/msrdcwebrtcsvc/msi` (~1.7 MB, signed by Microsoft) | When not already installed, or with `-Force`. An installed redirector is **not** silently upgraded — `-Force` is what replaces it |
 
 The flag is step 3, before the client is provisioned, because Teams reads it at startup to decide which media path to use.
 
@@ -301,6 +301,8 @@ Why the script looks the way it does — most of these are scars from a real fai
 
 **AVD behind a switch, not autodetected.** A session host needs the `IsWVDEnvironment` flag and the WebRTC redirector; a normal endpoint needs neither, and setting the flag there tells Teams to hand media to a redirector that is not present. Autodetecting AVD would make that a silent, machine-dependent side effect, so it is an explicit switch — the script only *mentions* that a device looks like a session host.
 
+**The redirector MSI does not upgrade itself.** It keeps one ProductCode across versions, so `msiexec /i` over an existing install answers `1638` ("another version of this product is already installed") instead of upgrading — which is exactly what a `-Force` run on a configured session host hit. The script now compares the downloaded ProductVersion with what is registered: same version means a repair (`REINSTALL=ALL REINSTALLMODE=vomus`), a different version means the old one is uninstalled first, and a `1638` that still slips through is reported as "leaving the existing one in place" instead of failing the run.
+
 **Provisioning is not installing.** `teamsbootstrapper.exe -p` stages the package for future sign-ins; it does not install it for whoever ran the script. A first production run on a session host proved the point: the bootstrapper reported success and the add-in step then died on `New Teams package not found after install`, because `Get-AppxPackage -Name MSTeams` looks at the current user and the admin running the script had no Teams. The add-in MSI is therefore located by globbing `%ProgramFiles%\WindowsApps\MSTeams_*_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi` and taking the newest version, which works whether or not any user has the package installed. The same blind spot applied to the SlimCore check, which now asks `-AllUsers` first.
 
 **No SID whitelist.** Enumerating user profiles by matching `S-1-5-21-*` looks right and silently breaks on Entra-joined devices, where user SIDs are `S-1-12-1-*`. Measured on this machine: the whitelist skipped the only real user, and the Outlook check reported "nobody has it registered" while `LoadBehavior=3` was sitting right there. The filter excludes the service SIDs (`S-1-5-18/19/20`), `.DEFAULT` and the `_Classes` hives instead.
@@ -320,6 +322,7 @@ Why the script looks the way it does — most of these are scars from a real fai
 | `Could not determine the latest published build` | `config.teams.microsoft.com` is unreachable (proxy, firewall, no DNS). Use `-Force` to reinstall without the check |
 | `Bootstrapper signature is NotSigned/HashMismatch` | The download was intercepted or is a proxy error page. Check `-BootstrapperUrl` and the proxy; `-SkipSignatureCheck` only for a deliberate internal mirror |
 | `Downloaded file is only N bytes` | Same cause — a captive portal or error page instead of the installer |
+| `WebRTC Redirector install failed (exit code 1638)` | Should no longer happen: the old version is uninstalled first. If it does, the redirector is registered under a version msiexec disagrees with - remove it by hand from Programs and Features and re-run |
 | `timed out after 900 seconds and was killed` | A hung msiexec or a slow image. Raise `-TimeoutSeconds`; check whether another installation is running |
 | `No add-in MSI found under ...\WindowsApps` | The bootstrapper did not stage a package. Check the step 7 output and `C:\Program Files\WindowsApps` for an `MSTeams_*` folder |
 | Add-in installed but not visible in Outlook | Outlook has to restart. The script warns when Outlook is running during the install |
@@ -355,8 +358,10 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Classic removal on a real session host | `-Force -RemoveClassicTeams -AvdOptimizations` on an AVD host removed a real per-profile classic Teams `1.4.00.11161`. The machine-wide msiexec path is still **untested** - that host had no Machine-Wide Installer |
 | Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
 | Outlook add-in switched off | That production run found `LoadBehavior 2` for one account - the check earns its keep on the first real device it saw |
+| Redirector replacement | A second session host failed on `1638` with redirector `1.54.2408.19001` installed while `aka.ms` now serves `1.56.2603.20001`. Both paths are now planned correctly under `-WhatIf` (replace: `/x` then `/i`; same version: `REINSTALL=ALL`), but **neither msiexec call has been run for real** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 
