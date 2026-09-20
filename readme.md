@@ -754,6 +754,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (2)
+| Change |
+|--------|
+| Third production failure on the same session host, third fix: `Uninstall of Teams Machine-Wide Installer failed (exit code 1605)`. 1605 is "this action is only valid for products that are currently installed" — the entry in Programs and Features outlived the product, which is common once the new Teams bootstrapper has been over a machine |
+| There is nothing to uninstall in that case, but the stale entry would keep the script reporting classic Teams on every run, so it now removes the registry entry instead and carries on. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes a planted stale entry, verifies clean and exits `0` |
+| The uninstall-entry objects now carry their `RegistryPath` and `UninstallString`, which is what makes that cleanup possible |
+
 ### 2026-09-20
 | Change |
 |--------|

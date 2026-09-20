@@ -124,7 +124,9 @@ Preflight reports that package when `-AvdOptimizations` is used, but it is **inf
 
 The documented per-user uninstall is `Update.exe --uninstall -s`, but that has to run as the profile owner, which System cannot do — so the files are removed instead. Roaming data in `%APPDATA%\Microsoft\Teams` is left alone; it is inert once the client is gone.
 
-Failure handling splits the two deliberately:
+One case gets its own treatment. `msiexec /x` answering **1605** ("this action is only valid for products that are currently installed") means the entry in Programs and Features outlived the product — common once the new Teams bootstrapper has been over the machine. There is nothing to uninstall, but the stale entry would keep this script reporting classic Teams forever, so the registry entry is removed instead and the run carries on.
+
+Failure handling splits the rest deliberately:
 
 - A **machine-wide installer that survives** the uninstall is a real failure → `[FAIL]`, exit `1`.
 - A **per-profile folder that survives** is almost always a file lock from a running classic Teams → `[WARN]`, and the next run clears it once the user has signed out. The script warns up front when it sees `Teams.exe` running.
@@ -322,6 +324,7 @@ Why the script looks the way it does — most of these are scars from a real fai
 | `Could not determine the latest published build` | `config.teams.microsoft.com` is unreachable (proxy, firewall, no DNS). Use `-Force` to reinstall without the check |
 | `Bootstrapper signature is NotSigned/HashMismatch` | The download was intercepted or is a proxy error page. Check `-BootstrapperUrl` and the proxy; `-SkipSignatureCheck` only for a deliberate internal mirror |
 | `Downloaded file is only N bytes` | Same cause — a captive portal or error page instead of the installer |
+| `Uninstall of Teams Machine-Wide Installer failed (exit code 1605)` | Should no longer happen: 1605 means Windows Installer does not know the product, so the leftover Programs and Features entry is removed instead |
 | `WebRTC Redirector install failed (exit code 1638)` | Should no longer happen: the old version is uninstalled first. If it does, the redirector is registered under a version msiexec disagrees with - remove it by hand from Programs and Features and re-run |
 | `timed out after 900 seconds and was killed` | A hung msiexec or a slow image. Raise `-TimeoutSeconds`; check whether another installation is running |
 | `No add-in MSI found under ...\WindowsApps` | The bootstrapper did not stage a package. Check the step 7 output and `C:\Program Files\WindowsApps` for an `MSTeams_*` folder |
@@ -359,8 +362,10 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
 | Outlook add-in switched off | That production run found `LoadBehavior 2` for one account - the check earns its keep on the first real device it saw |
 | Redirector replacement | A second session host failed on `1638` with redirector `1.54.2408.19001` installed while `aka.ms` now serves `1.56.2603.20001`. Both paths are now planned correctly under `-WhatIf` (replace: `/x` then `/i`; same version: `REINSTALL=ALL`), but **neither msiexec call has been run for real** |
+| Stale machine-wide classic entry | That same host then failed on `1605` from the classic uninstall. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes the stale registry entry, continues and verifies clean, exit `0`. A classic uninstall that actually removes a registered product is still **untested** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 

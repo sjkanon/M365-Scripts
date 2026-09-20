@@ -390,9 +390,11 @@ function Get-TeamsMeetingAddInEntry {
             $name = $key.GetValue('DisplayName')
             if ($name -like '*Microsoft Teams Meeting Add-in*') {
                 [PSCustomObject]@{
-                    ProductCode = $key.PSChildName
-                    DisplayName = $name
-                    Version     = $key.GetValue('DisplayVersion')
+                    ProductCode     = $key.PSChildName
+                    DisplayName     = $name
+                    Version         = $key.GetValue('DisplayVersion')
+                    RegistryPath    = $key.PSPath
+                    UninstallString = $key.GetValue('UninstallString')
                 }
             }
         }
@@ -407,9 +409,11 @@ function Get-ClassicTeamsEntry {
             $name = $key.GetValue('DisplayName')
             if ($name -like '*Teams Machine-Wide Installer*') {
                 [PSCustomObject]@{
-                    ProductCode = $key.PSChildName
-                    DisplayName = $name
-                    Version     = $key.GetValue('DisplayVersion')
+                    ProductCode     = $key.PSChildName
+                    DisplayName     = $name
+                    Version         = $key.GetValue('DisplayVersion')
+                    RegistryPath    = $key.PSPath
+                    UninstallString = $key.GetValue('UninstallString')
                 }
             }
         }
@@ -541,9 +545,11 @@ function Get-WebRtcRedirectorEntry {
             $name = $key.GetValue('DisplayName')
             if ($name -like '*Remote Desktop WebRTC Redirector Service*') {
                 [PSCustomObject]@{
-                    ProductCode = $key.PSChildName
-                    DisplayName = $name
-                    Version     = $key.GetValue('DisplayVersion')
+                    ProductCode     = $key.PSChildName
+                    DisplayName     = $name
+                    Version         = $key.GetValue('DisplayVersion')
+                    RegistryPath    = $key.PSPath
+                    UninstallString = $key.GetValue('UninstallString')
                 }
             }
         }
@@ -1020,9 +1026,26 @@ try {
             $target = "$($entry.DisplayName) $($entry.Version) [$($entry.ProductCode)]"
             if ($PSCmdlet.ShouldProcess($target, 'msiexec /x /qn (uninstall)')) {
                 $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($entry.ProductCode) /qn /norestart"
+
                 if ($result.Success) {
                     Write-Ok "Uninstalled $($entry.DisplayName)"
                     if ($result.RebootRequired) { $rebootRequired = $true }
+                } elseif ($result.ExitCode -eq 1605) {
+                    # 1605 is "this action is only valid for products that are
+                    # currently installed": the entry in Programs and Features
+                    # outlived the product itself, which is common once the new Teams
+                    # bootstrapper has been over the machine. Nothing to uninstall,
+                    # but the stale entry keeps this script reporting classic Teams
+                    # forever, so it goes too.
+                    Write-Warn "$($entry.DisplayName) is no longer registered with Windows Installer (1605) - the entry in Programs and Features is stale"
+                    if ($PSCmdlet.ShouldProcess($entry.RegistryPath, 'Remove the stale uninstall entry')) {
+                        Remove-Item -Path $entry.RegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+                        if (Test-Path $entry.RegistryPath) {
+                            Write-Warn "Could not remove the stale entry at $($entry.RegistryPath)"
+                        } else {
+                            Write-Ok 'Removed the stale uninstall entry'
+                        }
+                    }
                 } else {
                     throw "Uninstall of $($entry.DisplayName) failed ($($result.Message))"
                 }
@@ -1273,6 +1296,7 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
 
 
 
