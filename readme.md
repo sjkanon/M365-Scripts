@@ -754,6 +754,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (4)
+| Change |
+|--------|
+| "I do not see it loaded on all profiles yet" was a visibility gap, not only a Teams one: a profile whose hive is not mounted cannot be read at all, and the script simply left it out — so an unreadable profile and a healthy one looked identical in the output. It now lists those profiles by name, with what it means for them: with a healthy machine-wide registration they pick the add-in up at the first Outlook start, without one there is nothing to fall back on |
+| Worth stating plainly, because it decides whether there is anything to fix: a profile that is not signed in is not broken. The machine-wide registration covers users who have no per-user state; only a user who already has their own (disabled, or pointing at a removed DLL) keeps shadowing it |
+| Both messages verified against stubbed profile lists. Not verified here: mounting an unmounted hive to inspect or repair a signed-out profile — `reg load` needs privileges this workstation does not have, so that machinery is deliberately not built on an untested assumption |
+
 ### 2026-09-20 (3)
 | Change |
 |--------|

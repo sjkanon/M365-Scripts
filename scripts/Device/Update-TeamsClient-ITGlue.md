@@ -188,6 +188,15 @@ De add-in machinebreed installeren is één ding; of **Outlook** hem laadt is ee
 
 > Draait het script als System via NinjaOne, dan ziet het alleen de profielen van gebruikers die op dat moment **ingelogd** zijn. Een profiel waar niemand in zit kan het niet uitlezen. Dat is geen fout en laat de job dus ook niet mislukken.
 
+**"Ik zie hem nog niet geladen op alle profielen"** — meestal geen storing. Het script meldt die profielen expliciet:
+
+```
+[SKIP] 2 profile(s) are not signed in, so their Outlook registration cannot be read (DOMEIN\jan, DOMEIN\piet)
+       - they pick up the machine-wide registration the first time that user starts Outlook
+```
+
+Staat er in dezelfde output `[ OK ] Outlook loads the add-in for all users (machine-wide, ...)`, dan is het geregeld: die gebruikers krijgen de add-in zodra ze Outlook voor het eerst starten. Staat die regel er **niet**, dan is er niets om op terug te vallen en moet je de machinebrede installatie eerst rechtzetten (`-Force`).
+
 ---
 
 ## Waar het script naar Teams zoekt
@@ -517,6 +526,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 
