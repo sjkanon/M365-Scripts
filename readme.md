@@ -754,6 +754,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (5)
+| Change |
+|--------|
+| A clean production run confirmed three earlier fixes on a real session host: the redirector repaired in place (`The download is the installed version (1.56.2603.20001)`, so the previous run really did upgrade 1.54 → 1.56), the add-in resolved from the staged package after provisioning, and the whole flow finished at exit `0` |
+| It also pinned down the one remaining warning: `BAKKERPARTNERS\admin` has a registration pointing at add-in `1.24.19202`, a per-user copy long gone, which shadows a perfectly healthy machine-wide `1.26.21803`. `-RepairOutlookAddIn` (Ninja variable `repairOutlookAddIn`) now clears that stale `Classes\CLSID\{19A6E644-...}` key and puts `LoadBehavior` back to 3, so COM resolves to the machine-wide registration again |
+| It only acts when that machine-wide registration is healthy — clearing the shadow with nothing behind it would leave the user worse off — and it is off by default, because it writes into another user's hive. It counts as work, so `-CheckOnly` reports it and `-Quiet` surfaces it |
+| Tested against planted keys in both registry views: `-WhatIf` plans both actions, an applied run clears the CLSID keys, sets `LoadBehavior` to 3 and exits `0`. Untested: whether Outlook then actually loads the add-in for that user — that is the next production run |
+
 ### 2026-09-20 (4)
 | Change |
 |--------|

@@ -185,6 +185,7 @@ De add-in machinebreed installeren is één ding; of **Outlook** hem laadt is ee
 | `[WARN] Outlook has not registered the add-in for any signed-in user yet` | Nog niemand ingelogd, of Outlook is nog niet gestart sinds de installatie | Gebruiker laten in- en uitloggen of Outlook opnieuw starten, daarna opnieuw controleren |
 | `[WARN] Outlook has the add-in switched off for ... (LoadBehavior 2)` | **Outlook heeft de add-in zelf uitgeschakeld** — meestal na een crash of een trage start | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Blijft het terugvallen, doorzetten naar level 3 |
 | `[WARN] Outlook knows the add-in ... but has no LoadBehavior set` | Registratie half aangelegd | Outlook opnieuw starten en opnieuw controleren |
+| `[WARN] The add-in is registered for ... but its DLL is gone (...)` | De eigen registratie van die gebruiker wijst naar een bestand dat er niet meer is en overschaduwt de machinebrede installatie | **Vinkje terugzetten helpt niet.** Draai het script met `-RepairOutlookAddIn` (of vink `repairOutlookAddIn` aan): dat ruimt die verouderde registratie op, waarna de machinebrede versie het overneemt bij de volgende Outlook-start |
 
 > Draait het script als System via NinjaOne, dan ziet het alleen de profielen van gebruikers die op dat moment **ingelogd** zijn. Een profiel waar niemand in zit kan het niet uitlezen. Dat is geen fout en laat de job dus ook niet mislukken.
 
@@ -327,6 +328,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-Force` | Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams |
 | `-AvdOptimizations` | Alleen op AVD/VDI-sessiehosts: zet de mediavlag `IsWVDEnvironment` en installeert de WebRTC-redirector |
 | `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
+| `-RepairOutlookAddIn` | Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen |
 | `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
 | `-SkipMeetingAddIn` | Alleen de client, de Outlook-add-in met rust laten |
 | `-TimeoutSeconds` | Standaard 900. Verhogen op trage werkplekken |
@@ -375,6 +377,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `WebRTC Redirector install failed (exit code 1638)` | Er stond al een andere versie van de redirector; die MSI kan niet over zichzelf heen installeren | Hoort niet meer voor te komen: het script verwijdert de oude versie eerst. Komt het toch terug, verwijder de redirector handmatig via Programma's en onderdelen en draai opnieuw | L3 |
 | `Teams Meeting Add-in installation failed` | Client staat er, add-in niet | Outlook volledig sluiten en het script opnieuw draaien | L2 |
 | `Outlook has the add-in switched off for ... (LoadBehavior 2)` | Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet | L2 |
+| `The add-in is registered for ... but its DLL is gone (...)` | Verouderde registratie van die gebruiker overschaduwt de machinebrede installatie | Draaien met `-RepairOutlookAddIn`; vinkje terugzetten in Outlook helpt niet | L2 |
 | `Teams installation failed` | De installatie is niet doorgekomen | Log in `C:\Temp` lezen en doorzetten | L3 |
 | `A reboot is required` | Windows wil herstarten om af te ronden | Herstart inplannen met de gebruiker | L1 |
 
@@ -440,6 +443,7 @@ Met script variables krijgt de collega die het script draait vinkjes in plaats v
 | `checkOnly` | Checkbox | Alleen controleren, niets installeren |
 | `force` | Checkbox | Herinstalleren ook als de versie al actueel is |
 | `avdOptimizations` | Checkbox | AVD/VDI: mediavlag + WebRTC-redirector afdwingen |
+| `repairOutlookAddIn` | Checkbox | Verouderde per-gebruiker-registraties van de add-in opruimen |
 | `removeClassicTeams` | Checkbox | Classic Teams verwijderen (machinebreed + per gebruiker) |
 | `skipMeetingAddIn` | Checkbox | Outlook-add-in met rust laten |
 | `workingDir` | Text | Andere downloadmap |
@@ -526,6 +530,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 
