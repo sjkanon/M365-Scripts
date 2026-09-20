@@ -362,6 +362,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `Downloaded file is only N bytes` | Zelfde oorzaak: een foutpagina in plaats van de installer | Zie hierboven | L2 |
 | `timed out after 900 seconds and was killed` | Installatie bleef hangen | Werkplek herstarten en opnieuw proberen; anders `-TimeoutSeconds` verhogen | L2 |
 | `Another installation is in progress (1618)` | Er loopt al een installatie | Geen actie — het script probeert het zelf opnieuw | L1 |
+| `WebRTC Redirector install failed (exit code 1638)` | Er stond al een andere versie van de redirector; die MSI kan niet over zichzelf heen installeren | Hoort niet meer voor te komen: het script verwijdert de oude versie eerst. Komt het toch terug, verwijder de redirector handmatig via Programma's en onderdelen en draai opnieuw | L3 |
 | `Teams Meeting Add-in installation failed` | Client staat er, add-in niet | Outlook volledig sluiten en het script opnieuw draaien | L2 |
 | `Outlook has the add-in switched off for ... (LoadBehavior 2)` | Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet | L2 |
 | `Teams installation failed` | De installatie is niet doorgekomen | Log in `C:\Temp` lezen en doorzetten | L3 |
@@ -515,6 +516,7 @@ Dat "mislukt" bij code `2` is bedoeld: zo vallen precies de werkplekken op die a
 **Achteraf:**
 
 > De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop *Nieuwe Teams-vergadering* niet in je agenda, laat het ons dan even weten.
+
 
 
 

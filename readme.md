@@ -754,6 +754,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20
+| Change |
+|--------|
+| Fixed the second production failure on a session host: `WebRTC Redirector install failed (exit code 1638)`. That MSI keeps one ProductCode across versions, so `msiexec /i` over an existing install refuses with "another version of this product is already installed" rather than upgrading — and `-Force` walks straight into it on any host that already has the redirector |
+| The script now reads the downloaded ProductVersion and decides: same version → repair in place (`REINSTALL=ALL REINSTALLMODE=vomus`), different version → uninstall the old one first, then install. A `1638` that still slips through is reported as "leaving the existing one in place" instead of failing the whole run |
+| Measured while fixing it: `aka.ms/msrdcwebrtcsvc/msi` now serves `1.56.2603.20001`, while that host had `1.54.2408.19001` installed — so this was an upgrade being refused, not a duplicate install. Both paths are planned correctly under `-WhatIf`; neither msiexec call has been run for real yet, which the docs say out loud |
+| Also written down explicitly: an installed redirector is **not** silently upgraded by a normal run. Only `-Force` replaces it. With WebRTC losing support on 1 October 2026, keeping that deliberate beats auto-upgrading a component on its way out |
+
 ### 2026-09-18 (4)
 | Change |
 |--------|

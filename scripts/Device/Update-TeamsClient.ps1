@@ -41,9 +41,11 @@
     HKLM:\SOFTWARE\Microsoft\Teams\IsWVDEnvironment = 1 (set before Teams is
     provisioned, which is why it is step 3) and the Remote Desktop WebRTC Redirector
     Service from https://aka.ms/msrdcwebrtcsvc/msi. Both are installed only when
-    missing, so a scheduled run on a session host costs no extra download. -Force
-    reinstalls the redirector as well. Without the switch the script only points out
-    that the device looks like a session host.
+    missing, so a scheduled run on a session host costs no extra download - which also
+    means an already installed redirector is not silently upgraded; -Force is what
+    replaces it (older version removed first, because its MSI keeps one ProductCode
+    across versions and plain /i then answers 1638). Without the switch the script
+    only points out that the device looks like a session host.
 
     WebRTC is being retired: end of support 1 October 2026, end of availability
     1 April 2027. Its replacement, SlimCore, needs nothing installed here - it ships
@@ -957,11 +959,41 @@ try {
                 Write-Ok "Downloaded $($file.Name) ($([math]::Round($file.Length / 1MB, 1)) MB), signature verified"
             }
 
-            if ($PSCmdlet.ShouldProcess('Remote Desktop WebRTC Redirector Service', 'msiexec /i /qn (install)')) {
-                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/i `"$webRtcMsi`" /qn /norestart"
-                if (-not $result.Success) { throw "WebRTC Redirector install failed ($($result.Message))" }
-                if ($result.RebootRequired) { $rebootRequired = $true }
-                Write-Ok 'WebRTC Redirector installed'
+            # The redirector MSI keeps its ProductCode across versions, so msiexec /i
+            # over an existing install returns 1638 ("another version of this product
+            # is already installed") instead of upgrading. Same version: repair in
+            # place. Different version: take the old one off first.
+            $msiVersion = if (Test-Path $webRtcMsi) { Get-MsiProductVersion -Path $webRtcMsi } else { $null }
+            $msiArgs    = '/i "{0}" /qn /norestart' -f $webRtcMsi
+
+            if ($webRtcEntry -and -not $msiVersion) {
+                Write-Skip 'On a real run the downloaded version decides whether the installed redirector is removed first'
+            } elseif ($webRtcEntry -and $msiVersion) {
+                if ($webRtcEntry.Version -eq $msiVersion) {
+                    Write-Skip "The download is the installed version ($msiVersion) - repairing in place"
+                    $msiArgs = '/i "{0}" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart' -f $webRtcMsi
+                } else {
+                    Write-Ok "Replacing WebRTC Redirector $($webRtcEntry.Version) with $msiVersion"
+                    if ($PSCmdlet.ShouldProcess("Remote Desktop WebRTC Redirector Service $($webRtcEntry.Version)", 'msiexec /x /qn (uninstall the old version)')) {
+                        $removal = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($webRtcEntry.ProductCode) /qn /norestart"
+                        if (-not $removal.Success) {
+                            throw "Could not remove WebRTC Redirector $($webRtcEntry.Version) ($($removal.Message))"
+                        }
+                        if ($removal.RebootRequired) { $rebootRequired = $true }
+                    }
+                }
+            }
+
+            if ($PSCmdlet.ShouldProcess('Remote Desktop WebRTC Redirector Service', "msiexec.exe $msiArgs")) {
+                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments $msiArgs
+                if ($result.ExitCode -eq 1638) {
+                    Write-Warn 'msiexec reports another version of the redirector is already installed (1638) - leaving the existing one in place'
+                } elseif (-not $result.Success) {
+                    throw "WebRTC Redirector install failed ($($result.Message))"
+                } else {
+                    if ($result.RebootRequired) { $rebootRequired = $true }
+                    Write-Ok 'WebRTC Redirector installed'
+                }
             }
         }
     }
