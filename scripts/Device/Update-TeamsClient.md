@@ -146,6 +146,7 @@ That is not the only way the add-in gets onto a device. On an ordinary endpoint 
 | Add-in files | `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\1.26.21803` (note the hyphen) |
 | MSI the client installed it from | `%LOCALAPPDATA%\Microsoft\TeamsMeetingAddinMsis\1.26.21803\` — seven cached versions, one per Teams update since April |
 | Outlook COM registration | `HKCU\SOFTWARE\Microsoft\Office\Outlook\Addins\TeamsAddin.FastConnect`, `LoadBehavior=3` |
+| The DLL Outlook actually loads | `HKCU\SOFTWARE\Classes\CLSID\{19A6E644-14E6-4A60-B8D7-DD20610A871D}\InprocServer32` → `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\<version>\x64\Microsoft.Teams.AddinLoader.dll` |
 | Machine-wide Outlook registration | none — no Teams entry under `HKLM\...\Office\Outlook\Addins` at all |
 | Uninstall entry | `HKLM` **64-bit** hive, product code `{A7AB73A3-...}`, `InstallSource` pointing at that per-user MSI cache |
 
@@ -153,6 +154,8 @@ Three consequences worth knowing:
 
 - **Outlook loads add-ins per user.** A machine-wide install makes the add-in *available* to everyone; each user's Outlook still picks it up on its next start. That is why the script warns when Outlook is running.
 - **What the verification proves.** Step 8 reads the `HKLM` uninstall keys *and* asks whether Outlook itself has the add-in registered, for every signed-in user: `HKEY_USERS\<sid>\SOFTWARE\Microsoft\Office\Outlook\Addins\TeamsAddin.FastConnect`, plus the machine-wide equivalent under `HKLM`. `LoadBehavior 3` means Outlook loads it at startup; `2` or `0` means Outlook switched it off, which is the real "the button is gone" case and needs a human. A profile nobody is signed into cannot be read at all — not broken, just unseen — so none of this is treated as a failure.
+- **A per-user registration outranks the machine-wide one.** `HKCU\SOFTWARE\Classes` wins over `HKLM\SOFTWARE\Classes` for that user, so a user who already has the client-installed copy keeps loading the DLL from their own profile even after a machine-wide install lands in `Program Files (x86)`. Which also means the two are not interchangeable: the machine-wide install does not repair a broken per-user one.
+- **A dangling registration is what `LoadBehavior 2` usually means.** If that `InprocServer32` path no longer exists — the profile copy was removed while the registration stayed — Outlook tries, fails and switches the add-in off again. Ticking the box back on does not survive that; the add-in has to be installed again for that user. The script resolves the CLSID per signed-in user and reports the two cases apart, because they need different fixes.
 - **`-SkipMeetingAddIn` is defensible on normal endpoints.** There the client keeps the add-in current on its own; the machine-wide install is what session hosts and shared machines need.
 
 > The uninstall entry landed in the **64-bit** hive here, not in `WOW6432Node`. It is not fixed which one it is, which is exactly why both are scanned.
@@ -361,10 +364,12 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Classic removal on a real session host | `-Force -RemoveClassicTeams -AvdOptimizations` on an AVD host removed a real per-profile classic Teams `1.4.00.11161`. The machine-wide msiexec path is still **untested** - that host had no Machine-Wide Installer |
 | Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
 | Outlook add-in switched off | That production run found `LoadBehavior 2` for one account - the check earns its keep on the first real device it saw |
+| Dangling add-in registration | Measured here: the COM class resolves to `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\1.26.21803\x64\Microsoft.Teams.AddinLoader.dll`, a targeted lookup across loaded hives costs ~100 ms, and a planted registration pointing at a missing DLL is reported as "re-enabling will not stick" |
 | Redirector replacement | A second session host failed on `1638` with redirector `1.54.2408.19001` installed while `aka.ms` now serves `1.56.2603.20001`. Both paths are now planned correctly under `-WhatIf` (replace: `/x` then `/i`; same version: `REINSTALL=ALL`), but **neither msiexec call has been run for real** |
 | Stale machine-wide classic entry | That same host then failed on `1605` from the classic uninstall. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes the stale registry entry, continues and verifies clean, exit `0`. A classic uninstall that actually removes a registered product is still **untested** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 
