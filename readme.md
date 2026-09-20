@@ -754,6 +754,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-20 (6)
+| Change |
+|--------|
+| Corrected a check that was looking in the wrong place: the script warned `SlimCore packages not found` on session hosts, but Microsoft stages SlimCore **on the endpoint**, not on the VM — *"Step 3: SlimCore MSIX staging and registration on the endpoint ... the plugin silently executes this step, without user or admin intervention"*. The warning was noise on every session host, and a check that looks in the wrong place does not fail, it lies |
+| The report is now context-aware. On a session host it confirms the Teams build against the documented minimum `24193.1805.3040.8975` and states that SlimCore belongs on the endpoint. On an endpoint it reports whether the packages are staged, and checks the three policies Microsoft documents as blocking that staging, each with the Teams error code it surfaces: `BlockNonAdminUserInstall` (16389), `AllowAllTrustedApps` (15615) and AppLocker (10083) |
+| Also settled the version question from last week: Windows App for Windows `2.0.352.0` is the documented minimum on the endpoint, and the classic Remote Desktop client is no longer supported for this at all |
+| Resilience: MSI exit code `1641` (success, reboot already initiated) counted as a failure and aborted the run. It is now a success with a reboot flagged, alongside `3010` |
+| Verified on both sides: this endpoint reports `Microsoft.Teams.SlimCoreVdiHost.win-x64 2026.31.1.16`; with `RDInfraAgent` faked the session-host wording appears instead; the three blockers were exercised against stubbed registry reads |
+
 ### 2026-09-20 (5)
 | Change |
 |--------|

@@ -48,11 +48,14 @@
     only points out that the device looks like a session host.
 
     WebRTC is being retired: end of support 1 October 2026, end of availability
-    1 April 2027. Its replacement, SlimCore, needs nothing installed here - it ships
-    inside new Teams (the Microsoft.Teams.SlimCore* packages, reported in preflight)
-    and inside Windows App on the endpoint the user connects from. The endpoint's
-    Windows App version is what decides which path is used, and this script cannot see
-    that from the session host. IsWVDEnvironment stays required either way, and
+    1 April 2027. Its replacement, SlimCore, cannot be installed here at all: the
+    plugin bundled with Windows App stages and registers the MSIX on the endpoint the
+    user connects from, silently and without admin intervention. The session host only
+    has to run a Teams build of 24193.1805.3040.8975 or newer; the endpoint needs
+    Windows App 2.0.352.0 or newer (the classic Remote Desktop client is no longer
+    supported). Preflight reports whichever side it is standing on, and on an endpoint
+    it also checks the policies that block the staging - BlockNonAdminUserInstall,
+    AllowAllTrustedApps and AppLocker. IsWVDEnvironment stays required either way, and
     Microsoft still advises keeping the redirector as a fallback for endpoints that
     cannot do SlimCore, so the switch keeps installing it. Revisit before April 2027.
 
@@ -348,6 +351,13 @@ $AvdRegistryPath = 'HKLM:\SOFTWARE\Microsoft\Teams'
 # The meeting add-in's COM class. Stable across versions, and the only way to find
 # out which DLL Outlook would actually load for a given user.
 $AddInClsid = '{19A6E644-14E6-4A60-B8D7-DD20610A871D}'
+
+# SlimCore, the WebRTC successor, is staged and registered on the *endpoint* the
+# user connects from - the plugin does it silently, without admin intervention -
+# and never on the session host. These are Microsoft's documented minimums for
+# Azure Virtual Desktop and Windows 365.
+$SlimCoreMinimumTeamsBuild = [version] '24193.1805.3040.8975'
+$SlimCoreMinimumWindowsApp = '2.0.352.0'
 
 # -Confirm:$false means "never ask", for an unattended run from a scheduler or RMM.
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
@@ -667,6 +677,65 @@ function Test-AvdSessionHost {
     return (Test-Path 'HKLM:\SOFTWARE\Microsoft\RDInfraAgent')
 }
 
+function Get-SlimCoreBlocker {
+    <#
+        Registry policies Microsoft documents as stopping the SlimCore MSIX from
+        staging, with the error code Teams reports for each. They apply wherever the
+        staging happens, which is the endpoint.
+    #>
+    $blockers = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($path in 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\ApplicationManagement',
+                      'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx') {
+        $policy = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+        if ((Get-PropertyValue $policy 'BlockNonAdminUserInstall') -eq 1) {
+            $blockers.Add('BlockNonAdminUserInstall is 1 - a non-admin cannot register the SlimCore packages (Teams reports error 16389)')
+        }
+        if ((Get-PropertyValue $policy 'AllowAllTrustedApps') -eq 0) {
+            $blockers.Add('AllowAllTrustedApps is 0 - sideloading is off, so the SlimCore MSIX cannot install (Teams reports error 15615)')
+        }
+    }
+
+    if (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\SrpV2') {
+        $blockers.Add('AppLocker policy is present - without an exception for the SlimCoreVdi packages Teams reports error 10083')
+    }
+
+    return ($blockers | Select-Object -Unique)
+}
+
+function Write-SlimCoreStatus {
+    <#
+        Where SlimCore stands, from the point of view of the machine this runs on.
+
+        On a session host the packages are never expected: the plugin stages them on
+        the endpoint. All the host contributes is a recent enough Teams build. On an
+        endpoint the packages and the blocking policies are the real story.
+    #>
+    param([version] $TeamsVersion)
+
+    if (Test-AvdSessionHost) {
+        if ($TeamsVersion -and $TeamsVersion -lt $SlimCoreMinimumTeamsBuild) {
+            Write-Warn "Teams $TeamsVersion is below $SlimCoreMinimumTeamsBuild, the minimum build that can use SlimCore"
+        } else {
+            Write-Ok "Teams build supports SlimCore - whether it is used depends on the endpoint's Windows App ($SlimCoreMinimumWindowsApp or newer); SlimCore itself is staged there, never here"
+        }
+    } else {
+        $staged = @(Get-AppxPackage -AllUsers -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
+                  Select-Object -First 1
+        if (-not $staged) {
+            $staged = @(Get-AppxPackage -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
+                      Select-Object -First 1
+        }
+        if ($staged) {
+            Write-Ok "SlimCore is staged on this endpoint ($($staged.Version))"
+        } else {
+            Write-Skip 'SlimCore is not staged on this endpoint yet - the plugin downloads it on the first optimized connection'
+        }
+    }
+
+    foreach ($blocker in Get-SlimCoreBlocker) { Write-Warn "SlimCore blocker: $blocker" }
+}
+
 function Save-VerifiedDownload {
     <#
         Download a Microsoft installer and refuse anything that is not what it claims
@@ -833,10 +902,13 @@ function Invoke-Installer {
             continue
         }
 
+        # 3010 = reboot required, 1641 = reboot already initiated by the installer.
+        # Both are successes that happen to need a restart; failing on them would
+        # abort a run that actually worked.
         return [PSCustomObject]@{
-            Success        = ($code -in @(0, 3010))
+            Success        = ($code -in @(0, 3010, 1641))
             ExitCode       = $code
-            RebootRequired = ($code -eq 3010)
+            RebootRequired = ($code -in @(3010, 1641))
             Message        = "exit code $code"
         }
     }
@@ -918,6 +990,13 @@ try {
         Write-OutlookAddInStatus -Registrations $addInRegistrations
     }
 
+    # SlimCore is reported separately from -AvdOptimizations: it is an endpoint-side
+    # story, and on an endpoint nobody passes that switch.
+    if ($AvdOptimizations -or (Test-AvdSessionHost) -or
+        (Get-AppxPackage -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue)) {
+        Write-SlimCoreStatus -TeamsVersion $installedVersion
+    }
+
     $avdFlagSet  = $false
     $webRtcEntry = $null
     if ($AvdOptimizations) {
@@ -930,22 +1009,6 @@ try {
         if ($webRtcEntry) { Write-Ok "WebRTC Redirector is installed ($($webRtcEntry.Version))" }
         else              { Write-Warn 'Remote Desktop WebRTC Redirector is not installed' }
 
-        # Informational only. SlimCore replaces WebRTC (support ends 1 October 2026)
-        # and ships with new Teams, but whether it is actually used depends on the
-        # Windows App version on the endpoint, which is invisible from here.
-        # -AllUsers matters: the packages belong to whoever has Teams, which on a
-        # session host is not the account running this script.
-        $slimCoreHost = @(Get-AppxPackage -AllUsers -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
-                        Select-Object -First 1
-        if (-not $slimCoreHost) {
-            $slimCoreHost = @(Get-AppxPackage -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
-                            Select-Object -First 1
-        }
-        if ($slimCoreHost) {
-            Write-Ok "SlimCore is present ($($slimCoreHost.Version)) - the endpoint's Windows App version decides whether it is used"
-        } else {
-            Write-Warn 'SlimCore packages not found - this host still depends on WebRTC, which loses support on 1 October 2026'
-        }
     } elseif (Test-AvdSessionHost) {
         Write-Skip 'This looks like an AVD session host - consider -AvdOptimizations for the media flag and the WebRTC redirector'
     }
@@ -1444,6 +1507,9 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
+
+
 
 
 
