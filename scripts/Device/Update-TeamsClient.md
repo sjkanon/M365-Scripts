@@ -159,6 +159,16 @@ Three consequences worth knowing:
 - **A profile that is not signed in is not broken, just unreadable.** Its hive is not mounted, so nothing can be said about it. With a healthy machine-wide registration in place that profile picks the add-in up the first time that user starts Outlook — which is why "not loaded on every profile yet" is usually a matter of waiting rather than a fault. The script lists those profiles by name instead of leaving them out, because an absent profile and a healthy one look identical in the output otherwise.
 - **A dangling registration is what `LoadBehavior 2` usually means.** If that `InprocServer32` path no longer exists — the profile copy was removed while the registration stayed — Outlook tries, fails and switches the add-in off again. Ticking the box back on does not survive that; the add-in has to be installed again for that user. The script resolves the CLSID per signed-in user and reports the two cases apart, because they need different fixes.
 - **A reinstall sweeps every copy first.** The MSI clears one. The machine-wide folder, the per-profile folders under `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in` and the per-user COM registrations are removed with it, because a copy left behind is exactly what becomes a shadowing registration pointing at files that no longer exist. `-RepairOutlookAddIn` exists for the devices where that already happened.
+- **"It still does not load" gets a reason, not a shrug.** A registration that is present but not loading is checked against the three causes that leave no trace in `LoadBehavior` itself, and each is reported as a `why:` line under the warning:
+
+  | Cause | What the script looks at | The fix |
+  |-------|--------------------------|---------|
+  | Bitness mismatch | Office platform from the Click-to-Run configuration versus the `\x64\` or `\x86\` loader the registration points at | Register the loader matching Outlook''s bitness |
+  | Outlook parked it | `Resiliency\DisabledItems` and `CrashedAddins` in that user''s hive, decoded from the binary values | File > Options > Add-ins > Manage: Disabled Items, then the `DoNotDisableAddinList` policy to keep it out |
+  | Policy overrides the user | `HKLM\SOFTWARE\Policies\Microsoft\Office\<ver>\Outlook\Addins\TeamsAddin.FastConnect` | Change or remove that policy |
+
+  When none of them applies it says so, which is also an answer: nothing on the machine is blocking it, so what is left is a full Outlook restart and a user who has signed in to Teams at least once.
+
 - **Repairing it means removing the shadow, not adding another install.** `-RepairOutlookAddIn` deletes the user''s stale `Classes\CLSID\{19A6E644-...}` key so COM resolves to the machine-wide registration again, and puts `LoadBehavior` back to 3. It only acts when that machine-wide registration is healthy — clearing the shadow with nothing behind it would leave the user worse off. Off by default: it writes into another user''s hive.
 - **`-SkipMeetingAddIn` is defensible on normal endpoints.** There the client keeps the add-in current on its own; the machine-wide install is what session hosts and shared machines need.
 
@@ -372,6 +382,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
 | Outlook add-in switched off | That production run found `LoadBehavior 2` for one account - the check earns its keep on the first real device it saw |
 | Profiles that cannot be read | Listed by name with what it means for them: with a machine-wide registration they pick it up at the next Outlook start, without one there is nothing to fall back on. Both messages verified against stubbed profile lists |
+| Add-in load diagnostics | Both detections exercised: an x86 loader path against x64 Office produces the bitness reason, and a planted binary `CrashedAddins` value is decoded and reported. A healthy registration produces no `why:` line at all |
 | Add-in sweep before reinstall | `Get-TeamsAddInFolder` verified against this device (finds the real per-profile copy), and the `-WhatIf` plan shows the folder plus both CLSID views being removed before the reinstall. The removal itself reuses mechanics proven live in the classic-Teams and repair tests; the sweep as a whole runs for the first time on a production host |
 | Per-user registration repair | Planted a stale CLSID (both registry views) plus `LoadBehavior 2` against a healthy machine-wide registration: `-WhatIf` planned both actions, an applied run cleared the keys and set `LoadBehavior` to 3, exit `0`. The real fix on a production host is still to be confirmed |
 | Dangling add-in registration | Measured here: the COM class resolves to `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\1.26.21803\x64\Microsoft.Teams.AddinLoader.dll`, a targeted lookup across loaded hives costs ~100 ms, and a planted registration pointing at a missing DLL is reported as "re-enabling will not stick" |
@@ -380,6 +391,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Stale machine-wide classic entry | That same host then failed on `1605` from the classic uninstall. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes the stale registry entry, continues and verifies clean, exit `0`. A classic uninstall that actually removes a registered product is still **untested** |
 
 Not yet exercised: a real apply run (uninstall + install) and the UAC self-elevation. Run `-WhatIf -Confirm:$false` on one pilot device before rolling out.
+
 
 
 
