@@ -10,13 +10,15 @@
       1. Preflight  - inventory of every place Teams can live on the device: the
                       MSTeams AppX package (per user and provisioned), classic Teams
                       (machine-wide installer and per-profile installs), the meeting
-                      add-in, whether Outlook itself has it registered, and any
-                      running Teams/Outlook process.
+                      add-in, whether Outlook itself has it registered, any
+                      running Teams/Outlook process, and - on a session host - what
+                      Teams logged about the media optimization.
       2. Check      - ask the Teams client config service which build is current for
                       this architecture and compare it with what is installed. Up to
                       date and nothing missing? Nothing happens at all.
-      3. AVD        - only with -AvdOptimizations: the IsWVDEnvironment media flag and
-                      the Remote Desktop WebRTC Redirector Service.
+      3. AVD        - only with -AvdOptimizations: the IsWVDEnvironment media flag
+                      and the Remote Desktop WebRTC Redirector Service. With
+                      -RemoveWebRtcRedirector instead: take that redirector away.
       4. Classic    - only with -RemoveClassicTeams: uninstall the classic Teams
                       machine-wide installer and clear the per-profile installs.
       5. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
@@ -59,7 +61,25 @@
     it also checks the policies that block the staging - BlockNonAdminUserInstall,
     AllowAllTrustedApps and AppLocker. IsWVDEnvironment stays required either way, and
     Microsoft still advises keeping the redirector as a fallback for endpoints that
-    cannot do SlimCore, so the switch keeps installing it. Revisit before April 2027.
+    cannot do SlimCore, so -AvdOptimizations keeps installing it. -RemoveWebRtcRedirector
+    is the other direction, for a fleet that has finished moving: it uninstalls the
+    redirector and leaves everything else alone. Off by default, and it should stay
+    off until every endpoint really does run Windows App 2.0.352.0 or newer - an
+    endpoint that cannot do SlimCore and no longer finds the redirector renders media
+    on the session host instead, which is the outcome both of them exist to avoid.
+
+    Proof, as opposed to inventory
+    ------------------------------
+    All of the above only shows that the parts are in place. Whether users are really
+    optimized is something only the session host can answer, and it answers it in the
+    Application event log: Teams writes a "Microsoft Teams VDI" event (ID 0) on every
+    connect and disconnect, and the description carries the codes from Microsoft's
+    connection error table. Preflight reads the last seven days of it and translates
+    the codes it knows - 24002 and 24010 mean the user is on SlimCore, 16002 means the
+    endpoint has no plugin, 16026 means a Citrix policy blocks the virtual channels,
+    16389 means BlockNonAdminUserInstall stopped the MSIX registration. This is the
+    one check here that reports on the endpoints rather than on this machine, which
+    makes -CheckOnly on a session host worth running on its own.
 
     The meeting add-in
     ------------------
@@ -162,6 +182,14 @@
     and the Remote Desktop WebRTC Redirector Service. Both only when missing, unless
     -Force is given.
 
+.PARAMETER RemoveWebRtcRedirector
+    Remove the Remote Desktop WebRTC Redirector Service - the old media optimization,
+    unsupported after 1 October 2026. Off by default and mutually exclusive with
+    -AvdOptimizations. Only use it once every endpoint can do SlimCore (Windows App
+    2.0.352.0 or newer); endpoints that cannot fall back to rendering media on the
+    session host. IsWVDEnvironment is deliberately left alone, because SlimCore needs
+    that flag too.
+
 .PARAMETER RemoveClassicTeams
     Also remove the classic Teams client: uninstall the Teams Machine-Wide Installer
     and clear the per-profile installs (install folder, autostart entry and the stale
@@ -177,6 +205,18 @@
 .PARAMETER WebRtcUrl
     Download URL for the Remote Desktop WebRTC Redirector MSI (default: the Microsoft
     aka.ms link). Must be https. Only used with -AvdOptimizations.
+
+.EXAMPLE
+    .\Update-TeamsClient.ps1 -CheckOnly
+
+    Full read-only health report of every place Teams lives on this machine,
+    including what the session host logged about the media optimization. Changes
+    nothing; exit code 2 means there is work to do.
+
+.EXAMPLE
+    .\Update-TeamsClient.ps1 -RemoveWebRtcRedirector -WhatIf
+
+    Show what removing the old WebRTC optimization would do. Drop -WhatIf to apply.
 
 .PARAMETER WorkingDir
     Folder used for the installer downloads (default: C:\IT\AVD\Teams).
@@ -248,6 +288,7 @@ param (
     [switch] $AvdOptimizations,
     [switch] $RemoveClassicTeams,
     [switch] $RepairOutlookAddIn,
+    [switch] $RemoveWebRtcRedirector,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
@@ -301,6 +342,14 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
     Write-Warning 'Running 32-bit and SysNative is unavailable - AppX and registry lookups may fail.'
 }
 
+# A combination that can never work is caught before the UAC prompt: nobody should
+# have to approve elevation for a run that is only going to refuse itself. The same
+# check runs again below, once the RMM variables have been folded in.
+if ($AvdOptimizations -and $RemoveWebRtcRedirector) {
+    Write-Error 'Use either -AvdOptimizations (which installs the WebRTC redirector) or -RemoveWebRtcRedirector, not both.'
+    exit 1
+}
+
 # -- Elevation -----------------------------------------------------------------
 # AppX enumeration, the MSI calls and the bootstrapper all need administrator rights.
 # Run as System from an RMM this is already true; started by hand it is usually not,
@@ -340,10 +389,16 @@ if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSign
 if (-not $PSBoundParameters.ContainsKey('AvdOptimizations')   -and $env:avdOptimizations   -in $rmmTrue) { $AvdOptimizations   = $true }
 if (-not $PSBoundParameters.ContainsKey('RemoveClassicTeams') -and $env:removeClassicTeams -in $rmmTrue) { $RemoveClassicTeams = $true }
 if (-not $PSBoundParameters.ContainsKey('RepairOutlookAddIn') -and $env:repairOutlookAddIn -in $rmmTrue) { $RepairOutlookAddIn = $true }
+if (-not $PSBoundParameters.ContainsKey('RemoveWebRtcRedirector') -and $env:removeWebRtcRedirector -in $rmmTrue) { $RemoveWebRtcRedirector = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
 if (-not $PSBoundParameters.ContainsKey('WebRtcUrl')          -and $env:webRtcUrl)                       { $WebRtcUrl          = $env:webRtcUrl }
+
+if ($AvdOptimizations -and $RemoveWebRtcRedirector) {
+    Write-Error 'Use either -AvdOptimizations (which installs the WebRTC redirector) or -RemoveWebRtcRedirector, not both.'
+    exit 1
+}
 
 $simulate         = [bool] $WhatIfPreference
 $teamsExe         = 'teamsbootstrapper.exe'
@@ -785,6 +840,131 @@ function Test-AvdSessionHost {
     return (Test-Path 'HKLM:\SOFTWARE\Microsoft\RDInfraAgent')
 }
 
+# Microsoft publishes one table for the VDI optimization errors with two columns of
+# numbers - a standard error code and the loadErrc/deployErrc the plugin logs - and
+# an event does not say which of the two it printed. Both are keyed here.
+$TeamsVdiEventSource = 'Microsoft Teams VDI'
+$TeamsVdiErrorCodes  = @{
+    '3000'  = 'SlimCore deployment not needed - the user is on the new architecture'
+    '24002' = 'SlimCore deployment not needed - the user is on the new architecture'
+    '3001'  = 'SlimCore already loaded - the user is on the new architecture'
+    '24010' = 'SlimCore already loaded - the user is on the new architecture'
+    '5'     = 'access denied starting MsTeamsVdi.exe - BlockNonAdminUserInstall, or AppX was still registering packages'
+    '43'    = 'access denied starting MsTeamsVdi.exe - BlockNonAdminUserInstall, or AppX was still registering packages'
+    '110'   = 'a background access policy blocks BITS on the endpoint, so SlimCore cannot download'
+    '403'   = 'the SlimCore download was refused (HTTP 403) - proxy or content filtering'
+    '3227'  = 'the SlimCore download was refused (HTTP 403) - proxy or content filtering'
+    '404'   = 'the SlimCore package was not found on the CDN (HTTP 404)'
+    '3235'  = 'the SlimCore package was not found on the CDN (HTTP 404)'
+    '1260'  = 'blocked by policy - AppLocker or WDAC without an exception for the SlimCoreVdi packages'
+    '10083' = 'blocked by policy - AppLocker or WDAC without an exception for the SlimCoreVdi packages'
+    '1460'  = 'MsTeamsVdi.exe timed out starting (60 seconds) - usually MSIX registration being slow'
+    '11683' = 'MsTeamsVdi.exe timed out starting (60 seconds) - usually MSIX registration being slow'
+    '1722'  = 'RPC to MsTeamsVdi.exe was unavailable - transient if optimization comes up anyway'
+    '13779' = 'RPC to MsTeamsVdi.exe was unavailable - transient if optimization comes up anyway'
+    '2000'  = 'no plugin on the endpoint - the remote desktop client has none, or it did not load'
+    '16002' = 'no plugin on the endpoint - the remote desktop client has none, or it did not load'
+    '2001'  = 'the virtual channel is not available on the VDA agent'
+    '16008' = 'the virtual channel is not available on the VDA agent'
+    '2003'  = 'the MSTEAMS/MSTEAM1/MSTEAM2 virtual channels are blocked by a Citrix policy'
+    '16026' = 'the MSTEAMS/MSTEAM1/MSTEAM2 virtual channels are blocked by a Citrix policy'
+    '2004'  = 'the Citrix Workspace App on the endpoint is too old'
+    '16032' = 'the Citrix Workspace App on the endpoint is too old'
+    '2005'  = 'Teams runs as a published app or RemoteApp - those sessions stay on WebRTC, never SlimCore'
+    '16043' = 'Teams runs as a published app or RemoteApp - those sessions stay on WebRTC, never SlimCore'
+    '2008'  = 'the Mac endpoint uses the Store build of Windows App - only the non-store build is supported'
+    '16066' = 'the Mac endpoint uses the Store build of Windows App - only the non-store build is supported'
+    '3002'  = 'SlimCore was never downloaded on the endpoint'
+    '24018' = 'SlimCore was never downloaded on the endpoint'
+    '3004'  = 'the plugin did not answer - usually transient while it stages the media engine'
+    '24035' = 'the plugin did not answer - usually transient while it stages the media engine'
+    '3005'  = 'the plugin timed out downloading the MSIX (2 minutes)'
+    '24043' = 'the plugin timed out downloading the MSIX (2 minutes)'
+    '3007'  = 'the SlimCore download or installation timed out'
+    '24058' = 'the SlimCore download or installation timed out'
+    '3021'  = 'no usable SlimCore package on the endpoint - the Host MSIX is missing'
+    '24170' = 'no usable SlimCore package on the endpoint - the Host MSIX is missing'
+    '4390'  = 'reparse point error - a thin client with a write filter or RAM disk; point MSTEAMSVDI_BITS_TMP_PATH at a real disk'
+    '12002' = 'the endpoint timed out reaching the internet'
+    '12030' = 'the connection to the Microsoft CDN was aborted'
+    '1951'  = 'sideloading is off on the endpoint (AllowAllTrustedApps is 0)'
+    '15615' = 'sideloading is off on the endpoint (AllowAllTrustedApps is 0)'
+    '15616' = 'the SlimCore package was updating - retryable, not a deployment failure'
+    '15618' = 'the SlimCore package is in use and could not be replaced'
+    '15700' = 'no package identity - the MsTeamsVdi alias is missing from %LOCALAPPDATA%\Microsoft\WindowsApps'
+    '16389' = 'Package Manager returned E_FAIL - most often BlockNonAdminUserInstall on the endpoint'
+}
+
+function Get-TeamsVdiEvent {
+    <#
+        Teams VDI events out of the Application log. Filtering on the provider has to
+        go through FilterXPath: the FilterHashtable form throws outright when the
+        provider has never written an event, which is exactly the case this has to
+        survive. Teams writes these from build 24123 onwards.
+    #>
+    param([int] $Days = 7, [int] $MaxEvents = 200)
+
+    $since = (Get-Date).AddDays(-$Days)
+    return @(Get-WinEvent -LogName Application -MaxEvents $MaxEvents -ErrorAction SilentlyContinue `
+                          -FilterXPath "*[System[Provider[@Name='$TeamsVdiEventSource']]]" |
+             Where-Object { $_.TimeCreated -ge $since })
+}
+
+function Get-TeamsVdiErrorMeaning {
+    <#
+        Known codes out of an event description. Only numbers written as an error
+        field are read: the same message carries version strings full of digits that
+        would otherwise pass for error codes. A zero errc is deliberately not in the
+        table - it only means that phase raised no error, and printing "OK" beside a
+        real failure in the other phase would be a lie.
+    #>
+    param([string] $Message)
+
+    $meanings = [System.Collections.Generic.List[string]]::new()
+    if ($Message) {
+        foreach ($hit in [regex]::Matches($Message, '(?i)(?:errc|_error|"val")\D{0,4}(\d+)')) {
+            $code = $hit.Groups[1].Value
+            if ($TeamsVdiErrorCodes.ContainsKey($code)) {
+                $meanings.Add("code $code - $($TeamsVdiErrorCodes[$code])")
+            }
+        }
+    }
+    return ($meanings | Select-Object -Unique)
+}
+
+function Write-TeamsVdiEventStatus {
+    <#
+        What this machine itself logged about the media optimization. On a session
+        host it is the only first-hand evidence that users really are optimized -
+        every other check only proves the parts are in place.
+    #>
+    param([int] $Days = 7)
+
+    $events = @(Get-TeamsVdiEvent -Days $Days)
+    if ($events.Count -eq 0) {
+        Write-Skip "No '$TeamsVdiEventSource' events in the last $Days days - no optimized session was logged here"
+        return
+    }
+
+    $last     = $events | Sort-Object TimeCreated -Descending | Select-Object -First 1
+    $failures = @($events | Where-Object { $_.LevelDisplayName -in @('Error', 'Critical') })
+    Write-Ok ('Teams VDI logged {0} event(s) in the last {1} days, last one {2:yyyy-MM-dd HH:mm}' -f
+              $events.Count, $Days, $last.TimeCreated)
+
+    foreach ($entry in ($failures | Sort-Object TimeCreated -Descending | Select-Object -First 3)) {
+        $text = (($entry.Message -replace '\s+', ' ')).Trim()
+        if ($text.Length -gt 200) { $text = $text.Substring(0, 200) + '...' }
+        Write-Warn ('Teams VDI error {0:yyyy-MM-dd HH:mm}: {1}' -f $entry.TimeCreated, $text)
+        foreach ($meaning in Get-TeamsVdiErrorMeaning -Message $entry.Message) { Write-Warn "         $meaning" }
+    }
+
+    # A success code in the newest event says as much as the error count does: it is
+    # the difference between "nobody connected" and "everybody is optimized".
+    if ($failures.Count -eq 0) {
+        foreach ($meaning in Get-TeamsVdiErrorMeaning -Message $last.Message) { Write-Ok "Last event: $meaning" }
+    }
+}
+
 function Get-SlimCoreBlocker {
     <#
         Registry policies Microsoft documents as stopping the SlimCore MSIX from
@@ -1105,20 +1285,25 @@ try {
         Write-SlimCoreStatus -TeamsVersion $installedVersion
     }
 
-    $avdFlagSet  = $false
-    $webRtcEntry = $null
-    if ($AvdOptimizations) {
-        $avdFlagSet  = ((Get-WvdEnvironmentFlag) -eq 1)
-        $webRtcEntry = @(Get-WebRtcRedirectorEntry) | Select-Object -First 1
+    # Read the optimization state whether or not this run may change it: on a session
+    # host it is half the answer to "is Teams healthy here".
+    $avdFlagSet  = ((Get-WvdEnvironmentFlag) -eq 1)
+    $webRtcEntry = @(Get-WebRtcRedirectorEntry) | Select-Object -First 1
+    $sessionHost = Test-AvdSessionHost
 
+    if ($AvdOptimizations -or $RemoveWebRtcRedirector -or $sessionHost) {
         if ($avdFlagSet) { Write-Ok 'AVD media flag IsWVDEnvironment is set' }
-        else             { Write-Warn 'AVD media flag IsWVDEnvironment is not set' }
+        else             { Write-Warn 'AVD media flag IsWVDEnvironment is not set - neither WebRTC nor SlimCore optimizes a session host without it' }
 
-        if ($webRtcEntry) { Write-Ok "WebRTC Redirector is installed ($($webRtcEntry.Version))" }
-        else              { Write-Warn 'Remote Desktop WebRTC Redirector is not installed' }
+        if ($webRtcEntry)          { Write-Ok "WebRTC Redirector is installed ($($webRtcEntry.Version)) - the old optimization, unsupported after 1 October 2026" }
+        elseif ($AvdOptimizations) { Write-Warn 'Remote Desktop WebRTC Redirector is not installed' }
+        else                       { Write-Skip 'Remote Desktop WebRTC Redirector is not installed - optimization depends on SlimCore from the endpoint' }
 
-    } elseif (Test-AvdSessionHost) {
-        Write-Skip 'This looks like an AVD session host - consider -AvdOptimizations for the media flag and the WebRTC redirector'
+        Write-TeamsVdiEventStatus
+    }
+
+    if ($sessionHost -and -not ($AvdOptimizations -or $RemoveWebRtcRedirector)) {
+        Write-Skip 'This looks like an AVD session host - -AvdOptimizations sets the media flag and installs WebRTC, -RemoveWebRtcRedirector drops the old stack'
     }
 
     # -- 2. Version check ------------------------------------------------------
@@ -1150,11 +1335,13 @@ try {
 
     $addInMissing  = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
     $avdWork       = $AvdOptimizations -and ((-not $avdFlagSet) -or (-not $webRtcEntry) -or $Force)
+    $webRtcRemoval = $RemoveWebRtcRedirector -and [bool] $webRtcEntry
     $classicWork   = $RemoveClassicTeams -and (($classicMachineWide.Count + $classicUserInstall.Count) -gt 0)
     $repairWork    = $RepairOutlookAddIn -and $brokenAddInUsers.Count -gt 0
     $fullReinstall = $clientOutdated -or $Force
 
-    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork -and -not $classicWork -and -not $repairWork) {
+    if (-not $fullReinstall -and -not $addInMissing -and -not $avdWork -and -not $classicWork -and
+        -not $repairWork -and -not $webRtcRemoval) {
         $plannedExit = 0
         throw 'Teams is up to date - nothing to do.'
     }
@@ -1163,6 +1350,7 @@ try {
     if ($clientOutdated) { $reasons += 'a newer build is available' }
     if ($addInMissing)   { $reasons += 'the Teams Meeting Add-in is missing' }
     if ($avdWork)        { $reasons += 'the AVD optimizations are incomplete' }
+    if ($webRtcRemoval)  { $reasons += 'the old WebRTC optimization is still installed' }
     if ($classicWork)    { $reasons += 'classic Teams is still installed' }
     if ($repairWork)     { $reasons += 'a user registration points at a removed add-in DLL' }
     if ($Force)          { $reasons += '-Force was given' }
@@ -1217,7 +1405,29 @@ try {
     # decide whether to hand media off to the redirector.
     Write-Out ''
     Write-Step '3. AVD optimizations'
-    if (-not $AvdOptimizations) {
+    if ($RemoveWebRtcRedirector) {
+        # Taking the old stack away only leaves users optimized when their endpoint
+        # can do SlimCore. Anyone on an older Windows App falls back to server-side
+        # rendering on this host, so this is deliberately never the default.
+        if (-not $webRtcEntry) {
+            Write-Skip 'WebRTC Redirector is not installed - nothing to remove'
+        } elseif ($PSCmdlet.ShouldProcess("Remote Desktop WebRTC Redirector Service $($webRtcEntry.Version)",
+                                          'msiexec /x /qn (remove the old optimization)')) {
+            $removal = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($webRtcEntry.ProductCode) /qn /norestart"
+            if ($removal.ExitCode -eq 1605) {
+                # Same as the classic Teams case: msiexec never heard of the product,
+                # so what is left is an orphaned uninstall entry, not an install.
+                Write-Warn 'msiexec does not know this product (1605) - the uninstall entry is stale, removing it'
+                Remove-Item -Path $webRtcEntry.RegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+            } elseif (-not $removal.Success) {
+                throw "Could not remove the WebRTC Redirector ($($removal.Message))"
+            } else {
+                if ($removal.RebootRequired) { $rebootRequired = $true }
+                Write-Ok "WebRTC Redirector $($webRtcEntry.Version) removed - media now depends on SlimCore from the endpoint"
+            }
+        }
+        if ($avdFlagSet) { Write-Skip 'IsWVDEnvironment left at 1 - SlimCore needs that flag just as much' }
+    } elseif (-not $AvdOptimizations) {
         Write-Skip 'Skipped - use -AvdOptimizations on an AVD/VDI session host'
     } else {
         if ($WebRtcUrl -notmatch '^https://') { throw "WebRtcUrl must be https: $WebRtcUrl" }
@@ -1581,6 +1791,11 @@ try {
             else { Write-Bad 'WebRTC Redirector installation failed'; $exitCode = 1 }
         }
 
+        if ($RemoveWebRtcRedirector) {
+            if (@(Get-WebRtcRedirectorEntry).Count -eq 0) { Write-Ok 'WebRTC Redirector is gone' }
+            else { Write-Bad 'The WebRTC Redirector is still installed'; $exitCode = 1 }
+        }
+
         if ($RemoveClassicTeams) {
             # A machine-wide installer that survives is a genuine failure. A per-user
             # folder that survives is usually a file lock, which the next run clears
@@ -1648,6 +1863,7 @@ try {
 
 if (-not $script:holdOutput) { Write-Host '' }
 exit $exitCode
+
 
 
 

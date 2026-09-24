@@ -10,6 +10,7 @@ Reference for [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1): what it decide
 - [The decision](#the-decision)
 - [The nine steps](#the-nine-steps)
 - [AVD / VDI](#avd--vdi)
+- [Proving it works: the VDI event log](#proving-it-works-the-vdi-event-log)
 - [Classic Teams](#classic-teams)
 - [The meeting add-in: machine-wide versus per user](#the-meeting-add-in-machine-wide-versus-per-user)
 - [The version check](#the-version-check)
@@ -67,9 +68,9 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 
 | # | Step | What happens | `-WhatIf` |
 |---|------|--------------|-----------|
-| 1 | Preflight | Inventory every place Teams can live: `*MSTEAMS*` AppX packages per user, the provisioned package, classic Teams (machine-wide installer and per-profile installs), the meeting add-in in both uninstall hives, whether Outlook has it registered, the AVD components, running Teams/Outlook | read-only |
+| 1 | Preflight | Inventory every place Teams can live: `*MSTEAMS*` AppX packages per user, the provisioned package, classic Teams (machine-wide installer and per-profile installs), the meeting add-in in both uninstall hives, whether Outlook has it registered, the AVD components, what Teams logged about the media optimization, running Teams/Outlook | read-only |
 | 2 | Version check | Ask the Teams config service for the published build, compare, decide | read-only |
-| 3 | AVD | Only with `-AvdOptimizations`: set `IsWVDEnvironment`, install the WebRTC redirector | guarded |
+| 3 | AVD | Only with `-AvdOptimizations`: set `IsWVDEnvironment`, install the WebRTC redirector. Only with `-RemoveWebRtcRedirector`: uninstall that redirector | guarded |
 | 4 | Classic | Only with `-RemoveClassicTeams`: uninstall the Teams Machine-Wide Installer, clear the per-profile installs | guarded |
 | 5 | Download | Create the working folder, download `teamsbootstrapper.exe`, check size and Authenticode signature | guarded |
 | 6 | Uninstall | `msiexec /x` the add-in **and every other copy of it** (machine-wide folder, per-profile folders, per-user COM registrations), `Remove-AppxPackage -AllUsers`, `Remove-AppxProvisionedPackage` | guarded |
@@ -80,7 +81,7 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 
 "Guarded" means the step is wrapped in `$PSCmdlet.ShouldProcess(...)`, so under `-WhatIf` it prints what it would do and changes nothing.
 
-Only what is actually missing gets done: steps 5–7 are skipped when the client is current, step 8 when the add-in is already there and the client was not replaced, step 3 unless `-AvdOptimizations` is given and step 4 unless `-RemoveClassicTeams` is given.
+Only what is actually missing gets done: steps 5–7 are skipped when the client is current, step 8 when the add-in is already there and the client was not replaced, step 3 unless `-AvdOptimizations` or `-RemoveWebRtcRedirector` is given, and step 4 unless `-RemoveClassicTeams` is given.
 
 ---
 
@@ -95,7 +96,7 @@ Only what is actually missing gets done: steps 5–7 are skipped when the client
 
 The flag is step 3, before the client is provisioned, because Teams reads it at startup to decide which media path to use.
 
-Both are only touched when missing, so a scheduled run on a fully configured session host still downloads nothing and, with `-Quiet`, prints nothing. Without the switch the script does not change any of this — it only points out that the device looks like a session host (`HKLM:\SOFTWARE\Microsoft\RDInfraAgent` exists).
+Both are only touched when missing, so a scheduled run on a fully configured session host still downloads nothing and, with `-Quiet`, prints nothing. Without the switch the script does not change any of this — but it does **report** it: the flag, the redirector and the event log are read on every run on a session host, because that state is half the answer to "is Teams healthy here". A session host is recognised by `HKLM:\SOFTWARE\Microsoft\RDInfraAgent`.
 
 ### WebRTC is on its way out
 
@@ -106,9 +107,61 @@ Microsoft.Teams.SlimCoreVdiHost.win-x64          2026.31.1.16
 Microsoft.Teams.SlimCoreVdiFwk.win-x64.2026.31   2026.31.1.16   (plus older framework versions)
 ```
 
-Preflight reports that package when `-AvdOptimizations` is used, but it is **informational only**: which path is actually taken depends on the Windows App version on the endpoint the user connects from, and a script on the session host cannot see that. Auditing endpoint client versions is the real migration work.
+Preflight reports that package when it is standing on an endpoint. On a session host there is nothing to report, because nothing is staged there — which is why the script no longer looks for it in that case. A check that looks in the wrong place does not fail, it lies.
 
-`IsWVDEnvironment` stays required either way, and Microsoft's current guidance is to keep the redirector installed as a fallback for endpoints that cannot do SlimCore — so `-AvdOptimizations` keeps installing it. Revisit before April 2027.
+Which path is actually taken depends on the Windows App version on the endpoint the user connects from:
+
+| Side | Minimum |
+|------|---------|
+| Session host | Teams `24193.1805.3040.8975` |
+| Endpoint, Windows | Windows App `2.0.352.0` (the classic Remote Desktop client is no longer supported) |
+| Endpoint, macOS | Windows App `11.3.4`, the non-Store `.pkg` build |
+
+`IsWVDEnvironment` stays required either way, and Microsoft's current guidance is to keep the redirector installed as a fallback for endpoints that cannot do SlimCore — so `-AvdOptimizations` keeps installing it.
+
+### Removing the old optimization
+
+`-RemoveWebRtcRedirector` is the other direction, for a fleet that has finished the migration. It uninstalls the redirector (`msiexec /x`, or clears the leftover Programs and Features entry when msiexec answers `1605`) and touches nothing else. It is **mutually exclusive** with `-AvdOptimizations`, which installs the same component; giving both is refused before the UAC prompt.
+
+`IsWVDEnvironment` is deliberately **not** cleared: SlimCore needs that flag just as much as WebRTC did.
+
+Do not run this until every endpoint really can do SlimCore. An endpoint below the minimum above that no longer finds the redirector does not fail — it falls back to rendering media on the session host, which is exactly the CPU load both optimizations exist to avoid. Check the event log below first: `code 16002` means at least one endpoint still has no plugin.
+
+---
+
+## Proving it works: the VDI event log
+
+Everything above only proves the parts are in place. Whether users are actually optimized is a question about their endpoints, and the one place a session host can answer it is the Application event log. Teams (build `24123` or newer) writes a **`Microsoft Teams VDI`** event, ID `0`, on every connect and disconnect, and the description carries the codes from Microsoft's connection error table.
+
+Preflight reads the last seven days, reports the count and the newest timestamp, shows up to three errors with their message, and translates every code it recognises. The codes worth knowing:
+
+| Code | Meaning |
+|------|---------|
+| `24002`, `24010` (`3000`, `3001`) | Not errors — the user is on SlimCore. This is what success looks like |
+| `16002` (`2000`) | The endpoint has no plugin: Windows App is missing, too old, or did not load |
+| `16026` (`2003`) | A Citrix policy blocks the `MSTEAMS`/`MSTEAM1`/`MSTEAM2` virtual channels |
+| `16043` (`2005`) | Teams runs as a published app or RemoteApp — those sessions stay on WebRTC by design |
+| `16066` (`2008`) | A Mac endpoint on the Store build of Windows App; only the non-Store build is supported |
+| `16389` | `BlockNonAdminUserInstall` on the endpoint stopped the MSIX registration |
+| `10083` (`1260`) | AppLocker or WDAC blocked the SlimCore packages |
+| `1951` (`15615`) | Sideloading is off on the endpoint (`AllowAllTrustedApps` is `0`) |
+| `24018` (`3002`), `24043` (`3005`), `24058` (`3007`) | SlimCore never downloaded, or timed out doing so |
+| `24170` (`3021`) | Packages present but no usable set — the Host MSIX is missing |
+| `1722`, `15616`, `24035` (`3004`) | Transient. Only worth chasing if users stay unoptimized |
+| `4390` | Thin client with a write filter or RAM disk — point `MSTEAMSVDI_BITS_TMP_PATH` at a real disk |
+
+Two details that cost time to find out:
+
+- The query has to use `-FilterXPath`, not `-FilterHashtable`. `Get-WinEvent -FilterHashtable @{ ProviderName = 'Microsoft Teams VDI' }` **throws** when the provider has never written an event — which is the normal case on a healthy non-VDI machine. The XPath form returns nothing and a soft error instead. `[System.Diagnostics.EventLog]::SourceExists()` is no use either: it walks the Security log and throws for anything but SYSTEM.
+- A `0` in `loadErrc` or `deployErrc` means *that phase* raised no error, not that the session is fine. It is deliberately absent from the table, because printing "OK" next to a real failure in the other phase would be a lie.
+
+To filter on the source by hand in Event Viewer, register it once on the session host:
+
+```powershell
+New-EventLog -LogName Application -Source 'Microsoft Teams VDI'
+```
+
+The script does not need this — it filters on the provider name in the event itself — so it does not do it for you.
 
 ---
 
@@ -249,6 +302,7 @@ A transcript (`C:\Temp\Update-TeamsClient_<timestamp>.log`, override with `-LogP
 | `-LogPath` | `C:\Temp` | Transcript folder |
 | `-BootstrapperUrl` | Microsoft fwlink | Download URL, https only |
 | `-WebRtcUrl` | `aka.ms/msrdcwebrtcsvc/msi` | WebRTC redirector MSI, https only |
+| `-RemoveWebRtcRedirector` | — | Uninstall the old WebRTC media optimization. Cannot be combined with `-AvdOptimizations` |
 | `-SkipMeetingAddIn` | — | Leave the add-in alone; a missing add-in is then not "work" |
 | `-SkipSignatureCheck` | — | Accept an installer not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | `900` | Per-process timeout for msiexec and the bootstrapper |
@@ -346,6 +400,9 @@ Why the script looks the way it does — most of these are scars from a real fai
 | `Downloaded file is only N bytes` | Same cause — a captive portal or error page instead of the installer |
 | `Uninstall of Teams Machine-Wide Installer failed (exit code 1605)` | Should no longer happen: 1605 means Windows Installer does not know the product, so the leftover Programs and Features entry is removed instead |
 | `WebRTC Redirector install failed (exit code 1638)` | Should no longer happen: the old version is uninstalled first. If it does, the redirector is registered under a version msiexec disagrees with - remove it by hand from Programs and Features and re-run |
+| `Use either -AvdOptimizations ... or -RemoveWebRtcRedirector` | The two switches install and uninstall the same component. Pick one |
+| `Could not remove the WebRTC Redirector` | msiexec refused the uninstall. Check `C:\Temp` transcript for the exit code; `1605` is handled (stale entry), anything else usually means another installation is running |
+| Users see `Azure Virtual Desktop Media Optimized` instead of SlimCore | Expected while the redirector is still installed and the endpoint has no plugin. Check the event log section for `16002` |
 | `timed out after 900 seconds and was killed` | A hung msiexec or a slow image. Raise `-TimeoutSeconds`; check whether another installation is running |
 | `No add-in MSI found under ...\WindowsApps` | The bootstrapper did not stage a package. Check the step 7 output and `C:\Program Files\WindowsApps` for an `MSTeams_*` folder |
 | Add-in installed but not visible in Outlook | Outlook has to restart. The script warns when Outlook is running during the install |
@@ -377,6 +434,11 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Outlook check under `-WhatIf` | Same answer as a real run, after dropping `New-PSDrive` |
 | Classic Teams detection | Neither variant is present on the test device, so detection's positive path is **untested** against a real install |
 | Classic removal, `-WhatIf` | With detection faked, plans the msiexec uninstall and the per-profile folder removal, skips steps 5-8, exit `0` |
+| `Microsoft Teams VDI` event query on a machine without the provider | `[SKIP] No 'Microsoft Teams VDI' events in the last 7 days`, 357 ms, no terminating error. Exercised by running the real functions out of the script; preflight calling them has **not** been run on a live session host |
+| Same query against a provider that does exist | Counted 42 events and reported the newest timestamp in 104 ms; the error branch formats, truncates at 200 characters and decodes nothing from version strings |
+| Code decoder against Microsoft's documented log lines | `deployErrc=24002` → on SlimCore; `"val":4390` → write-filter error; a line of nothing but version numbers → decodes nothing |
+| `-AvdOptimizations -RemoveWebRtcRedirector` together | Refused with exit `1` before the UAC prompt |
+| `-RemoveWebRtcRedirector` end to end | **Untested** — no session host with the redirector installed was available. The uninstall reuses the `msiexec /x` + `1605` path that is proven for classic Teams |
 | Classic removal, applied | Against a faked profile folder in a scratch directory: folder removed, verification reports `No per-user classic Teams left`, exit `0` |
 | Classic removal on a real session host | `-Force -RemoveClassicTeams -AvdOptimizations` on an AVD host removed a real per-profile classic Teams `1.4.00.11161`. The machine-wide msiexec path is still **untested** - that host had no Machine-Wide Installer |
 | Add-in step after provisioning | Broke on that same production run (`Get-AppxPackage` is per user, provisioning is not) and now resolves the MSI from the staged `WindowsApps` package instead. Re-tested here for a per-user install, a provisioned-only host and a `-Force` run |
