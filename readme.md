@@ -754,6 +754,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-24
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` answers the question the inventory could not: preflight now reads the `Microsoft Teams VDI` events from the Application log on any session host — not just with `-AvdOptimizations` — and translates the codes from Microsoft's connection error table, so a plain `-CheckOnly` reports whether users are actually optimized instead of only whether the parts are installed |
+| `24002`/`24010` say the user is on SlimCore, `16002` that an endpoint still has no plugin, `16389`/`10083`/`1951` that policy on the endpoint blocks the MSIX. A zero `errc` is deliberately not in the table: it means that phase raised no error, and printing "OK" next to a real failure in the other phase would be a lie |
+| The query uses `-FilterXPath`, because `Get-WinEvent -FilterHashtable @{ ProviderName = ... }` throws when the provider has never written an event — which is the normal case on a healthy non-VDI machine. Measured: 357 ms and a soft error when absent, 104 ms when present |
+| New `-RemoveWebRtcRedirector` removes the old optimization, retired 1 October 2026. Mutually exclusive with `-AvdOptimizations` and refused before the UAC prompt, reuses the `msiexec /x` + stale-`1605`-entry path proven for classic Teams, and leaves `IsWVDEnvironment` set because SlimCore needs that flag too. Off by default: an endpoint that cannot do SlimCore and no longer finds the redirector silently falls back to rendering media on the session host |
+| Both docs corrected where they still told a technician to look for SlimCore on the session host |
+
 ### 2026-09-20 (8)
 | Change |
 |--------|

@@ -224,9 +224,9 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 
 | # | Step | Honours `-WhatIf` |
 |---|------|-------------------|
-| 1 | Preflight — inventory: AppX per user + provisioned, classic Teams (machine-wide + per profile), add-in, Outlook registration, running Teams/Outlook | read-only |
+| 1 | Preflight — inventory: AppX per user + provisioned, classic Teams (machine-wide + per profile), add-in, Outlook registration, the AVD media optimization and what Teams logged about it, running Teams/Outlook | read-only |
 | 2 | Version check — published build vs installed build | read-only |
-| 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector | yes |
+| 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector. Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
 | 4 | Classic Teams only (`-RemoveClassicTeams`): uninstall machine-wide installer + per-profile installs | yes |
 | 5 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
 | 6 | Uninstall add-in, remove `MSTeams` AppX for all users, deprovision it | yes |
@@ -235,6 +235,12 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 | 9 | Verify add-in registration (machine-wide + per signed-in user in Outlook), classic removal, provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
 Only what is missing gets done: a current client with a missing add-in installs just the add-in, and on a session host with `-AvdOptimizations` a missing WebRTC redirector installs just that.
+
+**The media optimization, both generations**
+
+`-AvdOptimizations` installs the WebRTC redirector, which Microsoft retires on **1 October 2026** (end of availability 1 April 2027). Its successor SlimCore is never installed on the session host — the plugin inside Windows App stages it on the *endpoint* the user connects from — so the host-side question is not "is SlimCore here" but "are my users getting it". The answer is in the Application event log: Teams writes a `Microsoft Teams VDI` event on every connect, and preflight reads the last seven days of it on any session host and translates the codes (`24002`/`24010` = on SlimCore, `16002` = endpoint has no plugin, `16389` = policy blocked the MSIX). `-RemoveWebRtcRedirector` takes the old generation away once nothing reports `16002` any more; it refuses to run together with `-AvdOptimizations`, and leaves `IsWVDEnvironment` alone because SlimCore needs that flag too.
+
+> Querying that log needs `Get-WinEvent -FilterXPath`, not `-FilterHashtable`: the hashtable form throws outright when the provider has never written an event, which is the normal case on a machine that is not a session host.
 
 **Why the order matters:** nothing is touched until a newer build is confirmed, and the installer is fetched and verified *before* the first uninstall — so a failed download or a blocked URL can never leave the device without a Teams client.
 
@@ -296,6 +302,12 @@ Only what is missing gets done: a current client with a missing add-in installs 
 
 # Repair: full reinstall regardless of the version check
 .\Update-TeamsClient.ps1 -Force -Confirm:$false
+
+# Session host health report: everything Teams-related, changes nothing
+.\Update-TeamsClient.ps1 -CheckOnly
+
+# Migration done: drop the retired WebRTC optimization
+.\Update-TeamsClient.ps1 -RemoveWebRtcRedirector -WhatIf
 ```
 
 **Running it from NinjaOne**

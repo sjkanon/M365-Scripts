@@ -276,10 +276,52 @@ Je krijgt dit **alleen** als je de optie expliciet aanzet — met het vinkje `av
 Draait het script op een werkplek die eruitziet als een sessiehost terwijl de optie uitstaat, dan krijg je een tip in de output:
 
 ```
-  [SKIP] This looks like an AVD session host - consider -AvdOptimizations for the media flag and the WebRTC redirector
+  [SKIP] This looks like an AVD session host - -AvdOptimizations sets the media flag and installs WebRTC, -RemoveWebRtcRedirector drops the old stack
 ```
 
 Staan beide onderdelen al goed, dan gebeurt er niets extra's en wordt er niets gedownload.
+
+### Controleren of de optimalisatie ook echt werkt
+
+Dat de onderdelen geïnstalleerd zijn, betekent nog niet dat gebruikers optimalisatie krijgen — dat hangt af van het lokale apparaat waarmee ze inloggen. Het enige bewijs dat de sessiehost zelf heeft, staat in het gebeurtenissenlogboek: Teams schrijft bij elke verbinding een gebeurtenis weg onder de bron **`Microsoft Teams VDI`**.
+
+Het script leest op een sessiehost automatisch de laatste zeven dagen mee, ook zonder extra opties:
+
+```
+  [ OK ] Teams VDI logged 34 event(s) in the last 7 days, last one 2026-09-24 08:12
+  [ OK ] Last event: code 24002 - SlimCore deployment not needed - the user is on the new architecture
+```
+
+Dat is de goede uitkomst: de gebruikers zitten op de nieuwe techniek. Foutregels worden vertaald, bijvoorbeeld:
+
+```
+  [WARN] Teams VDI error 2026-09-24 08:05: ... deployErrc=16002 ...
+  [WARN]          code 16002 - no plugin on the endpoint - the remote desktop client has none, or it did not load
+```
+
+| Code in de output | Wat het betekent | Actie | Niveau |
+|-------------------|------------------|-------|--------|
+| `24002`, `24010` | Gebruiker zit op SlimCore — goed | Geen | L1 |
+| `16002` | Het lokale apparaat heeft geen (of een te oude) Windows App | Windows App bijwerken op dat apparaat | L2 |
+| `16026` | Citrix-beleid blokkeert de virtuele kanalen | Virtual Channel Allow List aanpassen | L3 |
+| `16043` | Teams draait als RemoteApp/published app — blijft altijd op WebRTC | Geen, dit is by design | L2 |
+| `16389`, `10083`, `1951` | Beleid op het lokale apparaat blokkeert de installatie van SlimCore | Intune/GPO-beleid van dat apparaat bekijken | L3 |
+| `24018`, `24043`, `24058` | SlimCore is niet gedownload op het lokale apparaat | Internetverbinding/proxy van dat apparaat | L2 |
+| `1722`, `15616`, `24035` | Tijdelijk — lost zichzelf meestal op | Alleen uitzoeken als het blijft terugkomen | L2 |
+
+> Geen enkele regel in de output? Dan heeft niemand in die zeven dagen een sessie opgebouwd, of draait er nog een Teams-versie ouder dan `24123`. Dat is geen fout.
+
+### De oude optimalisatie verwijderen (level 3)
+
+Als élk lokaal apparaat de nieuwe techniek aankan, kan de WebRTC-redirector eraf met `-RemoveWebRtcRedirector`. Dat is **geen** standaardactie en gaat nooit samen met `-AvdOptimizations`; die twee doen het tegenovergestelde en het script weigert de combinatie.
+
+```
+-RemoveWebRtcRedirector -Quiet -Confirm:$false
+```
+
+> Doe dit pas als de controle hierboven nergens `code 16002` laat zien. Een apparaat dat SlimCore niet aankan én de redirector niet meer vindt, krijgt geen foutmelding — beeld en geluid worden dan gewoon in de sessie verwerkt, precies de belasting die we willen voorkomen.
+
+De registervlag `IsWVDEnvironment` blijft staan: SlimCore heeft die net zo hard nodig.
 
 ---
 
@@ -337,7 +379,8 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 1. **Inventariseer de Windows App-versie** op de lokale apparaten van alle gebruikers die op de virtuele werkplek inloggen. Dat is het echte werk — de sessiehosts zijn niet het probleem.
 2. Rol de nieuwste Windows App uit op die apparaten.
 3. Laat `-AvdOptimizations` voorlopig aan staan: Microsoft adviseert de WebRTC-redirector te behouden als terugvaloptie voor apparaten die SlimCore nog niet aankunnen. Vóór april 2027 opnieuw beoordelen.
-4. Draai `Update-TeamsClient.ps1 -AvdOptimizations -CheckOnly` op een sessiehost om te zien of SlimCore daar aanwezig is. De regel `[ OK ] SlimCore is present (...)` bevestigt de sessiehostkant; de rest hangt af van het lokale apparaat.
+4. Draai `Update-TeamsClient.ps1 -CheckOnly` op een sessiehost. Zoek SlimCore daar **niet**: die wordt op het lokale apparaat geïnstalleerd, niet op de host. Wat de host wél weet, staat in de gebeurtenissen die het script meeleest — zie [Controleren of de optimalisatie ook echt werkt](#controleren-of-de-optimalisatie-ook-echt-werkt). Zolang daar `code 16002` tussen staat, is er nog minstens één apparaat niet bij.
+5. Pas als die code verdwenen is, mag de oude redirector eraf met `-RemoveWebRtcRedirector`.
 
 ---
 
@@ -353,6 +396,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-Confirm:$false` | Nooit om bevestiging vragen — verplicht bij onbeheerde runs |
 | `-Force` | Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams |
 | `-AvdOptimizations` | Alleen op AVD/VDI-sessiehosts: zet de mediavlag `IsWVDEnvironment` en installeert de WebRTC-redirector |
+| `-RemoveWebRtcRedirector` | Verwijdert de oude WebRTC-optimalisatie. Alleen als élk lokaal apparaat SlimCore aankan. Gaat niet samen met `-AvdOptimizations` |
 | `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
 | `-RepairOutlookAddIn` | Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen |
 | `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
@@ -401,6 +445,8 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `timed out after 900 seconds and was killed` | Installatie bleef hangen | Werkplek herstarten en opnieuw proberen; anders `-TimeoutSeconds` verhogen | L2 |
 | `Another installation is in progress (1618)` | Er loopt al een installatie | Geen actie — het script probeert het zelf opnieuw | L1 |
 | `WebRTC Redirector install failed (exit code 1638)` | Er stond al een andere versie van de redirector; die MSI kan niet over zichzelf heen installeren | Hoort niet meer voor te komen: het script verwijdert de oude versie eerst. Komt het toch terug, verwijder de redirector handmatig via Programma's en onderdelen en draai opnieuw | L3 |
+| `Use either -AvdOptimizations ... or -RemoveWebRtcRedirector, not both` | Beide opties tegelijk opgegeven; de een installeert wat de ander weghaalt | Kies er één | L2 |
+| `Could not remove the WebRTC Redirector` | msiexec weigerde de verwijdering | Log in `C:\Temp` lezen; meestal loopt er een andere installatie | L3 |
 | `Teams Meeting Add-in installation failed` | Client staat er, add-in niet | Outlook volledig sluiten en het script opnieuw draaien | L2 |
 | `Outlook has the add-in switched off for ... (LoadBehavior 2)` | Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet | L2 |
 | `The add-in is registered for ... but its DLL is gone (...)` | Verouderde registratie van die gebruiker overschaduwt de machinebrede installatie | Draaien met `-RepairOutlookAddIn`; vinkje terugzetten in Outlook helpt niet | L2 |
