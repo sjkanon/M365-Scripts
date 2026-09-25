@@ -270,10 +270,29 @@ Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand
 |---|---|
 | `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal. Onleesbare scopes staan er als `ItemType = Error` met de reden in de kolom `Error`; `UnitKey` koppelt een regel aan de checkpoint-unit die hem schreef |
 | `SharePoint_Permissions_Summary_<ts>.csv` | Per site: aantal grants, unieke scopes, webs, lijsten, mappen/bestanden met eigen rechten, deellinks, anonieme links, externe principals, `Everyone`-grants |
-| `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen én de Entra-groepen daarbinnen, platgeslagen |
+| `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen, de Entra-groepen die daarin genest zitten, én Entra-groepen die rechtstreeks op een scope zijn toegekend. Allemaal platgeslagen naar personen |
 | `SharePoint_Permissions_EffectiveAccess_<ts>.csv` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope, met de groep waardoor die toegang loopt |
 
 > Op een grote tenant kan het effective-access bestand ordes van grootte groter zijn dan de detail-CSV. Daarom staat het uit tenzij je erom vraagt.
+
+#### Alles in één Excel-bestand
+
+Met `-Excel` komt er naast de CSV's één werkmap bij, `SharePoint_Permissions_<ts>.xlsx`, met een tabblad per rapport:
+
+| Tabblad | Inhoud |
+|---|---|
+| `Samenvatting` | Per site: grants, unieke scopes, deellinks, externe principals, `Everyone`-grants, fouten |
+| `Rechten` | Elke grant afzonderlijk |
+| `Groepen` | Elke groep met zijn leden — SharePoint-groepen, de Entra-groepen die daarin genest zitten, **én** Entra-groepen die rechtstreeks op een scope zijn toegekend |
+| `Effectief` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope |
+
+Elk tabblad is een echte Excel-tabel, dus met filterknoppen en bevroren koprij.
+
+De CSV's blijven altijd staan; de werkmap komt er bovenop. Dat is met opzet: de CSV's zijn waar de scan naartoe streamt en waar een hervatte run op aanvult, dus ze bestaan sowieso — en als het schrijven van de werkmap misgaat (module ontbreekt, bestand open in Excel, te weinig geheugen) kost dat nooit het rapport zelf.
+
+> **Rijlimiet.** Een werkblad in Excel stopt bij 1.048.576 regels en laat de rest zonder melding vallen. Het script kapt daarom bewust af op 1.000.000 en zegt erbij welk tabblad is ingekort en in welke CSV de volledige data staat. Alleen `Effectief` komt daar op een grote tenant realistisch in de buurt.
+
+`-Excel` heeft de module `ImportExcel` nodig (staat in `Install-Modules.ps1`). Ontbreekt die, dan meldt het script dat en blijven de CSV's gewoon staan.
 
 ### Hervatten na onderbreking (checkpoints)
 
@@ -323,6 +342,7 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 | `-ExcludeLimitedAccess` | switch | uit | Laat `Limited Access`-toewijzingen weg. Die zet SharePoint zelf neer zodat iemand naar een dieper toegekend item kan navigeren — ruis in de meeste reviews, maar ze verklaren wél waarom iemand een mappad ziet |
 | `-SkipGroupExpansion` | switch | uit | Groepslidmaatschap niet oplossen. Sneller, maar dan weet je alleen wélke groep toegang heeft, niet wie erin zit |
 | `-IncludeEffectiveAccess` | switch | uit | Schrijft daarnaast de effective-access CSV |
+| `-Excel` | switch | uit | Schrijft daarnaast één `.xlsx` met een tabblad per rapport. Vereist `ImportExcel` |
 | `-GraphTimeoutSec` | int | `120` | Timeout per Graph-/SharePoint-aanroep |
 | `-MaxGraphRetry` | int | `6` | Aantal retries bij throttling of timeouts |
 | `-Concurrency` | int (1-8) | `4` | Parallelle workers voor de per-item lookups die een `-Scope Item`-run domineren. `1` schakelt parallellisme uit |
@@ -341,6 +361,9 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 
 # Eén site collection, plus een CSV met effectieve toegang per gebruiker
 .\Get-SharePointPermissionsReport.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -IncludeEffectiveAccess
+
+# Alles in één Excel-werkmap: samenvatting, rechten, groepen met leden, en effectieve toegang
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -IncludeEffectiveAccess -Excel
 
 # Sneller overzicht: stoppen op lijst-/bibliotheekniveau en automatische traversal-grants verbergen
 .\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -Scope List -ExcludeLimitedAccess

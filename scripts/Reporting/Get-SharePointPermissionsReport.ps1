@@ -105,6 +105,12 @@
     inherited the access through. Off by default — on a large tenant this file can be orders of
     magnitude larger than the detail CSV.
 
+.PARAMETER Excel
+    Also write everything into one .xlsx workbook next to the CSVs, with a worksheet per report:
+    Samenvatting, Rechten, Groepen and — with -IncludeEffectiveAccess — Effectief. Needs the
+    ImportExcel module. The CSVs are always written regardless; the workbook is the readable copy
+    on top of them, and a sheet that would exceed Excel's row limit is capped with a warning.
+
 .PARAMETER GraphTimeoutSec
     Timeout in seconds per Graph/SharePoint call (default: 120).
 
@@ -151,6 +157,7 @@ param(
     [switch] $ExcludeLimitedAccess,
     [switch] $SkipGroupExpansion,
     [switch] $IncludeEffectiveAccess,
+    [switch] $Excel,
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
     [ValidateRange(1, 8)]
@@ -1313,7 +1320,12 @@ function ConvertTo-PermissionRows {
         # which turned every such list into "Cannot bind argument to parameter 'RoleAssignments'".
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$RoleAssignments,
         [Parameter(Mandatory = $true)][hashtable]$ScopeInfo,
-        [System.Collections.Generic.List[object]]$EffectiveRows
+        [System.Collections.Generic.List[object]]$EffectiveRows,
+        # Entra groups granted straight onto a scope never pass through /sitegroups, so without
+        # these they would be the one kind of group whose membership the report never lists —
+        # only the first ten names in MemberPreview. Collected once per group, not per grant.
+        [System.Collections.Generic.List[object]]$GroupRows,
+        [System.Collections.Generic.List[string]]$GroupKeys
     )
 
     $rows = [System.Collections.Generic.List[object]]::new()
@@ -1332,6 +1344,37 @@ function ConvertTo-PermissionRows {
 
         $principal = Get-PrincipalInfo -Member $ra.Member
         $members   = Resolve-PrincipalMembers -Principal $principal -WebUrl $ScopeInfo.WebUrl
+
+        # Record a directly granted directory group's membership once, the first time it is seen.
+        if ($null -ne $GroupRows -and $principal.DirectoryId -and
+            $principal.Kind -in @('SecurityGroup', 'M365Group', 'M365GroupOwners')) {
+            $entraKey = "entra|$($principal.Kind)|$($principal.DirectoryId)"
+            if ($script:GroupRowsWritten.Add($entraKey)) {
+                if ($null -ne $GroupKeys) { $GroupKeys.Add($entraKey) | Out-Null }
+                $groupTypeLabel = switch ($principal.Kind) {
+                    'SecurityGroup'    { 'EntraSecurityGroup' }
+                    'M365Group'        { 'Microsoft365Group' }
+                    'M365GroupOwners'  { 'Microsoft365GroupOwners' }
+                }
+                if ($members.Count -eq 0) {
+                    $GroupRows.Add([PSCustomObject]@{
+                        SiteUrl = $ScopeInfo.SiteUrl; GroupId = $principal.DirectoryId
+                        GroupTitle = $principal.Title; GroupOwner = $null; GroupType = $groupTypeLabel
+                        MemberType = $null; MemberName = $null; MemberLogin = $null; MemberEmail = $null
+                        MemberIsExternal = $null; IsEmpty = $true
+                    }) | Out-Null
+                } else {
+                    foreach ($m in $members) {
+                        $GroupRows.Add([PSCustomObject]@{
+                            SiteUrl = $ScopeInfo.SiteUrl; GroupId = $principal.DirectoryId
+                            GroupTitle = $principal.Title; GroupOwner = $null; GroupType = $groupTypeLabel
+                            MemberType = 'User'; MemberName = $m.DisplayName; MemberLogin = $m.Upn
+                            MemberEmail = $m.Email; MemberIsExternal = $m.IsExternal; IsEmpty = $false
+                        }) | Out-Null
+                    }
+                }
+            }
+        }
 
         $externalCount = @($members | Where-Object { $_.IsExternal }).Count
         if ($principal.IsExternal) { $externalCount = [Math]::Max($externalCount, 1) }
@@ -1860,7 +1903,7 @@ try {
                     LastModified   = $webInfo.LastItemModifiedDate
                 }
                 $webRoleAssignments = Get-ScopeRoleAssignments -Uri ("{0}/_api/web/roleassignments" -f $webUrl)
-                foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($webRoleAssignments) -ScopeInfo $webScope -EffectiveRows $webEffectiveRows)) {
+                foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($webRoleAssignments) -ScopeInfo $webScope -EffectiveRows $webEffectiveRows -GroupRows $webGroupRows -GroupKeys $webGroupKeys)) {
                     $webDetailRows.Add($row) | Out-Null
                 }
 
@@ -1897,6 +1940,8 @@ try {
                 $runTotals.Lists++
                 $listDetailRows    = [System.Collections.Generic.List[object]]::new()
                 $listEffectiveRows = [System.Collections.Generic.List[object]]::new()
+                $listGroupRows     = [System.Collections.Generic.List[object]]::new()
+                $listGroupKeys     = [System.Collections.Generic.List[string]]::new()
 
                 # Everything from here to the checkpoint runs inside its own try. One list that
                 # throws — a template that does not answer /roleassignments, a view threshold, a
@@ -1925,7 +1970,7 @@ try {
                         LastModified   = $null
                     }
                     $listRoleAssignments = Get-ScopeRoleAssignments -Uri ("{0}/_api/web/lists(guid'{1}')/roleassignments" -f $webUrl, $listId)
-                    foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($listRoleAssignments) -ScopeInfo $listScope -EffectiveRows $listEffectiveRows)) {
+                    foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($listRoleAssignments) -ScopeInfo $listScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys)) {
                         $listDetailRows.Add($row) | Out-Null
                     }
                 }
@@ -2056,7 +2101,7 @@ try {
                                 InheritsFrom   = $null
                                 LastModified   = $item.Modified
                             }
-                            foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($assignments) -ScopeInfo $itemScope -EffectiveRows $listEffectiveRows)) {
+                            foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($assignments) -ScopeInfo $itemScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys)) {
                                 $listDetailRows.Add($row) | Out-Null
                             }
                         }
@@ -2067,7 +2112,8 @@ try {
                 # here: the closing summary derives them from the detail CSV, which also covers
                 # the rows a resumed run wrote in an earlier session. Counting them twice would
                 # mean three more passes over every row of every list for a number nobody reads.
-                Complete-CheckpointUnit -UnitKey $unitKey -DetailRows @($listDetailRows) -EffectiveRows @($listEffectiveRows)
+                Complete-CheckpointUnit -UnitKey $unitKey -DetailRows @($listDetailRows) `
+                    -EffectiveRows @($listEffectiveRows) -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys)
 
                 } catch {
                     # A 401 means the credential itself stopped working, which is not survivable
@@ -2078,7 +2124,8 @@ try {
                     Write-ProgressHost -Message ("    [ERROR] {0} failed: {1}" -f $list.Title, $_.Exception.Message) -ForegroundColor Red
                     # Whatever this list did produce before failing is still written, and the
                     # unit is deliberately left unmarked so a resumed run retries it.
-                    Complete-CheckpointUnit -UnitKey $null -EffectiveRows @($listEffectiveRows) -DetailRows (
+                    Complete-CheckpointUnit -UnitKey $null -EffectiveRows @($listEffectiveRows) `
+                        -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys) -DetailRows (
                         @($listDetailRows) + @([PSCustomObject]@{
                             SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
                             UnitKey = $unitKey; ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $webUrl
@@ -2256,9 +2303,82 @@ if ($detailPublished) {
 } else {
     Write-Host ("  {0,-18}: (no rows)" -f 'Detail') -ForegroundColor DarkGray
 }
-[void](Publish-ReportFile -PartialPath $script:CheckpointGroupsPath    -FinalPath $groupsCsv    -Label 'Groups')
+$groupsPublished = Publish-ReportFile -PartialPath $script:CheckpointGroupsPath -FinalPath $groupsCsv -Label 'Groups'
+$effectivePublished = $false
 if ($IncludeEffectiveAccess) {
-    [void](Publish-ReportFile -PartialPath $script:CheckpointEffectivePath -FinalPath $effectiveCsv -Label 'Effective access')
+    $effectivePublished = Publish-ReportFile -PartialPath $script:CheckpointEffectivePath -FinalPath $effectiveCsv -Label 'Effective access'
+}
+
+# ── One workbook ──────────────────────────────────────────────────────────────
+# Built from the CSVs rather than instead of them. The CSVs are what the scan streams into and
+# what a resumed run appends to, so they exist either way; the workbook is the readable deliverable
+# on top. It is also the one that can fail on size — see the row cap below — and losing a
+# convenience copy must never cost the actual report.
+function Export-PermissionsWorkbook {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkbookPath,
+        # Ordered: Samenvatting first because it is the sheet the workbook should open on.
+        [Parameter(Mandatory = $true)][object[]]$Sheets,
+        # Excel stops at 1,048,576 rows per sheet and drops the rest without complaint. Cap below
+        # that deliberately, so a sheet that does not fit says so instead of being quietly short.
+        [int]$RowCap = 1000000
+    )
+    if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
+        Write-Host ''
+        Write-Host "  [WARN] -Excel needs the ImportExcel module, which is not installed." -ForegroundColor Yellow
+        Write-Host "         Install it with: Install-Module ImportExcel -Scope CurrentUser" -ForegroundColor Yellow
+        Write-Host "         (or run .\scripts\Startup\Install-Modules.ps1). The CSVs are complete." -ForegroundColor Yellow
+        return $false
+    }
+
+    try {
+        Import-Module ImportExcel -ErrorAction Stop
+        # Export-Excel appends to an existing workbook, so a second run at the same path would
+        # stack on top of the first.
+        if (Test-Path $WorkbookPath) { Remove-Item $WorkbookPath -Force }
+
+        # -TableName gives each sheet a real Excel table, which is what carries the filter
+        # dropdowns and banded rows, so no separate -AutoFilter is needed.
+        $common = @{
+            Path         = $WorkbookPath
+            AutoSize     = $true
+            BoldTopRow   = $true
+            FreezeTopRow = $true
+            TableStyle   = 'Medium2'
+        }
+
+        $written = 0
+        foreach ($sheet in $Sheets) {
+            if (-not $sheet.Path -or -not (Test-Path $sheet.Path)) { continue }
+            $data = @(Import-Csv -Path $sheet.Path)
+            if ($data.Count -eq 0) { continue }
+            if ($data.Count -gt $RowCap) {
+                Write-Host ("  [WARN] '{0}' has {1:N0} rows — only the first {2:N0} fit in a worksheet." -f $sheet.Name, $data.Count, $RowCap) -ForegroundColor Yellow
+                Write-Host ("         The complete data stays in {0}" -f $sheet.Path) -ForegroundColor Yellow
+                $data = @($data | Select-Object -First $RowCap)
+            }
+            $data | Export-Excel @common -WorksheetName $sheet.Name -TableName $sheet.Name
+            $written++
+        }
+        return ($written -gt 0)
+    } catch {
+        Write-Host ("  [WARN] Could not write the Excel workbook: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        Write-Host "         The CSVs are complete and unaffected." -ForegroundColor Yellow
+        return $false
+    }
+}
+
+if ($Excel) {
+    $excelPath = Join-Path $outputDir "SharePoint_Permissions_$ts.xlsx"
+    $sheetSpec = @(
+        @{ Name = 'Samenvatting'; Path = $(if ($summaryRows.Count -gt 0) { $summaryCsv }) }
+        @{ Name = 'Rechten';      Path = $(if ($detailPublished)        { $detailCsv }) }
+        @{ Name = 'Groepen';      Path = $(if ($groupsPublished)        { $groupsCsv }) }
+        @{ Name = 'Effectief';    Path = $(if ($effectivePublished)     { $effectiveCsv }) }
+    )
+    if (Export-PermissionsWorkbook -WorkbookPath $excelPath -Sheets $sheetSpec) {
+        Write-Host ("  {0,-18}: {1}" -f 'Excel workbook', $excelPath) -ForegroundColor Green
+    }
 }
 
 # Checkpoint files are only removed once the finals are on disk — an interrupted run keeps them
