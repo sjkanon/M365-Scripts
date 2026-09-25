@@ -1,0 +1,766 @@
+{
+  "client": "Laseto",
+  "description": "SharePoint-structuur, metadata en groepsrechten voor Laseto.",
+  "tenant": "futpetlas.onmicrosoft.com",
+  "team": {
+    "displayName": "Laseto-NewTeams",
+    "mailNickname": "lasetonewteams",
+    "description": "Documentbeheer Laseto.",
+    "visibility": "Private",
+    "owners": [
+      "itceadmin@futpetlas.onmicrosoft.com"
+    ]
+  },
+  "sites": {
+    "team": "https://futpetlas.sharepoint.com/sites/lasetonewteams",
+    "mgmt": "https://futpetlas.sharepoint.com/sites/Laseto-NewTeams-MGMT"
+  },
+  "columnGroup": "Laseto-NewTeams",
+  "contentTypeGroup": "Laseto-NewTeams",
+  "fieldRoles": {
+    "brand": "PsMerk",
+    "pillar": "PsPijler",
+    "confidentiality": "PsVertrouwelijkheid",
+    "lifecycle": "PsStatus"
+  },
+  "termStore": {
+    "group": "Laseto-NewTeams",
+    "termSet": "Leveranciers",
+    "description": "Leveranciers van Laseto - uitbreidbaar vanuit de term store.",
+    "terms": [
+      "Lev. 1",
+      "Lev. 2",
+      "Lev. 3"
+    ]
+  },
+  "columns": [
+    {
+      "internalName": "PsMerk",
+      "displayName": "Merk",
+      "type": "Choice",
+      "description": "Voor welk merk is dit?",
+      "choices": [
+        "Laseto"
+      ]
+    },
+    {
+      "internalName": "PsPijler",
+      "displayName": "Pijler",
+      "type": "Choice",
+      "description": "Vult zichzelf in op basis van het kanaal. Je hoeft hier niets te doen.",
+      "choices": [
+        "MGMT",
+        "Leveranciers",
+        "Verkopers",
+        "Klanten",
+        "Marketing",
+        "TD"
+      ]
+    },
+    {
+      "internalName": "PsRegio",
+      "displayName": "Regio",
+      "type": "Choice",
+      "description": "Voor welke verkoopregio is dit bedoeld?",
+      "choices": [
+        "Benelux",
+        "Duitsland",
+        "Frankrijk",
+        "Export"
+      ]
+    },
+    {
+      "internalName": "PsLeverancier",
+      "displayName": "Leverancier",
+      "type": "Taxonomy",
+      "description": "Typ de eerste letters van de leverancier, dan vult hij aan. Staat hij er niet bij? Vraag IT om hem toe te voegen.",
+      "termSet": "Leveranciers",
+      "multiValue": false
+    },
+    {
+      "internalName": "PsTaal",
+      "displayName": "Taal",
+      "type": "MultiChoice",
+      "description": "In welke taal of talen is dit document? Meerdere aanvinken mag.",
+      "choices": [
+        "NL",
+        "FR",
+        "DE",
+        "EN",
+        "Geen taal"
+      ]
+    },
+    {
+      "internalName": "PsContenttype",
+      "displayName": "Contenttype",
+      "type": "Choice",
+      "description": "Wat voor soort document is dit?",
+      "choices": [
+        "Catalogus",
+        "Prijslijst",
+        "Schrijfrichtlijn",
+        "Afbeelding+certificaat",
+        "Marketingslag"
+      ]
+    },
+    {
+      "internalName": "PsVertrouwelijkheid",
+      "displayName": "Vertrouwelijkheid",
+      "type": "Choice",
+      "description": "Mag dit naar buiten? Intern blijft binnen Laseto-NewTeams.",
+      "choices": [
+        "Intern",
+        "Deelbaar met klant",
+        "Vertrouwelijk"
+      ],
+      "defaultValue": "Intern"
+    },
+    {
+      "internalName": "PsStatus",
+      "displayName": "Status",
+      "type": "Choice",
+      "description": "Laat Actief staan. Zet op Te archiveren wat weg mag maar nog niet verwijderd hoeft.",
+      "choices": [
+        "Actief",
+        "Te archiveren",
+        "Verouderd"
+      ],
+      "defaultValue": "Actief"
+    }
+  ],
+  "contentTypes": [
+    {
+      "name": "MGMT-document",
+      "id": "0x010100AF0938789CC44C8DADCF629740185569",
+      "description": "Documenten van de pijler MGMT.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": true
+        },
+        {
+          "internalName": "PsPijler",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Leveranciers-document",
+      "id": "0x01010098FB32A8578246A48DC0561669BBD229",
+      "description": "Documenten van de pijler Leveranciers.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsLeverancier",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": false
+        },
+        {
+          "internalName": "PsPijler",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Verkopers-document",
+      "id": "0x010100DF4D6107711F468CB03E874C1B68C5B5",
+      "description": "Documenten van de pijler Verkopers.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsRegio",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": false
+        },
+        {
+          "internalName": "PsPijler",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Klanten-document",
+      "id": "0x010100E46CE1FD12824FF29B5912DDD14CB8A4",
+      "description": "Documenten van de pijler Klanten.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": false
+        },
+        {
+          "internalName": "PsPijler",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Marketing-document",
+      "id": "0x010100FC3BEE1F31364A6390D1E715C877618A",
+      "description": "Documenten van de pijler Marketing.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": false
+        },
+        {
+          "internalName": "PsPijler",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "TD-document",
+      "id": "0x010100FEA902818A94423EA6C316DEF017903E",
+      "description": "Documenten van de pijler TD.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": false
+        },
+        {
+          "internalName": "PsPijler",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "Klantmedia",
+      "id": "0x01010008A261399D0D41EFAEFA72241BE27EE7",
+      "description": "Materiaal dat met klanten gedeeld wordt.",
+      "fields": [
+        {
+          "internalName": "PsMerk",
+          "required": true
+        },
+        {
+          "internalName": "PsContenttype",
+          "required": true
+        },
+        {
+          "internalName": "PsTaal",
+          "required": true
+        },
+        {
+          "internalName": "PsVertrouwelijkheid",
+          "required": false
+        },
+        {
+          "internalName": "PsStatus",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "displayName": "SG-LASETO-MGMT-RW",
+      "mailNickname": "sglasetomgmtrw",
+      "description": "Laseto - MGMT - bewerken"
+    },
+    {
+      "displayName": "SG-LASETO-MGMT-RO",
+      "mailNickname": "sglasetomgmtro",
+      "description": "Laseto - MGMT - alleen lezen"
+    },
+    {
+      "displayName": "SG-LASETO-Leveranciers-RW",
+      "mailNickname": "sglasetoleveranciersrw",
+      "description": "Laseto - Leveranciers - bewerken"
+    },
+    {
+      "displayName": "SG-LASETO-Leveranciers-RO",
+      "mailNickname": "sglasetoleveranciersro",
+      "description": "Laseto - Leveranciers - alleen lezen"
+    },
+    {
+      "displayName": "SG-LASETO-Verkopers-RW",
+      "mailNickname": "sglasetoverkopersrw",
+      "description": "Laseto - Verkopers - bewerken"
+    },
+    {
+      "displayName": "SG-LASETO-Verkopers-RO",
+      "mailNickname": "sglasetoverkopersro",
+      "description": "Laseto - Verkopers - alleen lezen"
+    },
+    {
+      "displayName": "SG-LASETO-Klanten-RW",
+      "mailNickname": "sglasetoklantenrw",
+      "description": "Laseto - Klanten - bewerken"
+    },
+    {
+      "displayName": "SG-LASETO-Klanten-RO",
+      "mailNickname": "sglasetoklantenro",
+      "description": "Laseto - Klanten - alleen lezen"
+    },
+    {
+      "displayName": "SG-LASETO-Marketing-RW",
+      "mailNickname": "sglasetomarketingrw",
+      "description": "Laseto - Marketing - bewerken"
+    },
+    {
+      "displayName": "SG-LASETO-Marketing-RO",
+      "mailNickname": "sglasetomarketingro",
+      "description": "Laseto - Marketing - alleen lezen"
+    },
+    {
+      "displayName": "SG-LASETO-TD-RW",
+      "mailNickname": "sglasetotdrw",
+      "description": "Laseto - TD - bewerken"
+    },
+    {
+      "displayName": "SG-LASETO-TD-RO",
+      "mailNickname": "sglasetotdro",
+      "description": "Laseto - TD - alleen lezen"
+    },
+    {
+      "displayName": "SG-LASETO-Klanten-Extern",
+      "mailNickname": "sglasetoklantenextern",
+      "description": "Laseto - externe klanten met leestoegang tot FUTECH Images and videos"
+    }
+  ],
+  "libraryViews": [
+    {
+      "site": "team",
+      "list": "Documents",
+      "views": [
+        {
+          "title": "Alles - Laseto",
+          "description": "Elk bestand van Laseto, dwars door alle pijlers heen.",
+          "recursive": true,
+          "groupBy": "PsPijler",
+          "where": "<Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Laseto</Value></Eq>",
+          "fields": [
+            "DocIcon",
+            "LinkFilename",
+            "PsPijler",
+            "PsContenttype",
+            "PsTaal",
+            "PsStatus",
+            "Modified"
+          ]
+        },
+        {
+          "title": "Nog te taggen",
+          "description": "Bestanden zonder merk - meestal binnengesleept of via de gesynchroniseerde map gekopieerd.",
+          "recursive": true,
+          "where": "<IsNull><FieldRef Name='PsMerk' /></IsNull>",
+          "fields": [
+            "DocIcon",
+            "LinkFilename",
+            "PsPijler",
+            "Editor",
+            "Modified"
+          ]
+        },
+        {
+          "title": "Te archiveren",
+          "description": "Alles met status Te archiveren of Verouderd.",
+          "recursive": true,
+          "groupBy": "PsStatus",
+          "where": "<Or><Eq><FieldRef Name='PsStatus' /><Value Type='Text'>Te archiveren</Value></Eq><Eq><FieldRef Name='PsStatus' /><Value Type='Text'>Verouderd</Value></Eq></Or>",
+          "fields": [
+            "DocIcon",
+            "LinkFilename",
+            "PsStatus",
+            "PsPijler",
+            "PsMerk",
+            "Editor",
+            "Modified"
+          ]
+        }
+      ]
+    }
+  ],
+  "containers": [
+    {
+      "key": "MGMT",
+      "title": "MGMT",
+      "kind": "ChannelFolder",
+      "channelType": "Private",
+      "site": "mgmt",
+      "list": "Documents",
+      "folder": "MGMT",
+      "pillar": "MGMT",
+      "defaultColumnValues": {
+        "PsPijler": "MGMT",
+        "PsStatus": "Actief"
+      },
+      "contentTypes": [
+        "MGMT-document"
+      ],
+      "defaultContentType": "MGMT-document",
+      "uniquePermissions": false,
+      "view": {
+        "title": "Op contenttype",
+        "groupBy": "PsContenttype",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsContenttype",
+          "PsMerk",
+          "PsTaal",
+          "PsVertrouwelijkheid",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [],
+      "note": "Privekanaal - Teams beheert de rechten via het lidmaatschap van de kanaalsite."
+    },
+    {
+      "key": "Leveranciers",
+      "title": "Leveranciers",
+      "kind": "ChannelFolder",
+      "channelType": "Standard",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Leveranciers",
+      "pillar": "Leveranciers",
+      "defaultColumnValues": {
+        "PsPijler": "Leveranciers",
+        "PsStatus": "Actief"
+      },
+      "contentTypes": [
+        "Leveranciers-document"
+      ],
+      "defaultContentType": "Leveranciers-document",
+      "uniquePermissions": false,
+      "view": {
+        "title": "Op leverancier",
+        "groupBy": "PsLeverancier",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsLeverancier",
+          "PsMerk",
+          "PsTaal",
+          "PsVertrouwelijkheid",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [
+        {
+          "group": "SG-LASETO-Leveranciers-RW",
+          "role": "Contribute"
+        },
+        {
+          "group": "SG-LASETO-Leveranciers-RO",
+          "role": "Read"
+        }
+      ]
+    },
+    {
+      "key": "Verkopers",
+      "title": "Verkopers",
+      "kind": "ChannelFolder",
+      "channelType": "Standard",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Verkopers",
+      "pillar": "Verkopers",
+      "defaultColumnValues": {
+        "PsPijler": "Verkopers",
+        "PsStatus": "Actief"
+      },
+      "contentTypes": [
+        "Verkopers-document"
+      ],
+      "defaultContentType": "Verkopers-document",
+      "uniquePermissions": false,
+      "view": {
+        "title": "Op regio",
+        "groupBy": "PsRegio",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsRegio",
+          "PsMerk",
+          "PsTaal",
+          "PsVertrouwelijkheid",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [
+        {
+          "group": "SG-LASETO-Verkopers-RW",
+          "role": "Contribute"
+        },
+        {
+          "group": "SG-LASETO-Verkopers-RO",
+          "role": "Read"
+        }
+      ]
+    },
+    {
+      "key": "Klanten",
+      "title": "Klanten",
+      "kind": "ChannelFolder",
+      "channelType": "Standard",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Klanten",
+      "pillar": "Klanten",
+      "defaultColumnValues": {
+        "PsPijler": "Klanten",
+        "PsStatus": "Actief"
+      },
+      "contentTypes": [
+        "Klanten-document"
+      ],
+      "defaultContentType": "Klanten-document",
+      "uniquePermissions": false,
+      "view": {
+        "title": "Op contenttype",
+        "groupBy": "PsContenttype",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsContenttype",
+          "PsMerk",
+          "PsTaal",
+          "PsVertrouwelijkheid",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [
+        {
+          "group": "SG-LASETO-Klanten-RW",
+          "role": "Contribute"
+        },
+        {
+          "group": "SG-LASETO-Klanten-RO",
+          "role": "Read"
+        }
+      ]
+    },
+    {
+      "key": "Marketing",
+      "title": "Marketing",
+      "kind": "ChannelFolder",
+      "channelType": "Standard",
+      "site": "team",
+      "list": "Documents",
+      "folder": "Marketing",
+      "pillar": "Marketing",
+      "defaultColumnValues": {
+        "PsPijler": "Marketing",
+        "PsStatus": "Actief"
+      },
+      "contentTypes": [
+        "Marketing-document"
+      ],
+      "defaultContentType": "Marketing-document",
+      "uniquePermissions": false,
+      "view": {
+        "title": "Op contenttype",
+        "groupBy": "PsContenttype",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsContenttype",
+          "PsMerk",
+          "PsTaal",
+          "PsVertrouwelijkheid",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [
+        {
+          "group": "SG-LASETO-Marketing-RW",
+          "role": "Contribute"
+        },
+        {
+          "group": "SG-LASETO-Marketing-RO",
+          "role": "Read"
+        }
+      ]
+    },
+    {
+      "key": "TD",
+      "title": "TD",
+      "kind": "ChannelFolder",
+      "channelType": "Standard",
+      "site": "team",
+      "list": "Documents",
+      "folder": "TD",
+      "pillar": "TD",
+      "defaultColumnValues": {
+        "PsPijler": "TD",
+        "PsStatus": "Actief"
+      },
+      "contentTypes": [
+        "TD-document"
+      ],
+      "defaultContentType": "TD-document",
+      "uniquePermissions": false,
+      "view": {
+        "title": "Op contenttype",
+        "groupBy": "PsContenttype",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsContenttype",
+          "PsMerk",
+          "PsTaal",
+          "PsVertrouwelijkheid",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [
+        {
+          "group": "SG-LASETO-TD-RW",
+          "role": "Contribute"
+        },
+        {
+          "group": "SG-LASETO-TD-RO",
+          "role": "Read"
+        }
+      ]
+    },
+    {
+      "key": "KlantBibliotheek",
+      "title": "FUTECH Images and videos",
+      "kind": "Library",
+      "site": "team",
+      "list": "FUTECH Images and videos",
+      "defaultColumnValues": {
+        "PsStatus": "Actief",
+        "PsVertrouwelijkheid": "Deelbaar met klant"
+      },
+      "contentTypes": [
+        "Klantmedia"
+      ],
+      "defaultContentType": "Klantmedia",
+      "uniquePermissions": true,
+      "keepExistingPermissions": false,
+      "view": {
+        "title": "Op merk",
+        "groupBy": "PsMerk",
+        "fields": [
+          "DocIcon",
+          "LinkFilename",
+          "PsMerk",
+          "PsContenttype",
+          "PsTaal",
+          "PsStatus",
+          "Modified"
+        ]
+      },
+      "permissions": [
+        {
+          "group": "SG-LASETO-Marketing-RW",
+          "role": "Contribute"
+        },
+        {
+          "group": "SG-LASETO-Klanten-Extern",
+          "role": "Read"
+        }
+      ]
+    }
+  ]
+}

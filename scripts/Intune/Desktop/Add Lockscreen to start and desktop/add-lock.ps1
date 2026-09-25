@@ -1,4 +1,15 @@
-﻿$folder = 'C:\Program Files\EOO\'
+﻿<#
+.SYNOPSIS
+    Put a "lock workstation" shortcut in the Start menu and on the public desktop.
+
+.DESCRIPTION
+    Downloads lock.bat and lock.ico from the endpoint share into
+    C:\Program Files\EOO\lockworkstation and creates a shortcut to them under
+    Start Menu\Programs\EOO and on the all-users desktop, so every user on the
+    device gets the same way to lock their screen. Intended for Intune deployment.
+#>
+
+$folder = 'C:\Program Files\EOO\'
 
 if(-not(Test-Path -Path $folder -PathType Container)){
 Set-Location 'C:\Program Files'

@@ -7,6 +7,7 @@
 ## Table of Contents
 
 - [Getting Started](#getting-started)
+- [Finding a script](#finding-a-script)
 - [Quick Launcher](#quick-launcher)
 - [Requirements](#requirements)
 - [Menu](#menu)
@@ -59,6 +60,19 @@ To remove the startup shortcut later:
 
 > You can also run `.\menu.ps1` directly — it will ask for your UPN as a fallback.
 > To reinstall or update modules manually: `.\scripts\Startup\Install-Modules.ps1`
+
+---
+
+## Finding a script
+
+| Where | What it gives you |
+|-------|-------------------|
+| [`scripts/INDEX.md`](scripts/INDEX.md) | Every script A–Z on one page — name, folder and what it does. Ctrl-F this when you know roughly what you want but not where it lives |
+| [`scripts/readme.md`](scripts/readme.md) | The other direction: what each workload folder is for |
+| [`.\menu.ps1`](menu.ps1) | The curated interactive launcher for the everyday tasks |
+| `f <term>` | Fuzzy search from your shell, described under [Quick Launcher](#quick-launcher) below |
+
+`INDEX.md` is generated from the scripts' own `.SYNOPSIS` headers by [`scripts/Startup/Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1) — rerun it (or run it with `-Check`) whenever a script is added, renamed, moved or removed.
 
 ---
 
@@ -133,8 +147,13 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `6` / `F6` | Device | Restart-Time-Sync |
 | `7` / `F7` | Device | Detect-AudioDevices |
 | `8` / `F8` | Device | Disable-InternalMic |
+| `I` | Device | Remove-OemBloatware — remove OEM + generic Store bloatware |
+| `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
 | `9` / `F9` | Startup | Install-Modules |
+| `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `A` / `F10` | Reporting | Licensing-Report |
+| `P` | Reporting | SharePoint-Perms — report who has access to what, at every level |
+| `S` | SharePoint | SharePoint-Structure — provision/check metadata, libraries and rights |
 | `F` | Startup | Enable-LauncherStartup — add launcher to Windows Startup |
 | `G` | Startup | Disable-LauncherStartup — remove launcher from Windows Startup |
 | `B` | M365 | Connect-Tenant |
@@ -157,6 +176,10 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `D` | Get-MailboxSizes — mailbox size report sorted by storage used |
 | `E` | Move-InboxToArchive — archive Inbox messages to Archive folder |
 | `F` | Set-DL-Dynamic-Static — resolve a dynamic distribution group into a static group |
+| `H` | Get-CalendarMappings — where a calendar is mapped in Outlook, next to the rights (search by keyword, e.g. `balie`, or all/selected mailboxes) |
+| `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
+| `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
+| `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
 
 **Entra ID submenu (`D`)**
 
@@ -194,6 +217,10 @@ Scripts for calendar and mailbox management.
 
 - Calendar migration between users
 - Set calendar folder permissions (NL/FR/EN locale support)
+- **Get-DistributionGroupMembers.ps1** — who is on which distribution list, as one Excel workbook meant to go straight to the customer
+  - `Overzicht` sheet (one row per list) and `Leden` sheet (one row per member), both filterable tables with a frozen header row, headers in Dutch
+  - `-Member jan@contoso.com` answers "which lists is this person on?"; `-Member @be.verizon.com` answers it for one domain and `-Member *.verizon.com` for a domain and every subdomain, matching aliases and `ExternalEmailAddress` so external contacts are actually found
+  - `-Recurse` expands nested lists — without it someone who only receives mail through a nested group is invisible, and a filter reports "no hits" on a list that does deliver to them
 - **Get-MessageTraceReport.ps1** — trace who received what, at what exact time, and where it was forwarded to
 - **Remove-PhishingMessage.ps1** — delete a phishing message from one, several, or all mailboxes; dry-run by default
   - Two engines: **Purview** Content Search + purge (tenant-wide, the only one that can HardDelete) and **Graph** (per-mailbox, no search-index lag, per-message report)
@@ -261,6 +288,21 @@ Restore deleted files and folders from a site or OneDrive recycle bin — dry-ru
 - Restores in batches of up to 200 via a single server call (`-BatchSize`) — a failed batch falls back to item-by-item so one bad file does not sink the rest
 - Timing throughout: how long reading the bin took, an up-front estimate, a progress bar with live ETA, and the real duration in the summary
 - CSV report of every item, restored or failed, including the site, the SharePoint error, its batch number and how long it took
+
+#### Structure Provisioning
+
+Provision and maintain a whole SharePoint structure — metadata model, content types, libraries and group permissions — from one JSON config. See [`scripts/SharePoint/Provisioning/`](scripts/SharePoint/Provisioning/readme.md).
+
+- `Install-SharePointStructure.ps1` — **the one-command build**: registers the Entra app itself, runs the three provisioning steps in the only order that works, verifies the result, and with `-TemporaryApp` removes the app registration again so nothing is left behind in a tenant you do not manage day to day
+- The model lives in the config, not in the code: a second MSP client is a second config file, not a second fork of four scripts
+- `New-SharePointMetadata.ps1` — managed metadata term set, site columns and content types, on **every** site in the config (a Teams private channel is its own site collection, and a site column does not reach across one)
+- `Set-SharePointLibraries.ps1` — libraries, Teams channel folders, content type binding, per-folder content type order, default column values, grouped views, and one Entra ID security group per pillar per access level; `-EnsureGroups` creates the groups on the way
+- `Update-SharePointShareStatus.ps1` — derives a Deelstatus column from the permissions actually on each file (Anyone link, guest, organisation link, or nothing) and flags anything tagged Intern/Vertrouwelijk sitting behind an external link; exit code 2 for a scheduled RMM job
+- `Test-SharePointStructure.ps1` — read-only drift check classifying every difference as Missing / Different / Extra; exit code 2 means somebody changed something
+- All four are idempotent and support `-WhatIf`; interactive or app-only with a certificate
+- Cross-cutting brand views (`Scope = RecursiveAll`) make "brand as a tag" real: *Alles - Butterstone* is one flat list across every pillar folder, including everything tagged **Beide** — one file, two brands, no copies. Plus *Nog te taggen*, *Extern gedeeld* and *Te archiveren*
+- [`Petsolutions-SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/Petsolutions-SharePoint-Handleiding.md) — end-user documentation in Dutch to hand to the customer: the three ways of adding a file and why they behave differently, what each label means, and what happens the moment you tag something
+- Documented rather than hidden: unique permissions on a **standard**-channel folder are what this model asks for and what Microsoft does not support — members keep seeing the channel and get an error on the Files tab. `-SkipChannelFolderPermissions` is the conservative alternative
 
 ---
 
@@ -488,10 +530,10 @@ A now-retired internal PowerShell repo (and two forked third-party GitHub toolki
 
 | Folder | Source | Covers |
 |--------|--------|--------|
-| [`TenantOnboarding/`](../scripts/TenantOnboarding/readme.md) | Internal tenant-setup toolkit | New-tenant provisioning (break-glass admin, baseline groups/Intune assignment), multi-tenant/GDAP license + break-glass password reporting, Win32/Chocolatey app deployment, device config (kiosk power, Office uninstall, Start menu layout), OneDrive management, dynamic-DG/feature-group user management |
-| [`Office365Toolkit/`](../scripts/Office365Toolkit/readme.md) | Fork of [`directorcia/Office365`](https://github.com/directorcia/Office365) (CIAOPS) | Secure Score reporting, enterprise app consent cleanup, shared mailbox sign-in lockdown, EOP baseline, mailbox hygiene/forwarding-risk audits, Unified Audit Log search, Intune policy inventory |
-| [`PatronToolkit/`](../scripts/PatronToolkit/readme.md) | Fork of [`directorcia/patron`](https://github.com/directorcia/patron) | MFA registration + CA policy export, enterprise app consent + suspicious inbox rule + unified security alert audits, consolidated email security posture + mailbox auditing checks, SPF/DMARC validation, Intune policy assignment + Autopilot device reports, message trace, SharePoint sharing config, Teams config report |
-| [`LegacyUtilities/`](../scripts/LegacyUtilities/readme.md) | Internal toolkit (misc small scripts) | Mailbox folder permissions/delegate access, bulk shared mailbox/contact creation, contact sync, duplicate mail item cleanup, M365 group membership, CA policy backup, Teams/Planner cloning, Azure Files drive mapping, NumLock/lock-workstation device tweaks, Workspace 365 environment provisioning |
+| [`TenantOnboarding/`](scripts/TenantOnboarding/readme.md) | Internal tenant-setup toolkit | New-tenant provisioning (break-glass admin, baseline groups/Intune assignment), multi-tenant/GDAP license + break-glass password reporting, Win32/Chocolatey app deployment, device config (kiosk power, Office uninstall, Start menu layout), OneDrive management, dynamic-DG/feature-group user management |
+| [`Office365Toolkit/`](scripts/Office365Toolkit/readme.md) | Fork of [`directorcia/Office365`](https://github.com/directorcia/Office365) (CIAOPS) | Secure Score reporting, enterprise app consent cleanup, shared mailbox sign-in lockdown, EOP baseline, mailbox hygiene/forwarding-risk audits, Unified Audit Log search, Intune policy inventory |
+| [`PatronToolkit/`](scripts/PatronToolkit/readme.md) | Fork of [`directorcia/patron`](https://github.com/directorcia/patron) | MFA registration + CA policy export, enterprise app consent + suspicious inbox rule + unified security alert audits, consolidated email security posture + mailbox auditing checks, SPF/DMARC validation, Intune policy assignment + Autopilot device reports, message trace, SharePoint sharing config, Teams config report |
+| [`LegacyUtilities/`](scripts/LegacyUtilities/readme.md) | Internal toolkit (misc small scripts) | Mailbox folder permissions/delegate access, bulk shared mailbox/contact creation, contact sync, duplicate mail item cleanup, M365 group membership, CA policy backup, Teams/Planner cloning, Azure Files drive mapping, NumLock/lock-workstation device tweaks, Workspace 365 environment provisioning |
 
 Both GitHub forks were reviewed capability-by-capability rather than ported 1:1 — near-duplicate single-purpose report scripts were consolidated into fewer well-parameterized ones, and capabilities already covered elsewhere in this repo were skipped rather than duplicated (see each folder's readme for the full skip list and reasoning). All code is a fresh implementation in this repo's style, not copied from the source projects.
 
@@ -511,6 +553,7 @@ M365-Scripts/
 ├── readme.md
 └── scripts/
     ├── readme.md                    ← Index of all categories below
+    ├── INDEX.md                     ← Every script A-Z with its folder (generated)
     ├── Azure/                        ← targets Azure IaaS directly via Az, not the M365 tenant
     │   ├── readme.md
     │   └── VM/
@@ -528,15 +571,19 @@ M365-Scripts/
     ├── Exchange/
     │   ├── readme.md
     │   ├── Migrate-Calendar.ps1
+    │   ├── Convert-SharedCalendarToResource.ps1  ← shared calendar in a user's mailbox → its own room/equipment mailbox
+    │   ├── Move-SharedCalendar.ps1  ← all in one: search by keyword + convert + who has to switch
     │   ├── Set-Calendar-rights.ps1
     │   ├── Set-Distributionlist-dynamic-static.ps1
     │   ├── Move-InboxToArchive.ps1
     │   ├── Test-CalendarPermissions.ps1
+    │   ├── Get-CalendarMappings.ps1  ← where each calendar is mapped in Outlook, next to the rights behind it
     │   ├── Test-MailboxPermissions.ps1
     │   ├── Test-DistributionGroupPermissions.ps1
     │   ├── Test-DkimConfig.ps1
     │   ├── Get-ExternalForwards.ps1
-    │   └── Get-MailboxSizes.ps1
+    │   ├── Get-MailboxSizes.ps1
+    │   └── Get-DistributionGroupMembers.ps1  ← who is on which distribution list, as an Excel workbook for the customer
     ├── Graph/
     │   ├── readme.md
     │   └── logic-permissies.ps1     ← grant a Graph app role to a Logic App managed identity
@@ -575,6 +622,9 @@ M365-Scripts/
     │   ├── Clear-TempFiles.ps1
     │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
+    │   ├── Update-TeamsClient.ps1       ← update new Teams + meeting add-in when a newer build exists
+    │   ├── Update-TeamsClient.md        ← how that script decides, step by step
+    │   ├── Update-TeamsClient-ITGlue.md ← servicedeskversie (NL) om in IT Glue te plakken
     │   ├── audio/
     │   │   ├── readme.md
     │   │   ├── detect-audiodevices.ps1
@@ -624,7 +674,17 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
     │   ├── Search-SharePointContent.ps1 ← same, tenant-wide via Graph app-only: delta + /permissions, sharing links and guests (files/folders)
-    │   └── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   ├── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
+    │       ├── readme.md
+    │       ├── Petsolutions-SharePoint-Handleiding.md ← end-user guide (NL) to hand to the customer
+    │       ├── petsolutions.config.json     ← the model: columns, content types, groups, libraries, views, permissions
+    │       ├── Install-SharePointStructure.ps1 ← build it all in one run, incl. (temporary) app registration
+    │       ├── SharePointStructure.Common.ps1 ← shared helpers (dot-sourced by all four)
+    │       ├── New-SharePointMetadata.ps1   ← term set, site columns, content types (every site in the config)
+    │       ├── Set-SharePointLibraries.ps1  ← libraries/channel folders, content types, defaults, views, group rights
+    │       ├── Update-SharePointShareStatus.ps1 ← derive the Deelstatus column, flag over-sharing (exit 2)
+    │       └── Test-SharePointStructure.ps1 ← read-only drift check vs the config (exit 2)
     ├── Teams/
     │   ├── readme.md
     │   └── vias_archiver.ps1        ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
@@ -632,6 +692,8 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
     │   ├── Get-SharePointStorageReport.ps1  ← tenant-wide SharePoint storage report
+    │   ├── Get-SharePointPermissionsReport.ps1 ← who has access to what, at every level, to CSV
+    │   ├── Remove-SharePointFileVersionsByDate.ps1 ← delete file versions older than a date
     │   └── Licensing/
     │       ├── readme.md
     │       ├── genereer_licentie_overzicht.py
@@ -643,7 +705,8 @@ M365-Scripts/
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
-    │   └── Test-PowerShellSyntax.ps1
+    │   ├── Test-PowerShellSyntax.ps1
+    │   └── Update-ScriptIndex.ps1   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
     ├── Custom Scripts/                 ← path-pinned scripts (see note above)
     │   ├── readme.md
     │   └── Intune/
@@ -713,6 +776,384 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-25 (5)
+| Change |
+|--------|
+| Finding a script on GitHub meant guessing which of the 56 workload folders it was under and opening readmes until it turned up. There is now one page that answers it: [`scripts/INDEX.md`](scripts/INDEX.md) lists all 176 scripts A-Z with a link to the file, a link to its folder readme, and what it does — Ctrl-F instead of a hunt |
+| The page is **generated**, by the new `scripts/Startup/Update-ScriptIndex.ps1`, so it cannot drift from the files the way a hand-kept table does. `-Check` reports a stale index without writing (exit `1`), which is what a hook or a pipeline would call; a run that finds the page current writes nothing at all |
+| Descriptions come from the scripts themselves: the `.SYNOPSIS` block, joined across the lines it wraps over rather than taking the first line, which was leaving half-sentences like "Grant Full Access and/or Send As delegate rights on one mailbox, a CSV list of" in the table. Where a synopsis opens with a sentence and then lists its cases, the lead-in is kept and the list is not dragged in behind it |
+| For the older scripts that have no `.SYNOPSIS`, a leading `#` comment block is used instead — but only a real header. A single comment line sitting straight on top of code describes that line, not the script: `# URL van de theme` above a `$ThemeUrl` assignment was being read as a description, which is worse in a table than a blank |
+| The eight scripts that still ended up with nothing got a real `.SYNOPSIS` instead of a blank cell: `add-lock.ps1`, `add-shortcut-lock.ps1`, `logic-permissies.ps1`, `Test-OpenVpnDiagnostics.ps1`, `Deploy-OfficeTheme.ps1`, `Restart-Time-Sync.ps1`, `Test-PowerShellSyntax.ps1` and `functies.ps1`. All 176 scripts now describe themselves, so the index has no "without a description" section left |
+| Documented the two scripts no readme mentioned at all: `Phising-rollout.ps1` in [`scripts/Entra/readme.md`](scripts/Entra/readme.md) (the two-way sync between the phishing-resistant MFA rollout and registered groups, what counts as registered and why the default is an AAGUID filter) and `Get-FSlogix-errors.ps1` in [`scripts/RDS/readme.md`](scripts/RDS/readme.md) (what the FSLogix diagnostic collects and that it must run on the session host). Its header still pointed at a filename that no longer exists, and named a real customer in the example; both corrected |
+| The root `Menu` table had drifted from `menu.ps1` — `I`, `T`, `S` and `P` were missing. Synced, and `X` added for the index generator, which is also in the Startup readme and the repository tree |
+| Verified: all 176 files parse; the generator is idempotent (a second run reports "already up to date" and writes nothing); `-Check` exits `0` when current; every markdown link in the repository resolves, percent-encoded folder names included; and `f.ps1` still finds both the new script and the newly described ones |
+| Numbering fix: two entries below were both labelled `(3)`. Renumbered to the order the work actually happened in |
+
+### 2026-09-25 (4)
+| Change |
+|--------|
+| Correction to the previous entry: the `1638` on the meeting add-in was **not** caused by `-Force` downgrading the client. Measured on the host itself, the registered add-in was `1.25.28902` and the MSI being installed `1.26.21803` - newer, and still refused. This MSI declines to install while any other copy of the add-in is registered, whichever version that is. The version comparison added in the last change would therefore not have prevented the failure; the guard now asks whether a registration survived the uninstall, which is the thing that actually decides it |
+| `-ClearOrphanedAddInRegistration` is the way out of the state that host is in. An uninstall answering `1612` means Windows Installer has lost the cached MSI it needs and can no longer remove the product by any supported means, while its registration keeps refusing every reinstall. The switch makes the installer forget that one product: its keys under `Installer\Products`, `Installer\Features` and `Installer\UserData\S-1-5-18\Products`, its entry under the upgrade code, and the Programs and Features entry. What MsiZap used to do, scoped to one product, only after msiexec has proved it cannot, off by default, and every key through `ShouldProcess` |
+| Finding those keys needs the ProductCode as Windows Installer's 32-character "packed" GUID. That transform was validated before anything used it to point at keys for deletion: of 57 GUID-named uninstall entries on a workstation, the 32 with machine-wide product data all mapped onto an existing packed key with an identical `DisplayName`, and the 25 that did not are per-user installs living under the user's own SID |
+| Verified read-only against three real products: each yields three product keys plus exactly one upgrade-code entry, and the constructed path is readable as written. A bogus product code returns nothing and an unknown product returns no keys, so the cleanup cannot fire on thin air. **Untested:** the removal itself, and the reinstall that should follow it |
+
+### 2026-09-25 (3)
+| Change |
+|--------|
+| Added `scripts/Reporting/Get-SharePointPermissionsReport.ps1` — an exhaustive read-only SharePoint Online permissions report: site collection admins, web role assignments including inheritance breaks, SharePoint groups with their full membership, list and library role assignments, every folder and item with a unique scope, sharing links with their kind, external/guest principals, `Everyone` grants, and Entra group grants resolved to transitive membership. Four CSVs: detail, per-site summary, group membership, and — behind `-IncludeEffectiveAccess` — one row per resolved user per scope with the group the access runs through |
+| Inheritance is followed the way SharePoint models it: an item is only reported as its own scope when `HasUniqueRoleAssignments` is true, so the CSV is a map of the permission structure rather than a row per file. Site discovery is deliberately redundant — Graph `getAllSites`, then sub-sites through both Graph and SharePoint REST (`/_api/web/webs`), de-duplicated on URL — because Graph omits classic sub-webs |
+| Authentication had to go app-only: role assignments are not readable through Graph at all, and are not covered by SharePoint's Read/Write/Manage application roles either — only `Sites.FullControl.All` can enumerate them. The script signs in interactively once, creates a short-lived App Registration with that role plus Graph `Sites.Read.All` and `GroupMember.Read.All`, and deletes it again on exit. Despite the Full Control role it only ever issues `GET`: it never writes and never changes a permission. `-ClientId`/`-TenantId` with a secret or certificate skips the temporary app |
+| Resumable like the other long SharePoint scans: a checkpoint per completed list, keyed on a hash of the scan parameters, so an interrupted tenant run continues instead of starting over; `-Restart` discards it. Checkpoint files are only cleaned up once the final CSVs are written, so their presence is itself the signal that a run was interrupted |
+| Documented in `scripts/Reporting/readme.md` (coverage, authentication, the four output files, checkpoints, full parameter table, examples), added to the root repository tree and to `menu.ps1` under Reporting as `P` — which also prompts for tenant or single site, scope, and whether to write the effective-access CSV |
+| The repository tree also listed neither this script nor `Remove-SharePointFileVersionsByDate.ps1`; both are in it now |
+| **Untested by me**: this script has not been run against a live tenant in this session — only its syntax was checked. The temporary App Registration path, the throttling retries and the checkpoint resume are unverified here and should be exercised on a pilot tenant, starting with `-SiteUrl` and `-Scope Site`, before a tenant-wide run |
+
+### 2026-09-25 (2)
+| Change |
+|--------|
+| An add-in that is registered but whose files are gone no longer counts as installed. That is exactly the state the failed run above left behind, and the script would have answered "Teams is up to date - nothing to do" on it: the work decision only looked at the Programs and Features entry, while the DLL check that spots this was report-only |
+| `Update-TeamsClient.ps1` no longer deletes a working meeting add-in before knowing it can install a replacement. A production `-Force` run removed every copy in step 6 and then failed in step 8 with `1638`, leaving the session host with no add-in at all. The sweep moved to step 8, behind the version comparison: an older MSI than the registered add-in now means the sweep and the install are skipped and the working add-in is left exactly as it is |
+| Three things had to line up for that, and all three are now handled. `-Force` on a host whose build is newer than the published one is a **downgrade**, which the version check now warns about by name. An add-in uninstall answering `1612` means Windows Installer lost its source, so it is retried against its own cached MSI under `C:\Windows\Installer` (via `Installer\UserData\S-1-5-18\Products\*\InstallProperties`, `LocalPackage`); when that is gone too, the run says the registration cannot be removed and what it will cause. A `1638` on the add-in is now a warning rather than an abort, so verification still runs and reports what Outlook is actually left with |
+| Preflight prints the registered add-in version instead of just "is installed" - that single number was the whole diagnosis of the failure and it was the one thing not on screen |
+| The AppLocker line no longer prints an empty summary when `SrpV2` exists with no rule collections under it (as on the production host): it says "no rule collections configured, so it blocks nothing" |
+| Verified: the cached-package lookup against real installed products, and that asking for a product this machine lacks returns nothing without throwing; the version guard in all four combinations (older, newer, equal, unparsable); the empty-collection AppLocker line. **Untested:** the `msiexec /x <cached msi>` retry and the `1638` warning path on a live host |
+
+### 2026-09-25
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` stops crying wolf about AppLocker. The SlimCore blocker check warned whenever `HKLM:\SOFTWARE\Policies\Microsoft\Windows\SrpV2` existed — which it does on any fleet that has ever written a single Exe rule — so the warning fired on machines where nothing was blocked at all. A check that always fires is a check nobody reads |
+| The policy is now read instead of detected, on the three points that decide whether it can stop the MSIX: only the packaged-app (`Appx`) collection applies, because an MSIX never meets the `Exe`/`Msi`/`Script`/`Dll` rules; a collection holding rules whose enforcement is *not configured* is enforced all the same, per Microsoft, and only an explicit `EnforcementMode = 0` lets everything through; and nothing is enforced at all while the Application Identity service (`AppIDSvc`) is stopped, which is now said out loud rather than assumed either way |
+| The report is something a technician can act on: the registry path, the mode per collection, the service state and the first five `Appx` rule names with their action. A rule that already allows the packages by name is reported as `[ OK ]`; a rule allowing anything signed by `O=MICROSOFT CORPORATION` is reported as probably sufficient, with a note to check it has not been narrowed to one product name |
+| A policy found on a session host is now named as a `[SKIP]` reference line instead of being hidden: it blocks nothing there, because the staging happens on the endpoint, but it is usually the same GPO — so the thing worth checking is whether it also reaches the endpoints |
+| Every branch exercised against a stubbed policy tree: an enforced `Exe` collection with no `Appx` collection produces no blocker (the old false positive, gone); an enforced `Appx` collection with no matching allow rule warns with path and rule count; explicit-SlimCore and Microsoft-publisher allow rules produce their two different notes; `EnforcementMode = 0` reads as audit only; enforcement-not-configured-with-rules reads as enforced; seven rules print five and `... and 2 more`; a missing `SrpV2` key produces nothing. Confirmed silent on this machine, which has no AppLocker policy. **Untested** against a live enforced AppLocker policy on a real endpoint |
+| Known limitation, documented rather than hidden: the allow-rule match is a text match on the rule XML, so a broad rule that names neither Microsoft nor the packages (`PublisherName="*"`) would really let SlimCore through but is still reported as a blocker. The rule names printed beside it are what settles that |
+
+### 2026-09-24
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` answers the question the inventory could not: preflight now reads the `Microsoft Teams VDI` events from the Application log on any session host — not just with `-AvdOptimizations` — and translates the codes from Microsoft's connection error table, so a plain `-CheckOnly` reports whether users are actually optimized instead of only whether the parts are installed |
+| `24002`/`24010` say the user is on SlimCore, `16002` that an endpoint still has no plugin, `16389`/`10083`/`1951` that policy on the endpoint blocks the MSIX. A zero `errc` is deliberately not in the table: it means that phase raised no error, and printing "OK" next to a real failure in the other phase would be a lie |
+| The query uses `-FilterXPath`, because `Get-WinEvent -FilterHashtable @{ ProviderName = ... }` throws when the provider has never written an event — which is the normal case on a healthy non-VDI machine. Measured: 357 ms and a soft error when absent, 104 ms when present |
+| New `-RemoveWebRtcRedirector` removes the old optimization, retired 1 October 2026. Mutually exclusive with `-AvdOptimizations` and refused before the UAC prompt, reuses the `msiexec /x` + stale-`1605`-entry path proven for classic Teams, and leaves `IsWVDEnvironment` set because SlimCore needs that flag too. Off by default: an endpoint that cannot do SlimCore and no longer finds the redirector silently falls back to rendering media on the session host |
+| Both docs corrected where they still told a technician to look for SlimCore on the session host |
+
+### 2026-09-20 (8)
+| Change |
+|--------|
+| "The add-in still does not load" now gets an answer instead of a status. A registration that is present but not loading is checked against the three causes that leave no trace in `LoadBehavior` itself, each reported as a `why:` line: a bitness mismatch between Outlook and the registered loader, Outlook having parked the add-in in its `DisabledItems`/`CrashedAddins` resiliency lists, and a group policy overriding the user's load behaviour |
+| The resiliency check decodes the binary values in that user's hive and matches on the add-in path, so it reports the one cause a technician cannot see from `LoadBehavior` at all — Outlook disables a crashed add-in and keeps it disabled, which is why ticking the box back on does not stick |
+| When nothing on the machine blocks it, it says that too, which is also an answer: what remains is a full Outlook restart and a user who has signed in to Teams at least once |
+| Both detections exercised: an x86 loader path against this x64 Office produces the bitness reason, and a planted binary `CrashedAddins` value is decoded and reported. A healthy registration produces no `why:` line |
+
+### 2026-09-20 (7)
+| Change |
+|--------|
+| A full reinstall now removes **every** copy of the meeting add-in before installing the new one, not just the one the MSI knows about: the machine-wide folder, the per-profile folders under `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in`, and the per-user COM registrations in each loaded hive |
+| That closes the loop on the `LoadBehavior 2` this script has been chasing for two days. A copy left behind during a reinstall is precisely what becomes a per-user registration shadowing the fresh machine-wide one while pointing at files that no longer exist — which is how `admin` ended up registered against add-in `1.24.19202` |
+| `Get-TeamsAddInFolder` verified against this device: it finds the real per-profile copy. The `-WhatIf` plan shows the folder and both CLSID views being removed before the reinstall. The removal itself reuses mechanics already proven live in the classic-Teams and repair tests, but the sweep as a whole runs for the first time on a production host |
+
+### 2026-09-20 (6)
+| Change |
+|--------|
+| Corrected a check that was looking in the wrong place: the script warned `SlimCore packages not found` on session hosts, but Microsoft stages SlimCore **on the endpoint**, not on the VM — *"Step 3: SlimCore MSIX staging and registration on the endpoint ... the plugin silently executes this step, without user or admin intervention"*. The warning was noise on every session host, and a check that looks in the wrong place does not fail, it lies |
+| The report is now context-aware. On a session host it confirms the Teams build against the documented minimum `24193.1805.3040.8975` and states that SlimCore belongs on the endpoint. On an endpoint it reports whether the packages are staged, and checks the three policies Microsoft documents as blocking that staging, each with the Teams error code it surfaces: `BlockNonAdminUserInstall` (16389), `AllowAllTrustedApps` (15615) and AppLocker (10083) |
+| Also settled the version question from last week: Windows App for Windows `2.0.352.0` is the documented minimum on the endpoint, and the classic Remote Desktop client is no longer supported for this at all |
+| Resilience: MSI exit code `1641` (success, reboot already initiated) counted as a failure and aborted the run. It is now a success with a reboot flagged, alongside `3010` |
+| Verified on both sides: this endpoint reports `Microsoft.Teams.SlimCoreVdiHost.win-x64 2026.31.1.16`; with `RDInfraAgent` faked the session-host wording appears instead; the three blockers were exercised against stubbed registry reads |
+
+### 2026-09-20 (5)
+| Change |
+|--------|
+| A clean production run confirmed three earlier fixes on a real session host: the redirector repaired in place (`The download is the installed version (1.56.2603.20001)`, so the previous run really did upgrade 1.54 → 1.56), the add-in resolved from the staged package after provisioning, and the whole flow finished at exit `0` |
+| It also pinned down the one remaining warning: `BAKKERPARTNERS\admin` has a registration pointing at add-in `1.24.19202`, a per-user copy long gone, which shadows a perfectly healthy machine-wide `1.26.21803`. `-RepairOutlookAddIn` (Ninja variable `repairOutlookAddIn`) now clears that stale `Classes\CLSID\{19A6E644-...}` key and puts `LoadBehavior` back to 3, so COM resolves to the machine-wide registration again |
+| It only acts when that machine-wide registration is healthy — clearing the shadow with nothing behind it would leave the user worse off — and it is off by default, because it writes into another user's hive. It counts as work, so `-CheckOnly` reports it and `-Quiet` surfaces it |
+| Tested against planted keys in both registry views: `-WhatIf` plans both actions, an applied run clears the CLSID keys, sets `LoadBehavior` to 3 and exits `0`. Untested: whether Outlook then actually loads the add-in for that user — that is the next production run |
+
+### 2026-09-20 (4)
+| Change |
+|--------|
+| "I do not see it loaded on all profiles yet" was a visibility gap, not only a Teams one: a profile whose hive is not mounted cannot be read at all, and the script simply left it out — so an unreadable profile and a healthy one looked identical in the output. It now lists those profiles by name, with what it means for them: with a healthy machine-wide registration they pick the add-in up at the first Outlook start, without one there is nothing to fall back on |
+| Worth stating plainly, because it decides whether there is anything to fix: a profile that is not signed in is not broken. The machine-wide registration covers users who have no per-user state; only a user who already has their own (disabled, or pointing at a removed DLL) keeps shadowing it |
+| Both messages verified against stubbed profile lists. Not verified here: mounting an unmounted hive to inspect or repair a signed-out profile — `reg load` needs privileges this workstation does not have, so that machinery is deliberately not built on an untested assumption |
+
+### 2026-09-20 (3)
+| Change |
+|--------|
+| Answered a question the script could not: **why** an account shows `LoadBehavior 2`. Outlook resolves the add-in through `Classes\CLSID\{19A6E644-...}\InprocServer32`, and a per-user registration in `HKCU\SOFTWARE\Classes` outranks the machine-wide one — so a user keeps loading the copy from their own profile even after an `ALLUSERS=1` install lands in `Program Files (x86)`. Measured on a device: the class resolves to `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in\<version>\x64\Microsoft.Teams.AddinLoader.dll` |
+| The script now resolves that path per signed-in user and reports the two cases apart, because they need different fixes: the add-in switched off but its DLL present (tick the box back on) versus a registration pointing at a DLL that is gone (ticking will not stick — it has to be installed again for that user). The targeted lookup across loaded hives costs ~100 ms |
+| Tested with a planted registration pointing at a missing DLL, without touching the real one |
+
+### 2026-09-20 (2)
+| Change |
+|--------|
+| Third production failure on the same session host, third fix: `Uninstall of Teams Machine-Wide Installer failed (exit code 1605)`. 1605 is "this action is only valid for products that are currently installed" — the entry in Programs and Features outlived the product, which is common once the new Teams bootstrapper has been over a machine |
+| There is nothing to uninstall in that case, but the stale entry would keep the script reporting classic Teams on every run, so it now removes the registry entry instead and carries on. Tested live: a real `msiexec /x` against an unknown product code returns 1605, the run warns, removes a planted stale entry, verifies clean and exits `0` |
+| The uninstall-entry objects now carry their `RegistryPath` and `UninstallString`, which is what makes that cleanup possible |
+
+### 2026-09-20
+| Change |
+|--------|
+| Fixed the second production failure on a session host: `WebRTC Redirector install failed (exit code 1638)`. That MSI keeps one ProductCode across versions, so `msiexec /i` over an existing install refuses with "another version of this product is already installed" rather than upgrading — and `-Force` walks straight into it on any host that already has the redirector |
+| The script now reads the downloaded ProductVersion and decides: same version → repair in place (`REINSTALL=ALL REINSTALLMODE=vomus`), different version → uninstall the old one first, then install. A `1638` that still slips through is reported as "leaving the existing one in place" instead of failing the whole run |
+| Measured while fixing it: `aka.ms/msrdcwebrtcsvc/msi` now serves `1.56.2603.20001`, while that host had `1.54.2408.19001` installed — so this was an upgrade being refused, not a duplicate install. Both paths are planned correctly under `-WhatIf`; neither msiexec call has been run for real yet, which the docs say out loud |
+| Also written down explicitly: an installed redirector is **not** silently upgraded by a normal run. Only `-Force` replaces it. With WebRTC losing support on 1 October 2026, keeping that deliberate beats auto-upgrading a component on its way out |
+
+### 2026-09-18 (4)
+| Change |
+|--------|
+| `Get-DistributionGroupMembers.ps1` — `-Member "*.verizon.com"` now matches a domain **and every subdomain of it** (`.verizon.com` and `*@*.verizon.com` are the same thing). Without the leading `*.` the filter stays on that one domain, so `@be.verizon.com` still deliberately does not reach `@us.verizon.com` |
+| The run says which of the two it is doing — *"scanning N list(s) for members on verizon.com and its subdomains"* — because a filter whose scope you have to infer is a filter you cannot trust in a customer report |
+| Matching is on the full domain label, verified against `@notverizon.com` and the suffix trick `@verizon.com.evil.test`; neither matches a `*.verizon.com` run. A wildcard anywhere but the front is escaped rather than quietly widening the filter |
+
+### 2026-09-18 (3)
+| Change |
+|--------|
+| `Get-DistributionGroupMembers.ps1` — **`-Recurse`**, after checking whether the report really covered everyone: it did not. Exchange only ever returns *direct* members, so a list containing another list reported that list as one member and never the people inside it. Someone who receives mail only through a nested group was invisible, and `-Member` reported "no hits" on a list that does deliver to them — a wrong answer that looks like a confident one |
+| `Via groep` names the group a person came in through (empty for a direct member), and someone reachable by several routes gets one row with the routes joined rather than a row per route |
+| `Aantal leden` keeps counting direct members, because that is the number Exchange and the EAC show; the new `Aantal personen` counts the real recipients reached |
+| A group already expanded is not expanded again, which is also what stops a membership cycle (A contains B, B contains A) from recursing forever. Verified against a deliberately cyclic pair of test lists; nesting past 20 levels is reported and left alone |
+| Documented what the report still does *not* cover: it reads group membership, so a user on no list at all appears nowhere |
+
+### 2026-09-18 (2)
+| Change |
+|--------|
+| `Get-DistributionGroupMembers.ps1` — `-Member` now also takes a **domain**: `-Member "@be.verizon.com"` reports every list that still holds an address on that domain (`be.verizon.com` and `*@be.verizon.com` mean the same). An address is matched by Exchange itself; a domain cannot be, so every list is read and then filtered — slower, and documented as such |
+| Matching covers the primary address, every alias, **and `ExternalEmailAddress`**. That is the whole point for a partner domain: such a member is usually a mail contact whose primary SMTP is `...@contoso.onmicrosoft.com`, with the real `@be.verizon.com` only in its external address. Matching on the primary address would have found nothing and reported "none" with a straight face |
+| New `Extern adres` column in the `Leden` sheet, so the address that actually receives the mail is visible for contacts instead of only the internal placeholder |
+| With a filter active: `Treffers` per list in `Overzicht`, and `Treffer op` per member in `Leden`. `Treffer op` holds the matching **address**, not Ja/Nee — a hit on an alias is otherwise unexplainable in a report that does not show aliases |
+| A domain filter that matches nothing says so and writes no file, rather than handing over an empty workbook that reads as a failed export |
+
+### 2026-09-18
+| Change |
+|--------|
+| Added `Get-DistributionGroupMembers.ps1` — every distribution list with its members in one Excel workbook: an `Overzicht` sheet (one row per list) and a `Leden` sheet (one row per member), both filterable tables with a frozen header row. Sheet headers and recipient types are in Dutch, because the workbook is what the customer reads |
+| `-Member user@domain` answers "which lists is this person on?" server-side via `Get-Recipient -Filter "Members -eq '<DN>'"` instead of walking every group, and still exports the matched lists in full so the customer sees who else is on them |
+| `-IncludeDynamic` and `-IncludeM365Groups` widen the report beyond plain distribution groups; dynamic groups are evaluated live, since they store no membership to query |
+| Falls back to two CSV files when `ImportExcel` is missing (and offers to install it first), so a missing module never costs you the report. `ImportExcel` added to `Install-Modules.ps1` — `vias_archiver.ps1` already needed it |
+| Exchange submenu: `K` Get-DLMembers |
+
+### 2026-09-17 (3)
+| Change |
+|--------|
+| Fixed the bug a production run on an AVD session host surfaced: `teamsbootstrapper.exe -p` **provisions** the package for future sign-ins, it does not install it for whoever ran the script. The bootstrapper reported success and the add-in step then died on `New Teams package not found after install`, because `Get-AppxPackage -Name MSTeams` asks about the current user and the admin running the script had no Teams |
+| The add-in MSI is now found by globbing `%ProgramFiles%\WindowsApps\MSTeams_*_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi` and taking the newest version, so it works whether or not any user has the package installed. Re-tested for a per-user install, a provisioned-only host and a `-Force` run |
+| Same per-user blind spot in the SlimCore check, which reported "not found" on a host that has new Teams for one profile: it now asks `-AllUsers` first. And the two machine-wide Outlook registry views are labelled 64-bit/32-bit apart, because that run printed two identical `all users (machine-wide)` lines, which reads like a bug |
+| That run also earned the new checks their keep: it removed a real per-profile classic Teams `1.4.00.11161`, and found `LoadBehavior 2` for one account - Outlook had switched the add-in off, which no amount of reinstalling fixes |
+
+### 2026-09-17 (2)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` can now remove classic Teams as well, behind `-RemoveClassicTeams` (Ninja variable `removeClassicTeams`). Off by default: taking an application away from users is not a decision an update job should make on its own. It uninstalls the *Teams Machine-Wide Installer* through msiexec — the one that matters, because while it is present Windows keeps staging classic Teams into every new profile — and per profile clears the install root, the `Run\com.squirrel.Teams.Teams` autostart entry and the stale `Uninstall\Teams` key |
+| The documented per-user uninstall (`Update.exe --uninstall -s`) has to run as the profile owner, which System cannot do, so the files are removed instead. Roaming data in `%APPDATA%\Microsoft\Teams` is left alone |
+| Failure handling splits the two cases on purpose: a machine-wide installer that survives the uninstall is a real failure (exit 1), while a per-profile folder that survives is almost always a file lock from a running classic Teams — a warning, cleared by the next run after the user signs out |
+| Tested with detection faked, since the test device has neither variant: `-WhatIf` plans the msiexec uninstall and the folder removal and skips steps 5-8, and an applied run removed a faked profile folder with the verification reporting it clean. The msiexec path itself has **not** been run against a real Machine-Wide Installer — written down in the docs rather than implied |
+
+### 2026-09-17
+| Change |
+|--------|
+| Fixed a bug a real session-host run exposed: `Get-AppxPackage -AllUsers` finds nothing when Teams is only *provisioned* and no user has it yet, so the version check had nothing to compare, declared the host outdated and reinstalled ~275 MB on every scheduled run. The installed version now falls back to the provisioned package version. Verified against that exact scenario: reports `Provisioned MSTeams <version>`, compares, does nothing |
+| `Update-TeamsClient.ps1` now checks whether **Outlook itself** sees the meeting add-in, not only that the MSI installed. It reads `HKEY_USERS\<sid>\...\Outlook\Addins\TeamsAddin.FastConnect` per signed-in user plus the machine-wide key: `LoadBehavior 3` = loaded, `2`/`0` = Outlook switched it off (the real "the button is gone" case). Reported in preflight and verification, never as a failure — a profile nobody is signed into cannot be read |
+| Preflight became a full inventory of everywhere Teams can live: AppX per user, the provisioned package, the classic *Teams Machine-Wide Installer*, classic per-profile installs, the add-in in both hives, the Outlook registration. Classic Teams is reported, not removed — it shares the October 2026 end-of-support date and a leftover machine-wide installer keeps restaging it into new profiles |
+| Two bugs found by running it rather than reading it. Enumerating profiles with an `S-1-5-21-*` whitelist skips **every** user on an Entra-joined device, where SIDs are `S-1-12-1-*` — the check claimed nobody had the add-in registered while `LoadBehavior=3` sat right there. And `New-PSDrive` honours `ShouldProcess`, so under `-WhatIf` the `HKEY_USERS` drive was never created and the same read-only check lied; the hives are addressed through `Registry::HKEY_USERS` now, with no drive to create |
+
+### 2026-09-11 (5)
+| Change |
+|--------|
+| Added `scripts/Exchange/Move-SharedCalendar.ps1` — all in one: `-Search balie` finds the calendar, shows who uses it, moves it into a resource mailbox with `Convert-SharedCalendarToResource.ps1` and lists who has to switch. One temporary App Registration with the permissions of both scripts, created once and removed at the end, so there is one sign-in instead of two. Several matches are picked from a list or narrowed with `-Owner`; a non-interactive run lists them and stops rather than guessing. The two scripts are called, not copied, so there is one implementation of each step |
+| Fixed `Convert-SharedCalendarToResource.ps1`: in a non-interactive session the typed confirmation was skipped and the original calendar removed without `-Force`. It is now left in place with a warning unless `-Force` is given |
+| Both calendar scripts: an explicit `-ClientId` now takes precedence over an existing app-only Graph session, so a calling script's app is really used. `Convert-SharedCalendarToResource.ps1` gains `-PassThru` (result object for callers) |
+| Exchange submenu (`C`) option `J` added |
+
+### 2026-09-11 (4)
+| Change |
+|--------|
+| `Get-CalendarMappings.ps1` — first real run (a tenant where "Balie planning" turned out to be a secondary calendar in an archived mailbox) confirmed the Graph assumptions: app-only reads return the calendars users added, and a shared secondary calendar appears in their list under its own name. It also exposed a wrong hint: a `NotMapped` row pointed at "Reservering vergaderzaal LBM" as "probably this one", while that is a *second* calendar the same owner shares. The hint now skips entries named after another calendar of the owner, and - for a secondary calendar - entries named after the owner, which are their main calendar |
+
+### 2026-09-11 (3)
+| Change |
+|--------|
+| Added `scripts/Exchange/Convert-SharedCalendarToResource.ps1` — moves a shared calendar (the "Balie" calendar in one person's mailbox) into a Room or Equipment mailbox of its own, with every item and every permission, then removes the original on request. Preview by default; `-Apply` creates and copies, `-RemoveSourceCalendar` removes the original only after every item has a verified copy and the calendar's name has been typed as confirmation |
+| Items are copied faithfully rather than approximately: recurring series stay series with their moved and cancelled occurrences applied (matched occurrence by occurrence, and left alone with a warning if the two series do not line up), times are written back in the time zone they were created in so weekly items survive a daylight saving switch, categories keep their colour, attachments up to 3 MB are copied and larger ones saved to the backup folder. Attendees are listed in the body instead of copied, so nobody receives a fresh invitation |
+| Permissions carry their exact Exchange access rights, custom rights included; `-SendSharingInvitation` sends users the standard invitation. External people, deleted accounts and delegate flags are reported, not silently dropped |
+| Every copy carries its source item's id in a hidden property, so a run that stops halfway continues where it left off; a half-finished series is redone. A JSON backup of everything read is written before anything is created |
+| Exchange submenu (`C`) option `I` added: always a preview first, then an explicit second step |
+
+### 2026-09-11 (2)
+| Change |
+|--------|
+| `Get-CalendarMappings.ps1` gains `-Search` (alias `-Keyword`): "where is the Balie calendar?" in one run. The keyword is matched against the owner's name and every address (a shared mailbox `balie@`, a room, a group) and against calendar names (a secondary calendar *Balie* in somebody's mailbox). The report shows where the calendar lives (new status `Source`), who has it in their calendar list, and who has rights on it |
+| A matching **secondary** calendar now gets its own permissions read, instead of being compared against the owner's main calendar and landing on `MappedWithoutRight`. A new `Calendar` column says which of the owner's calendars a row is about |
+| A calendar list entry carries no link back to the folder it came from, so a shared secondary calendar is matched by name. When a user has it under another name, the `NotMapped` row names the entry that is probably it rather than leaving a silent false negative |
+| Menu option `H` asks for a keyword first; blank falls back to the full or per-mailbox report |
+
+### 2026-09-11
+| Change |
+|--------|
+| Added `scripts/Exchange/Get-CalendarMappings.ps1` — shows where each calendar is actually mapped: for every mailbox it reads the calendar list in Outlook and the rights on its own main calendar, and folds both into one row per owner + user with a status (`Mapped`, `MappedWithoutRight`, `NotMapped`, `MappedOwnerMissing`, `SharedExternally`, …). `Test-CalendarPermissions.ps1` says who *may* open a calendar; this says where it *is*, and where the two disagree |
+| Graph rather than Exchange Online PowerShell, because the entries a user added to their own calendar list are not visible to any Exchange cmdlet. App-only access follows the same three routes as `Remove-PhishingMessage.ps1` (existing session, own app, or a temporary app that is removed in a `finally`), with read-only permissions `Calendars.Read`, `User.Read.All` and `Group.Read.All`. No Exchange connection, so no MSAL clash |
+| Tenant-wide runs go through `$batch` (20 mailboxes per call) with throttled items retried. A mailbox that cannot be read is reported as such rather than as "nothing mapped" |
+| Written down what the report cannot see: Full Access with AutoMapping (a mailbox permission — `Test-MailboxPermissions.ps1`), calendars opened in classic Outlook without shared calendar improvements, and secondary calendars, which show up as `MappedWithoutRight` |
+| Exchange submenu (`C`) option `H` added |
+
+### 2026-09-16 (5)
+| Change |
+|--------|
+| The explanation page is now step 4 of the one-command build rather than a separate script somebody remembers a week later. A structure nobody was told about is a structure nobody uses, and because the page is generated from the same configuration it describes exactly what the run just made |
+| `-SkipHelpPage` leaves it out, `-HelpContact` says who people should ask. The installer passes `-Force`, because it owns that page: rerunning the build brings the explanation back in line with what the build made |
+| Verification and the deelstatus audit shifted to steps 5 and 6, and the stale "step 2 changes permissions on a live team" warnings now name step 3 |
+### 2026-09-16 (4)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Add-SharePointHelpPage.ps1` — puts the end-user explanation on the team site as a SharePoint page, linked from the left-hand navigation. A handleiding in a repo is read by nobody; this writes it where the people who upload files already are |
+| The page is generated from the configuration rather than typed out, so it cannot drift from what the libraries actually do: the channels it lists are the ones that exist, the labels carry the same help text that appears under each field in the upload form, and the required fields per document type are read off the content types |
+| Written for the person uploading a catalogue. Two pieces of the configuration are deliberately kept off it: the `note` on a container, which names security groups, and the `description` on a view, which talks about pillars and synced folders. Permissions are left out entirely — who may see what is not something a user can act on |
+| Fixed along the way, found by rendering the page rather than reading the code: it announced three ways of adding a file and listed two, and the wizard was writing the team name where the company name belonged ("Intern blijft binnen Laseto-NewTeams") |
+### 2026-09-16 (3)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Remove-SharePointStructure.ps1` — takes the same configuration apart, deepest first: tabs, channels, libraries, content types (unbound from their lists first), site columns, term set, security groups, and the team itself |
+| **Deliberately the reverse default of everything else in the folder: without `-Apply` it changes nothing.** Forgetting `-WhatIf` on a destructive script is the dangerous direction, so the safe state is the one you get for free |
+| `-Scope All` never includes the team. Deleting a client's whole team is not something anyone should get by asking for "all" — it has to be named, and then the team's name typed to confirm |
+| Refuses by default rather than asking forgiveness: a library or channel folder that still holds files is skipped unless `-IncludeContent` (the item count is reported either way), the General channel and the team's own Documents library are never removed, and a content type still in use is reported rather than forced |
+| Reported with their cost before they run, because no recycle bin brings them back: removing the term set orphans the Leverancier value on every document that carried one, and removing a column takes its data with it. What *is* recoverable is said too — a deleted group or team is soft-deleted for 30 days, a channel has its own 30-day recycle, and files from a removed library land in the site recycle bin |
+| Menu step `6` runs it; the menu asks about applying, about files, and about the team as three separate questions rather than one |
+### 2026-09-16 (2)
+| Change |
+|--------|
+| A restricted pillar can now be shaped as **its own library behind an ordinary channel**, which is the only arrangement that gives a real read-only role and still puts a channel in Teams. The wizard asks which pillars are restricted and then in which form - `bibliotheek` (the default) or `privekanaal` |
+| The library form breaks inheritance **without copying it**, which is the whole point: copying carries every team member across as an editor, which is exactly the door the shape is meant to close. What survives is the site's own owners plus the pillar's two groups - Contribute and Read |
+| A private channel offers no read-only role at all: owners and members, and members may post, edit and delete. So a pillar that needs "may look" cannot be a private channel, and the wizard now says so at the point where the choice is made |
+| The channel is created as usual but gets no folder in the shared library, and the restricted library is surfaced as a tab in that channel - a standard channel's own Files tab always points at the team library and cannot be repointed, so it sits beside it |
+| Flagged in the readme because it will otherwise be reported as a bug: that built-in Files tab stays, pointing at a folder nobody uses. Either point people at the named tab, or remove the Files tab from the channel once by hand |
+### 2026-09-16
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Sync-SharePointChannelMember.ps1` — makes an Entra ID security group the source of truth for who is in a private Teams channel. A private channel cannot be given rights through a group at all: Teams tracks its roster one person at a time and Graph accepts only individual users there, so the group feeds the roster instead |
+| The obvious workaround is a trap and is documented as one: adding the group to the private channel site's SharePoint permissions works until Teams syncs the roster back over it, and in the meantime those people reach the files while the channel stays invisible to them in Teams. Unsupported by Microsoft |
+| Nested groups are followed, non-users are dropped, and everyone is added to the parent team first — Teams refuses a private-channel member who is not on the team, and the error it returns does not mention that. `-Prune` also removes people the groups no longer list; channel owners are never removed |
+| Written down because it changes the design, not just the script: **a private channel has no read-only role.** Owners and members, and members may post, edit and delete. A group named `-RO` cannot mean "may look" there, so the run reports per group how many people it brought in rather than letting that pass unnoticed. Where read-only genuinely matters, a document library with its own permissions is the right shape |
+| `-EnsureGroups` now creates every group in the model rather than only the ones a library grants to. A private channel grants nothing, so the MGMT pair sat in the configuration and was never created — which is exactly the pillar whose groups you go looking for first |
+| The wizard writes a `channelMembers` section for private pillars naming the groups that feed the roster; a configuration written before that key existed falls back to the configured groups named after the container, and reports the fallback |
+| Menu step `5` runs the sync; it signs in to Graph on its own, so it asks for no PnP app registration |
+### 2026-09-15 (3)
+| Change |
+|--------|
+| `New-StructureConfig.ps1 -All` asks for the names that were still being derived behind the operator's back: per pillar the channel name, the folder, the content type and both group names and the view title; plus the library behind the channels, the column and content type groups, the term set, the team site URL and the label every column carries for the user. Each keeps its derivation as the suggestion, so `-All` is still mostly Enters |
+| Only the column *internal* names stay fixed. They are never shown to anyone, and changing one after documents carry it loses the metadata on those documents |
+| Fixed: an optional question could never be turned down, because Enter means "take the suggestion". Optional questions now say `(of "geen")` and accept geen/none/nee/- as a real "none" — before this, answering nothing to "customer library" still created FUTECH |
+| Fixed a one-item list coming back as a bare string: PowerShell unrolls a single-element array on return, so a client with one brand crashed the wizard on `.Count`. Returned with a leading comma now |
+| Fixed two `$x = if (...) { @() }` assignments that yield `$null` rather than an empty array — a configuration with no sales pillar or no suppliers died at the summary |
+| All three paths verified end to end against the config validator: the full six-pillar default, a `-All` run with deliberately different names throughout, and a minimal two-pillar tenant with no private channel, no suppliers, no regions and no customer library |
+### 2026-09-15 (2)
+| Change |
+|--------|
+| `New-StructureConfig.ps1` asks what everything should be called and writes the configuration itself — nobody should have to open a JSON file to name a channel. Enter accepts the suggestion in brackets, so a standard build is mostly Enters plus the tenant and the team owner |
+| Everything else is derived from those answers: per pillar a channel, a content type, two security groups and a grouped view; per brand a cross-cutting view spanning every pillar folder. Which pillar handles suppliers and which handles sales is what decides where Leverancier and Regio become required fields |
+| Two of the answers are the ones that cost something later, so they are asked last and default to no: maintaining the share-status column (the only nightly script) and enforcing per-pillar rights on standard-channel folders (the part Microsoft does not support) |
+| `New-SharePointTeam.ps1` creates the Microsoft 365 team and its channels, the private MGMT one included, so the structure can be built from an empty tenant. A private channel's site collection is provisioned asynchronously and its URL cannot be known in advance — the script polls for it and writes it back into the configuration, which is what lets the following steps connect to something |
+| Never renames or deletes a channel: a channel whose name does not match the config is reported, not corrected, because renaming one moves its folder and breaks every link anyone has shared |
+| `Install-SharePointStructure.ps1` runs the wizard by itself when it finds no configuration for the tenant, and the team step is now step 1 of six. `-SkipTeam` for a team that already exists |
+| Column internal names and content type IDs are generated once and then fixed — SharePoint keys document metadata to both — which is why the wizard refuses to overwrite an existing configuration without `-Force`. Display names, channel names and group names stay changeable |
+| Removed the last hardcoded column names: the share-status audit reads which column is which from a new `fieldRoles` section instead of assuming `PsDeelstatus` and `PsVertrouwelijkheid` |
+| The app registration now also consents `Channel.Create`, `ChannelSettings.ReadWrite.All` and `Team.Create`, which the team step needs |
+### 2026-09-15
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/Install-SharePointStructure.ps1` — builds the whole structure in one run: registers the Entra app itself and admin-consents its delegated scopes, then metadata → libraries/groups/permissions → verification, optionally the first deelstatus audit. Each step stays its own script, so a failure is rerun on its own instead of starting over |
+| `-TemporaryApp` deletes the app registration again at the end, for a one-off build on a tenant you do not manage day to day. It only ever deletes an app **this run created** — one that was already cached predates the run and is somebody else's to remove, so the script says so rather than quietly deleting it. Without the switch the app stays and the client ID is cached in `pnp.appid.json`, shared with the other PnP scripts in this repo |
+| Flagged in the docs because it will otherwise be reported as a bug: a `-WhatIf` run needs an app to sign in with. With no cached app for the tenant there is nothing to connect as, so the dry run validates the config and stops there — run once for real, or pass `-ClientId`, to dry-run step by step |
+| Closed the gap that made "merk als tag" only half true: cross-cutting views on the shared library with `Scope = RecursiveAll`, so *Alles - Butterstone* is one flat list across every pillar folder, **including everything tagged Beide** — one file, two brands, no copies to drift apart. Plus *Nog te taggen* (what drag-and-drop and OneDrive sync leave behind), *Extern gedeeld* and *Te archiveren*. The filter is raw CAML in the config rather than a mini query language of the script's own invention |
+| Never group a view on `PsTaal`: SharePoint refuses to group on a multi-value column. Filtering on it works fine, and no shipped view groups on it |
+| Added `Petsolutions-SharePoint-Handleiding.md` — end-user documentation in Dutch to hand to the customer. Covers the three ways of adding a file and why they behave differently, what each label means, and what happens the moment you tag something (the file does not move, links keep working, `Beide` shows up in both brand views, search lags a few minutes behind the views) |
+| Two things the guide says out loud because users assume the opposite: **drag-and-drop and OneDrive sync ask nothing** — required columns are enforced by the upload form, not by the library, so bulk-dropped files land with empty labels and a "Required info" prompt rather than being blocked; and **a label is not a lock** — Vertrouwelijkheid shuts nobody out, it is an agreement plus the signal the nightly audit uses to flag over-sharing |
+| Menu item `S` gained step `0` for the all-in-one build; the per-step options are unchanged |
+
+### 2026-09-10 (4)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Provisioning/` — provision and maintain a whole SharePoint structure (metadata model, content types, libraries, Entra ID group permissions) for an MSP client from one JSON config, with a sharing audit and a read-only drift check. Built for Petsolutions NV (brands Butterstone/Laseto), but nothing in the scripts is client-specific |
+| The model lives in `petsolutions.config.json`, cross-checked at load time: a content type referring to an undefined column, or a container granting a group that is not in the model, fails before anything connects rather than halfway through provisioning. The shipped `CHANGEME` tenant/site URLs are refused outright |
+| Column internal names carry a `Ps` prefix. "Contenttype" and "Status" are display names SharePoint already uses for something else, and the prefix keeps them unambiguous in CAML, in views and in the drift check while users still see plain Dutch labels. Content type IDs are fixed rather than generated, so the same structure is reproducible across tenants |
+| `New-SharePointMetadata.ps1` runs against **every** site in the config, not just the team site: a Teams private channel (MGMT here) is its own site collection and a site column does not reach across one. Making a column required after the fact works — the `Required` flag on an existing field link is updated in place and pushed down to the lists already using the content type |
+| `Set-SharePointLibraries.ps1` sets a per-folder content type order, so the *New* menu inside the Leveranciers channel offers Leveranciersdocument and not the five types belonging to the other pillars — the shared library has to carry them all, the folder does not have to show them. No view is ever made the default: the default view of a Teams library is what every member of the channel sees the second they open Files |
+| Written down rather than hidden: unique permissions on a **standard**-channel folder are what this model asks for and what Microsoft does not support. Members who lose access keep seeing the channel in Teams and get an error on the Files tab instead of a closed door. The script does it, warns per folder, and `-SkipChannelFolderPermissions` leaves those folders inheriting. A private channel, a shared channel or an own library (what FUTECH uses) are the supported ways to close a pillar off |
+| `Update-SharePointShareStatus.ps1` derives the Deelstatus column from the permissions actually on each file. It asks the cheap question first — a file that inherits is not shared — so one round trip per hundred items settles nearly the whole library; only files that broke inheritance get their role assignments read, and of those only specific-people links need expanding (an Anyone or Organization link already says in its name whether a guest can be behind it). Writes with `SystemUpdate` so Modified/Modified By stay put and no version is created |
+| The audit never revokes a link. It reports files tagged Intern or Vertrouwelijk sitting behind an external one and exits `2`, so a scheduled RMM job surfaces exactly when there is a decision for a person to make. `Test-SharePointStructure.ps1` does the same for structural drift, classified as Missing / Different / Extra — "Extra" is never fixed automatically, because an extra column holds data and an extra role assignment is usually somebody's deliberate exception |
+| `SharePointStructure.Common.ps1` is dot-sourced by all four — a deliberate exception to the "every script stands alone" rule elsewhere in this repo, because they share one config schema and three copies of the permission code would drift apart within a month |
+| Menu item `S` added for the set (pick a step, `-WhatIf` unless you confirm; the drift check skips the question because it never writes) |
+### 2026-09-10 (4)
+| Change |
+|--------|
+| Attached the expiry date to the `-AvdOptimizations` feature: Microsoft retires the WebRTC-based AVD media optimization on **1 October 2026** (end of support) and **1 April 2027** (end of availability), and Teams already shows users a banner about it. The switch keeps installing the redirector because Microsoft still advises it as a fallback — with a note to revisit before April 2027 |
+| Its replacement, SlimCore, needs nothing on the session host: it ships inside new Teams. Confirmed on a device with Teams `26225.1806.5074.1452`, which carries `Microsoft.Teams.SlimCoreVdiHost.win-x64` `2026.31.1.16` plus several framework packages. Preflight now reports that package under `-AvdOptimizations` |
+| That report is deliberately informational and creates no work item: which media path is used depends on the Windows App version on the endpoint the user connects from, which a script running on the session host cannot see. Auditing endpoint client versions is the actual migration work |
+| Added a service desk section to the IT Glue doc for the banner users are reporting: what it means (an announcement, not an outage), the two dates, that the fix is on the local device rather than the session host, how to read the `AVD SlimCore Media Optimized` / `AVD Media Optimized` line under Teams > About, and ready-made text for the user |
+
+### 2026-09-10 (3)
+| Change |
+|--------|
+| Corrected a wrong claim in the Teams docs and in the script comment: the meeting add-in's uninstall entry does **not** always live in `WOW6432Node`. Measured on a Windows 11 endpoint, add-in `1.26.21803` registers in the **64-bit** hive, with `InstallSource` pointing at a per-user MSI cache. Scanning both hives (which the script already did) is right — the stated reason was not |
+| Documented how the add-in actually reaches a device, measured rather than assumed: the script installs it machine-wide (`ALLUSERS=1`, `Program Files (x86)`) for shared machines and session hosts, while on an ordinary endpoint the Teams client installs and updates it **per user** from `%LOCALAPPDATA%\Microsoft\TeamsMeetingAddinMsis` into `%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in`, registering only in `HKCU\...\Office\Outlook\Addins` |
+| Written down with it: what step 8 actually proves. It reads the HKLM uninstall keys, so it confirms the machine-wide install succeeded — not that a given user's Outlook shows the button. Run as System the script cannot see a user's `HKCU` at all |
+
+### 2026-09-10 (2)
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient.ps1` absorbs the AVD/VDI parts of the older gap-fill installer behind `-AvdOptimizations`: the `IsWVDEnvironment` media flag (set in step 3, before the client is provisioned, because Teams reads it at startup to pick its media path) and the Remote Desktop WebRTC Redirector Service from `aka.ms/msrdcwebrtcsvc/msi` |
+| Deliberately a switch and not autodetection: setting that flag on a normal endpoint tells Teams to hand media to a redirector that is not there. Without the switch the script only *reports* that a device looks like a session host (`HKLM:\SOFTWARE\Microsoft\RDInfraAgent`) |
+| Both components are installed only when missing (`-Force` reinstalls the redirector), so a scheduled run on a configured session host still downloads nothing and prints nothing under `-Quiet`. Verified end to end, including that the redirector MSI (1.7 MB, `1.54.2408.19001`) passes the Microsoft signature check |
+| The add-in step now also skips itself when the add-in is present and the client was not replaced — before this it would reinstall the add-in on a run that was only there to fix the AVD components |
+| Download and signature verification moved into one `Save-VerifiedDownload` helper shared by the bootstrapper and the redirector: https-only, minimum size, Authenticode `Valid` and signed by `O=Microsoft Corporation`, or it throws |
+| Corrected in the docs: Ninja script-variable names are **not** case-sensitive. Windows environment lookups are case-insensitive, so variables named `Quiet` or `Force` work exactly like `quiet` and `force` |
+
+### 2026-09-10
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient-ITGlue.md` gained a NinjaOne setup appendix: which values to pick per field when adding the script (PowerShell 5.1 rather than 7, 64-bit, Run As System), the script-variable names with a way to verify they actually arrive, the test run on one device, the scheduled automation with `-Quiet -Confirm:$false`, and the optional detection job |
+| Written down explicitly because it will otherwise be reported as a bug: `-CheckOnly` exits `2` when an update is available, and NinjaOne shows every non-zero exit code as a failed job. That is the intent — those are the devices needing attention — and it is what a script result condition can key on |
+| Also flagged: the Ninja script timeout must exceed `-TimeoutSeconds` (900 s) plus the ~275 MB download, otherwise Ninja kills the job mid-install |
+
+### 2026-09-08 (5)
+| Change |
+|--------|
+| Added `scripts/Device/Update-TeamsClient-ITGlue.md` — the service desk version of that documentation, in Dutch, to paste into IT Glue. Layered per support level: L1 checks with `-CheckOnly -Quiet` and reads the labelled output, L2 runs the update from NinjaOne or by hand and verifies afterwards, L3 gets parameters, exit codes, paths and the built-in safeties. Includes an error table with the escalation level per message, an FAQ, and ready-made text for the end user |
+| It leads with the point that trips people up: no output means the device is already current, which is a successful run and not a failure. Download volume per device (~275 MB: a 1.9 MB bootstrapper that pulls a ~273 MB package) was measured, not estimated |
+
+### 2026-09-08 (4)
+| Change |
+|--------|
+| Added `scripts/Device/Update-TeamsClient.md` — a reference for that script: the decision tree (behind → full reinstall, current but add-in missing → add-in only, current → nothing at all), the seven steps, the config-service version check with a sample response, output modes and exit codes, the NinjaOne script-variable table, the design decisions behind the order of operations, a troubleshooting table and what has actually been tested. Linked from the Device readme |
+
+### 2026-09-08 (3)
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient.ps1` no longer reinstalls unconditionally: it asks the Teams client config service (`config.teams.microsoft.com/config/v1/MicrosoftTeams/...`, `BuildSettings.WebView2PreAuth.<arch>.latestVersion` — the same feed the client uses to decide it is out of date) which build is published for this architecture, and leaves an up-to-date device completely alone |
+| Is the client current but the meeting add-in missing? Then only the add-in is installed — no download, no uninstall, no reprovision |
+| `-Quiet` holds back all output until there is news, so a scheduled NinjaOne run prints nothing on an up-to-date device and only surfaces in the activity feed when it found a newer build or hit a problem. Verified: an up-to-date `-Quiet` run produces zero bytes of output and exit code 0 |
+| `-CheckOnly` reports without changing anything and exits `2` when a newer build is available, for use as a Ninja detection/condition job. `-Ring` selects a non-default update ring |
+| When the config service cannot be reached the run stops instead of reinstalling blindly; `-Force` now means "reinstall even though it is current" as well as "continue without Teams or version info" |
+| A transcript is only written when the run actually changes something, so an hourly check leaves no log litter in `C:\Temp` |
+
+### 2026-09-08 (2)
+| Change |
+|--------|
+| `scripts/Device/Update-TeamsClient.ps1` is now safe to run unattended from an RMM (NinjaOne) *and* by hand. It relaunches itself 64-bit via `SysNative` when the agent starts PowerShell 32-bit — otherwise the HKLM reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is ever found |
+| NinjaOne script variables (`whatIf`, `force`, `skipMeetingAddIn`, `skipSignatureCheck`, `workingDir`, `logPath`) are read from the environment when the matching parameter is not passed, so a preview run can be a checkbox instead of a parameter string |
+| Started by hand without elevation it now asks for UAC and continues in an elevated window, instead of failing on a `#Requires -RunAsAdministrator` line, and an interactive apply run asks for confirmation once. `-Confirm:$false` makes it unattended; the menu passes that because it already asked |
+| Reordered so the bootstrapper is downloaded **and** its Microsoft Authenticode signature verified before the first uninstall — a failed download or a blocked URL can no longer leave a device without a Teams client. TLS 1.2 is forced for the download, and a non-https `-BootstrapperUrl` is refused |
+| `msiexec` and the bootstrapper now run through one helper with a timeout (`-TimeoutSeconds`, default 900, process killed on expiry), a retry on 1618 (another install in progress) and 3010 handled as success with a pending-reboot note, so an RMM job can never hang the agent |
+| The AppX package is also deprovisioned (`Remove-AppxProvisionedPackage`), otherwise new user profiles keep getting the old version staged from the image |
+| Add-in MSI version now comes from the MSI property table via the `WindowsInstaller.Installer` COM object. `Get-AppLockerFileInformation` — what Microsoft's own sample uses — is missing on some editions and under PowerShell 7 it drags in the Windows PowerShell compatibility layer, which fails and floods a `-WhatIf` run with unrelated file-copy output |
+| Apply runs write a transcript to `C:\Temp\Update-TeamsClient_<timestamp>.log`; unexpected errors abort instead of continuing half-way; exit code is 0 on success (`-WhatIf` included) and 1 on failure |
+
+### 2026-09-08
+| Change |
+|--------|
+| Added `scripts/Device/Update-TeamsClient.ps1` — clean reinstall of new Teams on an endpoint or AVD session host: uninstall the Teams Meeting Add-in, remove the `MSTeams` AppX package for all users, download `teamsbootstrapper.exe`, provision Teams (`-p`) and install the meeting add-in MSI that ships inside the new Teams package |
+| Every state-changing step runs through `ShouldProcess`, so `-WhatIf` walks the whole flow and prints each uninstall/download/install without touching the machine; the steps that only exist after a real install (new Teams version, add-in MSI path, final verification) are reported as such instead of failing the run |
+| The add-in lookup reads both the 64-bit and the `WOW6432Node` uninstall hive — the add-in installs 32-bit, so the 64-bit hive alone never finds it (uninstall and verification both missed it before) |
+| Exit codes and msiexec/bootstrapper exit codes are checked instead of assumed; `-SkipMeetingAddIn` replaces only the client, `-Force` installs on a device without any Teams. Wired into `menu.ps1` (key T), which defaults to a `-WhatIf` preview |
 
 ### 2026-09-07 (2)
 | Change |

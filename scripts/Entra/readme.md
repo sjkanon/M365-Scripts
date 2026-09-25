@@ -20,6 +20,7 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 | [`Remove-TemporaryConditionalAccessPolicies.ps1`](#remove-temporaryconditionalaccesspoliciesps1) | Remove expired/all temporary CA policies |
 | [`New-UserTemporaryAccessPass.ps1`](#new-usertemporaryaccesspassps1) | Create a TAP code for a user |
 | [`Set-EntraPasskeyMigrationOptOut.ps1`](#set-entrapasskeymigrationoptoutps1) | Defer the Sept 1, 2026 automatic passkey enablement (single tenant or a GDAP list) |
+| [`Phising-rollout.ps1`](#phising-rolloutps1) | Keep a phishing-resistant MFA rollout group and a registered group in sync, both ways |
 
 > Dynamic-to-static distribution group conversion (`Set-Distributionlist-dynamic-static.ps1`) lives in [`scripts/Exchange/`](../Exchange/readme.md) — it uses Exchange Online cmdlets, not Graph.
 
@@ -485,3 +486,71 @@ Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
 ```
 
 **Reference** — [Passkeys by default and retirement of Microsoft-provided SMS and voice authentication](https://learn.microsoft.com/en-us/entra/identity/authentication/concept-sms-voice-retirement)
+
+---
+
+### Phising-rollout.ps1
+
+Maintains two mutually exclusive static groups that drive a phishing-resistant MFA
+rollout: a **Rollout** group for users who still have to register, and a **Registered**
+group for those who have. A user is never in both.
+
+For every user currently in either group:
+
+| Situation | What happens |
+|-----------|--------------|
+| Has an accepted method and sits in Rollout | Moved to Registered — they graduated |
+| Has no accepted method any more and sits in Registered | Moved back to Rollout — the method was removed or expired, so they have to register again |
+| Anything else | Nothing; the status is already right |
+
+The move back matters as much as the move forward: without it a user who deletes their
+passkey silently keeps the compliant label.
+
+**What counts as registered**
+
+| `-AcceptedMethod` | Meaning |
+|-------------------|---------|
+| `AuthenticatorPasskey` (default) | Only a passkey in Microsoft Authenticator — a `fido2AuthenticationMethod` whose AAGUID is in `-AllowedAaGuids`. A YubiKey, Windows Hello for Business or CBA does **not** count and leaves the user in Rollout |
+| `AnyPhishingResistant` | Any phishing-resistant method counts (FIDO2 keys, WHfB, Platform SSO, CBA) |
+
+> The Entra portal calls such a method simply "Passkey", with a detail like
+> "MS Authenticator iOS". In Graph it is not a separate method type but a fido2 method —
+> only the AAGUID gives away that it is Authenticator, which is why the default is an
+> AAGUID filter rather than a method name.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-RolloutGroupId` | Object ID of the static Rollout group (still has to register) |
+| `-RegisteredGroupId` | Object ID of the static Registered group (already compliant) |
+| `-AcceptedMethod` | `AuthenticatorPasskey` (default) or `AnyPhishingResistant` |
+| `-AllowedAaGuids` | AAGUIDs that count as a passkey in Authenticator (default: the iOS and Android AAGUIDs of Microsoft Authenticator). Ignored for `AnyPhishingResistant` |
+| `-Interactive` | Sign in through the browser instead of a managed identity — for running it from your own machine |
+| `-UseAppRegistration` | Use an existing app registration (certificate or secret) |
+| `-UseTemporaryApp` | Create a throwaway app registration, run app-only, and delete it again afterwards |
+
+**Authentication**
+
+Built as an **Azure Automation runbook** on a system-assigned managed identity, to run
+every one to four hours. Without `-Interactive` or an app registration it tries managed
+identity, which always fails outside Azure.
+
+For a run across many users, `-UseTemporaryApp` (or `-UseAppRegistration` with a
+certificate) is the reliable choice: an app-only token is minted fresh on every call and
+can never produce a browser prompt halfway through the run. An interactive session can,
+and does — exactly when the token expires mid-run.
+
+**Required Graph application permissions**
+
+```
+User.Read.All
+UserAuthenticationMethod.Read.All
+GroupMember.ReadWrite.All      (or broader: Group.ReadWrite.All)
+```
+
+`-UseTemporaryApp` additionally needs Application Administrator or Global Administrator,
+because it creates an app and assigns app roles to it.
+
+> The file is spelled `Phising-rollout.ps1` in the repository. Renaming it is a separate
+> change — the Automation runbook that calls it refers to this name.
