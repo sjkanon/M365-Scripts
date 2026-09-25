@@ -784,6 +784,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (14)
+| Change |
+|--------|
+| Second live run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1` authenticated cleanly — the token role check caught the replication delay on its first attempt and waited it out, SharePoint and Graph both accepted their tokens, and 130 webs were discovered and started scanning. Two scan-level faults then repeated on every site |
+| `ConvertTo-PermissionRows` rejected an empty role assignment collection: a `Mandatory [object[]]` parameter refuses `@()`, so every system list that has unique permissions but no remaining role assignments (`User Information List`, `Converted Forms`, `Bibliotheek met onderhoudslogboeken`) failed with `Cannot bind argument to parameter 'RoleAssignments'`. Fixed with `[AllowEmptyCollection()]` — a scope with no assignments legitimately produces no rows |
+| More consequentially, an unreadable role assignment list was indistinguishable from an empty one. `Invoke-SPGet` swallows `403`/`404` and returns `$null`, which `Get-SPCollection` turns into an empty collection — and an empty collection reads as "nobody has rights on this scope". Role assignment reads now use `-ThrowOnDenied`, so a refusal becomes an error row saying the permissions are unknown rather than a silent claim that there are none. This is the only place a 403 is not skipped, because it is the only place where "not allowed to look" would be misread as a finding |
+| The gallery lists (`Galerie van thema's`, `Galerie met basispagina's`) answered `400 Bad Request` to the item `$select`, because their schema does not carry every field it names, and a 400 is not something retrying fixes. The item sweep now steps down a four-rung ladder of progressively narrower `$select` clauses until SharePoint accepts one; every rung keeps `Id` and `HasUniqueRoleAssignments`, so the worst case loses a file name rather than the list's unique scopes. Only a 400 triggers narrowing — a denial, a throttle or a view threshold answers the same way however few fields are asked for |
+| Verified locally with 132 checks across seven suites (21 new): an empty assignment set no longer crashes and produces no rows, a denied read throws with "unknown rather than empty", a genuine empty `200` stays empty end to end, an ordinary sweep still skips a 403, every ladder rung keeps the fields the scan depends on, and only a 400 narrows. **The scan phase past web 11 is still unverified against a live tenant** |
+
 ### 2026-09-25 (13)
 | Change |
 |--------|

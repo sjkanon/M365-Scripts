@@ -292,6 +292,9 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 | Geen toegang tot één site (`403`) of object weg (`404`) | Die ene site/dat ene object wordt overgeslagen, de rest loopt door |
 | Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`, anders exponentiële backoff tot 3 minuten |
 | Eén lijst faalt (view threshold, raar template) | Foutregel in de detail-CSV, de overige lijsten van die site lopen gewoon door. De unit wordt **niet** als klaar gemarkeerd, dus een hervatte run probeert hem opnieuw |
+| Lijst met eigen rechten maar zonder roltoewijzingen | Levert geen regels op, en dat is correct. Voorheen liep dit vast op `Cannot bind argument to parameter 'RoleAssignments'` |
+| Roltoewijzingen niet te lezen (`403`) | **Foutregel, geen lege uitkomst.** Dit is het enige punt waar een 403 niet wordt overgeslagen: een lege lijst roltoewijzingen leest als "niemand heeft rechten op deze scope", en "ik mag niet kijken" is een ander feit dan "er is niets te zien" |
+| Galerie-lijst weigert de veldselectie (`400`) | De query wordt stapsgewijs versmald (vier varianten) tot SharePoint hem accepteert. Op `Galerie van thema's` en `Galerie met basispagina's` bestaan niet alle velden; liever de bestandsnaam kwijt dan de unieke scopes van die lijst |
 | Item-sweep faalt | Aparte foutregel: zonder die regel zou de lijst er uitzien alsof er niets met eigen rechten in zat |
 | CSV staat open in Excel | Vijf keer opnieuw met oplopende wachttijd; lukt het dan nog niet, stopt de run in plaats van stilzwijgend regels te laten vallen |
 | Token verloopt midden in een grote bibliotheek | Elke wave haalt het token opnieuw op — workers krijgen een kopie en zien een latere refresh niet |
