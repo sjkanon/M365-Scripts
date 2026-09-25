@@ -287,7 +287,8 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 
 | Situatie | Gedrag |
 |---|---|
-| Token geweigerd (`401`) | Eén keer opnieuw authenticeren; blijft het weigeren, dan **stopt de run** met de reden uit `x-ms-diagnostics`. Een 401 geldt nooit voor één site, dus hij wordt niet per site gemeld |
+| App-rol nog niet gerepliceerd | Het token moet vóór de scan aantonen dát het de rollen draagt (`roles`-claim). Entra geeft namelijk gewoon een token uit zonder de net toegekende rol, en Graph antwoordt daarop met `401` — niet `403`. Zo'n token wordt niet gecachet; er wordt opnieuw geminst tot de rol erin staat (tot ~2,5 min), daarna een duidelijke fout |
+| Token geweigerd (`401`) | Eén keer opnieuw authenticeren met een vers token; blijft het weigeren, dan **stopt de run** met de reden uit `x-ms-diagnostics`. Een 401 geldt nooit voor één site, dus hij wordt niet per site gemeld |
 | Geen toegang tot één site (`403`) of object weg (`404`) | Die ene site/dat ene object wordt overgeslagen, de rest loopt door |
 | Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`, anders exponentiële backoff tot 3 minuten |
 | Eén lijst faalt (view threshold, raar template) | Foutregel in de detail-CSV, de overige lijsten van die site lopen gewoon door. De unit wordt **niet** als klaar gemarkeerd, dus een hervatte run probeert hem opnieuw |

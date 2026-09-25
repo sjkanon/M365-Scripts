@@ -196,6 +196,7 @@ $script:AppCertificate  = $null
 $script:AppSigningKey   = $null
 $script:AppTenantId     = $null
 $script:TokenCache      = @{}   # resource root URI -> @{ Headers; Expiry }
+$script:ResourceRequiredRoles = @{}   # resource root URI -> app roles its token must carry
 $script:CurrentScanLabel = ''
 
 function Write-ProgressHost {
@@ -309,7 +310,9 @@ function Remove-TempApp {
         $prevWarningPreference = $WarningPreference
         try {
             $WarningPreference = 'SilentlyContinue'
-            Disconnect-MgGraph -ErrorAction SilentlyContinue
+            # Returns the context it just disconnected; without Out-Null that object lands on
+            # stdout and prints a stray ClientId/TenantId/Scopes table after the summary.
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
         } catch {} finally {
             $WarningPreference = $prevWarningPreference
         }
@@ -403,49 +406,105 @@ function New-ClientAssertion {
     return "$toSign.$(ConvertTo-Base64Url -Bytes $signature)"
 }
 
+function Get-JwtClaim {
+    # Reads one claim out of a JWT payload. No validation and no library: the token was just
+    # handed to us by Entra over TLS, and all we want to know is what it says about itself.
+    param(
+        # Explicitly allows empty: a caller asking about a token it does not have should get back
+        # "no claim", not a parameter binding error it then has to guard against separately.
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Token,
+        [Parameter(Mandatory = $true)][string]$Claim
+    )
+    if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+    try {
+        $parts = $Token.Split('.')
+        if ($parts.Count -lt 2) { return $null }
+        $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } 1 { return $null } }
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+        return $json.$Claim
+    } catch { return $null }
+}
+
 function Get-ResourceToken {
     # Returns an Authorization header hashtable for the given resource root, minting and caching
     # a client-credentials token per resource. Refreshes 5 minutes before expiry.
-    param([Parameter(Mandatory = $true)][string]$Resource)
+    #
+    # -RequiredRoles is what makes this safe to call straight after granting app roles. Entra will
+    # happily issue a token before a freshly granted role has replicated, and that token carries no
+    # roles claim at all — which Graph answers with 401, not 403. Cached for the hour it is valid,
+    # one such token poisons the entire run and no amount of retrying the request can recover it,
+    # because every retry is handed the same dead token back. So the token has to prove it carries
+    # the roles before it is allowed into the cache.
+    param(
+        [Parameter(Mandatory = $true)][string]$Resource,
+        [string[]]$RequiredRoles = @()
+    )
 
     $cached = $script:TokenCache[$Resource]
     if ($cached -and (Get-Date) -lt $cached.Expiry) { return $cached.Headers }
 
+    # Remember what this resource needs, so a refresh later in the run is held to the same bar.
+    if ($RequiredRoles.Count -gt 0) { $script:ResourceRequiredRoles[$Resource] = $RequiredRoles }
+    $expectedRoles = @($script:ResourceRequiredRoles[$Resource])
+
     $authority = "https://login.microsoftonline.com/$($script:AppTenantId)/oauth2/v2.0/token"
-    $body = @{
-        grant_type = 'client_credentials'
-        scope      = "$Resource/.default"
-        client_id  = $script:AppClientId
-    }
-    if ($script:AppCertificate) {
-        $body['client_assertion_type'] = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
-        $body['client_assertion']      = New-ClientAssertion -Certificate $script:AppCertificate `
-                                            -ClientIdValue $script:AppClientId -Authority $authority `
-                                            -SigningKey $script:AppSigningKey
-    } else {
-        $body['client_secret'] = $script:AppClientSecret
-    }
 
     # A freshly registered certificate credential and a freshly granted app role both need time to
     # replicate before Entra will mint a token against them — noticeably longer than the few
     # seconds a secret needs. Give it up to ~two minutes rather than failing the whole run on a
     # race that resolves itself.
-    $resp = $null
-    $lastError = $null
-    $maxAttempts = 12
+    $resp        = $null
+    $lastError   = $null
+    $missingRoles = @()
+    $maxAttempts = 15
     for ($i = 1; $i -le $maxAttempts; $i++) {
+        # Rebuild the credential every attempt: the assertion carries its own expiry and a
+        # single-use jti, and over a propagation wait this loop can outlive the first one.
+        $body = @{
+            grant_type = 'client_credentials'
+            scope      = "$Resource/.default"
+            client_id  = $script:AppClientId
+        }
+        if ($script:AppCertificate) {
+            $body['client_assertion_type'] = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
+            $body['client_assertion']      = New-ClientAssertion -Certificate $script:AppCertificate `
+                                                -ClientIdValue $script:AppClientId -Authority $authority `
+                                                -SigningKey $script:AppSigningKey
+        } else {
+            $body['client_secret'] = $script:AppClientSecret
+        }
+
+        $resp = $null
         try {
             $resp = Invoke-RestMethod -Method POST -Uri $authority -Body $body -ErrorAction Stop
-            break
         } catch {
             $lastError = $_
-            if ($i -lt $maxAttempts) {
-                Write-ProgressHost -Message ("[INFO] Waiting for credential/consent propagation for {0} (attempt {1}/{2})..." -f $Resource, $i, $maxAttempts)
-                Start-Sleep -Seconds ([Math]::Min(5 * $i, 20))
-            }
+            $resp = $null
+        }
+
+        if ($resp -and $resp.access_token) {
+            if ($expectedRoles.Count -eq 0) { break }
+            $granted     = @(Get-JwtClaim -Token $resp.access_token -Claim 'roles')
+            $missingRoles = @($expectedRoles | Where-Object { $_ -notin $granted })
+            if ($missingRoles.Count -eq 0) { break }
+            # Token is technically valid but useless — discard it rather than cache it.
+            $resp = $null
+        }
+
+        if ($i -lt $maxAttempts) {
+            $reason = if ($missingRoles.Count -gt 0) {
+                "app role(s) {0} not in the token yet" -f ($missingRoles -join ', ')
+            } else { 'credential not accepted yet' }
+            Write-ProgressHost -Message ("[INFO] Waiting for {0} to replicate for {1} (attempt {2}/{3})..." -f $reason, $Resource, $i, $maxAttempts)
+            Start-Sleep -Seconds ([Math]::Min(5 * $i, 20))
         }
     }
+
     if (-not $resp -or -not $resp.access_token) {
+        if ($missingRoles.Count -gt 0) {
+            throw ("Entra issued a token for {0} without the required app role(s): {1}. The grant has not replicated, or it was not applied to this application." -f $Resource, ($missingRoles -join ', '))
+        }
         $detail = $null
         try { $detail = ($lastError.ErrorDetails.Message | ConvertFrom-Json).error_description } catch {}
         if (-not $detail) { $detail = $lastError.Exception.Message }
@@ -504,12 +563,25 @@ function Get-ResponseStatusCode {
 
 function Invoke-GraphGet {
     param([Parameter(Mandatory = $true)][string]$Uri)
+    $reauthTried = $false
     for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
         try {
             $headers = Get-ResourceToken -Resource $GraphResource
             return Invoke-RestMethod -Uri $Uri -Headers $headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
         } catch {
             $statusCode = Get-ResponseStatusCode -ErrorRecord $_
+
+            # Graph answers an app-only token that carries no usable role with 401, not 403, and a
+            # cached token never improves on its own. Retrying the request alone is therefore
+            # futile — the cache has to be dropped so the next attempt mints a fresh one.
+            if ($statusCode -eq 401 -and -not $reauthTried) {
+                $reauthTried = $true
+                $script:TokenCache.Remove($GraphResource)
+                Write-ProgressHost -Message "[INFO] Graph refused the token (401) — minting a fresh one and retrying..."
+                Start-Sleep -Seconds 3
+                continue
+            }
+
             $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
             if (-not $isRetryable -and -not $statusCode) {
                 $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
@@ -919,9 +991,16 @@ try {
         $script:AppSigningKey  = $tempCert.SigningKey
         $script:AppTenantId    = $usedTenantId
 
-        Write-Host "  Obtaining app-only tokens..." -ForegroundColor Cyan
-        [void](Get-ResourceToken -Resource $GraphResource)
-        Write-Host "  [OK]   Token obtained." -ForegroundColor DarkGray
+        # Both tokens are minted here, and both must already carry their app roles. Waiting for
+        # that now — while the run has produced nothing yet — is the difference between a clear
+        # "the grant has not replicated" and a scan that walks the whole tenant on a dead token.
+        Write-Host "  Obtaining app-only tokens (waiting for the grants to replicate)..." -ForegroundColor Cyan
+        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @('Sites.Read.All', 'GroupMember.Read.All'))
+        Write-Host "  [OK]   Graph token carries Sites.Read.All and GroupMember.Read.All." -ForegroundColor DarkGray
+
+        $sharePointResource = Get-ResourceRootFromUrl -Url $(if ($SiteUrl) { $SiteUrl } else { $TenantUrl })
+        [void](Get-ResourceToken -Resource $sharePointResource -RequiredRoles @('Sites.FullControl.All'))
+        Write-Host "  [OK]   SharePoint token carries Sites.FullControl.All." -ForegroundColor DarkGray
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red

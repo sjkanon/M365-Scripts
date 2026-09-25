@@ -784,6 +784,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (13)
+| Change |
+|--------|
+| First live run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1` got past SharePoint — the certificate credential worked and the preflight reported `SharePoint accepted the token (root web: ...)` — and then failed on Graph with `401` while retrieving sites. Cause: the Graph token was minted immediately after the app roles were granted, before the grant had replicated, so it carried no `roles` claim at all. Graph answers such a token with `401`, not `403`, and because the token was cached for its full hour every one of the six retries was handed the same dead token back |
+| Tokens now have to prove themselves: `Get-ResourceToken` takes `-RequiredRoles`, decodes the issued JWT, and refuses to cache a token whose `roles` claim is missing what the run needs. It keeps re-minting (up to 15 attempts, backoff capped at 20s) until the grant appears, then fails with the missing role named. Both tokens are validated up front — Graph for `Sites.Read.All` + `GroupMember.Read.All`, SharePoint for `Sites.FullControl.All` — so a replication delay is waited out before the scan starts rather than discovered 130 sites in |
+| `Invoke-GraphGet` now drops the cached token and re-mints once on a `401`, the same recovery `Invoke-SPGet` already had. Retrying the request alone could never have worked against a poisoned cache entry |
+| A user-supplied `-ClientId` app is deliberately **not** role-validated: a working app may hold broader roles (`Directory.Read.All` instead of `GroupMember.Read.All`), and rejecting it would be a false failure. The SharePoint preflight still catches a genuinely under-permissioned app |
+| `Get-JwtClaim` returns `$null` for an empty token instead of throwing a parameter binding error, and `Disconnect-MgGraph` no longer leaks its context object as a stray `ClientId`/`TenantId`/`Scopes` table after the summary |
+| Verified locally with 111 checks across six suites (23 of them new, driving the real `Get-ResourceToken` against a fake token endpoint): a role that arrives late is waited out and only the token carrying it is cached, a role that never arrives fails loudly with nothing cached, the backoff grows and stays capped, and caching stays isolated per resource. **The corrected Graph path is not yet verified against a live tenant** |
+
 ### 2026-09-25 (12)
 | Change |
 |--------|
