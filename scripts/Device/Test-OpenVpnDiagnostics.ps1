@@ -1,3 +1,16 @@
+﻿<#
+.SYNOPSIS
+    Collect OpenVPN client diagnostics on a Windows endpoint into one timestamped
+    report under C:\Temp.
+
+.DESCRIPTION
+    Gathers what a stuck or failing OpenVPN connection usually turns on: the
+    Wintun/TAP adapters including hidden and leftover ones, the OpenVPN services and
+    processes, the configuration and log files, and the routing and DNS state. Writes
+    everything to C:\Temp\OpenVPN_Diagnostics_<timestamp>.txt and flags the problems
+    it recognises, so the file can go straight onto a ticket. Read-only.
+#>
+
 # Maak C:\Temp aan als het niet bestaat
 if (-not (Test-Path "C:\Temp")) { New-Item -ItemType Directory -Path "C:\Temp" | Out-Null }
 
