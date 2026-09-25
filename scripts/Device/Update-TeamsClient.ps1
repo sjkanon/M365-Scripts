@@ -24,13 +24,12 @@
       5. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
                       BEFORE anything is uninstalled, so a failed download can never
                       leave the device without a Teams client.
-      6. Uninstall  - every copy of the Teams Meeting Add-in (the MSI, the folders
-                      under Program Files (x86) and in each profile, and the per-user
-                      COM registrations), the MSTeams AppX package for all users, and
-                      the provisioned package.
+      6. Uninstall  - the Teams Meeting Add-in MSI, the MSTeams AppX package for all
+                      users, and the provisioned package.
       7. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
       8. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
-                      Teams package (ALLUSERS=1).
+                      Teams package (ALLUSERS=1), after clearing every other copy of
+                      it - but only once that MSI is in hand and can actually go in.
       9. Verify     - re-check the add-in registration (machine-wide *and* whether
                       Outlook sees it, per signed-in user), the provisioned package,
                       the classic removal and, where applicable, the AVD components.
@@ -97,6 +96,19 @@
     in each loaded hive. Leaving any of those behind is what creates a user whose own
     registration shadows the fresh machine-wide one and points at files that are no
     longer there - Outlook then fails to load it and parks LoadBehavior at 2.
+
+    That sweep waits until step 8, with the replacement MSI in hand and its version
+    compared against what is still registered. Windows Installer refuses to put an
+    older add-in over a newer registered one (1638), and a run that had already
+    deleted every working copy by then left a production host with no add-in at all.
+    Two failures make that reachable: a -Force run on a host whose Teams build is
+    newer than the published one downgrades the client, so the add-in inside the
+    package is older than the one registered; and an uninstall that answers 1612
+    ("the installation source is not available") leaves the old product registered
+    for good. 1612 is retried against Windows Installer's own cached copy of the MSI
+    under C:\Windows\Installer, which usually still works; when that is gone too the
+    registration cannot be removed by msiexec at all, and the script says so instead
+    of destroying what still works.
 
     Classic Teams
     -------------
@@ -417,6 +429,7 @@ $rebootRequired   = $false
 $transcribing     = $false
 $plannedExit      = $null
 $workingDirReady  = $false
+$addInOrphaned    = $false
 
 # Teams reads this flag to switch to VDI media optimization; it has to be there
 # before the client is provisioned.
@@ -1052,10 +1065,13 @@ function Write-AppLockerStatus {
     #>
     param([Parameter(Mandatory)] $Detail)
 
-    $summary = foreach ($collection in ($Detail.Collections | Sort-Object Name)) {
+    # The key exists with no collections under it on plenty of machines - a leftover
+    # from a policy that was removed. Saying "-" there reads like a broken script.
+    $summary = @(foreach ($collection in ($Detail.Collections | Sort-Object Name)) {
         '{0} {1}' -f $collection.Name, $collection.Mode
-    }
-    Write-Skip "AppLocker policy: $($Detail.Path) - $($summary -join '; ') (Application Identity service: $($Detail.ServiceStatus))"
+    })
+    $what = if ($summary.Count -gt 0) { $summary -join '; ' } else { 'no rule collections configured, so it blocks nothing' }
+    Write-Skip "AppLocker policy: $($Detail.Path) - $what (Application Identity service: $($Detail.ServiceStatus))"
 
     $appx = Get-AppLockerAppxRule -Detail $Detail
     if (-not $appx -or $appx.RuleCount -eq 0) { return }
@@ -1274,6 +1290,32 @@ function Get-TeamsAddInInstaller {
            Select-Object -Last 1
 }
 
+function Get-MsiCachedPackage {
+    <#
+        Windows Installer's own cached copy of an installed product's MSI, under
+        C:\Windows\Installer. It needs that file to uninstall; when it has gone
+        missing msiexec /x answers 1612 ("the installation source is not available")
+        and the product stays registered for good - which is what later makes an
+        install of a different version answer 1638.
+    #>
+    param([Parameter(Mandatory)] [string] $DisplayNameLike)
+
+    $root = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products'
+    if (-not (Test-Path $root)) { return }
+
+    foreach ($key in @(Get-ChildItem "$root\*\InstallProperties" -ErrorAction SilentlyContinue)) {
+        $name = $key.GetValue('DisplayName')
+        if ($name -notlike $DisplayNameLike) { continue }
+        $package = $key.GetValue('LocalPackage')
+        [PSCustomObject]@{
+            DisplayName  = $name
+            Version      = $key.GetValue('DisplayVersion')
+            LocalPackage = $package
+            Cached       = [bool] ($package -and (Test-Path $package))
+        }
+    }
+}
+
 function Get-MsiProductVersion {
     <#
         ProductVersion straight from the MSI property table. Microsoft's own sample
@@ -1405,13 +1447,26 @@ try {
         Write-Warn "Classic Teams installed for $($classic.Account) ($($classic.Version)) - $classicNote"
     }
 
-    $addInInstalled     = [bool] (Get-TeamsMeetingAddInEntry)
+    # The registered version is kept: it is what decides whether the add-in inside
+    # the package about to be staged can be installed over it at all.
+    $addInEntries          = @(Get-TeamsMeetingAddInEntry)
+    $addInInstalled        = $addInEntries.Count -gt 0
+    $installedAddInVersion = $null
+    foreach ($entry in $addInEntries) {
+        try { $candidate = [version] $entry.Version } catch { continue }
+        if ($null -eq $installedAddInVersion -or $candidate -gt $installedAddInVersion) {
+            $installedAddInVersion = $candidate
+        }
+    }
     $machineWideAddInOk = $false
     $brokenAddInUsers   = @()
 
     if (-not $SkipMeetingAddIn) {
-        if ($addInInstalled) { Write-Ok 'Teams Meeting Add-in is installed' }
-        else                 { Write-Warn 'Teams Meeting Add-in is not installed' }
+        if ($addInInstalled) {
+            foreach ($entry in $addInEntries) { Write-Ok "Teams Meeting Add-in is installed ($($entry.Version))" }
+        } else {
+            Write-Warn 'Teams Meeting Add-in is not installed'
+        }
 
         $addInRegistrations = @(Get-OutlookAddInRegistration)
         $machineWideAddInOk = [bool] ($addInRegistrations | Where-Object { $_.Account -like 'all users*' -and -not $_.DllMissing })
@@ -1469,6 +1524,9 @@ try {
             Write-News "Update available: $installedVersion -> $($latest.Version)"
         } elseif ($installedVersion -gt $latest.Version) {
             Write-Ok "Installed build is newer than the published one ($installedVersion) - nothing to update"
+            if ($Force) {
+                Write-Warn "-Force replaces it with the published $($latest.Version), which is a downgrade - the meeting add-in inside that older package can be older than the $installedAddInVersion registered now, and Windows Installer refuses that with 1638"
+            }
         } else {
             Write-Ok "Installed build is current ($installedVersion)"
         }
@@ -1761,45 +1819,39 @@ try {
                     if ($result.Success) {
                         Write-Ok "Uninstalled $($entry.DisplayName)"
                         if ($result.RebootRequired) { $rebootRequired = $true }
+                    } elseif ($result.ExitCode -eq 1612) {
+                        # 1612 means Windows Installer cannot find the cached MSI it
+                        # needs. Its own copy under C:\Windows\Installer often is still
+                        # there and works; when it is not, nothing can uninstall this
+                        # product and it keeps blocking other versions with 1638.
+                        $cached = @(Get-MsiCachedPackage -DisplayNameLike '*Teams Meeting Add-in*' |
+                                    Where-Object { $_.Cached }) | Select-Object -First 1
+                        if ($cached -and $PSCmdlet.ShouldProcess($cached.LocalPackage, 'msiexec /x /qn (uninstall from the cached package)')) {
+                            Write-Warn "Windows Installer lost the source for $($entry.DisplayName) (1612) - retrying with its cached copy $($cached.LocalPackage)"
+                            $retry = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x `"$($cached.LocalPackage)`" /qn /norestart"
+                            if ($retry.Success) {
+                                Write-Ok "Uninstalled $($entry.DisplayName) from the cached package"
+                                if ($retry.RebootRequired) { $rebootRequired = $true }
+                            } else {
+                                $addInOrphaned = $true
+                                Write-Warn "The cached package did not uninstall either ($($retry.Message)) - $($entry.Version) stays registered"
+                            }
+                        } else {
+                            $addInOrphaned = $true
+                            Write-Warn "Windows Installer lost the source for $($entry.DisplayName) (1612) and its cached copy is gone too, so $($entry.Version) cannot be uninstalled - it stays registered and will refuse a different version with 1638"
+                        }
                     } else {
-                        # Not fatal: the reinstall below replaces the add-in anyway.
                         Write-Warn "Uninstall of $($entry.DisplayName) failed ($($result.Message))"
                     }
                 }
             }
 
-            # The MSI clears one copy. Every other one has to go too, or the reinstall
-            # hands a user a registration pointing at a folder that is about to be
-            # replaced - which is exactly how a shadowing LoadBehavior 2 is born.
-            foreach ($folder in @(Get-TeamsAddInFolder)) {
-                if ($PSCmdlet.ShouldProcess("$($folder.Account): $($folder.Path)", 'Remove leftover add-in folder')) {
-                    Remove-Item -LiteralPath $folder.Path -Recurse -Force -ErrorAction SilentlyContinue
-                    if (Test-Path $folder.Path) {
-                        Write-Warn "Could not fully remove $($folder.Path) - files in use; Outlook or Teams may still hold them"
-                    } else {
-                        Write-Ok "Removed the add-in copy for $($folder.Account)"
-                    }
-                }
-            }
-
-            # With the files gone every per-user COM registration is dangling, so they
-            # go as well; the fresh machine-wide install is what users resolve to.
-            foreach ($reg in @(Get-OutlookAddInRegistration | Where-Object { $_.Sid })) {
-                foreach ($clsidKey in @(Get-AddInClsidKey $reg.ClassesRoot)) {
-                    if ($PSCmdlet.ShouldProcess("$($reg.Account): $clsidKey", 'Remove the per-user COM registration')) {
-                        Remove-Item -Path $clsidKey -Recurse -Force -ErrorAction SilentlyContinue
-                        if (-not (Test-Path $clsidKey)) {
-                            Write-Ok "Cleared the per-user COM registration for $($reg.Account)"
-                        }
-                    }
-                }
-
-                if ($reg.LoadBehavior -ne 3 -and
-                    $PSCmdlet.ShouldProcess("$($reg.Account): LoadBehavior", 'Set to 3 (load at startup)')) {
-                    Set-ItemProperty -Path $reg.AddInKeyPath -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction SilentlyContinue
-                    Write-Ok "Set LoadBehavior back to 3 for $($reg.Account)"
-                }
-            }
+            # The rest of the sweep - the folders and the per-user COM registrations -
+            # deliberately waits until step 8, where the replacement MSI is in hand.
+            # Removing every copy here and only then discovering the new package
+            # carries an older add-in leaves the device with no add-in at all, which
+            # is exactly what happened on a production host.
+            Write-Skip 'The other add-in copies are removed in step 8, once the replacement MSI is known to be installable'
         }
 
         if ($existingTeams.Count -eq 0) { Write-Skip 'No AppX package to remove' }
@@ -1865,14 +1917,71 @@ try {
             if (-not $tmaVersion) { throw "Could not read the product version from $($tmaMsi.FullName)" }
 
             Write-Ok "Found Teams Meeting Add-in version: $tmaVersion"
-            $targetDir = '{0}\Microsoft\TeamsMeetingAddin\{1}\' -f ${env:ProgramFiles(x86)}, $tmaVersion
-            $params    = '/i "{0}" TARGETDIR="{1}" /qn /norestart ALLUSERS=1' -f $tmaMsi.FullName, $targetDir
 
-            if ($PSCmdlet.ShouldProcess("Teams Meeting Add-in $tmaVersion", "msiexec.exe $params")) {
-                $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments $params
-                if (-not $result.Success) { throw "Teams Meeting Add-in install failed ($($result.Message))" }
-                if ($result.RebootRequired) { $rebootRequired = $true }
-                Write-Ok "Installed Teams Meeting Add-in to $targetDir"
+            # Windows Installer refuses to put an older version over a newer one that
+            # is still registered (1638). Finding that out before touching the copies
+            # that do work is the difference between "nothing changed" and "the device
+            # has no add-in".
+            $stillRegistered = @(Get-TeamsMeetingAddInEntry) | Select-Object -First 1
+            $msiOlder        = $false
+            if ($stillRegistered) {
+                try { $msiOlder = ([version] $tmaVersion) -lt ([version] $stillRegistered.Version) } catch { $msiOlder = $false }
+            }
+
+            if ($msiOlder) {
+                Write-Warn "The staged package carries add-in $tmaVersion, older than the $($stillRegistered.Version) still registered - Windows Installer would answer 1638, so the working add-in is left exactly as it is"
+                if ($addInOrphaned) {
+                    Write-Warn 'That registration cannot be uninstalled either, because Windows Installer has lost its cached MSI - the way out is a newer Teams build whose add-in is at least this version, or removing the product registration by hand'
+                }
+            } else {
+                # Now that a usable MSI is in hand, clear every other copy: a per-user
+                # folder or COM registration that survives shadows the fresh
+                # machine-wide one and is how a LoadBehavior 2 is born.
+                foreach ($folder in @(Get-TeamsAddInFolder)) {
+                    if ($PSCmdlet.ShouldProcess("$($folder.Account): $($folder.Path)", 'Remove leftover add-in folder')) {
+                        Remove-Item -LiteralPath $folder.Path -Recurse -Force -ErrorAction SilentlyContinue
+                        if (Test-Path $folder.Path) {
+                            Write-Warn "Could not fully remove $($folder.Path) - files in use; Outlook or Teams may still hold them"
+                        } else {
+                            Write-Ok "Removed the add-in copy for $($folder.Account)"
+                        }
+                    }
+                }
+
+                foreach ($reg in @(Get-OutlookAddInRegistration | Where-Object { $_.Sid })) {
+                    foreach ($clsidKey in @(Get-AddInClsidKey $reg.ClassesRoot)) {
+                        if ($PSCmdlet.ShouldProcess("$($reg.Account): $clsidKey", 'Remove the per-user COM registration')) {
+                            Remove-Item -Path $clsidKey -Recurse -Force -ErrorAction SilentlyContinue
+                            if (-not (Test-Path $clsidKey)) {
+                                Write-Ok "Cleared the per-user COM registration for $($reg.Account)"
+                            }
+                        }
+                    }
+
+                    if ($reg.LoadBehavior -ne 3 -and
+                        $PSCmdlet.ShouldProcess("$($reg.Account): LoadBehavior", 'Set to 3 (load at startup)')) {
+                        Set-ItemProperty -Path $reg.AddInKeyPath -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction SilentlyContinue
+                        Write-Ok "Set LoadBehavior back to 3 for $($reg.Account)"
+                    }
+                }
+
+                $targetDir = '{0}\Microsoft\TeamsMeetingAddin\{1}\' -f ${env:ProgramFiles(x86)}, $tmaVersion
+                $params    = '/i "{0}" TARGETDIR="{1}" /qn /norestart ALLUSERS=1' -f $tmaMsi.FullName, $targetDir
+
+                if ($PSCmdlet.ShouldProcess("Teams Meeting Add-in $tmaVersion", "msiexec.exe $params")) {
+                    $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments $params
+                    if ($result.ExitCode -eq 1638) {
+                        # Not fatal any more: aborting here used to skip verification,
+                        # which is the one thing that says whether Outlook still has a
+                        # working add-in after all this.
+                        Write-Warn "Windows Installer reports another version of the add-in is already installed (1638) - $tmaVersion was not installed; verification below reports what Outlook is left with"
+                    } elseif (-not $result.Success) {
+                        throw "Teams Meeting Add-in install failed ($($result.Message))"
+                    } else {
+                        if ($result.RebootRequired) { $rebootRequired = $true }
+                        Write-Ok "Installed Teams Meeting Add-in to $targetDir"
+                    }
+                }
             }
         }
     }

@@ -229,9 +229,9 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 | 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector. Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
 | 4 | Classic Teams only (`-RemoveClassicTeams`): uninstall machine-wide installer + per-profile installs | yes |
 | 5 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
-| 6 | Uninstall add-in, remove `MSTeams` AppX for all users, deprovision it | yes |
+| 6 | Uninstall the add-in MSI (`1612` retried from Windows Installer's cached copy), remove `MSTeams` AppX for all users, deprovision it | yes |
 | 7 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
-| 8 | Install Teams Meeting Add-in MSI (`ALLUSERS=1`) | yes |
+| 8 | Compare the staged add-in MSI with what is still registered, clear every other copy of it, install it (`ALLUSERS=1`) | yes |
 | 9 | Verify add-in registration (machine-wide + per signed-in user in Outlook), classic removal, provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
 Only what is missing gets done: a current client with a missing add-in installs just the add-in, and on a session host with `-AvdOptimizations` a missing WebRTC redirector installs just that.

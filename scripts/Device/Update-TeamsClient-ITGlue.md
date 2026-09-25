@@ -406,7 +406,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-Quiet` | Alleen output als er nieuws is — voor geplande runs |
 | `-CheckOnly` | Alleen controleren en melden (exitcode 2 = update beschikbaar) |
 | `-Confirm:$false` | Nooit om bevestiging vragen — verplicht bij onbeheerde runs |
-| `-Force` | Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams |
+| `-Force` | Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams. **Let op:** draait er een build die nieuwer is dan de gepubliceerde, dan zet `-Force` Teams terug naar de gepubliceerde versie. Het script waarschuwt daarvoor |
 | `-AvdOptimizations` | Alleen op AVD/VDI-sessiehosts: zet de mediavlag `IsWVDEnvironment` en installeert de WebRTC-redirector |
 | `-RemoveWebRtcRedirector` | Verwijdert de oude WebRTC-optimalisatie. Alleen als élk lokaal apparaat SlimCore aankan. Gaat niet samen met `-AvdOptimizations` |
 | `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
@@ -459,6 +459,9 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `WebRTC Redirector install failed (exit code 1638)` | Er stond al een andere versie van de redirector; die MSI kan niet over zichzelf heen installeren | Hoort niet meer voor te komen: het script verwijdert de oude versie eerst. Komt het toch terug, verwijder de redirector handmatig via Programma's en onderdelen en draai opnieuw | L3 |
 | `Use either -AvdOptimizations ... or -RemoveWebRtcRedirector, not both` | Beide opties tegelijk opgegeven; de een installeert wat de ander weghaalt | Kies er één | L2 |
 | `Could not remove the WebRTC Redirector` | msiexec weigerde de verwijdering | Log in `C:\Temp` lezen; meestal loopt er een andere installatie | L3 |
+| `Uninstall of ... Add-in ... failed (exit code 1612)` | Windows Installer kan zijn eigen bron-MSI niet vinden | Het script probeert het opnieuw met de gecachte kopie in `C:\Windows\Installer`. Lukt dat niet, dan blijft de oude add-in geregistreerd en weigert een andere versie met `1638` | L3 |
+| `Teams Meeting Add-in install failed (exit code 1638)` | Er staat een **nieuwere** add-in geregistreerd dan die in het pakket zit | Geen paniek: de werkende add-in wordt met rust gelaten. Ontstaat vooral door `-Force` op een host met een nieuwere Teams-build dan de gepubliceerde — die wordt dan teruggezet | L3 |
+| `The staged package carries add-in X, older than the Y still registered` | Zo bedoeld: het script laat de werkende add-in staan in plaats van hem te slopen | Wachten op een Teams-build waarvan de add-in minimaal Y is | L3 |
 | `Teams Meeting Add-in installation failed` | Client staat er, add-in niet | Outlook volledig sluiten en het script opnieuw draaien | L2 |
 | `Outlook has the add-in switched off for ... (LoadBehavior 2)` | Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet | L2 |
 | `The add-in is registered for ... but its DLL is gone (...)` | Verouderde registratie van die gebruiker overschaduwt de machinebrede installatie | Draaien met `-RepairOutlookAddIn`; vinkje terugzetten in Outlook helpt niet | L2 |
