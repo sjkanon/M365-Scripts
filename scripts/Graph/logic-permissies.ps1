@@ -1,3 +1,33 @@
+﻿<#
+.SYNOPSIS
+    Grant a Microsoft Graph application permission to a Logic App's managed identity.
+    Supports -WhatIf.
+
+.DESCRIPTION
+    A Logic App that calls Graph needs an app role on its own managed identity, which
+    the portal cannot assign - only Graph itself can. This looks up the service
+    principal of the managed identity by display name, resolves the requested app role
+    on the Graph service principal, and assigns it when it is not there already.
+    Re-running it changes nothing.
+
+.PARAMETER TenantId
+    Entra ID tenant to connect to.
+
+.PARAMETER LogicAppName
+    Display name of the Logic App's managed identity (its enterprise application).
+    The name has to resolve to exactly one service principal.
+
+.PARAMETER PermissionValue
+    App role to assign (default: AuditLog.Read.All).
+
+.PARAMETER ResourceAppId
+    Application the role belongs to (default: Microsoft Graph).
+
+.PARAMETER ModuleHandling
+    Whether to install/update the required Graph modules first, install only when
+    missing, or leave them alone.
+#>
+
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]

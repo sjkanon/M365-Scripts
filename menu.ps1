@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # Cross-platform: Windows (PS 5.1+), macOS and Linux (PS 7+)
 <#
 .SYNOPSIS
@@ -256,6 +256,59 @@ $ExchangeSubmenu = @(
         $det = Read-Host "  Include per-hop delivery details (slower, shows redirects)? [y/N]"
         if ($det -match '^[Yy]') { $p['IncludeDetails'] = $true }
         & "$ROOT\scripts\Exchange\Get-MessageTraceReport.ps1" @p
+    }}
+    @{ Key='H'; Label='Get-CalendarMappings     — where a calendar is mapped in Outlook (search by keyword, e.g. balie)'; Action={
+        $kw = Read-Host "  Calendar keyword, e.g. balie (leave blank for a full report)"
+        $p = @{}
+        if ($kw) {
+            $p['Search'] = $kw
+        } else {
+            $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for all mailboxes)"
+            if ($mbx) { $p['Mailbox'] = @($mbx -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        }
+        & "$ROOT\scripts\Exchange\Get-CalendarMappings.ps1" @p
+    }}
+    @{ Key='I'; Label='Convert-SharedCalendar   — move a shared calendar out of a user mailbox into a room/equipment mailbox'; Action={
+        $path = Join-Path $ROOT 'scripts\Exchange\Convert-SharedCalendarToResource.ps1'
+        $mbx  = Read-Host "  User mailbox that holds the calendar"
+        $cal  = Read-Host "  Calendar name, e.g. Balie"
+        $name = Read-Host "  Name of the new resource mailbox [$cal]"
+        $type = Read-Host "  [R]oom or [E]quipment [R]"
+        $p = @{ Mailbox = $mbx; Calendar = $cal }
+        if ($name) { $p['ResourceName'] = $name }
+        if ($type -match '^[Ee]') { $p['ResourceType'] = 'Equipment' }
+        # Always a preview first; the real run is a second, explicit step.
+        & $path @p
+        $apply = Read-Host "  Preview done. Create the mailbox and copy everything now? [y/N]"
+        if ($apply -notmatch '^[Yy]') { return }
+        $p['Apply'] = $true
+        if ((Read-Host "  Send users a sharing invitation? [Y/n]") -notmatch '^[Nn]') { $p['SendSharingInvitation'] = $true }
+        if ((Read-Host "  Remove the original calendar once every item is verified? [y/N]") -match '^[Yy]') { $p['RemoveSourceCalendar'] = $true }
+        & $path @p
+    }}
+    @{ Key='J'; Label='Move-SharedCalendar      — all in one: find a calendar by keyword and move it to a resource mailbox'; Action={
+        $kw   = Read-Host "  Calendar keyword, e.g. balie"
+        $type = Read-Host "  [R]oom or [E]quipment [R]"
+        $keep = Read-Host "  Give the original owner rights on the new calendar? [Y/n] (n for an archived mailbox)"
+        $p = @{ Search = $kw }
+        if ($type -match '^[Ee]') { $p['ResourceType'] = 'Equipment' }
+        if ($keep -match '^[Nn]') { $p['SourceOwnerRights'] = 'None' }
+        # The script previews first and then asks itself whether to go ahead.
+        & "$ROOT\scripts\Exchange\Move-SharedCalendar.ps1" @p
+    }}
+    @{ Key='K'; Label='Get-DLMembers            — export distribution list members to Excel (filter by address or domain)'; Action={
+        $grp = Read-Host "  List email or name (leave blank for all lists)"
+        $mbr = Read-Host "  Only lists containing this address or domain, e.g. @be.verizon.com or *.verizon.com (optional)"
+        $rec = Read-Host "  Expand nested lists (slower, but finds people behind a nested group)? [y/N]"
+        $dyn = Read-Host "  Include dynamic distribution groups? [y/N]"
+        $m365 = Read-Host "  Include Microsoft 365 groups? [y/N]"
+        $p = @{}
+        if ($grp)  { $p['Group']  = $grp }
+        if ($mbr)  { $p['Member'] = $mbr }
+        if ($rec  -match '^[Yy]') { $p['Recurse']           = $true }
+        if ($dyn  -match '^[Yy]') { $p['IncludeDynamic']    = $true }
+        if ($m365 -match '^[Yy]') { $p['IncludeM365Groups'] = $true }
+        & "$ROOT\scripts\Exchange\Get-DistributionGroupMembers.ps1" @p
     }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
@@ -574,15 +627,125 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='T'; FKey=$null; Category='Device'
+        Label='Update-TeamsClient  — update new Teams + meeting add-in when outdated'
+        Script="$ROOT\scripts\Device\Update-TeamsClient.ps1"
+        Params={
+            $apply = Read-Host "  Install the update now (not just check)? [y/N]"
+            $a = @{}
+            if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
+            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"
         Params={ return @{} }
     }
+    [PSCustomObject]@{ Key='X'; FKey=$null; Category='Startup'
+        Label='Update-ScriptIndex  — rebuild scripts/INDEX.md, the A-Z list of every script'
+        Script="$ROOT\scripts\Startup\Update-ScriptIndex.ps1"
+        Params={
+            $check = Read-Host '  Only check whether the index is stale, change nothing? [y/N]'
+            $a = @{}
+            if ($check -match '^[Yy]') { $a['Check'] = $true }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='A'; FKey=[ConsoleKey]::F10; Category='Reporting'
         Label='Licensing-Report    — generate monthly Pax8 + Ingram Excel report'
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"
         Params={ return @{} }
+    }
+    [PSCustomObject]@{ Key='P'; FKey=$null; Category='Reporting'
+        Label='SharePoint-Perms    — report who has access to what, at every level'
+        Script="$ROOT\scripts\Reporting\Get-SharePointPermissionsReport.ps1"
+        Params={
+            $site = Read-Host '  One site collection URL (empty = whole tenant)'
+            $a = @{}
+            if ($site) {
+                $a['SiteUrl'] = $site
+            } else {
+                $tenant = Read-Host '  Tenant URL (https://contoso.sharepoint.com)'
+                if (-not $tenant) { Write-Warning 'A tenant URL is required for a tenant-wide run.'; return $null }
+                $a['TenantUrl'] = $tenant
+            }
+            $scope = Read-Host '  Scope [Site/List/Item] [Item]'
+            if ($scope -match '^(?i)(site|list|item)$') { $a['Scope'] = $scope }
+            $eff = Read-Host '  Also write the per-user effective access CSV? [y/N]'
+            if ($eff -match '^[Yy]') { $a['IncludeEffectiveAccess'] = $true }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='S'; FKey=$null; Category='SharePoint'
+        Label='SharePoint-Structure — provision/check metadata, libraries and rights'
+        Action={
+            $dir = Join-Path $ROOT 'scripts\SharePoint\Provisioning'
+            Write-Host ''
+            Write-Host '  0  Build it all  — app registration + steps 1-3 + verification' -ForegroundColor White
+            Write-Host '  1  Metadata      — term set, site columns, content types' -ForegroundColor Gray
+            Write-Host '  2  Libraries     — libraries, channel folders, content types, views, permissions' -ForegroundColor Gray
+            Write-Host '  3  Share status  — audit sharing and update the Deelstatus column' -ForegroundColor Gray
+            Write-Host '  4  Drift check   — compare the tenant with the config (read only)' -ForegroundColor Gray
+            Write-Host '  5  Channel members — put the security group''s people into the private channel' -ForegroundColor Gray
+            Write-Host '  6  Cleanup       — remove what was built (reports only unless you confirm)' -ForegroundColor DarkYellow
+            Write-Host ''
+            $step   = Read-Host '  Step [0-6]'
+            $config = Read-Host '  Config file [petsolutions.config.json]'
+
+            $script = switch ($step) {
+                '0'     { 'Install-SharePointStructure.ps1' }
+                '1'     { 'New-SharePointMetadata.ps1' }
+                '2'     { 'Set-SharePointLibraries.ps1' }
+                '3'     { 'Update-SharePointShareStatus.ps1' }
+                '4'     { 'Test-SharePointStructure.ps1' }
+                '5'     { 'Sync-SharePointChannelMember.ps1' }
+                '6'     { 'Remove-SharePointStructure.ps1' }
+                default { $null }
+            }
+            if (-not $script) { Write-Warning 'No such step.'; return }
+
+            $a = @{}
+            if ($config) { $a['ConfigPath'] = (Join-Path $dir $config) }
+
+            if ($step -eq '0') {
+                # The all-in-one registers its own app, so it asks for nothing here.
+                $temp = Read-Host '  Remove the app registration again afterwards? [y/N]'
+                if ($temp -match '^[Yy]') { $a['TemporaryApp'] = $true }
+            } elseif ($step -eq '5') {
+                # Signs in to Graph on its own - no PnP app registration involved.
+                $prune = Read-Host '  Also remove people the groups no longer list? [y/N]'
+                if ($prune -match '^[Yy]') { $a['Prune'] = $true }
+            } elseif ($step -eq '6') {
+                # Reports unless -Apply, so the question here is the one that matters.
+                $a['Interactive'] = $true
+                $client = Read-Host '  ClientId of the PnP app registration'
+                if ($client) { $a['ClientId'] = $client }
+                Write-Host ''
+                Write-Host '  Without confirmation this only reports what it would remove.' -ForegroundColor DarkGray
+                $go = Read-Host '  Actually remove? [y/N]'
+                if ($go -match '^[Yy]') {
+                    $a['Apply'] = $true
+                    $files = Read-Host '  Also remove libraries that still hold files? [y/N]'
+                    if ($files -match '^[Yy]') { $a['IncludeContent'] = $true }
+                    $team = Read-Host '  Also remove the Team itself, with all its files? [y/N]'
+                    if ($team -match '^[Yy]') { $a['Scope'] = @('All', 'Team') }
+                }
+            } else {
+                $a['Interactive'] = $true
+                $client = Read-Host '  ClientId of the PnP app registration'
+                if ($client) { $a['ClientId'] = $client }
+            }
+
+            # The drift check never writes, so it is the one step that skips the question.
+            if ($step -notin @('4', '6')) {
+                $apply = Read-Host '  Apply the changes now (not just -WhatIf)? [y/N]'
+                if ($apply -notmatch '^[Yy]') { $a['WhatIf'] = $true }
+            }
+
+            & (Join-Path $dir $script) @a
+        }
     }
     [PSCustomObject]@{ Key='F'; FKey=$null; Category='Startup'
         Label='Enable-LauncherStartup — run launcher at Windows sign-in'

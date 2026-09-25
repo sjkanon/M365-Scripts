@@ -9,15 +9,19 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | Script | Description |
 |--------|-------------|
 | [`Migrate-Calendar.ps1`](#migrate-calendarps1) | Migrate a shared M365 Group calendar to a Room Mailbox |
+| [`Move-SharedCalendar.ps1`](#move-sharedcalendarps1) | **All in one**: find a calendar by keyword, move it into a resource mailbox, list who has to switch — one sign-in |
+| [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) | Move a shared calendar out of a user's mailbox into its own room/equipment mailbox — items, series, attachments and rights included |
 | [`Set-Calendar-rights.ps1`](#set-calendar-rightsps1) | Grant calendar folder permissions to a user |
 | [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
 | [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
 | [`Test-CalendarPermissions.ps1`](#test-calendarpermissionsps1) | Audit calendar folder permissions |
+| [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) | Where each calendar is actually mapped in Outlook, next to the rights behind it — or find one calendar by keyword (`-Search balie`) |
 | [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1) | Audit Full Access, Send As, Send on Behalf delegation |
 | [`Test-DistributionGroupPermissions.ps1`](#test-distributiongrouppermissionsps1) | Audit DG managers, Send As, Send on Behalf, member counts |
 | [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
 | [`Get-ExternalForwards.ps1`](#get-externalforwardsps1) | Audit mailboxes with external forwarding |
 | [`Get-MailboxSizes.ps1`](#get-mailboxsizesps1) | Report mailbox sizes and item counts |
+| [`Get-DistributionGroupMembers.ps1`](#get-distributiongroupmembersps1) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists holding one address (`-Member jan@contoso.com`) or a whole domain (`-Member @be.verizon.com`) |
 | [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Trace who received what, at what exact time, and where it was forwarded to |
 | [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
 
@@ -263,6 +267,139 @@ Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 
 ---
 
+### Move-SharedCalendar.ps1
+
+**All in one:** from "where is the Balie calendar?" to "it has its own resource mailbox" in one run, with one sign-in. It chains [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) and [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) — both have to sit in the same folder.
+
+| Step | |
+|------|--|
+| 1. Find | `Get-CalendarMappings.ps1 -Search <keyword>`: where the calendar lives, who has it in Outlook, who has rights on it |
+| 2. Pick | The matching calendar that can be moved. Several matches: pick one from a numbered list, or narrow it down with `-Owner`. A non-interactive run never guesses — it lists the candidates and stops |
+| 3. Move | `Convert-SharedCalendarToResource.ps1`: preview, then three questions — go ahead? send invitations? remove the original? `-Apply` skips the preview round |
+| 4. Tell | Who had the old calendar in Outlook and who only had rights: the people who have to switch |
+
+**One sign-in.** A temporary App Registration with everything both scripts need (`Calendars.ReadWrite`, `User.Read.All`, `Group.Read.All`, `MailboxSettings.ReadWrite`) is created once, handed to both, and removed at the end — also when something fails. Exchange Online is connected once too. An existing app-only Graph session or `-ClientId` / `-ClientSecret` is used instead when given.
+
+A mailbox whose **main** calendar matches (a `balie@` account that is itself the shared calendar) cannot be moved out; the script says so and names the in-place alternative, `Set-Mailbox -Type Room`.
+
+A run that changes something is logged to `SharedCalendarMove_<timestamp>.log`, next to the mapping report and the backup.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Search` | Yes | Keyword: owner name/address or calendar name. Alias `-Keyword` |
+| `-Owner` | No | Narrows several matches down to one owner (part of the name or address) |
+| `-ResourceType` | No | `Room` (default) or `Equipment` |
+| `-ResourceName` / `-ResourceAddress` | No | Name and address of the new mailbox (default: the calendar's name, at the owner's domain) |
+| `-SourceOwnerRights` | No | Rights for the original owner: `Owner` (default) … `None` — use `None` for an archived mailbox |
+| `-SendSharingInvitation` | No | Invite users to the new calendar (asked when not given) |
+| `-Apply` | No | Go ahead without the preview round |
+| `-RemoveSourceCalendar` | No | Remove the original after a clean verification (asked when not given) |
+| `-Force` | No | Skip the typed confirmation — required to remove unattended |
+| `-OutputPath` | No | Folder for report, backup and log (default `C:\Temp`) |
+| `-TenantId` / `-ClientId` / `-ClientSecret` | No | Tenant, or your own App Registration instead of a temporary one |
+
+**Examples**
+
+```powershell
+# Find, preview, answer the questions
+.\Move-SharedCalendar.ps1 -Search balie
+
+# "Balie planning" in an archived mailbox: Equipment mailbox, users invited, original kept for now
+.\Move-SharedCalendar.ps1 -Search "balie planning" -ResourceType Equipment -SourceOwnerRights None `
+    -SendSharingInvitation -Apply
+
+# Once everyone has switched: the same command removes the original
+.\Move-SharedCalendar.ps1 -Search "balie planning" -ResourceType Equipment -SourceOwnerRights None `
+    -Apply -RemoveSourceCalendar
+```
+
+The second run skips every item that is already copied, copies what was added in the meantime, and only then removes the original.
+
+---
+
+### Convert-SharedCalendarToResource.ps1
+
+Moves a shared calendar out of a user's mailbox into a **resource mailbox of its own** (Room or Equipment), with every item and every permission, and then — on request — removes the original. Built for the typical "Balie" calendar: an extra calendar in one person's mailbox that the whole front desk uses, and that leaves with that person.
+
+**Preview by default.** Without `-Apply` the script only reads and reports: how many items, series and exceptions, which permissions it would carry over, and which mailbox it would create. The original is only removed with `-RemoveSourceCalendar`, only after every item has a verified copy, and only after you type the calendar's name (skip with `-Force`).
+
+**What happens on `-Apply`**
+
+| Step | |
+|------|--|
+| Backup | Every item (bodies included), every series occurrence and every permission to `calendar-backup.json`, before anything is created |
+| Mailbox | Room (default) or Equipment mailbox with the source mailbox's language and time zone. Calendar processing for a shared calendar: auto-accept, overlapping items allowed, nothing in an item rewritten, booking window 1080 days (the service maximum) |
+| Rights | Every permission with its **exact** Exchange access rights (custom rights too), `Default` and `Anonymous` as they were, the original owner as `-SourceOwnerRights` (default `Owner`). `-SendSharingInvitation` sends the usual "shared a calendar with you" mail |
+| Categories | The categories in use are created in the new mailbox with their colour |
+| Items | Every item copied — see below |
+| Verify | Every source item must have a complete copy |
+| Remove | Only with `-RemoveSourceCalendar` and a clean verification |
+
+**How items are copied**
+
+- **Series stay series.** Moved or edited occurrences are applied to the copy and cancelled occurrences are cancelled in it, by matching both series occurrence by occurrence. For a series without an end date that is done up to `-SeriesHorizonDays` (1095) ahead. If the two series do not line up, the script leaves that series alone and says so rather than cancelling the wrong occurrences
+- **Times keep their time zone.** Graph returns UTC; each item is written back in the zone it was created in, so a weekly 9:00 item is still 9:00 after the daylight saving switch
+- **Nobody is invited.** Copying a meeting with its attendees would send every attendee a new invitation from the resource mailbox. Organizer and attendees are listed at the bottom of the body instead; the resource mailbox is the organizer of every copy
+- **Attachments** up to 3 MB are copied, inline images included. Larger files and attached Outlook items are saved to the backup folder and listed at the end
+- **Rerunnable.** Every copy carries its source item's id in a hidden property. A run that stops halfway is continued by running the same command: complete copies are skipped, a half-finished series is removed and copied again
+
+**Not carried over, and reported:** delegate flags (a resource mailbox has no delegates), people outside the tenant (re-share by hand), permissions of deleted accounts, attachments on individual series exceptions. A published calendar (`Anonymous`) gets a new link.
+
+> **The main calendar cannot be converted this way.** If the whole mailbox *is* the shared calendar (a `balie@` user account), convert it in place instead — that keeps everything: `Set-Mailbox balie@contoso.com -Type Room`. The script refuses the main calendar and points at that.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Mailbox` | Yes | User mailbox that holds the calendar |
+| `-Calendar` | Yes | Calendar name as shown in Outlook (e.g. `Balie`). Must be owned by that user and not their main calendar |
+| `-ResourceName` | No | Display name of the new mailbox (default: the calendar's name) |
+| `-ResourceAddress` | No | SMTP address (default: the name as alias at the user's domain). An existing room/equipment mailbox at this address is reused |
+| `-ResourceType` | No | `Room` (default) or `Equipment` |
+| `-SourceOwnerRights` | No | Rights for the original owner: `Owner` (default), `PublishingEditor`, `Editor`, `Reviewer`, `None` |
+| `-SendSharingInvitation` | No | Send users a sharing invitation (only possible for Reviewer, Editor, LimitedDetails, AvailabilityOnly) |
+| `-Apply` | No | Actually create, grant and copy. Without it: preview |
+| `-RemoveSourceCalendar` | No | Remove the original after a clean verification. Needs `-Apply` |
+| `-Force` | No | Skip the typed confirmation before removal. A non-interactive session (scheduler, RMM) cannot type it, so there the original is only removed with `-Force` |
+| `-PassThru` | No | Return a result object (`ResourceAddress`, `Items`, `Verified`, `SourceRemoved`, `BackupPath`) for a calling script |
+| `-SeriesHorizonDays` | No | How far ahead exceptions of open-ended series are compared (default 1095) |
+| `-BackupPath` | No | Backup folder (default `C:\Temp\CalendarConvert_<calendar>_<timestamp>`) |
+| `-TenantId` | No | Tenant ID or domain (default: the Exchange session's tenant) |
+| `-ClientId` / `-ClientSecret` / `-CertificateThumbprint` | No | Your own App Registration for app-only Graph access |
+
+**Examples**
+
+```powershell
+# 1. Preview
+.\Convert-SharedCalendarToResource.ps1 -Mailbox jan@contoso.com -Calendar Balie
+
+# 2. Create the room mailbox, copy everything, invite the users - the original stays
+.\Convert-SharedCalendarToResource.ps1 -Mailbox jan@contoso.com -Calendar Balie -Apply -SendSharingInvitation
+
+# 3. Once users have switched: find who still has the old calendar, then remove it
+.\Get-CalendarMappings.ps1 -Search Balie
+.\Convert-SharedCalendarToResource.ps1 -Mailbox jan@contoso.com -Calendar Balie -Apply -RemoveSourceCalendar
+```
+
+Step 3 reruns the copy first: everything already copied is skipped, anything added to the original in the meantime is copied, and only then is the original removed.
+
+**Access**
+
+| | |
+|--|--|
+| Exchange Online | Exchange Administrator (`New-Mailbox`, folder permissions). An existing session is reused |
+| Graph | Application permission `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` for category colours (optional). Same three routes as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): existing app-only session, own App Registration, or a temporary one that is removed when the run ends. Plain REST, so no Exchange/Graph MSAL clash |
+
+**Notes**
+
+- The copy is a snapshot. Run it when the calendar is quiet and tell users to switch right after; step 3 above picks up what was added in between
+- Users who had the original calendar in their list keep an entry that stops working once it is removed — find them first with `Get-CalendarMappings.ps1 -Search`
+- Differs from `Migrate-Calendar.ps1` (group calendar → room): that script copies items without body, series or time zone. This one is meant to be a faithful move
+
+---
+
 ## Audit scripts
 
 Connect to Exchange Online automatically if no session is active; reuse an existing session if already connected.
@@ -293,6 +430,120 @@ Retrieves calendar folder permissions for one or all mailboxes. Uses `FolderType
 # Custom output path
 .\Test-CalendarPermissions.ps1 -OutputPath "C:\Reports\calendar.csv"
 ```
+
+---
+
+### Get-CalendarMappings.ps1
+
+Shows **where each calendar is mapped**: the calendars that actually sit in a user's calendar list in Outlook, next to the rights behind them. `Test-CalendarPermissions.ps1` answers "who *may* open this calendar"; this script answers "where *is* it" and flags where the two disagree. Read-only.
+
+Looking for one calendar? `-Search balie` finds it by keyword — see *Search by keyword* below.
+
+For every mailbox it reads over Microsoft Graph:
+
+- the **calendar list** (`/users/{id}/calendars`). Every calendar in it owned by somebody else is a mapping: a colleague, a shared mailbox, a room, a Microsoft 365 group, or someone outside the organisation
+- the **permissions on its own main calendar** (`/users/{id}/calendar/calendarPermissions`)
+
+and folds both into one row per calendar owner + user:
+
+| Status | Meaning |
+|--------|---------|
+| `Source` | `-Search` only: the matching calendar lives in this mailbox (its main or a secondary calendar) |
+| `Mapped` | In the user's calendar list, and the user has an explicit right |
+| `MappedWithoutRight` | In the list, but no explicit right on the owner's main calendar. Access then comes from the organisation-wide default, a group, a secondary calendar of the owner — or the right was removed and the entry is left over (the user gets an error when opening it) |
+| `MappedGroupCalendar` | A Microsoft 365 group calendar — access follows group membership |
+| `MappedOwnerMissing` | The owner no longer exists in the tenant — a stale entry in the user's list |
+| `MappedExternal` | The owner is outside the tenant |
+| `NotMapped` | Explicit right, but the calendar is not in the user's list — a clean-up candidate |
+| `NotChecked` | Explicit right, but the user's calendar list could not be read |
+| `GrantedToGroup` | A right granted to a group; members are not expanded |
+| `GrantedToMissing` | A right for an address or account that no longer exists — clean-up candidate |
+| `SharedExternally` | A right for an address outside the tenant |
+| `OrgWideDefault` | *My Organization* gets more than free/busy — every internal user can open the calendar |
+
+> **Why Graph and not Exchange Online PowerShell:** the Exchange cmdlets see folders and the permissions on them, not the entries a user added to their own calendar list. Those are only readable over Graph.
+
+**Not visible in this report**
+
+- **Full Access with AutoMapping** adds a whole mailbox to Outlook, calendar included. That is a mailbox permission, not a calendar entry — see [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1)
+- A calendar opened in classic Outlook with *shared calendar improvements* turned off may live only in that Outlook profile and not in the list Graph returns
+- Without `-Search`, rights are compared against the owner's **main** calendar. A secondary calendar the owner shared shows up as `MappedWithoutRight`; `-Search` reads a matching secondary calendar's own rights
+
+**Search by keyword**
+
+`-Search balie` (alias `-Keyword`) answers "where is the Balie calendar?". The keyword is matched case-insensitive, anywhere in the text, against:
+
+- the owner's **name and every address** — the shared mailbox `balie@`, a room, a group called *Balie-team*
+- the calendar's **own name** — a secondary calendar *Balie* in somebody's mailbox
+
+Wildcards (`*`, `?`) are used as given. For each match the report shows where the calendar lives (`Source`), every mailbox that has it in its calendar list, and everyone with an explicit right on it — for a secondary calendar its own rights, which a normal run does not read. The `Calendar` column says which calendar of the owner a row is about.
+
+```
+Owner      Calendar       User Status              Rights MappedAs
+-----      --------       ---- ------              ------ --------
+Anna       Balie Planning      Source                     Balie Planning
+Anna       Balie Planning Lisa Mapped              read   Balie Planning
+Anna       Balie Planning Jan  NotMapped           write
+Balie      Main                Source                     Agenda
+Balie      Main           Kees Mapped              read   Balie
+Balie      Main           Piet Mapped              write  Balie
+Balie      Main           Lisa NotMapped           read
+Balie-team                Kees MappedGroupCalendar        Balie-team
+```
+
+Every calendar list is still read — a mapping can sit in any mailbox — so a search takes about as long as a full scan for the lists, but only reads the permissions of the matching calendars.
+
+> A calendar list entry carries no link back to the calendar it came from. A shared secondary calendar is therefore recognised by its name matching the keyword. If a user has it under another name, it shows up as `NotMapped` with a note naming the entry that is probably it (*"Has a calendar of this owner as 'Planning Anna' - probably this one"*).
+
+**Scope**
+
+Without `-Mailbox` every mailbox in the tenant is scanned — the only way to find mappings that rest on the organisation-wide default or on a group. With `-Mailbox` the report is limited to rows where one of those mailboxes is the **owner or the user**: their own calendar lists are read, plus the lists of everyone with an explicit right on their calendar. For a complete "where is X's calendar mapped", use `-Search` instead. `-Mailbox` and `-Search` cannot be combined.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Search` | No | Keyword to find one calendar by (owner name/address or calendar name). Alias `-Keyword`. Cannot be combined with `-Mailbox` |
+| `-Mailbox` | No | One or more mailbox addresses. Limits the report to rows where they are owner or user. If omitted, every mailbox is scanned |
+| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
+| `-TenantId` | No | Tenant ID or domain. Optional for the temporary-app route — the sign-in then decides, and the tenant is printed |
+| `-ClientId` | No | Your own App Registration for app-only Graph access |
+| `-ClientSecret` | No | Client secret for `-ClientId` (plain REST, no Graph SDK) |
+| `-CertificateThumbprint` | No | Certificate thumbprint for `-ClientId` (via `Connect-MgGraph`) |
+
+**Examples**
+
+```powershell
+# Where is the Balie calendar, and who has it mapped?
+.\Get-CalendarMappings.ps1 -Search balie
+
+# Where is every calendar in the tenant mapped?
+.\Get-CalendarMappings.ps1 -TenantId contoso.com
+
+# Where is Jan's calendar mapped, and which calendars has Jan mapped?
+.\Get-CalendarMappings.ps1 -Mailbox jan@contoso.com
+
+# Own App Registration
+.\Get-CalendarMappings.ps1 -TenantId contoso.com -ClientId <appId> -ClientSecret <secret>
+```
+
+**Graph access**
+
+Needs application permissions `Calendars.Read` and `User.Read.All`, plus `Group.Read.All` to tell a group calendar from a removed mailbox (without it, group calendars show up as `MappedOwnerMissing` with a note saying so). Obtained the same three ways as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1):
+
+| # | Route | What it needs |
+|---|-------|---------------|
+| 1 | An app-only Graph session you already established | Nothing — used as-is |
+| 2 | `-ClientId` + `-ClientSecret` or `-CertificateThumbprint` | Your own app with the permissions above, admin consent granted. A broader permission (`Calendars.ReadWrite`, `Directory.Read.All`) is accepted too |
+| 3 | **Automatic** — device code sign-in, a short-lived App Registration that self-grants the three read permissions, removed again when the run ends (also on failure) | Global Administrator or Privileged Role Administrator for that sign-in. No extra modules |
+
+No Exchange Online connection is made, so the Exchange/Graph MSAL clash described under `Remove-PhishingMessage.ps1` does not apply. GDAP-aware like the other Graph scripts: under a GDAP session `-TenantId` is resolved from the selected customer tenant.
+
+**Notes**
+
+- Requests go through Graph `$batch`, 20 mailboxes per call. Throttled items are retried after the `Retry-After` the service asks for
+- Users with an address but no Exchange Online mailbox (404) are skipped and counted. A mailbox that cannot be read is listed separately, never reported as "nothing mapped". A 403 there usually means an Application Access Policy or RBAC for Applications limits the app
+- Shared mailboxes and rooms are disabled accounts in Entra ID, so they are included — no `accountEnabled` filter
 
 ---
 
@@ -438,6 +689,132 @@ Reports mailbox sizes (MB/GB), item counts, and quota status. Sorted by size des
 # Single mailbox
 .\Get-MailboxSizes.ps1 -Mailbox "user@contoso.com"
 ```
+
+---
+
+### Get-DistributionGroupMembers.ps1
+
+Exports every distribution list with its members to one Excel workbook, meant to be sent to the customer as-is.
+
+The workbook has two sheets, both filterable tables with a frozen header row:
+
+| Sheet | One row per | Columns |
+|-------|-------------|---------|
+| `Overzicht` | list | Lijst, E-mailadres, Type, Aantal leden, Eigenaar(s), Alias, Verborgen in adresboek, Alleen interne afzenders, Aangemaakt op |
+| `Leden` | member | Lijst, E-mailadres lijst, Type lijst, Lid, E-mailadres lid, Extern adres, Type lid |
+
+With `-Recurse` the sheets gain `Aantal personen` and `Via groep`; with `-Member` they gain `Treffers` and `Treffer op`.
+
+`Extern adres` is filled for mail contacts and mail users. Their primary SMTP address is an internal placeholder — the address that actually receives the mail is the external one, and for a report about external members that is the column that matters.
+
+The sheet headers and the recipient types are Dutch — `MailUniversalSecurityGroup` means nothing to the person reading the report, `Beveiligingsgroep (mail-enabled)` does. The script itself stays English like the rest of the repo.
+
+**Nested lists — read this before trusting the output**
+
+Exchange only ever returns **direct** members. A list containing another list reports that list as *one member* and never the people inside it. So by default:
+
+- someone who receives mail only through a nested group does not appear in the report;
+- `-Member` reports **no hits** on a list that does in fact deliver to that person.
+
+That second one is the dangerous half: it is a wrong answer that looks like a confident one. `-Recurse` expands nested groups so the report lists the people who actually receive the mail:
+
+```powershell
+# "Does anything still reach that domain?" - the form to use for that question
+.\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
+```
+
+| | Without `-Recurse` | With `-Recurse` |
+|---|---|---|
+| Nested list | one member row, nobody behind it | one member row **plus** the people inside it |
+| `Via groep` column | — | names the group a person came in through, empty for a direct member |
+| `Aantal leden` | direct members (what Exchange and the EAC show) | unchanged |
+| `Aantal personen` | — | the real recipients the list reaches |
+
+It costs one extra query per nested group. A group already expanded is not expanded again, which is also what keeps a membership cycle (A contains B, B contains A) from recursing forever; nesting deeper than 20 levels is reported and left alone. Someone reachable by several routes gets one row with the routes joined, not a row per route.
+
+The nested group itself stays in the report as its own row, so the structure remains visible.
+
+**Filtering on an address or a domain**
+
+`-Member` takes one address, one domain, or a domain and everything under it:
+
+```powershell
+-Member "jan@contoso.com"     # which lists is Jan on?
+-Member "@be.verizon.com"     # members on exactly that domain
+-Member "*.verizon.com"       # verizon.com AND every subdomain of it
+```
+
+| Written as | Matches | Does not match |
+|---|---|---|
+| `@be.verizon.com`, `be.verizon.com`, `*@be.verizon.com` | `jan@be.verizon.com` | `jan@verizon.com`, `jan@us.verizon.com`, `jan@notbe.verizon.com` |
+| `*.verizon.com`, `.verizon.com`, `*@*.verizon.com` | `jan@verizon.com`, `jan@be.verizon.com`, `jan@us.verizon.com` | `jan@notverizon.com`, `jan@verizon.com.evil.test` |
+
+Without the leading `*.` the match is on that **one** domain — `@be.verizon.com` deliberately does not reach a sibling like `@us.verizon.com`. With it, the apex and every subdomain are in scope. The run prints which of the two it is doing (`...for members on verizon.com and its subdomains`), so the scope is never left to guesswork.
+
+The match is on the full domain label either way, which is what keeps `@notverizon.com` and the suffix trick `@verizon.com.evil.test` out of a `*.verizon.com` run. A wildcard anywhere other than the front is not supported and is treated as a literal character rather than quietly widening the filter.
+
+The two are not equally cheap. **An address** is resolved to its DN and matched by Exchange itself (`Get-Recipient -Filter "Members -eq '<DN>'"`), so it does not walk every group in the tenant. **A domain** cannot be: there is no server-side filter for *"has a member whose address ends in @x"*, so every list is read and then filtered. On a large tenant that is one `Get-DistributionGroupMember` call per list — slower, and worth knowing before you run it against thousands of groups.
+
+Matching covers the primary address, **every alias**, and — for mail contacts and mail users — `ExternalEmailAddress`. That last one is the point: a Verizon contact in a distribution list is typically a mail contact whose primary SMTP is something like `marc.dubois@contoso.onmicrosoft.com`, with `@be.verizon.com` only in its external address. Matching on the primary address alone would find nothing.
+
+With a filter active both sheets gain a column:
+
+| Column | Sheet | Meaning |
+|--------|-------|---------|
+| `Treffers` | `Overzicht` | how many members of this list matched |
+| `Treffer op` | `Leden` | the address this member matched on, empty when it did not |
+
+`Treffer op` holds the **address**, not a Ja/Nee — someone can match on an alias that appears nowhere else in the report, and `Ja` next to `sara@contoso.com` only raises the question why. `sara.willems@be.verizon.com` answers it.
+
+Matched lists are exported **in full**, so the customer sees who else is on them; sort or filter on `Treffer op` to get just the hits.
+
+Direct membership only — someone inside a nested group is not a match. The nested group itself does show up as a member row, with `Distributielijst` as its member type.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Group` | No | One list (name, alias or e-mail). If omitted, every list is reported |
+| `-Member` | No | Only the lists holding this address (`jan@contoso.com`), this domain (`@be.verizon.com`), or this domain and its subdomains (`*.verizon.com`) |
+| `-Recurse` | No | Expand nested groups, so the people behind a nested list are reported too |
+| `-IncludeDynamic` | No | Also report dynamic distribution groups (evaluated live, one query per group) |
+| `-IncludeM365Groups` | No | Also report Microsoft 365 groups, Teams-backed ones included |
+| `-OutputPath` | No | Path of the `.xlsx` (default: `C:\Temp\Distributielijsten_<timestamp>.xlsx`) |
+| `-Csv` | No | Write two CSV files instead of Excel |
+| `-TenantId` | No | Entra ID tenant ID or domain |
+
+**Examples**
+
+```powershell
+# Every distribution list with all of its members
+.\Get-DistributionGroupMembers.ps1
+
+# Which lists is Jan on? (and who else is on them)
+.\Get-DistributionGroupMembers.ps1 -Member "jan@contoso.com"
+
+# Which lists still hold addresses on a partner domain?
+.\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com"
+
+# The same, but also finding people who sit inside a nested list
+.\Get-DistributionGroupMembers.ps1 -Member "@be.verizon.com" -Recurse
+
+# Everything Verizon: the apex and every subdomain, nested lists expanded
+.\Get-DistributionGroupMembers.ps1 -Member "*.verizon.com" -Recurse
+
+# One list, to a fixed path
+.\Get-DistributionGroupMembers.ps1 -Group "helpdesk@contoso.com" -OutputPath "C:\Reports\helpdesk.xlsx"
+
+# Everything that can receive mail as a group
+.\Get-DistributionGroupMembers.ps1 -IncludeDynamic -IncludeM365Groups
+```
+
+**Notes**
+- Needs [ImportExcel](https://github.com/dfinke/ImportExcel) for the `.xlsx`. If it is missing the script offers to install it, and writes two CSV files (`*-overzicht.csv`, `*-leden.csv`) if you decline — a missing module never costs you the report. `Install-Modules.ps1` installs it
+- A list with no members gets a `(geen leden)` row in the `Leden` sheet rather than quietly missing from it — an empty list is exactly what a customer wants to spot
+- Membership is read per group, so a person who is on no list at all appears nowhere — the report covers group membership, not the user directory
+- A domain filter that matches nothing reports *"No distribution list has a member on @x"* and writes no file — an empty workbook reads as a failed report rather than as the answer it is
+- CSV output uses `-UseCulture`, so a Dutch Excel opens it as columns instead of one wall of comma-separated text
+- An existing workbook at `-OutputPath` is replaced, not appended to — `Export-Excel` would otherwise stack a second run on top of the first
 
 ---
 

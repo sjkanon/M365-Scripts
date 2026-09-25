@@ -155,6 +155,7 @@ $modules = @(
     @{ Name = 'WindowsAutopilotIntune';         MinimumVersion = $null;   WindowsOnly = $true  }
     @{ Name = 'AzureAD';                        MinimumVersion = $null;   WindowsOnly = $true  }
     @{ Name = 'IntuneWin32App';                 MinimumVersion = $null;   WindowsOnly = $true  }
+    @{ Name = 'ImportExcel';                    MinimumVersion = '7.0.0'; WindowsOnly = $false }
 )
 #endregion
 
