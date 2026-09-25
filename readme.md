@@ -784,6 +784,21 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (12)
+| Change |
+|--------|
+| Hardened `scripts/Reporting/Get-SharePointPermissionsReport.ps1` for long tenant-wide runs. A `401` was still recoverable into a per-site error row: the per-list handler rethrew it but the per-web handler caught it again, so a credential that stopped working mid-run would have written one error row per remaining site — the same failure shape the certificate fix had just removed. Both handlers now let a 401 through and the run stops |
+| The parallel item lookups read the bearer token once per library instead of once per wave. A library with enough unique scopes outlives a token, so the tail of it would have failed with no indication why. The token is now re-read before every wave |
+| Item enumeration no longer materialises an entire library before filtering. `Invoke-SPCollectionPaged` hands each page to a callback and only items that actually have their own scope are kept — a million-item library now costs one page of memory instead of a million live objects |
+| Added a paging guard: SharePoint echoing back an identical `nextLink` used to be an infinite loop against a live tenant, and is now detected and stopped |
+| Checkpoint keys moved from the JSON state file to an append-only `.keys.partial.log`. Rewriting a sorted list of every completed key after every list is quadratic; on a tenant with thousands of lists the checkpoint cost more than the scanning. A torn final line from a killed process is tolerated — that unit is simply re-scanned |
+| A failed CSV write (the partial open in Excel) is retried five times and then stops the run. It previously threw while the unit was already marked complete, so those rows were gone from the report for good |
+| A list that fails now costs that list, not the rest of the site: per-list error handling writes an error row, keeps whatever the list already produced, and deliberately leaves the unit unmarked so a resumed run retries it. A failed item sweep gets its own row, because without it the list looks like it simply had nothing with unique permissions |
+| Per-item workers no longer report `401`/`403` as an empty permission set — only `404` (item genuinely deleted mid-scan) means "no permissions". Claiming an unreadable item has no rights on it is worse than saying so |
+| Added an output-folder write probe before authenticating, an abort when discovery finds no sites at all, and a `trap` that removes the temporary Full Control app registration on any unhandled error |
+| Suppressed the `Set-MgRequestContext` context table that leaked to stdout, and the run now closes by stating whether every targeted scope was read or how many were missed |
+| Verified locally with 53 checks across four suites: principal/claims parsing, CSV row-schema consistency (six row shapes, 26 columns each), certificate and signed-assertion generation, and HTTP behaviour driven through a fake transport — 401 aborts after one re-auth, 403/404 stay per-object, 429 retries to success, paging loops are broken, locked files are retried, and the checkpoint log survives a torn line. **Still not verified against a live tenant** |
+
 ### 2026-09-25 (11)
 | Change |
 |--------|

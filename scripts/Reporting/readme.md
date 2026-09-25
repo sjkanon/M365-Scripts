@@ -277,7 +277,27 @@ Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand
 
 ### Hervatten na onderbreking (checkpoints)
 
-Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json` plus `.detail/.groups/.effective.partial.csv`. Anders dan bij de twee scripts hierboven worden de regels direct naar die partials gestreamd in plaats van in het geheugen bewaard — een tenantbrede run op itemniveau levert miljoenen regels op. De summary-CSV bestaat daarom niet als checkpoint: die wordt aan het eind uit het detailbestand opgebouwd, zodat een hervatte run alles samenvat wat er ooit voor deze `<hash>` is weggeschreven en niet alleen het deel van de laatste sessie. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json`, `.keys.partial.log` en `.detail/.groups/.effective.partial.csv`. Anders dan bij de twee scripts hierboven worden de regels direct naar die partials gestreamd in plaats van in het geheugen bewaard — een tenantbrede run op itemniveau levert miljoenen regels op. De summary-CSV bestaat daarom niet als checkpoint: die wordt aan het eind uit het detailbestand opgebouwd, zodat een hervatte run alles samenvat wat er ooit voor deze `<hash>` is weggeschreven en niet alleen het deel van de laatste sessie. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+
+Welke units al klaar zijn staat in `.keys.partial.log`, één regel per sleutel, alleen aangevuld. Dat is bewust geen lijst in de JSON: die na elke lijst opnieuw gesorteerd wegschrijven is kwadratisch werk, en op een tenant met duizenden lijsten kost het checkpoint dan meer tijd dan het scannen zelf. Een halve laatste regel (proces hardgekild tijdens het schrijven) wordt genegeerd — die ene unit wordt dan gewoon opnieuw gescand.
+
+### Robuustheid
+
+Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hieronder zijn geen randgevallen maar te verwachten. Hoe het script ermee omgaat:
+
+| Situatie | Gedrag |
+|---|---|
+| Token geweigerd (`401`) | Eén keer opnieuw authenticeren; blijft het weigeren, dan **stopt de run** met de reden uit `x-ms-diagnostics`. Een 401 geldt nooit voor één site, dus hij wordt niet per site gemeld |
+| Geen toegang tot één site (`403`) of object weg (`404`) | Die ene site/dat ene object wordt overgeslagen, de rest loopt door |
+| Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`, anders exponentiële backoff tot 3 minuten |
+| Eén lijst faalt (view threshold, raar template) | Foutregel in de detail-CSV, de overige lijsten van die site lopen gewoon door. De unit wordt **niet** als klaar gemarkeerd, dus een hervatte run probeert hem opnieuw |
+| Item-sweep faalt | Aparte foutregel: zonder die regel zou de lijst er uitzien alsof er niets met eigen rechten in zat |
+| CSV staat open in Excel | Vijf keer opnieuw met oplopende wachttijd; lukt het dan nog niet, stopt de run in plaats van stilzwijgend regels te laten vallen |
+| Token verloopt midden in een grote bibliotheek | Elke wave haalt het token opnieuw op — workers krijgen een kopie en zien een latere refresh niet |
+| SharePoint herhaalt een paging-link | Wordt gedetecteerd en afgebroken in plaats van eindeloos door te draaien |
+| Onverwachte fout waar dan ook | Een `trap` ruimt de tijdelijke App Registration op voordat het script stopt — er blijft nooit een Full Control-app achter |
+
+> Aan het eind meldt het script expliciet of álles gelezen kon worden. Staat er een `[WARN]` over onleesbare scopes, filter dan de detail-CSV op `ItemType = Error`: een rapport met gaten mag er niet uitzien als een rapport zonder bevindingen.
 
 ### Parameters
 
