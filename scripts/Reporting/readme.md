@@ -270,10 +270,36 @@ Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand
 |---|---|
 | `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal. Onleesbare scopes staan er als `ItemType = Error` met de reden in de kolom `Error`; `UnitKey` koppelt een regel aan de checkpoint-unit die hem schreef |
 | `SharePoint_Permissions_Summary_<ts>.csv` | Per site: aantal grants, unieke scopes, webs, lijsten, mappen/bestanden met eigen rechten, deellinks, anonieme links, externe principals, `Everyone`-grants |
+| `SharePoint_Permissions_SiteAccess_<ts>.csv` | **Per site een regel per persoon**, met de groep waardoor de toegang loopt en het niveau. Zie hieronder |
 | `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen, de Entra-groepen die daarin genest zitten, én Entra-groepen die rechtstreeks op een scope zijn toegekend. Allemaal platgeslagen naar personen |
 | `SharePoint_Permissions_EffectiveAccess_<ts>.csv` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope, met de groep waardoor die toegang loopt |
 
 > Op een grote tenant kan het effective-access bestand ordes van grootte groter zijn dan de detail-CSV. Daarom staat het uit tenzij je erom vraagt.
+
+#### Wie heeft waar toegang, via welke groep — in één tabblad
+
+De vraag waarmee je dit rapport meestal opent is niet "welke grants bestaan er" maar **"wie kan bij deze SharePoint, en hoe komt die daar"**. Dat stond eerder verspreid: `Rechten` zei dát een groep rechten had, `Groepen` zei wie erin zat, en je moest die zelf koppelen. `Site Owners heeft Volledig beheer` plus `Site Owners bevat vijf mensen` is nog geen antwoord.
+
+Daarom is er `SharePoint_Permissions_SiteAccess_<ts>.csv` (tabblad `Toegang`): **één regel per persoon per site**, met de groep waardoor die toegang loopt en het niveau.
+
+| Kolom | Inhoud |
+|---|---|
+| `SiteTitle` / `SiteUrl` | De site, op naam — 130 URL's zijn geen "één oogopslag" |
+| `UserDisplayName` / `UserPrincipalName` / `UserEmail` | Wie |
+| `IsExternal` / `AccountEnabled` | Gast of intern, account actief |
+| `ViaType` | `Direct`, `SharePointGroup`, `SecurityGroup`, `M365Group`, `Everyone`, … |
+| `ViaName` / `ViaId` | Welke groep. De id staat erbij omdat een titel als `Site Owners` op elke site voorkomt |
+| `PermissionLevels` | Het niveau van die toekenning |
+
+Het is bewust **geconsolideerd per site collection**: iemand die via dezelfde groep op dertig mappen in dezelfde site uitkomt, is één regel — niet dertig. Een ander niveau of een andere groep is wél een aparte regel, want dat is andere toegang. Wil je het per losse map of bestand zien, gebruik dan `-IncludeEffectiveAccess`; dat tabblad (`Effectief`) is per scope en daardoor veel groter.
+
+Drie dingen die hier expres niet wegvallen:
+
+- **Rechtstreeks toegekende personen** staan er als zichzelf, met `ViaType = Direct`.
+- **`Everyone` en `Everyone except external users`** lossen naar niemand op, maar zijn juist wat je wil zien. Ze krijgen één regel met de claim als naam.
+- Ook met `-SkipGroupExpansion` blijven rechtstreeks toegekende personen zichtbaar; alleen de groepsleden ontbreken dan.
+
+> Vergeleken met [NovaPoint](https://github.com/Barbarur/NovaPoint/wiki/Solution-Report-PermissionsReport), dat dezelfde vraag beantwoordt met `AccessType` + `GroupId` en een kolom `Users` met een lijst gebruikers erin: hier staat elke gebruiker op een eigen regel. Dat leest minder compact, maar het is het verschil tussen wel en niet kunnen filteren of pivotten op een persoon.
 
 #### Alles in één Excel-bestand
 
@@ -283,6 +309,7 @@ Met `-Excel` komt er naast de CSV's één werkmap bij, `SharePoint_Permissions_<
 |---|---|
 | `Samenvatting` | Per site: grants, unieke scopes, deellinks, externe principals, `Everyone`-grants, fouten |
 | `Rechten` | Elke grant afzonderlijk |
+| `Toegang` | **Per site, per persoon: welk recht en via welke groep.** Het tabblad om mee te beginnen |
 | `Groepen` | Elke groep met zijn leden — SharePoint-groepen, de Entra-groepen die daarin genest zitten, **én** Entra-groepen die rechtstreeks op een scope zijn toegekend |
 | `Effectief` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope |
 
@@ -297,6 +324,7 @@ Er komen drie kant-en-klare draaitabellen bij, elk op een eigen tabblad:
 | `Pivot rechten` | Site | Permissieniveau | Aantal grants | Principaltype, scopetype |
 | `Pivot principals` | Principal | Scopetype | Aantal scopes | Site, extern ja/nee |
 | `Pivot groepen` | Groep | Lid extern ja/nee | Aantal leden | Site, groepstype |
+| `Pivot toegang` | Site → persoon → groep | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
 
 > **`PermissionLevels` is niet pivot-baar, `PrimaryPermission` wel.** SharePoint geeft een grant vaak meerdere niveaus tegelijk, en die staan in één kolom als `Read; Limited Access`. Een draaitabel maakt daar een aparte waarde van, dus `Full Control` en `Full Control; Limited Access` belanden op verschillende rijen. Daarom staat er in de tabbladen `Rechten` en `Effectief` een extra kolom `PrimaryPermission` naast de volledige tekst, met het zwaarste niveau van die grant. `Limited Access` verliest daarbij altijd van een echt niveau — dat zet SharePoint zelf neer zodat iemand naar iets dieper toegekends kan navigeren. Een eigen permissieniveau telt zwaarder dan `Lezen` maar lichter dan `Volledig beheer`: het is met opzet aangemaakt, dus het hoort niet weg te vallen. Nederlandse en Engelse niveaunamen worden allebei herkend.
 

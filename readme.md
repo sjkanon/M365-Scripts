@@ -784,6 +784,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (18)
+| Change |
+|--------|
+| `scripts/Reporting/Get-SharePointPermissionsReport.ps1` answered "which grants exist" but not the question people actually open it with: **who can reach this SharePoint, and how did they get there.** `Rechten` said a group had rights, `Groepen` said who was in it, and nothing joined the two — "Site Owners has Full Control" plus "Site Owners contains five people" is not an answer. Added `SharePoint_Permissions_SiteAccess_<ts>.csv` (worksheet `Toegang`): one row per person per site, with the group their access runs through, that group's id, and the permission level |
+| Consolidated per site collection on purpose: someone reaching thirty folders in one site through the same group is one row, not thirty. A different level or a different group is a separate row, because that is different access. Per-scope detail stays behind `-IncludeEffectiveAccess` |
+| Three things deliberately do not fall out of that view: a directly granted person appears as themselves with `ViaType = Direct`; `Everyone` and `Everyone except external users` resolve to nobody but get a row naming the claim, since they are exactly what a reviewer is looking for; and with `-SkipGroupExpansion` the direct grants still show, only the group members are missing |
+| Added `SiteTitle` — a consolidated view of 130 sites is not readable as 130 URLs, and the root web title is only known while that web is being scanned, so it is captured there and looked up per row. Added `ViaId` alongside `ViaName` after comparing with [NovaPoint](https://github.com/Barbarur/NovaPoint/wiki/Solution-Report-PermissionsReport), which carries `GroupId` next to `AccessType` for the same reason: a title like `Site Owners` repeats on every site in the tenant |
+| Added a `Pivot toegang` sheet nesting site → person → group against permission level, filtered by external and access type. NovaPoint puts its users in one `Users` column as a list; each user gets their own row here instead, which reads less compactly but is the difference between being able to filter or pivot on a person and not |
+| Verified locally with 238 checks across eleven suites (25 new): a group grant lists its people with the group name, id and level; the same access through the same group on a deeper scope is not repeated while a different level is; direct grants, `Everyone` claims and `-SkipGroupExpansion` all behave as described; checkpoint keys are one per row and unique; and the sheet and its pivot are read back out of the workbook. **Not yet verified against a live tenant** |
+
 ### 2026-09-25 (17)
 | Change |
 |--------|

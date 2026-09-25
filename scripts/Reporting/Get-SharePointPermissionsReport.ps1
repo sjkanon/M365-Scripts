@@ -8,6 +8,13 @@
     Walks the tenant (or a single site) and reports who has access to what, at every level where
     SharePoint actually stores an access decision:
 
+    The report to start from is the consolidated site access view: one row per person per site,
+    naming the group their access runs through and the level it grants. Grants and membership are
+    otherwise in separate reports, and "Site Owners has Full Control" plus "Site Owners contains
+    five people" is not yet an answer to who can reach the site.
+
+    Everything it is built from is reported too:
+
       * Site collection administrators
       * Web (site and sub-site) role assignments, including inheritance breaks
       * SharePoint groups (Owners/Members/Visitors and custom) and their full membership
@@ -193,6 +200,7 @@ $detailCsv    = Join-Path $outputDir "SharePoint_Permissions_Detail_$ts.csv"
 $summaryCsv   = Join-Path $outputDir "SharePoint_Permissions_Summary_$ts.csv"
 $groupsCsv    = Join-Path $outputDir "SharePoint_Permissions_Groups_$ts.csv"
 $effectiveCsv = Join-Path $outputDir "SharePoint_Permissions_EffectiveAccess_$ts.csv"
+$siteAccessCsv = Join-Path $outputDir "SharePoint_Permissions_SiteAccess_$ts.csv"
 
 # ── Well-known application IDs ────────────────────────────────────────────────
 $GraphAppId      = '00000003-0000-0000-c000-000000000000'
@@ -1182,6 +1190,10 @@ if ($targetSites.Count -eq 0) {
 $script:SiteGroupCache   = @{}   # site collection URL -> @{ groupId -> group object with Users }
 $script:EntraGroupCache  = @{}   # Entra group object id -> resolved member list
 $script:GroupRowsWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:SiteAccessWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+# Site collection URL -> its root web title. A consolidated view of 130 sites is not readable as
+# 130 URLs, and the title is only known while the root web is being scanned.
+$script:SiteTitles = @{}
 
 function Get-SiteCollectionUrl {
     # SharePoint groups live on the site collection, not the web, so sub-webs must share the cache
@@ -1330,7 +1342,13 @@ function ConvertTo-PermissionRows {
         # these they would be the one kind of group whose membership the report never lists —
         # only the first ten names in MemberPreview. Collected once per group, not per grant.
         [System.Collections.Generic.List[object]]$GroupRows,
-        [System.Collections.Generic.List[string]]$GroupKeys
+        [System.Collections.Generic.List[string]]$GroupKeys,
+        # The consolidated "who can reach this site, and how" view. Membership and grants are
+        # otherwise in separate reports — knowing that Site Owners has Full Control and separately
+        # that Site Owners contains five people leaves the reader to join the two by hand.
+        # De-duplicated per site collection, so a person in ten sub-sites is one row, not ten.
+        [System.Collections.Generic.List[object]]$SiteAccessRows,
+        [System.Collections.Generic.List[string]]$SiteAccessKeys
     )
 
     $rows = [System.Collections.Generic.List[object]]::new()
@@ -1378,6 +1396,58 @@ function ConvertTo-PermissionRows {
                         }) | Out-Null
                     }
                 }
+            }
+        }
+
+        # Consolidated site access. A principal that resolves to people contributes its people;
+        # one granted directly contributes itself, so a direct grant is not missing from the view
+        # that is supposed to answer "who can reach this site".
+        if ($null -ne $SiteAccessRows) {
+            $levelText = ($levels -join '; ')
+            $viaType   = if ($principal.Kind -eq 'User') { 'Direct' } else { $principal.Kind }
+            $viaName   = if ($principal.Kind -eq 'User') { $null } else { $principal.Title }
+
+            $people = @($members)
+            if ($people.Count -eq 0 -and $principal.Kind -eq 'User') {
+                $people = @([PSCustomObject]@{
+                    DisplayName = $principal.Title
+                    Upn         = $principal.LoginName.Split('|')[-1]
+                    Email       = $principal.Email
+                    IsExternal  = $principal.IsExternal
+                    Enabled     = $null
+                })
+            }
+            # Everyone / Everyone except external users resolve to nobody, but they are exactly the
+            # grants a reviewer must see. Keep them as a single row naming the claim itself.
+            if ($people.Count -eq 0 -and $principal.Kind -in @('Everyone', 'EveryoneExceptExternalUsers', 'AllAuthenticatedUsers')) {
+                $people = @([PSCustomObject]@{
+                    DisplayName = $principal.Title
+                    Upn         = "($($principal.Kind))"
+                    Email       = $null
+                    IsExternal  = ($principal.Kind -eq 'Everyone')
+                    Enabled     = $null
+                })
+            }
+
+            foreach ($person in $people) {
+                $accessKey = "{0}|{1}|{2}|{3}" -f $ScopeInfo.SiteUrl, $person.Upn, $viaName, $levelText
+                if (-not $script:SiteAccessWritten.Add($accessKey)) { continue }
+                if ($null -ne $SiteAccessKeys) { $SiteAccessKeys.Add($accessKey) | Out-Null }
+                $SiteAccessRows.Add([PSCustomObject]@{
+                    SiteTitle         = $(if ($script:SiteTitles.ContainsKey($ScopeInfo.SiteUrl)) { $script:SiteTitles[$ScopeInfo.SiteUrl] } else { $ScopeInfo.WebTitle })
+                    SiteUrl           = $ScopeInfo.SiteUrl
+                    UserDisplayName   = $person.DisplayName
+                    UserPrincipalName = $person.Upn
+                    UserEmail         = $person.Email
+                    IsExternal        = $person.IsExternal
+                    AccountEnabled    = $person.Enabled
+                    ViaType           = $viaType
+                    ViaName           = $viaName
+                    # NovaPoint carries the group id alongside the name for the same reason: a
+                    # title like "Site Owners" repeats across every site in the tenant.
+                    ViaId             = $(if ($principal.SpGroupId) { $principal.SpGroupId } else { $principal.DirectoryId })
+                    PermissionLevels  = $levelText
+                }) | Out-Null
             }
         }
 
@@ -1626,6 +1696,7 @@ $script:CheckpointStatePath     = Join-Path $outputDir "SharePoint_Permissions_$
 $script:CheckpointDetailPath    = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.detail.partial.csv"
 $script:CheckpointGroupsPath    = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.groups.partial.csv"
 $script:CheckpointEffectivePath = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.effective.partial.csv"
+$script:CheckpointSiteAccessPath = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.siteaccess.partial.csv"
 $script:CompletedUnitKeys       = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:LoadedCheckpoint        = $false
 
@@ -1636,7 +1707,7 @@ $script:CheckpointKeysPath = Join-Path $outputDir "SharePoint_Permissions_$check
 
 $allCheckpointPaths = @(
     $script:CheckpointStatePath, $script:CheckpointKeysPath, $script:CheckpointDetailPath,
-    $script:CheckpointGroupsPath, $script:CheckpointEffectivePath
+    $script:CheckpointGroupsPath, $script:CheckpointEffectivePath, $script:CheckpointSiteAccessPath
 )
 
 if ($Restart) {
@@ -1665,6 +1736,7 @@ if ($Restart) {
                     switch ($kind) {
                         'U' { [void]$script:CompletedUnitKeys.Add($key) }
                         'G' { [void]$script:GroupRowsWritten.Add($key) }
+                        'A' { [void]$script:SiteAccessWritten.Add($key) }
                     }
                 }
             }
@@ -1717,7 +1789,9 @@ function Complete-CheckpointUnit {
         [object[]]$DetailRows = @(),
         [object[]]$GroupRows = @(),
         [object[]]$EffectiveRows = @(),
-        [string[]]$GroupKeys = @()
+        [object[]]$SiteAccessRows = @(),
+        [string[]]$GroupKeys = @(),
+        [string[]]$SiteAccessKeys = @()
     )
     # Order matters: rows first, keys second. A crash between the two re-scans the unit on resume,
     # which is wasteful but correct. The reverse order would mark a unit done whose rows never
@@ -1725,8 +1799,10 @@ function Complete-CheckpointUnit {
     if ($DetailRows.Count -gt 0)    { Append-CheckpointRows -Path $script:CheckpointDetailPath    -Rows $DetailRows }
     if ($GroupRows.Count -gt 0)     { Append-CheckpointRows -Path $script:CheckpointGroupsPath    -Rows $GroupRows }
     if ($EffectiveRows.Count -gt 0) { Append-CheckpointRows -Path $script:CheckpointEffectivePath -Rows $EffectiveRows }
+    if ($SiteAccessRows.Count -gt 0) { Append-CheckpointRows -Path $script:CheckpointSiteAccessPath -Rows $SiteAccessRows }
 
-    foreach ($groupKey in $GroupKeys) { Add-CheckpointKey -Kind 'G' -Key $groupKey }
+    foreach ($groupKey in $GroupKeys)   { Add-CheckpointKey -Kind 'G' -Key $groupKey }
+    foreach ($accessKey in $SiteAccessKeys) { Add-CheckpointKey -Kind 'A' -Key $accessKey }
     if (-not [string]::IsNullOrWhiteSpace($UnitKey)) {
         $script:CompletedUnitKeys.Add($UnitKey) | Out-Null
         Add-CheckpointKey -Kind 'U' -Key $UnitKey
@@ -1777,6 +1853,8 @@ try {
             # Group keys are only persisted once their rows are safely written, so an interrupted
             # run does not remember having emitted membership it never got round to writing.
             $webGroupKeys     = [System.Collections.Generic.List[string]]::new()
+            $webSiteAccessRows = [System.Collections.Generic.List[object]]::new()
+            $webSiteAccessKeys = [System.Collections.Generic.List[string]]::new()
 
             $webInfo = Invoke-SPGet -Uri ("{0}/_api/web?`$select=Title,Url,WebTemplate,Created,HasUniqueRoleAssignments,LastItemModifiedDate" -f $webUrl)
             if (-not $webInfo) {
@@ -1786,6 +1864,10 @@ try {
             }
             $runTotals.Webs++
             $webTitle = [string]$webInfo.Title
+            # Only the root web's title names the site collection; a sub-site's title names itself.
+            if ($webUrl.TrimEnd('/') -eq $siteCollectionUrl.TrimEnd('/') -and $webTitle) {
+                $script:SiteTitles[$siteCollectionUrl] = $webTitle
+            }
 
             if (-not ($script:LoadedCheckpoint -and $script:CompletedUnitKeys.Contains($webUnitKey))) {
                 # ── Site collection administrators ────────────────────────────
@@ -1908,12 +1990,12 @@ try {
                     LastModified   = $webInfo.LastItemModifiedDate
                 }
                 $webRoleAssignments = Get-ScopeRoleAssignments -Uri ("{0}/_api/web/roleassignments" -f $webUrl)
-                foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($webRoleAssignments) -ScopeInfo $webScope -EffectiveRows $webEffectiveRows -GroupRows $webGroupRows -GroupKeys $webGroupKeys)) {
+                foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($webRoleAssignments) -ScopeInfo $webScope -EffectiveRows $webEffectiveRows -GroupRows $webGroupRows -GroupKeys $webGroupKeys -SiteAccessRows $webSiteAccessRows -SiteAccessKeys $webSiteAccessKeys)) {
                     $webDetailRows.Add($row) | Out-Null
                 }
 
                 Complete-CheckpointUnit -UnitKey $webUnitKey -DetailRows @($webDetailRows) `
-                    -GroupRows @($webGroupRows) -EffectiveRows @($webEffectiveRows) `
+                    -GroupRows @($webGroupRows) -EffectiveRows @($webEffectiveRows) -SiteAccessRows @($webSiteAccessRows) -SiteAccessKeys @($webSiteAccessKeys) `
                     -GroupKeys @($webGroupKeys)
             } else {
                 Write-ProgressHost -Message "    [SKIP] Web level already completed in a previous run." -ForegroundColor DarkGray
@@ -1947,6 +2029,8 @@ try {
                 $listEffectiveRows = [System.Collections.Generic.List[object]]::new()
                 $listGroupRows     = [System.Collections.Generic.List[object]]::new()
                 $listGroupKeys     = [System.Collections.Generic.List[string]]::new()
+                $listSiteAccessRows = [System.Collections.Generic.List[object]]::new()
+                $listSiteAccessKeys = [System.Collections.Generic.List[string]]::new()
 
                 # Everything from here to the checkpoint runs inside its own try. One list that
                 # throws — a template that does not answer /roleassignments, a view threshold, a
@@ -1975,7 +2059,7 @@ try {
                         LastModified   = $null
                     }
                     $listRoleAssignments = Get-ScopeRoleAssignments -Uri ("{0}/_api/web/lists(guid'{1}')/roleassignments" -f $webUrl, $listId)
-                    foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($listRoleAssignments) -ScopeInfo $listScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys)) {
+                    foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($listRoleAssignments) -ScopeInfo $listScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys -SiteAccessRows $listSiteAccessRows -SiteAccessKeys $listSiteAccessKeys)) {
                         $listDetailRows.Add($row) | Out-Null
                     }
                 }
@@ -2106,7 +2190,7 @@ try {
                                 InheritsFrom   = $null
                                 LastModified   = $item.Modified
                             }
-                            foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($assignments) -ScopeInfo $itemScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys)) {
+                            foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($assignments) -ScopeInfo $itemScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys -SiteAccessRows $listSiteAccessRows -SiteAccessKeys $listSiteAccessKeys)) {
                                 $listDetailRows.Add($row) | Out-Null
                             }
                         }
@@ -2118,7 +2202,7 @@ try {
                 # the rows a resumed run wrote in an earlier session. Counting them twice would
                 # mean three more passes over every row of every list for a number nobody reads.
                 Complete-CheckpointUnit -UnitKey $unitKey -DetailRows @($listDetailRows) `
-                    -EffectiveRows @($listEffectiveRows) -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys)
+                    -EffectiveRows @($listEffectiveRows) -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys) -SiteAccessRows @($listSiteAccessRows) -SiteAccessKeys @($listSiteAccessKeys)
 
                 } catch {
                     # A 401 means the credential itself stopped working, which is not survivable
@@ -2130,7 +2214,7 @@ try {
                     # Whatever this list did produce before failing is still written, and the
                     # unit is deliberately left unmarked so a resumed run retries it.
                     Complete-CheckpointUnit -UnitKey $null -EffectiveRows @($listEffectiveRows) `
-                        -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys) -DetailRows (
+                        -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys) -SiteAccessRows @($listSiteAccessRows) -SiteAccessKeys @($listSiteAccessKeys) -DetailRows (
                         @($listDetailRows) + @([PSCustomObject]@{
                             SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
                             UnitKey = $unitKey; ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $webUrl
@@ -2309,6 +2393,7 @@ if ($detailPublished) {
     Write-Host ("  {0,-18}: (no rows)" -f 'Detail') -ForegroundColor DarkGray
 }
 $groupsPublished = Publish-ReportFile -PartialPath $script:CheckpointGroupsPath -FinalPath $groupsCsv -Label 'Groups'
+$siteAccessPublished = Publish-ReportFile -PartialPath $script:CheckpointSiteAccessPath -FinalPath $siteAccessCsv -Label 'Site access'
 $effectivePublished = $false
 if ($IncludeEffectiveAccess) {
     $effectivePublished = Publish-ReportFile -PartialPath $script:CheckpointEffectivePath -FinalPath $effectiveCsv -Label 'Effective access'
@@ -2362,6 +2447,10 @@ function Add-PermissionsPivots {
         @{ Name = 'Pivot rechten';   Source = 'Rechten'; Rows = @('SiteUrl');       Columns = @('PrimaryPermission'); Data = @{ 'PrincipalName' = 'Count' }; Filter = @('PrincipalType', 'ScopeType') }
         @{ Name = 'Pivot principals';Source = 'Rechten'; Rows = @('PrincipalName'); Columns = @('ScopeType');          Data = @{ 'ScopeUrl' = 'Count' };      Filter = @('SiteUrl', 'IsExternal') }
         @{ Name = 'Pivot groepen';   Source = 'Groepen'; Rows = @('GroupTitle');    Columns = @('MemberIsExternal');   Data = @{ 'MemberLogin' = 'Count' };   Filter = @('SiteUrl', 'GroupType') }
+        # The one that answers the question people actually open this report with: per site, who
+        # can reach it and through which group. Site over user over group, so collapsing a site
+        # shows its people and expanding a person shows what carried them in.
+        @{ Name = 'Pivot toegang';   Source = 'Toegang'; Rows = @('SiteUrl', 'UserDisplayName', 'ViaName'); Columns = @('PrimaryPermission'); Data = @{ 'UserPrincipalName' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
     )
 
     $added = 0
@@ -2477,6 +2566,7 @@ if ($Excel) {
         @{ Name = 'Samenvatting'; Path = $(if ($summaryRows.Count -gt 0) { $summaryCsv }) }
         @{ Name = 'Rechten';      Path = $(if ($detailPublished)        { $detailCsv }) }
         @{ Name = 'Groepen';      Path = $(if ($groupsPublished)        { $groupsCsv }) }
+        @{ Name = 'Toegang';      Path = $(if ($siteAccessPublished)    { $siteAccessCsv }) }
         @{ Name = 'Effectief';    Path = $(if ($effectivePublished)     { $effectiveCsv }) }
     )
     if (Export-PermissionsWorkbook -WorkbookPath $excelPath -Sheets $sheetSpec) {
