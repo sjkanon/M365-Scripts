@@ -1160,48 +1160,58 @@ function Get-ItemRoleAssignmentsParallel {
     $poolSize     = [Math]::Min($Concurrency, $Items.Count)
     $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, $poolSize)
     $runspacePool.Open()
-    $workers = [System.Collections.Generic.List[object]]::new()
+
+    # Dispatch in waves rather than queueing one PowerShell instance per item up front. A library
+    # can easily have tens of thousands of uniquely permissioned items, and holding a live
+    # PowerShell object and pending async handle for every one of them costs far more memory than
+    # the scan itself — the pool would still only run $Concurrency of them at a time.
+    $waveSize = [Math]::Max($poolSize * 25, 100)
+    $done     = 0
 
     try {
-        foreach ($item in $Items) {
-            # Spacing out dispatch reduces the burst rate against one site, which is what
-            # SharePoint's throttle actually measures — the pool size alone does not do that.
-            Start-Sleep -Milliseconds 40
-            $uri = "{0}/_api/web/lists(guid'{1}')/items({2})/roleassignments{3}" -f $WebUrl, $ListId, $item.Id, $select
+        for ($offset = 0; $offset -lt $Items.Count; $offset += $waveSize) {
+            $wave    = $Items[$offset..([Math]::Min($offset + $waveSize - 1, $Items.Count - 1))]
+            $workers = [System.Collections.Generic.List[object]]::new()
 
-            $ps = [PowerShell]::Create()
-            $ps.RunspacePool = $runspacePool
-            [void]$ps.AddScript($workerScript)
-            [void]$ps.AddParameter('Uri', $uri)
-            [void]$ps.AddParameter('Headers', $headers)
-            [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
-            [void]$ps.AddParameter('MaxAttempts', $MaxGraphRetry)
+            foreach ($item in $wave) {
+                # Spacing out dispatch reduces the burst rate against one site, which is what
+                # SharePoint's throttle actually measures — the pool size alone does not do that.
+                Start-Sleep -Milliseconds 40
+                $uri = "{0}/_api/web/lists(guid'{1}')/items({2})/roleassignments{3}" -f $WebUrl, $ListId, $item.Id, $select
 
-            $workers.Add([PSCustomObject]@{
-                PowerShell = $ps
-                Handle     = $ps.BeginInvoke()
-                ItemId     = [string]$item.Id
-            }) | Out-Null
-        }
+                $ps = [PowerShell]::Create()
+                $ps.RunspacePool = $runspacePool
+                [void]$ps.AddScript($workerScript)
+                [void]$ps.AddParameter('Uri', $uri)
+                [void]$ps.AddParameter('Headers', $headers)
+                [void]$ps.AddParameter('TimeoutSec', $GraphTimeoutSec)
+                [void]$ps.AddParameter('MaxAttempts', $MaxGraphRetry)
 
-        $done = 0
-        foreach ($worker in $workers) {
-            $payload = $null
-            try { $payload = $worker.PowerShell.EndInvoke($worker.Handle) } catch { $payload = $null } finally { $worker.PowerShell.Dispose() }
-
-            if ($payload -and $payload.Success) {
-                $results[$worker.ItemId] = @($payload.Rows)
-            } elseif ($payload -and $payload.ErrorMessage) {
-                $results[$worker.ItemId] = [string]$payload.ErrorMessage
-            } else {
-                $results[$worker.ItemId] = 'Role assignment lookup failed after retries.'
+                $workers.Add([PSCustomObject]@{
+                    PowerShell = $ps
+                    Handle     = $ps.BeginInvoke()
+                    ItemId     = [string]$item.Id
+                }) | Out-Null
             }
 
-            $done++
-            if (($done % 100) -eq 0 -or $done -eq $workers.Count) {
-                Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Unieke rechten ophalen' -Status (
-                    "{0} — {1}/{2} objecten" -f $script:CurrentScanLabel, $done, $workers.Count
-                ) -PercentComplete ([int](($done / [Math]::Max($workers.Count, 1)) * 100))
+            foreach ($worker in $workers) {
+                $payload = $null
+                try { $payload = $worker.PowerShell.EndInvoke($worker.Handle) } catch { $payload = $null } finally { $worker.PowerShell.Dispose() }
+
+                if ($payload -and $payload.Success) {
+                    $results[$worker.ItemId] = @($payload.Rows)
+                } elseif ($payload -and $payload.ErrorMessage) {
+                    $results[$worker.ItemId] = [string]$payload.ErrorMessage
+                } else {
+                    $results[$worker.ItemId] = 'Role assignment lookup failed after retries.'
+                }
+
+                $done++
+                if (($done % 100) -eq 0 -or $done -eq $Items.Count) {
+                    Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Unieke rechten ophalen' -Status (
+                        "{0} — {1}/{2} objecten" -f $script:CurrentScanLabel, $done, $Items.Count
+                    ) -PercentComplete ([int](($done / [Math]::Max($Items.Count, 1)) * 100))
+                }
             }
         }
     } finally {
@@ -1307,13 +1317,6 @@ $runTotals = [PSCustomObject]@{
     Webs            = 0
     WebsFailed      = 0
     Lists           = 0
-    UniqueScopes    = 0
-    DetailRows      = 0
-    EffectiveRows   = 0
-    SharingLinks    = 0
-    ExternalGrants  = 0
-    EveryoneGrants  = 0
-    SiteAdmins      = 0
 }
 
 try {
@@ -1350,8 +1353,6 @@ try {
                     $admins = Get-SPCollection -Uri ("{0}/_api/web/siteusers?`$select=Id,Title,LoginName,Email,PrincipalType,IsSiteAdmin&`$filter=IsSiteAdmin%20eq%20true" -f $webUrl)
                     foreach ($admin in $admins) {
                         $principal = Get-PrincipalInfo -Member $admin
-                        $runTotals.SiteAdmins++
-                        if ($principal.IsExternal) { $runTotals.ExternalGrants++ }
                         $webDetailRows.Add([PSCustomObject]@{
                             SiteUrl           = $siteCollectionUrl
                             WebUrl            = $webUrl
@@ -1467,8 +1468,6 @@ try {
                     $webDetailRows.Add($row) | Out-Null
                 }
 
-                $runTotals.DetailRows    += $webDetailRows.Count
-                $runTotals.EffectiveRows += $webEffectiveRows.Count
                 Complete-CheckpointUnit -UnitKey $webUnitKey -DetailRows @($webDetailRows) `
                     -GroupRows @($webGroupRows) -EffectiveRows @($webEffectiveRows)
             } else {
@@ -1501,7 +1500,6 @@ try {
                 $runTotals.Lists++
                 $listDetailRows    = [System.Collections.Generic.List[object]]::new()
                 $listEffectiveRows = [System.Collections.Generic.List[object]]::new()
-                $uniqueScopeCount  = 0
 
                 $listUrl = if ($list.RootFolder -and $list.RootFolder.ServerRelativeUrl) {
                     ("{0}://{1}{2}" -f ([Uri]$webUrl).Scheme, ([Uri]$webUrl).Host, $list.RootFolder.ServerRelativeUrl)
@@ -1510,7 +1508,6 @@ try {
                 # A list that inherits is reported through its parent web, not duplicated here —
                 # that is what makes the CSV a map of the permission structure rather than a dump.
                 if ([bool]$list.HasUniqueRoleAssignments) {
-                    $uniqueScopeCount++
                     $listScope = @{
                         SiteUrl        = $siteCollectionUrl
                         WebUrl         = $webUrl
@@ -1569,7 +1566,6 @@ try {
                                 continue
                             }
 
-                            $uniqueScopeCount++
                             $itemScope = @{
                                 SiteUrl        = $siteCollectionUrl
                                 WebUrl         = $webUrl
@@ -1591,13 +1587,10 @@ try {
                     }
                 }
 
-                $runTotals.UniqueScopes   += $uniqueScopeCount
-                $runTotals.DetailRows     += $listDetailRows.Count
-                $runTotals.EffectiveRows  += $listEffectiveRows.Count
-                $runTotals.SharingLinks   += @($listDetailRows | Where-Object { $_.IsSharingLink }).Count
-                $runTotals.ExternalGrants += @($listDetailRows | Where-Object { $_.IsExternal -or [int]$_.ExternalMembers -gt 0 }).Count
-                $runTotals.EveryoneGrants += @($listDetailRows | Where-Object { $_.PrincipalType -in @('Everyone', 'EveryoneExceptExternalUsers', 'AllAuthenticatedUsers') }).Count
-
+                # Sharing-link, external and Everyone tallies are deliberately not accumulated
+                # here: the closing summary derives them from the detail CSV, which also covers
+                # the rows a resumed run wrote in an earlier session. Counting them twice would
+                # mean three more passes over every row of every list for a number nobody reads.
                 Complete-CheckpointUnit -UnitKey $unitKey -DetailRows @($listDetailRows) -EffectiveRows @($listEffectiveRows)
             }
 
