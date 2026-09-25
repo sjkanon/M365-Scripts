@@ -1,3 +1,18 @@
+﻿<#
+.SYNOPSIS
+    Pin a file to the Windows taskbar from a script.
+
+.DESCRIPTION
+    Windows exposes no supported way to pin an item to the taskbar unattended. This
+    borrows the hidden Windows.taskbarpin verb: it copies that verb's command handler
+    into a temporary HKCU class, invokes it on the target through the Shell COM
+    object, and removes the temporary key again. The companion to add-lock.ps1, which
+    creates the shortcut this pins.
+
+.PARAMETER Target
+    Full path of the item to pin. The script warns and stops when it does not exist.
+#>
+
 param (
     [parameter(Mandatory=$True, HelpMessage="Target item to pin")]
     [ValidateNotNullOrEmpty()]

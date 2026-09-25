@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     FSLogix / Azure Files Premium diagnosescript voor AVD session hosts.
 
@@ -8,7 +8,7 @@
 
 .NOTES
     Uitvoeren in een verhoogde (Administrator) PowerShell sessie op de session host.
-    Voorbeeld:  .\FSLogix-AVD-Diagnose.ps1 -User dedonder -Days 7 -OutputPath C:\Temp
+    Voorbeeld:  .\Get-FSlogix-errors.ps1 -User jdoe -Days 7 -OutputPath C:\Temp
 #>
 
 [CmdletBinding()]

@@ -1,6 +1,9 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 #Requires -Modules ExchangeOnlineManagement, Microsoft.Graph.Authentication, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Reports, Microsoft.Graph.Applications
 <#
+.SYNOPSIS
+    Generic MSP M365 management functions, dot-sourced by the launcher menu.
+
 .NOTES
     Generic MSP M365 management functions via Microsoft Graph and Exchange Online.
     Dot-source this file from your profile or startup script.

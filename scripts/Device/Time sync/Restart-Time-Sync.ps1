@@ -1,3 +1,14 @@
+﻿<#
+.SYNOPSIS
+    Repair Windows time synchronisation and keep it repaired with a scheduled task.
+
+.DESCRIPTION
+    Sets w32time to start automatically, points it at the Dutch NTP pool
+    (0/1.nl.pool.ntp.org) with a manual sync flag and forces a resync. The same
+    commands are registered as a scheduled task that reruns every 59 minutes, because
+    a single resync does not hold on a machine whose clock keeps drifting.
+#>
+
 #Set content for taskscheduler
 $content = @'
 Set-Service 'w32time' -StartupType Automatic

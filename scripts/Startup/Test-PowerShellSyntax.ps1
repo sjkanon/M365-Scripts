@@ -1,4 +1,20 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Parse PowerShell files and report syntax errors, without running any of them.
+
+.DESCRIPTION
+    Runs every .ps1 through the PowerShell parser and reports the parse errors with
+    file, line and message. Nothing is executed, so it is safe against any script in
+    the repository. This is the check to run before committing - see the working
+    rules in .claude/CLAUDE.md.
+
+.PARAMETER Path
+    File or folder to check (default: the repository root).
+
+.PARAMETER Recurse
+    Descend into subfolders when Path is a folder.
+#>
 
 [CmdletBinding()]
 param(

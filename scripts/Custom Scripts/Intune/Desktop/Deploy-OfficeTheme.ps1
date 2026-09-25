@@ -1,3 +1,17 @@
+﻿<#
+.SYNOPSIS
+    Download the corporate Office theme (.thmx) and apply it for the signed-in user.
+
+.DESCRIPTION
+    Fetches the theme from the URL pinned at the top of this script into
+    %ProgramData%\OfficeThemes and points Office at it, so Word, Excel and PowerPoint
+    open in the corporate colours. Intended for Intune deployment.
+
+    The download URL is hardcoded to a raw GitHub path inside this repository, which
+    is why this script lives under "Custom Scripts" - moving or renaming the .thmx
+    file breaks it.
+#>
+
 # URL van de theme
 $ThemeUrl = "https://github.com/FirstITHub/M365-Scripts/raw/refs/heads/main/scripts/Custom%20Scripts/Intune/Desktop/2026%20Vias%20institute%20colours%20(2).thmx"
 
