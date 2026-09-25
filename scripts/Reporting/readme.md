@@ -260,7 +260,7 @@ Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft he
 
 ### Hervatten na onderbreking (checkpoints)
 
-Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json` plus `.detail/.summary/.groups/.effective.partial.csv`. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json` plus `.detail/.groups/.effective.partial.csv`. Anders dan bij de twee scripts hierboven worden de regels direct naar die partials gestreamd in plaats van in het geheugen bewaard — een tenantbrede run op itemniveau levert miljoenen regels op. De summary-CSV bestaat daarom niet als checkpoint: die wordt aan het eind uit het detailbestand opgebouwd, zodat een hervatte run alles samenvat wat er ooit voor deze `<hash>` is weggeschreven en niet alleen het deel van de laatste sessie. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
 
 ### Parameters
 
