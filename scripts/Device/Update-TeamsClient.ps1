@@ -97,18 +97,23 @@
     registration shadows the fresh machine-wide one and points at files that are no
     longer there - Outlook then fails to load it and parks LoadBehavior at 2.
 
-    That sweep waits until step 8, with the replacement MSI in hand and its version
-    compared against what is still registered. Windows Installer refuses to put an
-    older add-in over a newer registered one (1638), and a run that had already
-    deleted every working copy by then left a production host with no add-in at all.
-    Two failures make that reachable: a -Force run on a host whose Teams build is
-    newer than the published one downgrades the client, so the add-in inside the
-    package is older than the one registered; and an uninstall that answers 1612
-    ("the installation source is not available") leaves the old product registered
-    for good. 1612 is retried against Windows Installer's own cached copy of the MSI
-    under C:\Windows\Installer, which usually still works; when that is gone too the
-    registration cannot be removed by msiexec at all, and the script says so instead
-    of destroying what still works.
+    That sweep waits until step 8, with the replacement MSI in hand and the registry
+    checked for a surviving registration. The add-in MSI refuses to install while any
+    other copy of the add-in is still registered (1638) - measured on a host where
+    1.26.21803 was refused over a registered 1.25.28902, so the version order is not
+    what decides it; the presence of a registration is. A run that had already deleted
+    every working copy by then left that host with no add-in at all.
+
+    What leaves a registration behind is an uninstall that answers 1612 ("the
+    installation source is not available"): Windows Installer has lost the cached copy
+    of the MSI it needs and cannot remove the product at all. That is retried against
+    its own cache under C:\Windows\Installer, which often still works. When the cache
+    is gone too, nothing short of forgetting the registration helps, which is what
+    -ClearOrphanedAddInRegistration does: it removes the product's keys under
+    Installer\Products, Installer\Features, Installer\UserData and the entry under its
+    upgrade code, plus the Programs and Features entry. That is what MsiZap did,
+    scoped to this one product, and it only runs when msiexec has already proved it
+    cannot do the job.
 
     Classic Teams
     -------------
@@ -210,6 +215,16 @@
     session host. IsWVDEnvironment is deliberately left alone, because SlimCore needs
     that flag too.
 
+.PARAMETER ClearOrphanedAddInRegistration
+    Make Windows Installer forget a Teams Meeting Add-in it can no longer uninstall,
+    so a reinstall can go in. Only acts after msiexec has answered 1612 and its
+    cached copy of the MSI is gone as well - at that point the product cannot be
+    removed by any supported means, and its registration keeps refusing every other
+    version with 1638. Removes that product's keys under Installer\Products,
+    Installer\Features and Installer\UserData, its entry under the upgrade code, and
+    the Programs and Features entry. Off by default: it edits the Windows Installer
+    database, which is a last resort rather than a maintenance step.
+
 .PARAMETER RemoveClassicTeams
     Also remove the classic Teams client: uninstall the Teams Machine-Wide Installer
     and clear the per-profile installs (install folder, autostart entry and the stale
@@ -309,6 +324,7 @@ param (
     [switch] $RemoveClassicTeams,
     [switch] $RepairOutlookAddIn,
     [switch] $RemoveWebRtcRedirector,
+    [switch] $ClearOrphanedAddInRegistration,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
@@ -410,6 +426,7 @@ if (-not $PSBoundParameters.ContainsKey('AvdOptimizations')   -and $env:avdOptim
 if (-not $PSBoundParameters.ContainsKey('RemoveClassicTeams') -and $env:removeClassicTeams -in $rmmTrue) { $RemoveClassicTeams = $true }
 if (-not $PSBoundParameters.ContainsKey('RepairOutlookAddIn') -and $env:repairOutlookAddIn -in $rmmTrue) { $RepairOutlookAddIn = $true }
 if (-not $PSBoundParameters.ContainsKey('RemoveWebRtcRedirector') -and $env:removeWebRtcRedirector -in $rmmTrue) { $RemoveWebRtcRedirector = $true }
+if (-not $PSBoundParameters.ContainsKey('ClearOrphanedAddInRegistration') -and $env:clearOrphanedAddInRegistration -in $rmmTrue) { $ClearOrphanedAddInRegistration = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
@@ -1290,6 +1307,70 @@ function Get-TeamsAddInInstaller {
            Select-Object -Last 1
 }
 
+function ConvertTo-MsiPackedGuid {
+    <#
+        Windows Installer stores a ProductCode as a 32-character "packed" GUID: the
+        first three groups reversed, then the remaining bytes swapped in pairs. That
+        string is the key name under Installer\Products and Installer\UserData, so it
+        is the only way to find the keys belonging to one product.
+
+        Verified against every MSI product on a real machine: 32 of 32 GUID-named
+        uninstall entries that have machine-wide product data mapped onto an existing
+        packed key with an identical DisplayName.
+    #>
+    param([Parameter(Mandatory)] [string] $Guid)
+
+    $hex = ($Guid -replace '[{}\-]', '').ToUpper()
+    if ($hex -notmatch '^[0-9A-F]{32}$') { return $null }
+
+    $reverse = { param([string] $Text) -join ($Text.ToCharArray())[($Text.Length - 1)..0] }
+    $swap    = {
+        param([string] $Text)
+        $out = ''
+        for ($i = 0; $i -lt $Text.Length; $i += 2) { $out += $Text[$i + 1] + $Text[$i] }
+        return $out
+    }
+
+    return (& $reverse $hex.Substring(0, 8)) + (& $reverse $hex.Substring(8, 4)) +
+           (& $reverse $hex.Substring(12, 4)) + (& $swap $hex.Substring(16, 16))
+}
+
+function Get-MsiProductRegistration {
+    <#
+        Every place Windows Installer remembers one machine-wide product. Removing
+        these is what MsiZap used to do, and the only way to make the installer forget
+        a product whose cached MSI is gone - nothing else clears the related-product
+        check that answers 1638.
+    #>
+    param([Parameter(Mandatory)] [string] $ProductCode)
+
+    $packed = ConvertTo-MsiPackedGuid -Guid $ProductCode
+    if (-not $packed) { return $null }
+
+    $keys   = [System.Collections.Generic.List[string]]::new()
+    $values = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($path in "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products\$packed",
+                      "HKLM:\SOFTWARE\Classes\Installer\Products\$packed",
+                      "HKLM:\SOFTWARE\Classes\Installer\Features\$packed") {
+        if (Test-Path $path) { $keys.Add($path) }
+    }
+
+    # The product is listed as a value under its own upgrade code, which is what
+    # FindRelatedProducts reads. Leaving it behind leaves the 1638 behind with it.
+    $upgradeRoot = 'HKLM:\SOFTWARE\Classes\Installer\UpgradeCodes'
+    if (Test-Path $upgradeRoot) {
+        foreach ($upgrade in @(Get-ChildItem $upgradeRoot -ErrorAction SilentlyContinue)) {
+            if ($upgrade.GetValueNames() -contains $packed) {
+                $values.Add([PSCustomObject]@{ Path = $upgrade.PSPath.Replace('Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'); Name = $packed })
+            }
+        }
+    }
+
+    return [PSCustomObject]@{ ProductCode = $ProductCode; Packed = $packed
+                              Keys = @($keys); Values = @($values) }
+}
+
 function Get-MsiCachedPackage {
     <#
         Windows Installer's own cached copy of an installed product's MSI, under
@@ -1844,9 +1925,45 @@ try {
                                 $addInOrphaned = $true
                                 Write-Warn "The cached package did not uninstall either ($($retry.Message)) - $($entry.Version) stays registered"
                             }
+                        } elseif ($ClearOrphanedAddInRegistration) {
+                            # Last resort, and only for a product Windows Installer can
+                            # no longer uninstall itself: forget the registration so
+                            # the related-product check stops answering 1638. This is
+                            # what MsiZap did, scoped to this one product.
+                            $registration = Get-MsiProductRegistration -ProductCode $entry.ProductCode
+                            if (-not $registration) {
+                                $addInOrphaned = $true
+                                Write-Warn "Could not work out the packed product code for $($entry.ProductCode) - leaving the registration alone"
+                            } else {
+                                Write-Warn "Windows Installer cannot uninstall $($entry.DisplayName) $($entry.Version) any more (1612, cached MSI gone) - clearing its registration so a reinstall is possible"
+                                foreach ($key in $registration.Keys) {
+                                    if ($PSCmdlet.ShouldProcess($key, 'Remove the orphaned Windows Installer product key')) {
+                                        Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+                                        if (Test-Path $key) { Write-Warn "Could not remove $key" } else { Write-Ok "Removed $key" }
+                                    }
+                                }
+                                foreach ($value in $registration.Values) {
+                                    if ($PSCmdlet.ShouldProcess("$($value.Path)\$($value.Name)", 'Remove the orphaned upgrade-code entry')) {
+                                        Remove-ItemProperty -Path $value.Path -Name $value.Name -Force -ErrorAction SilentlyContinue
+                                        Write-Ok "Cleared the upgrade-code entry under $($value.Path)"
+                                    }
+                                }
+                                if ($PSCmdlet.ShouldProcess($entry.RegistryPath, 'Remove the Programs and Features entry')) {
+                                    Remove-Item -Path $entry.RegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+                                    if (Test-Path $entry.RegistryPath) {
+                                        Write-Warn "Could not remove $($entry.RegistryPath)"
+                                    } else {
+                                        Write-Ok 'Removed the Programs and Features entry'
+                                    }
+                                }
+                                if (@(Get-TeamsMeetingAddInEntry).Count -gt 0) {
+                                    $addInOrphaned = $true
+                                    Write-Warn 'An add-in registration survived the cleanup - the install will still answer 1638'
+                                }
+                            }
                         } else {
                             $addInOrphaned = $true
-                            Write-Warn "Windows Installer lost the source for $($entry.DisplayName) (1612) and its cached copy is gone too, so $($entry.Version) cannot be uninstalled - it stays registered and will refuse a different version with 1638"
+                            Write-Warn "Windows Installer lost the source for $($entry.DisplayName) (1612) and its cached copy is gone too, so $($entry.Version) cannot be uninstalled - it stays registered and will refuse a different version with 1638. -ClearOrphanedAddInRegistration removes that registration so a reinstall can go in"
                         }
                     } else {
                         Write-Warn "Uninstall of $($entry.DisplayName) failed ($($result.Message))"
@@ -1926,20 +2043,20 @@ try {
 
             Write-Ok "Found Teams Meeting Add-in version: $tmaVersion"
 
-            # Windows Installer refuses to put an older version over a newer one that
-            # is still registered (1638). Finding that out before touching the copies
-            # that do work is the difference between "nothing changed" and "the device
-            # has no add-in".
+            # This MSI refuses to go in while *any* other copy of the add-in is still
+            # registered, whichever version that is - measured on a host where a
+            # newer 1.26.21803 answered 1638 over a registered 1.25.28902. So the
+            # question is not "is the MSI older", it is "did the uninstall work".
+            # Asking that before deleting the copies that do work is the difference
+            # between "nothing changed" and "the device has no add-in".
             $stillRegistered = @(Get-TeamsMeetingAddInEntry) | Select-Object -First 1
-            $msiOlder        = $false
-            if ($stillRegistered) {
-                try { $msiOlder = ([version] $tmaVersion) -lt ([version] $stillRegistered.Version) } catch { $msiOlder = $false }
-            }
 
-            if ($msiOlder) {
-                Write-Warn "The staged package carries add-in $tmaVersion, older than the $($stillRegistered.Version) still registered - Windows Installer would answer 1638, so the working add-in is left exactly as it is"
+            if ($stillRegistered) {
+                Write-Warn "Add-in $($stillRegistered.Version) is still registered, so installing $tmaVersion would answer 1638 - the existing add-in is left exactly as it is"
                 if ($addInOrphaned) {
-                    Write-Warn 'That registration cannot be uninstalled either, because Windows Installer has lost its cached MSI - the way out is a newer Teams build whose add-in is at least this version, or removing the product registration by hand'
+                    Write-Warn 'Windows Installer cannot uninstall it either, because its cached MSI is gone. -ClearOrphanedAddInRegistration clears that registration so this install can go in'
+                } else {
+                    Write-Warn "Uninstall the add-in by hand (Programs and Features) and run again, or use -ClearOrphanedAddInRegistration when Windows Installer refuses"
                 }
             } else {
                 # Now that a usable MSI is in hand, clear every other copy: a per-user
