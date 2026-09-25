@@ -6,7 +6,7 @@
 
 | Script | Description |
 |--------|-------------|
-| [`Connect-AzureFileShareDrive.ps1`](#connect-azurefilesharedriveps1) | Mount an Azure Files SMB share as a persistent drive letter |
+| [`Connect-AzureFileShareDrive.ps1`](Connect-AzureFileShareDrive.ps1) ([docs](#connect-azurefilesharedriveps1)) | Mount an Azure Files SMB share as a persistent drive letter |
 
 ---
 

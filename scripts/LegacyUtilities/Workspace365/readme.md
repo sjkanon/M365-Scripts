@@ -16,8 +16,8 @@ persistence was intentionally dropped.
 
 | Script | Description |
 |--------|-------------|
-| [`New-Workspace365Environment.ps1`](#new-workspace365environmentps1) | Provision a new environment, its SSO app registration, and default Exchange/SharePoint links |
-| [`Remove-Workspace365Environment.ps1`](#remove-workspace365environmentps1) | Delete an environment via the Provisioning API |
+| [`New-Workspace365Environment.ps1`](New-Workspace365Environment.ps1) ([docs](#new-workspace365environmentps1)) | Provision a new environment, its SSO app registration, and default Exchange/SharePoint links |
+| [`Remove-Workspace365Environment.ps1`](Remove-Workspace365Environment.ps1) ([docs](#remove-workspace365environmentps1)) | Delete an environment via the Provisioning API |
 
 ---
 

@@ -8,9 +8,9 @@ Network and connectivity diagnostic scripts. Cross-platform where noted; the res
 
 | Script | Description |
 |--------|-------------|
-| [`Test-Ports.ps1`](#test-portsps1) | TCP port connectivity checker (cross-platform) |
-| [`Test-AuthNetworkDiagnostics.ps1`](#test-authnetworkdiagnosticsps1) | Auth/network issue diagnostics (Event Viewer, Kerberos, DNS, shares) |
-| [`Test-FileIODiagnostics.ps1`](#test-fileiodiagnosticsps1) | File I/O stress test with live failure diagnostics |
+| [`Test-Ports.ps1`](Test-Ports.ps1) ([docs](#test-portsps1)) | TCP port connectivity checker (cross-platform) |
+| [`Test-AuthNetworkDiagnostics.ps1`](Test-AuthNetworkDiagnostics.ps1) ([docs](#test-authnetworkdiagnosticsps1)) | Auth/network issue diagnostics (Event Viewer, Kerberos, DNS, shares) |
+| [`Test-FileIODiagnostics.ps1`](Test-FileIODiagnostics.ps1) ([docs](#test-fileiodiagnosticsps1)) | File I/O stress test with live failure diagnostics |
 | [`UniFi/`](UniFi/readme.md) | UniFi Controller network documentation report + firmware upgrade tooling |
 
 ---

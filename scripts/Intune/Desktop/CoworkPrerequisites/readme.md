@@ -17,11 +17,11 @@ If your environment treats Cowork as a hard requirement rather than optional, de
 
 | Script | Role in Intune |
 |---|---|
-| `Deploy-CoworkPrerequisitesIntune.ps1` | **The one you run** for the Win32-app route. Packages the scripts below and creates/updates the Win32 app. |
-| `Install-CoworkPrerequisites-Intune.ps1` | Win32-app install command content script |
-| `Uninstall-CoworkPrerequisites-Intune.ps1` | Win32-app uninstall command content script |
-| `Detect-CoworkPrerequisites-Intune.ps1` | Win32-app custom detection script |
-| `CoworkPrerequisites-PlatformScript.ps1` | **Alternative**, standalone route — no Deploy script, no packaging, uploaded directly as an Intune "Platform script". See "Platform script alternative" below. |
+| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) | **The one you run** for the Win32-app route. Packages the scripts below and creates/updates the Win32 app. |
+| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) | Win32-app install command content script |
+| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) | Win32-app uninstall command content script |
+| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) | Win32-app custom detection script |
+| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) | **Alternative**, standalone route — no Deploy script, no packaging, uploaded directly as an Intune "Platform script". See "Platform script alternative" below. |
 
 There's no MSIX here — unlike Claude Desktop, the "content" is just these three scripts, so a re-run only does something if you've actually edited one of them (tracked via a `ScriptsHash` in the app's Notes field, same pattern as `Deploy-ClaudeDesktopIntune.ps1`).
 

@@ -8,9 +8,9 @@ Diagnostic and monitoring scripts for RDP / RD Web Access infrastructure. Run di
 
 | Script | Description |
 |--------|-------------|
-| [`Test-RDSDiagnostics.ps1`](#test-rdsdiagnosticsps1) | One-shot health check — services, config, certs, user account, event logs |
-| [`Watch-RDSLive.ps1`](#watch-rdslivesps1) | Real-time session + licensing event monitor |
-| [`Get-FSlogix-errors.ps1`](#get-fslogix-errorsps1) | FSLogix / Azure Files profile diagnostics on an AVD session host |
+| [`Test-RDSDiagnostics.ps1`](Test-RDSDiagnostics.ps1) ([docs](#test-rdsdiagnosticsps1)) | One-shot health check — services, config, certs, user account, event logs |
+| [`Watch-RDSLive.ps1`](Watch-RDSLive.ps1) ([docs](#watch-rdsliveps1)) | Real-time session + licensing event monitor |
+| [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | FSLogix / Azure Files profile diagnostics on an AVD session host |
 
 ---
 

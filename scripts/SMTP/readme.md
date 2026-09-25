@@ -10,8 +10,8 @@ Scripts for testing SMTP connectivity and authentication against Office 365 (or 
 
 | File | Description |
 |---|---|
-| `testsmtp.ps1` | One-time SMTP test — prompts for password interactively |
-| `testsmtp_5min.ps1` | Recurring test — sends every 5 minutes using a saved password |
+| [`testsmtp.ps1`](testsmtp.ps1) | One-time SMTP test — prompts for password interactively |
+| [`testsmtp_5min.ps1`](testsmtp_5min.ps1) | Recurring test — sends every 5 minutes using a saved password |
 
 ---
 

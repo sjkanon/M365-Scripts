@@ -14,7 +14,7 @@ Intune-deployed desktop customization: corporate wallpaper + lockscreen, and a t
 | [`Add Lockscreen to start and desktop/`](Add%20Lockscreen%20to%20start%20and%20desktop/readme.md) | Pins a "Lock Workstation" shortcut to Start |
 | [`ClaudeDesktop/`](ClaudeDesktop/readme.md) | Machine-wide Claude Desktop deployment, one script run monthly to stay current |
 | [`CoworkPrerequisites/`](CoworkPrerequisites/readme.md) | Windows-side Cowork prerequisites (`VirtualMachinePlatform`, Fast Startup) — its own independent Win32 app, not bundled into Claude Desktop |
-| [`Deploy-AllIntune.ps1`](#deploy-allintuneps1) | Runs both of the above deploy scripts in one call |
+| [`Deploy-AllIntune.ps1`](Deploy-AllIntune.ps1) ([docs](#deploy-allintuneps1)) | Runs both of the above deploy scripts in one call |
 
 ---
 

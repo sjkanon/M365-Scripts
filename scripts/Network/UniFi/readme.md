@@ -8,9 +8,9 @@ Tooling for a UniFi Network Controller or UniFi OS console (UDM/UDM-Pro/UDR). Ta
 
 | Script | Description |
 |--------|-------------|
-| [`Get-UnifiNetworkReport.ps1`](#get-unifinetworkreportps1) | Generate an HTML network documentation report (devices, firmware, uptime) |
-| [`Update-UnifiFirmware.ps1`](#update-unififirmwareps1) | List and optionally trigger firmware upgrades across sites |
-| `UnifiApi.ps1` | Shared login/session helper, dot-sourced automatically by the two scripts above — not meant to be run directly |
+| [`Get-UnifiNetworkReport.ps1`](Get-UnifiNetworkReport.ps1) ([docs](#get-unifinetworkreportps1)) | Generate an HTML network documentation report (devices, firmware, uptime) |
+| [`Update-UnifiFirmware.ps1`](Update-UnifiFirmware.ps1) ([docs](#update-unififirmwareps1)) | List and optionally trigger firmware upgrades across sites |
+| [`UnifiApi.ps1`](UnifiApi.ps1) | Shared login/session helper, dot-sourced automatically by the two scripts above — not meant to be run directly |
 
 ---
 

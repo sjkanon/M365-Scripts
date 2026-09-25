@@ -10,9 +10,9 @@ All three scripts authenticate app-only against each customer tenant using a mul
 
 | Script | Description |
 |--------|-------------|
-| [`Get-MultiTenantLicenseReport.ps1`](#get-multitenantlicensereportps1) | CSV report of licensed users across all (or selected) customer tenants |
-| [`Update-BreakGlassAdminPassword.ps1`](#update-breakglassadminpasswordps1) | Rotate a break-glass account's password in one tenant or across all customers |
-| [`New-CustomerPortalIndex.ps1`](#new-customerportalindexps1) | Generate an HTML index of admin-portal quick links per customer tenant |
+| [`Get-MultiTenantLicenseReport.ps1`](Get-MultiTenantLicenseReport.ps1) ([docs](#get-multitenantlicensereportps1)) | CSV report of licensed users across all (or selected) customer tenants |
+| [`Update-BreakGlassAdminPassword.ps1`](Update-BreakGlassAdminPassword.ps1) ([docs](#update-breakglassadminpasswordps1)) | Rotate a break-glass account's password in one tenant or across all customers |
+| [`New-CustomerPortalIndex.ps1`](New-CustomerPortalIndex.ps1) ([docs](#new-customerportalindexps1)) | Generate an HTML index of admin-portal quick links per customer tenant |
 
 ---
 

@@ -8,19 +8,19 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 
 | Script | Description |
 |--------|-------------|
-| [`Set-UserManager.ps1`](#set-usermanagerps1) | Report and optionally bulk-set the manager for a set of Entra ID users |
-| [`Remove-M365Users.ps1`](#remove-m365usersps1) | Bulk-delete M365 user accounts (dry-run by default) |
-| [`New-M365User.ps1`](#new-m365userps1) | Create a single M365 user, optional license |
-| [`Import-M365Users.ps1`](#import-m365usersps1) | Bulk-create M365 users from CSV (dry-run by default) |
-| [`Get-M365UserLicenses.ps1`](#get-m365userlicensesps1) | Report assigned licenses for a list of users |
-| [`Import-ConditionalAccessBaseline.ps1`](#import-conditionalaccessbaselineps1) | Import the community Conditional Access baseline |
-| [`Test-M365GroupMembership.ps1`](#test-m365groupmembershipps1) | Audit M365 Group / Teams owners and members |
-| [`Copy-GroupMember.ps1`](#copy-groupmemberps1) | Copy members from one Entra ID group into another (dry-run by default) |
-| [`New-TemporaryConditionalAccessPolicy.ps1`](#new-temporaryconditionalaccesspolicyps1) | Create a temporary CA policy for one user or group |
-| [`Remove-TemporaryConditionalAccessPolicies.ps1`](#remove-temporaryconditionalaccesspoliciesps1) | Remove expired/all temporary CA policies |
-| [`New-UserTemporaryAccessPass.ps1`](#new-usertemporaryaccesspassps1) | Create a TAP code for a user |
-| [`Set-EntraPasskeyMigrationOptOut.ps1`](#set-entrapasskeymigrationoptoutps1) | Defer the Sept 1, 2026 automatic passkey enablement (single tenant or a GDAP list) |
-| [`Phising-rollout.ps1`](#phising-rolloutps1) | Keep a phishing-resistant MFA rollout group and a registered group in sync, both ways |
+| [`Set-UserManager.ps1`](Set-UserManager.ps1) ([docs](#set-usermanagerps1)) | Report and optionally bulk-set the manager for a set of Entra ID users |
+| [`Remove-M365Users.ps1`](Remove-M365Users.ps1) ([docs](#remove-m365usersps1)) | Bulk-delete M365 user accounts (dry-run by default) |
+| [`New-M365User.ps1`](New-M365User.ps1) ([docs](#new-m365userps1)) | Create a single M365 user, optional license |
+| [`Import-M365Users.ps1`](Import-M365Users.ps1) ([docs](#import-m365usersps1)) | Bulk-create M365 users from CSV (dry-run by default) |
+| [`Get-M365UserLicenses.ps1`](Get-M365UserLicenses.ps1) ([docs](#get-m365userlicensesps1)) | Report assigned licenses for a list of users |
+| [`Import-ConditionalAccessBaseline.ps1`](Import-ConditionalAccessBaseline.ps1) ([docs](#import-conditionalaccessbaselineps1)) | Import the community Conditional Access baseline |
+| [`Test-M365GroupMembership.ps1`](Test-M365GroupMembership.ps1) ([docs](#test-m365groupmembershipps1)) | Audit M365 Group / Teams owners and members |
+| [`Copy-GroupMember.ps1`](Copy-GroupMember.ps1) ([docs](#copy-groupmemberps1)) | Copy members from one Entra ID group into another (dry-run by default) |
+| [`New-TemporaryConditionalAccessPolicy.ps1`](New-TemporaryConditionalAccessPolicy.ps1) ([docs](#new-temporaryconditionalaccesspolicyps1)) | Create a temporary CA policy for one user or group |
+| [`Remove-TemporaryConditionalAccessPolicies.ps1`](Remove-TemporaryConditionalAccessPolicies.ps1) ([docs](#remove-temporaryconditionalaccesspoliciesps1)) | Remove expired/all temporary CA policies |
+| [`New-UserTemporaryAccessPass.ps1`](New-UserTemporaryAccessPass.ps1) ([docs](#new-usertemporaryaccesspassps1)) | Create a TAP code for a user |
+| [`Set-EntraPasskeyMigrationOptOut.ps1`](Set-EntraPasskeyMigrationOptOut.ps1) ([docs](#set-entrapasskeymigrationoptoutps1)) | Defer the Sept 1, 2026 automatic passkey enablement (single tenant or a GDAP list) |
+| [`Phising-rollout.ps1`](Phising-rollout.ps1) ([docs](#phising-rolloutps1)) | Keep a phishing-resistant MFA rollout group and a registered group in sync, both ways |
 
 > Dynamic-to-static distribution group conversion (`Set-Distributionlist-dynamic-static.ps1`) lives in [`scripts/Exchange/`](../Exchange/readme.md) — it uses Exchange Online cmdlets, not Graph.
 

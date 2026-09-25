@@ -8,7 +8,7 @@ Tenant-wide Intune / Endpoint Manager policy inventory.
 
 | Script | Description |
 |--------|-------------|
-| [`Get-IntunePolicyInventory.ps1`](#get-intunepolicyinventoryps1) | Inventory all compliance/configuration/app protection/Endpoint Security policies |
+| [`Get-IntunePolicyInventory.ps1`](Get-IntunePolicyInventory.ps1) ([docs](#get-intunepolicyinventoryps1)) | Inventory all compliance/configuration/app protection/Endpoint Security policies |
 
 ---
 

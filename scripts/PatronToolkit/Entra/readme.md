@@ -8,8 +8,8 @@ MFA/SSPR registration reporting and Conditional Access policy backup via Microso
 
 | Script | Description |
 |--------|-------------|
-| [`Get-MfaRegistrationReport.ps1`](#get-mfaregistrationreportps1) | Report MFA/SSPR registration status for all or selected users |
-| [`Export-ConditionalAccessPolicies.ps1`](#export-conditionalaccesspoliciesps1) | Back up all Conditional Access policies and named locations to JSON/CSV |
+| [`Get-MfaRegistrationReport.ps1`](Get-MfaRegistrationReport.ps1) ([docs](#get-mfaregistrationreportps1)) | Report MFA/SSPR registration status for all or selected users |
+| [`Export-ConditionalAccessPolicies.ps1`](Export-ConditionalAccessPolicies.ps1) ([docs](#export-conditionalaccesspoliciesps1)) | Back up all Conditional Access policies and named locations to JSON/CSV |
 
 ---
 

@@ -8,8 +8,8 @@ Small workstation configuration utilities.
 
 | Script | Description |
 |--------|-------------|
-| [`Set-NumLockDefault.ps1`](#set-numlockdefaultps1) | Set the default Num Lock state for new profiles and the sign-in screen |
-| [`New-LockWorkstationShortcut.ps1`](#new-lockworkstationshortcutps1) | Create a Lock Workstation shortcut |
+| [`Set-NumLockDefault.ps1`](Set-NumLockDefault.ps1) ([docs](#set-numlockdefaultps1)) | Set the default Num Lock state for new profiles and the sign-in screen |
+| [`New-LockWorkstationShortcut.ps1`](New-LockWorkstationShortcut.ps1) ([docs](#new-lockworkstationshortcutps1)) | Create a Lock Workstation shortcut |
 
 ---
 
