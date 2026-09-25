@@ -381,6 +381,25 @@ Report last logon date for all computer objects in one or more OUs and export to
 - CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, PasswordLastSet, DaysSincePasswordSet, OS, IPv4, OU path, Created, Description
 - Supports multiple OUs in one run; `-IncludeDisabled` to include disabled objects
 
+#### SharePoint Permissions Report
+
+**Get-SharePointPermissionsReport.ps1** — who can reach which SharePoint, through which group, at what level. Read-only: every call it makes is a GET.
+
+- Starts from one consolidated view — one row per person per site, naming the group their access runs through and the level it grants. Grants and membership otherwise live in separate reports, and "Site Owners has Full Control" plus "Site Owners contains five people" is not yet an answer
+- Underneath it: site collection admins, web/list/item role assignments, inheritance breaks, SharePoint groups with their membership, Entra groups resolved to transitive membership, sharing links with their kind, external and guest principals, `Everyone` grants
+- An item is only reported as its own scope when it has unique permissions, so the report maps the permission structure instead of repeating a row per file
+- Role assignments are not readable through Graph and are not covered by SharePoint's Read/Write/Manage roles, so it creates a short-lived certificate-backed app with `Sites.FullControl.All` and deletes it again. A client secret cannot work — SharePoint Online refuses secret-based app-only tokens
+- `-Excel` writes one workbook with a sheet per report plus ready-made pivots; the CSVs are always written and the workbook is built from them
+- Resumes after an interruption from the last completed list, and says at the end whether every scope could actually be read
+
+#### SharePoint Storage Report
+
+**Get-SharePointStorageReport.ps1** — tenant-wide storage per site, library, version history and recycle bin, with site collection totals comparable to the admin centre.
+
+#### SharePoint Version Cleanup
+
+**Remove-SharePointFileVersionsByDate.ps1** — report (and with `-Apply`, delete) file versions older than a cutoff date. The current version is always preserved.
+
 #### Licensing Report
 
 Monthly licensing and Azure cost report generator.
@@ -697,7 +716,7 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
     │   ├── Get-SharePointStorageReport.ps1  ← tenant-wide SharePoint storage report
-    │   ├── Get-SharePointPermissionsReport.ps1 ← who has access to what, at every level, to CSV
+    │   ├── Get-SharePointPermissionsReport.ps1 ← who has access to what and via which group, to CSV + Excel
     │   ├── Remove-SharePointFileVersionsByDate.ps1 ← delete file versions older than a date
     │   └── Licensing/
     │       ├── readme.md
@@ -783,6 +802,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-25 (19)
+| Change |
+|--------|
+| Audited the documentation against the repository rules rather than assuming it was complete, and found three gaps. Parameters checked out: all 19 of `Get-SharePointPermissionsReport.ps1`'s parameters are present in the comment-based help and in the folder readme's parameter table, with nothing stale in either |
+| `scripts/Reporting/readme.md` had no `## Scripts` table at all, while `Exchange/`, `Entra/`, `Device/` and `SharePoint/` all have one. Added it, covering all five entries in the folder — not just the new script — so the table describes the folder rather than the last change to it. Every link and anchor in it was verified to resolve |
+| The root readme's `### 📊 Reporting` category listed only the Computer Last Logon and Licensing reports. All three SharePoint reporting scripts were missing from it, including two that predate this work. Added an entry for `Get-SharePointPermissionsReport.ps1` and short ones for `Get-SharePointStorageReport.ps1` and `Remove-SharePointFileVersionsByDate.ps1` |
+| The repository tree still described the permissions report as going "to CSV", which stopped being true when `-Excel` was added; it now says CSV + Excel. The `menu.ps1` label said "who has access to what, at every level", which describes the old shape of the report rather than the consolidated per-site view it now leads with |
+| Confirmed no action needed for `f.ps1`: its index rebuilds itself when a script's write time changes, so `f-sharepointpermissionsreport -Excel` picks up new parameters without `f-refresh` |
 
 ### 2026-09-25 (18)
 | Change |
