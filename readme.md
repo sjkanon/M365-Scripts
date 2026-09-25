@@ -784,6 +784,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (15)
+| Change |
+|--------|
+| First complete live run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1`: 130 webs, 2066 lists, 453 unique scopes, 1554 grants, 83 sharing links, 13 external grants, 111 `Everyone` grants. Three faults in the output itself, all found by reading the produced CSVs rather than the logs |
+| `-IncludeEffectiveAccess` produced an empty file on a tenant with 1554 grants and over a thousand resolved members. The guard was `if ($IncludeEffectiveAccess -and $EffectiveRows)`, and **an empty `List[object]` is falsy in PowerShell** — so the test failed on the very first row and the list could never fill, which kept it empty, which kept the test failing. Now an explicit `$null -ne` check |
+| 121 of the 158 "could not be read" rows were a single hidden system list, `Lijst met gebruikersgegevens` (template 112, the User Information List), on every site. SharePoint rejects `/items` on it with `400` at every `$select` width, including the narrowest rung of the ladder. Its items are directory records rather than content, so item-level scopes there mean nothing for an access review — the item sweep now skips template 112 and says so, while still reporting the list's own scope |
+| The remaining 37 were stale: error rows written by the interrupted earlier attempt, carried into the final CSV by the resume even though those lists succeeded on the retry. A failed unit is deliberately left unmarked so it is retried, but nothing removed its old rows. Detail rows now carry the `UnitKey` that produced them, and a row whose unit is marked complete is dropped when the final CSV is written — so the incompleteness count describes the file the reader opens |
+| The summary is now built from the published detail CSV instead of the partial, so its counts and the file agree |
+| Verified locally with 158 checks across eight suites (26 new): effective rows are emitted one per resolved user with the group they came through, a null list is tolerated, superseded error rows are dropped while still-failing and unkeyed ones survive, nothing else is lost, and the summary counts only what was published. Two earlier assertions were found to be mis-parenthesised — one of them a false pass — and corrected. **Fixes to this run's findings are not themselves verified against a live tenant yet** |
+
 ### 2026-09-25 (14)
 | Change |
 |--------|
