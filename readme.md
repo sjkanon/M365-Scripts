@@ -777,6 +777,22 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (7)
+| Change |
+|--------|
+| Merged the readable parts of an older IT Glue version of this same procedure into `Update-TeamsClient-ITGlue.md`: the one-sentence statement of what the procedure covers, and the ✅/❌ shape for "does this script fit this ticket", including the two user complaints that version listed and ours did not — Teams hanging on startup and Teams closing unexpectedly |
+| The two versions disagreed on who may run the update — the older one puts it at level 1, ours at level 2 — which serves a service desk worse than either answer on its own. The blanket level is replaced by a "wie mag wat" table that assigns a level per action: checking stays level 1, the update and the repairs sit at level 2, and the three switches that skip the signature check or edit the Windows Installer database sit at level 3. Changing the escalation policy is now one table, not a re-read of the document |
+| Deliberately not merged, measured against the script rather than judged by eye: that version's parameter table covers 8 of the 16 parameters, states that classic Teams is never touched (`-RemoveClassicTeams` does exactly that), and shows two sample output lines the script does not produce — `Found MSTeams ...` and `Teams installation completed` |
+| Numbering fix: two entries were both labelled `(4)`. The IT Glue sync is newer than the script-index entry above it, so it is now `(6)` and sits in the order the work happened |
+
+### 2026-09-25 (6)
+| Change |
+|--------|
+| The IT Glue document was brought back in line with the script, checked by comparing its text against the parameter block rather than by reading it: it was missing `-BootstrapperUrl` and `-SkipSignatureCheck` entirely, and its NinjaOne variable table was missing `removeWebRtcRedirector`, `clearOrphanedAddInRegistration`, `skipSignatureCheck` and `webRtcUrl`. All three documents now cover all 16 parameters, and the variable table all 16 environment variables |
+| That same comparison found a real gap in the script: every other text field could be set from a NinjaOne variable except `bootstrapperUrl`, which was simply never read. An admin who set it would have had it silently ignored. It is read now, alongside `webRtcUrl` |
+| Two statements in the IT Glue document were no longer true. "It does not touch classic Teams" is only true without `-RemoveClassicTeams`, and the plain-language summary still promised that every copy of the add-in is removed during an update - that sweep is now conditional on a replacement being installable |
+| Added a level 3 walkthrough for the `1612` + `1638` deadlock the production host hit: what each code means, the read-only command that says whether Windows Installer still has its cached MSI, which of the two outcomes needs `-ClearOrphanedAddInRegistration`, and the note that starting Teams and restarting Outlook gives a user the meeting button back in the meantime |
+
 ### 2026-09-25 (5)
 | Change |
 |--------|
@@ -797,14 +813,6 @@ These scripts are provided as-is. Always test in a non-production environment be
 | `-ClearOrphanedAddInRegistration` is the way out of the state that host is in. An uninstall answering `1612` means Windows Installer has lost the cached MSI it needs and can no longer remove the product by any supported means, while its registration keeps refusing every reinstall. The switch makes the installer forget that one product: its keys under `Installer\Products`, `Installer\Features` and `Installer\UserData\S-1-5-18\Products`, its entry under the upgrade code, and the Programs and Features entry. What MsiZap used to do, scoped to one product, only after msiexec has proved it cannot, off by default, and every key through `ShouldProcess` |
 | Finding those keys needs the ProductCode as Windows Installer's 32-character "packed" GUID. That transform was validated before anything used it to point at keys for deletion: of 57 GUID-named uninstall entries on a workstation, the 32 with machine-wide product data all mapped onto an existing packed key with an identical `DisplayName`, and the 25 that did not are per-user installs living under the user's own SID |
 | Verified read-only against three real products: each yields three product keys plus exactly one upgrade-code entry, and the constructed path is readable as written. A bogus product code returns nothing and an unknown product returns no keys, so the cleanup cannot fire on thin air. **Untested:** the removal itself, and the reinstall that should follow it |
-
-### 2026-09-25 (4)
-| Change |
-|--------|
-| The IT Glue document was brought back in line with the script, checked by comparing its text against the parameter block rather than by reading it: it was missing `-BootstrapperUrl` and `-SkipSignatureCheck` entirely, and its NinjaOne variable table was missing `removeWebRtcRedirector`, `clearOrphanedAddInRegistration`, `skipSignatureCheck` and `webRtcUrl`. All three documents now cover all 16 parameters, and the variable table all 16 environment variables |
-| That same comparison found a real gap in the script: every other text field could be set from a NinjaOne variable except `bootstrapperUrl`, which was simply never read. An admin who set it would have had it silently ignored. It is read now, alongside `webRtcUrl` |
-| Two statements in the IT Glue document were no longer true. "It does not touch classic Teams" is only true without `-RemoveClassicTeams`, and the plain-language summary still promised that every copy of the add-in is removed during an update - that sweep is now conditional on a replacement being installable |
-| Added a level 3 walkthrough for the `1612` + `1638` deadlock the production host hit: what each code means, the read-only command that says whether Windows Installer still has its cached MSI, which of the two outcomes needs `-ClearOrphanedAddInRegistration`, and the note that starting Teams and restarting Outlook gives a user the meeting button back in the meantime |
 
 ### 2026-09-25 (3)
 | Change |
