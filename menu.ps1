@@ -653,6 +653,24 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='M'; FKey=$null; Category='Startup'
+        Label='Convert-MarkdownToHtml — build a styled HTML page from a markdown doc (IT Glue)'
+        Script="$ROOT\scripts\Startup\Convert-MarkdownToHtml.ps1"
+        Params={
+            $default = "$ROOT\scripts\Device\Update-TeamsClient-ITGlue.md"
+            $path = Read-Host "  Markdown file [$default]"
+            if (-not $path) { $path = $default }
+            $a = @{ Path = $path }
+            $check = Read-Host '  Only check whether the HTML is stale, change nothing? [y/N]'
+            if ($check -match '^[Yy]') { $a['Check'] = $true }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='L'; FKey=$null; Category='Startup'
+        Label='Test-MarkdownLinks  — check every readme link: files and in-page anchors'
+        Script="$ROOT\scripts\Startup\Test-MarkdownLinks.ps1"
+        Params={ return @{} }
+    }
     [PSCustomObject]@{ Key='A'; FKey=[ConsoleKey]::F10; Category='Reporting'
         Label='Licensing-Report    — generate monthly Pax8 + Ingram Excel report'
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"

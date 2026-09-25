@@ -8,11 +8,13 @@ Entry-point scripts and the core M365 function library.
 
 | File | Description |
 |------|-------------|
-| `functies.ps1` | M365 function library — dot-sourced by `menu.ps1` on first use |
-| `Install-Modules.ps1` | Bootstrap script — installs and imports all required PowerShell modules |
-| `Update-Modules.ps1` | Updates every installed PowerShell module to its latest version |
-| `Test-PowerShellSyntax.ps1` | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
-| `Update-ScriptIndex.ps1` | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
+| [`functies.ps1`](functies.ps1) | M365 function library — dot-sourced by `menu.ps1` on first use |
+| [`Install-Modules.ps1`](Install-Modules.ps1) | Bootstrap script — installs and imports all required PowerShell modules |
+| [`Update-Modules.ps1`](Update-Modules.ps1) | Updates every installed PowerShell module to its latest version |
+| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
+| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
+| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Checks every link in every readme — files that must exist, anchors that must match a heading |
+| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Builds a self-contained, styled HTML page from a markdown document — for pasting into IT Glue or printing |
 
 ---
 
@@ -211,3 +213,93 @@ pwsh -File scripts/Startup/Update-ScriptIndex.ps1 -Check
 > on every commit.
 
 Exit codes: `0` = written or already current, `1` = `-Check` found the page stale.
+
+---
+
+## Convert-MarkdownToHtml.ps1
+
+The service desk documents in this repo are markdown, but IT Glue and most ticket systems want rich text. Converting by hand means the HTML is stale the first time the markdown changes — and `Update-TeamsClient-ITGlue.md` changed six times in two days — so the page is generated instead.
+
+Supported, because it is what these documents use: headings, tables with a header row, fenced code blocks (including the indented ones inside numbered steps), blockquotes, ordered and unordered lists, horizontal rules, and inline code, bold, italic and links. Anything else passes through as text rather than being guessed at.
+
+The CSS is embedded, so the page is standalone — nothing to host, and nothing to break when the file is copied elsewhere. Void elements are written self-closing (`<hr/>`, `<br/>`), so the output parses as XML as well as HTML and can be checked structurally instead of by eye.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Path` | The markdown file to convert (required) |
+| `-Destination` | Where to write the HTML (default: same folder and name, `.html`) |
+| `-Title` | Page and browser title (default: the document's first `#` heading) |
+| `-Check` | Write nothing; exit `1` when the HTML on disk no longer matches the markdown |
+| `-WhatIf` | Show what would be written and change nothing |
+
+**Examples**
+
+```powershell
+# Build the IT Glue page next to its markdown source
+pwsh -File scripts/Startup/Convert-MarkdownToHtml.ps1 -Path scripts/Device/Update-TeamsClient-ITGlue.md
+
+# Has the committed page fallen behind? Exit code 1 if it has
+pwsh -File scripts/Startup/Convert-MarkdownToHtml.ps1 -Path scripts/Device/Update-TeamsClient-ITGlue.md -Check
+```
+
+From the menu: `menu.ps1`, key **M**. It offers the Teams IT Glue document as the default path and asks whether to only check.
+
+**Notes**
+
+- **Getting it into IT Glue:** open the `.html` in a browser, select all, copy, and paste into the IT Glue document editor. The editor keeps the headings, tables and code blocks and drops the CSS — which is what you want there, since IT Glue applies its own.
+- The generated-on line is excluded from the `-Check` comparison, so rerunning it on an unchanged document does not report a difference.
+- Rerun it after editing the markdown. `-Check` is what a pre-commit hook or a pipeline would call.
+
+Exit codes: `0` = written or already current, `1` = `-Check` found the page stale, or the page does not exist yet.
+
+---
+
+## Test-MarkdownLinks.ps1
+
+Walks every `.md` file in the repository and reports links that go nowhere. A dead
+link in a readme is invisible until someone clicks it, which is usually the moment
+they needed it.
+
+It checks two kinds:
+
+| Kind | What can go wrong |
+|------|-------------------|
+| A link to a file or folder | The file was renamed, moved or removed and the readme still points at the old path. Percent-encoded spaces (`Time%20sync/readme.md`) are decoded before the path is tested, because that is what GitHub serves |
+| An in-page anchor (`#set-usermanagerps1`) | The heading it points at was renamed, or the anchor was typed by hand and never matched. These rot in silence — nothing warns you |
+
+Anchors are resolved the way GitHub builds them: the heading is lower-cased, markdown
+formatting is stripped, everything that is not a letter, digit, space, `_` or `-` is
+dropped, and spaces become hyphens — so `### Watch-RDSLive.ps1` is `#watch-rdsliveps1`,
+not `#watch-rdslivesps1`. Repeated headings get GitHub's `-1`, `-2` suffix. Invisible
+characters (variation selectors, zero-width joiners — the bytes that make an emoji an
+emoji) are stripped from both the heading and the link before they are compared, so an
+emoji heading in the table of contents does not read as broken.
+
+Fenced code blocks and inline code are skipped, so a readme that *documents* link
+syntax does not report itself as broken — the `([docs](#…))` example two paragraphs up
+is text about links, not a link.
+
+External links (`http`, `https`, `mailto`) are counted but not fetched: this is a
+structural check, and it has to work offline.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Root` | Repository root (default: two levels above this script) |
+| `-Path` | Check one file or folder instead of the whole repository |
+
+**Examples**
+
+```powershell
+# Check every readme in the repository
+pwsh -File scripts/Startup/Test-MarkdownLinks.ps1
+
+# Only one workload folder
+pwsh -File scripts/Startup/Test-MarkdownLinks.ps1 -Path scripts/Exchange
+```
+
+Exit codes: `0` = every internal link resolves, `1` = something is broken (each one
+listed with the file it is in and why it failed).
