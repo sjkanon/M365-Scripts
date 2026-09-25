@@ -652,7 +652,11 @@ function Invoke-SPGet {
                 }
                 throw ("SharePoint refused the token (401) for {0}.{1}{2}" -f $resourceRoot, $(if ($diag) { " $diag" } else { '' }), $hint)
             }
-            if ($statusCode -in @(403, 404) -and -not $ThrowOnDenied) { return $null }
+            if ($statusCode -in @(403, 404)) {
+                if (-not $ThrowOnDenied) { return $null }
+                $what = if ($statusCode -eq 403) { 'Access denied' } else { 'Not found' }
+                throw ("{0} (HTTP {1}) reading {2} — this scope could not be read, so its permissions are unknown rather than empty." -f $what, $statusCode, $Uri)
+            }
             $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
             if (-not $isRetryable -and -not $statusCode) {
                 $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
@@ -675,7 +679,8 @@ function Invoke-SPCollectionPaged {
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
         [Parameter(Mandatory = $true)][scriptblock]$OnPage,
-        [int] $MaxPages = 200000
+        [int] $MaxPages = 200000,
+        [switch] $ThrowOnDenied
     )
     $next = $Uri
     $page = 0
@@ -688,7 +693,7 @@ function Invoke-SPCollectionPaged {
             Write-ProgressHost -Message "[WARN] SharePoint repeated a paging link — stopping this collection to avoid looping." -ForegroundColor Yellow
             break
         }
-        $resp = Invoke-SPGet -Uri $next
+        $resp = Invoke-SPGet -Uri $next -ThrowOnDenied:$ThrowOnDenied
         if (-not $resp) { break }
         $page++
 
@@ -712,10 +717,11 @@ function Get-SPCollection {
     # Invoke-SPCollectionPaged.
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
-        [int] $MaxPages = 200000
+        [int] $MaxPages = 200000,
+        [switch] $ThrowOnDenied
     )
     $rows = [System.Collections.Generic.List[object]]::new()
-    Invoke-SPCollectionPaged -Uri $Uri -MaxPages $MaxPages -OnPage {
+    Invoke-SPCollectionPaged -Uri $Uri -MaxPages $MaxPages -ThrowOnDenied:$ThrowOnDenied -OnPage {
         param($Values)
         foreach ($v in $Values) { $rows.Add($v) | Out-Null }
     }
@@ -1302,7 +1308,10 @@ function ConvertTo-PermissionRows {
     # Turns one SharePoint roleassignments response into flat CSV rows — one per principal per
     # scope, with the permission levels joined, plus (optionally) the resolved people behind it.
     param(
-        [Parameter(Mandatory = $true)][object[]]$RoleAssignments,
+        # Empty is a legitimate answer: a scope can have unique permissions and no role assignments
+        # left on it at all. Without AllowEmptyCollection a Mandatory [object[]] rejects @() outright,
+        # which turned every such list into "Cannot bind argument to parameter 'RoleAssignments'".
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$RoleAssignments,
         [Parameter(Mandatory = $true)][hashtable]$ScopeInfo,
         [System.Collections.Generic.List[object]]$EffectiveRows
     )
@@ -1381,9 +1390,14 @@ function ConvertTo-PermissionRows {
 }
 
 function Get-ScopeRoleAssignments {
+    # -ThrowOnDenied matters here specifically. Everywhere else a swallowed 403/404 costs one
+    # object out of a sweep; on role assignments it would come back as an empty collection, and an
+    # empty collection reads as "nobody has rights on this scope". Not being allowed to look is a
+    # different fact from there being nothing to see, and only one of them belongs in a report
+    # about who has access.
     param([Parameter(Mandatory = $true)][string]$Uri)
     $expand = "?`$expand=Member,RoleDefinitionBindings&`$select=PrincipalId,Member/Id,Member/Title,Member/LoginName,Member/Email,Member/PrincipalType,RoleDefinitionBindings/Name,RoleDefinitionBindings/Id"
-    return Get-SPCollection -Uri ($Uri + $expand)
+    return Get-SPCollection -Uri ($Uri + $expand) -ThrowOnDenied
 }
 
 function Get-ItemRoleAssignmentsParallel {
@@ -1915,7 +1929,17 @@ try {
                     # fetch role assignments for the items that actually have their own scope.
                     # Paging by $top uses $skiptoken under the hood, so this does not trip the
                     # 5000-item list view threshold the way a $filter or $orderby query would.
-                    $itemsUri = "{0}/_api/web/lists(guid'{1}')/items?`$select=Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef,FileLeafRef,Title,Modified&`$top=2000" -f $webUrl, $listId
+                    # Not every list carries every one of these fields. The galleries in particular
+                    # (Theme Gallery, Master Page Gallery) answer 400 to a $select naming fields
+                    # their schema does not have, and a 400 is not something retrying fixes. So
+                    # step down to a narrower $select instead of writing the list off: losing the
+                    # file name on a handful of system lists beats losing their unique scopes.
+                    $selectLadder = @(
+                        'Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef,FileLeafRef,Title,Modified'
+                        'Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef,FileLeafRef,Modified'
+                        'Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef'
+                        'Id,HasUniqueRoleAssignments'
+                    )
 
                     # Only the items that actually have their own scope are kept. Materialising a
                     # whole library first would mean holding every one of a million rows in memory
@@ -1926,19 +1950,37 @@ try {
                     # Property writes on an object do reach back, so the tally lives on one.
                     $sweep = [PSCustomObject]@{ Scanned = 0 }
                     $itemSweepFailed = $null
-                    try {
-                        Invoke-SPCollectionPaged -Uri $itemsUri -OnPage {
-                            param($PageItems)
-                            $sweep.Scanned += $PageItems.Count
-                            foreach ($it in $PageItems) {
-                                if ([bool]$it.HasUniqueRoleAssignments) { $uniqueItems.Add($it) | Out-Null }
+
+                    foreach ($selectFields in $selectLadder) {
+                        $itemsUri = "{0}/_api/web/lists(guid'{1}')/items?`$select={2}&`$top=2000" -f $webUrl, $listId, $selectFields
+                        $uniqueItems.Clear()
+                        $sweep.Scanned  = 0
+                        $itemSweepFailed = $null
+
+                        try {
+                            Invoke-SPCollectionPaged -Uri $itemsUri -OnPage {
+                                param($PageItems)
+                                $sweep.Scanned += $PageItems.Count
+                                foreach ($it in $PageItems) {
+                                    if ([bool]$it.HasUniqueRoleAssignments) { $uniqueItems.Add($it) | Out-Null }
+                                }
+                                Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Items doorzoeken op eigen rechten' -Status (
+                                    "{0} — {1} items, {2} met eigen rechten" -f $script:CurrentScanLabel, $sweep.Scanned, $uniqueItems.Count)
                             }
-                            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Items doorzoeken op eigen rechten' -Status (
-                                "{0} — {1} items, {2} met eigen rechten" -f $script:CurrentScanLabel, $sweep.Scanned, $uniqueItems.Count)
+                        } catch {
+                            $itemSweepFailed = $_.Exception.Message
                         }
-                    } catch {
-                        $itemSweepFailed = $_.Exception.Message
-                        Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
+
+                        if (-not $itemSweepFailed) { break }
+                        # Only a rejected query is worth narrowing. Anything else — denied,
+                        # throttled, gone — answers the same way however few fields we ask for.
+                        if ($itemSweepFailed -notmatch '400|Bad Request') { break }
+
+                        if ($selectFields -eq $selectLadder[-1]) {
+                            Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
+                        } else {
+                            Write-ProgressHost -Message ("    [INFO] {0} rejected those fields — retrying with fewer." -f $list.Title)
+                        }
                     }
 
                     # A failed sweep is a hole in the report, so it goes in the CSV. Otherwise the
