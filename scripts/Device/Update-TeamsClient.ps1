@@ -59,10 +59,18 @@
     Windows App 2.0.352.0 or newer (the classic Remote Desktop client is no longer
     supported). Preflight reports whichever side it is standing on, and on an endpoint
     it also checks the policies that block the staging - BlockNonAdminUserInstall,
-    AllowAllTrustedApps and AppLocker. IsWVDEnvironment stays required either way, and
-    Microsoft still advises keeping the redirector as a fallback for endpoints that
-    cannot do SlimCore, so -AvdOptimizations keeps installing it. -RemoveWebRtcRedirector
-    is the other direction, for a fleet that has finished moving: it uninstalls the
+    AllowAllTrustedApps and AppLocker. AppLocker is read rather than merely detected:
+    only the packaged-app (Appx) collection can stop an MSIX, a collection holding
+    rules with enforcement "not configured" is enforced all the same, and nothing is
+    enforced at all while the Application Identity service is stopped. The registry
+    path, the mode per collection, the service state and the rule names are printed,
+    and a policy found on a session host is named for reference rather than warned
+    about, because the staging it would block happens on the endpoint.
+
+    IsWVDEnvironment stays required either way, and Microsoft still advises keeping
+    the redirector as a fallback for endpoints that cannot do SlimCore, so
+    -AvdOptimizations keeps installing it. -RemoveWebRtcRedirector is the other
+    direction, for a fleet that has finished moving: it uninstalls the
     redirector and leaves everything else alone. Off by default, and it should stay
     off until every endpoint really does run Windows App 2.0.352.0 or newer - an
     endpoint that cannot do SlimCore and no longer finds the redirector renders media
@@ -965,12 +973,121 @@ function Write-TeamsVdiEventStatus {
     }
 }
 
+$AppLockerPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\SrpV2'
+
+# What in a rule makes it relevant to SlimCore: the packages by name, or a publisher
+# rule broad enough to cover them (they are signed by Microsoft like everything else).
+$SlimCoreRulePattern         = '(?i)SlimCore|Microsoft\.Teams'
+$MicrosoftPublisherPattern   = '(?i)O=MICROSOFT CORPORATION'
+
+function Get-AppLockerDetail {
+    <#
+        What AppLocker actually says, instead of only whether it exists. Three things
+        decide whether it can stop the SlimCore MSIX, and each is easy to get wrong:
+
+          - only the packaged-app collection (Appx) applies to an MSIX at all. An
+            enforced Exe or Msi collection has nothing to do with it;
+          - "not configured" does not mean harmless. Microsoft: a collection that
+            holds at least one rule and has enforcement not configured is enforced.
+            Only an explicit 0 (audit only) lets everything through;
+          - nothing is enforced at all while the Application Identity service is not
+            running, which is worth saying out loud rather than assuming either way.
+
+        Returns $null when AppLocker is not configured on this machine. -Root exists
+        so the reader can be pointed at a rebuilt policy in a test.
+    #>
+    param([string] $Root = $AppLockerPolicyPath)
+
+    if (-not (Test-Path $Root)) { return $null }
+
+    $collections = [System.Collections.Generic.List[object]]::new()
+    foreach ($key in @(Get-ChildItem -Path $Root -ErrorAction SilentlyContinue)) {
+        $mode  = Get-PropertyValue (Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue) 'EnforcementMode'
+        $rules = [System.Collections.Generic.List[object]]::new()
+
+        foreach ($ruleKey in @(Get-ChildItem -Path $key.PSPath -ErrorAction SilentlyContinue)) {
+            $xml = Get-PropertyValue (Get-ItemProperty -Path $ruleKey.PSPath -ErrorAction SilentlyContinue) 'Value'
+            if (-not $xml) { continue }
+            $name   = if ($xml -match 'Name="([^"]*)"')   { $Matches[1] } else { $ruleKey.PSChildName }
+            $action = if ($xml -match 'Action="([^"]*)"') { $Matches[1] } else { 'unknown' }
+            $rules.Add([PSCustomObject]@{ Name = $name; Action = $action; Xml = [string] $xml })
+        }
+
+        $enforced = if ($mode -eq 1) { $true } elseif ($mode -eq 0) { $false } else { $rules.Count -gt 0 }
+        $label    = if ($mode -eq 1) { 'enforced' } elseif ($mode -eq 0) { 'audit only' }
+                    elseif ($rules.Count -gt 0) { 'enforced (enforcement not configured, which still enforces)' }
+                    else { 'no rules' }
+
+        $collections.Add([PSCustomObject]@{
+            Name      = $key.PSChildName
+            RuleCount = $rules.Count
+            Rules     = @($rules)
+            Enforced  = $enforced
+            Mode      = $label
+            Path      = "$Root\$($key.PSChildName)"
+        })
+    }
+
+    $service = Get-Service -Name 'AppIDSvc' -ErrorAction SilentlyContinue
+    return [PSCustomObject]@{
+        Path          = $Root
+        ServiceStatus = if ($service) { [string] $service.Status } else { 'not installed' }
+        Enforcing     = [bool] ($service -and $service.Status -eq 'Running')
+        Collections   = @($collections)
+    }
+}
+
+function Get-AppLockerAppxRule {
+    <# The packaged-app collection, the only one an MSIX ever meets. #>
+    param($Detail)
+    if (-not $Detail) { return $null }
+    return @($Detail.Collections | Where-Object { $_.Name -eq 'Appx' }) | Select-Object -First 1
+}
+
+function Write-AppLockerStatus {
+    <#
+        Where the policy lives and what it says. "AppLocker policy is present" is not
+        something a technician can act on; a registry path, an enforcement mode per
+        collection and the rule names are.
+    #>
+    param([Parameter(Mandatory)] $Detail)
+
+    $summary = foreach ($collection in ($Detail.Collections | Sort-Object Name)) {
+        '{0} {1}' -f $collection.Name, $collection.Mode
+    }
+    Write-Skip "AppLocker policy: $($Detail.Path) - $($summary -join '; ') (Application Identity service: $($Detail.ServiceStatus))"
+
+    $appx = Get-AppLockerAppxRule -Detail $Detail
+    if (-not $appx -or $appx.RuleCount -eq 0) { return }
+
+    # Relevant rules first, then denies, then the rest: truncating the one rule that
+    # decides this away in favour of filler would defeat the point of printing them.
+    $ordered = $appx.Rules | Sort-Object -Property @{ Expression = {
+        if ($_.Xml -match $SlimCoreRulePattern -or $_.Xml -match $MicrosoftPublisherPattern) { 0 }
+        elseif ($_.Action -eq 'Deny') { 1 } else { 2 }
+    } }, Name
+
+    foreach ($rule in ($ordered | Select-Object -First 5)) {
+        Write-Skip "  Appx rule: $($rule.Action) - $($rule.Name)"
+    }
+    if ($appx.RuleCount -gt 5) { Write-Skip "  ... and $($appx.RuleCount - 5) more Appx rule(s)" }
+
+    if (-not $appx.Enforced) { return }
+    if (@($appx.Rules | Where-Object { $_.Action -eq 'Allow' -and $_.Xml -match $SlimCoreRulePattern })) {
+        Write-Ok 'An AppLocker rule already allows the SlimCore packages by name'
+    } elseif (@($appx.Rules | Where-Object { $_.Action -eq 'Allow' -and $_.Xml -match $MicrosoftPublisherPattern })) {
+        Write-Skip '  Rules allowing anything signed by Microsoft Corporation should cover the SlimCore packages - check they are not narrowed to one product name'
+    }
+}
+
 function Get-SlimCoreBlocker {
     <#
         Registry policies Microsoft documents as stopping the SlimCore MSIX from
         staging, with the error code Teams reports for each. They apply wherever the
         staging happens, which is the endpoint.
     #>
+    param($AppLocker)
+
     $blockers = [System.Collections.Generic.List[string]]::new()
 
     foreach ($path in 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\ApplicationManagement',
@@ -984,8 +1101,20 @@ function Get-SlimCoreBlocker {
         }
     }
 
-    if (Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\SrpV2') {
-        $blockers.Add('AppLocker policy is present - without an exception for the SlimCoreVdi packages Teams reports error 10083')
+    # Only the packaged-app collection, only when it is actually enforced, and only
+    # when nothing in it lets the packages through. Warning on the mere presence of
+    # an AppLocker policy cried wolf at every Exe rule ever written.
+    $appx = Get-AppLockerAppxRule -Detail $AppLocker
+    if ($appx -and $appx.Enforced) {
+        $allows = @($appx.Rules | Where-Object {
+            $_.Action -eq 'Allow' -and ($_.Xml -match $SlimCoreRulePattern -or $_.Xml -match $MicrosoftPublisherPattern)
+        })
+        if ($allows.Count -eq 0) {
+            $note = if ($AppLocker.Enforcing) { '' }
+                    else { " (the Application Identity service is $($AppLocker.ServiceStatus), so nothing is enforced at this moment)" }
+            $blockers.Add(("AppLocker enforces packaged apps at {0} with {1} rule(s), none of which allows the SlimCoreVdi packages - Teams reports error 10083{2}" -f
+                           $appx.Path, $appx.RuleCount, $note))
+        }
     }
 
     return ($blockers | Select-Object -Unique)
@@ -1001,11 +1130,21 @@ function Write-SlimCoreStatus {
     #>
     param([version] $TeamsVersion)
 
+    $appLocker = Get-AppLockerDetail
+    $blockers  = @(Get-SlimCoreBlocker -AppLocker $appLocker)
+
     if (Test-AvdSessionHost) {
         if ($TeamsVersion -and $TeamsVersion -lt $SlimCoreMinimumTeamsBuild) {
             Write-Warn "Teams $TeamsVersion is below $SlimCoreMinimumTeamsBuild, the minimum build that can use SlimCore"
         } else {
             Write-Ok "Teams build supports SlimCore - whether it is used depends on the endpoint's Windows App ($SlimCoreMinimumWindowsApp or newer); SlimCore itself is staged there, never here"
+        }
+
+        # Same reason the packages are not looked for here: the staging happens on the
+        # endpoint, so a policy on this host is not what blocks it. It is usually the
+        # same GPO though, which is why it is named rather than hidden.
+        foreach ($blocker in $blockers) {
+            Write-Skip "Policy on this host, for reference - it blocks nothing here because SlimCore stages on the endpoint, but check whether the same policy is linked there: $blocker"
         }
     } else {
         $staged = @(Get-AppxPackage -AllUsers -Name 'Microsoft.Teams.SlimCoreVdiHost*' -ErrorAction SilentlyContinue) |
@@ -1019,9 +1158,11 @@ function Write-SlimCoreStatus {
         } else {
             Write-Skip 'SlimCore is not staged on this endpoint yet - the plugin downloads it on the first optimized connection'
         }
+
+        foreach ($blocker in $blockers) { Write-Warn "SlimCore blocker: $blocker" }
     }
 
-    foreach ($blocker in Get-SlimCoreBlocker) { Write-Warn "SlimCore blocker: $blocker" }
+    if ($appLocker) { Write-AppLockerStatus -Detail $appLocker }
 }
 
 function Save-VerifiedDownload {
