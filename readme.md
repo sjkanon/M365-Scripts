@@ -784,6 +784,17 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (11)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointPermissionsReport.ps1` producing an empty report against a live tenant: all 130 webs came back `[SKIP] Web not accessible with the current permissions`. The temporary App Registration authenticated with a client secret, and **SharePoint Online refuses every app-only token obtained with a secret** — `401` with `x-ms-diagnostics: ... Unsupported app only token`. Graph accepted the same credential, so site enumeration worked and only the `_api` calls failed, which is why it looked like a per-site permissions problem |
+| The temporary app is now given a certificate instead of a secret. It is generated in memory with `CertificateRequest`, registered as a `keyCredential`, and used to sign an RFC 7523 client assertion — it never touches the certificate store or disk, so an interrupted run leaves nothing behind |
+| `Invoke-SPGet` no longer swallows `401` alongside `403`/`404`. A `401` is never per-site — it is the same answer for the whole tenant — and treating it as "this one site is not accessible" is what turned a single credential fault into 130 lines that read like findings. It now throws, with the `x-ms-diagnostics` reason and, for the secret case, what to do about it |
+| Added a SharePoint preflight: one call against the tenant root after connecting, before enumerating anything. Whether SharePoint accepts the credential is one yes/no for the whole run, so it now costs one request to find out instead of a full sweep |
+| `-ClientSecret` now warns at startup that the SharePoint half will fail, and the docs say the same. Graph-only alternatives were considered and rejected: Graph has no endpoint for web role assignments, SharePoint groups, site collection administrators or named permission levels, and would need one `/permissions` call per item instead of one `HasUniqueRoleAssignments` sweep per list |
+| Suppressed a stray `ClientTimeout RetryDelay MaxRetry` table that `Set-MgRequestContext` printed to stdout at the end of every run |
+| Verified locally: 21 checks on certificate generation and the signed assertion, including that the signature verifies against the certificate's public key, that `x5t` matches its SHA-1 hash, and that nothing is written to `Cert:\CurrentUser\My`. The corrected auth path itself is **not yet verified against a live tenant** |
+
 ### 2026-09-25 (10)
 | Change |
 |--------|

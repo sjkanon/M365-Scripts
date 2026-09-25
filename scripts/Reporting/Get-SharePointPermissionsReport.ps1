@@ -38,11 +38,18 @@
         * Graph         Sites.Read.All         — tenant-wide site enumeration
         * Graph         GroupMember.Read.All   — resolving Entra group membership
 
+      That app is authenticated with a certificate, not a secret. This is not a preference:
+      SharePoint Online refuses any app-only token obtained with a client secret, answering 401
+      with x-ms-diagnostics "Unsupported app only token". The certificate is generated in memory
+      for the run, registered on the temporary app, and never written to the certificate store or
+      to disk — there is nothing to clean up afterwards.
+
       The app is deleted again when the run finishes. Despite the Full Control role, this script
       only ever issues HTTP GET requests — it never writes, and it never changes a permission.
 
-      To avoid the temporary app, pass -ClientId + -TenantId + -ClientSecret (or
-      -CertificateThumbprint) for an existing app registration that already holds those roles.
+      To avoid the temporary app, pass -ClientId + -TenantId + -CertificateThumbprint for an
+      existing app registration that already holds those roles. -ClientSecret is accepted for the
+      Graph half but will fail against SharePoint for the reason above.
 
 .PARAMETER SiteUrl
     Optional. Report on a single site collection (including its sub-sites) instead of the tenant.
@@ -58,11 +65,14 @@
     -ClientSecret or -CertificateThumbprint.
 
 .PARAMETER ClientSecret
-    Client secret for an existing app registration.
+    Client secret for an existing app registration. Works for the Graph calls but NOT for the
+    SharePoint ones — SharePoint Online rejects secret-based app-only tokens outright. Prefer
+    -CertificateThumbprint; the script warns if you use this.
 
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for an existing app registration. The certificate must be in
-    Cert:\CurrentUser\My or Cert:\LocalMachine\My and have a private key.
+    Cert:\CurrentUser\My or Cert:\LocalMachine\My and have a private key. This is the supported
+    way to authenticate an existing app against SharePoint Online.
 
 .PARAMETER OutputPath
     Override the default output folder (C:\Temp on Windows).
@@ -171,6 +181,7 @@ $script:ConnectedHere   = $false
 $script:AppClientId     = $null
 $script:AppClientSecret = $null
 $script:AppCertificate  = $null
+$script:AppSigningKey   = $null
 $script:AppTenantId     = $null
 $script:TokenCache      = @{}   # resource root URI -> @{ Headers; Expiry }
 $script:CurrentScanLabel = ''
@@ -273,6 +284,33 @@ function Remove-TempApp {
 # and one SharePoint resource per host (contoso.sharepoint.com and, for OneDrive scans,
 # contoso-my.sharepoint.com are separate audiences and need separate tokens).
 
+function New-SelfSignedAppCertificate {
+    # SharePoint Online refuses an app-only token that was obtained with a client secret — the
+    # request comes back 401 with x-ms-diagnostics "Unsupported app only token." Only a
+    # certificate-backed client credential is accepted against the SharePoint audience, so the
+    # temporary app is given a certificate instead of a password.
+    #
+    # The key is generated in memory and never written to the certificate store or to disk: it
+    # lives as long as the process does, which is already longer than the app registration it
+    # authenticates. Nothing to clean up, and nothing left behind if the run is interrupted.
+    param([string]$Subject = 'CN=SP-PermissionsReport-Temp')
+
+    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+    $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+        $Subject, $rsa,
+        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $cert = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5), [DateTimeOffset]::UtcNow.AddDays(1))
+
+    return [PSCustomObject]@{
+        Certificate = $cert
+        # Keep the generating RSA: on Windows the private key of an in-memory self-signed
+        # certificate is not always retrievable through GetRSAPrivateKey(), and signing with the
+        # object we already hold sidesteps that entirely.
+        SigningKey  = $rsa
+    }
+}
+
 function New-ClientAssertion {
     # Certificate credentials cannot be exchanged for a raw token the way a secret can, so build
     # the RFC 7523 client assertion ourselves. The Graph SDK does this internally, but SharePoint
@@ -280,9 +318,11 @@ function New-ClientAssertion {
     param(
         [Parameter(Mandatory = $true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
         [Parameter(Mandatory = $true)][string]$ClientIdValue,
-        [Parameter(Mandatory = $true)][string]$Authority
+        [Parameter(Mandatory = $true)][string]$Authority,
+        [System.Security.Cryptography.RSA]$SigningKey
     )
-    $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+    $rsa = $SigningKey
+    if (-not $rsa) { $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate) }
     if (-not $rsa) { throw "Certificate $($Certificate.Thumbprint) has no usable RSA private key." }
 
     function ConvertTo-Base64Url {
@@ -330,27 +370,36 @@ function Get-ResourceToken {
     if ($script:AppCertificate) {
         $body['client_assertion_type'] = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
         $body['client_assertion']      = New-ClientAssertion -Certificate $script:AppCertificate `
-                                            -ClientIdValue $script:AppClientId -Authority $authority
+                                            -ClientIdValue $script:AppClientId -Authority $authority `
+                                            -SigningKey $script:AppSigningKey
     } else {
         $body['client_secret'] = $script:AppClientSecret
     }
 
+    # A freshly registered certificate credential and a freshly granted app role both need time to
+    # replicate before Entra will mint a token against them — noticeably longer than the few
+    # seconds a secret needs. Give it up to ~two minutes rather than failing the whole run on a
+    # race that resolves itself.
     $resp = $null
     $lastError = $null
-    for ($i = 1; $i -le 6; $i++) {
+    $maxAttempts = 12
+    for ($i = 1; $i -le $maxAttempts; $i++) {
         try {
             $resp = Invoke-RestMethod -Method POST -Uri $authority -Body $body -ErrorAction Stop
             break
         } catch {
             $lastError = $_
-            if ($i -lt 6) {
-                Write-ProgressHost -Message ("[INFO] Waiting for token/consent propagation for {0} (attempt {1}/6)..." -f $Resource, $i)
-                Start-Sleep -Seconds 5
+            if ($i -lt $maxAttempts) {
+                Write-ProgressHost -Message ("[INFO] Waiting for credential/consent propagation for {0} (attempt {1}/{2})..." -f $Resource, $i, $maxAttempts)
+                Start-Sleep -Seconds ([Math]::Min(5 * $i, 20))
             }
         }
     }
     if (-not $resp -or -not $resp.access_token) {
-        throw "Could not obtain app-only token for $Resource. $($lastError.Exception.Message)"
+        $detail = $null
+        try { $detail = ($lastError.ErrorDetails.Message | ConvertFrom-Json).error_description } catch {}
+        if (-not $detail) { $detail = $lastError.Exception.Message }
+        throw "Could not obtain app-only token for $Resource. $detail"
     }
 
     # SharePoint and Graph disagree on how to ask for a lean payload: SharePoint wants
@@ -423,10 +472,33 @@ function Invoke-GraphGet {
     }
 }
 
+function Get-ResponseHeaderValue {
+    # SharePoint puts the real reason for a refusal in x-ms-diagnostics, not in the status line.
+    # "Unsupported app only token" in particular is the difference between "this app may not read
+    # this site" and "this credential type can never read any site".
+    param([object]$ErrorRecord, [string]$Name)
+    try {
+        $headers = $ErrorRecord.Exception.Response.Headers
+        if (-not $headers) { return $null }
+        # PS 7 exposes HttpResponseHeaders (TryGetValues); PS 5.1 a WebHeaderCollection (indexer).
+        if ($headers -is [System.Net.Http.Headers.HttpResponseHeaders]) {
+            $values = $null
+            if ($headers.TryGetValues($Name, [ref]$values)) { return ($values -join '; ') }
+            return $null
+        }
+        return [string]$headers[$Name]
+    } catch { return $null }
+}
+
 function Invoke-SPGet {
     # Single SharePoint REST GET. Returns $null for 403/404 — a site the app cannot open, or a
     # list/endpoint that does not exist on this template — because a tenant-wide sweep always hits
     # some of both and neither should abort the run.
+    #
+    # A 401 is deliberately NOT treated that way. It means the token itself is not accepted, which
+    # is never per-site: it is the same answer for every site in the tenant. Swallowing it turned a
+    # single credential fault into 130 lines of "not accessible with the current permissions",
+    # which reads like a permissions finding instead of the bug it is.
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
         [switch] $ThrowOnDenied
@@ -438,7 +510,16 @@ function Invoke-SPGet {
             return Invoke-RestMethod -Uri $Uri -Headers $headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
         } catch {
             $statusCode = Get-ResponseStatusCode -ErrorRecord $_
-            if ($statusCode -in @(401, 403, 404) -and -not $ThrowOnDenied) { return $null }
+            if ($statusCode -eq 401) {
+                $diag = Get-ResponseHeaderValue -ErrorRecord $_ -Name 'x-ms-diagnostics'
+                $hint = ''
+                if ($diag -match 'Unsupported app only token') {
+                    $hint = "`n         SharePoint Online does not accept an app-only token obtained with a client secret." +
+                            "`n         Use -CertificateThumbprint, or omit -ClientId so the script creates its own certificate-backed app."
+                }
+                throw ("SharePoint refused the token (401) for {0}.{1}{2}" -f $resourceRoot, $(if ($diag) { " $diag" } else { '' }), $hint)
+            }
+            if ($statusCode -in @(403, 404) -and -not $ThrowOnDenied) { return $null }
             $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
             if (-not $isRetryable -and -not $statusCode) {
                 $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
@@ -670,6 +751,12 @@ try {
             $script:AppCertificate = Resolve-ClientCertificate -Thumbprint $CertificateThumbprint
         } elseif ($ClientSecret) {
             $script:AppClientSecret = $ClientSecret
+            # Not an error — Graph accepts it — but every SharePoint call will come back 401, and
+            # that failure is invisible unless it is called out here: the scan would simply report
+            # every site as inaccessible.
+            Write-Host "  [WARN] SharePoint Online rejects app-only tokens obtained with a client secret" -ForegroundColor Yellow
+            Write-Host "         ('Unsupported app only token'). Use -CertificateThumbprint instead, or omit" -ForegroundColor Yellow
+            Write-Host "         -ClientId entirely and let the script create its own certificate-backed app." -ForegroundColor Yellow
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
@@ -697,9 +784,21 @@ try {
 
         $tempAppName = "SP-PermissionsReport-Temp-$ts"
         Write-Host "  Creating temporary App Registration '$tempAppName'..." -ForegroundColor Cyan
-        $app = New-MgApplication -DisplayName $tempAppName -ErrorAction Stop
+
+        # Certificate, not a password: SharePoint Online returns 401 "Unsupported app only token"
+        # for any app-only token that was obtained with a client secret, so a secret-backed temp
+        # app would authenticate fine against Graph and then fail on every single /_api call.
+        $tempCert = New-SelfSignedAppCertificate -Subject "CN=$tempAppName"
+        $keyCredential = @{
+            Type        = 'AsymmetricX509Cert'
+            Usage       = 'Verify'
+            Key         = $tempCert.Certificate.GetRawCertData()
+            DisplayName = "CN=$tempAppName"
+        }
+        $app = New-MgApplication -DisplayName $tempAppName -KeyCredentials @($keyCredential) -ErrorAction Stop
         $script:TempAppObjectId = $app.Id
         $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+        Write-Host ("  [OK]   Certificate credential registered (thumbprint {0}, valid 1 day, never written to disk)." -f $tempCert.Certificate.Thumbprint) -ForegroundColor DarkGray
 
         # Sites.FullControl.All is not an oversight here: SharePoint gates reading role
         # assignments behind the EnumeratePermissions right, which only Full Control carries.
@@ -724,15 +823,10 @@ try {
             Write-Host ("  [OK]   {0} / {1} granted ({2})." -f $resourceSp.DisplayName, $required.Role, $required.Why) -ForegroundColor DarkGray
         }
 
-        # 1-day secret: these runs are short, and a short lifetime limits exposure if cleanup ever
-        # fails to run. The app and its secret are removed by Remove-TempApp on the way out.
-        $secret = Add-MgApplicationPassword `
-            -ApplicationId      $app.Id `
-            -PasswordCredential @{ displayName = 'temp'; endDateTime = (Get-Date).AddDays(1) } -ErrorAction Stop
-
-        $script:AppClientId     = $app.AppId
-        $script:AppClientSecret = $secret.SecretText
-        $script:AppTenantId     = $usedTenantId
+        $script:AppClientId    = $app.AppId
+        $script:AppCertificate = $tempCert.Certificate
+        $script:AppSigningKey  = $tempCert.SigningKey
+        $script:AppTenantId    = $usedTenantId
 
         Write-Host "  Obtaining app-only tokens..." -ForegroundColor Cyan
         [void](Get-ResourceToken -Resource $GraphResource)
@@ -743,7 +837,30 @@ try {
     Remove-TempApp; exit 1
 }
 
-Set-GraphRequestTimeoutOptions -TimeoutSec $GraphTimeoutSec
+# Set-MgRequestContext returns the context object; without this it lands on stdout and prints a
+# stray "ClientTimeout RetryDelay MaxRetry" table at the end of an otherwise clean run.
+Set-GraphRequestTimeoutOptions -TimeoutSec $GraphTimeoutSec | Out-Null
+
+# ── SharePoint access preflight ───────────────────────────────────────────────
+# One call against the tenant root, before enumerating anything. Whether SharePoint accepts this
+# credential is a single yes/no for the whole tenant, so finding out here costs one request and
+# turns an otherwise silent 130-site sweep of "not accessible" into one actionable error.
+$preflightRoot = if ($SiteUrl) { Get-ResourceRootFromUrl -Url $SiteUrl } else { Get-ResourceRootFromUrl -Url $TenantUrl }
+Write-ProgressHost -Message ("Verifying SharePoint access against {0}..." -f $preflightRoot) -ForegroundColor Cyan
+try {
+    $preflightWeb = Invoke-SPGet -Uri ("{0}/_api/web?`$select=Title" -f $preflightRoot) -ThrowOnDenied
+    if (-not $preflightWeb) { throw "SharePoint returned no data for $preflightRoot/_api/web." }
+    Write-Host ("  [OK]   SharePoint accepted the token (root web: {0})." -f $preflightWeb.Title) -ForegroundColor DarkGray
+} catch {
+    Write-Host ''
+    Write-Host "  [ERROR] Cannot read SharePoint with this credential — stopping before the scan." -ForegroundColor Red
+    Write-Host ("  {0}" -f $_.Exception.Message) -ForegroundColor Red
+    Write-Host ''
+    Write-Host "  Reading role assignments needs the SharePoint application role Sites.FullControl.All" -ForegroundColor Yellow
+    Write-Host "  on a certificate-backed app registration. Graph permissions alone are not enough, and" -ForegroundColor Yellow
+    Write-Host "  a client secret is not accepted by SharePoint Online for app-only access." -ForegroundColor Yellow
+    Remove-TempApp; exit 1
+}
 
 # ── Site discovery ────────────────────────────────────────────────────────────
 # Three sources, de-duplicated on URL, because no single one is complete:

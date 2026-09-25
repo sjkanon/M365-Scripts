@@ -245,7 +245,24 @@ Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onde
 | Graph | `Sites.Read.All` | Tenantbrede site-enumeratie |
 | Graph | `GroupMember.Read.All` | Entra-groepslidmaatschap oplossen |
 
-Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee van een bestaande registratie die deze rollen al heeft.
+Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft.
+
+> **Certificaat, geen secret — en dat is geen voorkeur.** SharePoint Online weigert elk app-only token dat met een client secret is opgehaald: je krijgt `401` met `x-ms-diagnostics: ... Unsupported app only token`. Alleen certificaat-gebaseerde app-only authenticatie werkt tegen `_api`. De tijdelijke app krijgt daarom een certificaat dat het script **in het geheugen** aanmaakt en op de app registreert; het komt niet in de certificate store en niet op schijf, dus er valt achteraf niets op te ruimen. Geef je `-ClientSecret` mee bij een eigen app, dan waarschuwt het script: de Graph-helft werkt dan wel, de SharePoint-helft niet.
+
+#### Waarom niet gewoon Graph?
+
+Graph kan een deel: op een `driveItem` geeft `/permissions` de rechten, de deellinks (met type en vervaldatum) en via `inheritedFrom` of de overerving doorbroken is. Maar de rest van het beeld ontbreekt daar simpelweg — er is geen Graph-endpoint voor:
+
+| Wat | Graph | SharePoint REST |
+|---|---|---|
+| Roltoewijzingen op site-/webniveau | ❌ bestaat niet | ✅ `/_api/web/roleassignments` |
+| SharePoint-groepen en hun leden | ❌ bestaat niet | ✅ `/_api/web/sitegroups` |
+| Site collection-beheerders | ❌ bestaat niet | ✅ `/_api/web/siteusers` |
+| Naam van het permissieniveau (Full Control, Bewerken, eigen niveaus) | ❌ alleen `read`/`write`/`owner` | ✅ `RoleDefinitionBindings` |
+| Lijsten zonder `driveItem` (gewone lijsten) | ❌ | ✅ |
+| Goedkoop filteren op eigen rechten | ❌ één call per item | ✅ `HasUniqueRoleAssignments` in één sweep |
+
+Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand een `/permissions`-call moeten doen, terwijl SharePoint in één doorloop per lijst al vertelt wélke items eigen rechten hebben. Een Graph-only variant zou wél met een client secret kunnen en met minder rechten (`Sites.Read.All`), maar levert een rapport op zonder site-eigenaren, zonder groepen en zonder permissieniveaus — precies waar een rechtenreview mee begint.
 
 ### Output
 
@@ -271,8 +288,8 @@ Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `Sha
 | `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep: alleen webs, webs + lijsten, of alles tot map- en bestandsniveau |
 | `-TenantId` | string | _(uit de sessie)_ | Entra tenant-ID. Verplicht bij `-ClientId` |
 | `-ClientId` | string | — | Bestaande App Registration; slaat de tijdelijke app over |
-| `-ClientSecret` | string | — | Secret bij `-ClientId` |
-| `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My` |
+| `-ClientSecret` | string | — | Secret bij `-ClientId`. **Werkt niet tegen SharePoint** (zie Authenticatie); het script waarschuwt |
+| `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My`. Dit is de werkende variant |
 | `-OutputPath` | string | `C:\Temp` | Outputmap |
 | `-IncludeOneDriveSites` | switch | uit | Neemt ook persoonlijke OneDrive-sites mee (één site per gebruiker) |
 | `-IncludeHiddenLists` | switch | uit | Neemt verborgen en systeemlijsten mee (Form Templates, Style Library, workflowhistorie, …) |
