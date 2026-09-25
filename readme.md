@@ -767,6 +767,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 | The repository tree also listed neither this script nor `Remove-SharePointFileVersionsByDate.ps1`; both are in it now |
 | **Untested by me**: this script has not been run against a live tenant in this session — only its syntax was checked. The temporary App Registration path, the throttling retries and the checkpoint resume are unverified here and should be exercised on a pilot tenant, starting with `-SiteUrl` and `-Scope Site`, before a tenant-wide run |
 
+### 2026-09-25 (3)
+| Change |
+|--------|
+| Correction to the previous entry: the `1638` on the meeting add-in was **not** caused by `-Force` downgrading the client. Measured on the host itself, the registered add-in was `1.25.28902` and the MSI being installed `1.26.21803` - newer, and still refused. This MSI declines to install while any other copy of the add-in is registered, whichever version that is. The version comparison added in the last change would therefore not have prevented the failure; the guard now asks whether a registration survived the uninstall, which is the thing that actually decides it |
+| `-ClearOrphanedAddInRegistration` is the way out of the state that host is in. An uninstall answering `1612` means Windows Installer has lost the cached MSI it needs and can no longer remove the product by any supported means, while its registration keeps refusing every reinstall. The switch makes the installer forget that one product: its keys under `Installer\Products`, `Installer\Features` and `Installer\UserData\S-1-5-18\Products`, its entry under the upgrade code, and the Programs and Features entry. What MsiZap used to do, scoped to one product, only after msiexec has proved it cannot, off by default, and every key through `ShouldProcess` |
+| Finding those keys needs the ProductCode as Windows Installer's 32-character "packed" GUID. That transform was validated before anything used it to point at keys for deletion: of 57 GUID-named uninstall entries on a workstation, the 32 with machine-wide product data all mapped onto an existing packed key with an identical `DisplayName`, and the 25 that did not are per-user installs living under the user's own SID |
+| Verified read-only against three real products: each yields three product keys plus exactly one upgrade-code entry, and the constructed path is readable as written. A bogus product code returns nothing and an unknown product returns no keys, so the cleanup cannot fire on thin air. **Untested:** the removal itself, and the reinstall that should follow it |
+
 ### 2026-09-25 (2)
 | Change |
 |--------|

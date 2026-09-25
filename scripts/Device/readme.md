@@ -279,6 +279,7 @@ On an endpoint, preflight also checks the three policies that stop the staging: 
 | `-AvdOptimizations` | AVD/VDI session hosts: enforce the `IsWVDEnvironment` flag and the WebRTC redirector |
 | `-RemoveClassicTeams` | Also remove the classic Teams client: machine-wide installer plus per-profile installs |
 | `-RemoveWebRtcRedirector` | Remove the old WebRTC media optimization, retired 1 October 2026. Cannot be combined with `-AvdOptimizations`; leaves `IsWVDEnvironment` set, because SlimCore needs it too |
+| `-ClearOrphanedAddInRegistration` | Last resort: make Windows Installer forget a meeting add-in it can no longer uninstall (`1612` with its cached MSI gone), which is what keeps refusing a reinstall with `1638` |
 | `-RepairOutlookAddIn` | Clear a per-user Outlook registration pointing at an add-in DLL that no longer exists, so the machine-wide one takes over again |
 | `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
 | `-Ring` | Update ring queried at the config service (default: `general`) |

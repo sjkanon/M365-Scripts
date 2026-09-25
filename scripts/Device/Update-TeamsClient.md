@@ -232,9 +232,16 @@ Every working copy of the add-in was deleted and the replacement then refused to
 |---------------|-----|-----|
 | The host ran Teams `26246.1604.5133.838`, newer than the published `26225.1806.5074.1452`, and `-Force` reinstalled anyway | `-Force` means "reinstall regardless of the version check", which on a newer-than-published build is a **downgrade** | The version check warns that `-Force` is about to downgrade, and names the add-in consequence |
 | `msiexec /x` on the add-in answered `1612` | Windows Installer could not find the source it needs to uninstall, so the old product stayed registered | `1612` is retried against Windows Installer's own cached MSI under `C:\Windows\Installer` (found through `...\Installer\UserData\S-1-5-18\Products\*\InstallProperties`, `LocalPackage`). When that file is gone too, the run says the registration cannot be removed and what that will cause |
-| Installing add-in `1.26.21803` over the newer registered one answered `1638` | Windows Installer refuses an older version over a newer one | The versions are compared **before** anything is deleted. An older MSI means the sweep and the install are skipped and the working add-in is left alone; a `1638` that still happens is a warning, not an abort, so verification runs and reports what Outlook actually has |
+| Installing add-in `1.26.21803` answered `1638` even though the registered one was the **older** `1.25.28902` | This MSI refuses to install while any other copy of the add-in is registered. The version order is not what decides it - the presence of a registration is | The registry is checked for a surviving registration **before** anything is deleted. If one is there, the sweep and the install are skipped and the existing add-in is left alone; a `1638` that still happens is a warning, not an abort, so verification runs and reports what Outlook actually has |
+| The registration could not be removed at all | `1612` plus a missing cache means no supported route exists: `msiexec /x` cannot work without the package | `-ClearOrphanedAddInRegistration` makes Windows Installer forget the product - its keys under `Installer\Products`, `Installer\Features`, `Installer\UserData\S-1-5-18\Products` and its entry under the upgrade code, plus the Programs and Features entry. Scoped to that one product, only after msiexec has proved it cannot do it, and off by default |
 
 The general rule this follows is the one already applied to the bootstrapper: nothing that works is destroyed until its replacement is in hand and known to be installable.
+
+> An earlier version of this document blamed the `1638` on `-Force` downgrading the client, so that the package carried an older add-in than the one registered. The measurement says otherwise: the registered add-in was `1.25.28902` and the MSI `1.26.21803`, so the MSI was **newer** and still refused. The downgrade is real and still warned about, but it is not what caused this. A version comparison would not have prevented the failure; checking for a surviving registration does.
+
+### The packed product code
+
+Finding a product's registry keys means converting its ProductCode into Windows Installer's 32-character "packed" GUID - the first three GUID groups reversed, the rest byte-swapped in pairs. Before any code used that to point at keys for deletion it was checked against every MSI product on a real machine: of 57 GUID-named uninstall entries, the 32 with machine-wide product data all mapped onto an existing packed key carrying an identical `DisplayName`. The other 25 are per-user installs, whose data lives under the user's own SID rather than `S-1-5-18` - which is also why this only ever touches machine-wide products.
 
 ---
 
@@ -352,6 +359,7 @@ A transcript (`C:\Temp\Update-TeamsClient_<timestamp>.log`, override with `-LogP
 | `-BootstrapperUrl` | Microsoft fwlink | Download URL, https only |
 | `-WebRtcUrl` | `aka.ms/msrdcwebrtcsvc/msi` | WebRTC redirector MSI, https only |
 | `-RemoveWebRtcRedirector` | — | Uninstall the old WebRTC media optimization. Cannot be combined with `-AvdOptimizations` |
+| `-ClearOrphanedAddInRegistration` | — | Make Windows Installer forget an add-in it can no longer uninstall (`1612` with the cached MSI gone), so a reinstall can go in |
 | `-SkipMeetingAddIn` | — | Leave the add-in alone; a missing add-in is then not "work" |
 | `-SkipSignatureCheck` | — | Accept an installer not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | `900` | Per-process timeout for msiexec and the bootstrapper |
@@ -458,7 +466,7 @@ Why the script looks the way it does — most of these are scars from a real fai
 | Users see `Azure Virtual Desktop Media Optimized` instead of SlimCore | Expected while the redirector is still installed and the endpoint has no plugin. Check the event log section for `16002` |
 | `Uninstall of ... Add-in ... failed (exit code 1612)` | Windows Installer has lost the source MSI. It is retried from the cached copy under `C:\Windows\Installer`; if that is gone the product cannot be uninstalled by msiexec at all and keeps refusing other versions with `1638` |
 | `Teams Meeting Add-in install failed (exit code 1638)` | An older add-in is being installed over a newer registered one. No longer fatal, and normally prevented: the versions are compared first. Usually caused by `-Force` downgrading the client on a host whose build was newer than the published one |
-| `The staged package carries add-in X, older than the Y still registered` | Working as intended - the add-in was left alone. Get a Teams build whose add-in is at least Y, or clear the orphaned product registration by hand |
+| `Add-in X is still registered, so installing Y would answer 1638` | Working as intended - the existing add-in was left alone. Uninstall it through Programs and Features and run again; when Windows Installer refuses (`1612`), use `-ClearOrphanedAddInRegistration` |
 | `timed out after 900 seconds and was killed` | A hung msiexec or a slow image. Raise `-TimeoutSeconds`; check whether another installation is running |
 | `No add-in MSI found under ...\WindowsApps` | The bootstrapper did not stage a package. Check the step 7 output and `C:\Program Files\WindowsApps` for an `MSTeams_*` folder |
 | Add-in installed but not visible in Outlook | Outlook has to restart. The script warns when Outlook is running during the install |
@@ -496,7 +504,8 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | `-AvdOptimizations -RemoveWebRtcRedirector` together | Refused with exit `1` before the UAC prompt |
 | `-RemoveWebRtcRedirector` end to end | **Untested** — no session host with the redirector installed was available. The uninstall reuses the `msiexec /x` + `1605` path that is proven for classic Teams |
 | Cached-package lookup for a `1612` uninstall | Verified against real products on this machine: `...\Installer\UserData\S-1-5-18\Products\*\InstallProperties` yields `DisplayName`, `DisplayVersion` and a `LocalPackage` path that exists. Asking for the add-in on a machine that does not have it machine-wide returns nothing and does not throw. The `msiexec /x <cached msi>` retry itself is **untested** |
-| Add-in version guard | Exercised directly: an MSI older than the registered add-in skips, newer installs, equal installs, and an unparsable registered version does not block the install |
+| Packed product code | Validated against every MSI product on a workstation: 32 of 32 GUID-named uninstall entries with machine-wide product data mapped onto an existing packed key with an identical `DisplayName`; a bogus code returns nothing and an unknown product returns no keys |
+| Orphaned-registration lookup | Read-only against three real products: each yielded the three product keys plus exactly one upgrade-code entry, and the constructed upgrade-code path was readable as written. The **removal** itself is untested - no machine here has an add-in Windows Installer refuses to uninstall |
 | `1638` on the add-in install | Now a warning that lets verification run, instead of an abort. **Untested** live - the production host that produced it has not been re-run |
 | Classic removal, applied | Against a faked profile folder in a scratch directory: folder removed, verification reports `No per-user classic Teams left`, exit `0` |
 | Classic removal on a real session host | `-Force -RemoveClassicTeams -AvdOptimizations` on an AVD host removed a real per-profile classic Teams `1.4.00.11161`. The machine-wide msiexec path is still **untested** - that host had no Machine-Wide Installer |
