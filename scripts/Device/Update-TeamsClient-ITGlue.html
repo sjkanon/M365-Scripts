@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Teams-update op een werkplek (Update-TeamsClient.ps1)</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0 auto; padding: 2.5rem 1.5rem 4rem; max-width: 62rem;
+       font: 16px/1.65 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+       color: #1c2430; background: #ffffff; }
+h1, h2, h3, h4 { line-height: 1.25; color: #10243c; margin: 2.2rem 0 .8rem; }
+h1 { font-size: 1.9rem; margin-top: 0; padding-bottom: .5rem; border-bottom: 3px solid #0b5fa5; }
+h2 { font-size: 1.4rem; margin-top: 2.6rem; padding-bottom: .3rem; border-bottom: 1px solid #d7dee7; }
+h3 { font-size: 1.15rem; }
+h4 { font-size: 1rem; text-transform: uppercase; letter-spacing: .04em; color: #45556a; }
+p { margin: .7rem 0; }
+a { color: #0b5fa5; }
+hr { height: 0; margin: 2.4rem 0; border: 0; border-top: 1px solid #e3e8ef; }
+code { padding: .12em .35em; border-radius: 3px; background: #eef2f7; color: #0f3255;
+       font-family: Consolas, "SF Mono", Menlo, monospace; font-size: .89em; }
+pre { margin: .9rem 0; padding: .9rem 1.1rem; overflow-x: auto; border-radius: 6px;
+      background: #17222f; color: #e7eef6; }
+pre code { padding: 0; background: none; color: inherit; font-size: .86em; line-height: 1.5; }
+.table-scroll { overflow-x: auto; margin: 1rem 0; }
+table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+th, td { padding: .55rem .7rem; text-align: left; vertical-align: top;
+         border: 1px solid #dde3ea; }
+th { background: #f2f6fa; font-weight: 600; color: #10243c; }
+tbody tr:nth-child(even) { background: #fafcfe; }
+blockquote { margin: 1.1rem 0; padding: .8rem 1.1rem; border-left: 4px solid #0b5fa5;
+             border-radius: 0 4px 4px 0; background: #f3f8fc; }
+blockquote code { background: #e2ecf5; }
+ul, ol { margin: .7rem 0; padding-left: 1.6rem; }
+li { margin: .35rem 0; }
+li > p { margin: .4rem 0; }
+.meta { margin: 0 0 2rem; padding: .6rem .9rem; border-radius: 4px;
+        background: #f2f6fa; color: #45556a; font-size: .86rem; }
+@media print {
+  body { max-width: none; padding: 0; font-size: 11pt; }
+  pre { background: #f4f6f9; color: #17222f; border: 1px solid #d7dee7; }
+  h2 { page-break-after: avoid; }
+  table, pre, blockquote { page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-09-25 08:40. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<h1 id="teams-update-op-een-werkplek-update-teamsclientps1">Teams-update op een werkplek (Update-TeamsClient.ps1)</h1>
+<p>Deze procedure beschrijft hoe de Microsoft Teams-client en de Teams Meeting Add-in voor Outlook gecontroleerd, bijgewerkt en waar nodig hersteld worden op een werkstation of AVD-sessiehost.</p>
+<p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 controleert en meldt, level 2 voert uit, level 3 vindt onderaan de details.</p>
+<p>Technische referentie voor beheerders: <code>Update-TeamsClient.md</code> in de scriptrepo.</p>
+<hr/>
+<h2 id="wie-mag-wat">Wie mag wat</h2>
+<p>Niet elke schakelaar hoort bij hetzelfde niveau: controleren is ongevaarlijk, een herinstallatie sluit Teams af, en twee schakelaars grijpen in de installatiedatabase van Windows in.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Actie</th><th>Parameters</th><th>Niveau</th></tr></thead>
+<tbody>
+<tr><td>Controleren en melden, wijzigt niets</td><td><code>-CheckOnly -Quiet</code></td><td><strong>1</strong></td></tr>
+<tr><td>De gewone update draaien</td><td><code>-Quiet -Confirm:$false</code></td><td><strong>2</strong></td></tr>
+<tr><td>Herinstallatie forceren</td><td><code>-Force</code></td><td><strong>2</strong></td></tr>
+<tr><td>Verouderde per-gebruiker-registratie van de add-in opruimen</td><td><code>-RepairOutlookAddIn</code></td><td><strong>2</strong></td></tr>
+<tr><td>Classic Teams verwijderen</td><td><code>-RemoveClassicTeams</code></td><td><strong>2</strong></td></tr>
+<tr><td>AVD-mediaoptimalisatie zetten op een sessiehost</td><td><code>-AvdOptimizations</code></td><td><strong>2</strong></td></tr>
+<tr><td>Oude WebRTC-optimalisatie verwijderen</td><td><code>-RemoveWebRtcRedirector</code></td><td><strong>3</strong></td></tr>
+<tr><td>Add-in-registratie opruimen die Windows Installer niet meer kan verwijderen</td><td><code>-ClearOrphanedAddInRegistration</code></td><td><strong>3</strong></td></tr>
+<tr><td>Microsoft-handtekeningcontrole overslaan</td><td><code>-SkipSignatureCheck</code></td><td><strong>3</strong></td></tr>
+</tbody>
+</table></div>
+<blockquote><strong>Eén afspraak, niet twee.</strong> Er circuleert een oudere versie van dit document waarin level 1 de update zelf mag draaien. Hier ligt die bij level 2, omdat de update Teams afsluit en bij een fout diagnosewerk oplevert. Willen jullie het anders, pas dan deze tabel aan; de hoofdstukken hieronder volgen dezelfde indeling.</blockquote>
+<hr/>
+<h2 id="in-het-kort">In het kort</h2>
+<div class="table-scroll"><table>
+<thead><tr><th>Vraag</th><th>Antwoord</th></tr></thead>
+<tbody>
+<tr><td>Wat doet het?</td><td>Controleert of de nieuwe Teams-app op een werkplek achterloopt, en werkt hem alleen dan bij — inclusief de Teams-vergaderknop in Outlook</td></tr>
+<tr><td>Wanneer gebruik je het?</td><td>Teams start niet of blijft hangen, Teams is verouderd, of de vergaderknop ontbreekt in Outlook</td></tr>
+<tr><td>Wat merkt de gebruiker?</td><td>Teams sluit tijdens de update en moet opnieuw gestart worden; Outlook moet daarna één keer herstarten</td></tr>
+<tr><td>Gaan er gegevens verloren?</td><td>Nee. Chats, bestanden en teams staan in de cloud en blijven staan</td></tr>
+<tr><td>Hoe lang duurt het?</td><td>Meestal een paar minuten. Er wordt ongeveer 275 MB gedownload per werkplek</td></tr>
+<tr><td>Is een herstart nodig?</td><td>Meestal niet. Het script meldt het expliciet als het wél moet</td></tr>
+</tbody>
+</table></div>
+<hr/>
+<h2 id="wat-het-script-doet">Wat het script doet</h2>
+<p>In gewone taal:</p>
+<ol>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+</ol>
+<h3 id="wat-het-script-niet-doet">Wat het script <strong>niet</strong> doet</h3>
+<ul>
+<li>Het raakt de oude ("classic") Teams niet aan — tenzij je <code>-RemoveClassicTeams</code> meegeeft (zie <a href="#classic-teams-opruimen">Classic Teams opruimen</a>).
+</li>
+<li>Het verwijdert geen chats, bestanden of instellingen van de gebruiker.
+</li>
+<li>Het start de computer niet zelf opnieuw op.
+</li>
+<li>Het doet niets op een werkplek die al bij is — ook niet "voor de zekerheid".
+<blockquote><strong>Let op — "er gebeurde niets" is meestal goed nieuws.</strong> Als het script niets doet en geen output geeft, betekent dat: deze werkplek heeft al de nieuwste Teams. Dat is geen storing en geen mislukte run. Meld dit niet als fout.</blockquote>
+</li>
+</ul>
+<hr/>
+<h2 id="level-1-controleren-en-melden">Level 1 — controleren en melden</h2>
+<h3 id="wanneer-pak-je-dit-erbij">Wanneer pak je dit erbij?</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Melding van de gebruiker</th><th>Past dit script?</th></tr></thead>
+<tbody>
+<tr><td>"Teams start niet meer op"</td><td>✅ Ja — controleer eerst</td></tr>
+<tr><td>"Teams zegt dat ik moet updaten"</td><td>✅ Ja</td></tr>
+<tr><td>"Teams blijft hangen bij het opstarten"</td><td>✅ Ja</td></tr>
+<tr><td>"Teams sluit onverwacht af"</td><td>✅ Ja</td></tr>
+<tr><td>"De knop <em>Teams-vergadering</em> is weg in Outlook"</td><td>✅ Ja</td></tr>
+<tr><td>"Ik kan niet inloggen in Teams"</td><td>❌ Nee — accountprobleem, geen versieprobleem</td></tr>
+<tr><td>"Mijn camera/microfoon doet het niet in Teams"</td><td>❌ Nee — apparaat/rechtenprobleem</td></tr>
+<tr><td>"Ik mis een chat of bestand"</td><td>❌ Nee — dat lost een herinstallatie niet op</td></tr>
+</tbody>
+</table></div>
+<h3 id="controleren-zonder-iets-te-wijzigen">Controleren zonder iets te wijzigen</h3>
+<p>In NinjaOne: draai het script op de werkplek met dit veld bij <strong>Parameters</strong>:</p>
+<pre><code>-CheckOnly -Quiet</code></pre>
+<p>Dit verandert <strong>niets</strong> op de werkplek. Je krijgt één van twee uitkomsten:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Uitkomst</th><th>Betekenis</th><th>Wat doe je?</th></tr></thead>
+<tbody>
+<tr><td>Geen output, resultaat "geslaagd"</td><td>Teams is al bij</td><td>Geen actie. Zoek de oorzaak van het ticket elders</td></tr>
+<tr><td>Output met <code>[NEW ] Update available: ... -&gt; ...</code></td><td>Er is een nieuwere versie</td><td>Meld dit in het ticket en zet door naar level 2</td></tr>
+</tbody>
+</table></div>
+<h3 id="de-output-lezen">De output lezen</h3>
+<p>Elke regel begint met een label:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Label</th><th>Betekenis</th></tr></thead>
+<tbody>
+<tr><td><code>[ OK ]</code></td><td>Gecontroleerd en in orde</td></tr>
+<tr><td><code>[NEW ]</code></td><td>Er is nieuws: er is een nieuwere versie beschikbaar</td></tr>
+<tr><td><code>[SKIP]</code></td><td>Bewust overgeslagen — er was niets te doen</td></tr>
+<tr><td><code>[WARN]</code></td><td>Let op, maar de run gaat door</td></tr>
+<tr><td><code>[FAIL]</code></td><td>Mislukt — doorzetten naar level 2</td></tr>
+</tbody>
+</table></div>
+<p>Voorbeeld van een werkplek die al bij is:</p>
+<pre><code>  1. Preflight
+  [ OK ] Found MSTeams 26225.1806.5074.1452
+  [ OK ] Teams Meeting Add-in is installed
+
+  2. Version check
+  [ OK ] Latest published build (x64, ring general): 26225.1806.5074.1452
+  [ OK ] Installed build is current (26225.1806.5074.1452)
+
+  [SKIP] Teams is up to date - nothing to do.</code></pre>
+<p>Voorbeeld van een werkplek die achterloopt:</p>
+<pre><code>  2. Version check
+  [ OK ] Latest published build (x64, ring general): 26240.1000.5100.2000
+  [NEW ] Update available: 26225.1806.5074.1452 -&gt; 26240.1000.5100.2000</code></pre>
+<h3 id="wat-vertel-je-de-gebruiker">Wat vertel je de gebruiker?</h3>
+<blockquote>"Ik zie dat je Teams-versie verouderd is. Een collega zet de update klaar. Tijdens het bijwerken sluit Teams even af en moet je Outlook één keer opnieuw opstarten. Je chats en bestanden blijven gewoon staan."</blockquote>
+<h3 id="wanneer-escaleer-je">Wanneer escaleer je?</h3>
+<ul>
+<li>Bij elke <code>[FAIL]</code>-regel.
+</li>
+<li>Als de controle zelf niet lukt (bijvoorbeeld <code>Could not determine the latest published build</code>).
+</li>
+<li>Als de gebruiker de update niet kan laten uitvoeren omdat hij in vergaderingen zit — plan het in met level 2.
+</li>
+</ul>
+<hr/>
+<h2 id="level-2-de-update-uitvoeren">Level 2 — de update uitvoeren</h2>
+<h3 id="vooraf">Vooraf</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Check</th><th>Waarom</th></tr></thead>
+<tbody>
+<tr><td>Gebruiker zit niet in een vergadering</td><td>Teams sluit tijdens de update</td></tr>
+<tr><td>Gebruiker weet dat Outlook straks herstart moet worden</td><td>Anders is de vergaderknop nog even weg</td></tr>
+<tr><td>Werkplek staat aan en heeft internet</td><td>Er wordt ~275 MB gedownload</td></tr>
+</tbody>
+</table></div>
+<h3 id="via-ninjaone-voorkeur">Via NinjaOne (voorkeur)</h3>
+<ol>
+<li>
+</li>
+<li>
+<pre><code>   -Quiet -Confirm:$false</code></pre>
+</li>
+<li>
+<div class="table-scroll"><table>
+<thead><tr><th>Resultaat</th><th>Betekenis</th></tr></thead>
+<tbody>
+<tr><td>Geslaagd, geen output</td><td>Werkplek was al bij — er is niets gewijzigd</td></tr>
+<tr><td>Geslaagd, met output tot en met <code>[ OK ] Done</code></td><td>Update uitgevoerd en gecontroleerd</td></tr>
+<tr><td>Mislukt</td><td>Lees de <code>[FAIL]</code>-regel en zoek die op in de foutentabel hieronder</td></tr>
+</tbody>
+</table></div>
+<blockquote>Wil je eerst zien wat er zou gebeuren zonder iets te wijzigen? Gebruik <code>-WhatIf -Confirm:$false</code>. Het script laat dan de hele update zien maar voert niets uit.</blockquote>
+</li>
+</ol>
+<h3 id="de-drie-draaiwijzen">De drie draaiwijzen</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Doel</th><th>Parameters</th><th>Wat het doet</th></tr></thead>
+<tbody>
+<tr><td>Alleen controleren</td><td><code>-CheckOnly -Quiet</code></td><td>Wijzigt niets. Exitcode 2 als er werk ligt</td></tr>
+<tr><td>Bijwerken als het nodig is</td><td><code>-Quiet -Confirm:$false</code></td><td>Doet niets op een actuele werkplek; werkt bij als er een nieuwere build is</td></tr>
+<tr><td>Volledige herinstallatie (reparatie)</td><td><code>-Force -Confirm:$false</code></td><td>Herinstalleert Teams en de add-in ook als de versie al actueel is. Hiervoor kiezen bij een kapotte Teams, niet als routine</td></tr>
+</tbody>
+</table></div>
+<p>Voeg <code>-AvdOptimizations</code> toe op AVD/VDI-sessiehosts.</p>
+<h3 id="handmatig-op-de-werkplek">Handmatig op de werkplek</h3>
+<ol>
+<li>
+</li>
+<li>
+<pre><code>   powershell -ExecutionPolicy Bypass -File .\Update-TeamsClient.ps1</code></pre>
+</li>
+<li>
+</li>
+<li>
+</li>
+</ol>
+<p>Via het beheermenu van de scriptrepo kan het ook: <code>menu.ps1</code>, toets <strong>T</strong>. Dat vraagt eerst of je alleen wilt controleren of echt wilt installeren.</p>
+<h3 id="na-afloop-controleren">Na afloop controleren</h3>
+<ol>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+</ol>
+<hr/>
+<h2 id="controleren-of-outlook-de-vergaderknop-ziet">Controleren of Outlook de vergaderknop ziet</h2>
+<p>De add-in machinebreed installeren is één ding; of <strong>Outlook</strong> hem laadt is een tweede. Outlook doet dat per gebruiker. Het script controleert dat nu ook en zet het in de output, zowel in de preflight als in de eindverificatie.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Regel in de output</th><th>Betekenis</th><th>Actie</th></tr></thead>
+<tbody>
+<tr><td><code>[ OK ] Outlook loads the add-in for DOMEIN\gebruiker</code></td><td>Outlook laadt de add-in bij het opstarten</td><td>Geen</td></tr>
+<tr><td><code>[WARN] Outlook has not registered the add-in for any signed-in user yet</code></td><td>Nog niemand ingelogd, of Outlook is nog niet gestart sinds de installatie</td><td>Gebruiker laten in- en uitloggen of Outlook opnieuw starten, daarna opnieuw controleren</td></tr>
+<tr><td><code>[WARN] Outlook has the add-in switched off for ... (LoadBehavior 2)</code></td><td><strong>Outlook heeft de add-in zelf uitgeschakeld</strong> — meestal na een crash of een trage start</td><td>Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Blijft het terugvallen, doorzetten naar level 3</td></tr>
+<tr><td><code>[WARN] Outlook knows the add-in ... but has no LoadBehavior set</code></td><td>Registratie half aangelegd</td><td>Outlook opnieuw starten en opnieuw controleren</td></tr>
+<tr><td><code>[WARN] The add-in is registered for ... but its DLL is gone (...)</code></td><td>De eigen registratie van die gebruiker wijst naar een bestand dat er niet meer is en overschaduwt de machinebrede installatie</td><td><strong>Vinkje terugzetten helpt niet.</strong> Draai het script met <code>-RepairOutlookAddIn</code> (of vink <code>repairOutlookAddIn</code> aan): dat ruimt die verouderde registratie op, waarna de machinebrede versie het overneemt bij de volgende Outlook-start</td></tr>
+</tbody>
+</table></div>
+<blockquote><strong>Registratie zonder bestanden telt als "niet geïnstalleerd".</strong> Wijst de machinebrede registratie naar een loader-DLL die er niet meer is, dan beschouwt het script de add-in als ontbrekend en installeert hij hem opnieuw — <code>-CheckOnly</code> meldt dat als <code>Work is due: the machine-wide add-in registration points at files that are gone</code>. Alleen op de registersleutel afgaan is precies hoe een werkplek waarvan de add-in is weggegooid te horen kreeg dat er niets te doen was.</blockquote>
+<h3 id="de-add-in-laadt-nog-steeds-niet-waarom">De add-in laadt nog steeds niet — waarom?</h3>
+<p>Als een registratie er wél staat maar Outlook hem niet laadt, zet het script de reden eronder met <code>why:</code>. Drie oorzaken laten geen spoor na in <code>LoadBehavior</code> zelf:</p>
+<div class="table-scroll"><table>
+<thead><tr><th><code>why:</code>-regel</th><th>Wat er aan de hand is</th><th>Oplossing</th></tr></thead>
+<tbody>
+<tr><td><code>Outlook is x64 but this registration points at the x86 loader</code></td><td>Outlook kan alleen een DLL van zijn eigen bitness laden</td><td>De juiste versie registreren; meestal lost een volledige herinstallatie (<code>-Force</code>) dit op</td></tr>
+<tr><td><code>Outlook parked the add-in in its DisabledItems/CrashedAddins list</code></td><td>Outlook heeft hem zelf uitgezet na een crash of trage start, en houdt hem uit</td><td>Outlook → Bestand → Opties → Invoegtoepassingen → Beheren: <strong>Uitgeschakelde items</strong> → inschakelen. Blijft het terugkomen, zet hem dan via beleid op de <code>DoNotDisableAddinList</code></td></tr>
+<tr><td><code>Group policy sets LoadBehavior ... for this add-in</code></td><td>Een GPO overschrijft de instelling van de gebruiker</td><td>Dat beleid aanpassen of verwijderen</td></tr>
+</tbody>
+</table></div>
+<blockquote>Staat er <strong><code>why: nothing on this machine blocks it</code></strong>, dan is er op de werkplek zelf niets mis. Wat dan nog rest: Outlook helemaal afsluiten (ook uit de taakbalk) en opnieuw starten, en zorgen dat de gebruiker minstens één keer in Teams is ingelogd.</blockquote>
+<hr/>
+<blockquote>Draait het script als System via NinjaOne, dan ziet het alleen de profielen van gebruikers die op dat moment <strong>ingelogd</strong> zijn. Een profiel waar niemand in zit kan het niet uitlezen. Dat is geen fout en laat de job dus ook niet mislukken.</blockquote>
+<p><strong>"Ik zie hem nog niet geladen op alle profielen"</strong> — meestal geen storing. Het script meldt die profielen expliciet:</p>
+<pre><code>[SKIP] 2 profile(s) are not signed in, so their Outlook registration cannot be read (DOMEIN\jan, DOMEIN\piet)
+       - they pick up the machine-wide registration the first time that user starts Outlook</code></pre>
+<p>Staat er in dezelfde output <code>[ OK ] Outlook loads the add-in for all users (machine-wide, ...)</code>, dan is het geregeld: die gebruikers krijgen de add-in zodra ze Outlook voor het eerst starten. Staat die regel er <strong>niet</strong>, dan is er niets om op terug te vallen en moet je de machinebrede installatie eerst rechtzetten (<code>-Force</code>).</p>
+<h3 id="de-add-in-kan-niet-opnieuw-genstalleerd-worden-1612-en-1638-level-3">De add-in kan niet opnieuw geïnstalleerd worden (1612 en 1638) — level 3</h3>
+<p>Dit is een vastloper die zichzelf niet oplost. Je herkent hem aan twee regels in dezelfde run:</p>
+<pre><code>  [WARN] Uninstall of Microsoft Teams Meeting Add-in for Microsoft Office failed (exit code 1612)
+  [WARN] Add-in 1.25.28902 is still registered, so installing 1.26.21803 would answer 1638</code></pre>
+<p>Wat er speelt:</p>
+<ul>
+<li><strong>1612</strong> = Windows Installer is zijn eigen gecachte kopie van de MSI kwijt (die in <code>C:\Windows\Installer</code>). Zonder dat bestand kan hij het product op <strong>geen enkele</strong> ondersteunde manier verwijderen — ook niet via Programma's en onderdelen.
+</li>
+<li><strong>1638</strong> = de add-in-MSI weigert te installeren zolang er nog een andere add-in geregistreerd staat. Welke versie dat is maakt niet uit: gemeten met een <em>nieuwere</em> MSI (<code>1.26.21803</code>) die weigerde over een oudere <code>1.25.28902</code>.
+</li>
+</ul>
+<p>Samen betekent dat: de oude registratie kan er niet uit, en daardoor kan de nieuwe er niet in.</p>
+<p><strong>Eerst controleren</strong> of de cache echt weg is:</p>
+<pre><code>Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products\*\InstallProperties' |
+  Where-Object { $_.GetValue('DisplayName') -like '*Teams Meeting Add-in*' } |
+  Select-Object @{n='Version';e={$_.GetValue('DisplayVersion')}},
+                @{n='LocalPackage';e={$_.GetValue('LocalPackage')}},
+                @{n='Cached';e={Test-Path $_.GetValue('LocalPackage')}}</code></pre>
+<div class="table-scroll"><table>
+<thead><tr><th>Uitkomst</th><th>Wat te doen</th></tr></thead>
+<tbody>
+<tr><td><code>Cached : True</code></td><td>Het script lost dit zelf op: het verwijdert de add-in met die gecachte kopie. Gewoon opnieuw draaien</td></tr>
+<tr><td><code>Cached : False</code></td><td>Windows Installer kan het product niet meer verwijderen. Draai het script met <code>-ClearOrphanedAddInRegistration</code>, <strong>eerst met <code>-WhatIf</code></strong> zodat je ziet welke registersleutels hij zou opruimen</td></tr>
+</tbody>
+</table></div>
+<pre><code>.\Update-TeamsClient.ps1 -Force -ClearOrphanedAddInRegistration -WhatIf
+.\Update-TeamsClient.ps1 -Force -ClearOrphanedAddInRegistration</code></pre>
+<blockquote><strong>Waarom dit level 3 is.</strong> De schakelaar bewerkt de registratiedatabase van Windows Installer: hij laat de installer dat ene product vergeten. Dat is wat het oude hulpprogramma MsiZap deed. Hij treedt alleen op nadat msiexec zelf al heeft bewezen dat hij het niet kan, en alleen voor dit product — maar het blijft een laatste redmiddel, geen onderhoudsstap.</blockquote>
+<blockquote><strong>Ondertussen voor de gebruiker:</strong> Teams zet zelf ook een add-in in het profiel van elke gebruiker. Teams starten en Outlook daarna volledig herstarten geeft die gebruiker de vergaderknop terug, ook zolang de machinebrede installatie nog klemzit.</blockquote>
+<hr/>
+<h2 id="waar-het-script-naar-teams-zoekt">Waar het script naar Teams zoekt</h2>
+<p>De preflight inventariseert elke plek waar Teams kan staan, zodat je in één oogopslag ziet wat er op de werkplek leeft:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Wat</th><th>Waar het naar kijkt</th></tr></thead>
+<tbody>
+<tr><td>Nieuwe Teams per gebruiker</td><td>AppX-pakket <code>MSTeams</code> voor alle gebruikersprofielen</td></tr>
+<tr><td>Nieuwe Teams in de image</td><td>Het geprovisioneerde pakket — op een sessiehost staat Teams vaak alleen daar, zonder dat een gebruiker hem al heeft</td></tr>
+<tr><td>Classic Teams (machinebreed)</td><td>De oude <em>Teams Machine-Wide Installer</em></td></tr>
+<tr><td>Classic Teams per gebruiker</td><td><code>Teams.exe</code> in het profiel van elke gebruiker</td></tr>
+<tr><td>Vergader-add-in</td><td>Beide uninstall-hives (64-bit en 32-bit), <strong>met versienummer</strong> — dat getal bepaalt of een herinstallatie erin kan</td></tr>
+<tr><td>Add-in-kopieën</td><td>De machinebrede map plus de map in elk gebruikersprofiel (<code>%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in</code>)</td></tr>
+<tr><td>Outlook-registratie</td><td>Per ingelogde gebruiker</td></tr>
+</tbody>
+</table></div>
+<h3 id="classic-teams-opruimen">Classic Teams opruimen</h3>
+<p>Classic Teams wordt <strong>standaard alleen gemeld, niet verwijderd</strong>. Wil je hem weg hebben, zet dan het vinkje <code>removeClassicTeams</code> aan of gebruik de parameter:</p>
+<pre><code>-RemoveClassicTeams -Quiet -Confirm:$false</code></pre>
+<div class="table-scroll"><table>
+<thead><tr><th>Wat het verwijdert</th><th>Waarom</th></tr></thead>
+<tbody>
+<tr><td>De <em>Teams Machine-Wide Installer</em></td><td>Zolang die er staat, zet Windows classic Teams in elk nieuw gebruikersprofiel terug</td></tr>
+<tr><td>De installatiemap in het profiel van elke gebruiker</td><td>Daar staat de per-gebruiker-kopie</td></tr>
+<tr><td>De autostart-regel en de verouderde uninstall-sleutel</td><td>Anders probeert Windows iets te starten dat er niet meer is</td></tr>
+</tbody>
+</table></div>
+<p>Roaming-gegevens in <code>%APPDATA%\Microsoft\Teams</code> blijven staan; die doen niets meer zodra de client weg is.</p>
+<blockquote><strong>Overleg dit met de klant voordat je het breed uitrolt.</strong> Gebruikers die classic Teams nog gebruiken, verliezen hem. Draai het eerst met <code>-WhatIf</code> om te zien wat er op een toestel weg zou gaan.</blockquote>
+<p>Twee uitkomsten om te kennen:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Regel in de output</th><th>Betekenis</th><th>Actie</th></tr></thead>
+<tbody>
+<tr><td><code>[FAIL] The classic Teams machine-wide installer is still present</code></td><td>De uninstall is niet gelukt</td><td>Doorzetten naar level 3; de job faalt (exitcode 1)</td></tr>
+<tr><td><code>[WARN] ... is no longer registered with Windows Installer (1605)</code></td><td>De vermelding in Programma's en onderdelen stond er nog, maar Windows kent het product niet meer</td><td>Geen actie. Het script ruimt die verouderde vermelding zelf op en gaat door</td></tr>
+<tr><td><code>[WARN] Classic Teams still present for ... - files in use</code></td><td>Classic Teams draaide nog; de bestanden zaten vast</td><td>Gebruiker laten uitloggen; de volgende run maakt het af. Geen fout</td></tr>
+</tbody>
+</table></div>
+<hr/>
+<h2 id="avd--en-vdi-sessiehosts">AVD- en VDI-sessiehosts</h2>
+<p>Op een Azure Virtual Desktop- of VDI-sessiehost heeft Teams twee extra dingen nodig om beeld en geluid goed te laten lopen. Zonder die twee draait de video <em>in</em> de sessie: schokkerig beeld, hoge CPU-belasting en klachten over haperend geluid.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Onderdeel</th><th>Waarvoor</th><th>Wanneer installeert het script het</th></tr></thead>
+<tbody>
+<tr><td>Registervlag <code>IsWVDEnvironment</code></td><td>Vertelt Teams dat hij op een sessiehost draait en media moet doorgeven</td><td>Als de vlag nog niet op <code>1</code> staat</td></tr>
+<tr><td>Remote Desktop WebRTC Redirector Service</td><td>Handelt beeld en geluid af op het lokale apparaat van de gebruiker in plaats van in de sessie</td><td>Als hij nog niet geïnstalleerd is</td></tr>
+</tbody>
+</table></div>
+<p>Je krijgt dit <strong>alleen</strong> als je de optie expliciet aanzet — met het vinkje <code>avdOptimizations</code> of de parameter <code>-AvdOptimizations</code>:</p>
+<pre><code>-AvdOptimizations -Quiet -Confirm:$false</code></pre>
+<blockquote>Zet dit <strong>niet</strong> aan op gewone laptops en desktops. De vlag vertelt Teams daar dat hij media moet doorgeven aan een redirector die er niet is.</blockquote>
+<p>Draait het script op een werkplek die eruitziet als een sessiehost terwijl de optie uitstaat, dan krijg je een tip in de output:</p>
+<pre><code>  [SKIP] This looks like an AVD session host - -AvdOptimizations sets the media flag and installs WebRTC, -RemoveWebRtcRedirector drops the old stack</code></pre>
+<p>Staan beide onderdelen al goed, dan gebeurt er niets extra's en wordt er niets gedownload.</p>
+<h3 id="controleren-of-de-optimalisatie-ook-echt-werkt">Controleren of de optimalisatie ook echt werkt</h3>
+<p>Dat de onderdelen geïnstalleerd zijn, betekent nog niet dat gebruikers optimalisatie krijgen — dat hangt af van het lokale apparaat waarmee ze inloggen. Het enige bewijs dat de sessiehost zelf heeft, staat in het gebeurtenissenlogboek: Teams schrijft bij elke verbinding een gebeurtenis weg onder de bron <strong><code>Microsoft Teams VDI</code></strong>.</p>
+<p>Het script leest op een sessiehost automatisch de laatste zeven dagen mee, ook zonder extra opties:</p>
+<pre><code>  [ OK ] Teams VDI logged 34 event(s) in the last 7 days, last one 2026-09-24 08:12
+  [ OK ] Last event: code 24002 - SlimCore deployment not needed - the user is on the new architecture</code></pre>
+<p>Dat is de goede uitkomst: de gebruikers zitten op de nieuwe techniek. Foutregels worden vertaald, bijvoorbeeld:</p>
+<pre><code>  [WARN] Teams VDI error 2026-09-24 08:05: ... deployErrc=16002 ...
+  [WARN]          code 16002 - no plugin on the endpoint - the remote desktop client has none, or it did not load</code></pre>
+<div class="table-scroll"><table>
+<thead><tr><th>Code in de output</th><th>Wat het betekent</th><th>Actie</th><th>Niveau</th></tr></thead>
+<tbody>
+<tr><td><code>24002</code>, <code>24010</code></td><td>Gebruiker zit op SlimCore — goed</td><td>Geen</td><td>L1</td></tr>
+<tr><td><code>16002</code></td><td>Het lokale apparaat heeft geen (of een te oude) Windows App</td><td>Windows App bijwerken op dat apparaat</td><td>L2</td></tr>
+<tr><td><code>16026</code></td><td>Citrix-beleid blokkeert de virtuele kanalen</td><td>Virtual Channel Allow List aanpassen</td><td>L3</td></tr>
+<tr><td><code>16043</code></td><td>Teams draait als RemoteApp/published app — blijft altijd op WebRTC</td><td>Geen, dit is by design</td><td>L2</td></tr>
+<tr><td><code>16389</code>, <code>10083</code>, <code>1951</code></td><td>Beleid op het lokale apparaat blokkeert de installatie van SlimCore</td><td>Intune/GPO-beleid van dat apparaat bekijken</td><td>L3</td></tr>
+<tr><td><code>24018</code>, <code>24043</code>, <code>24058</code></td><td>SlimCore is niet gedownload op het lokale apparaat</td><td>Internetverbinding/proxy van dat apparaat</td><td>L2</td></tr>
+<tr><td><code>1722</code>, <code>15616</code>, <code>24035</code></td><td>Tijdelijk — lost zichzelf meestal op</td><td>Alleen uitzoeken als het blijft terugkomen</td><td>L2</td></tr>
+</tbody>
+</table></div>
+<blockquote>Geen enkele regel in de output? Dan heeft niemand in die zeven dagen een sessie opgebouwd, of draait er nog een Teams-versie ouder dan <code>24123</code>. Dat is geen fout.</blockquote>
+<h3 id="de-oude-optimalisatie-verwijderen-level-3">De oude optimalisatie verwijderen (level 3)</h3>
+<p>Als élk lokaal apparaat de nieuwe techniek aankan, kan de WebRTC-redirector eraf met <code>-RemoveWebRtcRedirector</code>. Dat is <strong>geen</strong> standaardactie en gaat nooit samen met <code>-AvdOptimizations</code>; die twee doen het tegenovergestelde en het script weigert de combinatie.</p>
+<pre><code>-RemoveWebRtcRedirector -Quiet -Confirm:$false</code></pre>
+<blockquote>Doe dit pas als de controle hierboven nergens <code>code 16002</code> laat zien. Een apparaat dat SlimCore niet aankan én de redirector niet meer vindt, krijgt geen foutmelding — beeld en geluid worden dan gewoon in de sessie verwerkt, precies de belasting die we willen voorkomen.</blockquote>
+<p>De registervlag <code>IsWVDEnvironment</code> blijft staan: SlimCore heeft die net zo hard nodig.</p>
+<hr/>
+<h2 id="melding-teams-optimization-for-your-virtual-desktop-will-soon-be-unsupported">Melding "Teams optimization for your virtual desktop will soon be unsupported"</h2>
+<p>Gebruikers op een virtuele werkplek krijgen sinds medio 2026 deze banner in Teams:</p>
+<blockquote><em>Teams optimization for your virtual desktop will soon be unsupported. Starting October 1, 2026, we will no longer support the AVD Media optimization technology based on WebRTC.</em></blockquote>
+<p><strong>Dit is geen storing.</strong> Beeld en geluid werken gewoon door. Microsoft vervangt de techniek achter de media-optimalisatie en waarschuwt vooraf.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Datum</th><th>Wat er gebeurt</th></tr></thead>
+<tbody>
+<tr><td>1 oktober 2026</td><td>Einde <strong>ondersteuning</strong> van de WebRTC-optimalisatie. Het blijft werken, maar Microsoft lost er geen problemen meer in op</td></tr>
+<tr><td>1 april 2027</td><td>Einde <strong>beschikbaarheid</strong>: WebRTC stopt met werken. Zonder de nieuwe techniek worden gesprekken dan in de sessie zelf verwerkt — schokkerig beeld en hoge CPU-belasting op de sessiehost</td></tr>
+</tbody>
+</table></div>
+<h3 id="waar-zit-de-oplossing-op-het-lokale-apparaat-niet-op-de-sessiehost">Waar zit de oplossing? Op het lokale apparaat, niet op de sessiehost</h3>
+<blockquote><strong>SlimCore kun je niet op de sessiehost installeren.</strong> Microsoft laat de plugin in Windows App het pakket (~50 MB) downloaden en registreren op het apparaat waarmee de gebruiker inlogt. Er is dus niets uit te rollen op de server; de enige actie zit op het endpoint.</blockquote>
+<p>De opvolger heet <strong>SlimCore</strong>. Die hoeft niemand apart te installeren: hij zit al in de nieuwe Teams-app op de sessiehost, en in <strong>Windows App</strong> op het apparaat waarmee de gebruiker inlogt. Wat bepaalt of de nieuwe techniek gebruikt wordt, is dus de <strong>versie van Windows App op de lokale pc of laptop van de gebruiker</strong>.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Kant</th><th>Wat er moet gebeuren</th></tr></thead>
+<tbody>
+<tr><td>Sessiehost (AVD/VDI)</td><td>Niets extra's installeren. Nieuwe Teams actueel houden (dat doet <code>Update-TeamsClient.ps1</code>) en <code>IsWVDEnvironment</code> op 1 laten staan</td></tr>
+<tr><td>Lokaal apparaat van de gebruiker</td><td><strong>Windows App bijwerken</strong> naar minimaal <code>2.0.352.0</code> (macOS: <code>11.3.4</code>, de losse <code>.pkg</code>, niet die uit de App Store). De oude <em>Remote Desktop</em>-client wordt hiervoor niet meer ondersteund</td></tr>
+<tr><td>Sessiehost</td><td>Teams minimaal <code>24193.1805.3040.8975</code> — die eis haal je ruimschoots</td></tr>
+</tbody>
+</table></div>
+<p>Lukt het op een apparaat niet, dan blokkeert meestal een beleidsinstelling de installatie. Het script controleert deze drie en noemt de Teams-foutcode erbij:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Beleid</th><th>Gevolg</th><th>Teams-fout</th></tr></thead>
+<tbody>
+<tr><td><code>BlockNonAdminUserInstall = 1</code></td><td>Een gebruiker zonder beheerrechten kan het pakket niet registreren</td><td><code>16389</code></td></tr>
+<tr><td><code>AllowAllTrustedApps = 0</code></td><td>Sideloading staat uit, het MSIX kan niet installeren</td><td><code>15615</code></td></tr>
+<tr><td>AppLocker op verpakte apps, zonder regel die de SlimCoreVdi-pakketten toelaat</td><td>De pakketten worden geblokkeerd</td><td><code>10083</code></td></tr>
+</tbody>
+</table></div>
+<h4 id="wat-het-script-over-applocker-vertelt">Wat het script over AppLocker vertelt</h4>
+<p>Niet <em>of</em> er AppLocker is — dat zegt niets — maar wat er staat. Het meldt het registerpad, per verzameling (<code>Exe</code>, <code>Msi</code>, <code>Appx</code>, …) de modus, de status van de service <strong>Application Identity</strong> (<code>AppIDSvc</code>) en de namen van de eerste vijf <code>Appx</code>-regels. Drie dingen zijn daarbij makkelijk verkeerd te lezen:</p>
+<ul>
+<li><strong>Alleen de verzameling <code>Appx</code> telt.</strong> Een MSIX komt de regels voor <code>Exe</code>, <code>Msi</code>, <code>Script</code> of <code>Dll</code> nooit tegen. Een afgedwongen Exe-regelset blokkeert SlimCore dus niet, en wordt ook niet meer als blokkade gemeld.
+</li>
+<li><strong>"Niet geconfigureerd" betekent niet "uit".</strong> Volgens Microsoft is een verzameling mét regels waarvan de afdwinging niet is geconfigureerd, gewoon afgedwongen. Alleen een expliciete <code>EnforcementMode = 0</code> (alleen controleren) laat alles door. Het script schrijft dat er letterlijk bij.
+</li>
+<li><strong>Zonder de service gebeurt er niets.</strong> Staat <code>AppIDSvc</code> niet aan, dan wordt er op dat moment niets afgedwongen — het script zegt dat erbij. Let op: na een herstart kan de service alsnog starten, dan is de blokkade er wél.
+</li>
+</ul>
+<p>Ligt er al een regel die de pakketten met naam toelaat, dan meldt het script dat als <code>[ OK ]</code>. Een regel die alles van <code>O=MICROSOFT CORPORATION</code> toelaat zou moeten volstaan; controleer dan wel of die niet op één productnaam is dichtgezet.</p>
+<blockquote>Op een <strong>sessiehost</strong> blokkeert dit beleid niets, want SlimCore wordt op het lokale apparaat geïnstalleerd. Het script noemt een gevonden beleid daar toch — als <code>[SKIP]</code>, niet als waarschuwing — omdat het meestal dezelfde GPO is. De vraag is dan of die GPO ook aan de endpoints hangt.</blockquote>
+<blockquote>Teams heeft <strong>één herstart</strong> nodig om van WebRTC naar SlimCore over te stappen nadat de plugin gevonden is.</blockquote>
+<h3 id="controleren-of-het-al-goed-staat">Controleren of het al goed staat</h3>
+<p>Laat de gebruiker in de virtuele sessie Teams openen → <strong>... → Instellingen → Over Teams</strong>. Onderin staat een van deze meldingen:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Melding</th><th>Betekenis</th></tr></thead>
+<tbody>
+<tr><td><code>AVD SlimCore Media Optimized</code></td><td>Nieuwe techniek actief — klaar, banner verdwijnt</td></tr>
+<tr><td><code>AVD Media Optimized</code></td><td>Nog op WebRTC — Windows App op het lokale apparaat bijwerken</td></tr>
+<tr><td><code>AVD Media not connected</code></td><td>Geen optimalisatie actief — Teams afsluiten en opnieuw starten, daarna opnieuw kijken</td></tr>
+</tbody>
+</table></div>
+<h3 id="antwoord-voor-de-gebruiker">Antwoord voor de gebruiker</h3>
+<blockquote>Bedankt voor de melding. Dit is een aankondiging van Microsoft, geen storing: je gesprekken en vergaderingen blijven gewoon werken. De techniek erachter wordt vervangen. Wij zorgen dat de app waarmee je verbinding maakt met de virtuele werkplek wordt bijgewerkt; daarna verdwijnt de melding vanzelf. Je hoeft zelf niets te doen.</blockquote>
+<h3 id="wat-wij-intern-moeten-doen">Wat wij intern moeten doen</h3>
+<ol>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+<li>
+</li>
+</ol>
+<hr/>
+<h2 id="level-3-details">Level 3 — details</h2>
+<h3 id="parameters">Parameters</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Parameter</th><th>Wanneer gebruiken</th></tr></thead>
+<tbody>
+<tr><td><code>-WhatIf</code></td><td>Alles tonen, niets wijzigen</td></tr>
+<tr><td><code>-Quiet</code></td><td>Alleen output als er nieuws is — voor geplande runs</td></tr>
+<tr><td><code>-CheckOnly</code></td><td>Alleen controleren en melden (exitcode 2 = update beschikbaar)</td></tr>
+<tr><td><code>-Confirm:$false</code></td><td>Nooit om bevestiging vragen — verplicht bij onbeheerde runs</td></tr>
+<tr><td><code>-Force</code></td><td>Herinstalleren terwijl de versie al actueel is (reparatie), of installeren op een werkplek zonder Teams. <strong>Let op:</strong> draait er een build die nieuwer is dan de gepubliceerde, dan zet <code>-Force</code> Teams terug naar de gepubliceerde versie. Het script waarschuwt daarvoor</td></tr>
+<tr><td><code>-AvdOptimizations</code></td><td>Alleen op AVD/VDI-sessiehosts: zet de mediavlag <code>IsWVDEnvironment</code> en installeert de WebRTC-redirector</td></tr>
+<tr><td><code>-RemoveWebRtcRedirector</code></td><td>Verwijdert de oude WebRTC-optimalisatie. Alleen als élk lokaal apparaat SlimCore aankan. Gaat niet samen met <code>-AvdOptimizations</code></td></tr>
+<tr><td><code>-ClearOrphanedAddInRegistration</code></td><td><strong>Laatste redmiddel, L3.</strong> Laat Windows Installer een add-in vergeten die hij zelf niet meer kan verwijderen (<code>1612</code> én de gecachte MSI weg), zodat herinstalleren weer kan. Raakt alleen dat ene product</td></tr>
+<tr><td><code>-RemoveClassicTeams</code></td><td>Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel</td></tr>
+<tr><td><code>-RepairOutlookAddIn</code></td><td>Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen</td></tr>
+<tr><td><code>-WebRtcUrl</code></td><td>Andere downloadlocatie voor de WebRTC-redirector</td></tr>
+<tr><td><code>-BootstrapperUrl</code></td><td>Andere downloadlocatie voor <code>teamsbootstrapper.exe</code>. Moet https zijn</td></tr>
+<tr><td><code>-SkipSignatureCheck</code></td><td><strong>Alleen na overleg.</strong> Slaat de controle over of de installer echt van Microsoft is. Bedoeld voor een eigen interne spiegel; nooit gebruiken om een mislukte handtekeningcontrole "weg te krijgen" — die betekent meestal dat een proxy een foutpagina teruggaf</td></tr>
+<tr><td><code>-SkipMeetingAddIn</code></td><td>Alleen de client, de Outlook-add-in met rust laten</td></tr>
+<tr><td><code>-TimeoutSeconds</code></td><td>Standaard 900. Verhogen op trage werkplekken</td></tr>
+<tr><td><code>-Ring</code></td><td>Andere update-ring dan <code>general</code></td></tr>
+<tr><td><code>-WorkingDir</code></td><td>Andere downloadmap dan <code>C:\IT\AVD\Teams</code></td></tr>
+<tr><td><code>-LogPath</code></td><td>Andere logmap dan <code>C:\Temp</code></td></tr>
+</tbody>
+</table></div>
+<h3 id="exitcodes">Exitcodes</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Code</th><th>Betekenis</th><th>Actie</th></tr></thead>
+<tbody>
+<tr><td><code>0</code></td><td>Gelukt, of al bij</td><td>Geen</td></tr>
+<tr><td><code>1</code></td><td>Mislukt</td><td>Log lezen, foutentabel raadplegen</td></tr>
+<tr><td><code>2</code></td><td>Alleen bij <code>-CheckOnly</code>: er is een update beschikbaar</td><td>Update inplannen</td></tr>
+</tbody>
+</table></div>
+<h3 id="waar-staat-wat">Waar staat wat</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Wat</th><th>Pad</th></tr></thead>
+<tbody>
+<tr><td>Logbestand (alleen bij een run die iets wijzigt)</td><td><code>C:\Temp\Update-TeamsClient_&lt;datum-tijd&gt;.log</code></td></tr>
+<tr><td>Gedownloade installer</td><td><code>C:\IT\AVD\Teams\teamsbootstrapper.exe</code></td></tr>
+<tr><td>Geïnstalleerde Outlook-add-in</td><td><code>C:\Program Files (x86)\Microsoft\TeamsMeetingAddin\&lt;versie&gt;\</code></td></tr>
+<tr><td>Versiebron van Microsoft</td><td><code>config.teams.microsoft.com</code></td></tr>
+</tbody>
+</table></div>
+<h3 id="veiligheden-die-zijn-ingebouwd">Veiligheden die zijn ingebouwd</h3>
+<ul>
+<li>De installer wordt <strong>eerst</strong> gedownload en op Microsoft-handtekening gecontroleerd, en pas daarna wordt de oude Teams verwijderd. Mislukt de download, dan houdt de werkplek zijn werkende Teams.
+</li>
+<li>Installaties krijgen een timeout en worden afgebroken als ze blijven hangen, zodat een NinjaOne-job de agent niet blokkeert.
+</li>
+<li>Loopt er al een andere installatie op de werkplek (Windows Update, ander pakket), dan wacht het script en probeert het opnieuw.
+</li>
+<li>Bij een onverwachte fout stopt de run in plaats van half werk af te maken.
+</li>
+</ul>
+<hr/>
+<h2 id="foutmeldingen">Foutmeldingen</h2>
+<div class="table-scroll"><table>
+<thead><tr><th>Melding</th><th>Betekenis</th><th>Actie</th><th>Niveau</th></tr></thead>
+<tbody>
+<tr><td><code>Teams is up to date - nothing to do</code></td><td>Geen fout: werkplek is bij</td><td>Geen</td><td>L1</td></tr>
+<tr><td><code>Administrator rights are required</code></td><td>Zonder beheerrechten gestart</td><td>In NinjaOne op <strong>System</strong> draaien, handmatig de UAC-vraag goedkeuren</td><td>L1</td></tr>
+<tr><td><code>Could not enumerate AppX packages</code></td><td>Zelfde oorzaak: te weinig rechten</td><td>Zie hierboven</td><td>L1</td></tr>
+<tr><td><code>Could not determine the latest published build</code></td><td><code>config.teams.microsoft.com</code> niet bereikbaar (proxy/firewall/DNS)</td><td>Netwerk controleren. In noodgeval <code>-Force</code> gebruiken om zonder controle te herinstalleren</td><td>L2</td></tr>
+<tr><td><code>Bootstrapper signature is ...</code></td><td>De download is niet (meer) van Microsoft — meestal een proxy die een foutpagina teruggeeft</td><td>Proxy/webfilter controleren. <strong>Niet</strong> omzeilen zonder overleg</td><td>L3</td></tr>
+<tr><td><code>Downloaded file is only N bytes</code></td><td>Zelfde oorzaak: een foutpagina in plaats van de installer</td><td>Zie hierboven</td><td>L2</td></tr>
+<tr><td><code>timed out after 900 seconds and was killed</code></td><td>Installatie bleef hangen</td><td>Werkplek herstarten en opnieuw proberen; anders <code>-TimeoutSeconds</code> verhogen</td><td>L2</td></tr>
+<tr><td><code>Another installation is in progress (1618)</code></td><td>Er loopt al een installatie</td><td>Geen actie — het script probeert het zelf opnieuw</td><td>L1</td></tr>
+<tr><td><code>WebRTC Redirector install failed (exit code 1638)</code></td><td>Er stond al een andere versie van de redirector; die MSI kan niet over zichzelf heen installeren</td><td>Hoort niet meer voor te komen: het script verwijdert de oude versie eerst. Komt het toch terug, verwijder de redirector handmatig via Programma's en onderdelen en draai opnieuw</td><td>L3</td></tr>
+<tr><td><code>Use either -AvdOptimizations ... or -RemoveWebRtcRedirector, not both</code></td><td>Beide opties tegelijk opgegeven; de een installeert wat de ander weghaalt</td><td>Kies er één</td><td>L2</td></tr>
+<tr><td><code>Could not remove the WebRTC Redirector</code></td><td>msiexec weigerde de verwijdering</td><td>Log in <code>C:\Temp</code> lezen; meestal loopt er een andere installatie</td><td>L3</td></tr>
+<tr><td><code>Uninstall of ... Add-in ... failed (exit code 1612)</code></td><td>Windows Installer kan zijn eigen bron-MSI niet vinden</td><td>Het script probeert het opnieuw met de gecachte kopie in <code>C:\Windows\Installer</code>. Lukt dat niet, dan blijft de oude add-in geregistreerd en weigert een andere versie met <code>1638</code></td><td>L3</td></tr>
+<tr><td><code>Teams Meeting Add-in install failed (exit code 1638)</code></td><td>Er staat nog een <strong>andere</strong> add-in geregistreerd. Niet de versie is bepalend maar het feit dát er iets geregistreerd staat: gemeten met een nieuwere MSI (<code>1.26.21803</code>) die weigerde over een oudere <code>1.25.28902</code></td><td>De oude eerst verwijderen. Kan Windows Installer dat niet meer (<code>1612</code>), dan <code>-ClearOrphanedAddInRegistration</code></td><td>L3</td></tr>
+<tr><td><code>Add-in X is still registered, so installing Y would answer 1638</code></td><td>Zo bedoeld: het script laat de bestaande add-in staan in plaats van hem te slopen</td><td>Add-in verwijderen via Programma's en onderdelen en opnieuw draaien. Weigert Windows Installer dat (<code>1612</code>), dan <code>-ClearOrphanedAddInRegistration</code> gebruiken</td><td>L3</td></tr>
+<tr><td><code>Teams Meeting Add-in installation failed</code></td><td>Client staat er, add-in niet</td><td>Outlook volledig sluiten en het script opnieuw draaien</td><td>L2</td></tr>
+<tr><td><code>Outlook has the add-in switched off for ... (LoadBehavior 2)</code></td><td>Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash</td><td>Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet</td><td>L2</td></tr>
+<tr><td><code>The add-in is registered for ... but its DLL is gone (...)</code></td><td>Verouderde registratie van die gebruiker overschaduwt de machinebrede installatie</td><td>Draaien met <code>-RepairOutlookAddIn</code>; vinkje terugzetten in Outlook helpt niet</td><td>L2</td></tr>
+<tr><td><code>Teams installation failed</code></td><td>De installatie is niet doorgekomen</td><td>Log in <code>C:\Temp</code> lezen en doorzetten</td><td>L3</td></tr>
+<tr><td><code>A reboot is required</code></td><td>Windows wil herstarten om af te ronden</td><td>Herstart inplannen met de gebruiker</td><td>L1</td></tr>
+</tbody>
+</table></div>
+<hr/>
+<h2 id="veelgestelde-vragen">Veelgestelde vragen</h2>
+<p><strong>Het script gaf helemaal geen output. Is het wel gelopen?</strong></p>
+<p>Ja. Met <code>-Quiet</code> zwijgt het script bewust zolang er niets te melden is. Geen output plus resultaat "geslaagd" betekent: werkplek is al bij.</p>
+<p><strong>Kan ik het gewoon nog een keer draaien?</strong></p>
+<p>Ja. Op een werkplek die al bij is doet het niets. Het is niet schadelijk om het vaker te draaien.</p>
+<p><strong>Raakt de gebruiker chats of bestanden kwijt?</strong></p>
+<p>Nee. Die staan in Microsoft 365, niet in de app.</p>
+<p><strong>Moet de gebruiker opnieuw inloggen in Teams?</strong></p>
+<p>Meestal niet — de aanmelding komt van Windows. Gebeurt het toch, dan is dat normaal na een herinstallatie.</p>
+<p><strong>De vergaderknop in Outlook is nog steeds weg.</strong></p>
+<p>Outlook volledig afsluiten (ook in de taakbalk) en opnieuw openen. Outlook laadt invoegtoepassingen <strong>per gebruiker</strong>, dus de knop verschijnt pas bij de eerstvolgende start van Outlook van die gebruiker. Blijft het weg, dan doorzetten naar level 2.</p>
+<p><strong>Wordt de add-in voor alle gebruikers geïnstalleerd?</strong></p>
+<p>Ja. Het script installeert hem machinebreed (<code>ALLUSERS=1</code>) in <code>C:\Program Files (x86)\Microsoft\TeamsMeetingAddin\</code>, zodat iedereen die op die werkplek inlogt hem heeft — van belang op sessiehosts en gedeelde werkplekken. Op een gewone werkplek installeert en update Teams de add-in daarnaast zelf per gebruiker; daar is <code>-SkipMeetingAddIn</code> een verdedigbare keuze. In beide gevallen pikt Outlook hem per gebruiker op bij de volgende start.</p>
+<p><strong>Moet ik dit op alle werkplekken draaien?</strong></p>
+<p>Dat kan als geplande NinjaOne-taak met <code>-Quiet -Confirm:$false</code>. Werkplekken die bij zijn worden overgeslagen en verschijnen niet in de activity feed — alleen waar echt iets gebeurde of misging.</p>
+<hr/>
+<h2 id="bijlage-het-script-in-ninjaone-zetten-eenmalig-level-3">Bijlage — het script in NinjaOne zetten (eenmalig, level 3)</h2>
+<p>Dit hoef je maar één keer per Ninja-omgeving te doen. Daarna kan level 1 en 2 er gewoon mee werken.</p>
+<blockquote>Menupaden verschillen per Ninja-versie en per taalinstelling. De veldnamen hieronder kloppen; het pad ernaartoe kan bij jou net anders heten.</blockquote>
+<h3 id="stap-1-het-script-toevoegen">Stap 1 — het script toevoegen</h3>
+<p><strong>Administration → Library → Automation → Add → New Script</strong> (in oudere versies: <em>Configuration → Scripting</em>).</p>
+<p>Plak de volledige inhoud van <code>Update-TeamsClient.ps1</code> in de editor en zet de velden zo:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Veld</th><th>Waarde</th><th>Waarom</th></tr></thead>
+<tbody>
+<tr><td>Name</td><td><code>Update Teams client + Outlook add-in</code></td><td>—</td></tr>
+<tr><td>Description</td><td><code>Werkt nieuwe Teams bij als Microsoft een nieuwere build publiceert. Doet niets op een werkplek die al bij is.</code></td><td>Zodat collega's het niet verwarren met een herinstallatie-script</td></tr>
+<tr><td>Categories</td><td>Bijvoorbeeld <code>Applications</code> of <code>Microsoft 365</code></td><td>Vindbaarheid</td></tr>
+<tr><td>Language</td><td><strong>PowerShell</strong> (dus 5.1, niet PowerShell 7)</td><td>De AppX-commando's zijn daar native; onder 7 lopen ze via een compatibiliteitslaag</td></tr>
+<tr><td>Operating System</td><td><strong>Windows</strong></td><td>—</td></tr>
+<tr><td>Architecture</td><td><strong>64-bit</strong> als je die keuze hebt, anders <strong>All</strong></td><td>Het script vangt 32-bit zelf op, maar 64-bit scheelt een herstart van zichzelf</td></tr>
+<tr><td>Run As</td><td><strong>System</strong></td><td>Nodig voor AppX, MSI en het register</td></tr>
+</tbody>
+</table></div>
+<p>Opslaan.</p>
+<h3 id="stap-2-script-variables-optioneel-maar-handig">Stap 2 — script variables (optioneel, maar handig)</h3>
+<p>Met script variables krijgt de collega die het script draait vinkjes in plaats van een parameterregel. Voeg ze toe onder <strong>Script Variables</strong> bij het script:</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Variable name</th><th>Type</th><th>Label voor de collega</th></tr></thead>
+<tbody>
+<tr><td><code>whatIf</code></td><td>Checkbox</td><td>Alleen tonen wat er zou gebeuren</td></tr>
+<tr><td><code>quiet</code></td><td>Checkbox</td><td>Alleen melden als er nieuws is</td></tr>
+<tr><td><code>checkOnly</code></td><td>Checkbox</td><td>Alleen controleren, niets installeren</td></tr>
+<tr><td><code>force</code></td><td>Checkbox</td><td>Herinstalleren ook als de versie al actueel is</td></tr>
+<tr><td><code>avdOptimizations</code></td><td>Checkbox</td><td>AVD/VDI: mediavlag + WebRTC-redirector afdwingen</td></tr>
+<tr><td><code>repairOutlookAddIn</code></td><td>Checkbox</td><td>Verouderde per-gebruiker-registraties van de add-in opruimen</td></tr>
+<tr><td><code>removeClassicTeams</code></td><td>Checkbox</td><td>Classic Teams verwijderen (machinebreed + per gebruiker)</td></tr>
+<tr><td><code>removeWebRtcRedirector</code></td><td>Checkbox</td><td>Oude WebRTC-optimalisatie verwijderen (niet samen met <code>avdOptimizations</code>)</td></tr>
+<tr><td><code>clearOrphanedAddInRegistration</code></td><td>Checkbox</td><td><strong>Laatste redmiddel:</strong> add-in-registratie opruimen die Windows Installer niet meer kan verwijderen</td></tr>
+<tr><td><code>skipMeetingAddIn</code></td><td>Checkbox</td><td>Outlook-add-in met rust laten</td></tr>
+<tr><td><code>workingDir</code></td><td>Text</td><td>Andere downloadmap</td></tr>
+<tr><td><code>logPath</code></td><td>Text</td><td>Andere logmap</td></tr>
+<tr><td><code>ring</code></td><td>Text</td><td>Andere update-ring</td></tr>
+<tr><td><code>webRtcUrl</code></td><td>Text</td><td>Andere downloadlocatie voor de WebRTC-redirector</td></tr>
+<tr><td><code>bootstrapperUrl</code></td><td>Text</td><td>Andere downloadlocatie voor <code>teamsbootstrapper.exe</code></td></tr>
+<tr><td><code>skipSignatureCheck</code></td><td>Checkbox</td><td><strong>Niet aanzetten zonder overleg</strong> — slaat de Microsoft-handtekeningcontrole over</td></tr>
+</tbody>
+</table></div>
+<p>De naam moet inhoudelijk kloppen (<code>checkOnly</code>, niet <code>check_only</code>), maar <strong>hoofdletters maken niet uit</strong>: <code>Quiet</code>, <code>quiet</code> en <code>QUIET</code> werken allemaal, want environment-lookups zijn in Windows hoofdletterongevoelig. Ninja zet de variabelen klaar als environment-variabelen, en het script leest ze alleen als dezelfde parameter niet al op de commandoregel staat.</p>
+<p><strong>Controleer het één keer:</strong> draai het script met alleen het vinkje <em>whatIf</em> aan. De eerste regel van de output moet zijn:</p>
+<pre><code>  Mode: -WhatIf - nothing will be changed</code></pre>
+<p>Staat er <code>Mode: APPLY</code>, dan komt de variabele niet door — gebruik dan gewoon het Parameters-veld (stap 3).</p>
+<h3 id="stap-3-testen-op-n-werkplek">Stap 3 — testen op één werkplek</h3>
+<p>Zoek een testwerkplek op, <strong>Run Script</strong>, en vul bij <strong>Parameters</strong> in:</p>
+<pre><code>-WhatIf -Confirm:$false</code></pre>
+<p>Je ziet de versievergelijking en, als er een update is, alle stappen die uitgevoerd zouden worden. Er verandert niets op de werkplek. Resultaat moet <strong>geslaagd</strong> zijn.</p>
+<h3 id="stap-4-inplannen-voor-de-hele-omgeving">Stap 4 — inplannen voor de hele omgeving</h3>
+<p><strong>Policies → (het beleid van de werkplekken) → Scheduled Automations → Add → Script</strong>.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Instelling</th><th>Waarde</th></tr></thead>
+<tbody>
+<tr><td>Script</td><td><code>Update Teams client + Outlook add-in</code></td></tr>
+<tr><td>Parameters</td><td><code>-Quiet -Confirm:$false</code></td></tr>
+<tr><td>Run As</td><td>System</td></tr>
+<tr><td>Schedule</td><td>Bijvoorbeeld wekelijks buiten kantooruren</td></tr>
+</tbody>
+</table></div>
+<p>Door <code>-Quiet</code> blijft het stil op werkplekken die al bij zijn. Alleen werkplekken waar echt iets gebeurde of misging verschijnen in de activity feed.</p>
+<p>Heb je AVD- of VDI-sessiehosts? Maak daarvoor een <strong>tweede</strong> scheduled automation aan, met hetzelfde script maar deze parameters:</p>
+<pre><code>-AvdOptimizations -Quiet -Confirm:$false</code></pre>
+<p>Richt die op het beleid van de sessiehosts, niet op gewone werkplekken. Zie <a href="#avd--en-vdi-sessiehosts">AVD- en VDI-sessiehosts</a>.</p>
+<blockquote><code>-Confirm:$false</code> is geen overbodige luxe: het maakt het onmogelijk dat het script op een bevestigingsvraag blijft wachten, ongeacht wat de agent over de sessie meldt.</blockquote>
+<h3 id="stap-5-optioneel-detectie-in-plaats-van-installatie">Stap 5 — optioneel: detectie in plaats van installatie</h3>
+<p>Wil je eerst zien op hoeveel werkplekken een update klaarstaat, zonder iets te installeren? Plan dan een tweede automation in met:</p>
+<pre><code>-CheckOnly -Quiet</code></pre>
+<div class="table-scroll"><table>
+<thead><tr><th>Uitkomst</th><th>Exitcode</th><th>Hoe Ninja het toont</th></tr></thead>
+<tbody>
+<tr><td>Werkplek is bij</td><td><code>0</code></td><td>Geslaagd, geen output</td></tr>
+<tr><td>Update beschikbaar</td><td><code>2</code></td><td><strong>Mislukt</strong> (elke exitcode ≠ 0 is voor Ninja een fout) — met de versievergelijking in de output</td></tr>
+<tr><td>Controle lukte niet</td><td><code>1</code></td><td>Mislukt, met de reden in de output</td></tr>
+</tbody>
+</table></div>
+<p>Dat "mislukt" bij code <code>2</code> is bedoeld: zo vallen precies de werkplekken op die aandacht nodig hebben. Heeft jullie Ninja-versie <em>script result conditions</em>, dan kun je die exitcode gebruiken om er een echte conditie/alert van te maken.</p>
+<h3 id="aandachtspunten">Aandachtspunten</h3>
+<div class="table-scroll"><table>
+<thead><tr><th>Punt</th><th>Waar je op let</th></tr></thead>
+<tbody>
+<tr><td>Script-timeout in Ninja</td><td>Moet ruimer staan dan <code>-TimeoutSeconds</code> (standaard 900 s) plus de downloadtijd van ~275 MB. Staat de Ninja-timeout korter, dan breekt Ninja de job af midden in een installatie</td></tr>
+<tr><td>Draaien als System</td><td>Zonder System krijg je <code>Administrator rights are required</code> en stopt het script netjes met exitcode 1</td></tr>
+<tr><td>Netwerk</td><td><code>config.teams.microsoft.com</code> en <code>statics.teams.cdn.office.net</code> moeten bereikbaar zijn. Blokkeert de proxy die, dan meldt het script dat en verandert het niets</td></tr>
+<tr><td>Logbestand</td><td>Alleen bij een run die iets wijzigt: <code>C:\Temp\Update-TeamsClient_&lt;datum-tijd&gt;.log</code> op de werkplek zelf</td></tr>
+<tr><td>Bijwerken van het script</td><td>Nieuwe versie uit de repo opnieuw in hetzelfde Ninja-script plakken; geplande automations blijven verwijzen naar hetzelfde script</td></tr>
+</tbody>
+</table></div>
+<hr/>
+<h2 id="tekst-voor-de-gebruiker">Tekst voor de gebruiker</h2>
+<p><strong>Vooraf:</strong></p>
+<blockquote>Wij gaan Microsoft Teams op je werkplek bijwerken naar de nieuwste versie. Teams sluit daarbij automatisch af en start daarna weer op. Wil je Outlook na de update één keer opnieuw opstarten? Dan staat de knop voor Teams-vergaderingen weer in je agenda. Je chats, bestanden en teams blijven ongewijzigd.</blockquote>
+<p><strong>Achteraf:</strong></p>
+<blockquote>De update is uitgevoerd. Start Teams en Outlook opnieuw op. Zie je de knop <em>Nieuwe Teams-vergadering</em> niet in je agenda, laat het ons dan even weten.</blockquote>
+</body>
+</html>
