@@ -111,6 +111,11 @@
     ImportExcel module. The CSVs are always written regardless; the workbook is the readable copy
     on top of them, and a sheet that would exceed Excel's row limit is capped with a warning.
 
+    Every sheet is a real Excel table, so it filters and sorts as one. Three ready-made pivot
+    sheets are added as well, and the sheets carrying PermissionLevels get a PrimaryPermission
+    column beside it — a grant often holds several levels at once ("Read; Limited Access"), which
+    a pivot would otherwise treat as a value of its own.
+
 .PARAMETER GraphTimeoutSec
     Timeout in seconds per Graph/SharePoint call (default: 120).
 
@@ -2314,6 +2319,92 @@ if ($IncludeEffectiveAccess) {
 # what a resumed run appends to, so they exist either way; the workbook is the readable deliverable
 # on top. It is also the one that can fail on size — see the row cap below — and losing a
 # convenience copy must never cost the actual report.
+function Get-PrimaryPermissionLevel {
+    # PermissionLevels is a joined string ("Read; Limited Access"), which is the one thing a pivot
+    # table cannot work with: every combination becomes its own value, so "Full Control" and
+    # "Full Control; Limited Access" land in separate rows. This picks the single strongest level
+    # so there is something to pivot on, while the full string stays in the column next to it.
+    param([string]$Levels)
+    if ([string]::IsNullOrWhiteSpace($Levels)) { return $null }
+
+    # Both spellings, because a Dutch-language tenant names its built-in levels in Dutch.
+    $rank = @{
+        'full control' = 100; 'volledig beheer'   = 100
+        'design'       = 80;  'ontwerpen'         = 80
+        'edit'         = 70;  'bewerken'          = 70
+        'contribute'   = 60;  'bijdragen'         = 60
+        'read'         = 40;  'lezen'             = 40
+        'restricted view' = 30; 'beperkte weergave' = 30
+        'view only'    = 20;  'alleen weergeven'  = 20
+        'limited access' = 1; 'beperkte toegang'  = 1
+    }
+
+    $best = $null
+    $bestScore = -1
+    foreach ($level in ($Levels -split ';')) {
+        $name = $level.Trim()
+        if (-not $name) { continue }
+        $key = $name.ToLowerInvariant()
+        # A custom level outranks Read: someone created it deliberately, and it should not be
+        # hidden behind whichever built-in happens to sit beside it.
+        $score = if ($rank.ContainsKey($key)) { $rank[$key] } else { 50 }
+        if ($score -gt $bestScore) { $bestScore = $score; $best = $name }
+    }
+    return $best
+}
+
+function Add-PermissionsPivots {
+    # Ready-made pivots, added once every data sheet exists. Failing to build them must never cost
+    # the workbook, so the whole thing is best-effort and reports rather than throws.
+    param([Parameter(Mandatory = $true)][string]$WorkbookPath)
+
+    $pivots = @(
+        @{ Name = 'Pivot rechten';   Source = 'Rechten'; Rows = @('SiteUrl');       Columns = @('PrimaryPermission'); Data = @{ 'PrincipalName' = 'Count' }; Filter = @('PrincipalType', 'ScopeType') }
+        @{ Name = 'Pivot principals';Source = 'Rechten'; Rows = @('PrincipalName'); Columns = @('ScopeType');          Data = @{ 'ScopeUrl' = 'Count' };      Filter = @('SiteUrl', 'IsExternal') }
+        @{ Name = 'Pivot groepen';   Source = 'Groepen'; Rows = @('GroupTitle');    Columns = @('MemberIsExternal');   Data = @{ 'MemberLogin' = 'Count' };   Filter = @('SiteUrl', 'GroupType') }
+    )
+
+    $added = 0
+    try {
+        $pkg = Open-ExcelPackage -Path $WorkbookPath -ErrorAction Stop
+        try {
+            foreach ($pivot in $pivots) {
+                $source = $pkg.Workbook.Worksheets[$pivot.Source]
+                if (-not $source -or $source.Dimension -eq $null) { continue }
+
+                # Only reference columns the sheet actually has — a narrowed or absent report
+                # would otherwise produce a pivot pointing at a field that is not there.
+                $headers = @(1..$source.Dimension.End.Column | ForEach-Object { $source.Cells[1, $_].Text })
+                $rows    = @($pivot.Rows    | Where-Object { $headers -contains $_ })
+                $columns = @($pivot.Columns | Where-Object { $headers -contains $_ })
+                $filter  = @($pivot.Filter  | Where-Object { $headers -contains $_ })
+                $dataKey = @($pivot.Data.Keys | Where-Object { $headers -contains $_ })
+                if ($rows.Count -eq 0 -or $dataKey.Count -eq 0) { continue }
+
+                $params = @{
+                    ExcelPackage    = $pkg
+                    PivotTableName  = $pivot.Name
+                    SourceWorksheet = $source
+                    PivotRows       = $rows
+                    PivotData       = @{ $dataKey[0] = $pivot.Data[$dataKey[0]] }
+                    PivotTableStyle = 'Medium2'
+                }
+                if ($columns.Count -gt 0) { $params['PivotColumns'] = $columns }
+                if ($filter.Count -gt 0)  { $params['PivotFilter']  = $filter }
+
+                Add-PivotTable @params -ErrorAction Stop
+                $added++
+            }
+        } finally {
+            Close-ExcelPackage $pkg
+        }
+    } catch {
+        Write-Host ("  [WARN] Could not add pivot tables: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        Write-Host "         The data sheets themselves are unaffected." -ForegroundColor Yellow
+    }
+    return $added
+}
+
 function Export-PermissionsWorkbook {
     param(
         [Parameter(Mandatory = $true)][string]$WorkbookPath,
@@ -2352,6 +2443,18 @@ function Export-PermissionsWorkbook {
             if (-not $sheet.Path -or -not (Test-Path $sheet.Path)) { continue }
             $data = @(Import-Csv -Path $sheet.Path)
             if ($data.Count -eq 0) { continue }
+
+            # Give any sheet carrying PermissionLevels a single-value column beside it, so the
+            # permission level is something a pivot can group on.
+            if ($data[0].PSObject.Properties.Name -contains 'PermissionLevels') {
+                $projection = foreach ($prop in $data[0].PSObject.Properties.Name) {
+                    $prop
+                    if ($prop -eq 'PermissionLevels') {
+                        @{ Name = 'PrimaryPermission'; Expression = { Get-PrimaryPermissionLevel -Levels $_.PermissionLevels } }
+                    }
+                }
+                $data = @($data | Select-Object $projection)
+            }
             if ($data.Count -gt $RowCap) {
                 Write-Host ("  [WARN] '{0}' has {1:N0} rows — only the first {2:N0} fit in a worksheet." -f $sheet.Name, $data.Count, $RowCap) -ForegroundColor Yellow
                 Write-Host ("         The complete data stays in {0}" -f $sheet.Path) -ForegroundColor Yellow
@@ -2377,7 +2480,11 @@ if ($Excel) {
         @{ Name = 'Effectief';    Path = $(if ($effectivePublished)     { $effectiveCsv }) }
     )
     if (Export-PermissionsWorkbook -WorkbookPath $excelPath -Sheets $sheetSpec) {
+        $pivotCount = Add-PermissionsPivots -WorkbookPath $excelPath
         Write-Host ("  {0,-18}: {1}" -f 'Excel workbook', $excelPath) -ForegroundColor Green
+        if ($pivotCount -gt 0) {
+            Write-Host ("  {0,-18}: {1} ready-made pivot sheet(s); 'PrimaryPermission' groups the joined levels" -f '', $pivotCount) -ForegroundColor DarkGray
+        }
     }
 }
 

@@ -784,6 +784,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (17)
+| Change |
+|--------|
+| Made the `-Excel` workbook from `scripts/Reporting/Get-SharePointPermissionsReport.ps1` genuinely pivotable. Checked first rather than assumed: numeric columns already arrive in Excel as numbers, not text, so aggregation was never the problem — the obstacle was `PermissionLevels`, which SharePoint fills with several levels at once (`Read; Limited Access`). A pivot treats each combination as its own value, so `Full Control` and `Full Control; Limited Access` land on separate rows |
+| Sheets carrying `PermissionLevels` now get a `PrimaryPermission` column immediately beside it, holding the single strongest level of that grant. `Limited Access` always loses to a real level — SharePoint adds it automatically for traversal — and a custom level ranks above `Read` but below `Full Control`, because it was created deliberately and should not vanish behind a built-in. Dutch and English level names are both recognised, which matters on a Dutch-language tenant |
+| Added three ready-made pivot sheets: `Pivot rechten` (site × permission level, count of grants, filtered by principal and scope type), `Pivot principals` (principal × scope type, count of scopes, filtered by site and external), and `Pivot groepen` (group × external member, count of members, filtered by site and group type). Each only references columns its source sheet actually has, and a missing or narrowed source is skipped rather than producing a broken pivot |
+| Pivot creation is best-effort and isolated: a failure warns and leaves the data sheets untouched, on the same principle as the workbook itself not being allowed to cost the CSVs |
+| Verified locally with 213 checks across ten suites (33 new): the level ranking across single, joined, reversed, Dutch, custom, case-varying and empty inputs; the derived column landing next to the original on the right sheets and not on the others; and the pivots read back out of the package with the right row, column, data and filter fields, skipping absent sources and column-less sheets. **Not yet verified against a live tenant** |
+
 ### 2026-09-25 (16)
 | Change |
 |--------|
