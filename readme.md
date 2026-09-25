@@ -672,6 +672,8 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
     │   ├── Get-SharePointStorageReport.ps1  ← tenant-wide SharePoint storage report
+    │   ├── Get-SharePointPermissionsReport.ps1 ← who has access to what, at every level, to CSV
+    │   ├── Remove-SharePointFileVersionsByDate.ps1 ← delete file versions older than a date
     │   └── Licensing/
     │       ├── readme.md
     │       ├── genereer_licentie_overzicht.py
@@ -754,9 +756,21 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (3)
+| Change |
+|--------|
+| Added `scripts/Reporting/Get-SharePointPermissionsReport.ps1` — an exhaustive read-only SharePoint Online permissions report: site collection admins, web role assignments including inheritance breaks, SharePoint groups with their full membership, list and library role assignments, every folder and item with a unique scope, sharing links with their kind, external/guest principals, `Everyone` grants, and Entra group grants resolved to transitive membership. Four CSVs: detail, per-site summary, group membership, and — behind `-IncludeEffectiveAccess` — one row per resolved user per scope with the group the access runs through |
+| Inheritance is followed the way SharePoint models it: an item is only reported as its own scope when `HasUniqueRoleAssignments` is true, so the CSV is a map of the permission structure rather than a row per file. Site discovery is deliberately redundant — Graph `getAllSites`, then sub-sites through both Graph and SharePoint REST (`/_api/web/webs`), de-duplicated on URL — because Graph omits classic sub-webs |
+| Authentication had to go app-only: role assignments are not readable through Graph at all, and are not covered by SharePoint's Read/Write/Manage application roles either — only `Sites.FullControl.All` can enumerate them. The script signs in interactively once, creates a short-lived App Registration with that role plus Graph `Sites.Read.All` and `GroupMember.Read.All`, and deletes it again on exit. Despite the Full Control role it only ever issues `GET`: it never writes and never changes a permission. `-ClientId`/`-TenantId` with a secret or certificate skips the temporary app |
+| Resumable like the other long SharePoint scans: a checkpoint per completed list, keyed on a hash of the scan parameters, so an interrupted tenant run continues instead of starting over; `-Restart` discards it. Checkpoint files are only cleaned up once the final CSVs are written, so their presence is itself the signal that a run was interrupted |
+| Documented in `scripts/Reporting/readme.md` (coverage, authentication, the four output files, checkpoints, full parameter table, examples), added to the root repository tree and to `menu.ps1` under Reporting as `P` — which also prompts for tenant or single site, scope, and whether to write the effective-access CSV |
+| The repository tree also listed neither this script nor `Remove-SharePointFileVersionsByDate.ps1`; both are in it now |
+| **Untested by me**: this script has not been run against a live tenant in this session — only its syntax was checked. The temporary App Registration path, the throttling retries and the checkpoint resume are unverified here and should be exercised on a pilot tenant, starting with `-SiteUrl` and `-Scope Site`, before a tenant-wide run |
+
 ### 2026-09-25 (2)
 | Change |
 |--------|
+| An add-in that is registered but whose files are gone no longer counts as installed. That is exactly the state the failed run above left behind, and the script would have answered "Teams is up to date - nothing to do" on it: the work decision only looked at the Programs and Features entry, while the DLL check that spots this was report-only |
 | `Update-TeamsClient.ps1` no longer deletes a working meeting add-in before knowing it can install a replacement. A production `-Force` run removed every copy in step 6 and then failed in step 8 with `1638`, leaving the session host with no add-in at all. The sweep moved to step 8, behind the version comparison: an older MSI than the registered add-in now means the sweep and the install are skipped and the working add-in is left exactly as it is |
 | Three things had to line up for that, and all three are now handled. `-Force` on a host whose build is newer than the published one is a **downgrade**, which the version check now warns about by name. An add-in uninstall answering `1612` means Windows Installer lost its source, so it is retried against its own cached MSI under `C:\Windows\Installer` (via `Installer\UserData\S-1-5-18\Products\*\InstallProperties`, `LocalPackage`); when that is gone too, the run says the registration cannot be removed and what it will cause. A `1638` on the add-in is now a warning rather than an abort, so verification still runs and reports what Outlook is actually left with |
 | Preflight prints the registered add-in version instead of just "is installed" - that single number was the whole diagnosis of the failure and it was the one thing not on screen |

@@ -1458,8 +1458,9 @@ try {
             $installedAddInVersion = $candidate
         }
     }
-    $machineWideAddInOk = $false
-    $brokenAddInUsers   = @()
+    $machineWideAddInOk     = $false
+    $machineWideAddInBroken = $false
+    $brokenAddInUsers       = @()
 
     if (-not $SkipMeetingAddIn) {
         if ($addInInstalled) {
@@ -1470,6 +1471,10 @@ try {
 
         $addInRegistrations = @(Get-OutlookAddInRegistration)
         $machineWideAddInOk = [bool] ($addInRegistrations | Where-Object { $_.Account -like 'all users*' -and -not $_.DllMissing })
+        # Registered but pointing at files that are gone is not "installed". Counting
+        # it as installed is how a device whose add-in was deleted gets told there is
+        # nothing to do.
+        $machineWideAddInBroken = [bool] ($addInRegistrations | Where-Object { $_.Account -like 'all users*' -and $_.DllMissing })
         $brokenAddInUsers   = @($addInRegistrations | Where-Object { $_.Sid -and $_.DllMissing })
         Write-OutlookAddInStatus -Registrations $addInRegistrations
     }
@@ -1532,7 +1537,7 @@ try {
         }
     }
 
-    $addInMissing  = (-not $SkipMeetingAddIn) -and (-not $addInInstalled)
+    $addInMissing  = (-not $SkipMeetingAddIn) -and ((-not $addInInstalled) -or $machineWideAddInBroken)
     $avdWork       = $AvdOptimizations -and ((-not $avdFlagSet) -or (-not $webRtcEntry) -or $Force)
     $webRtcRemoval = $RemoveWebRtcRedirector -and [bool] $webRtcEntry
     $classicWork   = $RemoveClassicTeams -and (($classicMachineWide.Count + $classicUserInstall.Count) -gt 0)
@@ -1547,7 +1552,10 @@ try {
 
     $reasons = @()
     if ($clientOutdated) { $reasons += 'a newer build is available' }
-    if ($addInMissing)   { $reasons += 'the Teams Meeting Add-in is missing' }
+    if ($addInMissing) {
+        $reasons += if ($machineWideAddInBroken) { 'the machine-wide add-in registration points at files that are gone' }
+                    else { 'the Teams Meeting Add-in is missing' }
+    }
     if ($avdWork)        { $reasons += 'the AVD optimizations are incomplete' }
     if ($webRtcRemoval)  { $reasons += 'the old WebRTC optimization is still installed' }
     if ($classicWork)    { $reasons += 'classic Teams is still installed' }
