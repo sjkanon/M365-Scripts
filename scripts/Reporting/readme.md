@@ -216,6 +216,98 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant contex
 
 ---
 
+## Get-SharePointPermissionsReport.ps1
+
+Rapporteert **wie waar toegang toe heeft** in SharePoint Online — elke site, sub-site, lijst/bibliotheek, map en bestand dat eigen rechten draagt, geëxporteerd naar CSV. Alleen-lezen: het script doet uitsluitend `GET`-aanroepen en wijzigt nooit een recht.
+
+### Dekking
+
+- Site collection-beheerders
+- Roltoewijzingen op web-niveau (site en sub-site), inclusief doorbroken overerving
+- SharePoint-groepen (Owners/Members/Visitors en eigen groepen) met hun volledige ledenlijst
+- Roltoewijzingen op lijsten en documentbibliotheken
+- Map- en bestandsniveau: elk item met `HasUniqueRoleAssignments`
+- Deellinks (anoniem / organisatie / specifieke personen) en met wie er gedeeld is
+- Externe en gastgebruikers, plus `Everyone` en `Everyone except external users`
+- Entra ID-groepen, doorvertaald naar hun transitieve ledenlijst
+
+Overerving wordt gevolgd zoals SharePoint die zelf modelleert: een item verschijnt alleen als eigen scope wanneer het eigen rechten heeft. De rest erft van de dichtstbijzijnde parent, die één keer wordt gerapporteerd. De CSV blijft daarmee een kaart van de rechtenstructuur in plaats van een regel per bestand.
+
+> Sites worden bewust dubbel opgehaald: eerst tenantbreed via Graph (`getAllSites`), daarna opnieuw uitgevraagd op sub-sites via zowel Graph als SharePoint REST (`/_api/web/webs`), en ontdubbeld op URL. Klassieke sub-webs die Graph overslaat komen zo alsnog mee.
+
+### Authenticatie
+
+Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onder de Read/Write/Manage-rollen van SharePoint: daarvoor is de applicatierol `Sites.FullControl.All` nodig. Het script logt je daarom één keer interactief in en maakt vervolgens zelf een kortlevende App Registration aan met:
+
+| Resource | Rol | Waarvoor |
+|---|---|---|
+| SharePoint | `Sites.FullControl.All` | Roltoewijzingen, sitegroepen, item-scopes |
+| Graph | `Sites.Read.All` | Tenantbrede site-enumeratie |
+| Graph | `GroupMember.Read.All` | Entra-groepslidmaatschap oplossen |
+
+Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee van een bestaande registratie die deze rollen al heeft.
+
+### Output
+
+| Bestand | Inhoud |
+|---|---|
+| `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal |
+| `SharePoint_Permissions_Summary_<ts>.csv` | Per site: aantal grants, unieke scopes, webs, lijsten, mappen/bestanden met eigen rechten, deellinks, anonieme links, externe principals, `Everyone`-grants |
+| `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen én de Entra-groepen daarbinnen, platgeslagen |
+| `SharePoint_Permissions_EffectiveAccess_<ts>.csv` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope, met de groep waardoor die toegang loopt |
+
+> Op een grote tenant kan het effective-access bestand ordes van grootte groter zijn dan de detail-CSV. Daarom staat het uit tenzij je erom vraagt.
+
+### Hervatten na onderbreking (checkpoints)
+
+Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json` plus `.detail/.summary/.groups/.effective.partial.csv`. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+
+### Parameters
+
+| Parameter | Type | Standaard | Omschrijving |
+|---|---|---|---|
+| `-TenantUrl` | string | — | Tenant-root, bijv. `https://contoso.sharepoint.com`. Verplicht voor een tenantbrede run |
+| `-SiteUrl` | string | — | Eén site collection (inclusief sub-sites) in plaats van de hele tenant |
+| `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep: alleen webs, webs + lijsten, of alles tot map- en bestandsniveau |
+| `-TenantId` | string | _(uit de sessie)_ | Entra tenant-ID. Verplicht bij `-ClientId` |
+| `-ClientId` | string | — | Bestaande App Registration; slaat de tijdelijke app over |
+| `-ClientSecret` | string | — | Secret bij `-ClientId` |
+| `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My` |
+| `-OutputPath` | string | `C:\Temp` | Outputmap |
+| `-IncludeOneDriveSites` | switch | uit | Neemt ook persoonlijke OneDrive-sites mee (één site per gebruiker) |
+| `-IncludeHiddenLists` | switch | uit | Neemt verborgen en systeemlijsten mee (Form Templates, Style Library, workflowhistorie, …) |
+| `-ListTitle` | string[] | _(alles)_ | Beperk tot één of meer lijst-/bibliotheektitels |
+| `-ExcludeLimitedAccess` | switch | uit | Laat `Limited Access`-toewijzingen weg. Die zet SharePoint zelf neer zodat iemand naar een dieper toegekend item kan navigeren — ruis in de meeste reviews, maar ze verklaren wél waarom iemand een mappad ziet |
+| `-SkipGroupExpansion` | switch | uit | Groepslidmaatschap niet oplossen. Sneller, maar dan weet je alleen wélke groep toegang heeft, niet wie erin zit |
+| `-IncludeEffectiveAccess` | switch | uit | Schrijft daarnaast de effective-access CSV |
+| `-GraphTimeoutSec` | int | `120` | Timeout per Graph-/SharePoint-aanroep |
+| `-MaxGraphRetry` | int | `6` | Aantal retries bij throttling of timeouts |
+| `-Concurrency` | int (1-8) | `4` | Parallelle workers voor de per-item lookups die een `-Scope Item`-run domineren. `1` schakelt parallellisme uit |
+| `-Restart` | switch | uit | Negeer een bestaand checkpoint en begin opnieuw |
+
+### Vereisten
+
+- Module `Microsoft.Graph.Authentication` (en `Microsoft.Graph.Applications` zolang je de tijdelijke app laat aanmaken) — `.\scripts\Startup\Install-Modules.ps1`
+- Een account dat een App Registration mag aanmaken en admin consent mag geven, tenzij je `-ClientId` van een bestaande app meegeeft
+
+### Voorbeelden
+
+```powershell
+# Alles, tenantbreed: sites, sub-sites, bibliotheken, mappen en bestanden met eigen rechten
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com"
+
+# Eén site collection, plus een CSV met effectieve toegang per gebruiker
+.\Get-SharePointPermissionsReport.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -IncludeEffectiveAccess
+
+# Sneller overzicht: stoppen op lijst-/bibliotheekniveau en automatische traversal-grants verbergen
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -Scope List -ExcludeLimitedAccess
+
+# Onderbroken tenantscan negeren en volledig opnieuw beginnen
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -Restart
+```
+
+---
+
 ## Remove-SharePointFileVersionsByDate.ps1
 
 Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document libraries op basis van een cutoff-datum, terwijl de **huidige versie behouden blijft**.

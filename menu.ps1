@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # Cross-platform: Windows (PS 5.1+), macOS and Linux (PS 7+)
 <#
 .SYNOPSIS
@@ -647,6 +647,26 @@ $menu = @(
         Label='Licensing-Report    — generate monthly Pax8 + Ingram Excel report'
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"
         Params={ return @{} }
+    }
+    [PSCustomObject]@{ Key='P'; FKey=$null; Category='Reporting'
+        Label='SharePoint-Perms    — report who has access to what, at every level'
+        Script="$ROOT\scripts\Reporting\Get-SharePointPermissionsReport.ps1"
+        Params={
+            $site = Read-Host '  One site collection URL (empty = whole tenant)'
+            $a = @{}
+            if ($site) {
+                $a['SiteUrl'] = $site
+            } else {
+                $tenant = Read-Host '  Tenant URL (https://contoso.sharepoint.com)'
+                if (-not $tenant) { Write-Warning 'A tenant URL is required for a tenant-wide run.'; return $null }
+                $a['TenantUrl'] = $tenant
+            }
+            $scope = Read-Host '  Scope [Site/List/Item] [Item]'
+            if ($scope -match '^(?i)(site|list|item)$') { $a['Scope'] = $scope }
+            $eff = Read-Host '  Also write the per-user effective access CSV? [y/N]'
+            if ($eff -match '^[Yy]') { $a['IncludeEffectiveAccess'] = $true }
+            return $a
+        }
     }
     [PSCustomObject]@{ Key='S'; FKey=$null; Category='SharePoint'
         Label='SharePoint-Structure — provision/check metadata, libraries and rights'
