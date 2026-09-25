@@ -268,7 +268,7 @@ Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand
 
 | Bestand | Inhoud |
 |---|---|
-| `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal |
+| `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal. Onleesbare scopes staan er als `ItemType = Error` met de reden in de kolom `Error`; `UnitKey` koppelt een regel aan de checkpoint-unit die hem schreef |
 | `SharePoint_Permissions_Summary_<ts>.csv` | Per site: aantal grants, unieke scopes, webs, lijsten, mappen/bestanden met eigen rechten, deellinks, anonieme links, externe principals, `Everyone`-grants |
 | `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen én de Entra-groepen daarbinnen, platgeslagen |
 | `SharePoint_Permissions_EffectiveAccess_<ts>.csv` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope, met de groep waardoor die toegang loopt |
@@ -295,6 +295,8 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 | Lijst met eigen rechten maar zonder roltoewijzingen | Levert geen regels op, en dat is correct. Voorheen liep dit vast op `Cannot bind argument to parameter 'RoleAssignments'` |
 | Roltoewijzingen niet te lezen (`403`) | **Foutregel, geen lege uitkomst.** Dit is het enige punt waar een 403 niet wordt overgeslagen: een lege lijst roltoewijzingen leest als "niemand heeft rechten op deze scope", en "ik mag niet kijken" is een ander feit dan "er is niets te zien" |
 | Galerie-lijst weigert de veldselectie (`400`) | De query wordt stapsgewijs versmald (vier varianten) tot SharePoint hem accepteert. Op `Galerie van thema's` en `Galerie met basispagina's` bestaan niet alle velden; liever de bestandsnaam kwijt dan de unieke scopes van die lijst |
+| `Lijst met gebruikersgegevens` (template 112) | Item-scan wordt overgeslagen. SharePoint weigert `/items` op deze verborgen systeemlijst bij élke veldbreedte, en de items zijn gebruikersrecords, geen content — item-rechten zeggen daar niets. De lijst zelf wordt wel gerapporteerd. Dit scheelde 121 valse foutregels per tenantscan |
+| Foutregels uit een eerdere, afgebroken poging | Worden bij het wegschrijven weggelaten zodra dezelfde unit later wél is gelukt. Anders telt het rapport fouten mee die al opgelost zijn, en klopt het getal "N scopes niet leesbaar" niet — precies het getal waarop iemand actie onderneemt |
 | Item-sweep faalt | Aparte foutregel: zonder die regel zou de lijst er uitzien alsof er niets met eigen rechten in zat |
 | CSV staat open in Excel | Vijf keer opnieuw met oplopende wachttijd; lukt het dan nog niet, stopt de run in plaats van stilzwijgend regels te laten vallen |
 | Token verloopt midden in een grote bibliotheek | Elke wave haalt het token opnieuw op — workers krijgen een kopie en zien een latere refresh niet |

@@ -1337,6 +1337,9 @@ function ConvertTo-PermissionRows {
         if ($principal.IsExternal) { $externalCount = [Math]::Max($externalCount, 1) }
 
         $rows.Add([PSCustomObject]@{
+            # Ties the row back to the checkpoint unit that produced it, so error rows left behind
+            # by an attempt that later succeeded can be dropped when the final CSV is written.
+            UnitKey           = $ScopeInfo.UnitKey
             SiteUrl           = $ScopeInfo.SiteUrl
             WebUrl            = $ScopeInfo.WebUrl
             WebTitle          = $ScopeInfo.WebTitle
@@ -1367,7 +1370,10 @@ function ConvertTo-PermissionRows {
             Error             = $null
         }) | Out-Null
 
-        if ($IncludeEffectiveAccess -and $EffectiveRows) {
+        # Must be an explicit null test. An empty List[object] is falsy in PowerShell, so
+        # "-and $EffectiveRows" was false on the very first row and the list could never fill —
+        # which is why -IncludeEffectiveAccess produced an empty file on a 1554-grant tenant.
+        if ($IncludeEffectiveAccess -and $null -ne $EffectiveRows) {
             foreach ($m in $members) {
                 $EffectiveRows.Add([PSCustomObject]@{
                     SiteUrl          = $ScopeInfo.SiteUrl
@@ -1742,6 +1748,7 @@ try {
                     foreach ($admin in $admins) {
                         $principal = Get-PrincipalInfo -Member $admin
                         $webDetailRows.Add([PSCustomObject]@{
+                            UnitKey           = $webUnitKey
                             SiteUrl           = $siteCollectionUrl
                             WebUrl            = $webUrl
                             WebTitle          = $webTitle
@@ -1924,7 +1931,18 @@ try {
                 }
 
                 # ── Folders, files and list items with unique permissions ─────
-                if ($Scope -eq 'Item' -and [int]$list.ItemCount -gt 0) {
+                # Template 112 is the User Information List: a hidden system list of user profile
+                # stubs that SharePoint refuses to enumerate through /items at any $select width
+                # (400 on all four rungs of the ladder below, on every site in the tenant). Its
+                # items are directory records rather than content, so item-level scopes there mean
+                # nothing for an access review — and the list's own scope is already reported
+                # above. Skipping it removes 121 false "could not be read" rows per tenant scan.
+                $skipItemSweep = ([int]$list.BaseTemplate -eq 112)
+                if ($skipItemSweep -and $Scope -eq 'Item' -and [int]$list.ItemCount -gt 0) {
+                    Write-ProgressHost -Message ("    [SKIP] {0}: SharePoint does not support item enumeration on this system list." -f $list.Title) -ForegroundColor DarkGray
+                }
+
+                if ($Scope -eq 'Item' -and -not $skipItemSweep -and [int]$list.ItemCount -gt 0) {
                     # Ask for HasUniqueRoleAssignments on every item in one paged sweep, then only
                     # fetch role assignments for the items that actually have their own scope.
                     # Paging by $top uses $skiptoken under the hood, so this does not trip the
@@ -1988,7 +2006,7 @@ try {
                     if ($itemSweepFailed) {
                         $listDetailRows.Add([PSCustomObject]@{
                             SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
-                            ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $listUrl
+                            UnitKey = $unitKey; ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $listUrl
                             ItemType = 'Error'; ListTitle = [string]$list.Title; ListTemplate = [string]$list.BaseTemplate
                             HasUniquePerms = $null; InheritsFrom = $null
                             PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
@@ -2010,7 +2028,7 @@ try {
                             if ($assignments -is [string]) {
                                 $listDetailRows.Add([PSCustomObject]@{
                                     SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
-                                    ScopeType = 'Item'; ScopeTitle = [string]$item.FileLeafRef; ScopeUrl = [string]$item.FileRef
+                                    UnitKey = $unitKey; ScopeType = 'Item'; ScopeTitle = [string]$item.FileLeafRef; ScopeUrl = [string]$item.FileRef
                                     ItemType = 'Error'; ListTitle = [string]$list.Title; ListTemplate = [string]$list.BaseTemplate
                                     HasUniquePerms = $true; InheritsFrom = $null
                                     PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
@@ -2063,7 +2081,7 @@ try {
                     Complete-CheckpointUnit -UnitKey $null -EffectiveRows @($listEffectiveRows) -DetailRows (
                         @($listDetailRows) + @([PSCustomObject]@{
                             SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
-                            ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $webUrl
+                            UnitKey = $unitKey; ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $webUrl
                             ItemType = 'Error'; ListTitle = [string]$list.Title; ListTemplate = [string]$list.BaseTemplate
                             HasUniquePerms = $null; InheritsFrom = $null
                             PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
@@ -2094,7 +2112,7 @@ try {
             # that site will actually see it.
             Complete-CheckpointUnit -UnitKey $null -DetailRows @([PSCustomObject]@{
                 SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $web.Title
-                ScopeType = 'Web'; ScopeTitle = $web.Title; ScopeUrl = $webUrl
+                UnitKey = $webUnitKey; ScopeType = 'Web'; ScopeTitle = $web.Title; ScopeUrl = $webUrl
                 ItemType = 'Error'; ListTitle = $null; ListTemplate = $null
                 HasUniquePerms = $null; InheritsFrom = $null
                 PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
@@ -2185,8 +2203,6 @@ function New-PermissionSummary {
     return @($summary)
 }
 
-$summaryRows = @(New-PermissionSummary -DetailPath $script:CheckpointDetailPath)
-
 # ── Write final CSVs ──────────────────────────────────────────────────────────
 function Publish-ReportFile {
     param([string]$PartialPath, [string]$FinalPath, [string]$Label)
@@ -2199,6 +2215,31 @@ function Publish-ReportFile {
     return $true
 }
 
+function Publish-DetailFile {
+    # A unit that failed is left unmarked so a resumed run retries it — but the error rows from
+    # that failed attempt are already in the partial CSV and no later success removes them. The
+    # report then carries errors that have since been resolved, and the "could not be read" count
+    # people act on is wrong. A row whose unit is now marked complete has been superseded, so it
+    # is dropped here rather than published.
+    # Writes the file and says nothing; the summary block below reports it in order.
+    param([string]$PartialPath, [string]$FinalPath)
+    if (-not (Test-Path $PartialPath)) { return $false }
+    Import-Csv -Path $PartialPath | Where-Object {
+        if ($_.ItemType -ne 'Error') { return $true }
+        if ([string]::IsNullOrWhiteSpace($_.UnitKey)) { return $true }
+        if ($script:CompletedUnitKeys.Contains($_.UnitKey)) { $script:SupersededErrorRows++; return $false }
+        return $true
+    } | Export-Csv -Path $FinalPath -NoTypeInformation -Encoding UTF8
+    return $true
+}
+
+$script:SupersededErrorRows = 0
+$detailPublished = Publish-DetailFile -PartialPath $script:CheckpointDetailPath -FinalPath $detailCsv
+
+# Summarise the published file, not the partial: the counts have to describe the CSV the reader
+# actually opens, superseded error rows excluded from both.
+$summaryRows = @(if ($detailPublished) { New-PermissionSummary -DetailPath $detailCsv })
+
 Write-Host ''
 Write-Host '  ================================================' -ForegroundColor Cyan
 Write-Host '   Summary' -ForegroundColor Cyan
@@ -2210,7 +2251,11 @@ if ($summaryRows.Count -gt 0) {
 } else {
     Write-Host ("  {0,-18}: (no rows)" -f 'Summary') -ForegroundColor DarkGray
 }
-[void](Publish-ReportFile -PartialPath $script:CheckpointDetailPath    -FinalPath $detailCsv    -Label 'Detail')
+if ($detailPublished) {
+    Write-Host ("  {0,-18}: {1}" -f 'Detail', $detailCsv) -ForegroundColor Green
+} else {
+    Write-Host ("  {0,-18}: (no rows)" -f 'Detail') -ForegroundColor DarkGray
+}
 [void](Publish-ReportFile -PartialPath $script:CheckpointGroupsPath    -FinalPath $groupsCsv    -Label 'Groups')
 if ($IncludeEffectiveAccess) {
     [void](Publish-ReportFile -PartialPath $script:CheckpointEffectivePath -FinalPath $effectiveCsv -Label 'Effective access')
@@ -2253,6 +2298,9 @@ Write-Host ("  Everyone grants   : {0}" -f $totalEveryone) -ForegroundColor $(if
 if ($totalErrors -gt 0 -or $runTotals.WebsFailed -gt 0) {
     Write-Host ''
     Write-Host ("  [WARN] {0} scope(s) could not be read — the report is incomplete." -f $totalErrors) -ForegroundColor Yellow
+    if ($script:SupersededErrorRows -gt 0) {
+        Write-Host ("         ({0} error(s) from an earlier interrupted attempt were dropped — those scopes were read this time.)" -f $script:SupersededErrorRows) -ForegroundColor DarkGray
+    }
     Write-Host "         Filter the detail CSV on ItemType = 'Error' to see exactly what was missed." -ForegroundColor Yellow
     Write-Host "         Re-running with the same parameters resumes and retries them." -ForegroundColor Yellow
 } else {
