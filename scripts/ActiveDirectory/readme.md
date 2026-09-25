@@ -8,7 +8,7 @@ On-prem Active Directory Domain Services monitoring — as opposed to [`Entra/`]
 
 | Script | Description |
 |--------|-------------|
-| [`Watch-ADAccountLockouts.ps1`](#watch-adaccountlockoutsps1) | Monitor AD for locked-out user accounts, log only new lockouts, every 20 minutes |
+| [`Watch-ADAccountLockouts.ps1`](Watch-ADAccountLockouts.ps1) ([docs](#watch-adaccountlockoutsps1)) | Monitor AD for locked-out user accounts, log only new lockouts, every 20 minutes |
 
 ---
 

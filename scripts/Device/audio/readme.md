@@ -12,9 +12,9 @@ Scripts for detecting and disabling the internal microphone on Windows laptops w
 
 | File | Description |
 |------|-------------|
-| `detect-audiodevices.ps1` | Phase 1 — inventory all audio devices and classify as internal or headset |
-| `Disable-internalmic.ps1` | Phase 2 — disable internal microphone based on detection patterns |
-| `Rollback-InternalMic.ps1` | Emergency — re-enable the microphone if something goes wrong |
+| [`detect-audiodevices.ps1`](detect-audiodevices.ps1) | Phase 1 — inventory all audio devices and classify as internal or headset |
+| [`Disable-internalmic.ps1`](Disable-internalmic.ps1) | Phase 2 — disable internal microphone based on detection patterns |
+| [`Rollback-InternalMic.ps1`](Rollback-InternalMic.ps1) | Emergency — re-enable the microphone if something goes wrong |
 
 ---
 

@@ -8,8 +8,8 @@ Pins a "Lock Workstation" shortcut to Start / Desktop via a downloaded `.bat` + 
 
 | File | Description |
 |------|-------------|
-| [`add-lock.ps1`](#add-lockps1) | Downloads the lock script + icon and creates the shortcut |
-| [`add-shortcut-lock.ps1`](#add-shortcut-lockps1) | Pins an arbitrary shortcut via the `Windows.taskbarpin` Explorer verb |
+| [`add-lock.ps1`](add-lock.ps1) ([docs](#add-lockps1)) | Downloads the lock script + icon and creates the shortcut |
+| [`add-shortcut-lock.ps1`](add-shortcut-lock.ps1) ([docs](#add-shortcut-lockps1)) | Pins an arbitrary shortcut via the `Windows.taskbarpin` Explorer verb |
 
 ---
 

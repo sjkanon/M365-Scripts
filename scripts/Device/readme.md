@@ -8,12 +8,12 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 
 | Script | Description |
 |--------|-------------|
-| [`Clear-TempFiles.ps1`](#clear-tempfilesps1) | Clear the shared script temp folder (`C:\Temp` on Windows, `/tmp` on Linux/macOS) |
-| [`Invoke-WindowsActivation.ps1`](#invoke-windowsactivationps1) | Activate Windows, manage product keys and KMS settings |
-| [`Invoke-WindowsCleanup.ps1`](#invoke-windowscleanupps1) | Scan and remove reclaimable disk space |
-| [`Remove-OemBloatware.ps1`](#remove-oembloatwareps1) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
-| [`Test-OpenVpnDiagnostics.ps1`](#test-openvpndiagnosticsps1) | Diagnose OpenVPN Connect issues |
-| [`Update-TeamsClient.ps1`](#update-teamsclientps1) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build ([how it works](Update-TeamsClient.md), [IT Glue](Update-TeamsClient-ITGlue.md)) |
+| [`Clear-TempFiles.ps1`](Clear-TempFiles.ps1) ([docs](#clear-tempfilesps1)) | Clear the shared script temp folder (`C:\Temp` on Windows, `/tmp` on Linux/macOS) |
+| [`Invoke-WindowsActivation.ps1`](Invoke-WindowsActivation.ps1) ([docs](#invoke-windowsactivationps1)) | Activate Windows, manage product keys and KMS settings |
+| [`Invoke-WindowsCleanup.ps1`](Invoke-WindowsCleanup.ps1) ([docs](#invoke-windowscleanupps1)) | Scan and remove reclaimable disk space |
+| [`Remove-OemBloatware.ps1`](Remove-OemBloatware.ps1) ([docs](#remove-oembloatwareps1)) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
+| [`Test-OpenVpnDiagnostics.ps1`](Test-OpenVpnDiagnostics.ps1) ([docs](#test-openvpndiagnosticsps1)) | Diagnose OpenVPN Connect issues |
+| [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1) ([docs](#update-teamsclientps1)) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build ([how it works](Update-TeamsClient.md), [IT Glue](Update-TeamsClient-ITGlue.md)) |
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 | [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
@@ -323,7 +323,7 @@ On an endpoint, preflight also checks the three policies that stop the staging: 
 2. Preview a device first: run it with `-WhatIf -Confirm:$false` in the *Parameters* field — the job output shows the version comparison and every step an update would perform, and the device stays untouched.
 3. Schedule the real run with `-Quiet -Confirm:$false`. On an up-to-date device it prints nothing and exits `0`, so the activity feed only shows the devices where it actually did something.
 4. For a detection/condition job use `-CheckOnly -Quiet`: silent and `0` when current, output and exit code `2` when a newer build is published.
-5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `avdOptimizations`, `removeClassicTeams`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`, `webRtcUrl`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
+5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `avdOptimizations`, `removeWebRtcRedirector`, `removeClassicTeams`, `repairOutlookAddIn`, `clearOrphanedAddInRegistration`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`, `webRtcUrl`, `bootstrapperUrl`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
 
 If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `SysNative` first — without that, the registry reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is found.
 

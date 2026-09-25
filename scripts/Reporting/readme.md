@@ -1,6 +1,18 @@
 # Reporting Scripts
 
-Scripts voor het genereren van rapporten over Active Directory, devices en licenties.
+Scripts voor het genereren van rapporten over Active Directory, SharePoint Online en licenties.
+
+---
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Laatste inlogdatum van computerobjecten in één of meerdere OUs, met export naar CSV |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis en prullenbak |
+| [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Wie heeft waar toegang, via welke groep en met welk niveau — elke site, lijst, map en bestand met eigen rechten. Alleen-lezen, naar CSV en één Excel-werkmap |
+| [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Verwijdert bestandsversies ouder dan een datum; de huidige versie blijft altijd staan. Standaard alleen rapporteren |
+| [`Licensing/`](Licensing/readme.md) | Maandelijks licentie- en Azure-kostenrapport uit Pax8- en Ingram-data |
 
 ---
 
@@ -245,22 +257,126 @@ Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onde
 | Graph | `Sites.Read.All` | Tenantbrede site-enumeratie |
 | Graph | `GroupMember.Read.All` | Entra-groepslidmaatschap oplossen |
 
-Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee van een bestaande registratie die deze rollen al heeft.
+Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft.
+
+> **Certificaat, geen secret — en dat is geen voorkeur.** SharePoint Online weigert elk app-only token dat met een client secret is opgehaald: je krijgt `401` met `x-ms-diagnostics: ... Unsupported app only token`. Alleen certificaat-gebaseerde app-only authenticatie werkt tegen `_api`. De tijdelijke app krijgt daarom een certificaat dat het script **in het geheugen** aanmaakt en op de app registreert; het komt niet in de certificate store en niet op schijf, dus er valt achteraf niets op te ruimen. Geef je `-ClientSecret` mee bij een eigen app, dan waarschuwt het script: de Graph-helft werkt dan wel, de SharePoint-helft niet.
+
+#### Waarom niet gewoon Graph?
+
+Graph kan een deel: op een `driveItem` geeft `/permissions` de rechten, de deellinks (met type en vervaldatum) en via `inheritedFrom` of de overerving doorbroken is. Maar de rest van het beeld ontbreekt daar simpelweg — er is geen Graph-endpoint voor:
+
+| Wat | Graph | SharePoint REST |
+|---|---|---|
+| Roltoewijzingen op site-/webniveau | ❌ bestaat niet | ✅ `/_api/web/roleassignments` |
+| SharePoint-groepen en hun leden | ❌ bestaat niet | ✅ `/_api/web/sitegroups` |
+| Site collection-beheerders | ❌ bestaat niet | ✅ `/_api/web/siteusers` |
+| Naam van het permissieniveau (Full Control, Bewerken, eigen niveaus) | ❌ alleen `read`/`write`/`owner` | ✅ `RoleDefinitionBindings` |
+| Lijsten zonder `driveItem` (gewone lijsten) | ❌ | ✅ |
+| Goedkoop filteren op eigen rechten | ❌ één call per item | ✅ `HasUniqueRoleAssignments` in één sweep |
+
+Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand een `/permissions`-call moeten doen, terwijl SharePoint in één doorloop per lijst al vertelt wélke items eigen rechten hebben. Een Graph-only variant zou wél met een client secret kunnen en met minder rechten (`Sites.Read.All`), maar levert een rapport op zonder site-eigenaren, zonder groepen en zonder permissieniveaus — precies waar een rechtenreview mee begint.
 
 ### Output
 
 | Bestand | Inhoud |
 |---|---|
-| `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal |
+| `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal. Onleesbare scopes staan er als `ItemType = Error` met de reden in de kolom `Error`; `UnitKey` koppelt een regel aan de checkpoint-unit die hem schreef |
 | `SharePoint_Permissions_Summary_<ts>.csv` | Per site: aantal grants, unieke scopes, webs, lijsten, mappen/bestanden met eigen rechten, deellinks, anonieme links, externe principals, `Everyone`-grants |
-| `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen én de Entra-groepen daarbinnen, platgeslagen |
+| `SharePoint_Permissions_SiteAccess_<ts>.csv` | **Per site een regel per persoon**, met de groep waardoor de toegang loopt en het niveau. Zie hieronder |
+| `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen, de Entra-groepen die daarin genest zitten, én Entra-groepen die rechtstreeks op een scope zijn toegekend. Allemaal platgeslagen naar personen |
 | `SharePoint_Permissions_EffectiveAccess_<ts>.csv` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope, met de groep waardoor die toegang loopt |
 
 > Op een grote tenant kan het effective-access bestand ordes van grootte groter zijn dan de detail-CSV. Daarom staat het uit tenzij je erom vraagt.
 
+#### Wie heeft waar toegang, via welke groep — in één tabblad
+
+De vraag waarmee je dit rapport meestal opent is niet "welke grants bestaan er" maar **"wie kan bij deze SharePoint, en hoe komt die daar"**. Dat stond eerder verspreid: `Rechten` zei dát een groep rechten had, `Groepen` zei wie erin zat, en je moest die zelf koppelen. `Site Owners heeft Volledig beheer` plus `Site Owners bevat vijf mensen` is nog geen antwoord.
+
+Daarom is er `SharePoint_Permissions_SiteAccess_<ts>.csv` (tabblad `Toegang`): **één regel per persoon per site**, met de groep waardoor die toegang loopt en het niveau.
+
+| Kolom | Inhoud |
+|---|---|
+| `SiteTitle` / `SiteUrl` | De site, op naam — 130 URL's zijn geen "één oogopslag" |
+| `UserDisplayName` / `UserPrincipalName` / `UserEmail` | Wie |
+| `IsExternal` / `AccountEnabled` | Gast of intern, account actief |
+| `ViaType` | `Direct`, `SharePointGroup`, `SecurityGroup`, `M365Group`, `Everyone`, … |
+| `ViaName` / `ViaId` | Welke groep. De id staat erbij omdat een titel als `Site Owners` op elke site voorkomt |
+| `PermissionLevels` | Het niveau van die toekenning |
+
+Het is bewust **geconsolideerd per site collection**: iemand die via dezelfde groep op dertig mappen in dezelfde site uitkomt, is één regel — niet dertig. Een ander niveau of een andere groep is wél een aparte regel, want dat is andere toegang. Wil je het per losse map of bestand zien, gebruik dan `-IncludeEffectiveAccess`; dat tabblad (`Effectief`) is per scope en daardoor veel groter.
+
+Drie dingen die hier expres niet wegvallen:
+
+- **Rechtstreeks toegekende personen** staan er als zichzelf, met `ViaType = Direct`.
+- **`Everyone` en `Everyone except external users`** lossen naar niemand op, maar zijn juist wat je wil zien. Ze krijgen één regel met de claim als naam.
+- Ook met `-SkipGroupExpansion` blijven rechtstreeks toegekende personen zichtbaar; alleen de groepsleden ontbreken dan.
+
+> Vergeleken met [NovaPoint](https://github.com/Barbarur/NovaPoint/wiki/Solution-Report-PermissionsReport), dat dezelfde vraag beantwoordt met `AccessType` + `GroupId` en een kolom `Users` met een lijst gebruikers erin: hier staat elke gebruiker op een eigen regel. Dat leest minder compact, maar het is het verschil tussen wel en niet kunnen filteren of pivotten op een persoon.
+
+#### Alles in één Excel-bestand
+
+Met `-Excel` komt er naast de CSV's één werkmap bij, `SharePoint_Permissions_<ts>.xlsx`, met een tabblad per rapport:
+
+| Tabblad | Inhoud |
+|---|---|
+| `Samenvatting` | Per site: grants, unieke scopes, deellinks, externe principals, `Everyone`-grants, fouten |
+| `Rechten` | Elke grant afzonderlijk |
+| `Toegang` | **Per site, per persoon: welk recht en via welke groep.** Het tabblad om mee te beginnen |
+| `Groepen` | Elke groep met zijn leden — SharePoint-groepen, de Entra-groepen die daarin genest zitten, **én** Entra-groepen die rechtstreeks op een scope zijn toegekend |
+| `Effectief` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope |
+
+Elk tabblad is een echte Excel-tabel, dus met filterknoppen en bevroren koprij. Getallen komen als getallen binnen, niet als tekst, dus optellen en sorteren werkt zonder eerst te converteren.
+
+#### Draaitabellen
+
+Er komen drie kant-en-klare draaitabellen bij, elk op een eigen tabblad:
+
+| Tabblad | Rijen | Kolommen | Waarde | Filters |
+|---|---|---|---|---|
+| `Pivot rechten` | Site | Permissieniveau | Aantal grants | Principaltype, scopetype |
+| `Pivot principals` | Principal | Scopetype | Aantal scopes | Site, extern ja/nee |
+| `Pivot groepen` | Groep | Lid extern ja/nee | Aantal leden | Site, groepstype |
+| `Pivot toegang` | Site → persoon → groep | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
+
+> **`PermissionLevels` is niet pivot-baar, `PrimaryPermission` wel.** SharePoint geeft een grant vaak meerdere niveaus tegelijk, en die staan in één kolom als `Read; Limited Access`. Een draaitabel maakt daar een aparte waarde van, dus `Full Control` en `Full Control; Limited Access` belanden op verschillende rijen. Daarom staat er in de tabbladen `Rechten` en `Effectief` een extra kolom `PrimaryPermission` naast de volledige tekst, met het zwaarste niveau van die grant. `Limited Access` verliest daarbij altijd van een echt niveau — dat zet SharePoint zelf neer zodat iemand naar iets dieper toegekends kan navigeren. Een eigen permissieniveau telt zwaarder dan `Lezen` maar lichter dan `Volledig beheer`: het is met opzet aangemaakt, dus het hoort niet weg te vallen. Nederlandse en Engelse niveaunamen worden allebei herkend.
+
+Wil je zelf een draaitabel maken: zet de cursor in een tabblad en kies **Invoegen → Draaitabel**; de tabel is al benoemd, dus het bereik klopt meteen en groeit mee.
+
+De CSV's blijven altijd staan; de werkmap komt er bovenop. Dat is met opzet: de CSV's zijn waar de scan naartoe streamt en waar een hervatte run op aanvult, dus ze bestaan sowieso — en als het schrijven van de werkmap misgaat (module ontbreekt, bestand open in Excel, te weinig geheugen) kost dat nooit het rapport zelf.
+
+> **Rijlimiet.** Een werkblad in Excel stopt bij 1.048.576 regels en laat de rest zonder melding vallen. Het script kapt daarom bewust af op 1.000.000 en zegt erbij welk tabblad is ingekort en in welke CSV de volledige data staat. Alleen `Effectief` komt daar op een grote tenant realistisch in de buurt.
+
+`-Excel` heeft de module `ImportExcel` nodig (staat in `Install-Modules.ps1`). Ontbreekt die, dan meldt het script dat en blijven de CSV's gewoon staan.
+
 ### Hervatten na onderbreking (checkpoints)
 
-Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json` plus `.detail/.groups/.effective.partial.csv`. Anders dan bij de twee scripts hierboven worden de regels direct naar die partials gestreamd in plaats van in het geheugen bewaard — een tenantbrede run op itemniveau levert miljoenen regels op. De summary-CSV bestaat daarom niet als checkpoint: die wordt aan het eind uit het detailbestand opgebouwd, zodat een hervatte run alles samenvat wat er ooit voor deze `<hash>` is weggeschreven en niet alleen het deel van de laatste sessie. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json`, `.keys.partial.log` en `.detail/.groups/.effective.partial.csv`. Anders dan bij de twee scripts hierboven worden de regels direct naar die partials gestreamd in plaats van in het geheugen bewaard — een tenantbrede run op itemniveau levert miljoenen regels op. De summary-CSV bestaat daarom niet als checkpoint: die wordt aan het eind uit het detailbestand opgebouwd, zodat een hervatte run alles samenvat wat er ooit voor deze `<hash>` is weggeschreven en niet alleen het deel van de laatste sessie. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+
+Welke units al klaar zijn staat in `.keys.partial.log`, één regel per sleutel, alleen aangevuld. Dat is bewust geen lijst in de JSON: die na elke lijst opnieuw gesorteerd wegschrijven is kwadratisch werk, en op een tenant met duizenden lijsten kost het checkpoint dan meer tijd dan het scannen zelf. Een halve laatste regel (proces hardgekild tijdens het schrijven) wordt genegeerd — die ene unit wordt dan gewoon opnieuw gescand.
+
+### Robuustheid
+
+Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hieronder zijn geen randgevallen maar te verwachten. Hoe het script ermee omgaat:
+
+| Situatie | Gedrag |
+|---|---|
+| App-rol nog niet gerepliceerd | Het token moet vóór de scan aantonen dát het de rollen draagt (`roles`-claim). Entra geeft namelijk gewoon een token uit zonder de net toegekende rol, en Graph antwoordt daarop met `401` — niet `403`. Zo'n token wordt niet gecachet; er wordt opnieuw geminst tot de rol erin staat (tot ~2,5 min), daarna een duidelijke fout |
+| Token geweigerd (`401`) | Eén keer opnieuw authenticeren met een vers token; blijft het weigeren, dan **stopt de run** met de reden uit `x-ms-diagnostics`. Een 401 geldt nooit voor één site, dus hij wordt niet per site gemeld |
+| Geen toegang tot één site (`403`) of object weg (`404`) | Die ene site/dat ene object wordt overgeslagen, de rest loopt door |
+| Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`, anders exponentiële backoff tot 3 minuten |
+| Eén lijst faalt (view threshold, raar template) | Foutregel in de detail-CSV, de overige lijsten van die site lopen gewoon door. De unit wordt **niet** als klaar gemarkeerd, dus een hervatte run probeert hem opnieuw |
+| Lijst met eigen rechten maar zonder roltoewijzingen | Levert geen regels op, en dat is correct. Voorheen liep dit vast op `Cannot bind argument to parameter 'RoleAssignments'` |
+| Roltoewijzingen niet te lezen (`403`) | **Foutregel, geen lege uitkomst.** Dit is het enige punt waar een 403 niet wordt overgeslagen: een lege lijst roltoewijzingen leest als "niemand heeft rechten op deze scope", en "ik mag niet kijken" is een ander feit dan "er is niets te zien" |
+| Galerie-lijst weigert de veldselectie (`400`) | De query wordt stapsgewijs versmald (vier varianten) tot SharePoint hem accepteert. Op `Galerie van thema's` en `Galerie met basispagina's` bestaan niet alle velden; liever de bestandsnaam kwijt dan de unieke scopes van die lijst |
+| `Lijst met gebruikersgegevens` (template 112) | Item-scan wordt overgeslagen. SharePoint weigert `/items` op deze verborgen systeemlijst bij élke veldbreedte, en de items zijn gebruikersrecords, geen content — item-rechten zeggen daar niets. De lijst zelf wordt wel gerapporteerd. Dit scheelde 121 valse foutregels per tenantscan |
+| Foutregels uit een eerdere, afgebroken poging | Worden bij het wegschrijven weggelaten zodra dezelfde unit later wél is gelukt. Anders telt het rapport fouten mee die al opgelost zijn, en klopt het getal "N scopes niet leesbaar" niet — precies het getal waarop iemand actie onderneemt |
+| Item-sweep faalt | Aparte foutregel: zonder die regel zou de lijst er uitzien alsof er niets met eigen rechten in zat |
+| CSV staat open in Excel | Vijf keer opnieuw met oplopende wachttijd; lukt het dan nog niet, stopt de run in plaats van stilzwijgend regels te laten vallen |
+| Token verloopt midden in een grote bibliotheek | Elke wave haalt het token opnieuw op — workers krijgen een kopie en zien een latere refresh niet |
+| SharePoint herhaalt een paging-link | Wordt gedetecteerd en afgebroken in plaats van eindeloos door te draaien |
+| Onverwachte fout waar dan ook | Een `trap` ruimt de tijdelijke App Registration op voordat het script stopt — er blijft nooit een Full Control-app achter |
+
+> Aan het eind meldt het script expliciet of álles gelezen kon worden. Staat er een `[WARN]` over onleesbare scopes, filter dan de detail-CSV op `ItemType = Error`: een rapport met gaten mag er niet uitzien als een rapport zonder bevindingen.
 
 ### Parameters
 
@@ -271,8 +387,8 @@ Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `Sha
 | `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep: alleen webs, webs + lijsten, of alles tot map- en bestandsniveau |
 | `-TenantId` | string | _(uit de sessie)_ | Entra tenant-ID. Verplicht bij `-ClientId` |
 | `-ClientId` | string | — | Bestaande App Registration; slaat de tijdelijke app over |
-| `-ClientSecret` | string | — | Secret bij `-ClientId` |
-| `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My` |
+| `-ClientSecret` | string | — | Secret bij `-ClientId`. **Werkt niet tegen SharePoint** (zie Authenticatie); het script waarschuwt |
+| `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My`. Dit is de werkende variant |
 | `-OutputPath` | string | `C:\Temp` | Outputmap |
 | `-IncludeOneDriveSites` | switch | uit | Neemt ook persoonlijke OneDrive-sites mee (één site per gebruiker) |
 | `-IncludeHiddenLists` | switch | uit | Neemt verborgen en systeemlijsten mee (Form Templates, Style Library, workflowhistorie, …) |
@@ -280,6 +396,7 @@ Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `Sha
 | `-ExcludeLimitedAccess` | switch | uit | Laat `Limited Access`-toewijzingen weg. Die zet SharePoint zelf neer zodat iemand naar een dieper toegekend item kan navigeren — ruis in de meeste reviews, maar ze verklaren wél waarom iemand een mappad ziet |
 | `-SkipGroupExpansion` | switch | uit | Groepslidmaatschap niet oplossen. Sneller, maar dan weet je alleen wélke groep toegang heeft, niet wie erin zit |
 | `-IncludeEffectiveAccess` | switch | uit | Schrijft daarnaast de effective-access CSV |
+| `-Excel` | switch | uit | Schrijft daarnaast één `.xlsx` met een tabblad per rapport. Vereist `ImportExcel` |
 | `-GraphTimeoutSec` | int | `120` | Timeout per Graph-/SharePoint-aanroep |
 | `-MaxGraphRetry` | int | `6` | Aantal retries bij throttling of timeouts |
 | `-Concurrency` | int (1-8) | `4` | Parallelle workers voor de per-item lookups die een `-Scope Item`-run domineren. `1` schakelt parallellisme uit |
@@ -298,6 +415,9 @@ Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `Sha
 
 # Eén site collection, plus een CSV met effectieve toegang per gebruiker
 .\Get-SharePointPermissionsReport.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -IncludeEffectiveAccess
+
+# Alles in één Excel-werkmap: samenvatting, rechten, groepen met leden, en effectieve toegang
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -IncludeEffectiveAccess -Excel
 
 # Sneller overzicht: stoppen op lijst-/bibliotheekniveau en automatische traversal-grants verbergen
 .\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -Scope List -ExcludeLimitedAccess

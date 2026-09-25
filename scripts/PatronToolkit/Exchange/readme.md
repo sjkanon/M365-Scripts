@@ -8,7 +8,7 @@ Mail flow diagnostics via Exchange Online.
 
 | Script | Description |
 |--------|-------------|
-| [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Export a message trace (mail flow) report, with optional per-message delivery detail |
+| [`Get-MessageTraceReport.ps1`](Get-MessageTraceReport.ps1) ([docs](#get-messagetracereportps1)) | Export a message trace (mail flow) report, with optional per-message delivery detail |
 
 ---
 

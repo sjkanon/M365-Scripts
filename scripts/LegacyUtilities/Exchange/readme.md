@@ -10,13 +10,13 @@ session is active; reuse an existing session if already connected.
 
 | Script | Description |
 |--------|-------------|
-| [`Set-MailboxFolderPermission.ps1`](#set-mailboxfolderpermissionps1) | Grant a folder permission across every folder in a mailbox |
-| [`Add-MailboxDelegateAccess.ps1`](#add-mailboxdelegateaccessps1) | Grant Full Access / Send As on one mailbox, a CSV list, or every mailbox |
-| [`New-BulkSharedMailboxes.ps1`](#new-bulksharedmailboxesps1) | Bulk-create shared mailboxes from CSV |
-| [`New-BulkMailContacts.ps1`](#new-bulkmailcontactsps1) | Bulk-create Mail Contacts from CSV, optionally add to a distribution group |
-| [`Sync-UserContacts.ps1`](#sync-usercontactsps1) | Push a shared contact list into users' personal Outlook Contacts |
-| [`Start-MailboxMessageTraceReport.ps1`](#start-mailboxmessagetracereportps1) | Submit historical message trace report requests |
-| [`Remove-DuplicateMailItems.ps1`](#remove-duplicatemailitemsps1) | Find/remove duplicate messages in a mailbox folder via Graph |
+| [`Set-MailboxFolderPermission.ps1`](Set-MailboxFolderPermission.ps1) ([docs](#set-mailboxfolderpermissionps1)) | Grant a folder permission across every folder in a mailbox |
+| [`Add-MailboxDelegateAccess.ps1`](Add-MailboxDelegateAccess.ps1) ([docs](#add-mailboxdelegateaccessps1)) | Grant Full Access / Send As on one mailbox, a CSV list, or every mailbox |
+| [`New-BulkSharedMailboxes.ps1`](New-BulkSharedMailboxes.ps1) ([docs](#new-bulksharedmailboxesps1)) | Bulk-create shared mailboxes from CSV |
+| [`New-BulkMailContacts.ps1`](New-BulkMailContacts.ps1) ([docs](#new-bulkmailcontactsps1)) | Bulk-create Mail Contacts from CSV, optionally add to a distribution group |
+| [`Sync-UserContacts.ps1`](Sync-UserContacts.ps1) ([docs](#sync-usercontactsps1)) | Push a shared contact list into users' personal Outlook Contacts |
+| [`Start-MailboxMessageTraceReport.ps1`](Start-MailboxMessageTraceReport.ps1) ([docs](#start-mailboxmessagetracereportps1)) | Submit historical message trace report requests |
+| [`Remove-DuplicateMailItems.ps1`](Remove-DuplicateMailItems.ps1) ([docs](#remove-duplicatemailitemsps1)) | Find/remove duplicate messages in a mailbox folder via Graph |
 
 ---
 

@@ -10,8 +10,8 @@ connected.
 
 | Script | Description |
 |--------|-------------|
-| [`Add-M365GroupMember.ps1`](#add-m365groupmemberps1) | Add or remove group members, single or bulk |
-| [`Backup-ConditionalAccessPolicies.ps1`](#backup-conditionalaccesspoliciesps1) | Export every CA policy to individual JSON files |
+| [`Add-M365GroupMember.ps1`](Add-M365GroupMember.ps1) ([docs](#add-m365groupmemberps1)) | Add or remove group members, single or bulk |
+| [`Backup-ConditionalAccessPolicies.ps1`](Backup-ConditionalAccessPolicies.ps1) ([docs](#backup-conditionalaccesspoliciesps1)) | Export every CA policy to individual JSON files |
 
 ---
 

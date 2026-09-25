@@ -8,7 +8,7 @@ Microsoft Teams tenant governance and inventory reporting.
 
 | Script | Description |
 |--------|-------------|
-| [`Get-TeamsConfigReport.ps1`](#get-teamsconfigreportps1) | Report Teams tenant governance settings and team inventory |
+| [`Get-TeamsConfigReport.ps1`](Get-TeamsConfigReport.ps1) ([docs](#get-teamsconfigreportps1)) | Report Teams tenant governance settings and team inventory |
 
 ---
 

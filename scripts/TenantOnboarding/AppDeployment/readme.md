@@ -8,13 +8,13 @@ Generic, parameterized device-side app deployment scripts — replacing a large 
 
 | Script | Description |
 |--------|-------------|
-| [`Install-Win32AppPackage.ps1`](#install-win32apppackageps1) | Download a zipped PSAppDeployToolkit package and run its silent install |
-| [`Install-ChocolateyPackage.ps1`](#install-chocolateypackageps1) | Install, upgrade, or uninstall a package via Chocolatey |
-| [`Set-DefaultFileAssociation.ps1`](#set-defaultfileassociationps1) | Set the default app for a file extension (PS-SFTA wrapper) |
-| [`New-DesktopShortcutsFromStartMenu.ps1`](#new-desktopshortcutsfromstartmenups1) | Copy a set of Start Menu shortcuts to the Public Desktop |
-| [`New-DesktopUrlShortcut.ps1`](#new-desktopurlshortcutps1) | Create a `.url` shortcut on the Public Desktop |
-| [`Remove-DesktopShortcut.ps1`](#remove-desktopshortcutps1) | Remove desktop shortcuts matching a name pattern |
-| [`Add-NetworkPrinterConnection.ps1`](#add-networkprinterconnectionps1) | Add a network printer by IP-based port and driver name |
+| [`Install-Win32AppPackage.ps1`](Install-Win32AppPackage.ps1) ([docs](#install-win32apppackageps1)) | Download a zipped PSAppDeployToolkit package and run its silent install |
+| [`Install-ChocolateyPackage.ps1`](Install-ChocolateyPackage.ps1) ([docs](#install-chocolateypackageps1)) | Install, upgrade, or uninstall a package via Chocolatey |
+| [`Set-DefaultFileAssociation.ps1`](Set-DefaultFileAssociation.ps1) ([docs](#set-defaultfileassociationps1)) | Set the default app for a file extension (PS-SFTA wrapper) |
+| [`New-DesktopShortcutsFromStartMenu.ps1`](New-DesktopShortcutsFromStartMenu.ps1) ([docs](#new-desktopshortcutsfromstartmenups1)) | Copy a set of Start Menu shortcuts to the Public Desktop |
+| [`New-DesktopUrlShortcut.ps1`](New-DesktopUrlShortcut.ps1) ([docs](#new-desktopurlshortcutps1)) | Create a `.url` shortcut on the Public Desktop |
+| [`Remove-DesktopShortcut.ps1`](Remove-DesktopShortcut.ps1) ([docs](#remove-desktopshortcutps1)) | Remove desktop shortcuts matching a name pattern |
+| [`Add-NetworkPrinterConnection.ps1`](Add-NetworkPrinterConnection.ps1) ([docs](#add-networkprinterconnectionps1)) | Add a network printer by IP-based port and driver name |
 
 ---
 

@@ -8,7 +8,7 @@ Windows Autopilot hardware hash collection — for USB/OOBE enrollment, see also
 
 | File | Description |
 |------|-------------|
-| [`Get-WindowsAutoPilotInfo.ps1`](#get-windowsautopilotinfops1) | Community script (Michael Niehaus) — retrieves the Autopilot hardware hash |
+| [`Get-WindowsAutoPilotInfo.ps1`](Get-WindowsAutoPilotInfo.ps1) ([docs](#get-windowsautopilotinfops1)) | Community script (Michael Niehaus) — retrieves the Autopilot hardware hash |
 | [`GetAutoPilot.CMD`](#getautopilotcmd) | Double-click wrapper — enables WinRM and runs the script, saving to `compHash.csv` |
 
 ---

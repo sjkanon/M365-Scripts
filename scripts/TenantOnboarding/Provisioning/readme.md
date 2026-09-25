@@ -8,9 +8,9 @@ Scripts for bootstrapping a single newly onboarded tenant: break-glass admin acc
 
 | Script | Description |
 |--------|-------------|
-| [`New-BreakGlassAdminAccount.ps1`](#new-breakglassadminaccountps1) | Create a cloud-only emergency-access Global Administrator account |
-| [`New-TenantBaselineGroups.ps1`](#new-tenantbaselinegroupsps1) | Create the CA-exclusion group and any feature-toggle groups a new tenant needs |
-| [`Set-IntuneBaselinePolicyAssignment.ps1`](#set-intunebaselinepolicyassignmentps1) | Bulk-assign name-filtered Intune baseline policies to a target group |
+| [`New-BreakGlassAdminAccount.ps1`](New-BreakGlassAdminAccount.ps1) ([docs](#new-breakglassadminaccountps1)) | Create a cloud-only emergency-access Global Administrator account |
+| [`New-TenantBaselineGroups.ps1`](New-TenantBaselineGroups.ps1) ([docs](#new-tenantbaselinegroupsps1)) | Create the CA-exclusion group and any feature-toggle groups a new tenant needs |
+| [`Set-IntuneBaselinePolicyAssignment.ps1`](Set-IntuneBaselinePolicyAssignment.ps1) ([docs](#set-intunebaselinepolicyassignmentps1)) | Bulk-assign name-filtered Intune baseline policies to a target group |
 
 **Recommended order for a new tenant:**
 1. `New-BreakGlassAdminAccount.ps1` — create the emergency-access account
