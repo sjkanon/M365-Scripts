@@ -399,6 +399,8 @@ Script variables are read from the environment when the matching parameter is no
 | `avdOptimizations` | checkbox | `-AvdOptimizations` |
 | `removeClassicTeams` | checkbox | `-RemoveClassicTeams` |
 | `repairOutlookAddIn` | checkbox | `-RepairOutlookAddIn` |
+| `removeWebRtcRedirector` | checkbox | `-RemoveWebRtcRedirector` |
+| `clearOrphanedAddInRegistration` | checkbox | `-ClearOrphanedAddInRegistration` |
 | `skipMeetingAddIn` | checkbox | `-SkipMeetingAddIn` |
 | `skipSignatureCheck` | checkbox | `-SkipSignatureCheck` |
 | `workingDir` | text | `-WorkingDir` |

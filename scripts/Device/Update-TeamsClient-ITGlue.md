@@ -26,12 +26,12 @@ In gewone taal:
 1. Het kijkt welke Teams-versie op de werkplek staat.
 2. Het vraagt bij Microsoft op welke versie op dit moment de nieuwste is.
 3. **Is de werkplek al bij?** Dan gebeurt er niets. Het script stopt zonder iets aan te raken.
-4. **Loopt de werkplek achter?** Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams **en elke kopie van de vergader-add-in**, installeert de nieuwe en zet de vergaderknop in Outlook terug.
+4. **Loopt de werkplek achter?** Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug. De oude kopieën van de add-in gaan er pas uit als de vervanger klaarstaat én er ook in kan — anders blijft staan wat werkt.
 5. Daarna controleert het of alles er ook echt staat, en meldt of het gelukt is.
 
 ### Wat het script **niet** doet
 
-- Het raakt de oude ("classic") Teams niet aan.
+- Het raakt de oude ("classic") Teams niet aan — tenzij je `-RemoveClassicTeams` meegeeft (zie [Classic Teams opruimen](#classic-teams-opruimen)).
 - Het verwijdert geen chats, bestanden of instellingen van de gebruiker.
 - Het start de computer niet zelf opnieuw op.
 - Het doet niets op een werkplek die al bij is — ook niet "voor de zekerheid".
@@ -214,6 +214,46 @@ Als een registratie er wél staat maar Outlook hem niet laadt, zet het script de
 
 Staat er in dezelfde output `[ OK ] Outlook loads the add-in for all users (machine-wide, ...)`, dan is het geregeld: die gebruikers krijgen de add-in zodra ze Outlook voor het eerst starten. Staat die regel er **niet**, dan is er niets om op terug te vallen en moet je de machinebrede installatie eerst rechtzetten (`-Force`).
 
+### De add-in kan niet opnieuw geïnstalleerd worden (1612 en 1638) — level 3
+
+Dit is een vastloper die zichzelf niet oplost. Je herkent hem aan twee regels in dezelfde run:
+
+```
+  [WARN] Uninstall of Microsoft Teams Meeting Add-in for Microsoft Office failed (exit code 1612)
+  [WARN] Add-in 1.25.28902 is still registered, so installing 1.26.21803 would answer 1638
+```
+
+Wat er speelt:
+
+- **1612** = Windows Installer is zijn eigen gecachte kopie van de MSI kwijt (die in `C:\Windows\Installer`). Zonder dat bestand kan hij het product op **geen enkele** ondersteunde manier verwijderen — ook niet via Programma's en onderdelen.
+- **1638** = de add-in-MSI weigert te installeren zolang er nog een andere add-in geregistreerd staat. Welke versie dat is maakt niet uit: gemeten met een *nieuwere* MSI (`1.26.21803`) die weigerde over een oudere `1.25.28902`.
+
+Samen betekent dat: de oude registratie kan er niet uit, en daardoor kan de nieuwe er niet in.
+
+**Eerst controleren** of de cache echt weg is:
+
+```powershell
+Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products\*\InstallProperties' |
+  Where-Object { $_.GetValue('DisplayName') -like '*Teams Meeting Add-in*' } |
+  Select-Object @{n='Version';e={$_.GetValue('DisplayVersion')}},
+                @{n='LocalPackage';e={$_.GetValue('LocalPackage')}},
+                @{n='Cached';e={Test-Path $_.GetValue('LocalPackage')}}
+```
+
+| Uitkomst | Wat te doen |
+|----------|-------------|
+| `Cached : True` | Het script lost dit zelf op: het verwijdert de add-in met die gecachte kopie. Gewoon opnieuw draaien |
+| `Cached : False` | Windows Installer kan het product niet meer verwijderen. Draai het script met `-ClearOrphanedAddInRegistration`, **eerst met `-WhatIf`** zodat je ziet welke registersleutels hij zou opruimen |
+
+```powershell
+.\Update-TeamsClient.ps1 -Force -ClearOrphanedAddInRegistration -WhatIf
+.\Update-TeamsClient.ps1 -Force -ClearOrphanedAddInRegistration
+```
+
+> **Waarom dit level 3 is.** De schakelaar bewerkt de registratiedatabase van Windows Installer: hij laat de installer dat ene product vergeten. Dat is wat het oude hulpprogramma MsiZap deed. Hij treedt alleen op nadat msiexec zelf al heeft bewezen dat hij het niet kan, en alleen voor dit product — maar het blijft een laatste redmiddel, geen onderhoudsstap.
+
+> **Ondertussen voor de gebruiker:** Teams zet zelf ook een add-in in het profiel van elke gebruiker. Teams starten en Outlook daarna volledig herstarten geeft die gebruiker de vergaderknop terug, ook zolang de machinebrede installatie nog klemzit.
+
 ---
 
 ## Waar het script naar Teams zoekt
@@ -226,7 +266,7 @@ De preflight inventariseert elke plek waar Teams kan staan, zodat je in één oo
 | Nieuwe Teams in de image | Het geprovisioneerde pakket — op een sessiehost staat Teams vaak alleen daar, zonder dat een gebruiker hem al heeft |
 | Classic Teams (machinebreed) | De oude *Teams Machine-Wide Installer* |
 | Classic Teams per gebruiker | `Teams.exe` in het profiel van elke gebruiker |
-| Vergader-add-in | Beide uninstall-hives (64-bit en 32-bit) |
+| Vergader-add-in | Beide uninstall-hives (64-bit en 32-bit), **met versienummer** — dat getal bepaalt of een herinstallatie erin kan |
 | Add-in-kopieën | De machinebrede map plus de map in elk gebruikersprofiel (`%LOCALAPPDATA%\Microsoft\TeamsMeetingAdd-in`) |
 | Outlook-registratie | Per ingelogde gebruiker |
 
@@ -415,6 +455,8 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
 | `-RepairOutlookAddIn` | Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen |
 | `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
+| `-BootstrapperUrl` | Andere downloadlocatie voor `teamsbootstrapper.exe`. Moet https zijn |
+| `-SkipSignatureCheck` | **Alleen na overleg.** Slaat de controle over of de installer echt van Microsoft is. Bedoeld voor een eigen interne spiegel; nooit gebruiken om een mislukte handtekeningcontrole "weg te krijgen" — die betekent meestal dat een proxy een foutpagina teruggaf |
 | `-SkipMeetingAddIn` | Alleen de client, de Outlook-add-in met rust laten |
 | `-TimeoutSeconds` | Standaard 900. Verhogen op trage werkplekken |
 | `-Ring` | Andere update-ring dan `general` |
@@ -535,10 +577,15 @@ Met script variables krijgt de collega die het script draait vinkjes in plaats v
 | `avdOptimizations` | Checkbox | AVD/VDI: mediavlag + WebRTC-redirector afdwingen |
 | `repairOutlookAddIn` | Checkbox | Verouderde per-gebruiker-registraties van de add-in opruimen |
 | `removeClassicTeams` | Checkbox | Classic Teams verwijderen (machinebreed + per gebruiker) |
+| `removeWebRtcRedirector` | Checkbox | Oude WebRTC-optimalisatie verwijderen (niet samen met `avdOptimizations`) |
+| `clearOrphanedAddInRegistration` | Checkbox | **Laatste redmiddel:** add-in-registratie opruimen die Windows Installer niet meer kan verwijderen |
 | `skipMeetingAddIn` | Checkbox | Outlook-add-in met rust laten |
 | `workingDir` | Text | Andere downloadmap |
 | `logPath` | Text | Andere logmap |
 | `ring` | Text | Andere update-ring |
+| `webRtcUrl` | Text | Andere downloadlocatie voor de WebRTC-redirector |
+| `bootstrapperUrl` | Text | Andere downloadlocatie voor `teamsbootstrapper.exe` |
+| `skipSignatureCheck` | Checkbox | **Niet aanzetten zonder overleg** — slaat de Microsoft-handtekeningcontrole over |
 
 De naam moet inhoudelijk kloppen (`checkOnly`, niet `check_only`), maar **hoofdletters maken niet uit**: `Quiet`, `quiet` en `QUIET` werken allemaal, want environment-lookups zijn in Windows hoofdletterongevoelig. Ninja zet de variabelen klaar als environment-variabelen, en het script leest ze alleen als dezelfde parameter niet al op de commandoregel staat.
 
