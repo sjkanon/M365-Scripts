@@ -10,6 +10,7 @@ Diagnostic and monitoring scripts for RDP / RD Web Access infrastructure. Run di
 |--------|-------------|
 | [`Test-RDSDiagnostics.ps1`](#test-rdsdiagnosticsps1) | One-shot health check — services, config, certs, user account, event logs |
 | [`Watch-RDSLive.ps1`](#watch-rdslivesps1) | Real-time session + licensing event monitor |
+| [`Get-FSlogix-errors.ps1`](#get-fslogix-errorsps1) | FSLogix / Azure Files profile diagnostics on an AVD session host |
 
 ---
 
@@ -85,3 +86,45 @@ Prints a heartbeat line per poll with the active session count.
 ```
 
 > Press `Ctrl+C` to stop. Run as Administrator for Security log access.
+
+---
+
+### Get-FSlogix-errors.ps1
+
+Collects, in one run, everything needed to work out why an FSLogix profile will not
+mount on an AVD session host — mount errors, a locked VHDX, SMB/Azure Files trouble or
+disk errors. Read-only: it gathers and reports, it repairs nothing.
+
+**What it collects**
+
+| Area | Details |
+|------|---------|
+| System | Host name, OS build, uptime |
+| FSLogix | Installed version, the full `Profiles`/`Containers` configuration, and the service state |
+| Containers | Attached VHD(X) files, the FSLogix session registry, and the profile paths from `ProfileList` |
+| Storage | SMB connections to Azure Files, and whether the VHD share is reachable at all |
+| Events | FSLogix events over the last `-Days` days, matched against the known critical failure patterns, plus disk/NTFS errors and User Profile Service events |
+| Leftovers | Local profiles under `C:\Users` and the FSLogix log files |
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-User` | Also produce a section filtered to one user — the account whose profile is failing |
+| `-Days` | Days of event history to analyse (default: `7`) |
+| `-OutputPath` | Folder for the transcript (default: `%SystemDrive%\Temp\FSLogixDiag`) |
+
+**Examples**
+
+```powershell
+# Everything from the last week
+.\Get-FSlogix-errors.ps1
+
+# One user, two weeks back, report somewhere else
+.\Get-FSlogix-errors.ps1 -User jdoe -Days 14 -OutputPath C:\Temp
+```
+
+> Run in an elevated session **on the session host itself** — the container, SMB and
+> event data only exist there. The whole run is written to
+> `FSLogixDiag_<host>_<timestamp>.log` in the output folder, which is the file to
+> attach to a ticket.
