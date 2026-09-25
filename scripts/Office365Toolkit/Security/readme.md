@@ -10,10 +10,10 @@ anti-malware baseline.
 
 | Script | Description |
 |--------|-------------|
-| [`Get-SecureScoreReport.ps1`](#get-securescorereportps1) | Report Secure Score trend and weakest controls |
-| [`Remove-EnterpriseAppConsent.ps1`](#remove-enterpriseappconsentps1) | Audit and optionally revoke an enterprise app's OAuth consent grants |
-| [`Test-SharedMailboxSignIn.ps1`](#test-sharedmailboxsigninps1) | Report/disable direct sign-in on shared mailboxes |
-| [`New-EOPProtectionBaseline.ps1`](#new-eopprotectionbaselineps1) | Create/update baseline anti-spam + anti-malware EOP policies |
+| [`Get-SecureScoreReport.ps1`](Get-SecureScoreReport.ps1) ([docs](#get-securescorereportps1)) | Report Secure Score trend and weakest controls |
+| [`Remove-EnterpriseAppConsent.ps1`](Remove-EnterpriseAppConsent.ps1) ([docs](#remove-enterpriseappconsentps1)) | Audit and optionally revoke an enterprise app's OAuth consent grants |
+| [`Test-SharedMailboxSignIn.ps1`](Test-SharedMailboxSignIn.ps1) ([docs](#test-sharedmailboxsigninps1)) | Report/disable direct sign-in on shared mailboxes |
+| [`New-EOPProtectionBaseline.ps1`](New-EOPProtectionBaseline.ps1) ([docs](#new-eopprotectionbaselineps1)) | Create/update baseline anti-spam + anti-malware EOP policies |
 
 ---
 

@@ -8,9 +8,9 @@ Device-side OneDrive for Business maintenance scripts: a restart/reset watchdog,
 
 | Script | Description |
 |--------|-------------|
-| [`Register-OneDriveWatchdog.ps1`](#register-onedrivewatchdogps1) | Keep OneDrive running via a scheduled task; also supports a one-time `/reset` |
-| [`Stop-OneDriveLibrarySync.ps1`](#stop-onedrivelibrarysyncps1) | Stop syncing one specific library without touching any other |
-| [`Set-OneDriveKnownFolderRedirect.ps1`](#set-onedriveknownfolderredirectps1) | Redirect Desktop/Documents/Pictures/Downloads into OneDrive |
+| [`Register-OneDriveWatchdog.ps1`](Register-OneDriveWatchdog.ps1) ([docs](#register-onedrivewatchdogps1)) | Keep OneDrive running via a scheduled task; also supports a one-time `/reset` |
+| [`Stop-OneDriveLibrarySync.ps1`](Stop-OneDriveLibrarySync.ps1) ([docs](#stop-onedrivelibrarysyncps1)) | Stop syncing one specific library without touching any other |
+| [`Set-OneDriveKnownFolderRedirect.ps1`](Set-OneDriveKnownFolderRedirect.ps1) ([docs](#set-onedriveknownfolderredirectps1)) | Redirect Desktop/Documents/Pictures/Downloads into OneDrive |
 
 ---
 

@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-176 scripts across 56 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+178 scripts across 56 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -27,6 +27,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Clear-TempFiles.ps1`](Device/Clear-TempFiles.ps1) | [`Device/`](Device/readme.md) | Clears the shared script temp folder. |
 | [`Compare-IntuneConfig.ps1`](Intune/Compare-IntuneConfig.ps1) | [`Intune/`](Intune/readme.md) | Compare a customer tenant's Intune configuration against an MSP baseline backup. |
 | [`Connect-AzureFileShareDrive.ps1`](LegacyUtilities/Network/Connect-AzureFileShareDrive.ps1) | [`LegacyUtilities/Network/`](LegacyUtilities/Network/readme.md) | Mount an Azure Files SMB share as a persistent drive letter. |
+| [`Convert-MarkdownToHtml.ps1`](Startup/Convert-MarkdownToHtml.ps1) | [`Startup/`](Startup/readme.md) | Turn a repository markdown document into one self-contained, styled HTML page - made to paste into IT Glue or to print. Supports -WhatIf. |
 | [`Convert-SharedCalendarToResource.ps1`](Exchange/Convert-SharedCalendarToResource.ps1) | [`Exchange/`](Exchange/readme.md) | Move a shared calendar out of a user's mailbox into a resource mailbox of its own - every item and every permission along with it - and then remove the origina… |
 | [`Copy-GroupMember.ps1`](Entra/Copy-GroupMember.ps1) | [`Entra/`](Entra/readme.md) | Copy the members of one Entra ID group into another group via Microsoft Graph. |
 | [`Copy-PlannerPlan.ps1`](LegacyUtilities/Teams/Copy-PlannerPlan.ps1) | [`LegacyUtilities/Teams/`](LegacyUtilities/Teams/readme.md) | Copy a Planner plan's buckets and tasks (with descriptions and checklists) into a new plan on a different group. |
@@ -166,6 +167,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Test-MailboxForwardingRisk.ps1`](Office365Toolkit/Exchange/Test-MailboxForwardingRisk.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Audit Outlook inbox rules and Sweep rules across mailboxes for forwarding/redirect/exfiltration patterns. |
 | [`Test-MailboxPermissions.ps1`](Exchange/Test-MailboxPermissions.ps1) | [`Exchange/`](Exchange/readme.md) | Audit mailbox access permissions - Full Access, Send As, and Send on Behalf. |
 | [`Test-MailboxSecurityBaseline.ps1`](Office365Toolkit/Exchange/Test-MailboxSecurityBaseline.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Audit mailboxes against a set of Exchange Online security/hygiene baseline settings. |
+| [`Test-MarkdownLinks.ps1`](Startup/Test-MarkdownLinks.ps1) | [`Startup/`](Startup/readme.md) | Check every link in the repository's markdown: files that must exist, and in-page anchors that must match a real heading. |
 | [`Test-OpenVpnDiagnostics.ps1`](Device/Test-OpenVpnDiagnostics.ps1) | [`Device/`](Device/readme.md) | Collect OpenVPN client diagnostics on a Windows endpoint into one timestamped report under C:\Temp. |
 | [`Test-Ports.ps1`](Network/Test-Ports.ps1) | [`Network/`](Network/readme.md) | Tests TCP connectivity on one or more ports against a target host. |
 | [`Test-PowerShellSyntax.ps1`](Startup/Test-PowerShellSyntax.ps1) | [`Startup/`](Startup/readme.md) | Parse PowerShell files and report syntax errors, without running any of them. |

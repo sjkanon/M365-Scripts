@@ -653,13 +653,31 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='M'; FKey=$null; Category='Startup'
+        Label='Convert-MarkdownToHtml — build a styled HTML page from a markdown doc (IT Glue)'
+        Script="$ROOT\scripts\Startup\Convert-MarkdownToHtml.ps1"
+        Params={
+            $default = "$ROOT\scripts\Device\Update-TeamsClient-ITGlue.md"
+            $path = Read-Host "  Markdown file [$default]"
+            if (-not $path) { $path = $default }
+            $a = @{ Path = $path }
+            $check = Read-Host '  Only check whether the HTML is stale, change nothing? [y/N]'
+            if ($check -match '^[Yy]') { $a['Check'] = $true }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='L'; FKey=$null; Category='Startup'
+        Label='Test-MarkdownLinks  — check every readme link: files and in-page anchors'
+        Script="$ROOT\scripts\Startup\Test-MarkdownLinks.ps1"
+        Params={ return @{} }
+    }
     [PSCustomObject]@{ Key='A'; FKey=[ConsoleKey]::F10; Category='Reporting'
         Label='Licensing-Report    — generate monthly Pax8 + Ingram Excel report'
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"
         Params={ return @{} }
     }
     [PSCustomObject]@{ Key='P'; FKey=$null; Category='Reporting'
-        Label='SharePoint-Perms    — report who has access to what, at every level'
+        Label='SharePoint-Perms    — who can reach which site, via which group, at what level'
         Script="$ROOT\scripts\Reporting\Get-SharePointPermissionsReport.ps1"
         Params={
             $site = Read-Host '  One site collection URL (empty = whole tenant)'
@@ -675,6 +693,8 @@ $menu = @(
             if ($scope -match '^(?i)(site|list|item)$') { $a['Scope'] = $scope }
             $eff = Read-Host '  Also write the per-user effective access CSV? [y/N]'
             if ($eff -match '^[Yy]') { $a['IncludeEffectiveAccess'] = $true }
+            $xl = Read-Host '  Also write one Excel workbook with all sheets? [Y/n]'
+            if ($xl -notmatch '^[Nn]') { $a['Excel'] = $true }
             return $a
         }
     }

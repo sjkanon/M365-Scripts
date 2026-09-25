@@ -8,7 +8,7 @@ Deploys the VIAS Institute Office color palette (theme colors only, not the full
 
 | File | Description |
 |------|-------------|
-| [`Deploy-Officecolors.ps1`](#deploy-officecolorsps1) | Downloads and installs the color scheme XML into Office's Theme Colors folder |
+| [`Deploy-Officecolors.ps1`](Deploy-Officecolors.ps1) ([docs](#deploy-officecolorsps1)) | Downloads and installs the color scheme XML into Office's Theme Colors folder |
 | `Test VIAS.xml` | The color scheme definition (`<a:clrScheme>`) — dark/light/accent colors for the VIAS Institute theme |
 
 ---

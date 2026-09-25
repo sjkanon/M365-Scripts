@@ -64,17 +64,17 @@ without Regio.
 
 | Script | What it does | Writes? |
 |---|---|---|
-| [`Install-SharePointStructure.ps1`](#install-sharepointstructureps1) | **Start here.** Asks what everything should be called, then builds the lot: app registration, team, channels, metadata, libraries, permissions, verification | yes |
-| [`New-StructureConfig.ps1`](#you-are-asked-not-handed-a-json-file) | The questions. Runs by itself from the installer; run it alone to prepare a configuration up front | writes the config |
-| [`New-SharePointTeam.ps1`](#install-sharepointstructureps1) | The Microsoft 365 team and its channels, private ones included, and the site URLs written back | yes |
-| [`New-SharePointMetadata.ps1`](#new-sharepointmetadataps1) | Term set, site columns, content types — on every site in the config | yes |
-| [`Set-SharePointLibraries.ps1`](#set-sharepointlibrariesps1) | Libraries, channel folders, content type binding, default metadata, views, group permissions | yes |
-| [`Update-SharePointShareStatus.ps1`](#update-sharepointsharestatusps1) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
-| [`Test-SharePointStructure.ps1`](#test-sharepointstructureps1) | Compares the tenant with the config and reports every difference | never |
-| [`Sync-SharePointChannelMember.ps1`](#private-channels-and-groups) | Makes a security group the source of truth for who is in a private channel | channel roster |
-| [`Add-SharePointHelpPage.ps1`](#handing-it-over-to-the-customer) | Writes the end-user explanation onto the team site, generated from the config | yes |
-| [`Remove-SharePointStructure.ps1`](#undoing-it) | Removes what was built — reports only unless you pass `-Apply` | yes, on purpose |
-| `SharePointStructure.Common.ps1` | Shared helpers — dot-sourced, not run on its own | — |
+| [`Install-SharePointStructure.ps1`](Install-SharePointStructure.ps1) ([docs](#install-sharepointstructureps1)) | **Start here.** Asks what everything should be called, then builds the lot: app registration, team, channels, metadata, libraries, permissions, verification | yes |
+| [`New-StructureConfig.ps1`](New-StructureConfig.ps1) ([docs](#you-are-asked-not-handed-a-json-file)) | The questions. Runs by itself from the installer; run it alone to prepare a configuration up front | writes the config |
+| [`New-SharePointTeam.ps1`](New-SharePointTeam.ps1) ([docs](#install-sharepointstructureps1)) | The Microsoft 365 team and its channels, private ones included, and the site URLs written back | yes |
+| [`New-SharePointMetadata.ps1`](New-SharePointMetadata.ps1) ([docs](#new-sharepointmetadataps1)) | Term set, site columns, content types — on every site in the config | yes |
+| [`Set-SharePointLibraries.ps1`](Set-SharePointLibraries.ps1) ([docs](#set-sharepointlibrariesps1)) | Libraries, channel folders, content type binding, default metadata, views, group permissions | yes |
+| [`Update-SharePointShareStatus.ps1`](Update-SharePointShareStatus.ps1) ([docs](#update-sharepointsharestatusps1)) | Derives Deelstatus from the real permissions, flags files shared wider than their tag allows | one column |
+| [`Test-SharePointStructure.ps1`](Test-SharePointStructure.ps1) ([docs](#test-sharepointstructureps1)) | Compares the tenant with the config and reports every difference | never |
+| [`Sync-SharePointChannelMember.ps1`](Sync-SharePointChannelMember.ps1) ([docs](#private-channels-and-groups)) | Makes a security group the source of truth for who is in a private channel | channel roster |
+| [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#handing-it-over-to-the-customer)) | Writes the end-user explanation onto the team site, generated from the config | yes |
+| [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#undoing-it)) | Removes what was built — reports only unless you pass `-Apply` | yes, on purpose |
+| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Shared helpers — dot-sourced, not run on its own | — |
 | [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
 | `petsolutions.config.json` | The model | — |
 

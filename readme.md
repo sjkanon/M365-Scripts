@@ -71,8 +71,11 @@ To remove the startup shortcut later:
 | [`scripts/readme.md`](scripts/readme.md) | The other direction: what each workload folder is for |
 | [`.\menu.ps1`](menu.ps1) | The curated interactive launcher for the everyday tasks |
 | `f <term>` | Fuzzy search from your shell, described under [Quick Launcher](#quick-launcher) below |
+| Any folder readme | Every script name in a `Scripts` table links straight to the file, with a `docs` link to its section on the same page |
 
 `INDEX.md` is generated from the scripts' own `.SYNOPSIS` headers by [`scripts/Startup/Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1) — rerun it (or run it with `-Check`) whenever a script is added, renamed, moved or removed.
+
+Those links are checked, not assumed: [`scripts/Startup/Test-MarkdownLinks.ps1`](scripts/Startup/Test-MarkdownLinks.ps1) walks every readme and fails on a file that is not there, or an anchor with no heading behind it.
 
 ---
 
@@ -151,6 +154,8 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
+| `L` | Startup | Test-MarkdownLinks — check every readme link: files and in-page anchors |
+| `M` | Startup | Convert-MarkdownToHtml — build a styled HTML page from a markdown document, for IT Glue |
 | `A` / `F10` | Reporting | Licensing-Report |
 | `P` | Reporting | SharePoint-Perms — report who has access to what, at every level |
 | `S` | SharePoint | SharePoint-Structure — provision/check metadata, libraries and rights |
@@ -376,6 +381,25 @@ Report last logon date for all computer objects in one or more OUs and export to
 - CSV columns: Name, Status, Enabled, LastLogon, DaysSinceLogon, PasswordLastSet, DaysSincePasswordSet, OS, IPv4, OU path, Created, Description
 - Supports multiple OUs in one run; `-IncludeDisabled` to include disabled objects
 
+#### SharePoint Permissions Report
+
+**Get-SharePointPermissionsReport.ps1** — who can reach which SharePoint, through which group, at what level. Read-only: every call it makes is a GET.
+
+- Starts from one consolidated view — one row per person per site, naming the group their access runs through and the level it grants. Grants and membership otherwise live in separate reports, and "Site Owners has Full Control" plus "Site Owners contains five people" is not yet an answer
+- Underneath it: site collection admins, web/list/item role assignments, inheritance breaks, SharePoint groups with their membership, Entra groups resolved to transitive membership, sharing links with their kind, external and guest principals, `Everyone` grants
+- An item is only reported as its own scope when it has unique permissions, so the report maps the permission structure instead of repeating a row per file
+- Role assignments are not readable through Graph and are not covered by SharePoint's Read/Write/Manage roles, so it creates a short-lived certificate-backed app with `Sites.FullControl.All` and deletes it again. A client secret cannot work — SharePoint Online refuses secret-based app-only tokens
+- `-Excel` writes one workbook with a sheet per report plus ready-made pivots; the CSVs are always written and the workbook is built from them
+- Resumes after an interruption from the last completed list, and says at the end whether every scope could actually be read
+
+#### SharePoint Storage Report
+
+**Get-SharePointStorageReport.ps1** — tenant-wide storage per site, library, version history and recycle bin, with site collection totals comparable to the admin centre.
+
+#### SharePoint Version Cleanup
+
+**Remove-SharePointFileVersionsByDate.ps1** — report (and with `-Apply`, delete) file versions older than a cutoff date. The current version is always preserved.
+
 #### Licensing Report
 
 Monthly licensing and Azure cost report generator.
@@ -409,9 +433,9 @@ Three scripts that work together to detect, disable, and roll back internal micr
 
 | Script | Doel |
 |---|---|
-| `detect-audiodevices.ps1` | Inventory van alle audio endpoints op het toestel |
-| `Disable-internalmic.ps1` | Disable interne microfoon(s), headsets worden overgeslagen |
-| `Rollback-InternalMic.ps1` | Heractiveer eerder uitgeschakelde interne microfoons |
+| [`detect-audiodevices.ps1`](scripts%5CDevice%5Caudio%5Cdetect-audiodevices.ps1) | Inventory van alle audio endpoints op het toestel |
+| [`Disable-internalmic.ps1`](scripts%5CDevice%5Caudio%5CDisable-internalmic.ps1) | Disable interne microfoon(s), headsets worden overgeslagen |
+| [`Rollback-InternalMic.ps1`](scripts%5CDevice%5Caudio%5CRollback-InternalMic.ps1) | Heractiveer eerder uitgeschakelde interne microfoons |
 
 **NinjaOne uitrol (alle drie de scripts):**
 
@@ -692,7 +716,7 @@ M365-Scripts/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
     │   ├── Get-SharePointStorageReport.ps1  ← tenant-wide SharePoint storage report
-    │   ├── Get-SharePointPermissionsReport.ps1 ← who has access to what, at every level, to CSV
+    │   ├── Get-SharePointPermissionsReport.ps1 ← who has access to what and via which group, to CSV + Excel
     │   ├── Remove-SharePointFileVersionsByDate.ps1 ← delete file versions older than a date
     │   └── Licensing/
     │       ├── readme.md
@@ -706,7 +730,9 @@ M365-Scripts/
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
     │   ├── Test-PowerShellSyntax.ps1
-    │   └── Update-ScriptIndex.ps1   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
+    │   ├── Update-ScriptIndex.ps1   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
+    │   ├── Test-MarkdownLinks.ps1   ← Checks every readme link: files and in-page anchors
+    │   └── Convert-MarkdownToHtml.ps1 ← Markdown doc → one self-contained styled HTML page
     ├── Custom Scripts/                 ← path-pinned scripts (see note above)
     │   ├── readme.md
     │   └── Intune/
@@ -776,6 +802,141 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-25 (19)
+| Change |
+|--------|
+| Audited the documentation against the repository rules rather than assuming it was complete, and found three gaps. Parameters checked out: all 19 of `Get-SharePointPermissionsReport.ps1`'s parameters are present in the comment-based help and in the folder readme's parameter table, with nothing stale in either |
+| `scripts/Reporting/readme.md` had no `## Scripts` table at all, while `Exchange/`, `Entra/`, `Device/` and `SharePoint/` all have one. Added it, covering all five entries in the folder — not just the new script — so the table describes the folder rather than the last change to it. Every link and anchor in it was verified to resolve |
+| The root readme's `### 📊 Reporting` category listed only the Computer Last Logon and Licensing reports. All three SharePoint reporting scripts were missing from it, including two that predate this work. Added an entry for `Get-SharePointPermissionsReport.ps1` and short ones for `Get-SharePointStorageReport.ps1` and `Remove-SharePointFileVersionsByDate.ps1` |
+| The repository tree still described the permissions report as going "to CSV", which stopped being true when `-Excel` was added; it now says CSV + Excel. The `menu.ps1` label said "who has access to what, at every level", which describes the old shape of the report rather than the consolidated per-site view it now leads with |
+| Confirmed no action needed for `f.ps1`: its index rebuilds itself when a script's write time changes, so `f-sharepointpermissionsreport -Excel` picks up new parameters without `f-refresh` |
+
+### 2026-09-25 (18)
+| Change |
+|--------|
+| `scripts/Reporting/Get-SharePointPermissionsReport.ps1` answered "which grants exist" but not the question people actually open it with: **who can reach this SharePoint, and how did they get there.** `Rechten` said a group had rights, `Groepen` said who was in it, and nothing joined the two — "Site Owners has Full Control" plus "Site Owners contains five people" is not an answer. Added `SharePoint_Permissions_SiteAccess_<ts>.csv` (worksheet `Toegang`): one row per person per site, with the group their access runs through, that group's id, and the permission level |
+| Consolidated per site collection on purpose: someone reaching thirty folders in one site through the same group is one row, not thirty. A different level or a different group is a separate row, because that is different access. Per-scope detail stays behind `-IncludeEffectiveAccess` |
+| Three things deliberately do not fall out of that view: a directly granted person appears as themselves with `ViaType = Direct`; `Everyone` and `Everyone except external users` resolve to nobody but get a row naming the claim, since they are exactly what a reviewer is looking for; and with `-SkipGroupExpansion` the direct grants still show, only the group members are missing |
+| Added `SiteTitle` — a consolidated view of 130 sites is not readable as 130 URLs, and the root web title is only known while that web is being scanned, so it is captured there and looked up per row. Added `ViaId` alongside `ViaName` after comparing with [NovaPoint](https://github.com/Barbarur/NovaPoint/wiki/Solution-Report-PermissionsReport), which carries `GroupId` next to `AccessType` for the same reason: a title like `Site Owners` repeats on every site in the tenant |
+| Added a `Pivot toegang` sheet nesting site → person → group against permission level, filtered by external and access type. NovaPoint puts its users in one `Users` column as a list; each user gets their own row here instead, which reads less compactly but is the difference between being able to filter or pivot on a person and not |
+| Verified locally with 238 checks across eleven suites (25 new): a group grant lists its people with the group name, id and level; the same access through the same group on a deeper scope is not repeated while a different level is; direct grants, `Everyone` claims and `-SkipGroupExpansion` all behave as described; checkpoint keys are one per row and unique; and the sheet and its pivot are read back out of the workbook. **Not yet verified against a live tenant** |
+
+### 2026-09-25 (17)
+| Change |
+|--------|
+| Made the `-Excel` workbook from `scripts/Reporting/Get-SharePointPermissionsReport.ps1` genuinely pivotable. Checked first rather than assumed: numeric columns already arrive in Excel as numbers, not text, so aggregation was never the problem — the obstacle was `PermissionLevels`, which SharePoint fills with several levels at once (`Read; Limited Access`). A pivot treats each combination as its own value, so `Full Control` and `Full Control; Limited Access` land on separate rows |
+| Sheets carrying `PermissionLevels` now get a `PrimaryPermission` column immediately beside it, holding the single strongest level of that grant. `Limited Access` always loses to a real level — SharePoint adds it automatically for traversal — and a custom level ranks above `Read` but below `Full Control`, because it was created deliberately and should not vanish behind a built-in. Dutch and English level names are both recognised, which matters on a Dutch-language tenant |
+| Added three ready-made pivot sheets: `Pivot rechten` (site × permission level, count of grants, filtered by principal and scope type), `Pivot principals` (principal × scope type, count of scopes, filtered by site and external), and `Pivot groepen` (group × external member, count of members, filtered by site and group type). Each only references columns its source sheet actually has, and a missing or narrowed source is skipped rather than producing a broken pivot |
+| Pivot creation is best-effort and isolated: a failure warns and leaves the data sheets untouched, on the same principle as the workbook itself not being allowed to cost the CSVs |
+| Verified locally with 213 checks across ten suites (33 new): the level ranking across single, joined, reversed, Dutch, custom, case-varying and empty inputs; the derived column landing next to the original on the right sheets and not on the others; and the pivots read back out of the package with the right row, column, data and filter fields, skipping absent sources and column-less sheets. **Not yet verified against a live tenant** |
+
+### 2026-09-25 (16)
+| Change |
+|--------|
+| Added `-Excel` to `scripts/Reporting/Get-SharePointPermissionsReport.ps1`: one `.xlsx` alongside the CSVs with a worksheet per report — `Samenvatting`, `Rechten`, `Groepen` and, with `-IncludeEffectiveAccess`, `Effectief` — each a real Excel table with filter dropdowns and a frozen header, using the same `ImportExcel` pattern as `Get-DistributionGroupMembers.ps1` |
+| The CSVs are still always written and the workbook is built from them, not instead of them. They are what the scan streams into and what a resumed run appends to, so they exist regardless — and a workbook that fails to write (module missing, file open, out of memory) then costs a convenience copy rather than the report |
+| A worksheet stops at 1,048,576 rows and drops the rest without complaint, so sheets are capped at 1,000,000 with a warning naming the sheet and the CSV that still holds everything. On a large tenant only `Effectief` realistically approaches that |
+| Fixed a real gap in the group membership while wiring this up: an Entra ID group granted **directly** on a site, list or item never passes through `/sitegroups`, so it was the one kind of group whose membership the report never listed — only the first ten names in `MemberPreview`. Those groups now get their own rows in the Groups output, resolved to people, recorded once per group rather than once per grant, and sharing the schema the SharePoint-group rows already use |
+| Added the Excel prompt to the `menu.ps1` entry |
+| Verified locally with 180 checks across nine suites (20 new): a workbook is written and read back with all four sheets in order and their rows intact, a re-run replaces rather than appends, absent/empty/missing sources are skipped, nothing to write leaves no file behind, an oversized sheet is capped rather than truncated by Excel, a directly granted Entra group is listed once with its real members, SharePoint groups are left to `/sitegroups`, and both group sources share one schema. **Not yet verified against a live tenant** |
+
+### 2026-09-25 (15)
+| Change |
+|--------|
+| First complete live run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1`: 130 webs, 2066 lists, 453 unique scopes, 1554 grants, 83 sharing links, 13 external grants, 111 `Everyone` grants. Three faults in the output itself, all found by reading the produced CSVs rather than the logs |
+| `-IncludeEffectiveAccess` produced an empty file on a tenant with 1554 grants and over a thousand resolved members. The guard was `if ($IncludeEffectiveAccess -and $EffectiveRows)`, and **an empty `List[object]` is falsy in PowerShell** — so the test failed on the very first row and the list could never fill, which kept it empty, which kept the test failing. Now an explicit `$null -ne` check |
+| 121 of the 158 "could not be read" rows were a single hidden system list, `Lijst met gebruikersgegevens` (template 112, the User Information List), on every site. SharePoint rejects `/items` on it with `400` at every `$select` width, including the narrowest rung of the ladder. Its items are directory records rather than content, so item-level scopes there mean nothing for an access review — the item sweep now skips template 112 and says so, while still reporting the list's own scope |
+| The remaining 37 were stale: error rows written by the interrupted earlier attempt, carried into the final CSV by the resume even though those lists succeeded on the retry. A failed unit is deliberately left unmarked so it is retried, but nothing removed its old rows. Detail rows now carry the `UnitKey` that produced them, and a row whose unit is marked complete is dropped when the final CSV is written — so the incompleteness count describes the file the reader opens |
+| The summary is now built from the published detail CSV instead of the partial, so its counts and the file agree |
+| Verified locally with 158 checks across eight suites (26 new): effective rows are emitted one per resolved user with the group they came through, a null list is tolerated, superseded error rows are dropped while still-failing and unkeyed ones survive, nothing else is lost, and the summary counts only what was published. Two earlier assertions were found to be mis-parenthesised — one of them a false pass — and corrected. **Fixes to this run's findings are not themselves verified against a live tenant yet** |
+
+### 2026-09-25 (14)
+| Change |
+|--------|
+| Second live run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1` authenticated cleanly — the token role check caught the replication delay on its first attempt and waited it out, SharePoint and Graph both accepted their tokens, and 130 webs were discovered and started scanning. Two scan-level faults then repeated on every site |
+| `ConvertTo-PermissionRows` rejected an empty role assignment collection: a `Mandatory [object[]]` parameter refuses `@()`, so every system list that has unique permissions but no remaining role assignments (`User Information List`, `Converted Forms`, `Bibliotheek met onderhoudslogboeken`) failed with `Cannot bind argument to parameter 'RoleAssignments'`. Fixed with `[AllowEmptyCollection()]` — a scope with no assignments legitimately produces no rows |
+| More consequentially, an unreadable role assignment list was indistinguishable from an empty one. `Invoke-SPGet` swallows `403`/`404` and returns `$null`, which `Get-SPCollection` turns into an empty collection — and an empty collection reads as "nobody has rights on this scope". Role assignment reads now use `-ThrowOnDenied`, so a refusal becomes an error row saying the permissions are unknown rather than a silent claim that there are none. This is the only place a 403 is not skipped, because it is the only place where "not allowed to look" would be misread as a finding |
+| The gallery lists (`Galerie van thema's`, `Galerie met basispagina's`) answered `400 Bad Request` to the item `$select`, because their schema does not carry every field it names, and a 400 is not something retrying fixes. The item sweep now steps down a four-rung ladder of progressively narrower `$select` clauses until SharePoint accepts one; every rung keeps `Id` and `HasUniqueRoleAssignments`, so the worst case loses a file name rather than the list's unique scopes. Only a 400 triggers narrowing — a denial, a throttle or a view threshold answers the same way however few fields are asked for |
+| Verified locally with 132 checks across seven suites (21 new): an empty assignment set no longer crashes and produces no rows, a denied read throws with "unknown rather than empty", a genuine empty `200` stays empty end to end, an ordinary sweep still skips a 403, every ladder rung keeps the fields the scan depends on, and only a 400 narrows. **The scan phase past web 11 is still unverified against a live tenant** |
+
+### 2026-09-25 (13)
+| Change |
+|--------|
+| First live run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1` got past SharePoint — the certificate credential worked and the preflight reported `SharePoint accepted the token (root web: ...)` — and then failed on Graph with `401` while retrieving sites. Cause: the Graph token was minted immediately after the app roles were granted, before the grant had replicated, so it carried no `roles` claim at all. Graph answers such a token with `401`, not `403`, and because the token was cached for its full hour every one of the six retries was handed the same dead token back |
+| Tokens now have to prove themselves: `Get-ResourceToken` takes `-RequiredRoles`, decodes the issued JWT, and refuses to cache a token whose `roles` claim is missing what the run needs. It keeps re-minting (up to 15 attempts, backoff capped at 20s) until the grant appears, then fails with the missing role named. Both tokens are validated up front — Graph for `Sites.Read.All` + `GroupMember.Read.All`, SharePoint for `Sites.FullControl.All` — so a replication delay is waited out before the scan starts rather than discovered 130 sites in |
+| `Invoke-GraphGet` now drops the cached token and re-mints once on a `401`, the same recovery `Invoke-SPGet` already had. Retrying the request alone could never have worked against a poisoned cache entry |
+| A user-supplied `-ClientId` app is deliberately **not** role-validated: a working app may hold broader roles (`Directory.Read.All` instead of `GroupMember.Read.All`), and rejecting it would be a false failure. The SharePoint preflight still catches a genuinely under-permissioned app |
+| `Get-JwtClaim` returns `$null` for an empty token instead of throwing a parameter binding error, and `Disconnect-MgGraph` no longer leaks its context object as a stray `ClientId`/`TenantId`/`Scopes` table after the summary |
+| Verified locally with 111 checks across six suites (23 of them new, driving the real `Get-ResourceToken` against a fake token endpoint): a role that arrives late is waited out and only the token carrying it is cached, a role that never arrives fails loudly with nothing cached, the backoff grows and stays capped, and caching stays isolated per resource. **The corrected Graph path is not yet verified against a live tenant** |
+
+### 2026-09-25 (12)
+| Change |
+|--------|
+| Hardened `scripts/Reporting/Get-SharePointPermissionsReport.ps1` for long tenant-wide runs. A `401` was still recoverable into a per-site error row: the per-list handler rethrew it but the per-web handler caught it again, so a credential that stopped working mid-run would have written one error row per remaining site — the same failure shape the certificate fix had just removed. Both handlers now let a 401 through and the run stops |
+| The parallel item lookups read the bearer token once per library instead of once per wave. A library with enough unique scopes outlives a token, so the tail of it would have failed with no indication why. The token is now re-read before every wave |
+| Item enumeration no longer materialises an entire library before filtering. `Invoke-SPCollectionPaged` hands each page to a callback and only items that actually have their own scope are kept — a million-item library now costs one page of memory instead of a million live objects |
+| Added a paging guard: SharePoint echoing back an identical `nextLink` used to be an infinite loop against a live tenant, and is now detected and stopped |
+| Checkpoint keys moved from the JSON state file to an append-only `.keys.partial.log`. Rewriting a sorted list of every completed key after every list is quadratic; on a tenant with thousands of lists the checkpoint cost more than the scanning. A torn final line from a killed process is tolerated — that unit is simply re-scanned |
+| A failed CSV write (the partial open in Excel) is retried five times and then stops the run. It previously threw while the unit was already marked complete, so those rows were gone from the report for good |
+| A list that fails now costs that list, not the rest of the site: per-list error handling writes an error row, keeps whatever the list already produced, and deliberately leaves the unit unmarked so a resumed run retries it. A failed item sweep gets its own row, because without it the list looks like it simply had nothing with unique permissions |
+| Per-item workers no longer report `401`/`403` as an empty permission set — only `404` (item genuinely deleted mid-scan) means "no permissions". Claiming an unreadable item has no rights on it is worse than saying so |
+| Added an output-folder write probe before authenticating, an abort when discovery finds no sites at all, and a `trap` that removes the temporary Full Control app registration on any unhandled error |
+| Suppressed the `Set-MgRequestContext` context table that leaked to stdout, and the run now closes by stating whether every targeted scope was read or how many were missed |
+| Verified locally with 53 checks across four suites: principal/claims parsing, CSV row-schema consistency (six row shapes, 26 columns each), certificate and signed-assertion generation, and HTTP behaviour driven through a fake transport — 401 aborts after one re-auth, 403/404 stay per-object, 429 retries to success, paging loops are broken, locked files are retried, and the checkpoint log survives a torn line. **Still not verified against a live tenant** |
+
+### 2026-09-25 (11)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointPermissionsReport.ps1` producing an empty report against a live tenant: all 130 webs came back `[SKIP] Web not accessible with the current permissions`. The temporary App Registration authenticated with a client secret, and **SharePoint Online refuses every app-only token obtained with a secret** — `401` with `x-ms-diagnostics: ... Unsupported app only token`. Graph accepted the same credential, so site enumeration worked and only the `_api` calls failed, which is why it looked like a per-site permissions problem |
+| The temporary app is now given a certificate instead of a secret. It is generated in memory with `CertificateRequest`, registered as a `keyCredential`, and used to sign an RFC 7523 client assertion — it never touches the certificate store or disk, so an interrupted run leaves nothing behind |
+| `Invoke-SPGet` no longer swallows `401` alongside `403`/`404`. A `401` is never per-site — it is the same answer for the whole tenant — and treating it as "this one site is not accessible" is what turned a single credential fault into 130 lines that read like findings. It now throws, with the `x-ms-diagnostics` reason and, for the secret case, what to do about it |
+| Added a SharePoint preflight: one call against the tenant root after connecting, before enumerating anything. Whether SharePoint accepts the credential is one yes/no for the whole run, so it now costs one request to find out instead of a full sweep |
+| `-ClientSecret` now warns at startup that the SharePoint half will fail, and the docs say the same. Graph-only alternatives were considered and rejected: Graph has no endpoint for web role assignments, SharePoint groups, site collection administrators or named permission levels, and would need one `/permissions` call per item instead of one `HasUniqueRoleAssignments` sweep per list |
+| Suppressed a stray `ClientTimeout RetryDelay MaxRetry` table that `Set-MgRequestContext` printed to stdout at the end of every run |
+| Verified locally: 21 checks on certificate generation and the signed assertion, including that the signature verifies against the certificate's public key, that `x5t` matches its SHA-1 hash, and that nothing is written to `Cert:\CurrentUser\My`. The corrected auth path itself is **not yet verified against a live tenant** |
+
+### 2026-09-25 (10)
+| Change |
+|--------|
+| `Convert-MarkdownToHtml.ps1` rendered every numbered list as empty bullets. `$Matches` is one variable per scope: the list branch captured the item text, then ran a second `-match` to decide whether the list was ordered, and that second match threw the capture away. Dashed lists survived only because their second match failed and left `$Matches` alone. Both captures now come from one match and the marker decides the type without matching again |
+| A fenced code block indented to line up inside a numbered step kept that indentation, so anyone copying the command out of the page copied leading spaces with it. The fence's own indentation is now stripped from its content — and only that: a block fenced at column 0 keeps every space, which is what the sample output of the script needs |
+| Verified on the regenerated page: 36 list items and **none** empty, still parses as XML, 29 tables and 19 code blocks intact, the indented command comes out clean, and the seven code blocks that legitimately start with whitespace still do |
+
+### 2026-09-25 (9)
+| Change |
+|--------|
+| You can now click from a readme straight to the script it describes. Every script name in a folder readme's `Scripts` table linked to a section further down the same page, never to the file — so the readme told you what a script did but gave you no way to open it. 172 links across 47 readmes now point at the file, with a `([docs](#…))` link beside them for the section that was there before |
+| 34 of those were not links at all: a script name in a table cell, set in backticks, with nothing behind it. Those are file links now too |
+| Added `scripts/Startup/Test-MarkdownLinks.ps1`, because links that are never checked are links that quietly rot. It walks every `.md` and fails on two things: a relative link to a file that is not there (percent-encoded spaces decoded first, the way GitHub serves them), and an anchor with no heading behind it. Anchors are resolved the way GitHub builds them, including the `-1`/`-2` suffix for repeated headings |
+| It found three anchors that had never worked: `#watch-rdslivesps1` had an `s` too many for `### Watch-RDSLive.ps1`, and two links in the Intune readme used `#detect--remediate-…` where the heading `### Detect- / Remediate-StuckWin32AppEnforcement.ps1` produces `#detect---remediate-…` — three hyphens, because the slash becomes nothing and the spaces around it each become one. Nobody would find that by eye |
+| Invisible characters are stripped from both the heading and the link before they are compared. Without that, the four emoji entries in the root table of contents read as broken: the heading and the link both carry a variation selector, which is not a letter and not a digit. Reproducing GitHub's slugger byte for byte on characters nobody can see is not the point — establishing that a link and a heading correspond is |
+| Verified: 854 internal links across 71 markdown files all resolve, all 181 files parse, and the script index is current at 178 scripts. `L` added to the menu for the link check, alongside `X` for the index |
+
+### 2026-09-25 (8)
+| Change |
+|--------|
+| The Teams IT Glue procedure now also exists as a styled HTML page, `scripts/Device/Update-TeamsClient-ITGlue.html`, for pasting into IT Glue or printing. It is **generated** by the new [`scripts/Startup/Convert-MarkdownToHtml.ps1`](scripts/Startup/Convert-MarkdownToHtml.ps1) rather than written by hand: that document changed six times in two days, and a hand-made copy would have been wrong by the next morning |
+| The converter covers what these documents actually use — headings, tables, fenced code blocks including the indented ones inside numbered steps, blockquotes, both list kinds, rules, and inline code, bold, italic and links — and passes anything else through as text instead of guessing. `-Check` writes nothing and exits `1` when the committed page has fallen behind its markdown, which is what a hook or pipeline would call |
+| Void elements are emitted self-closing, so the page parses as XML as well as HTML. That is how it was verified rather than by looking at it: the output parses, and holds 29 tables, 190 rows, 19 code blocks and 46 headings, with **no** table containing a row that disagrees with its header width. Also checked: no `**`, backtick or `](` left anywhere in the rendered text, and the ✅/❌ and accented characters survive |
+| Both `-Check` failure paths exercised: a page that does not exist yet, and a markdown file that has moved on — each exits `1` with the reason. The generated-on line is excluded from the comparison, so an unchanged document does not report a difference |
+| Added as menu key **M**, documented in [`scripts/Startup/readme.md`](scripts/Startup/readme.md), and `scripts/INDEX.md` regenerated — adding a script had made it stale, which `Update-ScriptIndex.ps1 -Check` reported |
+
+### 2026-09-25 (7)
+| Change |
+|--------|
+| Merged the readable parts of an older IT Glue version of this same procedure into `Update-TeamsClient-ITGlue.md`: the one-sentence statement of what the procedure covers, and the ✅/❌ shape for "does this script fit this ticket", including the two user complaints that version listed and ours did not — Teams hanging on startup and Teams closing unexpectedly |
+| The two versions disagreed on who may run the update — the older one puts it at level 1, ours at level 2 — which serves a service desk worse than either answer on its own. The blanket level is replaced by a "wie mag wat" table that assigns a level per action: checking stays level 1, the update and the repairs sit at level 2, and the three switches that skip the signature check or edit the Windows Installer database sit at level 3. Changing the escalation policy is now one table, not a re-read of the document |
+| Deliberately not merged, measured against the script rather than judged by eye: that version's parameter table covers 8 of the 16 parameters, states that classic Teams is never touched (`-RemoveClassicTeams` does exactly that), and shows two sample output lines the script does not produce — `Found MSTeams ...` and `Teams installation completed` |
+| Numbering fix: two entries were both labelled `(4)`. The IT Glue sync is newer than the script-index entry above it, so it is now `(6)` and sits in the order the work happened |
+
+### 2026-09-25 (6)
+| Change |
+|--------|
+| The IT Glue document was brought back in line with the script, checked by comparing its text against the parameter block rather than by reading it: it was missing `-BootstrapperUrl` and `-SkipSignatureCheck` entirely, and its NinjaOne variable table was missing `removeWebRtcRedirector`, `clearOrphanedAddInRegistration`, `skipSignatureCheck` and `webRtcUrl`. All three documents now cover all 16 parameters, and the variable table all 16 environment variables |
+| That same comparison found a real gap in the script: every other text field could be set from a NinjaOne variable except `bootstrapperUrl`, which was simply never read. An admin who set it would have had it silently ignored. It is read now, alongside `webRtcUrl` |
+| Two statements in the IT Glue document were no longer true. "It does not touch classic Teams" is only true without `-RemoveClassicTeams`, and the plain-language summary still promised that every copy of the add-in is removed during an update - that sweep is now conditional on a replacement being installable |
+| Added a level 3 walkthrough for the `1612` + `1638` deadlock the production host hit: what each code means, the read-only command that says whether Windows Installer still has its cached MSI, which of the two outcomes needs `-ClearOrphanedAddInRegistration`, and the note that starting Teams and restarting Outlook gives a user the meeting button back in the meantime |
 
 ### 2026-09-25 (5)
 | Change |

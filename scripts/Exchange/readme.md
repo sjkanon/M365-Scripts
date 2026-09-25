@@ -8,22 +8,22 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 
 | Script | Description |
 |--------|-------------|
-| [`Migrate-Calendar.ps1`](#migrate-calendarps1) | Migrate a shared M365 Group calendar to a Room Mailbox |
-| [`Move-SharedCalendar.ps1`](#move-sharedcalendarps1) | **All in one**: find a calendar by keyword, move it into a resource mailbox, list who has to switch — one sign-in |
-| [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) | Move a shared calendar out of a user's mailbox into its own room/equipment mailbox — items, series, attachments and rights included |
-| [`Set-Calendar-rights.ps1`](#set-calendar-rightsps1) | Grant calendar folder permissions to a user |
-| [`Set-Distributionlist-dynamic-static.ps1`](#set-distributionlist-dynamic-staticps1) | Resolve a dynamic distribution group's members into a regular (static) group |
-| [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
-| [`Test-CalendarPermissions.ps1`](#test-calendarpermissionsps1) | Audit calendar folder permissions |
-| [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) | Where each calendar is actually mapped in Outlook, next to the rights behind it — or find one calendar by keyword (`-Search balie`) |
-| [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1) | Audit Full Access, Send As, Send on Behalf delegation |
-| [`Test-DistributionGroupPermissions.ps1`](#test-distributiongrouppermissionsps1) | Audit DG managers, Send As, Send on Behalf, member counts |
-| [`Test-DkimConfig.ps1`](#test-dkimconfigps1) | Validate DKIM signing config and DNS records |
-| [`Get-ExternalForwards.ps1`](#get-externalforwardsps1) | Audit mailboxes with external forwarding |
-| [`Get-MailboxSizes.ps1`](#get-mailboxsizesps1) | Report mailbox sizes and item counts |
-| [`Get-DistributionGroupMembers.ps1`](#get-distributiongroupmembersps1) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists holding one address (`-Member jan@contoso.com`) or a whole domain (`-Member @be.verizon.com`) |
-| [`Get-MessageTraceReport.ps1`](#get-messagetracereportps1) | Trace who received what, at what exact time, and where it was forwarded to |
-| [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
+| [`Migrate-Calendar.ps1`](Migrate-Calendar.ps1) ([docs](#migrate-calendarps1)) | Migrate a shared M365 Group calendar to a Room Mailbox |
+| [`Move-SharedCalendar.ps1`](Move-SharedCalendar.ps1) ([docs](#move-sharedcalendarps1)) | **All in one**: find a calendar by keyword, move it into a resource mailbox, list who has to switch — one sign-in |
+| [`Convert-SharedCalendarToResource.ps1`](Convert-SharedCalendarToResource.ps1) ([docs](#convert-sharedcalendartoresourceps1)) | Move a shared calendar out of a user's mailbox into its own room/equipment mailbox — items, series, attachments and rights included |
+| [`Set-Calendar-rights.ps1`](Set-Calendar-rights.ps1) ([docs](#set-calendar-rightsps1)) | Grant calendar folder permissions to a user |
+| [`Set-Distributionlist-dynamic-static.ps1`](Set-Distributionlist-dynamic-static.ps1) ([docs](#set-distributionlist-dynamic-staticps1)) | Resolve a dynamic distribution group's members into a regular (static) group |
+| [`Move-InboxToArchive.ps1`](Move-InboxToArchive.ps1) ([docs](#move-inboxtoarchiveps1)) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
+| [`Test-CalendarPermissions.ps1`](Test-CalendarPermissions.ps1) ([docs](#test-calendarpermissionsps1)) | Audit calendar folder permissions |
+| [`Get-CalendarMappings.ps1`](Get-CalendarMappings.ps1) ([docs](#get-calendarmappingsps1)) | Where each calendar is actually mapped in Outlook, next to the rights behind it — or find one calendar by keyword (`-Search balie`) |
+| [`Test-MailboxPermissions.ps1`](Test-MailboxPermissions.ps1) ([docs](#test-mailboxpermissionsps1)) | Audit Full Access, Send As, Send on Behalf delegation |
+| [`Test-DistributionGroupPermissions.ps1`](Test-DistributionGroupPermissions.ps1) ([docs](#test-distributiongrouppermissionsps1)) | Audit DG managers, Send As, Send on Behalf, member counts |
+| [`Test-DkimConfig.ps1`](Test-DkimConfig.ps1) ([docs](#test-dkimconfigps1)) | Validate DKIM signing config and DNS records |
+| [`Get-ExternalForwards.ps1`](Get-ExternalForwards.ps1) ([docs](#get-externalforwardsps1)) | Audit mailboxes with external forwarding |
+| [`Get-MailboxSizes.ps1`](Get-MailboxSizes.ps1) ([docs](#get-mailboxsizesps1)) | Report mailbox sizes and item counts |
+| [`Get-DistributionGroupMembers.ps1`](Get-DistributionGroupMembers.ps1) ([docs](#get-distributiongroupmembersps1)) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists holding one address (`-Member jan@contoso.com`) or a whole domain (`-Member @be.verizon.com`) |
+| [`Get-MessageTraceReport.ps1`](Get-MessageTraceReport.ps1) ([docs](#get-messagetracereportps1)) | Trace who received what, at what exact time, and where it was forwarded to |
+| [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
 
 ---
 
@@ -269,7 +269,7 @@ Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 
 ### Move-SharedCalendar.ps1
 
-**All in one:** from "where is the Balie calendar?" to "it has its own resource mailbox" in one run, with one sign-in. It chains [`Get-CalendarMappings.ps1`](#get-calendarmappingsps1) and [`Convert-SharedCalendarToResource.ps1`](#convert-sharedcalendartoresourceps1) — both have to sit in the same folder.
+**All in one:** from "where is the Balie calendar?" to "it has its own resource mailbox" in one run, with one sign-in. It chains [`Get-CalendarMappings.ps1`](Get-CalendarMappings.ps1) ([docs](#get-calendarmappingsps1)) and [`Convert-SharedCalendarToResource.ps1`](Convert-SharedCalendarToResource.ps1) ([docs](#convert-sharedcalendartoresourceps1)) — both have to sit in the same folder.
 
 | Step | |
 |------|--|
@@ -390,7 +390,7 @@ Step 3 reruns the copy first: everything already copied is skipped, anything add
 | | |
 |--|--|
 | Exchange Online | Exchange Administrator (`New-Mailbox`, folder permissions). An existing session is reused |
-| Graph | Application permission `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` for category colours (optional). Same three routes as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): existing app-only session, own App Registration, or a temporary one that is removed when the run ends. Plain REST, so no Exchange/Graph MSAL clash |
+| Graph | Application permission `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` for category colours (optional). Same three routes as [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)): existing app-only session, own App Registration, or a temporary one that is removed when the run ends. Plain REST, so no Exchange/Graph MSAL clash |
 
 **Notes**
 
@@ -465,7 +465,7 @@ and folds both into one row per calendar owner + user:
 
 **Not visible in this report**
 
-- **Full Access with AutoMapping** adds a whole mailbox to Outlook, calendar included. That is a mailbox permission, not a calendar entry — see [`Test-MailboxPermissions.ps1`](#test-mailboxpermissionsps1)
+- **Full Access with AutoMapping** adds a whole mailbox to Outlook, calendar included. That is a mailbox permission, not a calendar entry — see [`Test-MailboxPermissions.ps1`](Test-MailboxPermissions.ps1) ([docs](#test-mailboxpermissionsps1))
 - A calendar opened in classic Outlook with *shared calendar improvements* turned off may live only in that Outlook profile and not in the list Graph returns
 - Without `-Search`, rights are compared against the owner's **main** calendar. A secondary calendar the owner shared shows up as `MappedWithoutRight`; `-Search` reads a matching secondary calendar's own rights
 
@@ -529,7 +529,7 @@ Without `-Mailbox` every mailbox in the tenant is scanned — the only way to fi
 
 **Graph access**
 
-Needs application permissions `Calendars.Read` and `User.Read.All`, plus `Group.Read.All` to tell a group calendar from a removed mailbox (without it, group calendars show up as `MappedOwnerMissing` with a note saying so). Obtained the same three ways as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1):
+Needs application permissions `Calendars.Read` and `User.Read.All`, plus `Group.Read.All` to tell a group calendar from a removed mailbox (without it, group calendars show up as `MappedOwnerMissing` with a note saying so). Obtained the same three ways as [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)):
 
 | # | Route | What it needs |
 |---|-------|---------------|
@@ -1005,7 +1005,7 @@ Engine defaults to `Graph` when `-Mailbox` is given and `Purview` otherwise. Ove
 
 **How the Graph engine (and `-VerifyWithGraph`) gets its access**
 
-The same three-way pattern as [`Move-InboxToArchive.ps1`](#move-inboxtoarchiveps1) and the SharePoint reporting scripts, tried in order:
+The same three-way pattern as [`Move-InboxToArchive.ps1`](Move-InboxToArchive.ps1) ([docs](#move-inboxtoarchiveps1)) and the SharePoint reporting scripts, tried in order:
 
 | # | Route | What it needs |
 |---|-------|---------------|

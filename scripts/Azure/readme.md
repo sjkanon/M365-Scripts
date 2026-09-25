@@ -16,7 +16,7 @@ Scripts for managing Azure IaaS resources directly (not the M365 tenant) — sep
 
 | Script | Description |
 |--------|-------------|
-| [`Search-AADDSUserActivity.ps1`](#search-aaddsuseractivityps1) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query |
+| [`Search-AADDSUserActivity.ps1`](Search-AADDSUserActivity.ps1) ([docs](#search-aaddsuseractivityps1)) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query |
 
 ---
 

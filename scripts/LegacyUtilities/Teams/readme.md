@@ -10,9 +10,9 @@ session is active; reuse an existing session if already connected.
 
 | Script | Description |
 |--------|-------------|
-| [`Copy-Team.ps1`](#copy-teamps1) | Clone an existing Team (apps/tabs/settings/channels/members) |
-| [`Copy-PlannerPlan.ps1`](#copy-plannerplanps1) | Copy a Planner plan's buckets/tasks/checklists to a new plan |
-| [`New-ProjectTeam.ps1`](#new-projectteamps1) | Bulk-create Teams with a standard CSV-driven channel template |
+| [`Copy-Team.ps1`](Copy-Team.ps1) ([docs](#copy-teamps1)) | Clone an existing Team (apps/tabs/settings/channels/members) |
+| [`Copy-PlannerPlan.ps1`](Copy-PlannerPlan.ps1) ([docs](#copy-plannerplanps1)) | Copy a Planner plan's buckets/tasks/checklists to a new plan |
+| [`New-ProjectTeam.ps1`](New-ProjectTeam.ps1) ([docs](#new-projectteamps1)) | Bulk-create Teams with a standard CSV-driven channel template |
 
 ---
 

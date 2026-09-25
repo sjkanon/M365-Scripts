@@ -180,8 +180,10 @@
         means "update available").
       - Script variables arrive as environment variables, so checkboxes named whatIf,
         quiet, checkOnly, force, avdOptimizations, removeClassicTeams, repairOutlookAddIn,
-        skipMeetingAddIn or skipSignatureCheck and text fields named workingDir,
-        logPath or ring are picked up when the matching parameter is not passed.
+        skipMeetingAddIn, skipSignatureCheck, removeWebRtcRedirector or
+        clearOrphanedAddInRegistration and text fields named workingDir, logPath,
+        ring, webRtcUrl or bootstrapperUrl are picked up when the matching parameter
+        is not passed.
         Capitalisation does not matter - environment lookups are case-insensitive.
       - If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit
         via SysNative first. Without that, registry reads are redirected to
@@ -431,6 +433,7 @@ if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingD
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
 if (-not $PSBoundParameters.ContainsKey('WebRtcUrl')          -and $env:webRtcUrl)                       { $WebRtcUrl          = $env:webRtcUrl }
+if (-not $PSBoundParameters.ContainsKey('BootstrapperUrl')    -and $env:bootstrapperUrl)                 { $BootstrapperUrl    = $env:bootstrapperUrl }
 
 if ($AvdOptimizations -and $RemoveWebRtcRedirector) {
     Write-Error 'Use either -AvdOptimizations (which installs the WebRTC redirector) or -RemoveWebRtcRedirector, not both.'

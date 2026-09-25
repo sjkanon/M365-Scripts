@@ -8,12 +8,12 @@ Windows device-side configuration and hardening scripts used during tenant/devic
 
 | Script | Description |
 |--------|-------------|
-| [`Set-LocalGroupSelfElevation.ps1`](#set-localgroupselfelevationps1) | Grant/revoke a logged-on user's local group membership at next logon |
-| [`Disable-CredentialManagerVault.ps1`](#disable-credentialmanagervaultps1) | Disable Windows Credential Manager's local password storage |
-| [`Set-KioskPowerSettings.ps1`](#set-kioskpowersettingsps1) | Disable sleep/fast-startup for kiosk or always-on devices |
-| [`Uninstall-MicrosoftOffice.ps1`](#uninstall-microsoftofficeps1) | Silently uninstall Microsoft Office / Microsoft 365 Apps |
-| [`Import-StartMenuLayout.ps1`](#import-startmenulayoutps1) | Apply a Start Menu layout XML |
-| [`Set-TeamsFirewallRule.ps1`](#set-teamsfirewallruleps1) | Create the inbound firewall rule Teams needs for LAN screen sharing |
+| [`Set-LocalGroupSelfElevation.ps1`](Set-LocalGroupSelfElevation.ps1) ([docs](#set-localgroupselfelevationps1)) | Grant/revoke a logged-on user's local group membership at next logon |
+| [`Disable-CredentialManagerVault.ps1`](Disable-CredentialManagerVault.ps1) ([docs](#disable-credentialmanagervaultps1)) | Disable Windows Credential Manager's local password storage |
+| [`Set-KioskPowerSettings.ps1`](Set-KioskPowerSettings.ps1) ([docs](#set-kioskpowersettingsps1)) | Disable sleep/fast-startup for kiosk or always-on devices |
+| [`Uninstall-MicrosoftOffice.ps1`](Uninstall-MicrosoftOffice.ps1) ([docs](#uninstall-microsoftofficeps1)) | Silently uninstall Microsoft Office / Microsoft 365 Apps |
+| [`Import-StartMenuLayout.ps1`](Import-StartMenuLayout.ps1) ([docs](#import-startmenulayoutps1)) | Apply a Start Menu layout XML |
+| [`Set-TeamsFirewallRule.ps1`](Set-TeamsFirewallRule.ps1) ([docs](#set-teamsfirewallruleps1)) | Create the inbound firewall rule Teams needs for LAN screen sharing |
 
 ---
 

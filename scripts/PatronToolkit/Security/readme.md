@@ -9,12 +9,12 @@ alerts, email security configuration, audit logging, and SPF/DMARC validation.
 
 | Script | Description |
 |--------|-------------|
-| [`Get-EntraAppConsents.ps1`](#get-entraappconsentsps1) | Audit OAuth delegated + application permission grants tenant-wide, flag high-risk scopes |
-| [`Get-SuspiciousInboxRules.ps1`](#get-suspiciousinboxrulesps1) | Detect BEC-style inbox rules (external forward, silent delete, hidden-folder + keyword) |
-| [`Get-SecurityAlerts.ps1`](#get-securityalertsps1) | Report unified Defender/Entra security alerts |
-| [`Test-EmailSecurityPosture.ps1`](#test-emailsecuritypostureps1) | Consolidated Defender for O365 / anti-spam / DLP / mail flow security report |
-| [`Test-MailboxAuditingConfig.ps1`](#test-mailboxauditingconfigps1) | Report and optionally fix unified audit log + per-mailbox auditing gaps |
-| [`Test-EmailAuthenticationRecords.ps1`](#test-emailauthenticationrecordsps1) | Validate SPF and DMARC DNS records |
+| [`Get-EntraAppConsents.ps1`](Get-EntraAppConsents.ps1) ([docs](#get-entraappconsentsps1)) | Audit OAuth delegated + application permission grants tenant-wide, flag high-risk scopes |
+| [`Get-SuspiciousInboxRules.ps1`](Get-SuspiciousInboxRules.ps1) ([docs](#get-suspiciousinboxrulesps1)) | Detect BEC-style inbox rules (external forward, silent delete, hidden-folder + keyword) |
+| [`Get-SecurityAlerts.ps1`](Get-SecurityAlerts.ps1) ([docs](#get-securityalertsps1)) | Report unified Defender/Entra security alerts |
+| [`Test-EmailSecurityPosture.ps1`](Test-EmailSecurityPosture.ps1) ([docs](#test-emailsecuritypostureps1)) | Consolidated Defender for O365 / anti-spam / DLP / mail flow security report |
+| [`Test-MailboxAuditingConfig.ps1`](Test-MailboxAuditingConfig.ps1) ([docs](#test-mailboxauditingconfigps1)) | Report and optionally fix unified audit log + per-mailbox auditing gaps |
+| [`Test-EmailAuthenticationRecords.ps1`](Test-EmailAuthenticationRecords.ps1) ([docs](#test-emailauthenticationrecordsps1)) | Validate SPF and DMARC DNS records |
 
 ---
 

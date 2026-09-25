@@ -8,6 +8,13 @@
     Walks the tenant (or a single site) and reports who has access to what, at every level where
     SharePoint actually stores an access decision:
 
+    The report to start from is the consolidated site access view: one row per person per site,
+    naming the group their access runs through and the level it grants. Grants and membership are
+    otherwise in separate reports, and "Site Owners has Full Control" plus "Site Owners contains
+    five people" is not yet an answer to who can reach the site.
+
+    Everything it is built from is reported too:
+
       * Site collection administrators
       * Web (site and sub-site) role assignments, including inheritance breaks
       * SharePoint groups (Owners/Members/Visitors and custom) and their full membership
@@ -38,11 +45,18 @@
         * Graph         Sites.Read.All         — tenant-wide site enumeration
         * Graph         GroupMember.Read.All   — resolving Entra group membership
 
+      That app is authenticated with a certificate, not a secret. This is not a preference:
+      SharePoint Online refuses any app-only token obtained with a client secret, answering 401
+      with x-ms-diagnostics "Unsupported app only token". The certificate is generated in memory
+      for the run, registered on the temporary app, and never written to the certificate store or
+      to disk — there is nothing to clean up afterwards.
+
       The app is deleted again when the run finishes. Despite the Full Control role, this script
       only ever issues HTTP GET requests — it never writes, and it never changes a permission.
 
-      To avoid the temporary app, pass -ClientId + -TenantId + -ClientSecret (or
-      -CertificateThumbprint) for an existing app registration that already holds those roles.
+      To avoid the temporary app, pass -ClientId + -TenantId + -CertificateThumbprint for an
+      existing app registration that already holds those roles. -ClientSecret is accepted for the
+      Graph half but will fail against SharePoint for the reason above.
 
 .PARAMETER SiteUrl
     Optional. Report on a single site collection (including its sub-sites) instead of the tenant.
@@ -58,11 +72,14 @@
     -ClientSecret or -CertificateThumbprint.
 
 .PARAMETER ClientSecret
-    Client secret for an existing app registration.
+    Client secret for an existing app registration. Works for the Graph calls but NOT for the
+    SharePoint ones — SharePoint Online rejects secret-based app-only tokens outright. Prefer
+    -CertificateThumbprint; the script warns if you use this.
 
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for an existing app registration. The certificate must be in
-    Cert:\CurrentUser\My or Cert:\LocalMachine\My and have a private key.
+    Cert:\CurrentUser\My or Cert:\LocalMachine\My and have a private key. This is the supported
+    way to authenticate an existing app against SharePoint Online.
 
 .PARAMETER OutputPath
     Override the default output folder (C:\Temp on Windows).
@@ -94,6 +111,17 @@
     Also write an "effective access" CSV: one row per resolved user per scope, with the group they
     inherited the access through. Off by default — on a large tenant this file can be orders of
     magnitude larger than the detail CSV.
+
+.PARAMETER Excel
+    Also write everything into one .xlsx workbook next to the CSVs, with a worksheet per report:
+    Samenvatting, Rechten, Groepen and — with -IncludeEffectiveAccess — Effectief. Needs the
+    ImportExcel module. The CSVs are always written regardless; the workbook is the readable copy
+    on top of them, and a sheet that would exceed Excel's row limit is capped with a warning.
+
+    Every sheet is a real Excel table, so it filters and sorts as one. Three ready-made pivot
+    sheets are added as well, and the sheets carrying PermissionLevels get a PrimaryPermission
+    column beside it — a grant often holds several levels at once ("Read; Limited Access"), which
+    a pivot would otherwise treat as a value of its own.
 
 .PARAMETER GraphTimeoutSec
     Timeout in seconds per Graph/SharePoint call (default: 120).
@@ -141,6 +169,7 @@ param(
     [switch] $ExcludeLimitedAccess,
     [switch] $SkipGroupExpansion,
     [switch] $IncludeEffectiveAccess,
+    [switch] $Excel,
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6,
     [ValidateRange(1, 8)]
@@ -152,13 +181,26 @@ param(
 $outputDir = if ($OutputPath) { $OutputPath }
              elseif ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' }
              else { "$HOME/Downloads" }
-if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
+# Prove the output folder is usable before anything else happens. A tenant-wide scan can run for
+# hours; discovering at the end that nothing could be written — or worse, failing on the first
+# checkpoint after authenticating and creating an app registration — is entirely avoidable.
+try {
+    if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir -ErrorAction Stop | Out-Null }
+    $writeProbe = Join-Path $outputDir ".sp-permissions-write-test-$PID.tmp"
+    [System.IO.File]::WriteAllText($writeProbe, 'probe')
+    Remove-Item -Path $writeProbe -Force -ErrorAction SilentlyContinue
+} catch {
+    Write-Host "  [ERROR] Output folder '$outputDir' is not writable: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Pass -OutputPath to write somewhere else." -ForegroundColor Yellow
+    exit 1
+}
 
 $ts           = Get-Date -Format 'yyyyMMdd_HHmmss'
 $detailCsv    = Join-Path $outputDir "SharePoint_Permissions_Detail_$ts.csv"
 $summaryCsv   = Join-Path $outputDir "SharePoint_Permissions_Summary_$ts.csv"
 $groupsCsv    = Join-Path $outputDir "SharePoint_Permissions_Groups_$ts.csv"
 $effectiveCsv = Join-Path $outputDir "SharePoint_Permissions_EffectiveAccess_$ts.csv"
+$siteAccessCsv = Join-Path $outputDir "SharePoint_Permissions_SiteAccess_$ts.csv"
 
 # ── Well-known application IDs ────────────────────────────────────────────────
 $GraphAppId      = '00000003-0000-0000-c000-000000000000'
@@ -171,8 +213,10 @@ $script:ConnectedHere   = $false
 $script:AppClientId     = $null
 $script:AppClientSecret = $null
 $script:AppCertificate  = $null
+$script:AppSigningKey   = $null
 $script:AppTenantId     = $null
 $script:TokenCache      = @{}   # resource root URI -> @{ Headers; Expiry }
+$script:ResourceRequiredRoles = @{}   # resource root URI -> app roles its token must carry
 $script:CurrentScanLabel = ''
 
 function Write-ProgressHost {
@@ -220,12 +264,30 @@ function Get-TextHashHex {
 }
 
 function Append-CheckpointRows {
+    # Retries on a locked or briefly unavailable file. The realistic cause is someone opening the
+    # partial CSV in Excel mid-scan, which takes an exclusive lock: without this the write throws,
+    # the unit is still marked complete, and those rows are gone from the report for good.
     param([string]$Path, [object[]]$Rows)
     if ($Rows.Count -eq 0) { return }
-    if (Test-Path $Path) {
-        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append
-    } else {
-        $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+
+    $maxAttempts = 5
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            if (Test-Path $Path) {
+                $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -Append -ErrorAction Stop
+            } else {
+                $Rows | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+            }
+            return
+        } catch {
+            if ($attempt -eq $maxAttempts) {
+                # Deliberately terminating: silently dropping rows would leave a report that looks
+                # complete and is not. Losing the run is recoverable — the checkpoint resumes it.
+                throw ("Could not write {0} row(s) to {1} after {2} attempts: {3}" -f $Rows.Count, $Path, $maxAttempts, $_.Exception.Message)
+            }
+            Write-ProgressHost -Message ("[WARN] Could not write to {0} (attempt {1}/{2}) — is it open in another program? Retrying..." -f (Split-Path $Path -Leaf), $attempt, $maxAttempts) -ForegroundColor Yellow
+            Start-Sleep -Seconds (3 * $attempt)
+        }
     }
 }
 
@@ -256,11 +318,21 @@ function Remove-TempApp {
         }
         $script:TempAppObjectId = $null
     }
+    # The in-memory signing key holds unmanaged crypto state; release it once it can no longer be
+    # needed rather than waiting for the finalizer.
+    foreach ($disposable in @($script:AppSigningKey, $script:AppCertificate)) {
+        if ($disposable -is [System.IDisposable]) { try { $disposable.Dispose() } catch {} }
+    }
+    $script:AppSigningKey  = $null
+    $script:AppCertificate = $null
+    $script:TokenCache     = @{}
     if ($script:ConnectedHere) {
         $prevWarningPreference = $WarningPreference
         try {
             $WarningPreference = 'SilentlyContinue'
-            Disconnect-MgGraph -ErrorAction SilentlyContinue
+            # Returns the context it just disconnected; without Out-Null that object lands on
+            # stdout and prints a stray ClientId/TenantId/Scopes table after the summary.
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
         } catch {} finally {
             $WarningPreference = $prevWarningPreference
         }
@@ -268,10 +340,49 @@ function Remove-TempApp {
     }
 }
 
+# Last line of defence for the temporary App Registration. The scan itself cleans up in a finally,
+# and the known failure paths call Remove-TempApp explicitly, but an unexpected terminating error
+# anywhere between creating the app and reaching the scan would otherwise leave a Full Control app
+# registration behind in the customer's tenant. That must not depend on having predicted the error.
+trap {
+    Write-Host ''
+    Write-Host "  [ERROR] Unhandled error: $($_.Exception.Message)" -ForegroundColor Red
+    if ($_.ScriptStackTrace) { Write-Host "  $($_.ScriptStackTrace)" -ForegroundColor DarkGray }
+    try { Remove-TempApp } catch {}
+    exit 1
+}
+
 # ── Token handling ────────────────────────────────────────────────────────────
 # One app registration, several resources: Graph for site enumeration and group expansion,
 # and one SharePoint resource per host (contoso.sharepoint.com and, for OneDrive scans,
 # contoso-my.sharepoint.com are separate audiences and need separate tokens).
+
+function New-SelfSignedAppCertificate {
+    # SharePoint Online refuses an app-only token that was obtained with a client secret — the
+    # request comes back 401 with x-ms-diagnostics "Unsupported app only token." Only a
+    # certificate-backed client credential is accepted against the SharePoint audience, so the
+    # temporary app is given a certificate instead of a password.
+    #
+    # The key is generated in memory and never written to the certificate store or to disk: it
+    # lives as long as the process does, which is already longer than the app registration it
+    # authenticates. Nothing to clean up, and nothing left behind if the run is interrupted.
+    param([string]$Subject = 'CN=SP-PermissionsReport-Temp')
+
+    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+    $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+        $Subject, $rsa,
+        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $cert = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5), [DateTimeOffset]::UtcNow.AddDays(1))
+
+    return [PSCustomObject]@{
+        Certificate = $cert
+        # Keep the generating RSA: on Windows the private key of an in-memory self-signed
+        # certificate is not always retrievable through GetRSAPrivateKey(), and signing with the
+        # object we already hold sidesteps that entirely.
+        SigningKey  = $rsa
+    }
+}
 
 function New-ClientAssertion {
     # Certificate credentials cannot be exchanged for a raw token the way a secret can, so build
@@ -280,9 +391,11 @@ function New-ClientAssertion {
     param(
         [Parameter(Mandatory = $true)][System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
         [Parameter(Mandatory = $true)][string]$ClientIdValue,
-        [Parameter(Mandatory = $true)][string]$Authority
+        [Parameter(Mandatory = $true)][string]$Authority,
+        [System.Security.Cryptography.RSA]$SigningKey
     )
-    $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+    $rsa = $SigningKey
+    if (-not $rsa) { $rsa = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate) }
     if (-not $rsa) { throw "Certificate $($Certificate.Thumbprint) has no usable RSA private key." }
 
     function ConvertTo-Base64Url {
@@ -313,44 +426,109 @@ function New-ClientAssertion {
     return "$toSign.$(ConvertTo-Base64Url -Bytes $signature)"
 }
 
+function Get-JwtClaim {
+    # Reads one claim out of a JWT payload. No validation and no library: the token was just
+    # handed to us by Entra over TLS, and all we want to know is what it says about itself.
+    param(
+        # Explicitly allows empty: a caller asking about a token it does not have should get back
+        # "no claim", not a parameter binding error it then has to guard against separately.
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Token,
+        [Parameter(Mandatory = $true)][string]$Claim
+    )
+    if ([string]::IsNullOrWhiteSpace($Token)) { return $null }
+    try {
+        $parts = $Token.Split('.')
+        if ($parts.Count -lt 2) { return $null }
+        $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } 1 { return $null } }
+        $json = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+        return $json.$Claim
+    } catch { return $null }
+}
+
 function Get-ResourceToken {
     # Returns an Authorization header hashtable for the given resource root, minting and caching
     # a client-credentials token per resource. Refreshes 5 minutes before expiry.
-    param([Parameter(Mandatory = $true)][string]$Resource)
+    #
+    # -RequiredRoles is what makes this safe to call straight after granting app roles. Entra will
+    # happily issue a token before a freshly granted role has replicated, and that token carries no
+    # roles claim at all — which Graph answers with 401, not 403. Cached for the hour it is valid,
+    # one such token poisons the entire run and no amount of retrying the request can recover it,
+    # because every retry is handed the same dead token back. So the token has to prove it carries
+    # the roles before it is allowed into the cache.
+    param(
+        [Parameter(Mandatory = $true)][string]$Resource,
+        [string[]]$RequiredRoles = @()
+    )
 
     $cached = $script:TokenCache[$Resource]
     if ($cached -and (Get-Date) -lt $cached.Expiry) { return $cached.Headers }
 
-    $authority = "https://login.microsoftonline.com/$($script:AppTenantId)/oauth2/v2.0/token"
-    $body = @{
-        grant_type = 'client_credentials'
-        scope      = "$Resource/.default"
-        client_id  = $script:AppClientId
-    }
-    if ($script:AppCertificate) {
-        $body['client_assertion_type'] = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
-        $body['client_assertion']      = New-ClientAssertion -Certificate $script:AppCertificate `
-                                            -ClientIdValue $script:AppClientId -Authority $authority
-    } else {
-        $body['client_secret'] = $script:AppClientSecret
-    }
+    # Remember what this resource needs, so a refresh later in the run is held to the same bar.
+    if ($RequiredRoles.Count -gt 0) { $script:ResourceRequiredRoles[$Resource] = $RequiredRoles }
+    $expectedRoles = @($script:ResourceRequiredRoles[$Resource])
 
-    $resp = $null
-    $lastError = $null
-    for ($i = 1; $i -le 6; $i++) {
+    $authority = "https://login.microsoftonline.com/$($script:AppTenantId)/oauth2/v2.0/token"
+
+    # A freshly registered certificate credential and a freshly granted app role both need time to
+    # replicate before Entra will mint a token against them — noticeably longer than the few
+    # seconds a secret needs. Give it up to ~two minutes rather than failing the whole run on a
+    # race that resolves itself.
+    $resp        = $null
+    $lastError   = $null
+    $missingRoles = @()
+    $maxAttempts = 15
+    for ($i = 1; $i -le $maxAttempts; $i++) {
+        # Rebuild the credential every attempt: the assertion carries its own expiry and a
+        # single-use jti, and over a propagation wait this loop can outlive the first one.
+        $body = @{
+            grant_type = 'client_credentials'
+            scope      = "$Resource/.default"
+            client_id  = $script:AppClientId
+        }
+        if ($script:AppCertificate) {
+            $body['client_assertion_type'] = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
+            $body['client_assertion']      = New-ClientAssertion -Certificate $script:AppCertificate `
+                                                -ClientIdValue $script:AppClientId -Authority $authority `
+                                                -SigningKey $script:AppSigningKey
+        } else {
+            $body['client_secret'] = $script:AppClientSecret
+        }
+
+        $resp = $null
         try {
             $resp = Invoke-RestMethod -Method POST -Uri $authority -Body $body -ErrorAction Stop
-            break
         } catch {
             $lastError = $_
-            if ($i -lt 6) {
-                Write-ProgressHost -Message ("[INFO] Waiting for token/consent propagation for {0} (attempt {1}/6)..." -f $Resource, $i)
-                Start-Sleep -Seconds 5
-            }
+            $resp = $null
+        }
+
+        if ($resp -and $resp.access_token) {
+            if ($expectedRoles.Count -eq 0) { break }
+            $granted     = @(Get-JwtClaim -Token $resp.access_token -Claim 'roles')
+            $missingRoles = @($expectedRoles | Where-Object { $_ -notin $granted })
+            if ($missingRoles.Count -eq 0) { break }
+            # Token is technically valid but useless — discard it rather than cache it.
+            $resp = $null
+        }
+
+        if ($i -lt $maxAttempts) {
+            $reason = if ($missingRoles.Count -gt 0) {
+                "app role(s) {0} not in the token yet" -f ($missingRoles -join ', ')
+            } else { 'credential not accepted yet' }
+            Write-ProgressHost -Message ("[INFO] Waiting for {0} to replicate for {1} (attempt {2}/{3})..." -f $reason, $Resource, $i, $maxAttempts)
+            Start-Sleep -Seconds ([Math]::Min(5 * $i, 20))
         }
     }
+
     if (-not $resp -or -not $resp.access_token) {
-        throw "Could not obtain app-only token for $Resource. $($lastError.Exception.Message)"
+        if ($missingRoles.Count -gt 0) {
+            throw ("Entra issued a token for {0} without the required app role(s): {1}. The grant has not replicated, or it was not applied to this application." -f $Resource, ($missingRoles -join ', '))
+        }
+        $detail = $null
+        try { $detail = ($lastError.ErrorDetails.Message | ConvertFrom-Json).error_description } catch {}
+        if (-not $detail) { $detail = $lastError.Exception.Message }
+        throw "Could not obtain app-only token for $Resource. $detail"
     }
 
     # SharePoint and Graph disagree on how to ask for a lean payload: SharePoint wants
@@ -405,12 +583,25 @@ function Get-ResponseStatusCode {
 
 function Invoke-GraphGet {
     param([Parameter(Mandatory = $true)][string]$Uri)
+    $reauthTried = $false
     for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
         try {
             $headers = Get-ResourceToken -Resource $GraphResource
             return Invoke-RestMethod -Uri $Uri -Headers $headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
         } catch {
             $statusCode = Get-ResponseStatusCode -ErrorRecord $_
+
+            # Graph answers an app-only token that carries no usable role with 401, not 403, and a
+            # cached token never improves on its own. Retrying the request alone is therefore
+            # futile — the cache has to be dropped so the next attempt mints a fresh one.
+            if ($statusCode -eq 401 -and -not $reauthTried) {
+                $reauthTried = $true
+                $script:TokenCache.Remove($GraphResource)
+                Write-ProgressHost -Message "[INFO] Graph refused the token (401) — minting a fresh one and retrying..."
+                Start-Sleep -Seconds 3
+                continue
+            }
+
             $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
             if (-not $isRetryable -and -not $statusCode) {
                 $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
@@ -423,22 +614,69 @@ function Invoke-GraphGet {
     }
 }
 
+function Get-ResponseHeaderValue {
+    # SharePoint puts the real reason for a refusal in x-ms-diagnostics, not in the status line.
+    # "Unsupported app only token" in particular is the difference between "this app may not read
+    # this site" and "this credential type can never read any site".
+    param([object]$ErrorRecord, [string]$Name)
+    try {
+        $headers = $ErrorRecord.Exception.Response.Headers
+        if (-not $headers) { return $null }
+        # PS 7 exposes HttpResponseHeaders (TryGetValues); PS 5.1 a WebHeaderCollection (indexer).
+        if ($headers -is [System.Net.Http.Headers.HttpResponseHeaders]) {
+            $values = $null
+            if ($headers.TryGetValues($Name, [ref]$values)) { return ($values -join '; ') }
+            return $null
+        }
+        return [string]$headers[$Name]
+    } catch { return $null }
+}
+
 function Invoke-SPGet {
     # Single SharePoint REST GET. Returns $null for 403/404 — a site the app cannot open, or a
     # list/endpoint that does not exist on this template — because a tenant-wide sweep always hits
     # some of both and neither should abort the run.
+    #
+    # A 401 is deliberately NOT treated that way. It means the token itself is not accepted, which
+    # is never per-site: it is the same answer for every site in the tenant. Swallowing it turned a
+    # single credential fault into 130 lines of "not accessible with the current permissions",
+    # which reads like a permissions finding instead of the bug it is.
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
         [switch] $ThrowOnDenied
     )
     $resourceRoot = Get-ResourceRootFromUrl -Url $Uri
+    $reauthTried  = $false
     for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
         try {
             $headers = Get-ResourceToken -Resource $resourceRoot
             return Invoke-RestMethod -Uri $Uri -Headers $headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
         } catch {
             $statusCode = Get-ResponseStatusCode -ErrorRecord $_
-            if ($statusCode -in @(401, 403, 404) -and -not $ThrowOnDenied) { return $null }
+            if ($statusCode -eq 401) {
+                # A 401 is usually fatal, but not always: a token can be rejected right on the
+                # expiry boundary, or after the service principal is re-replicated. Throw away the
+                # cached token and try once more before concluding the credential itself is wrong.
+                if (-not $reauthTried) {
+                    $reauthTried = $true
+                    $script:TokenCache.Remove($resourceRoot)
+                    Write-ProgressHost -Message "[INFO] Token refused (401) — re-authenticating once before giving up..."
+                    Start-Sleep -Seconds 2
+                    continue
+                }
+                $diag = Get-ResponseHeaderValue -ErrorRecord $_ -Name 'x-ms-diagnostics'
+                $hint = ''
+                if ($diag -match 'Unsupported app only token') {
+                    $hint = "`n         SharePoint Online does not accept an app-only token obtained with a client secret." +
+                            "`n         Use -CertificateThumbprint, or omit -ClientId so the script creates its own certificate-backed app."
+                }
+                throw ("SharePoint refused the token (401) for {0}.{1}{2}" -f $resourceRoot, $(if ($diag) { " $diag" } else { '' }), $hint)
+            }
+            if ($statusCode -in @(403, 404)) {
+                if (-not $ThrowOnDenied) { return $null }
+                $what = if ($statusCode -eq 403) { 'Access denied' } else { 'Not found' }
+                throw ("{0} (HTTP {1}) reading {2} — this scope could not be read, so its permissions are unknown rather than empty." -f $what, $statusCode, $Uri)
+            }
             $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
             if (-not $isRetryable -and -not $statusCode) {
                 $isRetryable = $_.Exception.Message -match 'timed out|timeout|temporar|connection|EOF|name resolution'
@@ -451,29 +689,61 @@ function Invoke-SPGet {
     }
 }
 
-function Get-SPCollection {
-    # Follows SharePoint's paging (odata.nextLink under nometadata, __next under verbose) and
-    # returns every row. Item paging uses $skiptoken internally, so this does not trip the
-    # 5000-item list view threshold the way a $filter/$orderby query would.
+function Invoke-SPCollectionPaged {
+    # Walks SharePoint's paging (odata.nextLink under nometadata, __next under verbose) and hands
+    # each page to -OnPage. Nothing is accumulated here, so a library with a million items costs
+    # one page of memory instead of a million live objects.
+    #
+    # Item paging uses $skiptoken internally, so this does not trip the 5000-item list view
+    # threshold the way a $filter or $orderby query would.
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
-        [int] $MaxPages = 100000
+        [Parameter(Mandatory = $true)][scriptblock]$OnPage,
+        [int] $MaxPages = 200000,
+        [switch] $ThrowOnDenied
     )
-    $rows = [System.Collections.Generic.List[object]]::new()
     $next = $Uri
     $page = 0
+    # SharePoint has been seen to echo back a nextLink identical to the request under some error
+    # conditions. Without this guard that is an infinite loop against a live tenant.
+    $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
     while ($next -and $page -lt $MaxPages) {
-        $resp = Invoke-SPGet -Uri $next
+        if (-not $seen.Add($next)) {
+            Write-ProgressHost -Message "[WARN] SharePoint repeated a paging link — stopping this collection to avoid looping." -ForegroundColor Yellow
+            break
+        }
+        $resp = Invoke-SPGet -Uri $next -ThrowOnDenied:$ThrowOnDenied
         if (-not $resp) { break }
         $page++
+
         $values = $null
         if ($null -ne $resp.value) { $values = $resp.value }
         elseif ($resp.d -and $null -ne $resp.d.results) { $values = $resp.d.results }
-        if ($values) { foreach ($v in @($values)) { $rows.Add($v) | Out-Null } }
+        if ($values) { & $OnPage @($values) }
 
         $next = $null
         if ($resp.'odata.nextLink') { $next = [string]$resp.'odata.nextLink' }
         elseif ($resp.d -and $resp.d.__next) { $next = [string]$resp.d.__next }
+    }
+    if ($page -ge $MaxPages) {
+        Write-ProgressHost -Message ("[WARN] Stopped paging after {0} pages — the collection may be incomplete." -f $MaxPages) -ForegroundColor Yellow
+    }
+}
+
+function Get-SPCollection {
+    # Accumulating wrapper, for the collections that are inherently small: site groups, lists,
+    # role assignments, sub-webs. List *items* deliberately do not go through this — see
+    # Invoke-SPCollectionPaged.
+    param(
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [int] $MaxPages = 200000,
+        [switch] $ThrowOnDenied
+    )
+    $rows = [System.Collections.Generic.List[object]]::new()
+    Invoke-SPCollectionPaged -Uri $Uri -MaxPages $MaxPages -ThrowOnDenied:$ThrowOnDenied -OnPage {
+        param($Values)
+        foreach ($v in $Values) { $rows.Add($v) | Out-Null }
     }
     return $rows
 }
@@ -670,6 +940,12 @@ try {
             $script:AppCertificate = Resolve-ClientCertificate -Thumbprint $CertificateThumbprint
         } elseif ($ClientSecret) {
             $script:AppClientSecret = $ClientSecret
+            # Not an error — Graph accepts it — but every SharePoint call will come back 401, and
+            # that failure is invisible unless it is called out here: the scan would simply report
+            # every site as inaccessible.
+            Write-Host "  [WARN] SharePoint Online rejects app-only tokens obtained with a client secret" -ForegroundColor Yellow
+            Write-Host "         ('Unsupported app only token'). Use -CertificateThumbprint instead, or omit" -ForegroundColor Yellow
+            Write-Host "         -ClientId entirely and let the script create its own certificate-backed app." -ForegroundColor Yellow
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
@@ -697,9 +973,21 @@ try {
 
         $tempAppName = "SP-PermissionsReport-Temp-$ts"
         Write-Host "  Creating temporary App Registration '$tempAppName'..." -ForegroundColor Cyan
-        $app = New-MgApplication -DisplayName $tempAppName -ErrorAction Stop
+
+        # Certificate, not a password: SharePoint Online returns 401 "Unsupported app only token"
+        # for any app-only token that was obtained with a client secret, so a secret-backed temp
+        # app would authenticate fine against Graph and then fail on every single /_api call.
+        $tempCert = New-SelfSignedAppCertificate -Subject "CN=$tempAppName"
+        $keyCredential = @{
+            Type        = 'AsymmetricX509Cert'
+            Usage       = 'Verify'
+            Key         = $tempCert.Certificate.GetRawCertData()
+            DisplayName = "CN=$tempAppName"
+        }
+        $app = New-MgApplication -DisplayName $tempAppName -KeyCredentials @($keyCredential) -ErrorAction Stop
         $script:TempAppObjectId = $app.Id
         $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+        Write-Host ("  [OK]   Certificate credential registered (thumbprint {0}, valid 1 day, never written to disk)." -f $tempCert.Certificate.Thumbprint) -ForegroundColor DarkGray
 
         # Sites.FullControl.All is not an oversight here: SharePoint gates reading role
         # assignments behind the EnumeratePermissions right, which only Full Control carries.
@@ -724,26 +1012,51 @@ try {
             Write-Host ("  [OK]   {0} / {1} granted ({2})." -f $resourceSp.DisplayName, $required.Role, $required.Why) -ForegroundColor DarkGray
         }
 
-        # 1-day secret: these runs are short, and a short lifetime limits exposure if cleanup ever
-        # fails to run. The app and its secret are removed by Remove-TempApp on the way out.
-        $secret = Add-MgApplicationPassword `
-            -ApplicationId      $app.Id `
-            -PasswordCredential @{ displayName = 'temp'; endDateTime = (Get-Date).AddDays(1) } -ErrorAction Stop
+        $script:AppClientId    = $app.AppId
+        $script:AppCertificate = $tempCert.Certificate
+        $script:AppSigningKey  = $tempCert.SigningKey
+        $script:AppTenantId    = $usedTenantId
 
-        $script:AppClientId     = $app.AppId
-        $script:AppClientSecret = $secret.SecretText
-        $script:AppTenantId     = $usedTenantId
+        # Both tokens are minted here, and both must already carry their app roles. Waiting for
+        # that now — while the run has produced nothing yet — is the difference between a clear
+        # "the grant has not replicated" and a scan that walks the whole tenant on a dead token.
+        Write-Host "  Obtaining app-only tokens (waiting for the grants to replicate)..." -ForegroundColor Cyan
+        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @('Sites.Read.All', 'GroupMember.Read.All'))
+        Write-Host "  [OK]   Graph token carries Sites.Read.All and GroupMember.Read.All." -ForegroundColor DarkGray
 
-        Write-Host "  Obtaining app-only tokens..." -ForegroundColor Cyan
-        [void](Get-ResourceToken -Resource $GraphResource)
-        Write-Host "  [OK]   Token obtained." -ForegroundColor DarkGray
+        $sharePointResource = Get-ResourceRootFromUrl -Url $(if ($SiteUrl) { $SiteUrl } else { $TenantUrl })
+        [void](Get-ResourceToken -Resource $sharePointResource -RequiredRoles @('Sites.FullControl.All'))
+        Write-Host "  [OK]   SharePoint token carries Sites.FullControl.All." -ForegroundColor DarkGray
     }
 } catch {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Remove-TempApp; exit 1
 }
 
-Set-GraphRequestTimeoutOptions -TimeoutSec $GraphTimeoutSec
+# Set-MgRequestContext returns the context object; without this it lands on stdout and prints a
+# stray "ClientTimeout RetryDelay MaxRetry" table at the end of an otherwise clean run.
+Set-GraphRequestTimeoutOptions -TimeoutSec $GraphTimeoutSec | Out-Null
+
+# ── SharePoint access preflight ───────────────────────────────────────────────
+# One call against the tenant root, before enumerating anything. Whether SharePoint accepts this
+# credential is a single yes/no for the whole tenant, so finding out here costs one request and
+# turns an otherwise silent 130-site sweep of "not accessible" into one actionable error.
+$preflightRoot = if ($SiteUrl) { Get-ResourceRootFromUrl -Url $SiteUrl } else { Get-ResourceRootFromUrl -Url $TenantUrl }
+Write-ProgressHost -Message ("Verifying SharePoint access against {0}..." -f $preflightRoot) -ForegroundColor Cyan
+try {
+    $preflightWeb = Invoke-SPGet -Uri ("{0}/_api/web?`$select=Title" -f $preflightRoot) -ThrowOnDenied
+    if (-not $preflightWeb) { throw "SharePoint returned no data for $preflightRoot/_api/web." }
+    Write-Host ("  [OK]   SharePoint accepted the token (root web: {0})." -f $preflightWeb.Title) -ForegroundColor DarkGray
+} catch {
+    Write-Host ''
+    Write-Host "  [ERROR] Cannot read SharePoint with this credential — stopping before the scan." -ForegroundColor Red
+    Write-Host ("  {0}" -f $_.Exception.Message) -ForegroundColor Red
+    Write-Host ''
+    Write-Host "  Reading role assignments needs the SharePoint application role Sites.FullControl.All" -ForegroundColor Yellow
+    Write-Host "  on a certificate-backed app registration. Graph permissions alone are not enough, and" -ForegroundColor Yellow
+    Write-Host "  a client secret is not accepted by SharePoint Online for app-only access." -ForegroundColor Yellow
+    Remove-TempApp; exit 1
+}
 
 # ── Site discovery ────────────────────────────────────────────────────────────
 # Three sources, de-duplicated on URL, because no single one is complete:
@@ -859,12 +1172,28 @@ while ($discoveryQueue.Count -gt 0) {
 
 Write-ProgressHost -Message ("Target webs: {0}" -f $targetSites.Count) -ForegroundColor Green
 
+if ($targetSites.Count -eq 0) {
+    Write-Host ''
+    Write-Host "  [ERROR] No sites to scan — nothing was discovered." -ForegroundColor Red
+    if ($allSitesMode -and -not $IncludeOneDriveSites) {
+        Write-Host "  Every site found was a personal OneDrive site, which is excluded by default." -ForegroundColor Yellow
+        Write-Host "  Add -IncludeOneDriveSites to include them." -ForegroundColor Yellow
+    } else {
+        Write-Host "  Check that the tenant URL is right and that the app's Sites.Read.All grant has replicated." -ForegroundColor Yellow
+    }
+    Remove-TempApp; exit 1
+}
+
 # ── Principal membership resolution ───────────────────────────────────────────
 # Two caches, because the same handful of groups grant access all over a tenant and resolving
 # them once per grant would dwarf the cost of the scan itself.
 $script:SiteGroupCache   = @{}   # site collection URL -> @{ groupId -> group object with Users }
 $script:EntraGroupCache  = @{}   # Entra group object id -> resolved member list
 $script:GroupRowsWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$script:SiteAccessWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+# Site collection URL -> its root web title. A consolidated view of 130 sites is not readable as
+# 130 URLs, and the title is only known while the root web is being scanned.
+$script:SiteTitles = @{}
 
 function Get-SiteCollectionUrl {
     # SharePoint groups live on the site collection, not the web, so sub-webs must share the cache
@@ -1003,9 +1332,23 @@ function ConvertTo-PermissionRows {
     # Turns one SharePoint roleassignments response into flat CSV rows — one per principal per
     # scope, with the permission levels joined, plus (optionally) the resolved people behind it.
     param(
-        [Parameter(Mandatory = $true)][object[]]$RoleAssignments,
+        # Empty is a legitimate answer: a scope can have unique permissions and no role assignments
+        # left on it at all. Without AllowEmptyCollection a Mandatory [object[]] rejects @() outright,
+        # which turned every such list into "Cannot bind argument to parameter 'RoleAssignments'".
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$RoleAssignments,
         [Parameter(Mandatory = $true)][hashtable]$ScopeInfo,
-        [System.Collections.Generic.List[object]]$EffectiveRows
+        [System.Collections.Generic.List[object]]$EffectiveRows,
+        # Entra groups granted straight onto a scope never pass through /sitegroups, so without
+        # these they would be the one kind of group whose membership the report never lists —
+        # only the first ten names in MemberPreview. Collected once per group, not per grant.
+        [System.Collections.Generic.List[object]]$GroupRows,
+        [System.Collections.Generic.List[string]]$GroupKeys,
+        # The consolidated "who can reach this site, and how" view. Membership and grants are
+        # otherwise in separate reports — knowing that Site Owners has Full Control and separately
+        # that Site Owners contains five people leaves the reader to join the two by hand.
+        # De-duplicated per site collection, so a person in ten sub-sites is one row, not ten.
+        [System.Collections.Generic.List[object]]$SiteAccessRows,
+        [System.Collections.Generic.List[string]]$SiteAccessKeys
     )
 
     $rows = [System.Collections.Generic.List[object]]::new()
@@ -1025,10 +1368,96 @@ function ConvertTo-PermissionRows {
         $principal = Get-PrincipalInfo -Member $ra.Member
         $members   = Resolve-PrincipalMembers -Principal $principal -WebUrl $ScopeInfo.WebUrl
 
+        # Record a directly granted directory group's membership once, the first time it is seen.
+        if ($null -ne $GroupRows -and $principal.DirectoryId -and
+            $principal.Kind -in @('SecurityGroup', 'M365Group', 'M365GroupOwners')) {
+            $entraKey = "entra|$($principal.Kind)|$($principal.DirectoryId)"
+            if ($script:GroupRowsWritten.Add($entraKey)) {
+                if ($null -ne $GroupKeys) { $GroupKeys.Add($entraKey) | Out-Null }
+                $groupTypeLabel = switch ($principal.Kind) {
+                    'SecurityGroup'    { 'EntraSecurityGroup' }
+                    'M365Group'        { 'Microsoft365Group' }
+                    'M365GroupOwners'  { 'Microsoft365GroupOwners' }
+                }
+                if ($members.Count -eq 0) {
+                    $GroupRows.Add([PSCustomObject]@{
+                        SiteUrl = $ScopeInfo.SiteUrl; GroupId = $principal.DirectoryId
+                        GroupTitle = $principal.Title; GroupOwner = $null; GroupType = $groupTypeLabel
+                        MemberType = $null; MemberName = $null; MemberLogin = $null; MemberEmail = $null
+                        MemberIsExternal = $null; IsEmpty = $true
+                    }) | Out-Null
+                } else {
+                    foreach ($m in $members) {
+                        $GroupRows.Add([PSCustomObject]@{
+                            SiteUrl = $ScopeInfo.SiteUrl; GroupId = $principal.DirectoryId
+                            GroupTitle = $principal.Title; GroupOwner = $null; GroupType = $groupTypeLabel
+                            MemberType = 'User'; MemberName = $m.DisplayName; MemberLogin = $m.Upn
+                            MemberEmail = $m.Email; MemberIsExternal = $m.IsExternal; IsEmpty = $false
+                        }) | Out-Null
+                    }
+                }
+            }
+        }
+
+        # Consolidated site access. A principal that resolves to people contributes its people;
+        # one granted directly contributes itself, so a direct grant is not missing from the view
+        # that is supposed to answer "who can reach this site".
+        if ($null -ne $SiteAccessRows) {
+            $levelText = ($levels -join '; ')
+            $viaType   = if ($principal.Kind -eq 'User') { 'Direct' } else { $principal.Kind }
+            $viaName   = if ($principal.Kind -eq 'User') { $null } else { $principal.Title }
+
+            $people = @($members)
+            if ($people.Count -eq 0 -and $principal.Kind -eq 'User') {
+                $people = @([PSCustomObject]@{
+                    DisplayName = $principal.Title
+                    Upn         = $principal.LoginName.Split('|')[-1]
+                    Email       = $principal.Email
+                    IsExternal  = $principal.IsExternal
+                    Enabled     = $null
+                })
+            }
+            # Everyone / Everyone except external users resolve to nobody, but they are exactly the
+            # grants a reviewer must see. Keep them as a single row naming the claim itself.
+            if ($people.Count -eq 0 -and $principal.Kind -in @('Everyone', 'EveryoneExceptExternalUsers', 'AllAuthenticatedUsers')) {
+                $people = @([PSCustomObject]@{
+                    DisplayName = $principal.Title
+                    Upn         = "($($principal.Kind))"
+                    Email       = $null
+                    IsExternal  = ($principal.Kind -eq 'Everyone')
+                    Enabled     = $null
+                })
+            }
+
+            foreach ($person in $people) {
+                $accessKey = "{0}|{1}|{2}|{3}" -f $ScopeInfo.SiteUrl, $person.Upn, $viaName, $levelText
+                if (-not $script:SiteAccessWritten.Add($accessKey)) { continue }
+                if ($null -ne $SiteAccessKeys) { $SiteAccessKeys.Add($accessKey) | Out-Null }
+                $SiteAccessRows.Add([PSCustomObject]@{
+                    SiteTitle         = $(if ($script:SiteTitles.ContainsKey($ScopeInfo.SiteUrl)) { $script:SiteTitles[$ScopeInfo.SiteUrl] } else { $ScopeInfo.WebTitle })
+                    SiteUrl           = $ScopeInfo.SiteUrl
+                    UserDisplayName   = $person.DisplayName
+                    UserPrincipalName = $person.Upn
+                    UserEmail         = $person.Email
+                    IsExternal        = $person.IsExternal
+                    AccountEnabled    = $person.Enabled
+                    ViaType           = $viaType
+                    ViaName           = $viaName
+                    # NovaPoint carries the group id alongside the name for the same reason: a
+                    # title like "Site Owners" repeats across every site in the tenant.
+                    ViaId             = $(if ($principal.SpGroupId) { $principal.SpGroupId } else { $principal.DirectoryId })
+                    PermissionLevels  = $levelText
+                }) | Out-Null
+            }
+        }
+
         $externalCount = @($members | Where-Object { $_.IsExternal }).Count
         if ($principal.IsExternal) { $externalCount = [Math]::Max($externalCount, 1) }
 
         $rows.Add([PSCustomObject]@{
+            # Ties the row back to the checkpoint unit that produced it, so error rows left behind
+            # by an attempt that later succeeded can be dropped when the final CSV is written.
+            UnitKey           = $ScopeInfo.UnitKey
             SiteUrl           = $ScopeInfo.SiteUrl
             WebUrl            = $ScopeInfo.WebUrl
             WebTitle          = $ScopeInfo.WebTitle
@@ -1059,7 +1488,10 @@ function ConvertTo-PermissionRows {
             Error             = $null
         }) | Out-Null
 
-        if ($IncludeEffectiveAccess -and $EffectiveRows) {
+        # Must be an explicit null test. An empty List[object] is falsy in PowerShell, so
+        # "-and $EffectiveRows" was false on the very first row and the list could never fill —
+        # which is why -IncludeEffectiveAccess produced an empty file on a 1554-grant tenant.
+        if ($IncludeEffectiveAccess -and $null -ne $EffectiveRows) {
             foreach ($m in $members) {
                 $EffectiveRows.Add([PSCustomObject]@{
                     SiteUrl          = $ScopeInfo.SiteUrl
@@ -1082,9 +1514,14 @@ function ConvertTo-PermissionRows {
 }
 
 function Get-ScopeRoleAssignments {
+    # -ThrowOnDenied matters here specifically. Everywhere else a swallowed 403/404 costs one
+    # object out of a sweep; on role assignments it would come back as an empty collection, and an
+    # empty collection reads as "nobody has rights on this scope". Not being allowed to look is a
+    # different fact from there being nothing to see, and only one of them belongs in a report
+    # about who has access.
     param([Parameter(Mandatory = $true)][string]$Uri)
     $expand = "?`$expand=Member,RoleDefinitionBindings&`$select=PrincipalId,Member/Id,Member/Title,Member/LoginName,Member/Email,Member/PrincipalType,RoleDefinitionBindings/Name,RoleDefinitionBindings/Id"
-    return Get-SPCollection -Uri ($Uri + $expand)
+    return Get-SPCollection -Uri ($Uri + $expand) -ThrowOnDenied
 }
 
 function Get-ItemRoleAssignmentsParallel {
@@ -1103,8 +1540,6 @@ function Get-ItemRoleAssignmentsParallel {
     if ($Items.Count -eq 0) { return $results }
 
     $resourceRoot = Get-ResourceRootFromUrl -Url $WebUrl
-    # Refresh before dispatch: runspace workers get a plain copy of the bearer token and cannot see
-    # a later refresh, so a token that expires mid-library would silently fail every worker after it.
     $headers = Get-ResourceToken -Resource $resourceRoot
     $select  = "?`$expand=Member,RoleDefinitionBindings&`$select=PrincipalId,Member/Id,Member/Title,Member/LoginName,Member/Email,Member/PrincipalType,RoleDefinitionBindings/Name,RoleDefinitionBindings/Id"
 
@@ -1136,8 +1571,19 @@ function Get-ItemRoleAssignmentsParallel {
                 } catch {
                     $status = $null
                     try { if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode } } catch {}
-                    if ($status -in @(401, 403, 404)) {
+                    # 404 only: the item was deleted between the sweep and this lookup, so "no
+                    # permissions" is the honest answer. 401 and 403 are not — reporting those as
+                    # an empty permission set would quietly claim an item nobody can reach is an
+                    # item nobody has rights on.
+                    if ($status -eq 404) {
                         return [PSCustomObject]@{ Success = $true; Rows = @() }
+                    }
+                    if ($status -in @(401, 403)) {
+                        return [PSCustomObject]@{
+                            Success      = $false
+                            Rows         = @()
+                            ErrorMessage = "HTTP $status reading role assignments - permissions for this item are unknown, not empty."
+                        }
                     }
                     if ($attempt -eq $MaxAttempts) {
                         return [PSCustomObject]@{ Success = $false; Rows = @(); ErrorMessage = $_.Exception.Message }
@@ -1172,6 +1618,11 @@ function Get-ItemRoleAssignmentsParallel {
         for ($offset = 0; $offset -lt $Items.Count; $offset += $waveSize) {
             $wave    = $Items[$offset..([Math]::Min($offset + $waveSize - 1, $Items.Count - 1))]
             $workers = [System.Collections.Generic.List[object]]::new()
+
+            # Re-read the token every wave, not once per library. Workers get a plain copy of the
+            # bearer header and cannot see a later refresh, and a library with enough unique scopes
+            # runs longer than a token lives — the tail of it would 401 with nothing to show why.
+            $headers = Get-ResourceToken -Resource $resourceRoot
 
             foreach ($item in $wave) {
                 # Spacing out dispatch reduces the burst rate against one site, which is what
@@ -1245,12 +1696,18 @@ $script:CheckpointStatePath     = Join-Path $outputDir "SharePoint_Permissions_$
 $script:CheckpointDetailPath    = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.detail.partial.csv"
 $script:CheckpointGroupsPath    = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.groups.partial.csv"
 $script:CheckpointEffectivePath = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.effective.partial.csv"
+$script:CheckpointSiteAccessPath = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.siteaccess.partial.csv"
 $script:CompletedUnitKeys       = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:LoadedCheckpoint        = $false
 
+# Completed keys live in an append-only log, not in the JSON. Rewriting a sorted list of every
+# key after every finished list is quadratic: on a tenant with thousands of lists the last writes
+# serialise thousands of keys each, and the checkpoint ends up costing more than the scanning.
+$script:CheckpointKeysPath = Join-Path $outputDir "SharePoint_Permissions_$checkpointSignature.keys.partial.log"
+
 $allCheckpointPaths = @(
-    $script:CheckpointStatePath, $script:CheckpointDetailPath,
-    $script:CheckpointGroupsPath, $script:CheckpointEffectivePath
+    $script:CheckpointStatePath, $script:CheckpointKeysPath, $script:CheckpointDetailPath,
+    $script:CheckpointGroupsPath, $script:CheckpointEffectivePath, $script:CheckpointSiteAccessPath
 )
 
 if ($Restart) {
@@ -1268,11 +1725,20 @@ if ($Restart) {
         $checkpointState = Get-Content -Path $script:CheckpointStatePath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($checkpointState.RunSignature -eq $checkpointSignature) {
             $script:LoadedCheckpoint = $true
-            foreach ($key in @($checkpointState.CompletedUnitKeys)) {
-                if (-not [string]::IsNullOrWhiteSpace([string]$key)) { $script:CompletedUnitKeys.Add([string]$key) | Out-Null }
-            }
-            foreach ($key in @($checkpointState.WrittenGroupKeys)) {
-                if (-not [string]::IsNullOrWhiteSpace([string]$key)) { $script:GroupRowsWritten.Add([string]$key) | Out-Null }
+            # Read the key log line by line rather than slurping it: it can hold hundreds of
+            # thousands of lines, and a truncated last line (killed mid-write) must not abort the
+            # resume — it just means that one unit gets scanned again, which is harmless.
+            if (Test-Path $script:CheckpointKeysPath) {
+                foreach ($line in [System.IO.File]::ReadLines($script:CheckpointKeysPath)) {
+                    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                    $kind, $key = $line.Split('|', 2)
+                    if ([string]::IsNullOrWhiteSpace($key)) { continue }
+                    switch ($kind) {
+                        'U' { [void]$script:CompletedUnitKeys.Add($key) }
+                        'G' { [void]$script:GroupRowsWritten.Add($key) }
+                        'A' { [void]$script:SiteAccessWritten.Add($key) }
+                    }
+                }
             }
         }
     } catch {
@@ -1281,14 +1747,37 @@ if ($Restart) {
 }
 
 function Save-CheckpointState {
+    # Only the signature and a timestamp — the keys themselves are appended to the key log as they
+    # happen, so this stays a constant-size write no matter how large the tenant is.
     $state = [PSCustomObject]@{
-        Version          = 1
-        RunSignature     = $checkpointSignature
-        UpdatedUtc       = (Get-Date).ToUniversalTime().ToString('o')
-        CompletedUnitKeys= @($script:CompletedUnitKeys | Sort-Object)
-        WrittenGroupKeys = @($script:GroupRowsWritten | Sort-Object)
+        Version      = 2
+        RunSignature = $checkpointSignature
+        UpdatedUtc   = (Get-Date).ToUniversalTime().ToString('o')
     }
-    $state | ConvertTo-Json -Depth 4 | Set-Content -Path $script:CheckpointStatePath -Encoding UTF8
+    try {
+        $state | ConvertTo-Json -Depth 4 | Set-Content -Path $script:CheckpointStatePath -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        Write-ProgressHost -Message ("[WARN] Could not update the checkpoint state file: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
+function Add-CheckpointKey {
+    param([ValidateSet('U', 'G')][string]$Kind, [string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return }
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        try {
+            Add-Content -Path $script:CheckpointKeysPath -Value ("{0}|{1}" -f $Kind, $Key) -Encoding UTF8 -ErrorAction Stop
+            return
+        } catch {
+            if ($attempt -eq 5) {
+                # Non-fatal by design, unlike a failed row write: a lost key means the unit is
+                # re-scanned on resume, which costs time but never costs data.
+                Write-ProgressHost -Message ("[WARN] Could not record checkpoint key — this unit will be re-scanned if the run is resumed.") -ForegroundColor Yellow
+                return
+            }
+            Start-Sleep -Milliseconds (200 * $attempt)
+        }
+    }
 }
 
 function Complete-CheckpointUnit {
@@ -1299,14 +1788,40 @@ function Complete-CheckpointUnit {
         [string]$UnitKey,
         [object[]]$DetailRows = @(),
         [object[]]$GroupRows = @(),
-        [object[]]$EffectiveRows = @()
+        [object[]]$EffectiveRows = @(),
+        [object[]]$SiteAccessRows = @(),
+        [string[]]$GroupKeys = @(),
+        [string[]]$SiteAccessKeys = @()
     )
+    # Order matters: rows first, keys second. A crash between the two re-scans the unit on resume,
+    # which is wasteful but correct. The reverse order would mark a unit done whose rows never
+    # landed, and that gap would never be noticed.
     if ($DetailRows.Count -gt 0)    { Append-CheckpointRows -Path $script:CheckpointDetailPath    -Rows $DetailRows }
     if ($GroupRows.Count -gt 0)     { Append-CheckpointRows -Path $script:CheckpointGroupsPath    -Rows $GroupRows }
     if ($EffectiveRows.Count -gt 0) { Append-CheckpointRows -Path $script:CheckpointEffectivePath -Rows $EffectiveRows }
-    if (-not [string]::IsNullOrWhiteSpace($UnitKey)) { $script:CompletedUnitKeys.Add($UnitKey) | Out-Null }
-    Save-CheckpointState
+    if ($SiteAccessRows.Count -gt 0) { Append-CheckpointRows -Path $script:CheckpointSiteAccessPath -Rows $SiteAccessRows }
+
+    foreach ($groupKey in $GroupKeys)   { Add-CheckpointKey -Kind 'G' -Key $groupKey }
+    foreach ($accessKey in $SiteAccessKeys) { Add-CheckpointKey -Kind 'A' -Key $accessKey }
+    if (-not [string]::IsNullOrWhiteSpace($UnitKey)) {
+        $script:CompletedUnitKeys.Add($UnitKey) | Out-Null
+        Add-CheckpointKey -Kind 'U' -Key $UnitKey
+    }
+
+    # The state file only carries the signature, so refreshing it every few units is enough to
+    # keep its timestamp meaningful without writing a file per list.
+    $script:UnitsSinceStateSave++
+    if ($script:UnitsSinceStateSave -ge 25) {
+        Save-CheckpointState
+        $script:UnitsSinceStateSave = 0
+    }
 }
+
+$script:UnitsSinceStateSave = 0
+
+# Write the state file up front, not on the first periodic save. It is what a later run matches
+# the signature against, so a scan interrupted in its first few units must still be resumable.
+Save-CheckpointState
 
 if ($script:LoadedCheckpoint) {
     Write-ProgressHost -Message ("Resuming with {0} completed unit(s) from a previous run." -f $script:CompletedUnitKeys.Count) -ForegroundColor DarkGray
@@ -1335,6 +1850,11 @@ try {
             $webDetailRows    = [System.Collections.Generic.List[object]]::new()
             $webEffectiveRows = [System.Collections.Generic.List[object]]::new()
             $webGroupRows     = [System.Collections.Generic.List[object]]::new()
+            # Group keys are only persisted once their rows are safely written, so an interrupted
+            # run does not remember having emitted membership it never got round to writing.
+            $webGroupKeys     = [System.Collections.Generic.List[string]]::new()
+            $webSiteAccessRows = [System.Collections.Generic.List[object]]::new()
+            $webSiteAccessKeys = [System.Collections.Generic.List[string]]::new()
 
             $webInfo = Invoke-SPGet -Uri ("{0}/_api/web?`$select=Title,Url,WebTemplate,Created,HasUniqueRoleAssignments,LastItemModifiedDate" -f $webUrl)
             if (-not $webInfo) {
@@ -1344,6 +1864,10 @@ try {
             }
             $runTotals.Webs++
             $webTitle = [string]$webInfo.Title
+            # Only the root web's title names the site collection; a sub-site's title names itself.
+            if ($webUrl.TrimEnd('/') -eq $siteCollectionUrl.TrimEnd('/') -and $webTitle) {
+                $script:SiteTitles[$siteCollectionUrl] = $webTitle
+            }
 
             if (-not ($script:LoadedCheckpoint -and $script:CompletedUnitKeys.Contains($webUnitKey))) {
                 # ── Site collection administrators ────────────────────────────
@@ -1354,6 +1878,7 @@ try {
                     foreach ($admin in $admins) {
                         $principal = Get-PrincipalInfo -Member $admin
                         $webDetailRows.Add([PSCustomObject]@{
+                            UnitKey           = $webUnitKey
                             SiteUrl           = $siteCollectionUrl
                             WebUrl            = $webUrl
                             WebTitle          = $webTitle
@@ -1392,6 +1917,7 @@ try {
                     $group    = $siteGroups[$groupId]
                     $groupKey = "$siteCollectionUrl|$groupId"
                     if (-not $script:GroupRowsWritten.Add($groupKey)) { continue }
+                    $webGroupKeys.Add($groupKey) | Out-Null
 
                     $groupUsers = @($group.Users)
                     if ($groupUsers.Count -eq 0) {
@@ -1464,12 +1990,13 @@ try {
                     LastModified   = $webInfo.LastItemModifiedDate
                 }
                 $webRoleAssignments = Get-ScopeRoleAssignments -Uri ("{0}/_api/web/roleassignments" -f $webUrl)
-                foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($webRoleAssignments) -ScopeInfo $webScope -EffectiveRows $webEffectiveRows)) {
+                foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($webRoleAssignments) -ScopeInfo $webScope -EffectiveRows $webEffectiveRows -GroupRows $webGroupRows -GroupKeys $webGroupKeys -SiteAccessRows $webSiteAccessRows -SiteAccessKeys $webSiteAccessKeys)) {
                     $webDetailRows.Add($row) | Out-Null
                 }
 
                 Complete-CheckpointUnit -UnitKey $webUnitKey -DetailRows @($webDetailRows) `
-                    -GroupRows @($webGroupRows) -EffectiveRows @($webEffectiveRows)
+                    -GroupRows @($webGroupRows) -EffectiveRows @($webEffectiveRows) -SiteAccessRows @($webSiteAccessRows) -SiteAccessKeys @($webSiteAccessKeys) `
+                    -GroupKeys @($webGroupKeys)
             } else {
                 Write-ProgressHost -Message "    [SKIP] Web level already completed in a previous run." -ForegroundColor DarkGray
             }
@@ -1500,6 +2027,15 @@ try {
                 $runTotals.Lists++
                 $listDetailRows    = [System.Collections.Generic.List[object]]::new()
                 $listEffectiveRows = [System.Collections.Generic.List[object]]::new()
+                $listGroupRows     = [System.Collections.Generic.List[object]]::new()
+                $listGroupKeys     = [System.Collections.Generic.List[string]]::new()
+                $listSiteAccessRows = [System.Collections.Generic.List[object]]::new()
+                $listSiteAccessKeys = [System.Collections.Generic.List[string]]::new()
+
+                # Everything from here to the checkpoint runs inside its own try. One list that
+                # throws — a template that does not answer /roleassignments, a view threshold, a
+                # transient server error — must cost that list, not the rest of the web behind it.
+                try {
 
                 $listUrl = if ($list.RootFolder -and $list.RootFolder.ServerRelativeUrl) {
                     ("{0}://{1}{2}" -f ([Uri]$webUrl).Scheme, ([Uri]$webUrl).Host, $list.RootFolder.ServerRelativeUrl)
@@ -1523,28 +2059,102 @@ try {
                         LastModified   = $null
                     }
                     $listRoleAssignments = Get-ScopeRoleAssignments -Uri ("{0}/_api/web/lists(guid'{1}')/roleassignments" -f $webUrl, $listId)
-                    foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($listRoleAssignments) -ScopeInfo $listScope -EffectiveRows $listEffectiveRows)) {
+                    foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($listRoleAssignments) -ScopeInfo $listScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys -SiteAccessRows $listSiteAccessRows -SiteAccessKeys $listSiteAccessKeys)) {
                         $listDetailRows.Add($row) | Out-Null
                     }
                 }
 
                 # ── Folders, files and list items with unique permissions ─────
-                if ($Scope -eq 'Item' -and [int]$list.ItemCount -gt 0) {
+                # Template 112 is the User Information List: a hidden system list of user profile
+                # stubs that SharePoint refuses to enumerate through /items at any $select width
+                # (400 on all four rungs of the ladder below, on every site in the tenant). Its
+                # items are directory records rather than content, so item-level scopes there mean
+                # nothing for an access review — and the list's own scope is already reported
+                # above. Skipping it removes 121 false "could not be read" rows per tenant scan.
+                $skipItemSweep = ([int]$list.BaseTemplate -eq 112)
+                if ($skipItemSweep -and $Scope -eq 'Item' -and [int]$list.ItemCount -gt 0) {
+                    Write-ProgressHost -Message ("    [SKIP] {0}: SharePoint does not support item enumeration on this system list." -f $list.Title) -ForegroundColor DarkGray
+                }
+
+                if ($Scope -eq 'Item' -and -not $skipItemSweep -and [int]$list.ItemCount -gt 0) {
                     # Ask for HasUniqueRoleAssignments on every item in one paged sweep, then only
                     # fetch role assignments for the items that actually have their own scope.
                     # Paging by $top uses $skiptoken under the hood, so this does not trip the
                     # 5000-item list view threshold the way a $filter or $orderby query would.
-                    $itemsUri = "{0}/_api/web/lists(guid'{1}')/items?`$select=Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef,FileLeafRef,Title,Modified&`$top=2000" -f $webUrl, $listId
-                    $items = @()
-                    try {
-                        $items = @(Get-SPCollection -Uri $itemsUri)
-                    } catch {
-                        Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $_.Exception.Message) -ForegroundColor Yellow
+                    # Not every list carries every one of these fields. The galleries in particular
+                    # (Theme Gallery, Master Page Gallery) answer 400 to a $select naming fields
+                    # their schema does not have, and a 400 is not something retrying fixes. So
+                    # step down to a narrower $select instead of writing the list off: losing the
+                    # file name on a handful of system lists beats losing their unique scopes.
+                    $selectLadder = @(
+                        'Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef,FileLeafRef,Title,Modified'
+                        'Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef,FileLeafRef,Modified'
+                        'Id,FileSystemObjectType,HasUniqueRoleAssignments,FileRef'
+                        'Id,HasUniqueRoleAssignments'
+                    )
+
+                    # Only the items that actually have their own scope are kept. Materialising a
+                    # whole library first would mean holding every one of a million rows in memory
+                    # to discard nearly all of them — the unique ones are typically a rounding error.
+                    $uniqueItems = [System.Collections.Generic.List[object]]::new()
+                    # A plain counter would not survive: & $scriptblock runs in a child scope, so
+                    # "$n += 1" inside -OnPage writes to a local copy and the outer stays zero.
+                    # Property writes on an object do reach back, so the tally lives on one.
+                    $sweep = [PSCustomObject]@{ Scanned = 0 }
+                    $itemSweepFailed = $null
+
+                    foreach ($selectFields in $selectLadder) {
+                        $itemsUri = "{0}/_api/web/lists(guid'{1}')/items?`$select={2}&`$top=2000" -f $webUrl, $listId, $selectFields
+                        $uniqueItems.Clear()
+                        $sweep.Scanned  = 0
+                        $itemSweepFailed = $null
+
+                        try {
+                            Invoke-SPCollectionPaged -Uri $itemsUri -OnPage {
+                                param($PageItems)
+                                $sweep.Scanned += $PageItems.Count
+                                foreach ($it in $PageItems) {
+                                    if ([bool]$it.HasUniqueRoleAssignments) { $uniqueItems.Add($it) | Out-Null }
+                                }
+                                Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Items doorzoeken op eigen rechten' -Status (
+                                    "{0} — {1} items, {2} met eigen rechten" -f $script:CurrentScanLabel, $sweep.Scanned, $uniqueItems.Count)
+                            }
+                        } catch {
+                            $itemSweepFailed = $_.Exception.Message
+                        }
+
+                        if (-not $itemSweepFailed) { break }
+                        # Only a rejected query is worth narrowing. Anything else — denied,
+                        # throttled, gone — answers the same way however few fields we ask for.
+                        if ($itemSweepFailed -notmatch '400|Bad Request') { break }
+
+                        if ($selectFields -eq $selectLadder[-1]) {
+                            Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
+                        } else {
+                            Write-ProgressHost -Message ("    [INFO] {0} rejected those fields — retrying with fewer." -f $list.Title)
+                        }
                     }
 
-                    $uniqueItems = @($items | Where-Object { [bool]$_.HasUniqueRoleAssignments })
+                    # A failed sweep is a hole in the report, so it goes in the CSV. Otherwise the
+                    # list simply looks like it had nothing with unique permissions.
+                    if ($itemSweepFailed) {
+                        $listDetailRows.Add([PSCustomObject]@{
+                            SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
+                            UnitKey = $unitKey; ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $listUrl
+                            ItemType = 'Error'; ListTitle = [string]$list.Title; ListTemplate = [string]$list.BaseTemplate
+                            HasUniquePerms = $null; InheritsFrom = $null
+                            PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
+                            DirectoryObjectId = $null; PermissionLevels = $null
+                            IsSharingLink = $false; SharingLinkType = $null; IsExternal = $null
+                            MemberCount = 0; ExternalMembers = 0; MemberPreview = $null
+                            LastModified = $null
+                            ScannedUtc = (Get-Date).ToUniversalTime().ToString('s')
+                            Error = "Item sweep failed, items with unique permissions were not checked: $itemSweepFailed"
+                        }) | Out-Null
+                    }
+
                     if ($uniqueItems.Count -gt 0) {
-                        Write-ProgressHost -Message ("    {0}: {1} item(s) scanned, {2} with unique permissions" -f $list.Title, $items.Count, $uniqueItems.Count)
+                        Write-ProgressHost -Message ("    {0}: {1} item(s) scanned, {2} with unique permissions" -f $list.Title, $sweep.Scanned, $uniqueItems.Count)
                         $itemAssignments = Get-ItemRoleAssignmentsParallel -Items $uniqueItems -WebUrl $webUrl -ListId $listId
 
                         foreach ($item in $uniqueItems) {
@@ -1552,7 +2162,7 @@ try {
                             if ($assignments -is [string]) {
                                 $listDetailRows.Add([PSCustomObject]@{
                                     SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
-                                    ScopeType = 'Item'; ScopeTitle = [string]$item.FileLeafRef; ScopeUrl = [string]$item.FileRef
+                                    UnitKey = $unitKey; ScopeType = 'Item'; ScopeTitle = [string]$item.FileLeafRef; ScopeUrl = [string]$item.FileRef
                                     ItemType = 'Error'; ListTitle = [string]$list.Title; ListTemplate = [string]$list.BaseTemplate
                                     HasUniquePerms = $true; InheritsFrom = $null
                                     PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
@@ -1580,7 +2190,7 @@ try {
                                 InheritsFrom   = $null
                                 LastModified   = $item.Modified
                             }
-                            foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($assignments) -ScopeInfo $itemScope -EffectiveRows $listEffectiveRows)) {
+                            foreach ($row in (ConvertTo-PermissionRows -RoleAssignments @($assignments) -ScopeInfo $itemScope -EffectiveRows $listEffectiveRows -GroupRows $listGroupRows -GroupKeys $listGroupKeys -SiteAccessRows $listSiteAccessRows -SiteAccessKeys $listSiteAccessKeys)) {
                                 $listDetailRows.Add($row) | Out-Null
                             }
                         }
@@ -1591,12 +2201,46 @@ try {
                 # here: the closing summary derives them from the detail CSV, which also covers
                 # the rows a resumed run wrote in an earlier session. Counting them twice would
                 # mean three more passes over every row of every list for a number nobody reads.
-                Complete-CheckpointUnit -UnitKey $unitKey -DetailRows @($listDetailRows) -EffectiveRows @($listEffectiveRows)
+                Complete-CheckpointUnit -UnitKey $unitKey -DetailRows @($listDetailRows) `
+                    -EffectiveRows @($listEffectiveRows) -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys) -SiteAccessRows @($listSiteAccessRows) -SiteAccessKeys @($listSiteAccessKeys)
+
+                } catch {
+                    # A 401 means the credential itself stopped working, which is not survivable
+                    # and not specific to this list — let it out so the run stops loudly rather
+                    # than filling the CSV with one error row per remaining list.
+                    if ($_.Exception.Message -match 'SharePoint refused the token \(401\)') { throw }
+
+                    Write-ProgressHost -Message ("    [ERROR] {0} failed: {1}" -f $list.Title, $_.Exception.Message) -ForegroundColor Red
+                    # Whatever this list did produce before failing is still written, and the
+                    # unit is deliberately left unmarked so a resumed run retries it.
+                    Complete-CheckpointUnit -UnitKey $null -EffectiveRows @($listEffectiveRows) `
+                        -GroupRows @($listGroupRows) -GroupKeys @($listGroupKeys) -SiteAccessRows @($listSiteAccessRows) -SiteAccessKeys @($listSiteAccessKeys) -DetailRows (
+                        @($listDetailRows) + @([PSCustomObject]@{
+                            SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $webTitle
+                            UnitKey = $unitKey; ScopeType = 'List'; ScopeTitle = [string]$list.Title; ScopeUrl = $webUrl
+                            ItemType = 'Error'; ListTitle = [string]$list.Title; ListTemplate = [string]$list.BaseTemplate
+                            HasUniquePerms = $null; InheritsFrom = $null
+                            PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
+                            DirectoryObjectId = $null; PermissionLevels = $null
+                            IsSharingLink = $false; SharingLinkType = $null; IsExternal = $null
+                            MemberCount = 0; ExternalMembers = 0; MemberPreview = $null
+                            LastModified = $null
+                            ScannedUtc = (Get-Date).ToUniversalTime().ToString('s')
+                            Error = $_.Exception.Message
+                        })
+                    )
+                }
             }
 
             Complete-ScanProgress -Id 3 -ParentId 2
             Complete-ScanProgress -Id 2 -ParentId 1
         } catch {
+            # Same reasoning as the per-list handler, one level up: a refused token is not a
+            # property of this web. Letting it be recorded here would walk the whole tenant
+            # writing an error row per site — which is exactly the failure mode this scan already
+            # had once, and the reason it looked like a permissions finding instead of a bug.
+            if ($_.Exception.Message -match 'SharePoint refused the token \(401\)') { throw }
+
             $runTotals.WebsFailed++
             Write-ProgressHost -Message ("[ERROR] Web failed: {0} — {1}" -f $webUrl, $_.Exception.Message) -ForegroundColor Red
             # Recorded in the detail file rather than a separate error file: a web that could not
@@ -1604,7 +2248,7 @@ try {
             # that site will actually see it.
             Complete-CheckpointUnit -UnitKey $null -DetailRows @([PSCustomObject]@{
                 SiteUrl = $siteCollectionUrl; WebUrl = $webUrl; WebTitle = $web.Title
-                ScopeType = 'Web'; ScopeTitle = $web.Title; ScopeUrl = $webUrl
+                UnitKey = $webUnitKey; ScopeType = 'Web'; ScopeTitle = $web.Title; ScopeUrl = $webUrl
                 ItemType = 'Error'; ListTitle = $null; ListTemplate = $null
                 HasUniquePerms = $null; InheritsFrom = $null
                 PrincipalType = $null; PrincipalName = $null; PrincipalLogin = $null; PrincipalEmail = $null
@@ -1695,8 +2339,6 @@ function New-PermissionSummary {
     return @($summary)
 }
 
-$summaryRows = @(New-PermissionSummary -DetailPath $script:CheckpointDetailPath)
-
 # ── Write final CSVs ──────────────────────────────────────────────────────────
 function Publish-ReportFile {
     param([string]$PartialPath, [string]$FinalPath, [string]$Label)
@@ -1709,6 +2351,31 @@ function Publish-ReportFile {
     return $true
 }
 
+function Publish-DetailFile {
+    # A unit that failed is left unmarked so a resumed run retries it — but the error rows from
+    # that failed attempt are already in the partial CSV and no later success removes them. The
+    # report then carries errors that have since been resolved, and the "could not be read" count
+    # people act on is wrong. A row whose unit is now marked complete has been superseded, so it
+    # is dropped here rather than published.
+    # Writes the file and says nothing; the summary block below reports it in order.
+    param([string]$PartialPath, [string]$FinalPath)
+    if (-not (Test-Path $PartialPath)) { return $false }
+    Import-Csv -Path $PartialPath | Where-Object {
+        if ($_.ItemType -ne 'Error') { return $true }
+        if ([string]::IsNullOrWhiteSpace($_.UnitKey)) { return $true }
+        if ($script:CompletedUnitKeys.Contains($_.UnitKey)) { $script:SupersededErrorRows++; return $false }
+        return $true
+    } | Export-Csv -Path $FinalPath -NoTypeInformation -Encoding UTF8
+    return $true
+}
+
+$script:SupersededErrorRows = 0
+$detailPublished = Publish-DetailFile -PartialPath $script:CheckpointDetailPath -FinalPath $detailCsv
+
+# Summarise the published file, not the partial: the counts have to describe the CSV the reader
+# actually opens, superseded error rows excluded from both.
+$summaryRows = @(if ($detailPublished) { New-PermissionSummary -DetailPath $detailCsv })
+
 Write-Host ''
 Write-Host '  ================================================' -ForegroundColor Cyan
 Write-Host '   Summary' -ForegroundColor Cyan
@@ -1720,10 +2387,195 @@ if ($summaryRows.Count -gt 0) {
 } else {
     Write-Host ("  {0,-18}: (no rows)" -f 'Summary') -ForegroundColor DarkGray
 }
-[void](Publish-ReportFile -PartialPath $script:CheckpointDetailPath    -FinalPath $detailCsv    -Label 'Detail')
-[void](Publish-ReportFile -PartialPath $script:CheckpointGroupsPath    -FinalPath $groupsCsv    -Label 'Groups')
+if ($detailPublished) {
+    Write-Host ("  {0,-18}: {1}" -f 'Detail', $detailCsv) -ForegroundColor Green
+} else {
+    Write-Host ("  {0,-18}: (no rows)" -f 'Detail') -ForegroundColor DarkGray
+}
+$groupsPublished = Publish-ReportFile -PartialPath $script:CheckpointGroupsPath -FinalPath $groupsCsv -Label 'Groups'
+$siteAccessPublished = Publish-ReportFile -PartialPath $script:CheckpointSiteAccessPath -FinalPath $siteAccessCsv -Label 'Site access'
+$effectivePublished = $false
 if ($IncludeEffectiveAccess) {
-    [void](Publish-ReportFile -PartialPath $script:CheckpointEffectivePath -FinalPath $effectiveCsv -Label 'Effective access')
+    $effectivePublished = Publish-ReportFile -PartialPath $script:CheckpointEffectivePath -FinalPath $effectiveCsv -Label 'Effective access'
+}
+
+# ── One workbook ──────────────────────────────────────────────────────────────
+# Built from the CSVs rather than instead of them. The CSVs are what the scan streams into and
+# what a resumed run appends to, so they exist either way; the workbook is the readable deliverable
+# on top. It is also the one that can fail on size — see the row cap below — and losing a
+# convenience copy must never cost the actual report.
+function Get-PrimaryPermissionLevel {
+    # PermissionLevels is a joined string ("Read; Limited Access"), which is the one thing a pivot
+    # table cannot work with: every combination becomes its own value, so "Full Control" and
+    # "Full Control; Limited Access" land in separate rows. This picks the single strongest level
+    # so there is something to pivot on, while the full string stays in the column next to it.
+    param([string]$Levels)
+    if ([string]::IsNullOrWhiteSpace($Levels)) { return $null }
+
+    # Both spellings, because a Dutch-language tenant names its built-in levels in Dutch.
+    $rank = @{
+        'full control' = 100; 'volledig beheer'   = 100
+        'design'       = 80;  'ontwerpen'         = 80
+        'edit'         = 70;  'bewerken'          = 70
+        'contribute'   = 60;  'bijdragen'         = 60
+        'read'         = 40;  'lezen'             = 40
+        'restricted view' = 30; 'beperkte weergave' = 30
+        'view only'    = 20;  'alleen weergeven'  = 20
+        'limited access' = 1; 'beperkte toegang'  = 1
+    }
+
+    $best = $null
+    $bestScore = -1
+    foreach ($level in ($Levels -split ';')) {
+        $name = $level.Trim()
+        if (-not $name) { continue }
+        $key = $name.ToLowerInvariant()
+        # A custom level outranks Read: someone created it deliberately, and it should not be
+        # hidden behind whichever built-in happens to sit beside it.
+        $score = if ($rank.ContainsKey($key)) { $rank[$key] } else { 50 }
+        if ($score -gt $bestScore) { $bestScore = $score; $best = $name }
+    }
+    return $best
+}
+
+function Add-PermissionsPivots {
+    # Ready-made pivots, added once every data sheet exists. Failing to build them must never cost
+    # the workbook, so the whole thing is best-effort and reports rather than throws.
+    param([Parameter(Mandatory = $true)][string]$WorkbookPath)
+
+    $pivots = @(
+        @{ Name = 'Pivot rechten';   Source = 'Rechten'; Rows = @('SiteUrl');       Columns = @('PrimaryPermission'); Data = @{ 'PrincipalName' = 'Count' }; Filter = @('PrincipalType', 'ScopeType') }
+        @{ Name = 'Pivot principals';Source = 'Rechten'; Rows = @('PrincipalName'); Columns = @('ScopeType');          Data = @{ 'ScopeUrl' = 'Count' };      Filter = @('SiteUrl', 'IsExternal') }
+        @{ Name = 'Pivot groepen';   Source = 'Groepen'; Rows = @('GroupTitle');    Columns = @('MemberIsExternal');   Data = @{ 'MemberLogin' = 'Count' };   Filter = @('SiteUrl', 'GroupType') }
+        # The one that answers the question people actually open this report with: per site, who
+        # can reach it and through which group. Site over user over group, so collapsing a site
+        # shows its people and expanding a person shows what carried them in.
+        @{ Name = 'Pivot toegang';   Source = 'Toegang'; Rows = @('SiteUrl', 'UserDisplayName', 'ViaName'); Columns = @('PrimaryPermission'); Data = @{ 'UserPrincipalName' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
+    )
+
+    $added = 0
+    try {
+        $pkg = Open-ExcelPackage -Path $WorkbookPath -ErrorAction Stop
+        try {
+            foreach ($pivot in $pivots) {
+                $source = $pkg.Workbook.Worksheets[$pivot.Source]
+                if (-not $source -or $source.Dimension -eq $null) { continue }
+
+                # Only reference columns the sheet actually has — a narrowed or absent report
+                # would otherwise produce a pivot pointing at a field that is not there.
+                $headers = @(1..$source.Dimension.End.Column | ForEach-Object { $source.Cells[1, $_].Text })
+                $rows    = @($pivot.Rows    | Where-Object { $headers -contains $_ })
+                $columns = @($pivot.Columns | Where-Object { $headers -contains $_ })
+                $filter  = @($pivot.Filter  | Where-Object { $headers -contains $_ })
+                $dataKey = @($pivot.Data.Keys | Where-Object { $headers -contains $_ })
+                if ($rows.Count -eq 0 -or $dataKey.Count -eq 0) { continue }
+
+                $params = @{
+                    ExcelPackage    = $pkg
+                    PivotTableName  = $pivot.Name
+                    SourceWorksheet = $source
+                    PivotRows       = $rows
+                    PivotData       = @{ $dataKey[0] = $pivot.Data[$dataKey[0]] }
+                    PivotTableStyle = 'Medium2'
+                }
+                if ($columns.Count -gt 0) { $params['PivotColumns'] = $columns }
+                if ($filter.Count -gt 0)  { $params['PivotFilter']  = $filter }
+
+                Add-PivotTable @params -ErrorAction Stop
+                $added++
+            }
+        } finally {
+            Close-ExcelPackage $pkg
+        }
+    } catch {
+        Write-Host ("  [WARN] Could not add pivot tables: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        Write-Host "         The data sheets themselves are unaffected." -ForegroundColor Yellow
+    }
+    return $added
+}
+
+function Export-PermissionsWorkbook {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkbookPath,
+        # Ordered: Samenvatting first because it is the sheet the workbook should open on.
+        [Parameter(Mandatory = $true)][object[]]$Sheets,
+        # Excel stops at 1,048,576 rows per sheet and drops the rest without complaint. Cap below
+        # that deliberately, so a sheet that does not fit says so instead of being quietly short.
+        [int]$RowCap = 1000000
+    )
+    if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
+        Write-Host ''
+        Write-Host "  [WARN] -Excel needs the ImportExcel module, which is not installed." -ForegroundColor Yellow
+        Write-Host "         Install it with: Install-Module ImportExcel -Scope CurrentUser" -ForegroundColor Yellow
+        Write-Host "         (or run .\scripts\Startup\Install-Modules.ps1). The CSVs are complete." -ForegroundColor Yellow
+        return $false
+    }
+
+    try {
+        Import-Module ImportExcel -ErrorAction Stop
+        # Export-Excel appends to an existing workbook, so a second run at the same path would
+        # stack on top of the first.
+        if (Test-Path $WorkbookPath) { Remove-Item $WorkbookPath -Force }
+
+        # -TableName gives each sheet a real Excel table, which is what carries the filter
+        # dropdowns and banded rows, so no separate -AutoFilter is needed.
+        $common = @{
+            Path         = $WorkbookPath
+            AutoSize     = $true
+            BoldTopRow   = $true
+            FreezeTopRow = $true
+            TableStyle   = 'Medium2'
+        }
+
+        $written = 0
+        foreach ($sheet in $Sheets) {
+            if (-not $sheet.Path -or -not (Test-Path $sheet.Path)) { continue }
+            $data = @(Import-Csv -Path $sheet.Path)
+            if ($data.Count -eq 0) { continue }
+
+            # Give any sheet carrying PermissionLevels a single-value column beside it, so the
+            # permission level is something a pivot can group on.
+            if ($data[0].PSObject.Properties.Name -contains 'PermissionLevels') {
+                $projection = foreach ($prop in $data[0].PSObject.Properties.Name) {
+                    $prop
+                    if ($prop -eq 'PermissionLevels') {
+                        @{ Name = 'PrimaryPermission'; Expression = { Get-PrimaryPermissionLevel -Levels $_.PermissionLevels } }
+                    }
+                }
+                $data = @($data | Select-Object $projection)
+            }
+            if ($data.Count -gt $RowCap) {
+                Write-Host ("  [WARN] '{0}' has {1:N0} rows — only the first {2:N0} fit in a worksheet." -f $sheet.Name, $data.Count, $RowCap) -ForegroundColor Yellow
+                Write-Host ("         The complete data stays in {0}" -f $sheet.Path) -ForegroundColor Yellow
+                $data = @($data | Select-Object -First $RowCap)
+            }
+            $data | Export-Excel @common -WorksheetName $sheet.Name -TableName $sheet.Name
+            $written++
+        }
+        return ($written -gt 0)
+    } catch {
+        Write-Host ("  [WARN] Could not write the Excel workbook: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+        Write-Host "         The CSVs are complete and unaffected." -ForegroundColor Yellow
+        return $false
+    }
+}
+
+if ($Excel) {
+    $excelPath = Join-Path $outputDir "SharePoint_Permissions_$ts.xlsx"
+    $sheetSpec = @(
+        @{ Name = 'Samenvatting'; Path = $(if ($summaryRows.Count -gt 0) { $summaryCsv }) }
+        @{ Name = 'Rechten';      Path = $(if ($detailPublished)        { $detailCsv }) }
+        @{ Name = 'Groepen';      Path = $(if ($groupsPublished)        { $groupsCsv }) }
+        @{ Name = 'Toegang';      Path = $(if ($siteAccessPublished)    { $siteAccessCsv }) }
+        @{ Name = 'Effectief';    Path = $(if ($effectivePublished)     { $effectiveCsv }) }
+    )
+    if (Export-PermissionsWorkbook -WorkbookPath $excelPath -Sheets $sheetSpec) {
+        $pivotCount = Add-PermissionsPivots -WorkbookPath $excelPath
+        Write-Host ("  {0,-18}: {1}" -f 'Excel workbook', $excelPath) -ForegroundColor Green
+        if ($pivotCount -gt 0) {
+            Write-Host ("  {0,-18}: {1} ready-made pivot sheet(s); 'PrimaryPermission' groups the joined levels" -f '', $pivotCount) -ForegroundColor DarkGray
+        }
+    }
 }
 
 # Checkpoint files are only removed once the finals are on disk — an interrupted run keeps them
@@ -1740,6 +2592,8 @@ $totalSharingLinks = ($summaryRows | Measure-Object -Property SharingLinks -Sum)
 $totalAnonymous    = ($summaryRows | Measure-Object -Property AnonymousLinks -Sum).Sum
 $totalExternal     = ($summaryRows | Measure-Object -Property ExternalPrincipals -Sum).Sum
 $totalEveryone     = ($summaryRows | Measure-Object -Property EveryoneGrants -Sum).Sum
+$totalErrors       = ($summaryRows | Measure-Object -Property Errors -Sum).Sum
+if (-not $totalErrors)       { $totalErrors = 0 }
 if (-not $totalGrants)       { $totalGrants = 0 }
 if (-not $totalUniqueScopes) { $totalUniqueScopes = 0 }
 if (-not $totalSharingLinks) { $totalSharingLinks = 0 }
@@ -1755,6 +2609,21 @@ Write-Host ("  Permission grants : {0}" -f $totalGrants) -ForegroundColor Cyan
 Write-Host ("  Sharing links     : {0}{1}" -f $totalSharingLinks, $(if ($totalAnonymous) { " ({0} anonymous)" -f $totalAnonymous } else { '' })) -ForegroundColor $(if ($totalAnonymous -gt 0) { 'Yellow' } else { 'Cyan' })
 Write-Host ("  External access   : {0} grant(s)" -f $totalExternal) -ForegroundColor $(if ($totalExternal -gt 0) { 'Yellow' } else { 'Cyan' })
 Write-Host ("  Everyone grants   : {0}" -f $totalEveryone) -ForegroundColor $(if ($totalEveryone -gt 0) { 'Yellow' } else { 'Cyan' })
+
+# Coverage before conclusions: a report with gaps in it must say so, or the absence of a finding
+# reads as the absence of a risk.
+if ($totalErrors -gt 0 -or $runTotals.WebsFailed -gt 0) {
+    Write-Host ''
+    Write-Host ("  [WARN] {0} scope(s) could not be read — the report is incomplete." -f $totalErrors) -ForegroundColor Yellow
+    if ($script:SupersededErrorRows -gt 0) {
+        Write-Host ("         ({0} error(s) from an earlier interrupted attempt were dropped — those scopes were read this time.)" -f $script:SupersededErrorRows) -ForegroundColor DarkGray
+    }
+    Write-Host "         Filter the detail CSV on ItemType = 'Error' to see exactly what was missed." -ForegroundColor Yellow
+    Write-Host "         Re-running with the same parameters resumes and retries them." -ForegroundColor Yellow
+} else {
+    Write-Host ''
+    Write-Host "  [OK]   Every targeted scope was read without errors." -ForegroundColor Green
+}
 if ($SkipGroupExpansion) {
     Write-Host '  [NOTE] -SkipGroupExpansion was used: group membership was not resolved.' -ForegroundColor DarkYellow
 }

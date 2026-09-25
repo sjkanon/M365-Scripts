@@ -8,7 +8,7 @@ SharePoint Online tenant sharing configuration and external user auditing.
 
 | Script | Description |
 |--------|-------------|
-| [`Test-SharePointSharingConfig.ps1`](#test-sharepointsharingconfigps1) | Report tenant sharing settings, per-site overrides, and external users |
+| [`Test-SharePointSharingConfig.ps1`](Test-SharePointSharingConfig.ps1) ([docs](#test-sharepointsharingconfigps1)) | Report tenant sharing settings, per-site overrides, and external users |
 
 ---
 
