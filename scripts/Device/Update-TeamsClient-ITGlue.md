@@ -356,7 +356,19 @@ Lukt het op een apparaat niet, dan blokkeert meestal een beleidsinstelling de in
 |--------|--------|------------|
 | `BlockNonAdminUserInstall = 1` | Een gebruiker zonder beheerrechten kan het pakket niet registreren | `16389` |
 | `AllowAllTrustedApps = 0` | Sideloading staat uit, het MSIX kan niet installeren | `15615` |
-| AppLocker actief | Heeft een uitzondering nodig voor de SlimCoreVdi-pakketten | `10083` |
+| AppLocker op verpakte apps, zonder regel die de SlimCoreVdi-pakketten toelaat | De pakketten worden geblokkeerd | `10083` |
+
+#### Wat het script over AppLocker vertelt
+
+Niet *of* er AppLocker is — dat zegt niets — maar wat er staat. Het meldt het registerpad, per verzameling (`Exe`, `Msi`, `Appx`, …) de modus, de status van de service **Application Identity** (`AppIDSvc`) en de namen van de eerste vijf `Appx`-regels. Drie dingen zijn daarbij makkelijk verkeerd te lezen:
+
+- **Alleen de verzameling `Appx` telt.** Een MSIX komt de regels voor `Exe`, `Msi`, `Script` of `Dll` nooit tegen. Een afgedwongen Exe-regelset blokkeert SlimCore dus niet, en wordt ook niet meer als blokkade gemeld.
+- **"Niet geconfigureerd" betekent niet "uit".** Volgens Microsoft is een verzameling mét regels waarvan de afdwinging niet is geconfigureerd, gewoon afgedwongen. Alleen een expliciete `EnforcementMode = 0` (alleen controleren) laat alles door. Het script schrijft dat er letterlijk bij.
+- **Zonder de service gebeurt er niets.** Staat `AppIDSvc` niet aan, dan wordt er op dat moment niets afgedwongen — het script zegt dat erbij. Let op: na een herstart kan de service alsnog starten, dan is de blokkade er wél.
+
+Ligt er al een regel die de pakketten met naam toelaat, dan meldt het script dat als `[ OK ]`. Een regel die alles van `O=MICROSOFT CORPORATION` toelaat zou moeten volstaan; controleer dan wel of die niet op één productnaam is dichtgezet.
+
+> Op een **sessiehost** blokkeert dit beleid niets, want SlimCore wordt op het lokale apparaat geïnstalleerd. Het script noemt een gevonden beleid daar toch — als `[SKIP]`, niet als waarschuwing — omdat het meestal dezelfde GPO is. De vraag is dan of die GPO ook aan de endpoints hangt.
 
 > Teams heeft **één herstart** nodig om van WebRTC naar SlimCore over te stappen nadat de plugin gevonden is.
 

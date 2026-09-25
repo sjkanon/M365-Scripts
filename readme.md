@@ -754,6 +754,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` stops crying wolf about AppLocker. The SlimCore blocker check warned whenever `HKLM:\SOFTWARE\Policies\Microsoft\Windows\SrpV2` existed — which it does on any fleet that has ever written a single Exe rule — so the warning fired on machines where nothing was blocked at all. A check that always fires is a check nobody reads |
+| The policy is now read instead of detected, on the three points that decide whether it can stop the MSIX: only the packaged-app (`Appx`) collection applies, because an MSIX never meets the `Exe`/`Msi`/`Script`/`Dll` rules; a collection holding rules whose enforcement is *not configured* is enforced all the same, per Microsoft, and only an explicit `EnforcementMode = 0` lets everything through; and nothing is enforced at all while the Application Identity service (`AppIDSvc`) is stopped, which is now said out loud rather than assumed either way |
+| The report is something a technician can act on: the registry path, the mode per collection, the service state and the first five `Appx` rule names with their action. A rule that already allows the packages by name is reported as `[ OK ]`; a rule allowing anything signed by `O=MICROSOFT CORPORATION` is reported as probably sufficient, with a note to check it has not been narrowed to one product name |
+| A policy found on a session host is now named as a `[SKIP]` reference line instead of being hidden: it blocks nothing there, because the staging happens on the endpoint, but it is usually the same GPO — so the thing worth checking is whether it also reaches the endpoints |
+| Every branch exercised against a stubbed policy tree: an enforced `Exe` collection with no `Appx` collection produces no blocker (the old false positive, gone); an enforced `Appx` collection with no matching allow rule warns with path and rule count; explicit-SlimCore and Microsoft-publisher allow rules produce their two different notes; `EnforcementMode = 0` reads as audit only; enforcement-not-configured-with-rules reads as enforced; seven rules print five and `... and 2 more`; a missing `SrpV2` key produces nothing. Confirmed silent on this machine, which has no AppLocker policy. **Untested** against a live enforced AppLocker policy on a real endpoint |
+| Known limitation, documented rather than hidden: the allow-rule match is a text match on the rule XML, so a broad rule that names neither Microsoft nor the packages (`PublisherName="*"`) would really let SlimCore through but is still reported as a blocker. The rule names printed beside it are what settles that |
+
 ### 2026-09-24
 | Change |
 |--------|

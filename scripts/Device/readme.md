@@ -242,6 +242,8 @@ Only what is missing gets done: a current client with a missing add-in installs 
 
 > Querying that log needs `Get-WinEvent -FilterXPath`, not `-FilterHashtable`: the hashtable form throws outright when the provider has never written an event, which is the normal case on a machine that is not a session host.
 
+On an endpoint, preflight also checks the three policies that stop the staging: `BlockNonAdminUserInstall` (error `16389`), `AllowAllTrustedApps` (`15615`) and AppLocker (`10083`). AppLocker is read rather than detected — only the packaged-app (`Appx`) collection can block an MSIX, a collection holding rules with enforcement *not configured* is enforced all the same, and nothing is enforced while the Application Identity service is stopped. The report names the registry path, the mode per collection, the service state and the rule names, and says so when a rule already allows the packages. A policy found on a *session host* is listed for reference rather than warned about: it blocks nothing there, but it is usually the same GPO that also reaches the endpoints.
+
 **Why the order matters:** nothing is touched until a newer build is confirmed, and the installer is fetched and verified *before* the first uninstall — so a failed download or a blocked URL can never leave the device without a Teams client.
 
 **Version check**
