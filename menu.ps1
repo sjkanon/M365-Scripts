@@ -643,6 +643,16 @@ $menu = @(
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"
         Params={ return @{} }
     }
+    [PSCustomObject]@{ Key='X'; FKey=$null; Category='Startup'
+        Label='Update-ScriptIndex  — rebuild scripts/INDEX.md, the A-Z list of every script'
+        Script="$ROOT\scripts\Startup\Update-ScriptIndex.ps1"
+        Params={
+            $check = Read-Host '  Only check whether the index is stale, change nothing? [y/N]'
+            $a = @{}
+            if ($check -match '^[Yy]') { $a['Check'] = $true }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='A'; FKey=[ConsoleKey]::F10; Category='Reporting'
         Label='Licensing-Report    — generate monthly Pax8 + Ingram Excel report'
         Script="$ROOT\scripts\Reporting\Licensing\genereer_rapport.ps1"

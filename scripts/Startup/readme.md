@@ -12,6 +12,7 @@ Entry-point scripts and the core M365 function library.
 | `Install-Modules.ps1` | Bootstrap script — installs and imports all required PowerShell modules |
 | `Update-Modules.ps1` | Updates every installed PowerShell module to its latest version |
 | `Test-PowerShellSyntax.ps1` | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
+| `Update-ScriptIndex.ps1` | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
 
 ---
 
@@ -160,3 +161,53 @@ Parse-checks `.ps1` (and optionally `.psm1`) files for syntax errors without exe
 ```
 
 Exit codes: `0` = no errors, `1` = syntax errors found, `2` = path/argument error.
+
+---
+
+## Update-ScriptIndex.ps1
+
+Builds [`scripts/INDEX.md`](../INDEX.md): one page listing every script in the repository
+A–Z, with a link to the file, a link to its folder readme, and a one-line description.
+
+It exists because finding a script on GitHub otherwise means guessing which workload
+folder it is under and opening readmes until it turns up. One generated page is
+Ctrl-F-able and clickable, and — being generated — cannot drift from the files the way a
+hand-kept table does.
+
+**Where the description comes from**
+
+| Order | Source |
+|-------|--------|
+| 1 | The script's `.SYNOPSIS` block, joined across the lines it wraps over |
+| 2 | Failing that, the first real line of a leading `#` comment block |
+| 3 | Failing that, nothing — and the script is listed under *Scripts without a description*, so the gap is visible instead of silently blank |
+
+A single `#` comment sitting directly on top of code is deliberately **not** used: a line
+like `# URL van de theme` above a `$ThemeUrl` assignment describes that variable, not the
+script, and reading it as a description puts something worse than nothing in the table.
+A header block runs to several lines, or is set off from the code by a blank line.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Root` | Repository root (default: two levels above this script) |
+| `-Check` | Write nothing; exit `1` when the committed page no longer matches the scripts on disk |
+| `-WhatIf` | Report what would change without writing |
+
+**Examples**
+
+```powershell
+# Rebuild the index after adding, renaming or removing a script
+pwsh -File scripts/Startup/Update-ScriptIndex.ps1
+
+# Fail when the index is stale — for a hook or a pipeline
+pwsh -File scripts/Startup/Update-ScriptIndex.ps1 -Check
+```
+
+> Rerun it whenever a script is added, renamed, moved or removed — the same moment the
+> [working rules](../../.claude/CLAUDE.md) already ask you to update the readmes and
+> `menu.ps1`. It rewrites nothing when the page is already current, so it is safe to run
+> on every commit.
+
+Exit codes: `0` = written or already current, `1` = `-Check` found the page stale.

@@ -7,6 +7,7 @@
 ## Table of Contents
 
 - [Getting Started](#getting-started)
+- [Finding a script](#finding-a-script)
 - [Quick Launcher](#quick-launcher)
 - [Requirements](#requirements)
 - [Menu](#menu)
@@ -59,6 +60,19 @@ To remove the startup shortcut later:
 
 > You can also run `.\menu.ps1` directly — it will ask for your UPN as a fallback.
 > To reinstall or update modules manually: `.\scripts\Startup\Install-Modules.ps1`
+
+---
+
+## Finding a script
+
+| Where | What it gives you |
+|-------|-------------------|
+| [`scripts/INDEX.md`](scripts/INDEX.md) | Every script A–Z on one page — name, folder and what it does. Ctrl-F this when you know roughly what you want but not where it lives |
+| [`scripts/readme.md`](scripts/readme.md) | The other direction: what each workload folder is for |
+| [`.\menu.ps1`](menu.ps1) | The curated interactive launcher for the everyday tasks |
+| `f <term>` | Fuzzy search from your shell, described under [Quick Launcher](#quick-launcher) below |
+
+`INDEX.md` is generated from the scripts' own `.SYNOPSIS` headers by [`scripts/Startup/Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1) — rerun it (or run it with `-Check`) whenever a script is added, renamed, moved or removed.
 
 ---
 
@@ -133,8 +147,13 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `6` / `F6` | Device | Restart-Time-Sync |
 | `7` / `F7` | Device | Detect-AudioDevices |
 | `8` / `F8` | Device | Disable-InternalMic |
+| `I` | Device | Remove-OemBloatware — remove OEM + generic Store bloatware |
+| `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
 | `9` / `F9` | Startup | Install-Modules |
+| `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `A` / `F10` | Reporting | Licensing-Report |
+| `P` | Reporting | SharePoint-Perms — report who has access to what, at every level |
+| `S` | SharePoint | SharePoint-Structure — provision/check metadata, libraries and rights |
 | `F` | Startup | Enable-LauncherStartup — add launcher to Windows Startup |
 | `G` | Startup | Disable-LauncherStartup — remove launcher from Windows Startup |
 | `B` | M365 | Connect-Tenant |
@@ -534,6 +553,7 @@ M365-Scripts/
 ├── readme.md
 └── scripts/
     ├── readme.md                    ← Index of all categories below
+    ├── INDEX.md                     ← Every script A-Z with its folder (generated)
     ├── Azure/                        ← targets Azure IaaS directly via Az, not the M365 tenant
     │   ├── readme.md
     │   └── VM/
@@ -685,7 +705,8 @@ M365-Scripts/
     │   ├── functies.ps1             ← M365 function library (dot-sourced by menu)
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
-    │   └── Test-PowerShellSyntax.ps1
+    │   ├── Test-PowerShellSyntax.ps1
+    │   └── Update-ScriptIndex.ps1   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
     ├── Custom Scripts/                 ← path-pinned scripts (see note above)
     │   ├── readme.md
     │   └── Intune/
@@ -756,6 +777,27 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (5)
+| Change |
+|--------|
+| Finding a script on GitHub meant guessing which of the 56 workload folders it was under and opening readmes until it turned up. There is now one page that answers it: [`scripts/INDEX.md`](scripts/INDEX.md) lists all 176 scripts A-Z with a link to the file, a link to its folder readme, and what it does — Ctrl-F instead of a hunt |
+| The page is **generated**, by the new `scripts/Startup/Update-ScriptIndex.ps1`, so it cannot drift from the files the way a hand-kept table does. `-Check` reports a stale index without writing (exit `1`), which is what a hook or a pipeline would call; a run that finds the page current writes nothing at all |
+| Descriptions come from the scripts themselves: the `.SYNOPSIS` block, joined across the lines it wraps over rather than taking the first line, which was leaving half-sentences like "Grant Full Access and/or Send As delegate rights on one mailbox, a CSV list of" in the table. Where a synopsis opens with a sentence and then lists its cases, the lead-in is kept and the list is not dragged in behind it |
+| For the older scripts that have no `.SYNOPSIS`, a leading `#` comment block is used instead — but only a real header. A single comment line sitting straight on top of code describes that line, not the script: `# URL van de theme` above a `$ThemeUrl` assignment was being read as a description, which is worse in a table than a blank |
+| The eight scripts that still ended up with nothing got a real `.SYNOPSIS` instead of a blank cell: `add-lock.ps1`, `add-shortcut-lock.ps1`, `logic-permissies.ps1`, `Test-OpenVpnDiagnostics.ps1`, `Deploy-OfficeTheme.ps1`, `Restart-Time-Sync.ps1`, `Test-PowerShellSyntax.ps1` and `functies.ps1`. All 176 scripts now describe themselves, so the index has no "without a description" section left |
+| Documented the two scripts no readme mentioned at all: `Phising-rollout.ps1` in [`scripts/Entra/readme.md`](scripts/Entra/readme.md) (the two-way sync between the phishing-resistant MFA rollout and registered groups, what counts as registered and why the default is an AAGUID filter) and `Get-FSlogix-errors.ps1` in [`scripts/RDS/readme.md`](scripts/RDS/readme.md) (what the FSLogix diagnostic collects and that it must run on the session host). Its header still pointed at a filename that no longer exists, and named a real customer in the example; both corrected |
+| The root `Menu` table had drifted from `menu.ps1` — `I`, `T`, `S` and `P` were missing. Synced, and `X` added for the index generator, which is also in the Startup readme and the repository tree |
+| Verified: all 176 files parse; the generator is idempotent (a second run reports "already up to date" and writes nothing); `-Check` exits `0` when current; every markdown link in the repository resolves, percent-encoded folder names included; and `f.ps1` still finds both the new script and the newly described ones |
+| Numbering fix: two entries below were both labelled `(3)`. Renumbered to the order the work actually happened in |
+
+### 2026-09-25 (4)
+| Change |
+|--------|
+| Correction to the previous entry: the `1638` on the meeting add-in was **not** caused by `-Force` downgrading the client. Measured on the host itself, the registered add-in was `1.25.28902` and the MSI being installed `1.26.21803` - newer, and still refused. This MSI declines to install while any other copy of the add-in is registered, whichever version that is. The version comparison added in the last change would therefore not have prevented the failure; the guard now asks whether a registration survived the uninstall, which is the thing that actually decides it |
+| `-ClearOrphanedAddInRegistration` is the way out of the state that host is in. An uninstall answering `1612` means Windows Installer has lost the cached MSI it needs and can no longer remove the product by any supported means, while its registration keeps refusing every reinstall. The switch makes the installer forget that one product: its keys under `Installer\Products`, `Installer\Features` and `Installer\UserData\S-1-5-18\Products`, its entry under the upgrade code, and the Programs and Features entry. What MsiZap used to do, scoped to one product, only after msiexec has proved it cannot, off by default, and every key through `ShouldProcess` |
+| Finding those keys needs the ProductCode as Windows Installer's 32-character "packed" GUID. That transform was validated before anything used it to point at keys for deletion: of 57 GUID-named uninstall entries on a workstation, the 32 with machine-wide product data all mapped onto an existing packed key with an identical `DisplayName`, and the 25 that did not are per-user installs living under the user's own SID |
+| Verified read-only against three real products: each yields three product keys plus exactly one upgrade-code entry, and the constructed path is readable as written. A bogus product code returns nothing and an unknown product returns no keys, so the cleanup cannot fire on thin air. **Untested:** the removal itself, and the reinstall that should follow it |
+
 ### 2026-09-25 (3)
 | Change |
 |--------|
@@ -766,14 +808,6 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Documented in `scripts/Reporting/readme.md` (coverage, authentication, the four output files, checkpoints, full parameter table, examples), added to the root repository tree and to `menu.ps1` under Reporting as `P` — which also prompts for tenant or single site, scope, and whether to write the effective-access CSV |
 | The repository tree also listed neither this script nor `Remove-SharePointFileVersionsByDate.ps1`; both are in it now |
 | **Untested by me**: this script has not been run against a live tenant in this session — only its syntax was checked. The temporary App Registration path, the throttling retries and the checkpoint resume are unverified here and should be exercised on a pilot tenant, starting with `-SiteUrl` and `-Scope Site`, before a tenant-wide run |
-
-### 2026-09-25 (3)
-| Change |
-|--------|
-| Correction to the previous entry: the `1638` on the meeting add-in was **not** caused by `-Force` downgrading the client. Measured on the host itself, the registered add-in was `1.25.28902` and the MSI being installed `1.26.21803` - newer, and still refused. This MSI declines to install while any other copy of the add-in is registered, whichever version that is. The version comparison added in the last change would therefore not have prevented the failure; the guard now asks whether a registration survived the uninstall, which is the thing that actually decides it |
-| `-ClearOrphanedAddInRegistration` is the way out of the state that host is in. An uninstall answering `1612` means Windows Installer has lost the cached MSI it needs and can no longer remove the product by any supported means, while its registration keeps refusing every reinstall. The switch makes the installer forget that one product: its keys under `Installer\Products`, `Installer\Features` and `Installer\UserData\S-1-5-18\Products`, its entry under the upgrade code, and the Programs and Features entry. What MsiZap used to do, scoped to one product, only after msiexec has proved it cannot, off by default, and every key through `ShouldProcess` |
-| Finding those keys needs the ProductCode as Windows Installer's 32-character "packed" GUID. That transform was validated before anything used it to point at keys for deletion: of 57 GUID-named uninstall entries on a workstation, the 32 with machine-wide product data all mapped onto an existing packed key with an identical `DisplayName`, and the 25 that did not are per-user installs living under the user's own SID |
-| Verified read-only against three real products: each yields three product keys plus exactly one upgrade-code entry, and the constructed path is readable as written. A bogus product code returns nothing and an unknown product returns no keys, so the cleanup cannot fire on thin air. **Untested:** the removal itself, and the reinstall that should follow it |
 
 ### 2026-09-25 (2)
 | Change |
