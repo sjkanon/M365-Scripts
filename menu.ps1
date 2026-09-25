@@ -677,7 +677,7 @@ $menu = @(
         Params={ return @{} }
     }
     [PSCustomObject]@{ Key='P'; FKey=$null; Category='Reporting'
-        Label='SharePoint-Perms    — report who has access to what, at every level'
+        Label='SharePoint-Perms    — who can reach which site, via which group, at what level'
         Script="$ROOT\scripts\Reporting\Get-SharePointPermissionsReport.ps1"
         Params={
             $site = Read-Host '  One site collection URL (empty = whole tenant)'
