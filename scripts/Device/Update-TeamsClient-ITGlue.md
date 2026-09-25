@@ -1,8 +1,30 @@
 # Teams-update op een werkplek (Update-TeamsClient.ps1)
 
-**Voor IT Glue — servicedeskdocumentatie.** Bedoeld voor alle supportniveaus: level 1 kan hiermee controleren en melden, level 2 kan het uitvoeren, level 3 vindt onderaan de details.
+Deze procedure beschrijft hoe de Microsoft Teams-client en de Teams Meeting Add-in voor Outlook gecontroleerd, bijgewerkt en waar nodig hersteld worden op een werkstation of AVD-sessiehost.
+
+**Voor IT Glue — servicedeskdocumentatie.** Bedoeld voor alle supportniveaus: level 1 controleert en meldt, level 2 voert uit, level 3 vindt onderaan de details.
 
 Technische referentie voor beheerders: `Update-TeamsClient.md` in de scriptrepo.
+
+---
+
+## Wie mag wat
+
+Niet elke schakelaar hoort bij hetzelfde niveau: controleren is ongevaarlijk, een herinstallatie sluit Teams af, en twee schakelaars grijpen in de installatiedatabase van Windows in.
+
+| Actie | Parameters | Niveau |
+|-------|------------|--------|
+| Controleren en melden, wijzigt niets | `-CheckOnly -Quiet` | **1** |
+| De gewone update draaien | `-Quiet -Confirm:$false` | **2** |
+| Herinstallatie forceren | `-Force` | **2** |
+| Verouderde per-gebruiker-registratie van de add-in opruimen | `-RepairOutlookAddIn` | **2** |
+| Classic Teams verwijderen | `-RemoveClassicTeams` | **2** |
+| AVD-mediaoptimalisatie zetten op een sessiehost | `-AvdOptimizations` | **2** |
+| Oude WebRTC-optimalisatie verwijderen | `-RemoveWebRtcRedirector` | **3** |
+| Add-in-registratie opruimen die Windows Installer niet meer kan verwijderen | `-ClearOrphanedAddInRegistration` | **3** |
+| Microsoft-handtekeningcontrole overslaan | `-SkipSignatureCheck` | **3** |
+
+> **Eén afspraak, niet twee.** Er circuleert een oudere versie van dit document waarin level 1 de update zelf mag draaien. Hier ligt die bij level 2, omdat de update Teams afsluit en bij een fout diagnosewerk oplevert. Willen jullie het anders, pas dan deze tabel aan; de hoofdstukken hieronder volgen dezelfde indeling.
 
 ---
 
@@ -46,12 +68,14 @@ In gewone taal:
 
 | Melding van de gebruiker | Past dit script? |
 |---------------------------|------------------|
-| "Teams start niet meer op" | Ja — controleer eerst |
-| "Teams zegt dat ik moet updaten" | Ja |
-| "De knop *Teams-vergadering* is weg in Outlook" | Ja |
-| "Ik kan niet inloggen in Teams" | Nee — accountprobleem, geen versieprobleem |
-| "Mijn camera/microfoon doet het niet in Teams" | Nee — apparaat/rechtenprobleem |
-| "Ik mis een chat of bestand" | Nee — dat lost een herinstallatie niet op |
+| "Teams start niet meer op" | ✅ Ja — controleer eerst |
+| "Teams zegt dat ik moet updaten" | ✅ Ja |
+| "Teams blijft hangen bij het opstarten" | ✅ Ja |
+| "Teams sluit onverwacht af" | ✅ Ja |
+| "De knop *Teams-vergadering* is weg in Outlook" | ✅ Ja |
+| "Ik kan niet inloggen in Teams" | ❌ Nee — accountprobleem, geen versieprobleem |
+| "Mijn camera/microfoon doet het niet in Teams" | ❌ Nee — apparaat/rechtenprobleem |
+| "Ik mis een chat of bestand" | ❌ Nee — dat lost een herinstallatie niet op |
 
 ### Controleren zonder iets te wijzigen
 
