@@ -803,6 +803,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (20)
+| Change |
+|--------|
+| Turned the `Pivot toegang` sheet around to nest **site → group → person** instead of site → person → group. That is how SharePoint actually grants access — a site has groups, groups have people — so collapsed it lists the groups on a site and expanded it names everyone they let in |
+| Added `Pivot per persoon` (person → site → group) so the other direction is still answerable from the same sheet: what does this one person reach, and through what. That is the offboarding question, and a site-first pivot cannot answer it |
+| A directly granted person has no group, and in a three-level hierarchy that empty middle level reads as missing data rather than as "granted without a group". `ViaName` now says `(direct toegekend)` for those rows instead of being blank |
+| Verified locally with 240 checks across eleven suites: both pivots read back out of the workbook with their row fields in the intended order, and a direct grant is named rather than empty |
+
 ### 2026-09-25 (19)
 | Change |
 |--------|
