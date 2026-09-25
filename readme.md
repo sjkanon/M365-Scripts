@@ -784,6 +784,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (10)
+| Change |
+|--------|
+| `Convert-MarkdownToHtml.ps1` rendered every numbered list as empty bullets. `$Matches` is one variable per scope: the list branch captured the item text, then ran a second `-match` to decide whether the list was ordered, and that second match threw the capture away. Dashed lists survived only because their second match failed and left `$Matches` alone. Both captures now come from one match and the marker decides the type without matching again |
+| A fenced code block indented to line up inside a numbered step kept that indentation, so anyone copying the command out of the page copied leading spaces with it. The fence's own indentation is now stripped from its content — and only that: a block fenced at column 0 keeps every space, which is what the sample output of the script needs |
+| Verified on the regenerated page: 36 list items and **none** empty, still parses as XML, 29 tables and 19 code blocks intact, the indented command comes out clean, and the seven code blocks that legitimately start with whitespace still do |
+
 ### 2026-09-25 (9)
 | Change |
 |--------|

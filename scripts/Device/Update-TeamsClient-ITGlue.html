@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-09-25 08:40. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-09-25 08:50. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-update-op-een-werkplek-update-teamsclientps1">Teams-update op een werkplek (Update-TeamsClient.ps1)</h1>
 <p>Deze procedure beschrijft hoe de Microsoft Teams-client en de Teams Meeting Add-in voor Outlook gecontroleerd, bijgewerkt en waar nodig hersteld worden op een werkstation of AVD-sessiehost.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 controleert en meldt, level 2 voert uit, level 3 vindt onderaan de details.</p>
@@ -86,15 +86,15 @@ li > p { margin: .4rem 0; }
 <h2 id="wat-het-script-doet">Wat het script doet</h2>
 <p>In gewone taal:</p>
 <ol>
-<li>
+<li>Het kijkt welke Teams-versie op de werkplek staat.
 </li>
-<li>
+<li>Het vraagt bij Microsoft op welke versie op dit moment de nieuwste is.
 </li>
-<li>
+<li><strong>Is de werkplek al bij?</strong> Dan gebeurt er niets. Het script stopt zonder iets aan te raken.
 </li>
-<li>
+<li><strong>Loopt de werkplek achter?</strong> Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug. De oude kopieën van de add-in gaan er pas uit als de vervanger klaarstaat én er ook in kan — anders blijft staan wat werkt.
 </li>
-<li>
+<li>Daarna controleert het of alles er ook echt staat, en meldt of het gelukt is.
 </li>
 </ol>
 <h3 id="wat-het-script-niet-doet">Wat het script <strong>niet</strong> doet</h3>
@@ -186,12 +186,12 @@ li > p { margin: .4rem 0; }
 </table></div>
 <h3 id="via-ninjaone-voorkeur">Via NinjaOne (voorkeur)</h3>
 <ol>
-<li>
+<li>Zoek de werkplek op en start het script <strong>Update-TeamsClient</strong>.
 </li>
-<li>
-<pre><code>   -Quiet -Confirm:$false</code></pre>
+<li>Vul bij <strong>Parameters</strong> in:
+<pre><code>-Quiet -Confirm:$false</code></pre>
 </li>
-<li>
+<li>Wacht tot de job klaar is en beoordeel het resultaat:
 <div class="table-scroll"><table>
 <thead><tr><th>Resultaat</th><th>Betekenis</th></tr></thead>
 <tbody>
@@ -215,24 +215,24 @@ li > p { margin: .4rem 0; }
 <p>Voeg <code>-AvdOptimizations</code> toe op AVD/VDI-sessiehosts.</p>
 <h3 id="handmatig-op-de-werkplek">Handmatig op de werkplek</h3>
 <ol>
-<li>
+<li>Open PowerShell (hoeft niet als administrator — het script vraagt zelf om rechten en gaat verder in een nieuw venster).
 </li>
-<li>
-<pre><code>   powershell -ExecutionPolicy Bypass -File .\Update-TeamsClient.ps1</code></pre>
+<li>Draai:
+<pre><code>powershell -ExecutionPolicy Bypass -File .\Update-TeamsClient.ps1</code></pre>
 </li>
-<li>
+<li>Het script vraagt één keer om bevestiging voordat er iets verandert. Typ <code>y</code> en Enter.
 </li>
-<li>
+<li>Laat het venster open staan tot je <code>[ OK ] Done</code> ziet.
 </li>
 </ol>
 <p>Via het beheermenu van de scriptrepo kan het ook: <code>menu.ps1</code>, toets <strong>T</strong>. Dat vraagt eerst of je alleen wilt controleren of echt wilt installeren.</p>
 <h3 id="na-afloop-controleren">Na afloop controleren</h3>
 <ol>
-<li>
+<li>Start Teams — hij moet normaal opstarten en ingelogd zijn.
 </li>
-<li>
+<li>Start Outlook opnieuw en controleer of <strong>Nieuwe Teams-vergadering</strong> in de agenda staat.
 </li>
-<li>
+<li>Ziet het script <code>A reboot is required</code>? Plan dan een herstart in met de gebruiker.
 </li>
 </ol>
 <hr/>
@@ -433,15 +433,15 @@ li > p { margin: .4rem 0; }
 <blockquote>Bedankt voor de melding. Dit is een aankondiging van Microsoft, geen storing: je gesprekken en vergaderingen blijven gewoon werken. De techniek erachter wordt vervangen. Wij zorgen dat de app waarmee je verbinding maakt met de virtuele werkplek wordt bijgewerkt; daarna verdwijnt de melding vanzelf. Je hoeft zelf niets te doen.</blockquote>
 <h3 id="wat-wij-intern-moeten-doen">Wat wij intern moeten doen</h3>
 <ol>
-<li>
+<li><strong>Inventariseer de Windows App-versie</strong> op de lokale apparaten van alle gebruikers die op de virtuele werkplek inloggen. Dat is het echte werk — de sessiehosts zijn niet het probleem.
 </li>
-<li>
+<li>Rol de nieuwste Windows App uit op die apparaten.
 </li>
-<li>
+<li>Laat <code>-AvdOptimizations</code> voorlopig aan staan: Microsoft adviseert de WebRTC-redirector te behouden als terugvaloptie voor apparaten die SlimCore nog niet aankunnen. Vóór april 2027 opnieuw beoordelen.
 </li>
-<li>
+<li>Draai <code>Update-TeamsClient.ps1 -CheckOnly</code> op een sessiehost. Zoek SlimCore daar <strong>niet</strong>: die wordt op het lokale apparaat geïnstalleerd, niet op de host. Wat de host wél weet, staat in de gebeurtenissen die het script meeleest — zie <a href="#controleren-of-de-optimalisatie-ook-echt-werkt">Controleren of de optimalisatie ook echt werkt</a>. Zolang daar <code>code 16002</code> tussen staat, is er nog minstens één apparaat niet bij.
 </li>
-<li>
+<li>Pas als die code verdwenen is, mag de oude redirector eraf met <code>-RemoveWebRtcRedirector</code>.
 </li>
 </ol>
 <hr/>
