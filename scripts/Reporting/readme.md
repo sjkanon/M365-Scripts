@@ -286,7 +286,21 @@ Met `-Excel` komt er naast de CSV's één werkmap bij, `SharePoint_Permissions_<
 | `Groepen` | Elke groep met zijn leden — SharePoint-groepen, de Entra-groepen die daarin genest zitten, **én** Entra-groepen die rechtstreeks op een scope zijn toegekend |
 | `Effectief` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope |
 
-Elk tabblad is een echte Excel-tabel, dus met filterknoppen en bevroren koprij.
+Elk tabblad is een echte Excel-tabel, dus met filterknoppen en bevroren koprij. Getallen komen als getallen binnen, niet als tekst, dus optellen en sorteren werkt zonder eerst te converteren.
+
+#### Draaitabellen
+
+Er komen drie kant-en-klare draaitabellen bij, elk op een eigen tabblad:
+
+| Tabblad | Rijen | Kolommen | Waarde | Filters |
+|---|---|---|---|---|
+| `Pivot rechten` | Site | Permissieniveau | Aantal grants | Principaltype, scopetype |
+| `Pivot principals` | Principal | Scopetype | Aantal scopes | Site, extern ja/nee |
+| `Pivot groepen` | Groep | Lid extern ja/nee | Aantal leden | Site, groepstype |
+
+> **`PermissionLevels` is niet pivot-baar, `PrimaryPermission` wel.** SharePoint geeft een grant vaak meerdere niveaus tegelijk, en die staan in één kolom als `Read; Limited Access`. Een draaitabel maakt daar een aparte waarde van, dus `Full Control` en `Full Control; Limited Access` belanden op verschillende rijen. Daarom staat er in de tabbladen `Rechten` en `Effectief` een extra kolom `PrimaryPermission` naast de volledige tekst, met het zwaarste niveau van die grant. `Limited Access` verliest daarbij altijd van een echt niveau — dat zet SharePoint zelf neer zodat iemand naar iets dieper toegekends kan navigeren. Een eigen permissieniveau telt zwaarder dan `Lezen` maar lichter dan `Volledig beheer`: het is met opzet aangemaakt, dus het hoort niet weg te vallen. Nederlandse en Engelse niveaunamen worden allebei herkend.
+
+Wil je zelf een draaitabel maken: zet de cursor in een tabblad en kies **Invoegen → Draaitabel**; de tabel is al benoemd, dus het bereik klopt meteen en groeit mee.
 
 De CSV's blijven altijd staan; de werkmap komt er bovenop. Dat is met opzet: de CSV's zijn waar de scan naartoe streamt en waar een hervatte run op aanvult, dus ze bestaan sowieso — en als het schrijven van de werkmap misgaat (module ontbreekt, bestand open in Excel, te weinig geheugen) kost dat nooit het rapport zelf.
 
