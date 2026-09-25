@@ -798,6 +798,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 | Finding those keys needs the ProductCode as Windows Installer's 32-character "packed" GUID. That transform was validated before anything used it to point at keys for deletion: of 57 GUID-named uninstall entries on a workstation, the 32 with machine-wide product data all mapped onto an existing packed key with an identical `DisplayName`, and the 25 that did not are per-user installs living under the user's own SID |
 | Verified read-only against three real products: each yields three product keys plus exactly one upgrade-code entry, and the constructed path is readable as written. A bogus product code returns nothing and an unknown product returns no keys, so the cleanup cannot fire on thin air. **Untested:** the removal itself, and the reinstall that should follow it |
 
+### 2026-09-25 (4)
+| Change |
+|--------|
+| The IT Glue document was brought back in line with the script, checked by comparing its text against the parameter block rather than by reading it: it was missing `-BootstrapperUrl` and `-SkipSignatureCheck` entirely, and its NinjaOne variable table was missing `removeWebRtcRedirector`, `clearOrphanedAddInRegistration`, `skipSignatureCheck` and `webRtcUrl`. All three documents now cover all 16 parameters, and the variable table all 16 environment variables |
+| That same comparison found a real gap in the script: every other text field could be set from a NinjaOne variable except `bootstrapperUrl`, which was simply never read. An admin who set it would have had it silently ignored. It is read now, alongside `webRtcUrl` |
+| Two statements in the IT Glue document were no longer true. "It does not touch classic Teams" is only true without `-RemoveClassicTeams`, and the plain-language summary still promised that every copy of the add-in is removed during an update - that sweep is now conditional on a replacement being installable |
+| Added a level 3 walkthrough for the `1612` + `1638` deadlock the production host hit: what each code means, the read-only command that says whether Windows Installer still has its cached MSI, which of the two outcomes needs `-ClearOrphanedAddInRegistration`, and the note that starting Teams and restarting Outlook gives a user the meeting button back in the meantime |
+
 ### 2026-09-25 (3)
 | Change |
 |--------|

@@ -323,7 +323,7 @@ On an endpoint, preflight also checks the three policies that stop the staging: 
 2. Preview a device first: run it with `-WhatIf -Confirm:$false` in the *Parameters* field — the job output shows the version comparison and every step an update would perform, and the device stays untouched.
 3. Schedule the real run with `-Quiet -Confirm:$false`. On an up-to-date device it prints nothing and exits `0`, so the activity feed only shows the devices where it actually did something.
 4. For a detection/condition job use `-CheckOnly -Quiet`: silent and `0` when current, output and exit code `2` when a newer build is published.
-5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `avdOptimizations`, `removeClassicTeams`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`, `webRtcUrl`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
+5. Optional script variables (checkboxes `whatIf`, `quiet`, `checkOnly`, `force`, `avdOptimizations`, `removeWebRtcRedirector`, `removeClassicTeams`, `repairOutlookAddIn`, `clearOrphanedAddInRegistration`, `skipMeetingAddIn`, `skipSignatureCheck`; text fields `workingDir`, `logPath`, `ring`, `webRtcUrl`, `bootstrapperUrl`) are picked up from the environment when the matching parameter is not passed, so a technician can tick *whatIf* instead of typing parameters.
 
 If the agent starts PowerShell 32-bit, the script relaunches itself 64-bit via `SysNative` first — without that, the registry reads are redirected to `WOW6432Node` and `$env:ProgramFiles` points at the x86 folder, so neither the AppX package nor the add-in MSI is found.
 
