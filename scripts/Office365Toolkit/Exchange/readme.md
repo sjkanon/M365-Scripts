@@ -15,10 +15,10 @@ connected.
 
 | Script | Description |
 |--------|-------------|
-| [`Test-MailboxSecurityBaseline.ps1`](#test-mailboxsecuritybaselineps1) | Audit mailboxes against a hygiene baseline (audit logging, retention, litigation hold, archive, legacy protocols) |
-| [`Test-MailboxForwardingRisk.ps1`](#test-mailboxforwardingriskps1) | Audit inbox rules and Sweep rules for forwarding/exfiltration patterns (BEC indicator) |
-| [`Get-MailboxAddIns.ps1`](#get-mailboxaddinsps1) | Report Outlook add-ins installed per mailbox |
-| [`Search-MailboxAuditLog.ps1`](#search-mailboxauditlogps1) | Search the Unified Audit Log for sign-in and mailbox login events |
+| [`Test-MailboxSecurityBaseline.ps1`](Test-MailboxSecurityBaseline.ps1) ([docs](#test-mailboxsecuritybaselineps1)) | Audit mailboxes against a hygiene baseline (audit logging, retention, litigation hold, archive, legacy protocols) |
+| [`Test-MailboxForwardingRisk.ps1`](Test-MailboxForwardingRisk.ps1) ([docs](#test-mailboxforwardingriskps1)) | Audit inbox rules and Sweep rules for forwarding/exfiltration patterns (BEC indicator) |
+| [`Get-MailboxAddIns.ps1`](Get-MailboxAddIns.ps1) ([docs](#get-mailboxaddinsps1)) | Report Outlook add-ins installed per mailbox |
+| [`Search-MailboxAuditLog.ps1`](Search-MailboxAuditLog.ps1) ([docs](#search-mailboxauditlogps1)) | Search the Unified Audit Log for sign-in and mailbox login events |
 
 > Message trace reporting lives in [`scripts/PatronToolkit/Exchange/Get-MessageTraceReport.ps1`](../../PatronToolkit/Exchange/readme.md#get-messagetracereportps1) — an equivalent script was built independently for both toolkits, so only one was kept (with `-IncludeDetail` support merged in from this one).
 

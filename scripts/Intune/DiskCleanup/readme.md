@@ -6,8 +6,8 @@ Intune Win32-app deployment that runs [`Invoke-WindowsCleanup.ps1`](../../Device
 
 | Script | Role in Intune |
 |---|---|
-| `Invoke-DiskCleanupIntune.ps1` | Install command content script — calls the shared `Invoke-WindowsCleanup.ps1 -Apply`, then `Restart-Computer -Force` |
-| `Detect-DiskCleanupIntune.ps1` | Custom detection script |
+| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) | Install command content script — calls the shared `Invoke-WindowsCleanup.ps1 -Apply`, then `Restart-Computer -Force` |
+| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) | Custom detection script |
 
 ## Behavior
 

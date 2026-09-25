@@ -8,8 +8,8 @@ Small Entra ID / Exchange Online user and group management helpers used during t
 
 | Script | Description |
 |--------|-------------|
-| [`New-DynamicDistributionGroupByFilter.ps1`](#new-dynamicdistributiongroupbyfilterps1) | Create a Dynamic Distribution Group from a job title or custom recipient filter |
-| [`Add-UserToFeatureGroup.ps1`](#add-usertofeaturegroupps1) | Add/remove a user from a named Entra ID group to gate an add-on feature |
+| [`New-DynamicDistributionGroupByFilter.ps1`](New-DynamicDistributionGroupByFilter.ps1) ([docs](#new-dynamicdistributiongroupbyfilterps1)) | Create a Dynamic Distribution Group from a job title or custom recipient filter |
+| [`Add-UserToFeatureGroup.ps1`](Add-UserToFeatureGroup.ps1) ([docs](#add-usertofeaturegroupps1)) | Add/remove a user from a named Entra ID group to gate an add-on feature |
 
 ---
 

@@ -10,9 +10,9 @@ Autopilot enrollment, compliance policy automation, configuration drift detectio
 
 | Script | Description |
 |--------|-------------|
-| [`Compare-IntuneConfig.ps1`](#compare-intuneconfigps1) | Compare a customer tenant's Intune configuration against an MSP baseline backup |
-| [`Repair-StuckWin32AppEnforcement.ps1`](#repair-stuckwin32appenforcementps1) | Clear Win32 apps stuck behind Intune's GRS retry cooldown on a device — run manually, locally, with a dry-run/report/`-AppId` filter |
-| [`Detect-StuckWin32AppEnforcement.ps1`](#detect--remediate-stuckwin32appenforcementps1) + [`Remediate-StuckWin32AppEnforcement.ps1`](#detect--remediate-stuckwin32appenforcementps1) | Same fix, packaged as an Intune Remediation pair — trigger entirely from the Intune portal, no device access needed |
+| [`Compare-IntuneConfig.ps1`](Compare-IntuneConfig.ps1) ([docs](#compare-intuneconfigps1)) | Compare a customer tenant's Intune configuration against an MSP baseline backup |
+| [`Repair-StuckWin32AppEnforcement.ps1`](Repair-StuckWin32AppEnforcement.ps1) ([docs](#repair-stuckwin32appenforcementps1)) | Clear Win32 apps stuck behind Intune's GRS retry cooldown on a device — run manually, locally, with a dry-run/report/`-AppId` filter |
+| [`Detect-StuckWin32AppEnforcement.ps1`](Detect-StuckWin32AppEnforcement.ps1) + [`Remediate-StuckWin32AppEnforcement.ps1`](Remediate-StuckWin32AppEnforcement.ps1) ([docs](#detect---remediate-stuckwin32appenforcementps1)) | Same fix, packaged as an Intune Remediation pair — trigger entirely from the Intune portal, no device access needed |
 
 ## Folders
 
@@ -100,8 +100,8 @@ Same fix as `Repair-StuckWin32AppEnforcement.ps1` above, split into a detection/
 
 | Script | Role |
 |---|---|
-| `Detect-StuckWin32AppEnforcement.ps1` | Detection half — exit 1 if any Win32 app has a real last error code cached (possible GRS lock), exit 0 otherwise |
-| `Remediate-StuckWin32AppEnforcement.ps1` | Remediation half — always clears everything the detection script found, restarts IME, forces an immediate MDM sync |
+| [`Detect-StuckWin32AppEnforcement.ps1`](Detect-StuckWin32AppEnforcement.ps1) | Detection half — exit 1 if any Win32 app has a real last error code cached (possible GRS lock), exit 0 otherwise |
+| [`Remediate-StuckWin32AppEnforcement.ps1`](Remediate-StuckWin32AppEnforcement.ps1) | Remediation half — always clears everything the detection script found, restarts IME, forces an immediate MDM sync |
 
 **Deploy in Intune:**
 

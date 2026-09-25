@@ -16,10 +16,10 @@ Intune installs LOB MSIX apps per-user. That fails for standard users without ad
 
 | Script | Role in Intune |
 |---|---|
-| `Deploy-ClaudeDesktopIntune.ps1` | **The one you run.** Orchestrates everything below — see "Monthly run" section. |
-| `Install-ClaudeDesktop-Intune.ps1` | Install command content script |
-| `Uninstall-ClaudeDesktop-Intune.ps1` | Uninstall command content script |
-| `Detect-ClaudeDesktop-Intune.ps1` | Custom detection script |
+| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) | **The one you run.** Orchestrates everything below — see "Monthly run" section. |
+| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) | Install command content script |
+| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) | Uninstall command content script |
+| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) | Custom detection script |
 
 `Install-`/`Uninstall-`/`Detect-ClaudeDesktop-Intune.ps1` are never run manually — `Deploy-ClaudeDesktopIntune.ps1` packages them into the `.intunewin` (or, for the detection script, uploads it as part of the detection rule) automatically.
 

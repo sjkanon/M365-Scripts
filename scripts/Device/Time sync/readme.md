@@ -8,7 +8,7 @@ Fixes Windows time synchronization drift by pointing `W32time` at Dutch NTP pool
 
 | File | Description |
 |------|-------------|
-| [`Restart-Time-Sync.ps1`](#restart-time-syncps1) | Force an immediate resync and register a recurring scheduled task |
+| [`Restart-Time-Sync.ps1`](Restart-Time-Sync.ps1) ([docs](#restart-time-syncps1)) | Force an immediate resync and register a recurring scheduled task |
 
 ---
 

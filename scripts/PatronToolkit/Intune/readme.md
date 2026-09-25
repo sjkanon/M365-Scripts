@@ -9,8 +9,8 @@ Graph.
 
 | Script | Description |
 |--------|-------------|
-| [`Get-IntunePolicyAssignments.ps1`](#get-intunepolicyassignmentsps1) | Report which groups are assigned to which Intune profiles/policies/apps |
-| [`Get-AutopilotDevices.ps1`](#get-autopilotdevicesps1) | Report registered Windows Autopilot devices and deployment profiles |
+| [`Get-IntunePolicyAssignments.ps1`](Get-IntunePolicyAssignments.ps1) ([docs](#get-intunepolicyassignmentsps1)) | Report which groups are assigned to which Intune profiles/policies/apps |
+| [`Get-AutopilotDevices.ps1`](Get-AutopilotDevices.ps1) ([docs](#get-autopilotdevicesps1)) | Report registered Windows Autopilot devices and deployment profiles |
 
 ---
 

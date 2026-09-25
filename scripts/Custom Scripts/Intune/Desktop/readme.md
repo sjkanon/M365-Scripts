@@ -10,7 +10,7 @@ For wallpaper/lockscreen/taskbar-shortcut deployment, see [`scripts/Intune/Deskt
 
 | Item | Description |
 |------|-------------|
-| [`Deploy-OfficeTheme.ps1`](#deploy-officethemeps1) | Installs the full VIAS Institute `.thmx` Office theme |
+| [`Deploy-OfficeTheme.ps1`](Deploy-OfficeTheme.ps1) ([docs](#deploy-officethemeps1)) | Installs the full VIAS Institute `.thmx` Office theme |
 | [`Office Themes/`](Office%20Themes/readme.md) | `Deploy-Officecolors.ps1` — installs just the color scheme |
 | `2026 Vias institute colours (2).thmx` | The Office theme file downloaded by `Deploy-OfficeTheme.ps1` |
 
