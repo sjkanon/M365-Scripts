@@ -116,6 +116,7 @@ function Convert-MarkdownBody {
     $quote      = [System.Collections.Generic.List[string]]::new()
     $listType   = $null      # 'ul' or 'ol' while a list is open
     $itemOpen   = $false
+    $fenceIndent = 0
 
     function Close-Table {
         if ($tableRows.Count -eq 0) { return }
@@ -159,11 +160,19 @@ function Convert-MarkdownBody {
                 $inCode = $false
             } else {
                 Close-Table; Close-Quote
+                # A fence inside a numbered step is indented to line up with the text.
+                # That indentation is layout, not content, so it is stripped - anyone
+                # copying the command out of the page should get the command.
+                $fenceIndent = $line.Length - $line.TrimStart().Length
                 $inCode = $true
             }
             continue
         }
-        if ($inCode) { $codeBuffer.Add($line); continue }
+        if ($inCode) {
+            $strip = [Math]::Min($fenceIndent, ($line.Length - $line.TrimStart().Length))
+            $codeBuffer.Add($line.Substring($strip))
+            continue
+        }
 
         # -- table ------------------------------------------------------------
         if ($trimmed.StartsWith('|')) {
@@ -195,9 +204,14 @@ function Convert-MarkdownBody {
         }
 
         # -- lists ------------------------------------------------------------
-        if ($trimmed -match '^[-*]\s+(.*)$' -or $trimmed -match '^\d+\.\s+(.*)$') {
-            $wanted = if ($trimmed -match '^\d+\.') { 'ol' } else { 'ul' }
-            $text   = Convert-Inline $Matches[1]
+        if ($trimmed -match '^([-*]|\d+\.)\s+(.*)$') {
+            # Both captures are read before anything else runs a -match. $Matches is a
+            # single variable per scope, so testing the marker again after capturing
+            # the text threw the text away - which is why every numbered list came out
+            # as empty bullets while the dashed ones were fine.
+            $marker = $Matches[1]
+            $text   = Convert-Inline $Matches[2]
+            $wanted = if ($marker -eq '-' -or $marker -eq '*') { 'ul' } else { 'ol' }
             if ($listType -ne $wanted) {
                 Close-List
                 $listType = $wanted
