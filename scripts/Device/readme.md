@@ -218,6 +218,8 @@ Results are printed to screen with a summary of all issues at the end.
 
 Keeps the new Teams client and the Outlook meeting add-in current on an endpoint or AVD session host. It asks the Teams config service which build Microsoft publishes for this architecture and **only acts when that build is newer than what is installed** — an up-to-date device is left completely alone. When an update is due it downloads and signature-checks `teamsbootstrapper.exe`, uninstalls the meeting add-in, removes and deprovisions the `MSTeams` AppX package, provisions the new build for all users and reinstalls the add-in MSI that ships inside it.
 
+"Add-in present" means its files are present, not that a registry key mentions it: a machine-wide registration pointing at a loader DLL that is gone counts as missing, and `-CheckOnly` says so (`the machine-wide add-in registration points at files that are gone`). Trusting the key alone is how a device whose add-in was deleted gets told there is nothing to do.
+
 Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the full flow without touching the machine. Runs by hand (it elevates itself via UAC and asks for confirmation once) and unattended from an RMM such as NinjaOne.
 
 **Steps**

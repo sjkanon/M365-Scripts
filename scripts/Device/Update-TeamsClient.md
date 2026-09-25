@@ -62,6 +62,8 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 
 `-Force` short-circuits the comparison and always takes the full path — that is the repair mode. `-CheckOnly` stops right after the decision and reports it (exit code `2` when there is work to do).
 
+"Is the add-in installed?" means the files are there, not that a registry key says so. A machine-wide registration pointing at a loader DLL that no longer exists counts as **missing**, and the reason says so — `the machine-wide add-in registration points at files that are gone`. Reading the key alone is how a device whose add-in was deleted underneath it gets told there is nothing to do.
+
 ---
 
 ## The nine steps

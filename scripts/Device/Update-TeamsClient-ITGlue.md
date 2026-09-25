@@ -187,6 +187,8 @@ De add-in machinebreed installeren is één ding; of **Outlook** hem laadt is ee
 | `[WARN] Outlook knows the add-in ... but has no LoadBehavior set` | Registratie half aangelegd | Outlook opnieuw starten en opnieuw controleren |
 | `[WARN] The add-in is registered for ... but its DLL is gone (...)` | De eigen registratie van die gebruiker wijst naar een bestand dat er niet meer is en overschaduwt de machinebrede installatie | **Vinkje terugzetten helpt niet.** Draai het script met `-RepairOutlookAddIn` (of vink `repairOutlookAddIn` aan): dat ruimt die verouderde registratie op, waarna de machinebrede versie het overneemt bij de volgende Outlook-start |
 
+> **Registratie zonder bestanden telt als "niet geïnstalleerd".** Wijst de machinebrede registratie naar een loader-DLL die er niet meer is, dan beschouwt het script de add-in als ontbrekend en installeert hij hem opnieuw — `-CheckOnly` meldt dat als `Work is due: the machine-wide add-in registration points at files that are gone`. Alleen op de registersleutel afgaan is precies hoe een werkplek waarvan de add-in is weggegooid te horen kreeg dat er niets te doen was.
+
 ### De add-in laadt nog steeds niet — waarom?
 
 Als een registratie er wél staat maar Outlook hem niet laadt, zet het script de reden eronder met `why:`. Drie oorzaken laten geen spoor na in `LoadBehavior` zelf:
