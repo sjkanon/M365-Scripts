@@ -4,6 +4,14 @@ All PowerShell tooling for this repo, grouped by workload. Launch everything fro
 
 ---
 
+## Looking for one specific script?
+
+[**INDEX.md**](INDEX.md) lists all of them A–Z on one page — script, folder and what it does — so you can Ctrl-F instead of guessing which folder it is under. It is generated from the scripts themselves by [`Startup/Update-ScriptIndex.ps1`](Startup/Update-ScriptIndex.ps1); rerun that after adding, renaming or removing a script.
+
+The table below is the other way round: what each category is *for*.
+
+---
+
 ## Categories
 
 | Folder | Description |
