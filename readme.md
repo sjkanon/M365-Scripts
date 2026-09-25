@@ -71,8 +71,11 @@ To remove the startup shortcut later:
 | [`scripts/readme.md`](scripts/readme.md) | The other direction: what each workload folder is for |
 | [`.\menu.ps1`](menu.ps1) | The curated interactive launcher for the everyday tasks |
 | `f <term>` | Fuzzy search from your shell, described under [Quick Launcher](#quick-launcher) below |
+| Any folder readme | Every script name in a `Scripts` table links straight to the file, with a `docs` link to its section on the same page |
 
 `INDEX.md` is generated from the scripts' own `.SYNOPSIS` headers by [`scripts/Startup/Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1) — rerun it (or run it with `-Check`) whenever a script is added, renamed, moved or removed.
+
+Those links are checked, not assumed: [`scripts/Startup/Test-MarkdownLinks.ps1`](scripts/Startup/Test-MarkdownLinks.ps1) walks every readme and fails on a file that is not there, or an anchor with no heading behind it.
 
 ---
 
@@ -151,6 +154,8 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
+| `L` | Startup | Test-MarkdownLinks — check every readme link: files and in-page anchors |
+| `M` | Startup | Convert-MarkdownToHtml — build a styled HTML page from a markdown document, for IT Glue |
 | `A` / `F10` | Reporting | Licensing-Report |
 | `P` | Reporting | SharePoint-Perms — report who has access to what, at every level |
 | `S` | SharePoint | SharePoint-Structure — provision/check metadata, libraries and rights |
@@ -409,9 +414,9 @@ Three scripts that work together to detect, disable, and roll back internal micr
 
 | Script | Doel |
 |---|---|
-| `detect-audiodevices.ps1` | Inventory van alle audio endpoints op het toestel |
-| `Disable-internalmic.ps1` | Disable interne microfoon(s), headsets worden overgeslagen |
-| `Rollback-InternalMic.ps1` | Heractiveer eerder uitgeschakelde interne microfoons |
+| [`detect-audiodevices.ps1`](scripts%5CDevice%5Caudio%5Cdetect-audiodevices.ps1) | Inventory van alle audio endpoints op het toestel |
+| [`Disable-internalmic.ps1`](scripts%5CDevice%5Caudio%5CDisable-internalmic.ps1) | Disable interne microfoon(s), headsets worden overgeslagen |
+| [`Rollback-InternalMic.ps1`](scripts%5CDevice%5Caudio%5CRollback-InternalMic.ps1) | Heractiveer eerder uitgeschakelde interne microfoons |
 
 **NinjaOne uitrol (alle drie de scripts):**
 
@@ -706,7 +711,9 @@ M365-Scripts/
     │   ├── Install-Modules.ps1      ← Bootstrap: install & import all modules
     │   ├── Update-Modules.ps1       ← Update every installed PowerShell module
     │   ├── Test-PowerShellSyntax.ps1
-    │   └── Update-ScriptIndex.ps1   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
+    │   ├── Update-ScriptIndex.ps1   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
+    │   ├── Test-MarkdownLinks.ps1   ← Checks every readme link: files and in-page anchors
+    │   └── Convert-MarkdownToHtml.ps1 ← Markdown doc → one self-contained styled HTML page
     ├── Custom Scripts/                 ← path-pinned scripts (see note above)
     │   ├── readme.md
     │   └── Intune/
@@ -776,6 +783,25 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-25 (9)
+| Change |
+|--------|
+| You can now click from a readme straight to the script it describes. Every script name in a folder readme's `Scripts` table linked to a section further down the same page, never to the file — so the readme told you what a script did but gave you no way to open it. 172 links across 47 readmes now point at the file, with a `([docs](#…))` link beside them for the section that was there before |
+| 34 of those were not links at all: a script name in a table cell, set in backticks, with nothing behind it. Those are file links now too |
+| Added `scripts/Startup/Test-MarkdownLinks.ps1`, because links that are never checked are links that quietly rot. It walks every `.md` and fails on two things: a relative link to a file that is not there (percent-encoded spaces decoded first, the way GitHub serves them), and an anchor with no heading behind it. Anchors are resolved the way GitHub builds them, including the `-1`/`-2` suffix for repeated headings |
+| It found three anchors that had never worked: `#watch-rdslivesps1` had an `s` too many for `### Watch-RDSLive.ps1`, and two links in the Intune readme used `#detect--remediate-…` where the heading `### Detect- / Remediate-StuckWin32AppEnforcement.ps1` produces `#detect---remediate-…` — three hyphens, because the slash becomes nothing and the spaces around it each become one. Nobody would find that by eye |
+| Invisible characters are stripped from both the heading and the link before they are compared. Without that, the four emoji entries in the root table of contents read as broken: the heading and the link both carry a variation selector, which is not a letter and not a digit. Reproducing GitHub's slugger byte for byte on characters nobody can see is not the point — establishing that a link and a heading correspond is |
+| Verified: 854 internal links across 71 markdown files all resolve, all 181 files parse, and the script index is current at 178 scripts. `L` added to the menu for the link check, alongside `X` for the index |
+
+### 2026-09-25 (8)
+| Change |
+|--------|
+| The Teams IT Glue procedure now also exists as a styled HTML page, `scripts/Device/Update-TeamsClient-ITGlue.html`, for pasting into IT Glue or printing. It is **generated** by the new [`scripts/Startup/Convert-MarkdownToHtml.ps1`](scripts/Startup/Convert-MarkdownToHtml.ps1) rather than written by hand: that document changed six times in two days, and a hand-made copy would have been wrong by the next morning |
+| The converter covers what these documents actually use — headings, tables, fenced code blocks including the indented ones inside numbered steps, blockquotes, both list kinds, rules, and inline code, bold, italic and links — and passes anything else through as text instead of guessing. `-Check` writes nothing and exits `1` when the committed page has fallen behind its markdown, which is what a hook or pipeline would call |
+| Void elements are emitted self-closing, so the page parses as XML as well as HTML. That is how it was verified rather than by looking at it: the output parses, and holds 29 tables, 190 rows, 19 code blocks and 46 headings, with **no** table containing a row that disagrees with its header width. Also checked: no `**`, backtick or `](` left anywhere in the rendered text, and the ✅/❌ and accented characters survive |
+| Both `-Check` failure paths exercised: a page that does not exist yet, and a markdown file that has moved on — each exits `1` with the reason. The generated-on line is excluded from the comparison, so an unchanged document does not report a difference |
+| Added as menu key **M**, documented in [`scripts/Startup/readme.md`](scripts/Startup/readme.md), and `scripts/INDEX.md` regenerated — adding a script had made it stale, which `Update-ScriptIndex.ps1 -Check` reported |
 
 ### 2026-09-25 (7)
 | Change |
