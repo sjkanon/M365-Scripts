@@ -784,6 +784,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (16)
+| Change |
+|--------|
+| Added `-Excel` to `scripts/Reporting/Get-SharePointPermissionsReport.ps1`: one `.xlsx` alongside the CSVs with a worksheet per report — `Samenvatting`, `Rechten`, `Groepen` and, with `-IncludeEffectiveAccess`, `Effectief` — each a real Excel table with filter dropdowns and a frozen header, using the same `ImportExcel` pattern as `Get-DistributionGroupMembers.ps1` |
+| The CSVs are still always written and the workbook is built from them, not instead of them. They are what the scan streams into and what a resumed run appends to, so they exist regardless — and a workbook that fails to write (module missing, file open, out of memory) then costs a convenience copy rather than the report |
+| A worksheet stops at 1,048,576 rows and drops the rest without complaint, so sheets are capped at 1,000,000 with a warning naming the sheet and the CSV that still holds everything. On a large tenant only `Effectief` realistically approaches that |
+| Fixed a real gap in the group membership while wiring this up: an Entra ID group granted **directly** on a site, list or item never passes through `/sitegroups`, so it was the one kind of group whose membership the report never listed — only the first ten names in `MemberPreview`. Those groups now get their own rows in the Groups output, resolved to people, recorded once per group rather than once per grant, and sharing the schema the SharePoint-group rows already use |
+| Added the Excel prompt to the `menu.ps1` entry |
+| Verified locally with 180 checks across nine suites (20 new): a workbook is written and read back with all four sheets in order and their rows intact, a re-run replaces rather than appends, absent/empty/missing sources are skipped, nothing to write leaves no file behind, an oversized sheet is capped rather than truncated by Excel, a directly granted Entra group is listed once with its real members, SharePoint groups are left to `/sitegroups`, and both group sources share one schema. **Not yet verified against a live tenant** |
+
 ### 2026-09-25 (15)
 | Change |
 |--------|

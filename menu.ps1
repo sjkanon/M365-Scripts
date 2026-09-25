@@ -693,6 +693,8 @@ $menu = @(
             if ($scope -match '^(?i)(site|list|item)$') { $a['Scope'] = $scope }
             $eff = Read-Host '  Also write the per-user effective access CSV? [y/N]'
             if ($eff -match '^[Yy]') { $a['IncludeEffectiveAccess'] = $true }
+            $xl = Read-Host '  Also write one Excel workbook with all sheets? [Y/n]'
+            if ($xl -notmatch '^[Nn]') { $a['Excel'] = $true }
             return $a
         }
     }
