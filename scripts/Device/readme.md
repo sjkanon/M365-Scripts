@@ -276,6 +276,8 @@ On an endpoint, preflight also checks the three policies that stop the staging: 
 | `-CheckOnly` | Only report whether a newer build exists (exit code 2), change nothing |
 | `-AvdOptimizations` | AVD/VDI session hosts: enforce the `IsWVDEnvironment` flag and the WebRTC redirector |
 | `-RemoveClassicTeams` | Also remove the classic Teams client: machine-wide installer plus per-profile installs |
+| `-RemoveWebRtcRedirector` | Remove the old WebRTC media optimization, retired 1 October 2026. Cannot be combined with `-AvdOptimizations`; leaves `IsWVDEnvironment` set, because SlimCore needs it too |
+| `-RepairOutlookAddIn` | Clear a per-user Outlook registration pointing at an add-in DLL that no longer exists, so the machine-wide one takes over again |
 | `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
 | `-Ring` | Update ring queried at the config service (default: `general`) |
 | `-WorkingDir` | Bootstrapper download folder (default: `C:\IT\AVD\Teams`) |
