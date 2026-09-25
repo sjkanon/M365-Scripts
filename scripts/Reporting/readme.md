@@ -300,14 +300,14 @@ Daarom is er `SharePoint_Permissions_SiteAccess_<ts>.csv` (tabblad `Toegang`): *
 | `UserDisplayName` / `UserPrincipalName` / `UserEmail` | Wie |
 | `IsExternal` / `AccountEnabled` | Gast of intern, account actief |
 | `ViaType` | `Direct`, `SharePointGroup`, `SecurityGroup`, `M365Group`, `Everyone`, … |
-| `ViaName` / `ViaId` | Welke groep. De id staat erbij omdat een titel als `Site Owners` op elke site voorkomt |
+| `ViaName` / `ViaId` | Welke groep, of `(direct toegekend)`. De id staat erbij omdat een titel als `Site Owners` op elke site voorkomt |
 | `PermissionLevels` | Het niveau van die toekenning |
 
 Het is bewust **geconsolideerd per site collection**: iemand die via dezelfde groep op dertig mappen in dezelfde site uitkomt, is één regel — niet dertig. Een ander niveau of een andere groep is wél een aparte regel, want dat is andere toegang. Wil je het per losse map of bestand zien, gebruik dan `-IncludeEffectiveAccess`; dat tabblad (`Effectief`) is per scope en daardoor veel groter.
 
 Drie dingen die hier expres niet wegvallen:
 
-- **Rechtstreeks toegekende personen** staan er als zichzelf, met `ViaType = Direct`.
+- **Rechtstreeks toegekende personen** staan er als zichzelf, met `ViaType = Direct` en `ViaName = (direct toegekend)`.
 - **`Everyone` en `Everyone except external users`** lossen naar niemand op, maar zijn juist wat je wil zien. Ze krijgen één regel met de claim als naam.
 - Ook met `-SkipGroupExpansion` blijven rechtstreeks toegekende personen zichtbaar; alleen de groepsleden ontbreken dan.
 
@@ -336,7 +336,12 @@ Er komen drie kant-en-klare draaitabellen bij, elk op een eigen tabblad:
 | `Pivot rechten` | Site | Permissieniveau | Aantal grants | Principaltype, scopetype |
 | `Pivot principals` | Principal | Scopetype | Aantal scopes | Site, extern ja/nee |
 | `Pivot groepen` | Groep | Lid extern ja/nee | Aantal leden | Site, groepstype |
-| `Pivot toegang` | Site → persoon → groep | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
+| `Pivot toegang` | **Site → groep → persoon** | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
+| `Pivot per persoon` | Persoon → site → groep | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
+
+`Pivot toegang` volgt hoe SharePoint rechten werkelijk uitdeelt: een site heeft groepen, en groepen hebben mensen. Ingeklapt zie je welke groepen op een site zitten; uitgeklapt wie die groepen binnenlaten. `Pivot per persoon` leest dezelfde data van de andere kant — wat bereikt déze persoon en waardoor — wat de vraag is bij een offboarding.
+
+> Een rechtstreeks toegekende persoon heeft geen groep. In `ViaName` staat dan `(direct toegekend)` in plaats van niets: een leeg niveau in de hiërarchie leest als ontbrekende data, niet als "zonder groep toegekend".
 
 > **`PermissionLevels` is niet pivot-baar, `PrimaryPermission` wel.** SharePoint geeft een grant vaak meerdere niveaus tegelijk, en die staan in één kolom als `Read; Limited Access`. Een draaitabel maakt daar een aparte waarde van, dus `Full Control` en `Full Control; Limited Access` belanden op verschillende rijen. Daarom staat er in de tabbladen `Rechten` en `Effectief` een extra kolom `PrimaryPermission` naast de volledige tekst, met het zwaarste niveau van die grant. `Limited Access` verliest daarbij altijd van een echt niveau — dat zet SharePoint zelf neer zodat iemand naar iets dieper toegekends kan navigeren. Een eigen permissieniveau telt zwaarder dan `Lezen` maar lichter dan `Volledig beheer`: het is met opzet aangemaakt, dus het hoort niet weg te vallen. Nederlandse en Engelse niveaunamen worden allebei herkend.
 

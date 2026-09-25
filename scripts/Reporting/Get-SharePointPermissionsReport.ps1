@@ -1405,7 +1405,9 @@ function ConvertTo-PermissionRows {
         if ($null -ne $SiteAccessRows) {
             $levelText = ($levels -join '; ')
             $viaType   = if ($principal.Kind -eq 'User') { 'Direct' } else { $principal.Kind }
-            $viaName   = if ($principal.Kind -eq 'User') { $null } else { $principal.Title }
+            # Named rather than left empty: the pivot nests site over group over person, and a
+            # blank level there reads as missing data instead of "granted without a group".
+            $viaName   = if ($principal.Kind -eq 'User') { '(direct toegekend)' } else { $principal.Title }
 
             $people = @($members)
             if ($people.Count -eq 0 -and $principal.Kind -eq 'User') {
@@ -2447,10 +2449,13 @@ function Add-PermissionsPivots {
         @{ Name = 'Pivot rechten';   Source = 'Rechten'; Rows = @('SiteUrl');       Columns = @('PrimaryPermission'); Data = @{ 'PrincipalName' = 'Count' }; Filter = @('PrincipalType', 'ScopeType') }
         @{ Name = 'Pivot principals';Source = 'Rechten'; Rows = @('PrincipalName'); Columns = @('ScopeType');          Data = @{ 'ScopeUrl' = 'Count' };      Filter = @('SiteUrl', 'IsExternal') }
         @{ Name = 'Pivot groepen';   Source = 'Groepen'; Rows = @('GroupTitle');    Columns = @('MemberIsExternal');   Data = @{ 'MemberLogin' = 'Count' };   Filter = @('SiteUrl', 'GroupType') }
-        # The one that answers the question people actually open this report with: per site, who
-        # can reach it and through which group. Site over user over group, so collapsing a site
-        # shows its people and expanding a person shows what carried them in.
-        @{ Name = 'Pivot toegang';   Source = 'Toegang'; Rows = @('SiteUrl', 'UserDisplayName', 'ViaName'); Columns = @('PrimaryPermission'); Data = @{ 'UserPrincipalName' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
+        # Site over group over person, which is how SharePoint actually grants access: a site has
+        # groups, and groups have people. Collapsed it lists the groups on a site; expanded it
+        # names everyone they let in.
+        @{ Name = 'Pivot toegang';   Source = 'Toegang'; Rows = @('SiteTitle', 'ViaName', 'UserDisplayName'); Columns = @('PrimaryPermission'); Data = @{ 'UserPrincipalName' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
+        # The same data read from the other end, for the question a pivot by site cannot answer:
+        # what does this one person reach, and through what. That is the offboarding view.
+        @{ Name = 'Pivot per persoon'; Source = 'Toegang'; Rows = @('UserDisplayName', 'SiteTitle', 'ViaName'); Columns = @('PrimaryPermission'); Data = @{ 'SiteUrl' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
     )
 
     $added = 0
