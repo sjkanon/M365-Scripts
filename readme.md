@@ -754,6 +754,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-25 (2)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` no longer deletes a working meeting add-in before knowing it can install a replacement. A production `-Force` run removed every copy in step 6 and then failed in step 8 with `1638`, leaving the session host with no add-in at all. The sweep moved to step 8, behind the version comparison: an older MSI than the registered add-in now means the sweep and the install are skipped and the working add-in is left exactly as it is |
+| Three things had to line up for that, and all three are now handled. `-Force` on a host whose build is newer than the published one is a **downgrade**, which the version check now warns about by name. An add-in uninstall answering `1612` means Windows Installer lost its source, so it is retried against its own cached MSI under `C:\Windows\Installer` (via `Installer\UserData\S-1-5-18\Products\*\InstallProperties`, `LocalPackage`); when that is gone too, the run says the registration cannot be removed and what it will cause. A `1638` on the add-in is now a warning rather than an abort, so verification still runs and reports what Outlook is actually left with |
+| Preflight prints the registered add-in version instead of just "is installed" - that single number was the whole diagnosis of the failure and it was the one thing not on screen |
+| The AppLocker line no longer prints an empty summary when `SrpV2` exists with no rule collections under it (as on the production host): it says "no rule collections configured, so it blocks nothing" |
+| Verified: the cached-package lookup against real installed products, and that asking for a product this machine lacks returns nothing without throwing; the version guard in all four combinations (older, newer, equal, unparsable); the empty-collection AppLocker line. **Untested:** the `msiexec /x <cached msi>` retry and the `1638` warning path on a live host |
+
 ### 2026-09-25
 | Change |
 |--------|
