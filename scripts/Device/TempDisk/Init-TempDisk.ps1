@@ -65,9 +65,12 @@
         thing means the first one did not help, and repeating it forever is worse
         than saying so.
 
-    The restart is announced through shutdown.exe with a countdown (60 seconds by
-    default), so anyone who is on the machine sees it coming and can stop it with
-    shutdown /a.
+    The restart is announced through shutdown.exe. The countdown exists to warn
+    people, so it only applies when there are people: signed in, it is
+    -RestartDelaySeconds (60 by default) and shutdown /a stops it; nobody signed in -
+    the normal case at boot, and the guaranteed one on a session host whose pool is
+    drained - and the restart happens within seconds, because waiting a minute for an
+    audience of nobody only costs availability.
 
     Exit codes
     ----------
@@ -110,8 +113,10 @@
     -RestartCooldownMinutes.
 
 .PARAMETER RestartDelaySeconds
-    Countdown before the restart (default: 60). Anyone on the machine sees the
-    notice and can stop it with shutdown /a.
+    Countdown before a restart that happens while someone is signed in (default: 60),
+    so they see the notice and can stop it with shutdown /a. With nobody signed in -
+    the normal case at boot - the restart happens within seconds instead, because
+    there is nobody to warn and the wait only costs availability.
 
 .PARAMETER RestartCooldownMinutes
     Shortest interval between two restarts triggered by this script (default: 60).
@@ -776,11 +781,18 @@ try {
             Write-Warn ('Not restarting: this script already restarted the machine {0:N0} minute(s) ago ({1:yyyy-MM-dd HH:mm}) and the pagefile is still not in use - restarting again would only repeat that. Check the log at {2}' -f
                         $since.TotalMinutes, $marker, $LogPath)
         } else {
+            # The countdown is there to warn people. Nobody signed in - the normal
+            # case at boot, and the guaranteed one on a host whose pool is drained -
+            # means there is nobody to warn, and a minute of waiting is a minute the
+            # host is not available. A few seconds is kept so this run's own log line
+            # is written before the shutdown starts.
+            $delay = if ($signedIn.Count -gt 0) { $RestartDelaySeconds } else { [math]::Min(5, $RestartDelaySeconds) }
             if ($signedIn.Count -gt 0) {
-                Write-Warn ('Restarting with {0} signed in (-RestartEvenIfUsersSignedIn): {1}' -f $signedIn.Count, ($signedIn -join ', '))
+                Write-Warn ('Restarting with {0} signed in (-RestartEvenIfUsersSignedIn), {1} second countdown: {2}' -f
+                            $signedIn.Count, $delay, ($signedIn -join ', '))
             }
             $notice = "The temp disk was restored; this computer restarts in order to put the pagefile on $targetRoot."
-            if ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Restart in $RestartDelaySeconds seconds so $pagefilePath is created")) {
+            if ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Restart in $delay seconds so $pagefilePath is created")) {
                 # The guard goes down before the thing it guards, not after: a restart
                 # that happens without its marker having been written is a restart
                 # nothing can stop from happening again at the next boot. A marker
@@ -796,7 +808,7 @@ try {
                     # System log and in Azure's own restart reporting.
                     $scheduled = $false
                     try {
-                        $null = & shutdown.exe /r /t $RestartDelaySeconds /c $notice /d p:2:4
+                        $null = & shutdown.exe /r /t $delay /c $notice /d p:2:4
                         $scheduled = ($LASTEXITCODE -eq 0)
                     } catch {
                         # From PowerShell 7.4 a non-zero exit code from a native
@@ -810,7 +822,7 @@ try {
 
                     if ($scheduled) {
                         $restartTriggered = $true
-                        Write-News "Restarting in $RestartDelaySeconds seconds so $pagefilePath is created - 'shutdown /a' cancels it"
+                        Write-News "Restarting in $delay seconds so $pagefilePath is created - 'shutdown /a' cancels it"
                     } else {
                         Write-Bad "shutdown.exe refused to schedule the restart (exit code $LASTEXITCODE)"
                         $exitCode = 1
