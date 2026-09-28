@@ -862,6 +862,22 @@ function Write-OutlookAddInStatus {
     }
 }
 
+function Get-AppxPackageHolder {
+    <#
+        The users an AppX package is installed for. PackageUserInformation surfaces
+        differently across builds, so the SID is taken out of its string form rather
+        than through a property path that might not be there.
+    #>
+    param($Package)
+
+    foreach ($holder in @(Get-PropertyValue $Package 'PackageUserInformation')) {
+        $text = [string] $holder
+        if ($text -match '(S-1-[0-9\-]+)') {
+            [PSCustomObject]@{ Sid = $Matches[1]; Account = (Resolve-SidName $Matches[1]); Raw = $text }
+        }
+    }
+}
+
 function Get-WebRtcRedirectorEntry {
     <# Uninstall entry for the Remote Desktop WebRTC Redirector Service, if any. #>
     foreach ($root in $UninstallRoots) {
@@ -1770,7 +1786,12 @@ try {
         } elseif ($installedVersion -gt $latest.Version) {
             Write-Ok "Installed build is newer than the published one ($installedVersion) - nothing to update"
             if ($Force) {
-                Write-Warn "-Force replaces it with the published $($latest.Version), which is a downgrade - the meeting add-in inside that older package can be older than the $installedAddInVersion registered now, and Windows Installer refuses that with 1638"
+                # Only mention the registered add-in when there is one: with none
+                # installed the sentence read "older than the  registered now".
+                $addInNote = if ($installedAddInVersion) {
+                    " - the meeting add-in inside that older package can be older than the $installedAddInVersion registered now, and Windows Installer refuses that with 1638"
+                } else { '' }
+                Write-Warn "-Force replaces it with the published $($latest.Version), which is a downgrade$addInNote"
             }
         } else {
             Write-Ok "Installed build is current ($installedVersion)"
@@ -2077,7 +2098,29 @@ try {
                     $pkg | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
                 } catch {
                     Write-Warn "Could not remove $($pkg.Name) $($pkg.Version): $($_.Exception.Message)"
-                    Write-Warn '  On a session host this is nearly always a signed-in user holding the package - drain the host or run outside working hours. The run continues; the provision below upgrades in place whatever survived'
+
+                    # -AllUsers is all or nothing: one profile it cannot touch fails
+                    # the whole call. Per user it usually still goes, and either way
+                    # the holders get named - "a user is holding it" is not actionable
+                    # until you know which user.
+                    $holders = @(Get-AppxPackageHolder -Package $pkg)
+                    if ($holders.Count -eq 0) {
+                        Write-Warn '  No user registrations are readable for it, so there is nothing left to try per user'
+                    }
+                    foreach ($holder in $holders) {
+                        if (-not $PSCmdlet.ShouldProcess("$($holder.Account) [$($holder.Sid)]",
+                                                         'Remove-AppxPackage -User (fallback, -AllUsers failed)')) { continue }
+                        try {
+                            Remove-AppxPackage -Package $pkg.PackageFullName -User $holder.Sid -ErrorAction Stop
+                            Write-Ok "  Removed it for $($holder.Account)"
+                        } catch {
+                            Write-Warn "  Still held by $($holder.Account): $($_.Exception.Message)"
+                        }
+                    }
+
+                    if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
+                        Write-Warn '  Drain the session host or run outside working hours; the provision below upgrades in place whatever survived'
+                    }
                     continue
                 }
                 if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
