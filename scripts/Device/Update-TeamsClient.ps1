@@ -12,7 +12,12 @@
                       (machine-wide installer and per-profile installs), the meeting
                       add-in, whether Outlook itself has it registered, any
                       running Teams/Outlook process, and - on a session host - what
-                      Teams logged about the media optimization.
+                      Teams logged about the media optimization. Package states are
+                      read rather than counted: a removal parked at "pending removal"
+                      only completes at a sign-out, and one whose profile is gone
+                      never will. A package the store lists but cannot find on disk
+                      is named as such - that single fact is why removing it and
+                      provisioning over it both answer 0x80070490.
       2. Check      - ask the Teams client config service which build is current for
                       this architecture and compare it with what is installed. Up to
                       date and nothing missing? Nothing happens at all.
@@ -456,6 +461,7 @@ $transcribing     = $false
 $plannedExit      = $null
 $workingDirReady  = $false
 $addInOrphaned    = $false
+$appxOrphaned     = $false
 
 # Teams reads this flag to switch to VDI media optimization; it has to be there
 # before the client is provisioned.
@@ -887,13 +893,18 @@ function Get-AppxPackageHolder {
         $account = if ($text -match '\[([^\]]+)\]' -and $Matches[1] -ne $sid) { $Matches[1] }
                    else { Resolve-SidName $sid }
 
+        # "Completes when they sign out" only holds while there is somebody left to
+        # sign out. A pending removal for a SID that has no profile on this host any
+        # more waits for an event that can never happen, and telling a technician to
+        # drain a host that is already empty sends them in a circle.
         [PSCustomObject]@{
-            Sid      = $sid
-            Account  = $account
-            State    = $state
-            IsSystem = ($sid -eq 'S-1-5-18')
-            Pending  = ($state -like '*pending removal*')
-            Raw      = $text
+            Sid        = $sid
+            Account    = $account
+            State      = $state
+            IsSystem   = ($sid -eq 'S-1-5-18')
+            Pending    = ($state -like '*pending removal*')
+            HasProfile = (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid")
+            Raw        = $text
         }
     }
 }
@@ -1675,11 +1686,14 @@ try {
         $holders = @(Get-AppxPackageHolder -Package $pkg)
         $real    = @($holders | Where-Object { -not $_.IsSystem })
         $pending = @($real | Where-Object { $_.Pending })
+        $waiting = @($pending | Where-Object { $_.HasProfile })
+        $orphans = @($pending | Where-Object { -not $_.HasProfile })
 
         $forWhom = if ($real.Count -eq 0) {
             if ($holders.Count -gt 0) { ' - staged only, not installed for any user' } else { '' }
         } elseif ($pending.Count -eq $real.Count) {
-            " - removal is pending for all $($real.Count) user(s), and completes when they sign out"
+            if ($waiting.Count -gt 0) { " - removal is pending for all $($real.Count) user(s), and completes when they sign out" }
+            else { " - removal is pending for all $($real.Count) user(s), none of whom still has a profile here" }
         } elseif ($pending.Count -gt 0) {
             " - installed for $($real.Count) user profile(s), $($pending.Count) pending removal"
         } else {
@@ -1688,10 +1702,17 @@ try {
         Write-Ok "New Teams (AppX) $($pkg.Name) $($pkg.Version)$forWhom"
 
         # A removal waiting on a sign-out is not a failure, but nothing else will get
-        # anywhere until it finishes - so it is said plainly, once.
-        if ($pending.Count -gt 0) {
-            Write-Warn "  pending removal for: $(($pending | Select-Object -ExpandProperty Account) -join ', ') - sign those users out or reboot the host, then run again"
+        # anywhere until it finishes - so it is said plainly, once. Split by whether
+        # the profile is even still here: for the ones it is not, no sign-out and no
+        # reboot will ever finish the job, and saying "drain the host" about an empty
+        # host is worse than saying nothing.
+        if ($waiting.Count -gt 0) {
+            Write-Warn "  pending removal for: $(($waiting | Select-Object -ExpandProperty Account) -join ', ') - sign those users out or reboot the host, then run again"
             $rebootRequired = $true
+        }
+        if ($orphans.Count -gt 0) {
+            $appxOrphaned = $true
+            Write-Warn "  pending removal for: $(($orphans | Select-Object -ExpandProperty Account) -join ', ') - but those profiles are no longer on this host, so there is nobody left to sign out and the removal cannot complete on its own"
         }
 
         # A package Windows considers Modified or Tampered is what makes
@@ -1700,6 +1721,21 @@ try {
         $status = Get-PropertyValue $pkg 'Status'
         if ($status -and $status -ne 'Ok') {
             Write-Warn "  that package reports Status '$status' - Windows considers it damaged, which is what makes removing it and provisioning over it fail"
+        }
+
+        # The one state nothing recovers from by itself: the package store lists the
+        # package, its files are not there. Every removal then answers 0x80070490
+        # ("Element not found") because there is nothing to remove, and provisioning
+        # that same version answers it too - measured on a session host where all five
+        # holders, S-1-5-18 included, failed with 0x80070490 and the bootstrapper then
+        # failed identically on that exact package.
+        $location = Get-PropertyValue $pkg 'InstallLocation'
+        if (-not $location) {
+            $appxOrphaned = $true
+            Write-Warn '  the package store holds no install location for it at all - the entry is an orphan, which is why removing it and provisioning over it both answer 0x80070490'
+        } elseif (-not (Test-Path $location)) {
+            $appxOrphaned = $true
+            Write-Warn "  its files are gone ($location) while the package store still lists it - the entry is an orphan, which is why removing it and provisioning over it both answer 0x80070490"
         }
 
         $candidate = [version] $pkg.Version
@@ -2147,19 +2183,37 @@ try {
                     if ($holders.Count -eq 0) {
                         Write-Warn '  No user registrations are readable for it, so there is nothing left to try per user'
                     }
+                    $tried = 0; $ghosts = 0
                     foreach ($holder in $holders) {
                         if (-not $PSCmdlet.ShouldProcess("$($holder.Account) [$($holder.Sid)]",
                                                          'Remove-AppxPackage -User (fallback, -AllUsers failed)')) { continue }
+                        $tried++
                         try {
                             Remove-AppxPackage -Package $pkg.PackageFullName -User $holder.Sid -ErrorAction Stop
                             Write-Ok "  Removed it for $($holder.Account)"
                         } catch {
-                            Write-Warn "  Still held by $($holder.Account): $($_.Exception.Message)"
+                            # 0x80070490 is not a user holding the package - it is the
+                            # store failing to find what it just told us it has. It
+                            # came back for all five holders on a session host,
+                            # S-1-5-18 among them, which no sign-out can explain.
+                            if ($_.Exception.Message -match '0x80070490|Element not found') {
+                                $ghosts++
+                                Write-Warn "  Nothing to remove for $($holder.Account) - the store lists that registration but cannot find it (0x80070490)"
+                            } else {
+                                Write-Warn "  Still held by $($holder.Account): $($_.Exception.Message)"
+                            }
                         }
                     }
 
                     if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
-                        Write-Warn '  Drain the session host or run outside working hours; the provision below upgrades in place whatever survived'
+                        if ($tried -gt 0 -and $ghosts -eq $tried) {
+                            # Every single registration was a ghost, so nobody is
+                            # holding anything and draining the host changes nothing.
+                            $appxOrphaned = $true
+                            Write-Warn '  Not one registration could be found, so nothing is holding this package - the package store itself is inconsistent, and no sign-out, drain or reboot clears that'
+                        } else {
+                            Write-Warn '  Drain the session host or run outside working hours; the provision below upgrades in place whatever survived'
+                        }
                     }
                     continue
                 }
@@ -2224,9 +2278,20 @@ try {
             # -f binds tighter than +, so building this message by concatenating
             # pieces and formatting at the end put the exit code nowhere and left a
             # literal {0} in the output - which is the one thing the reader needed.
-            throw ("Bootstrapper failed ($($result.Message)). The bootstrapper and AppX deployment lines above " +
-                   'carry the reason; on a session host a package still held by a signed-in user is the usual ' +
-                   'one, and draining the host fixes that.')
+            # Which advice belongs here is not a matter of taste: a busy host and an
+            # inconsistent package store both fail at this line, and the remedy for
+            # one is a waste of an evening on the other.
+            $why = if ($appxOrphaned) {
+                'the preflight and removal lines above show this package store listing a package it cannot find, ' +
+                'so nothing is holding Teams and no drain, sign-out or reboot changes that. Remove-AppxPackage, ' +
+                'the bootstrapper and DISM all read that same store, so none of them can repair it - on a pooled ' +
+                'session host, redeploying the host from its image is the fix, and on a personal host an in-place ' +
+                'repair of Windows is'
+            } else {
+                'the bootstrapper and AppX deployment lines above carry the reason; on a session host a package ' +
+                'still held by a signed-in user is the usual one, and draining the host fixes that'
+            }
+            throw "Bootstrapper failed ($($result.Message)). $why."
         }
         if ($result.RebootRequired) { $rebootRequired = $true }
         Write-Ok 'Bootstrapper completed'

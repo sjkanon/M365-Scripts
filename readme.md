@@ -821,6 +821,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-28 (4)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` was giving advice that could not help. A production session host answered `0x80070490` ("Element not found") for **every** holder of the package, `NT AUTHORITY\SYSTEM` among them, and the script still said to drain the host and sign users out — on a host that was already drained and had nobody on it. A registration the package store cannot find is not a user holding the package |
+| Preflight now says whether a pending removal has anybody left to wait for. `Installed(pending removal)` only completes at a sign-out, so a SID with no profile under `ProfileList` waits for an event that can never happen; those are reported apart from the ones that really are waiting, and only the latter flag a reboot |
+| It also checks the one state nothing recovers from by itself: a package the store lists whose `InstallLocation` is gone, or that has no install location at all. That single line explains the whole failure — every removal answers `0x80070490` because there is nothing to remove, and provisioning the same version answers it too |
+| When the per-user removal answers that code for every holder, the run says so plainly, and the final failure changes its advice with it: not "drain the host", but that `Remove-AppxPackage`, the bootstrapper and DISM all read the same inconsistent store, so none of them can repair it — a pooled session host is redeployed from its image, a personal one is repaired in place |
+| Exercised against the strings that host really printed, plus a live SID from this machine as the contrast case: four orphaned profiles read as orphaned, a real profile still reads as "sign them out", a package with no install location is flagged, and a healthy package stays quiet. The **remediation** is untested — this machine has no damaged package store to try it on |
+
 ### 2026-09-28 (3)
 | Change |
 |--------|

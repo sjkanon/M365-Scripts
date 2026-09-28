@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-09-25 08:50. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-09-28 15:50. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-update-op-een-werkplek-update-teamsclientps1">Teams-update op een werkplek (Update-TeamsClient.ps1)</h1>
 <p>Deze procedure beschrijft hoe de Microsoft Teams-client en de Teams Meeting Add-in voor Outlook gecontroleerd, bijgewerkt en waar nodig hersteld worden op een werkstation of AVD-sessiehost.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 controleert en meldt, level 2 voert uit, level 3 vindt onderaan de details.</p>
@@ -522,6 +522,10 @@ li > p { margin: .4rem 0; }
 <tr><td><code>Teams Meeting Add-in installation failed</code></td><td>Client staat er, add-in niet</td><td>Outlook volledig sluiten en het script opnieuw draaien</td><td>L2</td></tr>
 <tr><td><code>Outlook has the add-in switched off for ... (LoadBehavior 2)</code></td><td>Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash</td><td>Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet</td><td>L2</td></tr>
 <tr><td><code>The add-in is registered for ... but its DLL is gone (...)</code></td><td>Verouderde registratie van die gebruiker overschaduwt de machinebrede installatie</td><td>Draaien met <code>-RepairOutlookAddIn</code>; vinkje terugzetten in Outlook helpt niet</td><td>L2</td></tr>
+<tr><td><code>pending removal for: ...</code></td><td>De verwijdering is al gelukt en wacht tot die gebruikers uitloggen</td><td>Gebruikers uitloggen of de host herstarten, daarna opnieuw draaien</td><td>L2</td></tr>
+<tr><td><code>... those profiles are no longer on this host</code></td><td>Zelfde wachtstand, maar het profiel staat er niet meer: er is niemand meer om uit te loggen, dus dit lost zichzelf nooit op</td><td>Niet op wachten. Zie de regel hieronder — dit hoort bij een beschadigde pakketdatabase</td><td>L3</td></tr>
+<tr><td><code>its files are gone (...) while the package store still lists it</code></td><td>Windows heeft het pakket in zijn administratie staan, maar de bestanden zijn weg</td><td>Dit is de kern van de storing: verwijderen antwoordt <code>0x80070490</code> omdat er niets te verwijderen is, en installeren van diezelfde versie ook. Zie de regel hieronder</td><td>L3</td></tr>
+<tr><td><code>Nothing to remove for ... (0x80070490)</code></td><td>Geen gebruiker die het pakket vasthoudt, maar een registratie die Windows zelf niet kan vinden. Komt dit voor <strong>alle</strong> houders terug, inclusief <code>SYSTEM</code>, dan houdt niemand iets vast</td><td>Draineren, uitloggen en herstarten helpen geen van drieën. <code>Remove-AppxPackage</code>, de bootstrapper en DISM lezen dezelfde kapotte administratie. Een pooled AVD-sessiehost opnieuw uitrollen vanaf de image; een persoonlijke werkplek een in-place reparatie van Windows geven</td><td>L3</td></tr>
 <tr><td><code>Teams installation failed</code></td><td>De installatie is niet doorgekomen</td><td>Log in <code>C:\Temp</code> lezen en doorzetten</td><td>L3</td></tr>
 <tr><td><code>A reboot is required</code></td><td>Windows wil herstarten om af te ronden</td><td>Herstart inplannen met de gebruiker</td><td>L1</td></tr>
 </tbody>
