@@ -638,6 +638,17 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
+        Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
+        Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"
+        Params={
+            $apply = Read-Host "  Repair it now (not just report)? [y/N]"
+            $a = @{}
+            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"

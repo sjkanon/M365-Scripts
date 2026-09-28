@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-178 scripts across 56 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+180 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -78,6 +78,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Import-DnsRecords.ps1`](DNS/Import-DnsRecords.ps1) | [`DNS/`](DNS/readme.md) | Resolve public DNS records and optionally import them into Active Directory DNS. |
 | [`Import-M365Users.ps1`](Entra/Import-M365Users.ps1) | [`Entra/`](Entra/readme.md) | Bulk-create M365 users from a CSV file via Microsoft Graph. |
 | [`Import-StartMenuLayout.ps1`](TenantOnboarding/DeviceConfig/Import-StartMenuLayout.ps1) | [`TenantOnboarding/DeviceConfig/`](TenantOnboarding/DeviceConfig/readme.md) | Apply a Start Menu layout XML to the local device. |
+| [`Init-TempDisk.ps1`](Device/TempDisk/Init-TempDisk.ps1) | [`Device/TempDisk/`](Device/TempDisk/readme.md) | Bring the ephemeral temp disk back as D: and keep the pagefile on it. Meant to run at every boot from a scheduled task. Supports -WhatIf. |
 | [`Install-ChocolateyPackage.ps1`](TenantOnboarding/AppDeployment/Install-ChocolateyPackage.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Install, upgrade, or uninstall a package via Chocolatey. |
 | [`Install-ClaudeDesktop-Intune.ps1`](Intune/Desktop/ClaudeDesktop/Install-ClaudeDesktop-Intune.ps1) | [`Intune/Desktop/ClaudeDesktop/`](Intune/Desktop/ClaudeDesktop/readme.md) | Intune Win32-app install script voor Claude Desktop (machine-breed). |
 | [`Install-CoworkPrerequisites-Intune.ps1`](Intune/Desktop/CoworkPrerequisites/Install-CoworkPrerequisites-Intune.ps1) | [`Intune/Desktop/CoworkPrerequisites/`](Intune/Desktop/CoworkPrerequisites/readme.md) | Intune Win32-app install script voor de Windows-vereisten van Claude Cowork (VirtualMachinePlatform + Fast Startup), los van de Claude Desktop-app zelf. |
@@ -114,6 +115,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`New-UserTemporaryAccessPass.ps1`](Entra/New-UserTemporaryAccessPass.ps1) | [`Entra/`](Entra/readme.md) | Create a Temporary Access Pass (TAP) for a user. |
 | [`New-Workspace365Environment.ps1`](LegacyUtilities/Workspace365/New-Workspace365Environment.ps1) | [`LegacyUtilities/Workspace365/`](LegacyUtilities/Workspace365/readme.md) | Provision a new Workspace 365 environment for this tenant, including its SSO app registration and default Exchange/SharePoint links. |
 | [`Phising-rollout.ps1`](Entra/Phising-rollout.ps1) | [`Entra/`](Entra/readme.md) | Houdt twee elkaar uitsluitende statische groepen bij op basis van of een gebruiker een geaccepteerde MFA-methode heeft geregistreerd |
+| [`Register-InitTempDiskTask.ps1`](Device/TempDisk/Register-InitTempDiskTask.ps1) | [`Device/TempDisk/`](Device/TempDisk/readme.md) | Install Init-TempDisk.ps1 on the device and register it as a scheduled task that runs at every boot as SYSTEM. Supports -WhatIf. |
 | [`Register-OneDriveWatchdog.ps1`](TenantOnboarding/OneDriveManagement/Register-OneDriveWatchdog.ps1) | [`TenantOnboarding/OneDriveManagement/`](TenantOnboarding/OneDriveManagement/readme.md) | Register a scheduled task that keeps OneDrive running, restarting it hourly if needed. |
 | [`Remediate-StuckWin32AppEnforcement.ps1`](Intune/Remediate-StuckWin32AppEnforcement.ps1) | [`Intune/`](Intune/readme.md) | Intune Remediation fix script - clears Win32 apps stuck behind Intune's GRS retry cooldown on this device. |
 | [`Remove-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Remove-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Remove-CorporateWallpaper.ps1 |

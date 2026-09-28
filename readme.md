@@ -474,6 +474,19 @@ Comprehensive disk space cleanup for Windows endpoints.
 - Config-driven via a mappings CSV (`DriveLetter`, `Url`, optional `Label`); dry-run by default, `-Apply` to actually map
 - No stored credentials — relies on the signed-in user's existing tenant session (same as browser WebDAV access)
 
+#### Temp Disk & Pagefile (Azure / AVD)
+
+Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD session host in place, and keep the pagefile on it.
+
+| Script | Doel |
+|---|---|
+| [`Init-TempDisk.ps1`](scripts/Device/TempDisk/Init-TempDisk.ps1) | Restore the temp disk as `D:` and configure the pagefile on it |
+| [`Register-InitTempDiskTask.ps1`](scripts/Device/TempDisk/Register-InitTempDiskTask.ps1) | Install that script on the device and run it at every boot as SYSTEM |
+
+- The temp disk is wiped on every deallocate, resize or host move — and Windows reads the pagefile configuration at boot, so a pagefile on a drive letter that is not there at boot is never created and the machine pages on `C:` again
+- Restores the volume (RAW disks only — a disk that still carries partitions is reported, never formatted), moves an optical drive off `D:` when it is in the way, then points the pagefile at `D:\pagefile.sys` and removes the entry for every other drive
+- `-CheckOnly` reports without changing anything (exit code `2` = work is due); `-WhatIf` walks the whole flow; `-Quiet` keeps a healthy boot silent
+
 ---
 
 ### 🔧 Custom Tools
@@ -657,6 +670,10 @@ M365-Scripts/
     │   ├── DriveMapping/
     │   │   ├── readme.md
     │   │   └── New-CloudDriveMapping.ps1   ← map SharePoint/OneDrive libraries to drive letters (WebDAV)
+    │   ├── TempDisk/
+    │   │   ├── readme.md
+    │   │   ├── Init-TempDisk.ps1              ← restore the ephemeral temp disk as D: and put the pagefile on it
+    │   │   └── Register-InitTempDiskTask.ps1  ← install that script and run it at every boot as SYSTEM
     │   └── Time sync/
     │       ├── readme.md
     │       └── Restart-Time-Sync.ps1
@@ -811,6 +828,17 @@ These scripts are provided as-is. Always test in a non-production environment be
 | The add-in **uninstall** moved from step 6 to step 8, next to the install that replaces it. The sweep had already moved there; leaving the uninstall behind meant any later failure produced the same outcome by a different route. Everything destructive about the add-in now sits with the thing that undoes it |
 | Exit codes are readable. `teamsbootstrapper.exe` answers with an HRESULT, which PowerShell prints as a large negative integer: "exit code -2147023728" says nothing, `0x80070490 - Element not found` says where to look. MSI codes stay plain numbers, and an HRESULT outside the Win32 facility falls back to bare hex rather than inventing a meaning |
 | A failed provision now tries Microsoft's documented machine-wide uninstall (`teamsbootstrapper.exe -x -m`) once and provisions again before giving up, and the failure it raises names the usual cause on a session host: a package held by a signed-in user. **Untested** — that recovery has not yet run on a host that needed it |
+
+### 2026-09-28
+| Change |
+|--------|
+| Added `scripts/Device/TempDisk/Init-TempDisk.ps1`: an Azure VM's ephemeral temp disk is wiped on every deallocate, resize or host move and comes back RAW, offline or without its drive letter. Windows reads the pagefile configuration at boot and never re-reads it, so a pagefile configured on `D:` that is not there at boot is simply never created and the machine pages on `C:` again - or runs with no pagefile at all. The script restores the volume as `D:` and points the pagefile back at it |
+| A temp disk that only lost its drive letter is given the letter back rather than reformatted, recognised by its label (`Temporary Storage`) or by the `DataLoss_Warning_Readme.txt` Azure writes on the resource disk. Only a RAW, non-boot, non-system disk is ever initialised: an empty temp disk and an unformatted data disk look identical from the outside, so a disk with partitions is reported and left alone, and more than one RAW candidate makes the script refuse to guess and ask for `-DiskNumber`. `-Force` plus `-DiskNumber` is the only route to formatting a disk that still carries data |
+| An optical drive holding `D:` is moved out of the way first - Windows hands `D:` to the DVD on an image with no temp disk and never gives it back, which is the second way the pagefile ends up on `C:` |
+| The run distinguishes the pagefile as *configured* (registry) from the pagefile *in use* (this session) and says which is which, instead of reporting success for a change that only lands at the next restart. Configuring a pagefile on a drive that could not be restored is a hard failure rather than a setting Windows quietly ignores |
+| Added `scripts/Device/TempDisk/Register-InitTempDiskTask.ps1`, built on a draft that had two faults: its `-ScriptSourcePath` default referenced `$ScriptTargetDir`, a parameter declared *after* it, so the default expanded to `\Init-TempDisk.ps1` and never resolved; and the copy ran with `-ErrorAction SilentlyContinue`, so a missing source registered a boot task against a file that is not there - it then fails at every boot with nobody watching. The source now defaults to the copy next to the script, a missing source is a hard error, and the task is verified to exist after registering |
+| Documented both in a new `scripts/Device/TempDisk/readme.md`, added the folder to the `Device/` readme and the repository tree, gave the root readme a **Temp Disk & Pagefile (Azure / AVD)** entry, and wired `Init-TempDisk.ps1` into `menu.ps1` as Device key `V` (defaults to `-CheckOnly` unless you confirm the repair) |
+| Verified: both files parse clean through `Test-PowerShellSyntax.ps1`. The read-only helpers were run for real on this Windows 11 machine under both PowerShell 5.1 and 7 with `Set-StrictMode -Version Latest` - free-letter search, optical-drive lookup, temp-disk and RAW-candidate detection, and the pagefile state read (which correctly reported automatic management on and `C:\pagefile.sys` in use) - and the scheduled-task trigger, principal and settings objects were constructed and their values checked. **Not yet verified on a live Azure VM or session host**: no disk was initialised, no pagefile was changed and no task was registered from this session |
 
 ### 2026-09-25 (20)
 | Change |
