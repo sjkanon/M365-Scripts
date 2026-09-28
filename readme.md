@@ -803,6 +803,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-28
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` crashed in preflight on any machine where the meeting add-in is registered nowhere: `The property 'Count' cannot be found on this object`. `$x = if (...) { @() }` assigns `$null`, because an empty array written to the pipeline is zero objects — the `@()` has to go around the whole `if`, not inside its branches. Reproduced against the committed version and fixed; all five paths through the reporting function now pass, and the three empty ones provably threw before |
+| A package the AppX stack refuses to remove no longer ends the run. `Remove-AppxPackage -AllUsers` answered `Catastrophic failure` on a session host carrying two `MSTeams` versions, and `-ErrorAction` does not cover a terminating error, so it needed a `try`/`catch`. The run continues and the provision upgrades in place whatever survived — aborting there had left the host with the add-in uninstalled and no Teams put back |
+| The add-in **uninstall** moved from step 6 to step 8, next to the install that replaces it. The sweep had already moved there; leaving the uninstall behind meant any later failure produced the same outcome by a different route. Everything destructive about the add-in now sits with the thing that undoes it |
+| Exit codes are readable. `teamsbootstrapper.exe` answers with an HRESULT, which PowerShell prints as a large negative integer: "exit code -2147023728" says nothing, `0x80070490 - Element not found` says where to look. MSI codes stay plain numbers, and an HRESULT outside the Win32 facility falls back to bare hex rather than inventing a meaning |
+| A failed provision now tries Microsoft's documented machine-wide uninstall (`teamsbootstrapper.exe -x -m`) once and provisions again before giving up, and the failure it raises names the usual cause on a session host: a package held by a signed-in user. **Untested** — that recovery has not yet run on a host that needed it |
+
 ### 2026-09-25 (20)
 | Change |
 |--------|

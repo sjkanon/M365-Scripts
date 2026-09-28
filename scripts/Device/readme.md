@@ -17,6 +17,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 | [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
+| [`TempDisk/`](TempDisk/readme.md) | Restore the ephemeral temp disk as `D:` at every boot and keep the pagefile on it |
 
 ---
 
@@ -231,9 +232,9 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 | 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector. Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
 | 4 | Classic Teams only (`-RemoveClassicTeams`): uninstall machine-wide installer + per-profile installs | yes |
 | 5 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
-| 6 | Uninstall the add-in MSI (`1612` retried from Windows Installer's cached copy), remove `MSTeams` AppX for all users, deprovision it | yes |
+| 6 | Remove `MSTeams` AppX for all users and deprovision it; a package the AppX stack refuses to remove is reported, not fatal. The add-in is left alone here | yes |
 | 7 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
-| 8 | Compare the staged add-in MSI with what is still registered, clear every other copy of it, install it (`ALLUSERS=1`) | yes |
+| 8 | The whole add-in replacement, once the MSI is in hand: uninstall the registered one (`1612` retried from the cached copy), verify nothing survived, clear every other copy, install it (`ALLUSERS=1`) | yes |
 | 9 | Verify add-in registration (machine-wide + per signed-in user in Outlook), classic removal, provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
 Only what is missing gets done: a current client with a missing add-in installs just the add-in, and on a session host with `-AvdOptimizations` a missing WebRTC redirector installs just that.
