@@ -485,6 +485,7 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 
 - The temp disk is wiped on every deallocate, resize or host move — and Windows reads the pagefile configuration at boot, so a pagefile on a drive letter that is not there at boot is never created and the machine pages on `C:` again
 - Restores the volume (RAW disks only — a disk that still carries partitions is reported, never formatted), moves an optical drive off `D:` when it is in the way, then points the pagefile at `D:\pagefile.sys` and removes the entry for every other drive
+- Windows only reads that configuration at boot, so `-RestartIfNeeded` (what the boot task uses) restarts the machine once when that is the only thing left - never after a failed run, never while someone is signed in, and at most once an hour, with a 60-second countdown that `shutdown /a` cancels
 - `-CheckOnly` reports without changing anything (exit code `2` = work is due); `-WhatIf` walks the whole flow; `-Quiet` keeps a healthy boot silent
 
 ---
@@ -820,7 +821,21 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
-### 2026-09-28
+### 2026-09-28 (3)
+| Change |
+|--------|
+| `Init-TempDisk.ps1` repaired the temp disk and configured the pagefile on it, and then let the machine run the rest of that session without one - Windows reads the pagefile configuration at boot and never re-reads it, so the boot that had to rebuild `D:` is exactly the boot on which the pagefile does not exist. Added `-RestartIfNeeded`, which closes that gap instead of waiting for the next boot |
+| A script that runs at every boot and may restart the machine is a reboot loop waiting to happen, so it only fires when all of this holds: the run finished clean (a failed run never restarts - that would hide the failure behind a reboot), the disk is there, the pagefile is configured on it, and the only thing missing is that this session is not using it |
+| Nobody may be signed in, connected or disconnected. Sessions are counted as one `explorer.exe` per interactive desktop rather than by parsing `query.exe`, whose column headers follow the display language and would read an empty list out of a Dutch session host. `-RestartEvenIfUsersSignedIn` overrides it where the countdown is warning enough |
+| At most one restart per `-RestartCooldownMinutes` (default 60), remembered as a round-trip timestamp under `HKLM:\SOFTWARE\ICTKanon\InitTempDisk` - a locale-formatted timestamp written by one run and read by another is how a cooldown quietly stops working. A second restart for the same thing means the first one did not help, and the run says so instead of repeating it |
+| The restart goes through `shutdown.exe` with a 60-second countdown and the planned "Operating System: Reconfiguration" reason, so anyone on the machine sees it coming, `shutdown /a` stops it, and it is not reported as an unexpected restart |
+| `Register-InitTempDiskTask.ps1` now deploys the task with `-Quiet -RestartIfNeeded`, and says at registration time whether the task may restart the machine. `-ScriptArguments '-Quiet'` leaves the restart out |
+| Numbered the two earlier entries of today: two identical `### 2026-09-28` headings had ended up in the history, which reads as one change split in half |
+| Verified on this machine under PowerShell 5.1 and 7: session detection names the signed-in account (so this machine would refuse to restart), a missing marker reads as `$null`, a marker written and read back parses to a `DateTime` and blocks a second restart inside the cooldown, a 90-minute-old marker allows one, and a corrupt marker degrades to "no marker" rather than throwing |
+| Also measured how a failing `shutdown.exe` reports itself, because the code branches on it: `shutdown /a` with nothing pending answers 1116 and sets `$LASTEXITCODE` in both 5.1 and 7.6 without throwing, so the exit-code branch is the one that runs. The `try` around it stays for `$PSNativeCommandUseErrorActionPreference`, which can turn that into a terminating error on 7.4 and later |
+| **No restart was triggered from this session** and the guards remain unverified against a live Azure VM |
+
+### 2026-09-28 (2)
 | Change |
 |--------|
 | `Update-TeamsClient.ps1` crashed in preflight on any machine where the meeting add-in is registered nowhere: `The property 'Count' cannot be found on this object`. `$x = if (...) { @() }` assigns `$null`, because an empty array written to the pipeline is zero objects — the `@()` has to go around the whole `if`, not inside its branches. Reproduced against the committed version and fixed; all five paths through the reporting function now pass, and the three empty ones provably threw before |
