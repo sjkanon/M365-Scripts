@@ -93,6 +93,30 @@
     one check here that reports on the endpoints rather than on this machine, which
     makes -CheckOnly on a session host worth running on its own.
 
+    When the package store itself is broken
+    ---------------------------------------
+    A session host reached the state where every route answered 0x80070490: removing
+    the package for all users, removing it per user - for all five holders, System
+    among them - and provisioning it. That is not a user holding anything. It is
+    AppxAllUserStore listing packages Windows can no longer resolve: registrations
+    for SIDs whose profiles are gone, a machine-wide entry whose manifest is gone,
+    and the Deprovisioned marker that refuses the provision outright.
+
+    Preflight names them, with the registry path, whether or not anything may be
+    changed - so -CheckOnly is the diagnosis. -RepairAppxStore is the repair, in two
+    steps: a package whose files are still on disk is re-registered from its own
+    manifest, which rebuilds the store's knowledge of it and usually makes the
+    ordinary removal work again; what is left is removed key by key, each one named
+    first, and nothing outside MSTeams is ever touched.
+
+    -UseWinget attacks the same problem from the other side. Instead of letting the
+    bootstrapper fetch a package at run time and provision it through the store,
+    winget downloads the MSIX - checking it against the SHA256 in its own manifest -
+    and the bootstrapper provisions that file with -p -o. The deployment then has an
+    explicit source rather than a store entry it has to resolve for itself, and the
+    run knows exactly which build it installed. winget's manifest lags the config
+    service by a build or two, and the run says so when it does.
+
     The meeting add-in
     ------------------
     A full reinstall removes every copy before putting the new one back: the MSI,
@@ -191,8 +215,9 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
         means "update available").
       - Script variables arrive as environment variables, so checkboxes named whatIf,
         quiet, checkOnly, force, avdOptimizations, removeClassicTeams, repairOutlookAddIn,
-        skipMeetingAddIn, skipSignatureCheck, removeWebRtcRedirector or
-        clearOrphanedAddInRegistration and text fields named workingDir, logPath,
+        skipMeetingAddIn, skipSignatureCheck, removeWebRtcRedirector,
+        clearOrphanedAddInRegistration, repairAppxStore or useWinget
+        and text fields named workingDir, logPath,
         ring, webRtcUrl or bootstrapperUrl are picked up when the matching parameter
         is not passed.
         Capitalisation does not matter - environment lookups are case-insensitive.
@@ -237,6 +262,40 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
     Installer\Features and Installer\UserData, its entry under the upgrade code, and
     the Programs and Features entry. Off by default: it edits the Windows Installer
     database, which is a last resort rather than a maintenance step.
+
+.PARAMETER RepairAppxStore
+    Repair the AppX package store where it has lost track of MSTeams, so a host that
+    answers 0x80070490 to everything can be fixed without being redeployed. Only
+    worth running once the supported routes have failed, which is why it is off by
+    default.
+
+    Two things, in that order. Where the package's files are still on disk it is
+    re-registered from its own manifest (Add-AppxPackage -Register), which rebuilds
+    the store's knowledge of it and usually makes the ordinary removal work again.
+    What is left after that is registry: the entries under
+    HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore that no
+    longer correspond to anything - a package registered for a SID with no profile
+    on this host (also under EndOfLife and DeferredRemoval), a machine-wide entry
+    whose manifest is gone, and the Deprovisioned marker that tells Windows never to
+    provision this package again. Each one is named with its full registry path
+    before it is removed, and nothing outside MSTeams is ever touched.
+
+    Preflight reports these orphans whether or not the switch is given, so
+    -CheckOnly is the way to see what it would clear.
+
+.PARAMETER UseWinget
+    Fetch the Teams MSIX with winget and provision that exact package
+    (teamsbootstrapper.exe -p -o) instead of letting the bootstrapper download one
+    at run time. Three reasons to want it: the run knows which build it installed,
+    the package is checked twice (winget against its published SHA256, this script
+    against its Microsoft signature), and a provision with an explicit source does
+    not depend on the package store being able to resolve one - which is the state
+    -RepairAppxStore exists for.
+
+    winget's manifest is maintained separately from the Teams config service and
+    lags behind it, so this can install a slightly older build than the version
+    check reports; the run says so when it does. Run as System winget is resolved
+    from Program Files\WindowsApps, because its alias only exists per user.
 
 .PARAMETER RemoveClassicTeams
     Also remove the classic Teams client: uninstall the Teams Machine-Wide Installer
@@ -338,6 +397,8 @@ param (
     [switch] $RepairOutlookAddIn,
     [switch] $RemoveWebRtcRedirector,
     [switch] $ClearOrphanedAddInRegistration,
+    [switch] $RepairAppxStore,
+    [switch] $UseWinget,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
@@ -440,6 +501,8 @@ if (-not $PSBoundParameters.ContainsKey('RemoveClassicTeams') -and $env:removeCl
 if (-not $PSBoundParameters.ContainsKey('RepairOutlookAddIn') -and $env:repairOutlookAddIn -in $rmmTrue) { $RepairOutlookAddIn = $true }
 if (-not $PSBoundParameters.ContainsKey('RemoveWebRtcRedirector') -and $env:removeWebRtcRedirector -in $rmmTrue) { $RemoveWebRtcRedirector = $true }
 if (-not $PSBoundParameters.ContainsKey('ClearOrphanedAddInRegistration') -and $env:clearOrphanedAddInRegistration -in $rmmTrue) { $ClearOrphanedAddInRegistration = $true }
+if (-not $PSBoundParameters.ContainsKey('RepairAppxStore') -and $env:repairAppxStore -in $rmmTrue) { $RepairAppxStore = $true }
+if (-not $PSBoundParameters.ContainsKey('UseWinget')       -and $env:useWinget       -in $rmmTrue) { $UseWinget       = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
@@ -462,6 +525,15 @@ $plannedExit      = $null
 $workingDirReady  = $false
 $addInOrphaned    = $false
 $appxOrphaned     = $false
+$appxStoreCleared = $false
+$offlineMsix      = $null
+
+# Where Windows remembers, per machine and per user, which packaged apps exist. A
+# registration here that points at nothing is what makes Remove-AppxPackage and the
+# bootstrapper both answer 0x80070490: the store says the package is there, the
+# deployment engine goes looking and finds neither files nor a user to own it.
+$AppxAllUserStorePath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore'
+$ProfileListPath      = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
 
 # Teams reads this flag to switch to VDI media optimization; it has to be there
 # before the client is provisioned.
@@ -903,9 +975,125 @@ function Get-AppxPackageHolder {
             State      = $state
             IsSystem   = ($sid -eq 'S-1-5-18')
             Pending    = ($state -like '*pending removal*')
-            HasProfile = (Test-Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid")
+            HasProfile = (Test-ProfileOnHost $sid)
             Raw        = $text
         }
+    }
+}
+
+function Test-ProfileOnHost {
+    <# Whether a SID still has a profile on this machine. #>
+    param([Parameter(Mandatory)] [string] $Sid)
+    return (Test-Path "$ProfileListPath\$Sid")
+}
+
+function Get-AppxStoreRegistration {
+    <#
+        Every place AppxAllUserStore remembers one package, and whether that memory
+        still corresponds to anything:
+
+          <SID>\<package>                 the package is registered for that user
+          EndOfLife\<SID>\<package>       superseded, waiting for that user to go
+          DeferredRemoval\<SID>\<package> removal parked until that user signs out
+          Applications\<package>          the machine-wide entry, with the manifest
+                                          path it was staged from
+          Deprovisioned\<family>          "never provision this again"
+          Staged\<family>                 what is staged, reported but never touched
+
+        An entry under a SID that has no profile left, or an Applications entry whose
+        manifest is gone, is an orphan: the deployment engine walks these, finds
+        nothing behind them and answers ERROR_NOT_FOUND (0x80070490) - to a removal
+        and to a provision alike. A Deprovisioned marker is not damage but an
+        instruction, and it is the instruction that refuses the provision.
+
+        Read-only. -NameLike keeps it to one product; nothing here is generic enough
+        to be turned loose on the whole store.
+    #>
+    param([string] $NameLike = '*MSTeams*')
+
+    if (-not (Test-Path $AppxAllUserStorePath)) { return }
+
+    foreach ($scope in @(
+        @{ Root = $AppxAllUserStorePath;                   Kind = 'user registration' }
+        @{ Root = "$AppxAllUserStorePath\EndOfLife";       Kind = 'end-of-life entry' }
+        @{ Root = "$AppxAllUserStorePath\DeferredRemoval"; Kind = 'deferred removal' }
+    )) {
+        foreach ($sidKey in @(Get-ChildItem $scope.Root -ErrorAction SilentlyContinue |
+                              Where-Object { $_.PSChildName -like 'S-1-*' })) {
+            $sid     = $sidKey.PSChildName
+            $orphan  = -not (Test-ProfileOnHost $sid)
+            foreach ($pkgKey in @(Get-ChildItem $sidKey.PSPath -ErrorAction SilentlyContinue |
+                                  Where-Object { $_.PSChildName -like $NameLike })) {
+                [PSCustomObject]@{
+                    Kind     = $scope.Kind
+                    Sid      = $sid
+                    Account  = Resolve-SidName $sid
+                    Name     = $pkgKey.PSChildName
+                    Path     = $pkgKey.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
+                    Payload  = $null
+                    Orphaned = $orphan
+                    Reason   = if ($orphan) { "$sid has no profile on this host, so nothing will ever complete it" } else { '' }
+                }
+            }
+        }
+    }
+
+    foreach ($appKey in @(Get-ChildItem "$AppxAllUserStorePath\Applications" -ErrorAction SilentlyContinue |
+                          Where-Object { $_.PSChildName -like $NameLike })) {
+        $manifest = Get-PropertyValue (Get-ItemProperty $appKey.PSPath -ErrorAction SilentlyContinue) 'Path'
+        $gone     = (-not $manifest) -or (-not (Test-Path $manifest))
+        [PSCustomObject]@{
+            Kind     = 'machine registration'
+            Sid      = $null
+            Account  = $null
+            Name     = $appKey.PSChildName
+            Path     = $appKey.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
+            Payload  = $manifest
+            Orphaned = $gone
+            Reason   = if (-not $gone)   { '' }
+                       elseif ($manifest) { "the manifest it was staged from is gone ($manifest)" }
+                       else               { 'it records no manifest path at all' }
+        }
+    }
+
+    foreach ($key in @(Get-ChildItem "$AppxAllUserStorePath\Deprovisioned" -ErrorAction SilentlyContinue |
+                       Where-Object { $_.PSChildName -like $NameLike })) {
+        [PSCustomObject]@{
+            Kind     = 'deprovisioned marker'
+            Sid      = $null
+            Account  = $null
+            Name     = $key.PSChildName
+            Path     = $key.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
+            Payload  = $null
+            Orphaned = $true
+            Reason   = 'it tells Windows never to provision this package, which is exactly what the bootstrapper is trying to do'
+        }
+    }
+
+    foreach ($key in @(Get-ChildItem "$AppxAllUserStorePath\Staged" -ErrorAction SilentlyContinue |
+                       Where-Object { $_.PSChildName -like $NameLike })) {
+        [PSCustomObject]@{
+            Kind     = 'staged entry'
+            Sid      = $null
+            Account  = $null
+            Name     = $key.PSChildName
+            Path     = $key.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
+            Payload  = $null
+            Orphaned = $false
+            Reason   = ''
+        }
+    }
+}
+
+function Write-AppxStoreStatus {
+    <# The orphans, with the registry path, because that is what makes it checkable. #>
+    param($Registrations)
+
+    foreach ($entry in @($Registrations | Where-Object { $_.Orphaned })) {
+        $who = if ($entry.Account) { " for $($entry.Account)" } else { '' }
+        Write-Warn "Package store orphan - $($entry.Kind)$who`: $($entry.Name)"
+        Write-Warn "  $($entry.Reason)"
+        Write-Skip "  $($entry.Path)"
     }
 }
 
@@ -1302,6 +1490,95 @@ function Save-VerifiedDownload {
         }
     }
     return $file
+}
+
+function Get-WingetPath {
+    <#
+        winget as a path rather than a PATH lookup. It ships as an MSIX whose alias
+        lives in each user's own WindowsApps folder, so a run as System - which is
+        how an RMM runs this - finds nothing on PATH at all. The package's folder
+        under Program Files\WindowsApps is reachable either way; newest version wins.
+        $null when the App Installer is not on this machine.
+    #>
+    $command = Get-Command 'winget.exe' -ErrorAction SilentlyContinue
+    if ($command -and $command.Source -and (Test-Path $command.Source)) { return $command.Source }
+
+    $folders = @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -ErrorAction SilentlyContinue `
+                               -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' |
+                 Sort-Object -Property @{ Expression = {
+                     $raw = $_.Name -replace '^Microsoft\.DesktopAppInstaller_', '' -replace '_x64__8wekyb3d8bbwe$', ''
+                     try { [version] $raw } catch { [version] '0.0.0.0' }
+                 } })
+
+    for ($i = $folders.Count - 1; $i -ge 0; $i--) {
+        $exe = Join-Path $folders[$i].FullName 'winget.exe'
+        if (Test-Path $exe) { return $exe }
+    }
+    return $null
+}
+
+function Save-WingetPackage {
+    <#
+        Fetch the Teams MSIX through winget instead of letting the bootstrapper pick
+        its own. winget resolves the CDN URL from its manifest, checks the SHA256 it
+        published for it, and needs no Store account for the winget source - measured,
+        including the download of the 271 MB MSTeams-x64.msix.
+
+        The file is renamed to MSTeams-x64.msix: winget writes it as
+        "Microsoft Teams_<version>_X64_msix_en-US.msix", and a name with spaces is
+        one more thing to get wrong on a command line that already has an -o in it.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $Destination,
+        [string] $PackageId = 'Microsoft.Teams'
+    )
+
+    $winget = Get-WingetPath
+    if (-not $winget) {
+        throw 'winget was not found. The App Installer package provides it; install it from the Store, or drop -UseWinget to let the bootstrapper fetch Teams itself.'
+    }
+
+    # Its own directory, emptied first: winget writes the manifest yaml beside the
+    # installer, and picking "the newest .msix in the folder" out of a folder that
+    # also holds last month's attempt is how the wrong build gets installed.
+    $staging = Join-Path $Destination 'winget'
+    if (Test-Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+
+    $output = & $winget 'download' '--id' $PackageId '--exact' '--source' 'winget' `
+                        '--download-directory' $staging `
+                        '--accept-package-agreements' '--accept-source-agreements' '--disable-interactivity' 2>&1
+    foreach ($line in @($output)) {
+        $text = "$line".Trim()
+        if ($text) { Write-Skip "  winget: $text" }
+    }
+    if ($LASTEXITCODE -ne 0) { throw "winget download failed (exit code $LASTEXITCODE)" }
+
+    $msix = @(Get-ChildItem -LiteralPath $staging -File -ErrorAction SilentlyContinue |
+              Where-Object { $_.Extension -in @('.msix', '.msixbundle') } |
+              Sort-Object Length -Descending) | Select-Object -First 1
+    if (-not $msix) { throw "winget reported success but left no .msix in $staging" }
+
+    # Read the version off the name before the rename takes it away.
+    $version = if ($msix.Name -match '_(\d+\.\d+\.\d+\.\d+)_') { [version] $Matches[1] } else { $null }
+
+    # Same rule as every other installer here: signed by Microsoft, or not used.
+    if ($SkipSignatureCheck) {
+        Write-Warn "Signature check skipped for $($msix.Name) (-SkipSignatureCheck)"
+    } else {
+        $signature = Get-AuthenticodeSignature -LiteralPath $msix.FullName
+        if ($signature.Status -ne 'Valid') {
+            throw "$($msix.Name) signature is $($signature.Status) - refusing to install it"
+        }
+        if ($signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+            throw "$($msix.Name) is not signed by Microsoft: $($signature.SignerCertificate.Subject)"
+        }
+    }
+
+    $final = Join-Path $Destination 'MSTeams-x64.msix'
+    Move-Item -LiteralPath $msix.FullName -Destination $final -Force
+    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    return [PSCustomObject]@{ File = (Get-Item -LiteralPath $final); Version = $version }
 }
 
 function Get-LatestTeamsBuild {
@@ -1742,6 +2019,17 @@ try {
         if ($null -eq $installedVersion -or $candidate -gt $installedVersion) { $installedVersion = $candidate }
     }
 
+    # What the package store itself remembers. Get-AppxPackage only shows what the
+    # store is willing to describe; the registry underneath it also holds entries for
+    # users who are gone and for packages whose files are gone, and those are what a
+    # provision trips over. Read-only here - the repair is step 6b.
+    $appxStore        = @(Get-AppxStoreRegistration)
+    $appxStoreOrphans = @($appxStore | Where-Object { $_.Orphaned })
+    if ($appxStoreOrphans.Count -gt 0) {
+        $appxOrphaned = $true
+        Write-AppxStoreStatus -Registrations $appxStore
+    }
+
     # A pooled session host or a fresh image often has Teams provisioned without any
     # user having it installed yet. Without this fallback the version check has
     # nothing to compare, calls the host outdated and reinstalls on every single run.
@@ -2143,6 +2431,29 @@ try {
             $file = Save-VerifiedDownload -Uri $BootstrapperUrl -Path $exePath
             Write-Ok "Downloaded $($file.Name) ($([math]::Round($file.Length / 1MB, 1)) MB), signature verified"
         }
+
+        # The bootstrapper is 1.9 MB of downloader: it fetches the actual MSIX itself,
+        # at run time, from whatever it decides is current. -UseWinget takes that
+        # decision away - the package is fetched here, hash-checked by winget and
+        # signature-checked by us, and handed to the bootstrapper with -o. On a host
+        # whose package store is damaged that also means the provision has an explicit
+        # source to work from instead of a store entry it cannot resolve.
+        if ($UseWinget) {
+            if ($PSCmdlet.ShouldProcess('Microsoft.Teams', 'winget download (fetch the Teams MSIX)')) {
+                $package     = Save-WingetPackage -Destination $WorkingDir
+                $offlineMsix = $package.File.FullName
+                Write-Ok ("Teams MSIX from winget: {0} ({1} MB), signature verified" -f
+                          $package.File.Name, [math]::Round($package.File.Length / 1MB, 0))
+
+                # winget's manifest is maintained separately from the config service
+                # and lags behind it - measured at 26198.304.4946.9672 against a
+                # config service publishing a 26246 build. Worth saying out loud
+                # rather than letting the verification below call it "still older".
+                if ($package.Version -and $latest -and $package.Version -lt $latest.Version) {
+                    Write-Warn "winget publishes $($package.Version) while the config service publishes $($latest.Version) - winget's manifest lags, so this installs the older build"
+                }
+            }
+        }
     }
 
     # -- 6. Uninstall the add-in and the current package -----------------------
@@ -2241,6 +2552,75 @@ try {
         }
     }
 
+    # -- 6b. Repair the package store ------------------------------------------
+    # Every step above asks Windows to remove a package. This one asks what told
+    # Windows the package was there, which is the only question left once every
+    # removal answers "Element not found". It is the AppX counterpart of
+    # -ClearOrphanedAddInRegistration: scoped to MSTeams, off by default, and only
+    # worth running when the supported routes have already proved they cannot.
+    Write-Out ''
+    Write-Step '6b. AppX package store'
+    $storeNow    = @(Get-AppxStoreRegistration)
+    $storeOrphan = @($storeNow | Where-Object { $_.Orphaned })
+
+    if ($storeOrphan.Count -eq 0) {
+        Write-Skip 'Nothing orphaned in the package store'
+    } elseif (-not $RepairAppxStore) {
+        Write-Warn ("{0} orphaned MSTeams entr{1} in the package store - -RepairAppxStore rebuilds what can be rebuilt and removes the rest" -f
+                    $storeOrphan.Count, $(if ($storeOrphan.Count -eq 1) { 'y' } else { 'ies' }))
+    } else {
+        # The cheap repair first, and it is not registry surgery: when the package's
+        # files are still on disk, re-registering from its own manifest rebuilds the
+        # store's knowledge of it, after which the ordinary removal usually works.
+        # Running as System this registers the package for System, which is exactly
+        # why it is removed again in the same breath.
+        foreach ($pkg in @(Get-AppxPackage -AllUsers -Name '*MSTEAMS*' -ErrorAction SilentlyContinue)) {
+            $location = Get-PropertyValue $pkg 'InstallLocation'
+            $manifest = if ($location) { Join-Path $location 'AppxManifest.xml' } else { $null }
+            if (-not ($manifest -and (Test-Path $manifest))) {
+                Write-Skip "  $($pkg.PackageFullName) has no files left to re-register from - only its registration can be cleared"
+                continue
+            }
+            if (-not $PSCmdlet.ShouldProcess($pkg.PackageFullName,
+                                             'Add-AppxPackage -Register (rebuild the store entry from the files on disk)')) { continue }
+            try {
+                Add-AppxPackage -Register $manifest -DisableDevelopmentMode -ErrorAction Stop
+                Write-Ok "Re-registered $($pkg.PackageFullName) from its own manifest"
+                try {
+                    Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction Stop | Remove-AppxPackage -AllUsers -ErrorAction Stop
+                    $appxStoreCleared = $true
+                    Write-Ok '  and it removed cleanly this time'
+                } catch {
+                    Write-Warn "  it still refuses removal: $($_.Exception.Message)"
+                }
+            } catch {
+                Write-Warn "Could not re-register $($pkg.PackageFullName): $($_.Exception.Message)"
+            }
+        }
+
+        # Then the entries themselves. Each one is named and shown before it goes:
+        # this edits the database Windows deploys from, and a line in a transcript
+        # saying which key was removed is the difference between a repair and a
+        # mystery six months from now.
+        foreach ($entry in $storeOrphan) {
+            if (-not $PSCmdlet.ShouldProcess($entry.Path, "Remove the orphaned $($entry.Kind)")) { continue }
+            Remove-Item -Path $entry.Path -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $entry.Path) {
+                Write-Warn "Could not remove $($entry.Path)"
+            } else {
+                $appxStoreCleared = $true
+                Write-Ok "Removed the orphaned $($entry.Kind) for $($entry.Name)"
+            }
+        }
+
+        $storeLeft = @(Get-AppxStoreRegistration | Where-Object { $_.Orphaned })
+        if ($storeLeft.Count -eq 0) {
+            Write-Ok 'The package store holds no orphaned MSTeams entries any more'
+        } else {
+            Write-Warn "$($storeLeft.Count) orphaned entr$(if ($storeLeft.Count -eq 1) { 'y' } else { 'ies' }) survived the cleanup - the provision below may still fail"
+        }
+    }
+
     # -- 7. Install / provision new Teams --------------------------------------
     Write-Out ''
     Write-Step '7. Install new Teams'
@@ -2249,7 +2629,13 @@ try {
     } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
         if (-not (Test-Path $exePath)) { throw "Bootstrapper not found at $exePath" }
 
-        $result = Invoke-Bootstrapper -Path $exePath -Arguments '-p'
+        # -p provisions whatever the bootstrapper downloads for itself; -p -o <msix>
+        # provisions the package in hand. The second is the documented offline route
+        # and the only one where this script knows which build it installed.
+        $provisionArgs = if ($offlineMsix) { "-p -o `"$offlineMsix`"" } else { '-p' }
+        if ($offlineMsix) { Write-Ok "Provisioning from the package in hand: $offlineMsix" }
+
+        $result = Invoke-Bootstrapper -Path $exePath -Arguments $provisionArgs
 
         if (-not $result.Success) {
             # A provision that fails here almost always means the AppX state is
@@ -2265,7 +2651,7 @@ try {
                 if ($cleanup.Success) { Write-Ok 'Teams uninstalled machine-wide' }
                 else { Write-Warn "The machine-wide uninstall did not succeed either ($($cleanup.Message))" }
 
-                $result = Invoke-Bootstrapper -Path $exePath -Arguments '-p'
+                $result = Invoke-Bootstrapper -Path $exePath -Arguments $provisionArgs
             }
         }
 
@@ -2275,18 +2661,27 @@ try {
             # be closed" is an answer, 0x80070490 on its own is not.
             Write-AppxDeploymentError
 
+            if (-not $offlineMsix) {
+                Write-Skip '  -UseWinget fetches the MSIX and provisions from it (-p -o), which hands the deployment an explicit source instead of a store entry it has to resolve for itself'
+            }
+
             # -f binds tighter than +, so building this message by concatenating
             # pieces and formatting at the end put the exit code nowhere and left a
             # literal {0} in the output - which is the one thing the reader needed.
             # Which advice belongs here is not a matter of taste: a busy host and an
             # inconsistent package store both fail at this line, and the remedy for
             # one is a waste of an evening on the other.
-            $why = if ($appxOrphaned) {
-                'the preflight and removal lines above show this package store listing a package it cannot find, ' +
-                'so nothing is holding Teams and no drain, sign-out or reboot changes that. Remove-AppxPackage, ' +
-                'the bootstrapper and DISM all read that same store, so none of them can repair it - on a pooled ' +
-                'session host, redeploying the host from its image is the fix, and on a personal host an in-place ' +
-                'repair of Windows is'
+            $why = if ($appxOrphaned -and -not $RepairAppxStore) {
+                'the lines above show this package store listing a package it cannot find, so nothing is holding ' +
+                'Teams and no drain, sign-out or reboot changes that. Remove-AppxPackage, the bootstrapper and ' +
+                'DISM all read that same store and none of them can repair it - -RepairAppxStore does: it ' +
+                're-registers what still has files on disk and clears the registrations Windows can no longer ' +
+                'resolve. Run it before redeploying anything'
+            } elseif ($appxOrphaned) {
+                'the package store repair already ran, and step 6b says what it could and could not clear. ' +
+                'Anything still failing here is past what the registry can explain - on a pooled session host, ' +
+                'redeploying from the image is cheaper than going further, and on a personal host an in-place ' +
+                'repair of Windows is the supported route'
             } else {
                 'the bootstrapper and AppX deployment lines above carry the reason; on a session host a package ' +
                 'still held by a signed-in user is the usual one, and draining the host fixes that'
@@ -2566,8 +2961,19 @@ try {
             $exitCode = 1
         }
 
+        # Editing the store out from under a running deployment engine leaves it with
+        # a cached view of what it just lost. Nothing here depends on the restart, but
+        # the next run starts from a clean reading of the store rather than a stale one.
+        if ($appxStoreCleared) {
+            $rebootRequired = $true
+            Write-Warn 'The package store was repaired in step 6b - restart this host when convenient so the deployment engine rereads it from scratch'
+        }
+
         Write-Out ''
-        if ($rebootRequired) { Write-Warn 'A reboot is required to complete the installation (MSI returned 3010)' }
+        # Deliberately no reason in this line: a 3010 from an MSI, a removal waiting on
+        # a sign-out and a repaired package store all set it, and naming only the first
+        # sent readers looking for an installer that never ran.
+        if ($rebootRequired) { Write-Warn 'A reboot is required to finish - the lines above say what is waiting on it' }
         if ($exitCode -eq 0) { Write-Ok 'Done' }
     }
 } catch {

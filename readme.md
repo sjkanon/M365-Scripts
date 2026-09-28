@@ -485,7 +485,7 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 
 - The temp disk is wiped on every deallocate, resize or host move — and Windows reads the pagefile configuration at boot, so a pagefile on a drive letter that is not there at boot is never created and the machine pages on `C:` again
 - Restores the volume (RAW disks only — a disk that still carries partitions is reported, never formatted), moves an optical drive off `D:` when it is in the way, then points the pagefile at `D:\pagefile.sys` and removes the entry for every other drive
-- Windows only reads that configuration at boot, so `-RestartIfNeeded` (what the boot task uses) restarts the machine once when that is the only thing left - never after a failed run, never while someone is signed in, and at most once an hour, with a 60-second countdown that `shutdown /a` cancels
+- Windows only reads that configuration at boot, so `-RestartIfNeeded` (what the boot task uses) restarts the machine once when that is the only thing left - never after a failed run, never while someone is signed in, and at most once an hour. The countdown only applies when someone is signed in to see it; at boot it restarts within seconds
 - `-CheckOnly` reports without changing anything (exit code `2` = work is due); `-WhatIf` walks the whole flow; `-Quiet` keeps a healthy boot silent
 
 ---
@@ -821,6 +821,18 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-28 (5)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` can now repair the host instead of only diagnosing it. A session host where every route answered `0x80070490` had an `AppxAllUserStore` full of entries Windows can no longer resolve, and the honest advice at that point was "redeploy" — which is not what anyone wants to hear about a machine that is otherwise fine |
+| `-RepairAppxStore` does it in two steps. A package whose files are still on disk is re-registered from its own manifest (`Add-AppxPackage -Register`), which rebuilds the store's knowledge of it and usually makes the ordinary removal work again. What survives that is removed key by key: registrations under a SID with no profile on this host (also under `EndOfLife` and `DeferredRemoval`), a machine-wide `Applications` entry whose manifest is gone, and the `Deprovisioned` marker that refuses the provision outright. Each key is named with its full registry path before it goes, and nothing outside MSTeams is ever touched |
+| Preflight reports those orphans whether or not the switch is given, so `-CheckOnly` is the diagnosis and the repair is a separate decision — the same shape as `-ClearOrphanedAddInRegistration` for Windows Installer |
+| `-UseWinget` attacks it from the other side: winget downloads the MSIX, checking it against the SHA256 in its own manifest, and the bootstrapper provisions that file with `-p -o`. The deployment then has an explicit source rather than a store entry it has to resolve, and the run knows which build it installed. winget's manifest lags the config service — measured at `26198.304.4946.9672` against a `26246` build — and the run says so when it does |
+| Run as System, winget is not on `PATH` at all: its alias is a per-user MSIX shim. It is resolved from `Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*` instead, verified by emptying `PATH` and watching the fallback find it |
+| The store reader was run against this workstation's live `AppxAllUserStore`, where it found two genuine orphans (`S-1-0-0` and a deleted profile's SID under `EndOfLife`), reported none for healthy packages and kept every path inside the store. The **removal** was exercised for real against a store rebuilt under `HKCU`: 9 MSTeams entries, 6 orphaned, all 6 removed, while the healthy registrations, the `Staged` entry, another product's orphan and the dead SID's own key all survived |
+| `winget download` was measured end to end: 271 MB in 23 seconds, no Store account, its own hash check, a valid `O=Microsoft Corporation` signature, the staging folder emptied first and removed after. Against a host whose package store is actually damaged, both switches are **untested** — no machine here has one |
+| The reboot line stopped naming a reason. It said "MSI returned 3010" while three different things set it, and pointed readers at an installer that had never run |
+
 ### 2026-09-28 (4)
 | Change |
 |--------|
@@ -829,6 +841,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 | It also checks the one state nothing recovers from by itself: a package the store lists whose `InstallLocation` is gone, or that has no install location at all. That single line explains the whole failure — every removal answers `0x80070490` because there is nothing to remove, and provisioning the same version answers it too |
 | When the per-user removal answers that code for every holder, the run says so plainly, and the final failure changes its advice with it: not "drain the host", but that `Remove-AppxPackage`, the bootstrapper and DISM all read the same inconsistent store, so none of them can repair it — a pooled session host is redeployed from its image, a personal one is repaired in place |
 | Exercised against the strings that host really printed, plus a live SID from this machine as the contrast case: four orphaned profiles read as orphaned, a real profile still reads as "sign them out", a package with no install location is flagged, and a healthy package stays quiet. The **remediation** is untested — this machine has no damaged package store to try it on |
+
+### 2026-09-28 (4)
+| Change |
+|--------|
+| The restart `-RestartIfNeeded` triggers waited 60 seconds on a host where nobody could be watching. The countdown exists to warn people, so it now only applies when there are people: with someone signed in it is `-RestartDelaySeconds` and `shutdown /a` stops it; with nobody signed in - the normal case at boot, and the guaranteed one on a session host whose pool is set to drain - it restarts within seconds. A few seconds are kept so the run's own log line is written before the shutdown starts |
+| Considered draining logons from inside the guest (`change logon /drainuntilrestart`) to close the window between the task starting and the restart, and dropped it: a host being restarted this way already has its pool on drain, so the guest-side switch would only duplicate what the pool guarantees - and it would leave logons blocked on any run that crashed before re-enabling them |
+| Verified that `change.exe` and `chglogon.exe` exist on this Windows 11 build and that `change logon /query` reports "Session logins are currently ENABLED" while exiting 1, which is why the idea was measured before being dropped rather than after |
 
 ### 2026-09-28 (3)
 | Change |
