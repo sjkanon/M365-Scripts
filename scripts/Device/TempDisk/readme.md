@@ -24,6 +24,7 @@ Per run:
 3. **Disk** — a volume that already *is* the temp disk gets its drive letter back; otherwise a RAW, non-boot, non-system disk is brought online, initialised GPT, partitioned and formatted NTFS
 4. **Pagefile** — automatic management off, the pagefile pointed at `D:\pagefile.sys`, the entry for every other drive removed
 5. **Verify** — all of it read back, saying what is in effect now and what waits for the next restart
+6. **Restart** — only with `-RestartIfNeeded`: restart the machine when that is the one thing left between the configuration and a pagefile that is actually in use
 
 A temp disk that only lost its drive letter is given the letter back, never reformatted — the volume is recognised by its label (`Temporary Storage`) or by the `DataLoss_Warning_Readme.txt` that Azure writes on the resource disk.
 
@@ -38,6 +39,10 @@ A temp disk that only lost its drive letter is given the letter back, never refo
 | `-KeepSystemDrivePagefile` | Leave an existing pagefile on `C:` in place instead of removing it |
 | `-SkipPagefile` | Only restore the disk; do not touch the pagefile configuration |
 | `-OpticalDriveLetter` | Letter an optical drive is moved to when it holds `D:` (default: `Z`) |
+| `-RestartIfNeeded` | Restart the machine when that is the only thing left between the configuration and a pagefile in use. Off by default |
+| `-RestartDelaySeconds` | Countdown before that restart (default: `60`) — `shutdown /a` cancels it |
+| `-RestartCooldownMinutes` | Shortest interval between two restarts triggered by this script (default: `60`) |
+| `-RestartEvenIfUsersSignedIn` | Restart even when someone is signed in. On a session host, drain it instead |
 | `-CheckOnly` | Report only, change nothing. Exit code `2` means work is due |
 | `-Quiet` | Print nothing unless there is news — the log file always gets the full story |
 | `-LogPath` | Folder for `Init-TempDisk.log` (default: `C:\Temp`), appended and rotated past 1 MB |
@@ -52,8 +57,9 @@ A temp disk that only lost its drive letter is given the letter back, never refo
 # Walk the whole flow without touching the machine
 .\Init-TempDisk.ps1 -WhatIf
 
-# How the scheduled task runs it — silent while everything is in order
-.\Init-TempDisk.ps1 -Quiet
+# How the scheduled task runs it — silent while everything is in order,
+# and one restart when that is what the pagefile is waiting for
+.\Init-TempDisk.ps1 -Quiet -RestartIfNeeded
 
 # Fixed 16 GB pagefile instead of a system managed one
 .\Init-TempDisk.ps1 -InitialSizeMB 16384 -MaximumSizeMB 16384
@@ -73,7 +79,9 @@ A temp disk that only lost its drive letter is given the letter back, never refo
 **Notes**
 - **Nothing that is not RAW is ever initialised.** An empty temp disk and an unformatted data disk look identical from the outside, so a disk that already carries partitions is reported and left alone. With more than one RAW candidate the script refuses to guess and asks for `-DiskNumber`; `-Force` plus `-DiskNumber` is the only way to format a disk that still has partitions
 - A local NVMe disk wins over other RAW disks when several are present — on the newer VM sizes that *is* the temp disk
-- **A pagefile written by a run appears at the next restart.** Windows reads the configuration at boot and never re-reads it, so the run says so rather than claiming success. Because the task runs at every boot the device heals itself: the boot that recreates `D:` configures the pagefile, the next boot puts it in use
+- **A pagefile written by a run appears at the next restart.** Windows reads the configuration at boot and never re-reads it, so the run says so rather than claiming success. Because the task runs at every boot the device heals itself even without `-RestartIfNeeded`: the boot that recreates `D:` configures the pagefile, the next boot puts it in use
+- `-RestartIfNeeded` closes that gap instead of waiting for it, and a script that runs at every boot and may restart the machine is a reboot loop waiting to happen — so it only fires when **all** of this holds: the run finished clean, the disk is there, the pagefile is configured on it and only this session is not using it; nobody is signed in (connected *or* disconnected — one `explorer.exe` per desktop, which is language independent where parsing `query.exe` is not); and no restart was triggered in the last `-RestartCooldownMinutes`, remembered under `HKLM:\SOFTWARE\ICTKanon\InitTempDisk`. A run that failed never restarts — that would hide the failure behind a reboot
+- The restart goes through `shutdown.exe` with a 60-second countdown and the planned "Operating System: Reconfiguration" reason, so anyone on the machine sees it coming, `shutdown /a` stops it, and it shows up as intended rather than unexpected
 - Configuring a pagefile on a drive that is not there would write a setting Windows ignores, so the run fails instead if `D:` could not be restored
 - Needs administrator rights; started by hand from an ordinary window it asks for elevation itself
 
@@ -85,6 +93,8 @@ Run once per device — by hand, from Tactical RMM / NinjaOne, or as an Intune p
 
 Re-running it is safe: a task with the same name is replaced, so this is also how the arguments the task runs with are changed.
 
+The task runs `Init-TempDisk.ps1 -Quiet -RestartIfNeeded` by default. Windows reads the pagefile configuration at boot, so a boot on which the temp disk had to be rebuilt runs that whole session without a pagefile on `D:` unless the machine restarts once — and the guards above are what make that safe to hand to a boot task. Pass `-ScriptArguments '-Quiet'` to leave the restart out.
+
 **Parameters**
 
 | Parameter | Description |
@@ -92,7 +102,7 @@ Re-running it is safe: a task with the same name is replaced, so this is also ho
 | `-ScriptSourcePath` | `Init-TempDisk.ps1` to install (default: the copy next to this script) |
 | `-ScriptTargetDir` | Folder it is copied to on the device (default: `C:\Scripts`) |
 | `-TaskName` | Name of the scheduled task (default: `InitTempDisk`) |
-| `-ScriptArguments` | Extra arguments for `Init-TempDisk.ps1` (default: `-Quiet`) |
+| `-ScriptArguments` | Arguments for `Init-TempDisk.ps1` (default: `-Quiet -RestartIfNeeded`) |
 | `-DelaySeconds` | Delay between boot and the task starting (default: `30`) |
 | `-RunNow` | Also start the task once immediately, instead of waiting for a reboot |
 | `-Unregister` | Remove the task and the installed copy of the script |
@@ -107,7 +117,10 @@ Re-running it is safe: a task with the same name is replaced, so this is also ho
 .\Register-InitTempDiskTask.ps1 -RunNow
 
 # Same, but with a fixed 16 GB pagefile
-.\Register-InitTempDiskTask.ps1 -ScriptArguments '-Quiet -InitialSizeMB 16384 -MaximumSizeMB 16384'
+.\Register-InitTempDiskTask.ps1 -ScriptArguments '-Quiet -RestartIfNeeded -InitialSizeMB 16384 -MaximumSizeMB 16384'
+
+# Without the restart — the pagefile lands at whatever restart happens next
+.\Register-InitTempDiskTask.ps1 -ScriptArguments '-Quiet'
 
 # Take it off the device again
 .\Register-InitTempDiskTask.ps1 -Unregister
@@ -118,3 +131,4 @@ Re-running it is safe: a task with the same name is replaced, so this is also ho
 - A missing source file is a hard error rather than a silent skip — a task registered against a file that is not there runs and fails at every boot without anyone noticing, until the pagefile is gone
 - The startup trigger is delayed 30 seconds by default: the storage stack does not always have the temp disk enumerated the moment the task engine is up
 - `-Unregister` deliberately leaves the pagefile configuration alone — removing the task must not take a machine's pagefile with it
+- Registering says out loud whether the task may restart the machine; running it with `-RunNow` on a device nobody is signed in to can therefore start a 60-second countdown

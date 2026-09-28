@@ -16,6 +16,14 @@
     that work and is silent when there is nothing to do, so a boot on a healthy
     machine leaves no trace beyond its log line.
 
+    The task runs it with -Quiet -RestartIfNeeded by default. Windows reads the
+    pagefile configuration at boot, so a boot on which the temp disk had to be
+    rebuilt runs that whole session without a pagefile on D: unless the machine
+    restarts once. Init-TempDisk.ps1 only restarts when it demonstrably helps: the
+    run finished clean, the disk is there, the pagefile is configured on it and only
+    this session is not using it - and never while someone is signed in, and at most
+    once an hour. Pass -ScriptArguments '-Quiet' to leave the restart out.
+
     Re-running this script is safe: an existing task with the same name is replaced,
     so it is also the way to change the arguments the task runs with.
 
@@ -34,9 +42,11 @@
     Name of the scheduled task (default: InitTempDisk).
 
 .PARAMETER ScriptArguments
-    Extra arguments for Init-TempDisk.ps1 (default: -Quiet, which keeps a healthy
-    boot silent). Pass e.g. '-Quiet -InitialSizeMB 16384 -MaximumSizeMB 16384' for a
-    fixed pagefile size.
+    Arguments for Init-TempDisk.ps1 (default: '-Quiet -RestartIfNeeded' - silent on a
+    healthy boot, and one restart when that is what the pagefile is waiting for).
+    Pass '-Quiet' to leave the restart out, or e.g.
+    '-Quiet -RestartIfNeeded -InitialSizeMB 16384 -MaximumSizeMB 16384' for a fixed
+    pagefile size.
 
 .PARAMETER DelaySeconds
     Delay between boot and the task starting (default: 30). The storage stack does
@@ -60,9 +70,15 @@
     Install the script, register the boot task and run it once immediately.
 
 .EXAMPLE
-    .\Register-InitTempDiskTask.ps1 -ScriptArguments '-Quiet -InitialSizeMB 16384 -MaximumSizeMB 16384'
+    .\Register-InitTempDiskTask.ps1 -ScriptArguments '-Quiet -RestartIfNeeded -InitialSizeMB 16384 -MaximumSizeMB 16384'
 
     Same, but with a fixed 16 GB pagefile instead of a system managed one.
+
+.EXAMPLE
+    .\Register-InitTempDiskTask.ps1 -ScriptArguments '-Quiet'
+
+    Without the restart: the task repairs the disk and configures the pagefile, and
+    the pagefile is put in use at whatever restart happens next.
 
 .EXAMPLE
     .\Register-InitTempDiskTask.ps1 -Unregister
@@ -78,7 +94,7 @@ param (
     [string] $ScriptTargetDir  = 'C:\Scripts',
     [string] $ScriptSourcePath = (Join-Path $PSScriptRoot 'Init-TempDisk.ps1'),
     [string] $TaskName         = 'InitTempDisk',
-    [string] $ScriptArguments  = '-Quiet',
+    [string] $ScriptArguments  = '-Quiet -RestartIfNeeded',
     [ValidateRange(0, 3600)]
     [int]    $DelaySeconds     = 30,
     [switch] $RunNow,
@@ -195,7 +211,13 @@ try {
         Write-Skip 'Not run yet - it runs at the next boot, or add -RunNow to do it immediately'
     }
 
-    Write-Warn 'A pagefile is read at boot, so a pagefile this task configures is only in use after the next restart'
+    # What the task may do to a machine is worth saying at registration time, not
+    # only in the help of the script it runs.
+    if ($ScriptArguments -match '(?i)-RestartIfNeeded') {
+        Write-Warn 'A pagefile is read at boot, so this task may restart the machine once - only when the disk is in order, the pagefile is configured on it, nobody is signed in, and no restart was triggered in the last hour'
+    } else {
+        Write-Warn 'A pagefile is read at boot, so a pagefile this task configures is only in use after the next restart (-RestartIfNeeded in -ScriptArguments makes the task handle that itself)'
+    }
 } catch {
     Write-Host ''
     Write-Host "  [FAIL] Aborted: $($_.Exception.Message)" -ForegroundColor Red

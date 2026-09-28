@@ -29,6 +29,9 @@
                      and the entry for every other drive removed.
       5. Verify    - everything read back, saying what is in effect now and what is
                      waiting for the next restart.
+      6. Restart   - only with -RestartIfNeeded: restart the machine when that is the
+                     one thing left between the configuration and a pagefile that is
+                     actually in use.
 
     Safety
     ------
@@ -46,6 +49,25 @@
     a failure and is reported as such rather than counted as success. Because the
     task runs at every boot the device heals itself: the boot that recreates D:
     configures the pagefile, the next boot puts it in use.
+
+    -RestartIfNeeded closes that gap instead of waiting for it. A script that runs at
+    every boot and may restart the machine is a reboot loop waiting to happen, so it
+    only fires when a restart demonstrably fixes something and cannot repeat:
+
+      - the run finished clean, the temp disk is there, the pagefile is configured on
+        it, and the only thing missing is that this session is not using it yet. A
+        run that failed never restarts - that would hide the failure behind a reboot;
+      - nobody is signed in, connected or disconnected. A session host restarts when
+        it is drained, not while someone is in a meeting. -RestartEvenIfUsersSignedIn
+        overrides that for a fleet where the countdown is warning enough;
+      - at most one restart per -RestartCooldownMinutes, remembered in the registry
+        under HKLM:\SOFTWARE\ICTKanon\InitTempDisk. A second restart for the same
+        thing means the first one did not help, and repeating it forever is worse
+        than saying so.
+
+    The restart is announced through shutdown.exe with a countdown (60 seconds by
+    default), so anyone who is on the machine sees it coming and can stop it with
+    shutdown /a.
 
     Exit codes
     ----------
@@ -81,6 +103,24 @@
     Letter an optical drive is moved to when it holds the target letter
     (default: Z). Any other free letter is used when that one is taken as well.
 
+.PARAMETER RestartIfNeeded
+    Restart the machine when that is the only thing left between the configuration
+    and a pagefile that is actually in use. Off by default. Never restarts after a
+    failed run, never while a user is signed in, and at most once per
+    -RestartCooldownMinutes.
+
+.PARAMETER RestartDelaySeconds
+    Countdown before the restart (default: 60). Anyone on the machine sees the
+    notice and can stop it with shutdown /a.
+
+.PARAMETER RestartCooldownMinutes
+    Shortest interval between two restarts triggered by this script (default: 60).
+    A second restart for the same thing means the first one did not help.
+
+.PARAMETER RestartEvenIfUsersSignedIn
+    Restart even when someone is signed in. Only sensible where the countdown is
+    warning enough - on a session host, drain it instead.
+
 .PARAMETER CheckOnly
     Report only, change nothing. Exit code 2 means work is due.
 
@@ -113,6 +153,13 @@
     How the scheduled task runs it: silent while everything is in order.
 
 .EXAMPLE
+    .\Init-TempDisk.ps1 -Quiet -RestartIfNeeded
+
+    The same, but a boot that had to rebuild the temp disk restarts the machine so
+    the pagefile is in use straight away - if nobody is signed in and no restart was
+    triggered in the last hour.
+
+.EXAMPLE
     .\Init-TempDisk.ps1 -InitialSizeMB 16384 -MaximumSizeMB 16384
 
     Fixed 16 GB pagefile on the temp disk instead of a system managed one.
@@ -141,6 +188,12 @@ param (
     [switch] $SkipPagefile,
     [ValidatePattern('^[D-Zd-z]:?$')]
     [string] $OpticalDriveLetter = 'Z',
+    [switch] $RestartIfNeeded,
+    [ValidateRange(0, 3600)]
+    [int]    $RestartDelaySeconds = 60,
+    [ValidateRange(0, 10080)]
+    [int]    $RestartCooldownMinutes = 60,
+    [switch] $RestartEvenIfUsersSignedIn,
     [switch] $CheckOnly,
     [switch] $Quiet,
     [string] $LogPath = 'C:\Temp',
@@ -154,9 +207,14 @@ $simulate      = [bool] $WhatIfPreference
 $targetLetter  = $DriveLetter.TrimEnd(':').ToUpper()
 $targetRoot    = "${targetLetter}:"
 $pagefilePath  = "$targetRoot\pagefile.sys"
-$exitCode      = 0
-$changed       = $false
-$rebootPending = $false
+$exitCode         = 0
+$changed          = $false
+$rebootPending    = $false
+$restartTriggered = $false
+
+# Where the last self-triggered restart is remembered. In the registry rather than
+# next to the log, because the whole point is to survive the restart it records.
+$RestartMarkerPath = 'HKLM:\SOFTWARE\ICTKanon\InitTempDisk'
 
 function Test-Elevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -338,6 +396,45 @@ function Set-PagefileEntry {
     }
 }
 
+function Get-InteractiveSession {
+    <#
+        Who is on this machine, connected or disconnected. One explorer.exe runs per
+        interactive desktop, which is language independent - unlike parsing query.exe,
+        whose column headers follow the display language and would read an empty list
+        out of a Dutch session host.
+    #>
+    $sessions = [System.Collections.Generic.List[string]]::new()
+    foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
+        $who = $null
+        try {
+            $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction Stop
+            if ($owner.User) {
+                $who = if ($owner.Domain) { "$($owner.Domain)\$($owner.User)" } else { $owner.User }
+            }
+        } catch {
+            $who = $null   # a session we cannot name still counts as a session
+        }
+        $sessions.Add($(if ($who) { $who } else { "session $($proc.SessionId)" }))
+    }
+    return @($sessions | Select-Object -Unique)
+}
+
+function Get-RestartMarker {
+    <# When this script last restarted the machine, or $null if it never did. #>
+    $item = Get-ItemProperty -Path $RestartMarkerPath -Name 'LastRestart' -ErrorAction SilentlyContinue
+    if (-not $item) { return $null }
+    try { return [datetime]::Parse($item.LastRestart, [Globalization.CultureInfo]::InvariantCulture) }
+    catch { return $null }
+}
+
+function Set-RestartMarker {
+    <# Record a restart so the next run can refuse to repeat it. Round-trip format
+       on purpose: a locale-formatted timestamp written by one run and read by
+       another under a different locale is how a cooldown quietly stops working. #>
+    if (-not (Test-Path $RestartMarkerPath)) { New-Item -Path $RestartMarkerPath -Force | Out-Null }
+    Set-ItemProperty -Path $RestartMarkerPath -Name 'LastRestart' -Value ((Get-Date).ToString('o')) -Force
+}
+
 # -- Elevation -----------------------------------------------------------------
 # Disk and pagefile changes need administrator rights. Run by the scheduled task this
 # is already true; started by hand it usually is not, so ask for elevation instead of
@@ -440,6 +537,13 @@ try {
     $reasons = @()
     if (-not $diskReady)  { $reasons += "$targetRoot is not a fixed volume" }
     if (-not $pagefileOk) { $reasons += 'the pagefile is not configured on it' }
+
+    # With -RestartIfNeeded a correctly configured pagefile that this session is not
+    # using is work too: the restart is what puts it in use. Without the switch it is
+    # only worth a warning, and the run below stops at "nothing to do".
+    if ($RestartIfNeeded -and -not $SkipPagefile -and $pagefile.Active -notcontains $pagefilePath) {
+        $reasons += "$pagefilePath is configured but not in use in this session"
+    }
 
     if ($reasons.Count -eq 0) {
         Write-Out ''
@@ -643,14 +747,88 @@ try {
         }
     }
 
-    if ($changed -or $exitCode -ne 0) { Show-HeldOutput }
+    # -- 7. Restart ------------------------------------------------------------
+    # Everything above is idempotent and can be repeated for free. This cannot, so
+    # it is the one step that has to prove it will help before it acts.
+    Write-Out ''
+    Write-Step '6. Restart'
+    if (-not $RestartIfNeeded) {
+        if ($rebootPending) { Write-Skip 'Not restarting - use -RestartIfNeeded to have the pagefile put in use without waiting for the next boot' }
+        else                { Write-Skip 'Not needed' }
+    } elseif ($simulate) {
+        Write-Skip 'Skipped - a -WhatIf run never restarts anything'
+    } elseif (-not $rebootPending) {
+        Write-Skip 'Not needed - the pagefile on the temp disk is already in use'
+    } elseif ($exitCode -ne 0) {
+        # A restart here would replace a visible failure with a reboot and a device
+        # that comes back just as broken.
+        Write-Warn 'Not restarting: something above failed, and a restart would only hide it'
+    } else {
+        $signedIn = @(Get-InteractiveSession)
+        $marker   = Get-RestartMarker
+        $since    = if ($marker) { (Get-Date) - $marker } else { $null }
+
+        if ($signedIn.Count -gt 0 -and -not $RestartEvenIfUsersSignedIn) {
+            Write-Warn ("Not restarting: {0} signed in ({1}) - drain the machine, or pass -RestartEvenIfUsersSignedIn. The pagefile lands at their next restart either way" -f
+                        $(if ($signedIn.Count -eq 1) { 'someone is' } else { "$($signedIn.Count) users are" }), ($signedIn -join ', '))
+        } elseif ($since -and $since.TotalMinutes -lt $RestartCooldownMinutes) {
+            # The second restart for the same thing is the first symptom of a loop.
+            Write-Warn ('Not restarting: this script already restarted the machine {0:N0} minute(s) ago ({1:yyyy-MM-dd HH:mm}) and the pagefile is still not in use - restarting again would only repeat that. Check the log at {2}' -f
+                        $since.TotalMinutes, $marker, $LogPath)
+        } else {
+            if ($signedIn.Count -gt 0) {
+                Write-Warn ('Restarting with {0} signed in (-RestartEvenIfUsersSignedIn): {1}' -f $signedIn.Count, ($signedIn -join ', '))
+            }
+            $notice = "The temp disk was restored; this computer restarts in order to put the pagefile on $targetRoot."
+            if ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Restart in $RestartDelaySeconds seconds so $pagefilePath is created")) {
+                # The guard goes down before the thing it guards, not after: a restart
+                # that happens without its marker having been written is a restart
+                # nothing can stop from happening again at the next boot. A marker
+                # left behind by a restart that then failed to schedule only costs one
+                # cooldown, which is the cheaper of the two mistakes.
+                $guarded = $false
+                try { Set-RestartMarker; $guarded = $true }
+                catch { Write-Bad "Not restarting: the restart marker could not be written ($($_.Exception.Message)), and without it nothing limits a restart loop"; $exitCode = 1 }
+
+                if ($guarded) {
+                    # p:2:4 is the planned "Operating System: Reconfiguration" reason,
+                    # so the restart shows up as intended rather than unexpected in the
+                    # System log and in Azure's own restart reporting.
+                    $scheduled = $false
+                    try {
+                        $null = & shutdown.exe /r /t $RestartDelaySeconds /c $notice /d p:2:4
+                        $scheduled = ($LASTEXITCODE -eq 0)
+                    } catch {
+                        # From PowerShell 7.4 a non-zero exit code from a native
+                        # command can surface as a terminating error instead, through
+                        # $PSNativeCommandUseErrorActionPreference. Measured on 7.6 it
+                        # does not, and $LASTEXITCODE carries the failure as it always
+                        # has - but the same failure arriving by the other door must
+                        # not read as a restart that was scheduled.
+                        $scheduled = $false
+                    }
+
+                    if ($scheduled) {
+                        $restartTriggered = $true
+                        Write-News "Restarting in $RestartDelaySeconds seconds so $pagefilePath is created - 'shutdown /a' cancels it"
+                    } else {
+                        Write-Bad "shutdown.exe refused to schedule the restart (exit code $LASTEXITCODE)"
+                        $exitCode = 1
+                    }
+                }
+            }
+        }
+    }
+
+    if ($changed -or $restartTriggered -or $exitCode -ne 0) { Show-HeldOutput }
 } catch {
     Show-HeldOutput
     Write-Out ''
     Write-Bad "Aborted: $($_.Exception.Message)"
     $exitCode = 1
 } finally {
-    Write-Log ('--- finished, exit code {0}{1} ---' -f $exitCode, $(if ($rebootPending) { ', restart pending' } else { '' }))
+    $tail = if ($restartTriggered) { ', restart triggered' } elseif ($rebootPending) { ', restart pending' } else { '' }
+    Write-Log ('--- finished, exit code {0}{1} ---' -f $exitCode, $tail)
 }
 
 if (-not $script:holdOutput) { Write-Host '' }
