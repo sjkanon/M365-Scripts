@@ -821,6 +821,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-28 (6)
+| Change |
+|--------|
+| The restart `-RestartIfNeeded` triggers waited 60 seconds on a host where nobody could be watching. The countdown exists to warn people, so it now only applies when there are people: with someone signed in it is `-RestartDelaySeconds` and `shutdown /a` stops it; with nobody signed in - the normal case at boot, and the guaranteed one on a session host whose pool is set to drain - it restarts within seconds. A few seconds are kept so the run's own log line is written before the shutdown starts |
+| Considered draining logons from inside the guest (`change logon /drainuntilrestart`) to close the window between the task starting and the restart, and dropped it: a host being restarted this way already has its pool on drain, so the guest-side switch would only duplicate what the pool guarantees - and it would leave logons blocked on any run that crashed before re-enabling them |
+| Verified that `change.exe` and `chglogon.exe` exist on this Windows 11 build and that `change logon /query` reports "Session logins are currently ENABLED" while exiting 1, which is why the idea was measured before being dropped rather than after |
+
 ### 2026-09-28 (5)
 | Change |
 |--------|
@@ -841,13 +848,6 @@ These scripts are provided as-is. Always test in a non-production environment be
 | It also checks the one state nothing recovers from by itself: a package the store lists whose `InstallLocation` is gone, or that has no install location at all. That single line explains the whole failure — every removal answers `0x80070490` because there is nothing to remove, and provisioning the same version answers it too |
 | When the per-user removal answers that code for every holder, the run says so plainly, and the final failure changes its advice with it: not "drain the host", but that `Remove-AppxPackage`, the bootstrapper and DISM all read the same inconsistent store, so none of them can repair it — a pooled session host is redeployed from its image, a personal one is repaired in place |
 | Exercised against the strings that host really printed, plus a live SID from this machine as the contrast case: four orphaned profiles read as orphaned, a real profile still reads as "sign them out", a package with no install location is flagged, and a healthy package stays quiet. The **remediation** is untested — this machine has no damaged package store to try it on |
-
-### 2026-09-28 (4)
-| Change |
-|--------|
-| The restart `-RestartIfNeeded` triggers waited 60 seconds on a host where nobody could be watching. The countdown exists to warn people, so it now only applies when there are people: with someone signed in it is `-RestartDelaySeconds` and `shutdown /a` stops it; with nobody signed in - the normal case at boot, and the guaranteed one on a session host whose pool is set to drain - it restarts within seconds. A few seconds are kept so the run's own log line is written before the shutdown starts |
-| Considered draining logons from inside the guest (`change logon /drainuntilrestart`) to close the window between the task starting and the restart, and dropped it: a host being restarted this way already has its pool on drain, so the guest-side switch would only duplicate what the pool guarantees - and it would leave logons blocked on any run that crashed before re-enabling them |
-| Verified that `change.exe` and `chglogon.exe` exist on this Windows 11 build and that `change logon /query` reports "Session logins are currently ENABLED" while exiting 1, which is why the idea was measured before being dropped rather than after |
 
 ### 2026-09-28 (3)
 | Change |
