@@ -24,12 +24,12 @@
       5. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
                       BEFORE anything is uninstalled, so a failed download can never
                       leave the device without a Teams client.
-      6. Uninstall  - the Teams Meeting Add-in MSI, the MSTeams AppX package for all
-                      users, and the provisioned package.
+      6. Uninstall  - the MSTeams AppX package for all users and the provisioned
+                      package. The add-in is deliberately not touched here.
       7. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
-      8. Add-in     - install the Teams Meeting Add-in MSI shipped inside the new
-                      Teams package (ALLUSERS=1), after clearing every other copy of
-                      it - but only once that MSI is in hand and can actually go in.
+      8. Add-in     - the whole add-in replacement, in one place and only once the
+                      MSI that replaces it is in hand: uninstall the registered one,
+                      clear every other copy, install the new one (ALLUSERS=1).
       9. Verify     - re-check the add-in registration (machine-wide *and* whether
                       Outlook sees it, per signed-in user), the provisioned package,
                       the classic removal and, where applicable, the AVD components.
@@ -97,12 +97,18 @@
     registration shadows the fresh machine-wide one and points at files that are no
     longer there - Outlook then fails to load it and parks LoadBehavior at 2.
 
-    That sweep waits until step 8, with the replacement MSI in hand and the registry
-    checked for a surviving registration. The add-in MSI refuses to install while any
-    other copy of the add-in is still registered (1638) - measured on a host where
-    1.26.21803 was refused over a registered 1.25.28902, so the version order is not
-    what decides it; the presence of a registration is. A run that had already deleted
-    every working copy by then left that host with no add-in at all.
+All of that happens in step 8, and nothing about the add-in happens before it. The
+    add-in MSI refuses to install while any other copy is still registered (1638) -
+    measured on a host where 1.26.21803 was refused over a registered 1.25.28902, so
+    the version order is not what decides it; the presence of a registration is. That
+    is why the replacement is checked before anything is deleted.
+
+    The uninstall moved here for the same reason, after a second production failure:
+    with it in step 6, a host where Remove-AppxPackage answered "Catastrophic failure"
+    ended the run with the add-in already gone and no reinstall. Anything destructive
+    now sits next to the thing that undoes it. That AppX failure no longer aborts the
+    run either - it is reported and the provision proceeds, upgrading in place
+    whatever survived.
 
     What leaves a registration behind is an uninstall that answers 1612 ("the
     installation source is not available"): Windows Installer has lost the cached copy
@@ -801,7 +807,12 @@ function Write-OutlookAddInStatus {
        in cannot be inspected at all, so neither is treated as a failure. #>
     param($Registrations)
 
-    $registrations = if ($Registrations) { @($Registrations) } else { @(Get-OutlookAddInRegistration) }
+    # The @() goes around the whole if, not inside its branches. An empty array is
+    # zero pipeline objects, so `$x = if (...) { @() }` assigns $null - and $null.Count
+    # throws under Set-StrictMode. That is exactly what happened on a host where the
+    # add-in was not registered anywhere: every run died on "The property 'Count'
+    # cannot be found on this object".
+    $registrations = @(if ($Registrations) { $Registrations } else { Get-OutlookAddInRegistration })
     $machineWideOk = [bool] ($registrations | Where-Object { $_.Account -like 'all users*' -and -not $_.DllMissing })
 
     # Profiles nobody is signed into cannot be read. Say so, with names: a profile
@@ -1427,6 +1438,33 @@ function Get-MsiProductVersion {
     }
 }
 
+function Get-ExitCodeText {
+    <#
+        msiexec answers with small positive numbers that mean something on their own.
+        teamsbootstrapper.exe answers with an HRESULT, which PowerShell prints as a
+        large negative integer - "exit code -2147023728" tells a technician nothing,
+        while 0x80070490 "Element not found" tells them where to look.
+    #>
+    param($Code)
+
+    if ($null -eq $Code)  { return 'no exit code' }
+    if ($Code -ge 0)      { return "exit code $Code" }
+
+    $hex  = '0x{0:X8}' -f [uint32] ($Code -band 0xFFFFFFFFL)
+    $text = switch ($Code) {
+        -2147418113 { 'Catastrophic failure (E_UNEXPECTED) - the AppX stack could not complete the operation' }
+        -2147023728 { 'Element not found - a package or registration the bootstrapper expected is not there' }
+        default {
+            # Facility 7 is Win32, so the low word is a plain system error code.
+            if ((($Code -shr 16) -band 0x7FF) -eq 7) {
+                try { [ComponentModel.Win32Exception]::new([int] ($Code -band 0xFFFF)).Message } catch { $null }
+            } else { $null }
+        }
+    }
+    if ($text) { return "exit code $Code ($hex - $text)" }
+    return "exit code $Code ($hex)"
+}
+
 function Invoke-Installer {
     <#
         Run an installer and never hang the caller: the process is killed when it
@@ -1464,7 +1502,7 @@ function Invoke-Installer {
             Success        = ($code -in @(0, 3010, 1641))
             ExitCode       = $code
             RebootRequired = ($code -in @(3010, 1641))
-            Message        = "exit code $code"
+            Message        = Get-ExitCodeText $code
         }
     }
 }
@@ -1901,10 +1939,119 @@ try {
         if ($SkipMeetingAddIn) {
             Write-Skip 'Meeting add-in left alone (-SkipMeetingAddIn)'
         } else {
-            $addInEntries = @(Get-TeamsMeetingAddInEntry)
-            if ($addInEntries.Count -eq 0) { Write-Skip 'Microsoft Teams Meeting Add-in is not installed' }
+            # Nothing about the add-in happens here any more. Taking it off before the
+            # client work means any failure in that work - the AppX stack answering
+            # "Catastrophic failure" on a host with two MSTeams versions, measured -
+            # leaves the device with no add-in and nothing to put back. The whole
+            # replacement now happens in step 8, with the new MSI in hand.
+            Write-Skip 'The add-in is replaced in step 8, once the MSI that replaces it is in hand'
+        }
 
-            foreach ($entry in $addInEntries) {
+        if ($existingTeams.Count -eq 0) { Write-Skip 'No AppX package to remove' }
+        foreach ($pkg in $existingTeams) {
+            if ($PSCmdlet.ShouldProcess("$($pkg.Name) $($pkg.Version)", 'Remove-AppxPackage -AllUsers')) {
+                # -ErrorAction does not cover a terminating error, and the AppX stack
+                # raises one: "Catastrophic failure" on a session host carrying two
+                # MSTeams versions side by side. Letting that abort the run left the
+                # device with Teams half removed, so it is reported and the run
+                # continues - the provision below upgrades whatever survived in place.
+                try {
+                    $pkg | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+                } catch {
+                    Write-Warn "Could not remove $($pkg.Name) $($pkg.Version): $($_.Exception.Message)"
+                    Write-Warn '  On a session host this is nearly always a signed-in user holding the package - drain the host or run outside working hours. The run continues; the provision below upgrades in place whatever survived'
+                    continue
+                }
+                if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
+                    Write-Warn "$($pkg.Name) is still present after removal - the reinstall will upgrade it in place"
+                } else {
+                    Write-Ok "Removed $($pkg.Name)"
+                }
+            }
+        }
+
+        # Without dropping the provisioned copy, new user profiles keep getting the
+        # old version staged from the image.
+        $provisioned = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like 'MSTeams*' })
+        if ($provisioned.Count -eq 0) { Write-Skip 'No provisioned MSTeams package to remove' }
+        foreach ($prov in $provisioned) {
+            if ($PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online')) {
+                try {
+                    Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName | Out-Null
+                    Write-Ok "Deprovisioned $($prov.PackageName)"
+                } catch {
+                    Write-Warn "Could not deprovision $($prov.PackageName): $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+
+    # -- 7. Install / provision new Teams --------------------------------------
+    Write-Out ''
+    Write-Step '7. Install new Teams'
+    if (-not $fullReinstall) {
+        Write-Skip 'Not needed - the client stays as it is'
+    } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
+        if (-not (Test-Path $exePath)) { throw "Bootstrapper not found at $exePath" }
+
+        $result = Invoke-Installer -FilePath $exePath -Arguments '-p'
+
+        if (-not $result.Success) {
+            # A provision that fails here almost always means the AppX state is
+            # inconsistent - a package that could not be removed, a provisioned copy
+            # already gone. Microsoft documents a machine-wide uninstall for exactly
+            # that (teamsbootstrapper.exe -x -m), so it is tried once before giving
+            # up: at this point Teams is already half removed, and aborting leaves
+            # the device worse off than finishing.
+            Write-Warn "Provisioning failed ($($result.Message)) - trying the documented machine-wide uninstall and provisioning again"
+
+            if ($PSCmdlet.ShouldProcess($exePath, 'Uninstall Teams machine-wide (-x -m), then provision again (-p)')) {
+                $cleanup = Invoke-Installer -FilePath $exePath -Arguments '-x -m'
+                if ($cleanup.Success) { Write-Ok 'Teams uninstalled machine-wide' }
+                else { Write-Warn "The machine-wide uninstall did not succeed either ($($cleanup.Message))" }
+
+                $result = Invoke-Installer -FilePath $exePath -Arguments '-p'
+            }
+        }
+
+        if (-not $result.Success) {
+            throw ("Bootstrapper failed ({0}). On a session host that usually means a package could not be " +
+                   "removed because users are signed in - drain the host or run it outside working hours, " +
+                   "then run again." -f $result.Message)
+        }
+        if ($result.RebootRequired) { $rebootRequired = $true }
+        Write-Ok 'Bootstrapper completed'
+    }
+
+    # -- 8. Install the Teams Meeting Add-in for all users ---------------------
+    Write-Out ''
+    Write-Step '8. Teams Meeting Add-in (install)'
+    if ($SkipMeetingAddIn) {
+        Write-Skip 'Skipped (-SkipMeetingAddIn)'
+    } elseif (-not $fullReinstall -and -not $addInMissing) {
+        Write-Skip 'Already installed and the client was not replaced'
+    } else {
+        $tmaMsi = Get-TeamsAddInInstaller
+
+        if (-not $tmaMsi -and $simulate) {
+            Write-Skip 'Nothing was installed in this dry run, so the staged package is not there either - a real run takes the MSI from it'
+            Write-Skip 'Would run: msiexec.exe /i "<ProgramFiles>\WindowsApps\MSTeams_<version>_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi" TARGETDIR="<ProgramFiles(x86)>\Microsoft\TeamsMeetingAddin\<version>\" /qn ALLUSERS=1'
+        } elseif (-not $tmaMsi) {
+            throw "No add-in MSI found under $env:ProgramFiles\WindowsApps - did the bootstrapper stage the package?"
+        } else {
+            Write-Ok "Add-in MSI from staged package $($tmaMsi.Directory.Name)"
+            $tmaVersion = Get-MsiProductVersion -Path $tmaMsi.FullName
+            if (-not $tmaVersion) { throw "Could not read the product version from $($tmaMsi.FullName)" }
+
+            Write-Ok "Found Teams Meeting Add-in version: $tmaVersion"
+
+            # Only now, with a replacement in hand, does the old one come off. Doing
+            # this in step 6 meant a later failure could leave the device with no
+            # add-in at all, which is exactly what a production host ended up with.
+            $addInToRemove = @(Get-TeamsMeetingAddInEntry)
+            if ($addInToRemove.Count -eq 0) { Write-Skip 'No previous add-in registered - nothing to uninstall first' }
+
+            foreach ($entry in $addInToRemove) {
                 $target = "$($entry.DisplayName) $($entry.Version) [$($entry.ProductCode)]"
                 if ($PSCmdlet.ShouldProcess($target, 'msiexec /x /qn (uninstall)')) {
                     $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($entry.ProductCode) /qn /norestart"
@@ -1974,77 +2121,6 @@ try {
                 }
             }
 
-            # The rest of the sweep - the folders and the per-user COM registrations -
-            # deliberately waits until step 8, where the replacement MSI is in hand.
-            # Removing every copy here and only then discovering the new package
-            # carries an older add-in leaves the device with no add-in at all, which
-            # is exactly what happened on a production host.
-            Write-Skip 'The other add-in copies are removed in step 8, once the replacement MSI is known to be installable'
-        }
-
-        if ($existingTeams.Count -eq 0) { Write-Skip 'No AppX package to remove' }
-        foreach ($pkg in $existingTeams) {
-            if ($PSCmdlet.ShouldProcess("$($pkg.Name) $($pkg.Version)", 'Remove-AppxPackage -AllUsers')) {
-                $pkg | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
-                if (Get-AppxPackage -AllUsers -Name $pkg.Name -ErrorAction SilentlyContinue) {
-                    Write-Warn "$($pkg.Name) is still present after removal - the reinstall will upgrade it in place"
-                } else {
-                    Write-Ok "Removed $($pkg.Name)"
-                }
-            }
-        }
-
-        # Without dropping the provisioned copy, new user profiles keep getting the
-        # old version staged from the image.
-        $provisioned = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like 'MSTeams*' })
-        if ($provisioned.Count -eq 0) { Write-Skip 'No provisioned MSTeams package to remove' }
-        foreach ($prov in $provisioned) {
-            if ($PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online')) {
-                try {
-                    Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName | Out-Null
-                    Write-Ok "Deprovisioned $($prov.PackageName)"
-                } catch {
-                    Write-Warn "Could not deprovision $($prov.PackageName): $($_.Exception.Message)"
-                }
-            }
-        }
-    }
-
-    # -- 7. Install / provision new Teams --------------------------------------
-    Write-Out ''
-    Write-Step '7. Install new Teams'
-    if (-not $fullReinstall) {
-        Write-Skip 'Not needed - the client stays as it is'
-    } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
-        if (-not (Test-Path $exePath)) { throw "Bootstrapper not found at $exePath" }
-
-        $result = Invoke-Installer -FilePath $exePath -Arguments '-p'
-        if (-not $result.Success) { throw "Bootstrapper failed ($($result.Message))" }
-        if ($result.RebootRequired) { $rebootRequired = $true }
-        Write-Ok 'Bootstrapper completed'
-    }
-
-    # -- 8. Install the Teams Meeting Add-in for all users ---------------------
-    Write-Out ''
-    Write-Step '8. Teams Meeting Add-in (install)'
-    if ($SkipMeetingAddIn) {
-        Write-Skip 'Skipped (-SkipMeetingAddIn)'
-    } elseif (-not $fullReinstall -and -not $addInMissing) {
-        Write-Skip 'Already installed and the client was not replaced'
-    } else {
-        $tmaMsi = Get-TeamsAddInInstaller
-
-        if (-not $tmaMsi -and $simulate) {
-            Write-Skip 'Nothing was installed in this dry run, so the staged package is not there either - a real run takes the MSI from it'
-            Write-Skip 'Would run: msiexec.exe /i "<ProgramFiles>\WindowsApps\MSTeams_<version>_x64__8wekyb3d8bbwe\MicrosoftTeamsMeetingAddinInstaller.msi" TARGETDIR="<ProgramFiles(x86)>\Microsoft\TeamsMeetingAddin\<version>\" /qn ALLUSERS=1'
-        } elseif (-not $tmaMsi) {
-            throw "No add-in MSI found under $env:ProgramFiles\WindowsApps - did the bootstrapper stage the package?"
-        } else {
-            Write-Ok "Add-in MSI from staged package $($tmaMsi.Directory.Name)"
-            $tmaVersion = Get-MsiProductVersion -Path $tmaMsi.FullName
-            if (-not $tmaVersion) { throw "Could not read the product version from $($tmaMsi.FullName)" }
-
-            Write-Ok "Found Teams Meeting Add-in version: $tmaVersion"
 
             # This MSI refuses to go in while *any* other copy of the add-in is still
             # registered, whichever version that is - measured on a host where a
