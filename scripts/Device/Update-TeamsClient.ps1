@@ -872,8 +872,28 @@ function Get-AppxPackageHolder {
 
     foreach ($holder in @(Get-PropertyValue $Package 'PackageUserInformation')) {
         $text = [string] $holder
-        if ($text -match '(S-1-[0-9\-]+)') {
-            [PSCustomObject]@{ Sid = $Matches[1]; Account = (Resolve-SidName $Matches[1]); Raw = $text }
+        if ($text -notmatch '(S-1-[0-9\-]+)') { continue }
+        $sid = $Matches[1]
+
+        # A holder renders as "S-1-5-21-... [DOMAIN\user]: Installed(pending removal)".
+        # The state after the last colon is the part that matters: Staged is not
+        # installed for anyone, and "pending removal" means the removal already
+        # worked and is only waiting for that user to sign out.
+        $state = if ($text -match ':\s*([^:]+)$') { $Matches[1].Trim() } else { 'unknown' }
+
+        # The account name is already in the text, in brackets. Preferring it over
+        # translating the SID keeps the output readable for a profile from a domain
+        # this host can no longer resolve - which is half of them on a session host.
+        $account = if ($text -match '\[([^\]]+)\]' -and $Matches[1] -ne $sid) { $Matches[1] }
+                   else { Resolve-SidName $sid }
+
+        [PSCustomObject]@{
+            Sid      = $sid
+            Account  = $account
+            State    = $state
+            IsSystem = ($sid -eq 'S-1-5-18')
+            Pending  = ($state -like '*pending removal*')
+            Raw      = $text
         }
     }
 }
@@ -1649,10 +1669,30 @@ try {
 
     $installedVersion = $null
     foreach ($pkg in $existingTeams) {
-        $users = $null
-        try { $users = @($pkg.PackageUserInformation).Count } catch { $users = $null }
-        $forWhom = if ($users) { " - installed for $users user profile(s)" } else { '' }
+        # Counting PackageUserInformation entries called a package "installed for 1
+        # user profile" when its only entry was S-1-5-18 staging it - which is not a
+        # user and is not installed. The states are read instead.
+        $holders = @(Get-AppxPackageHolder -Package $pkg)
+        $real    = @($holders | Where-Object { -not $_.IsSystem })
+        $pending = @($real | Where-Object { $_.Pending })
+
+        $forWhom = if ($real.Count -eq 0) {
+            if ($holders.Count -gt 0) { ' - staged only, not installed for any user' } else { '' }
+        } elseif ($pending.Count -eq $real.Count) {
+            " - removal is pending for all $($real.Count) user(s), and completes when they sign out"
+        } elseif ($pending.Count -gt 0) {
+            " - installed for $($real.Count) user profile(s), $($pending.Count) pending removal"
+        } else {
+            " - installed for $($real.Count) user profile(s)"
+        }
         Write-Ok "New Teams (AppX) $($pkg.Name) $($pkg.Version)$forWhom"
+
+        # A removal waiting on a sign-out is not a failure, but nothing else will get
+        # anywhere until it finishes - so it is said plainly, once.
+        if ($pending.Count -gt 0) {
+            Write-Warn "  pending removal for: $(($pending | Select-Object -ExpandProperty Account) -join ', ') - sign those users out or reboot the host, then run again"
+            $rebootRequired = $true
+        }
 
         # A package Windows considers Modified or Tampered is what makes
         # Remove-AppxPackage answer "Catastrophic failure" and the bootstrapper fail
