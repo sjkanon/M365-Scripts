@@ -1438,6 +1438,85 @@ function Get-MsiProductVersion {
     }
 }
 
+function Get-BootstrapperVerdict {
+    <#
+        teamsbootstrapper.exe prints its own verdict as JSON - {"success": true} or
+        {"success": false, "errorCode": "0x80070490"} - and that is worth more than
+        its exit code: the code can go missing (see Invoke-Installer), while this is
+        always there and names the error. $null when the output is not that JSON.
+    #>
+    param([string] $Output)
+
+    if (-not $Output -or $Output -notmatch '"success"') { return $null }
+    try { return ($Output | ConvertFrom-Json) } catch { return $null }
+}
+
+function Invoke-Bootstrapper {
+    <#
+        Run teamsbootstrapper.exe, show what it said, and let what it said decide
+        whether it worked. A run where -x -m printed {"success": true} was reported
+        as a failure purely because the exit code had gone missing.
+    #>
+    param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Arguments)
+
+    $result = Invoke-Installer -FilePath $Path -Arguments $Arguments -CaptureOutput
+    Write-InstallerOutput -Result $result
+
+    $verdict = Get-BootstrapperVerdict -Output (Get-PropertyValue $result 'Output')
+    if (-not $verdict) { return $result }
+
+    $ok    = [bool] (Get-PropertyValue $verdict 'success')
+    $errCd = Get-PropertyValue $verdict 'errorCode'
+    $message = if ($ok)       { 'the bootstrapper reported success' }
+               elseif ($errCd) { "the bootstrapper reported failure, errorCode $errCd" }
+               else            { 'the bootstrapper reported failure' }
+
+    return [PSCustomObject]@{
+        Success        = $ok
+        ExitCode       = Get-PropertyValue $result 'ExitCode'
+        RebootRequired = [bool] (Get-PropertyValue $result 'RebootRequired')
+        Output         = Get-PropertyValue $result 'Output'
+        Message        = $message
+    }
+}
+
+function Write-AppxDeploymentError {
+    <#
+        The bootstrapper reports 0x80070490 and stops there; the AppX deployment log
+        is where Windows says which package and why - "Unable to install because the
+        following apps need to be closed" and the like. Read-only, and quiet when the
+        log holds nothing recent.
+    #>
+    param([int] $Minutes = 30, [int] $MaxEvents = 5)
+
+    $since  = (Get-Date).AddMinutes(-$Minutes)
+    $events = @(Get-WinEvent -LogName 'Microsoft-Windows-AppXDeploymentServer/Operational' `
+                             -FilterXPath '*[System[(Level=2)]]' -MaxEvents $MaxEvents -ErrorAction SilentlyContinue |
+                Where-Object { $_.TimeCreated -ge $since })
+
+    if ($events.Count -eq 0) {
+        Write-Skip "No AppX deployment errors logged in the last $Minutes minutes"
+        return
+    }
+
+    foreach ($entry in $events) {
+        $text = (($entry.Message -replace '\s+', ' ')).Trim()
+        if ($text.Length -gt 220) { $text = $text.Substring(0, 220) + '...' }
+        Write-Warn ('AppX deployment {0:HH:mm}: {1}' -f $entry.TimeCreated, $text)
+    }
+}
+
+function Write-InstallerOutput {
+    <# Whatever the installer printed, attributed so it is not mistaken for ours. #>
+    param($Result)
+
+    $text = Get-PropertyValue $Result 'Output'
+    if (-not $text) { return }
+    foreach ($line in ($text -split "`r?`n")) {
+        if ($line.Trim()) { Write-Skip "  bootstrapper: $($line.Trim())" }
+    }
+}
+
 function Get-ExitCodeText {
     <#
         msiexec answers with small positive numbers that mean something on their own.
@@ -1474,18 +1553,48 @@ function Invoke-Installer {
     param(
         [Parameter(Mandatory)] [string] $FilePath,
         [string] $Arguments = '',
-        [int]    $Attempts  = 3
+        [int]    $Attempts  = 3,
+        [switch] $CaptureOutput
     )
 
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         $startArgs = @{ FilePath = $FilePath; PassThru = $true; WindowStyle = 'Hidden' }
         if ($Arguments) { $startArgs['ArgumentList'] = $Arguments }
 
-        $proc = Start-Process @startArgs
-        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $proc.Kill() } catch { Write-Warn "Could not kill PID $($proc.Id): $($_.Exception.Message)" }
-            return [PSCustomObject]@{ Success = $false; ExitCode = $null; RebootRequired = $false
-                                      Message = "timed out after $TimeoutSeconds seconds and was killed" }
+        # The bootstrapper prints its own verdict and throws away nothing else worth
+        # having; running it hidden meant that verdict went nowhere. msiexec says
+        # nothing, so capturing costs it two empty files.
+        $outFile = $null; $errFile = $null; $captured = $null
+        if ($CaptureOutput) {
+            $outFile = [IO.Path]::GetTempFileName()
+            $errFile = [IO.Path]::GetTempFileName()
+            $startArgs['RedirectStandardOutput'] = $outFile
+            $startArgs['RedirectStandardError']  = $errFile
+        }
+
+        try {
+            $proc = Start-Process @startArgs
+
+            # Windows PowerShell 5.1 returns no exit code at all for a redirected
+            # process unless its handle is touched first - measured: redirect without
+            # this reads $null, redirect with it reads the real code, and PowerShell 7
+            # is unaffected either way. Capturing the output silently broke every
+            # verdict until this line went in.
+            $null = $proc.Handle
+
+            if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+                try { $proc.Kill() } catch { Write-Warn "Could not kill PID $($proc.Id): $($_.Exception.Message)" }
+                return [PSCustomObject]@{ Success = $false; ExitCode = $null; RebootRequired = $false; Output = $null
+                                          Message = "timed out after $TimeoutSeconds seconds and was killed" }
+            }
+            if ($CaptureOutput) {
+                $captured = (@(Get-Content -LiteralPath $outFile -ErrorAction SilentlyContinue) +
+                             @(Get-Content -LiteralPath $errFile -ErrorAction SilentlyContinue)) -join "`n"
+            }
+        } finally {
+            foreach ($temp in $outFile, $errFile) {
+                if ($temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+            }
         }
 
         $code = $proc.ExitCode
@@ -1502,6 +1611,7 @@ function Invoke-Installer {
             Success        = ($code -in @(0, 3010, 1641))
             ExitCode       = $code
             RebootRequired = ($code -in @(3010, 1641))
+            Output         = $captured
             Message        = Get-ExitCodeText $code
         }
     }
@@ -1527,6 +1637,14 @@ try {
         try { $users = @($pkg.PackageUserInformation).Count } catch { $users = $null }
         $forWhom = if ($users) { " - installed for $users user profile(s)" } else { '' }
         Write-Ok "New Teams (AppX) $($pkg.Name) $($pkg.Version)$forWhom"
+
+        # A package Windows considers Modified or Tampered is what makes
+        # Remove-AppxPackage answer "Catastrophic failure" and the bootstrapper fail
+        # after it. Naming it here beats discovering it three steps later.
+        $status = Get-PropertyValue $pkg 'Status'
+        if ($status -and $status -ne 'Ok') {
+            Write-Warn "  that package reports Status '$status' - Windows considers it damaged, which is what makes removing it and provisioning over it fail"
+        }
 
         $candidate = [version] $pkg.Version
         if ($null -eq $installedVersion -or $candidate -gt $installedVersion) { $installedVersion = $candidate }
@@ -1994,7 +2112,7 @@ try {
     } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
         if (-not (Test-Path $exePath)) { throw "Bootstrapper not found at $exePath" }
 
-        $result = Invoke-Installer -FilePath $exePath -Arguments '-p'
+        $result = Invoke-Bootstrapper -Path $exePath -Arguments '-p'
 
         if (-not $result.Success) {
             # A provision that fails here almost always means the AppX state is
@@ -2006,18 +2124,26 @@ try {
             Write-Warn "Provisioning failed ($($result.Message)) - trying the documented machine-wide uninstall and provisioning again"
 
             if ($PSCmdlet.ShouldProcess($exePath, 'Uninstall Teams machine-wide (-x -m), then provision again (-p)')) {
-                $cleanup = Invoke-Installer -FilePath $exePath -Arguments '-x -m'
+                $cleanup = Invoke-Bootstrapper -Path $exePath -Arguments '-x -m'
                 if ($cleanup.Success) { Write-Ok 'Teams uninstalled machine-wide' }
                 else { Write-Warn "The machine-wide uninstall did not succeed either ($($cleanup.Message))" }
 
-                $result = Invoke-Installer -FilePath $exePath -Arguments '-p'
+                $result = Invoke-Bootstrapper -Path $exePath -Arguments '-p'
             }
         }
 
         if (-not $result.Success) {
-            throw ("Bootstrapper failed ({0}). On a session host that usually means a package could not be " +
-                   "removed because users are signed in - drain the host or run it outside working hours, " +
-                   "then run again." -f $result.Message)
+            # Windows logs the reason behind the bootstrapper's code, so it is read
+            # before giving up: "Unable to install because the following apps need to
+            # be closed" is an answer, 0x80070490 on its own is not.
+            Write-AppxDeploymentError
+
+            # -f binds tighter than +, so building this message by concatenating
+            # pieces and formatting at the end put the exit code nowhere and left a
+            # literal {0} in the output - which is the one thing the reader needed.
+            throw ("Bootstrapper failed ($($result.Message)). The bootstrapper and AppX deployment lines above " +
+                   'carry the reason; on a session host a package still held by a signed-in user is the usual ' +
+                   'one, and draining the host fixes that.')
         }
         if ($result.RebootRequired) { $rebootRequired = $true }
         Write-Ok 'Bootstrapper completed'
