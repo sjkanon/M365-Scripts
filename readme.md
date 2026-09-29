@@ -850,6 +850,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-29 (11)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` provisions the **exact** Teams / Outlook build FSLogix fails on. A production host showed Outlook failing 196× in a week — 186× `0x80070490` — for 1.2026.902 and 915 while the host provisioned 818 and the files of both requested builds were on disk. The earlier verdict ("with a current FSLogix the gap is harmless, no action needed") was wrong, and so was chasing it with the installers, which only deliver an older last-known-good build |
+| The MSIX for one exact build is on Microsoft's CDN at the versioned URL winget's manifests use (`res.cdn.office.net/.../v2/<version>/Microsoft.OutlookForWindows_x64.msix`, `teamsinstaller.public.onecdn.static.microsoft/production-windows-x64/<version>/MSTeams-x64.msix`) — checked to answer for Outlook 812/818/902/915 and Teams 26198/26225/26246. `-Provision` now takes the newest build FSLogix failed on, downloads it, checks the Microsoft signature, provisions it and reads the provisioned version back; the installer is skipped for that package |
+| Error codes are decoded with Windows' own message for every Win32 code instead of a short hand-written list, one code per line: `0x80073D19` turned out to be "An error occurred because a user was logged off" — harmless — and is now labelled as such |
+| Verified in PowerShell 5.1: the scenario from that host (FSLogix asking 902 and 915, host at 818) yields 915 with the right URL, a **real** download of that 32 MB MSIX with a valid Microsoft signature, the provisioned version read back (with `Add-AppxProvisionedPackage` mocked), and no target once the host has 915; earlier scenarios unchanged. **Not run on the host itself** |
+
 ### 2026-09-29 (10)
 | Change |
 |--------|
