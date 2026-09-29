@@ -190,11 +190,12 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 |------|--------------|
 | 1. Diagnose | Registered packages whose files are gone (*Ghost*) or whose status is not Ok (*Damaged*), provisioned packages without files, orphaned `AppxAllUserStore` entries, recent AppX deployment errors |
 | 1b. FSLogix | FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, the packages FSLogix failed to register in the last `-Days` days against what this host provisions, AppX install policies |
+| 1c. Failing apps | **Every** package that failed to install, update or register in the last `-Days` days, from the AppX deployment log and the FSLogix log together: count, error codes with their meaning, the versions asked for and whether this host has their files. `0x80070490` first, top 15 |
 | 2. Provisioned | `Remove-AppxProvisionedPackage` for provisioned copies whose files are gone |
 | 3. Re-register | `Add-AppxPackage -Register` from the package's own manifest where the files are still there |
 | 4. Remove | `Remove-AppxPackage -AllUsers` for ghosts, per user where that refuses |
 | 5. Store | Each remaining orphaned registry key is exported to a `.reg` backup, and only then removed — no backup, no removal |
-| 6. Provision | `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, downloaded from Microsoft and signature-checked. `-Source`: any MSIX you supply |
+| 6. Provision | `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, downloaded from Microsoft and signature-checked. With `-UseWinget` the MSIX from winget instead (`Microsoft.Teams`, `Microsoft.Outlook`), provisioned with `Add-AppxProvisionedPackage` together with any dependencies winget brought. `-WingetId`: the same for any other package. `-Source`: any MSIX you supply |
 | 7. Verify | The diagnosis runs again; exit code 1 when anything survived |
 
 **Parameters**
@@ -204,14 +205,16 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows` |
 | `-CheckOnly` | Diagnose only, change nothing (exit code `2` when there is work) |
 | `-Provision` | Provision Teams / new Outlook for all users with Microsoft's installer: what FSLogix showed is missing or behind, plus either one named explicitly in `-Name` |
+| `-UseWinget` | With `-Provision`: take Teams / new Outlook from winget instead of Microsoft's installer. winget checks the SHA256, the script the Microsoft signature. winget's manifests lag behind (measured: Teams 26198 vs 26246, Outlook 1.2026.812 vs 902); the run warns when the build is older than what the profiles ask for |
+| `-WingetId` | winget ids of other packages to provision for all users the same way (only when winget's manifest for it is an MSIX) |
 | `-Source` | Provision this `.msix` / `.msixbundle` after the store is clean |
 | `-IncludeDeprovisioned` | Also clear Deprovisioned markers with a wildcard `-Name` (they are cleared by default only for explicitly named packages) |
 | `-SkipSignatureCheck` | Do not require a valid Microsoft signature on the installer or `-Source` |
-| `-Days` | How far back to read the FSLogix Apps log (default `7`) |
+| `-Days` | How far back to read the FSLogix Apps and AppX deployment logs (default `7`) |
 | `-WorkingDir` | Download folder for the installers (default `C:\IT\AppxRepair`) |
 | `-LogPath` | Transcript and `.reg` backups (default `C:\Temp`) |
 
-Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
+Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
 
 **Examples**
 
@@ -222,8 +225,11 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 # Repair and put Teams + new Outlook back for all users, unattended
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
 
-# Scan the whole store; system and framework packages are reported, never touched
-.\Repair-AppxPackageStore.ps1 -CheckOnly
+# Same, with both packages taken from winget
+.\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false
+
+# Every app that failed in the last 14 days, plus the whole store; changes nothing
+.\Repair-AppxPackageStore.ps1 -CheckOnly -Days 14
 ```
 
 **Notes**

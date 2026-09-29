@@ -36,6 +36,9 @@
       1b. FSLogix     The FSLogix build, whether it replays packages at sign-in, which
                       packages it failed to register in the last -Days days against
                       what this host provisions, and AppX policies that block installs.
+      1c. Failing     Every package that failed to install, update or register in the
+                      last -Days days, from the AppX and FSLogix logs together: count,
+                      error codes, versions asked for, and whether this host has them.
       2. Provisioned  Drop provisioned copies whose files are gone, so new profiles
                       stop being handed a package that cannot be registered.
       3. Re-register  A package whose files are still on disk but whose status is
@@ -46,8 +49,10 @@
                       exported to a .reg backup and only then removed.
       6. Provision    With -Provision, Teams and new Outlook are provisioned for all
                       users with Microsoft's own installer (teamsbootstrapper.exe -p,
-                      Outlook Setup.exe --provision true). With -Source, any MSIX you
-                      supply. Both only after the Microsoft signature is checked.
+                      Outlook Setup.exe --provision true), or with -UseWinget from the
+                      MSIX winget downloads. -WingetId does the same for any other
+                      package, -Source for an MSIX you supply. All only after the
+                      Microsoft signature is checked.
       7. Verify       The diagnosis runs again. Exit code 0 means nothing is broken
                       any more, 1 that something survived.
 
@@ -72,6 +77,18 @@
     failed to register that this host does not provision (or provisions older), and
     any of MSTeams / Microsoft.OutlookForWindows named explicitly in -Name. Other
     packages need -Source.
+
+.PARAMETER UseWinget
+    With -Provision, take Teams / new Outlook from winget (Microsoft.Teams,
+    Microsoft.Outlook) instead of Microsoft's installers: winget downloads the MSIX
+    and checks its SHA256, the script checks the signature and provisions it with
+    Add-AppxProvisionedPackage. winget's manifests lag behind the installers; the run
+    says so when that build is older than what the profiles ask for.
+
+.PARAMETER WingetId
+    winget ids of any other packages to provision for all users the same way, e.g.
+    to put back an app from the failing-apps overview. Only works when winget's
+    manifest for it is an MSIX.
 
 .PARAMETER IncludeDeprovisioned
     Also clear Deprovisioned markers for the named packages. Without this they are
@@ -101,6 +118,14 @@
     .\Repair-AppxPackageStore.ps1 -Name 'MSTeams','Microsoft.OutlookForWindows' -Provision -Confirm:$false
 
 .EXAMPLE
+    # Same, but take both packages from winget
+    .\Repair-AppxPackageStore.ps1 -Name 'MSTeams','Microsoft.OutlookForWindows' -Provision -UseWinget -Confirm:$false
+
+.EXAMPLE
+    # Every app that failed in the last 14 days, and the store for all of them
+    .\Repair-AppxPackageStore.ps1 -CheckOnly -Days 14
+
+.EXAMPLE
     # Repair and provision the current Teams from an MSIX in hand
     .\Repair-AppxPackageStore.ps1 -Name MSTeams -Source C:\IT\MSTeams-x64.msix
 
@@ -115,6 +140,8 @@ param (
     [switch]   $CheckOnly,
     [string]   $Source,
     [switch]   $Provision,
+    [switch]   $UseWinget,
+    [string[]] $WingetId,
     [switch]   $IncludeDeprovisioned,
     [switch]   $SkipSignatureCheck,
     [ValidateRange(1, 90)]
@@ -194,6 +221,8 @@ if (-not $PSBoundParameters.ContainsKey('CheckOnly')            -and $env:checkO
 if (-not $PSBoundParameters.ContainsKey('IncludeDeprovisioned') -and $env:includeDeprovisioned -in $rmmTrue) { $IncludeDeprovisioned = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck')   -and $env:skipSignatureCheck   -in $rmmTrue) { $SkipSignatureCheck   = $true }
 if (-not $PSBoundParameters.ContainsKey('Provision')            -and $env:provision            -in $rmmTrue) { $Provision            = $true }
+if (-not $PSBoundParameters.ContainsKey('UseWinget')            -and $env:useWinget            -in $rmmTrue) { $UseWinget            = $true }
+if (-not $PSBoundParameters.ContainsKey('WingetId')             -and $env:wingetId)     { $WingetId = @($env:wingetId) }
 if (-not $PSBoundParameters.ContainsKey('Days')                 -and $env:days -match '^\d+$')  { $Days    = [int] $env:days }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')           -and $env:workingDir)   { $WorkingDir = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('Name')                 -and $env:packageName)  { $Name    = @($env:packageName -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
@@ -204,6 +233,7 @@ if (-not $PSBoundParameters.ContainsKey('LogPath')              -and $env:logPat
 # which is also how the relaunches above hand it over - so the list is split here.
 $Name = @($Name | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Name.Count -eq 0) { $Name = @('*') }
+$WingetId = @($WingetId | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
 if ($confirmSuppressed) { $ConfirmPreference = 'None' }
@@ -232,16 +262,22 @@ $PackageRoots = @(
 # Packages Microsoft ships its own all-users provisioning installer for. -Provision
 # uses these; anything else needs -Source. Both links were checked to resolve to
 # Microsoft's CDN (teamsbootstrapper.exe, and the new Outlook Setup.exe).
+# WingetId is the same package in the winget source, whose manifest points at the
+# MSIX on Microsoft's CDN (checked: Microsoft.Teams -> MSTeams-x64.msix,
+# Microsoft.Outlook -> Microsoft.OutlookForWindows_x64.msix). winget's manifests lag
+# behind the installers above, which is why the installers are the default.
 $KnownInstallers = @{
     'MSTeams' = @{
-        Url  = 'https://go.microsoft.com/fwlink/?linkid=2243204&clcid=0x409'
-        File = 'teamsbootstrapper.exe'
-        Args = '-p'
+        Url      = 'https://go.microsoft.com/fwlink/?linkid=2243204&clcid=0x409'
+        File     = 'teamsbootstrapper.exe'
+        Args     = '-p'
+        WingetId = 'Microsoft.Teams'
     }
     'Microsoft.OutlookForWindows' = @{
-        Url  = 'https://go.microsoft.com/fwlink/?linkid=2207851'
-        File = 'OutlookSetup.exe'
-        Args = '--provision true --quiet --start-'
+        Url      = 'https://go.microsoft.com/fwlink/?linkid=2207851'
+        File     = 'OutlookSetup.exe'
+        Args     = '--provision true --quiet --start-'
+        WingetId = 'Microsoft.Outlook'
     }
 }
 
@@ -533,10 +569,8 @@ function Write-AppxDeploymentError {
     param([int] $Minutes = 60, [int] $MaxEvents = 5)
 
     $since  = (Get-Date).AddMinutes(-$Minutes)
-    $events = @(Get-WinEvent -LogName 'Microsoft-Windows-AppXDeploymentServer/Operational' `
-                             -FilterXPath '*[System[(Level=2)]]' -MaxEvents 50 -ErrorAction SilentlyContinue |
-                Where-Object { $_.TimeCreated -ge $since -and
-                               $_.Message -match '([\w\.\-]+_[\d\.]+_\w*_[\w\.\-]*_\w{13})' -and
+    $events = @(Get-EventSafe -Filter @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Level = 2; StartTime = $since } -MaxEvents 50 |
+                Where-Object { $_.Message -match '([\w\.\-]+_[\d\.]+_\w*_[\w\.\-]*_\w{13})' -and
                                (Test-NameInScope $Matches[1]) } |
                 Select-Object -First $MaxEvents)
 
@@ -567,6 +601,17 @@ function Test-MicrosoftSignature {
 
     $sig = Get-AuthenticodeSignature -FilePath $Path
     return ($sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -match 'O=Microsoft Corporation')
+}
+
+function Get-EventSafe {
+    <#
+        Get-WinEvent throws a terminating "The parameter is incorrect" for a provider
+        that is not registered (no FSLogix on the machine) and "No events were found"
+        for an empty result; -ErrorAction covers neither. Both mean "nothing" here.
+    #>
+    param([Parameter(Mandatory)] [hashtable] $Filter, [int] $MaxEvents = 5000)
+    try { return @(Get-WinEvent -FilterHashtable $Filter -MaxEvents $MaxEvents -ErrorAction Stop) }
+    catch { return @() }
 }
 
 # -- FSLogix -------------------------------------------------------------------
@@ -602,8 +647,7 @@ function Get-FslogixRequest {
         with how often and when it last failed.
     #>
     $since  = (Get-Date).AddDays(-$Days)
-    $events = @(Get-WinEvent -FilterHashtable @{ ProviderName = 'Microsoft-FSLogix-Apps'; Level = 2; StartTime = $since } `
-                             -ErrorAction SilentlyContinue)
+    $events = @(Get-EventSafe -Filter @{ ProviderName = 'Microsoft-FSLogix-Apps'; Level = 2; StartTime = $since })
 
     $found = @{}
     foreach ($entry in $events) {
@@ -743,6 +787,180 @@ function Invoke-KnownInstaller {
     return $false
 }
 
+# -- winget --------------------------------------------------------------------
+function Get-WingetPath {
+    <#
+        winget as a path rather than a PATH lookup: its alias only exists per user,
+        so a run as System finds nothing on PATH. The App Installer's own folder
+        under WindowsApps is reachable either way; newest version wins.
+    #>
+    $command = Get-Command 'winget.exe' -ErrorAction SilentlyContinue
+    if ($command -and $command.Source -and (Test-Path $command.Source)) { return $command.Source }
+
+    $folders = @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -ErrorAction SilentlyContinue `
+                               -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' |
+                 Sort-Object -Property @{ Expression = {
+                     $raw = $_.Name -replace '^Microsoft\.DesktopAppInstaller_', '' -replace '_x64__8wekyb3d8bbwe$', ''
+                     try { [version] $raw } catch { [version] '0.0.0.0' }
+                 } })
+    for ($i = $folders.Count - 1; $i -ge 0; $i--) {
+        $exe = Join-Path $folders[$i].FullName 'winget.exe'
+        if (Test-Path $exe) { return $exe }
+    }
+    return $null
+}
+
+function Invoke-WingetProvision {
+    <#
+        Provision a package for all users from the MSIX winget downloads for it.
+        winget checks the SHA256 its manifest publishes, this checks the Microsoft
+        signature on the package and on every dependency winget brought along, and
+        Add-AppxProvisionedPackage installs the lot for every profile - not only for
+        the account running this, which is what "winget install" would do.
+        Returns the provisioned version, or $null when it did not take.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageId)
+
+    $winget = Get-WingetPath
+    if (-not $winget) { throw 'winget was not found - the App Installer package provides it' }
+
+    # Its own folder, emptied first, so a previous attempt's file cannot be picked up.
+    $staging = Join-Path $WorkingDir ('winget_' + ($PackageId -replace '[^\w\.]', '_'))
+    if (Test-Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+
+    $output = & $winget 'download' '--id' $PackageId '--exact' '--source' 'winget' '--download-directory' $staging `
+                        '--accept-package-agreements' '--accept-source-agreements' '--disable-interactivity' 2>&1
+    foreach ($line in @($output)) {
+        $text = "$line".Trim()
+        # Progress bars are dropped: spinner characters and block elements (U+2580-259F),
+        # built from char codes because Windows PowerShell reads this file as ANSI.
+        $progress = '^[\s\-\\|/' + [char] 0x2580 + '-' + [char] 0x259F + ']+$'
+        if ($text -and $text -notmatch $progress) { Write-Skip "  winget: $text" }
+    }
+    if ($LASTEXITCODE -ne 0) { throw "winget download --id $PackageId failed (exit code $LASTEXITCODE)" }
+
+    $packages = @(Get-ChildItem -LiteralPath $staging -File -Recurse -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Extension -in @('.msix', '.msixbundle', '.appx', '.appxbundle') })
+    # The package itself is the largest; everything else winget fetched is a dependency.
+    $main = $packages | Sort-Object Length -Descending | Select-Object -First 1
+    if (-not $main) { throw "winget downloaded no MSIX for $PackageId - its installer is not a package that can be provisioned" }
+    $deps = @($packages | Where-Object { $_.FullName -ne $main.FullName })
+
+    if (-not $SkipSignatureCheck) {
+        foreach ($file in @($main) + $deps) {
+            if (-not (Test-MicrosoftSignature -Path $file.FullName)) {
+                throw "$($file.Name) is not validly signed by Microsoft - refusing to provision it"
+            }
+        }
+    }
+
+    $before = Get-ProvisionedVersion
+    $params = @{ Online = $true; PackagePath = $main.FullName; SkipLicense = $true; ErrorAction = 'Stop' }
+    if ($deps.Count -gt 0) { $params['DependencyPackagePath'] = @($deps.FullName) }
+    Add-AppxProvisionedPackage @params | Out-Null
+
+    # Which package that was is read back from the store rather than assumed from
+    # the winget id: the two names are not the same (Microsoft.Outlook provisions
+    # Microsoft.OutlookForWindows).
+    $after   = Get-ProvisionedVersion
+    $changed = @($after.Keys | Where-Object { -not $before.ContainsKey($_) -or $before[$_] -ne $after[$_] })
+    $mainName = @($changed | Where-Object { $_ -notmatch 'VCLibs|UI\.Xaml|WindowsAppRuntime|NET\.Native' }) + $changed |
+                Select-Object -First 1
+    if (-not $mainName) {
+        Write-Warn "  winget $PackageId was provisioned, but no provisioned package changed version - it was already there at that build"
+        return $null
+    }
+    Write-Ok "$mainName provisioned for all users from winget ($PackageId): $($after[$mainName])"
+    return $after[$mainName]
+}
+
+# -- Everything that fails -----------------------------------------------------
+function Get-FailingApp {
+    <#
+        Every package that failed to deploy in the last -Days days, from both places
+        that log it: the AppX deployment log (any install, update or registration)
+        and the FSLogix Apps log (the replay at sign-in). One object per package name,
+        with the versions asked for, the error codes, and whether this host has them.
+    #>
+    $since = (Get-Date).AddDays(-$Days)
+    $rows  = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($source in @(
+        @{ Label = 'AppX'; Filter = @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Level = 2; StartTime = $since } }
+        @{ Label = 'FSLogix'; Filter = @{ ProviderName = 'Microsoft-FSLogix-Apps'; Level = 2; StartTime = $since } }
+    )) {
+        foreach ($entry in @(Get-EventSafe -Filter $source.Filter)) {
+            if ($entry.Message -notmatch '([\w\.\-]+_\d+\.\d+\.\d+\.\d+_\w*_[\w\.\-]*_\w{13})') { continue }
+            $fullName = $Matches[1]
+            if (-not (Test-NameInScope $fullName)) { continue }
+            $rows.Add([PSCustomObject]@{
+                Source   = $source.Label
+                FullName = $fullName
+                Name     = ($fullName -split '_')[0]
+                Code     = if ($entry.Message -match '(0x8[0-9A-Fa-f]{7})') { ($Matches[1].ToUpper() -replace '^0X', '0x') } else { '?' }
+                Time     = $entry.TimeCreated
+            })
+        }
+    }
+
+    foreach ($group in @($rows | Group-Object Name | Sort-Object Count -Descending)) {
+        [PSCustomObject]@{
+            Name     = $group.Name
+            Count    = $group.Count
+            Last     = ($group.Group | Sort-Object Time -Descending | Select-Object -First 1).Time
+            Sources  = (@($group.Group.Source | Select-Object -Unique) -join '+')
+            Codes    = (@($group.Group | Group-Object Code | Sort-Object Count -Descending |
+                          ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ')
+            Versions = @($group.Group.FullName | Select-Object -Unique)
+        }
+    }
+}
+
+# The deployment errors worth a name. Anything else is shown as its bare code.
+$AppxErrorText = @{
+    '0x80070490' = 'not found - the store lists what it cannot find (this script repairs that)'
+    '0x80070005' = 'access denied'
+    '0x80073CF0' = 'package could not be opened'
+    '0x80073CF3' = 'a dependency or conflicting package blocks it'
+    '0x80073CF6' = 'registration failed'
+    '0x80073CF9' = 'install failed'
+    '0x80073CFB' = 'a package with that name is already installed'
+    '0x80073D02' = 'in use - it retries when the app is closed'
+    '0x80073D06' = 'a newer version is already installed'
+}
+
+function Write-FailingApp {
+    <# The overview, one block per package, worst first; -Top keeps it readable. #>
+    param([hashtable] $Provisioned, [int] $Top = 15)
+
+    $failing = @(Get-FailingApp)
+    if ($failing.Count -eq 0) {
+        Write-Ok "No package failed to deploy in the last $Days day(s)"
+        return
+    }
+
+    # 0x80070490 first: that is what this script can repair.
+    $failing = @($failing | Sort-Object @{ Expression = { $_.Codes -notmatch '0x80070490' } }, @{ Expression = 'Count'; Descending = $true })
+    Write-Warn "$($failing.Count) package(s) failed to deploy in the last $Days day(s):"
+    foreach ($app in @($failing | Select-Object -First $Top)) {
+        $codes = @($app.Codes -split ', ' | ForEach-Object {
+            $code = ($_ -split ' ')[0]
+            if ($AppxErrorText.ContainsKey($code)) { "$_ ($($AppxErrorText[$code]))" } else { $_ }
+        }) -join ', '
+        Write-Warn ("  {0}: {1}x ({2}), last {3:yyyy-MM-dd HH:mm}" -f $app.Name, $app.Count, $app.Sources, $app.Last)
+        Write-Skip "    $codes"
+        foreach ($version in $app.Versions) {
+            $onDisk = if (Test-PackageFiles $version) { 'files on this host' } else { 'no files on this host' }
+            Write-Skip "    $version ($onDisk)"
+        }
+        if ($Provisioned.ContainsKey($app.Name)) { Write-Skip "    provisioned here: $($Provisioned[$app.Name])" }
+    }
+    if ($failing.Count -gt $Top) {
+        Write-Skip "  ... and $($failing.Count - $Top) more - narrow it down with -Name"
+    }
+}
+
 # -- Main ----------------------------------------------------------------------
 try {
     Write-Out ''
@@ -757,7 +975,6 @@ try {
     Write-StoreHealth $health
     $work = Get-RepairableCount $health
     if ($work -eq 0) { Write-Ok 'Nothing broken in the package store for these packages' }
-    Write-AppxDeploymentError
 
     # -- 1b. FSLogix and policy ------------------------------------------------
     # On a pooled host the store is often fine and the error comes from FSLogix
@@ -768,6 +985,13 @@ try {
     $provisionedNow = Get-ProvisionedVersion
     $needs = @(Write-FslogixStatus -Provisioned $provisionedNow -Requests @(Get-FslogixRequest))
     Write-AppxPolicyStatus
+
+    # -- 1c. Everything that fails --------------------------------------------
+    # Not only what the store gets wrong: every package that failed to install,
+    # update or register lately, from the AppX and FSLogix logs together.
+    Write-Out ''
+    Write-Step '1c. Failing apps'
+    Write-FailingApp -Provisioned $provisionedNow
 
     # What -Provision installs: what FSLogix showed is missing or behind, plus any
     # known package named explicitly (a deliberate "bring this to the current build").
@@ -781,7 +1005,7 @@ try {
     }
 
     $work += $needs.Count
-    if ($work -eq 0 -and -not $Source -and -not ($Provision -and $provisionTargets.Count -gt 0)) {
+    if ($work -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and $provisionTargets.Count -gt 0)) {
         $plannedExit = 0
         throw 'Nothing to repair.'
     }
@@ -894,9 +1118,20 @@ try {
     if ($Provision) {
         if ($provisionTargets.Count -eq 0) { Write-Skip 'Nothing to provision with a known installer' }
         foreach ($target in $provisionTargets) {
-            if (-not $PSCmdlet.ShouldProcess($target, "Provision for all users ($($KnownInstallers[$target].File) $($KnownInstallers[$target].Args))")) { continue }
+            $spec = $KnownInstallers[$target]
+            $how  = if ($UseWinget) { "winget download $($spec.WingetId) + Add-AppxProvisionedPackage" } else { "$($spec.File) $($spec.Args)" }
+            if (-not $PSCmdlet.ShouldProcess($target, "Provision for all users ($how)")) { continue }
             try {
-                if (-not (Invoke-KnownInstaller -PackageName $target)) {
+                if ($UseWinget) {
+                    $got = Invoke-WingetProvision -PackageId $spec.WingetId
+                    # winget's manifest lags behind Microsoft's installers; say so
+                    # when it is behind what the profiles on this pool ask for.
+                    $asked = @(Get-FslogixRequest | Where-Object { $_.Name -eq $target } |
+                               Sort-Object Version -Descending | Select-Object -First 1 | ForEach-Object { $_.Version })
+                    if ($got -and $asked.Count -gt 0 -and $got -lt $asked[0]) {
+                        Write-Warn "  winget publishes $got while profiles ask for $($asked[0]) - drop -UseWinget to provision Microsoft's current build"
+                    }
+                } elseif (-not (Invoke-KnownInstaller -PackageName $target)) {
                     Write-AppxDeploymentError -Minutes 20
                     $exitCode = 1
                 }
@@ -909,8 +1144,21 @@ try {
         Write-Bad ("Still to do: provision {0} - run again with -Provision" -f ($provisionTargets -join ', '))
         $exitCode = 1
     }
+    # Any other package, by its winget id - the way to put back an app that is not
+    # Teams or Outlook, as long as winget's manifest for it is an MSIX.
+    foreach ($id in $WingetId) {
+        if (-not $PSCmdlet.ShouldProcess($id, 'Provision for all users (winget download + Add-AppxProvisionedPackage)')) { continue }
+        try {
+            [void] (Invoke-WingetProvision -PackageId $id)
+        } catch {
+            Write-Bad "Provisioning $id failed: $($_.Exception.Message)"
+            Write-AppxDeploymentError -Minutes 20
+            $exitCode = 1
+        }
+    }
+
     if (-not $Source) {
-        if (-not $Provision) { Write-Skip 'No -Source or -Provision given' }
+        if (-not $Provision -and $WingetId.Count -eq 0) { Write-Skip 'No -Provision, -WingetId or -Source given' }
     } else {
         if (-not $SkipSignatureCheck -and -not (Test-MicrosoftSignature -Path $Source)) {
             throw "$Source is not validly signed by Microsoft - use -SkipSignatureCheck to provision it anyway"
