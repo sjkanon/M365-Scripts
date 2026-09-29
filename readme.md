@@ -551,7 +551,8 @@ Veelgebruikte NinjaOne script parameters:
 **Repair-AppxPackageStore.ps1** — Repair AppX packages (Teams, new Outlook, any other) that fail with `0x80070490` / "Deployment Register operation ... from:  (AppxManifest.xml)":
 - Diagnoses registrations whose files are gone, provisioned copies without files, and orphaned `AppxAllUserStore` entries (no profile, no files, no manifest)
 - On FSLogix hosts reads the `Microsoft-FSLogix-Apps` errors: which exact version the profiles ask for against what this host provisions, the FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, and AppX install policies
-- Repairs in a fixed order — deprovision, re-register, remove, then back up every registry key to `.reg` before removing it — and reads everything back; `-Provision` puts Teams / new Outlook back for all users with Microsoft's own installer
+- Lists **every** app that failed to install, update or register in the last `-Days` days (AppX deployment log + FSLogix log), with the meaning of each error code
+- Repairs in a fixed order — deprovision, re-register, remove, then back up every registry key to `.reg` before removing it — and reads everything back; `-Provision` puts Teams / new Outlook back for all users with Microsoft's own installer, or from winget with `-UseWinget`; `-WingetId` does the same for any other app
 - `-CheckOnly` changes nothing; with `-Name '*'` system/framework packages and Deprovisioned markers are never touched
 
 #### DNS Management
@@ -833,6 +834,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-29 (5)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` can take Teams and new Outlook from winget (`-UseWinget`): `winget download` of `Microsoft.Teams` / `Microsoft.Outlook`, whose manifests point at the MSIX on Microsoft's CDN, then `Add-AppxProvisionedPackage` with any dependencies winget brought, so the package lands for all users rather than only for whoever ran `winget install`. Every file must carry a valid Microsoft signature. winget's manifests lag behind Microsoft's installers (checked today: Teams 26198 against the 26246 profiles ask for, Outlook 1.2026.812 against 902), so the installers stay the default and the run warns when winget's build is older than what the profiles ask for. `-WingetId` provisions any other app the same way |
+| It now lists every app that fails, not only the ones in the package store: step 1c reads the AppX deployment log and the FSLogix Apps log over `-Days`, grouped per package, with the error codes named (`0x80073D02` in use, `0x80073CF6` registration failed, ...), the versions asked for and whether this host has their files; `0x80070490` first, top 15 |
+| Found while testing, fixed: `Get-WinEvent` throws a terminating error for a provider that is not registered — any machine without FSLogix — which `-ErrorAction SilentlyContinue` does not catch, so the FSLogix check would have aborted the run there; all event reads go through one wrapper now. And the winget progress filter held two non-ASCII characters, which Windows PowerShell 5.1 reads as ANSI in a file without BOM and then fails to parse — the whole script would not have run from NinjaOne. The file is pure ASCII again, checked |
+| Verified in PowerShell 7 and 5.1: the failing-apps overview against this machine's **real** AppX log (20 packages, codes translated, capped at 15); a **real** `winget download` of `Microsoft.Outlook` (32 MB MSIX, hash verified by winget, signature by the script) through to a mocked `Add-AppxProvisionedPackage`; and the earlier mocked store scenario, unchanged. Provisioning itself and the Teams download (271 MB) were not run here |
 
 ### 2026-09-29 (4)
 | Change |

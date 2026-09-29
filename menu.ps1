@@ -663,7 +663,11 @@ $menu = @(
             else {
                 $a['Confirm'] = $false   # already answered here, don't ask twice
                 $prov = Read-Host "  Also provision Teams / new Outlook for all users? [y/N]"
-                if ($prov -match '^[Yy]') { $a['Provision'] = $true }
+                if ($prov -match '^[Yy]') {
+                    $a['Provision'] = $true
+                    $wg = Read-Host "  Take them from winget instead of Microsoft's installer? [y/N]"
+                    if ($wg -match '^[Yy]') { $a['UseWinget'] = $true }
+                }
             }
             return $a
         }
