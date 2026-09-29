@@ -656,15 +656,17 @@ $menu = @(
         Label='Repair-AppxStore    — repair AppX packages failing with 0x80070490 (Teams, Outlook, FSLogix)'
         Script="$ROOT\scripts\Device\Repair-AppxPackageStore.ps1"
         Params={
-            $names = Read-Host "  Packages [MSTeams,Microsoft.OutlookForWindows] (* = everything)"
+            $names = Read-Host "  Packages [MSTeams,Microsoft.OutlookForWindows] (* = everything, copilot = Copilot)"
             $hosts = Read-Host "  Session hosts, e.g. lem-avd-4,lem-avd-5 (empty = this machine)"
             $apply = Read-Host "  Repair now (not just diagnose)? [y/N]"
-            $a = @{ Name = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('MSTeams', 'Microsoft.OutlookForWindows') } }
+            $a = @{}
+            if ($names -match '^\s*copilot\s*$') { $a['Copilot'] = $true }
+            else { $a['Name'] = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('MSTeams', 'Microsoft.OutlookForWindows') } }
             if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
             if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
             else {
                 $a['Confirm'] = $false   # already answered here, don't ask twice
-                $prov = Read-Host "  Also provision Teams / new Outlook for all users? [y/N]"
+                $prov = Read-Host "  Also install the apps for all users (provision)? [y/N]"
                 if ($prov -match '^[Yy]') {
                     $a['Provision'] = $true
                     $wg = Read-Host "  Take them from winget instead of Microsoft's installer? [y/N]"

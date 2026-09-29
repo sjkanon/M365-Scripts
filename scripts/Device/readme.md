@@ -215,6 +215,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | `-LogPath` | Transcript and `.reg` backups (default `C:\Temp`) |
 | `-ComputerName` | Run on these session hosts instead of this machine (e.g. `lem-avd-4,lem-avd-5,lem-avd-6`): the script copies itself over PowerShell remoting (WinRM) to `C:\IT\AppxRepair` on each host, runs there with the same parameters, and ends with a pool table — exit code, FSLogix build, provisioned Teams / Outlook per host — naming any difference between hosts. A repair is confirmed once for the whole pool |
 | `-Credential` | Credential for those remoting sessions |
+| `-Copilot` | Look at Copilot (step 1d): the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`), the **unified Microsoft Copilot app** Edge Update installs since September 2026, and every policy that removes or blocks it. Their Deprovisioned markers are in scope. With `-Provision` Copilot is installed for all users with Microsoft's documented `M365CopilotDesktopInstaller.exe --quiet --start -p` |
 
 Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
 
@@ -231,6 +232,10 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
 
+# Copilot missing on the pool: why, then put it back for all users
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Copilot -CheckOnly
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Copilot -Provision -Confirm:$false
+
 # Same, with both packages taken from winget
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false
 
@@ -243,6 +248,7 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 - Exit codes: `0` clean, `1` failed or something survived, `2` check-only found work.
 - On an FSLogix pool, run it on **every** host — `-ComputerName` does that from one place and shows whether FSLogix, Teams and Outlook are the same everywhere.
 - Profiles asking for a newer Teams / Outlook than a host provisions is normal: both apps update themselves per user, and Microsoft's installers provision a last-known-good build that is behind that (measured: Teams 26225 provisioned vs 26246 in the profiles, Outlook 1.2026.818 vs 902). With FSLogix 2210 HF4 / 25.06 or later that gap does no harm — the package is registered by family name. With an older FSLogix it is the cause of the `0x80070490`, and the fix is updating FSLogix, not chasing the build.
+- **Copilot, September 2026:** Microsoft is unifying the Microsoft 365 Copilot app and the Windows Copilot app into one *Microsoft Copilot* app, installed and updated by Edge Update (app id `{C50565E9-CCCF-44B4-BA15-5AC5C6569197}`). What keeps it away is usually a policy, and the script names it with its path: `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate` — `Install{id}` = 0 (no install), `Uninstall{id}` = 1/2 (removed at every check, unless `Install{id}` = 5 Force Installs, which overrides it); `PauseCopilotAppUnificationRollout` under `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate`; and Windows' own `WindowsCopilot` / `WindowsAI` policies, machine-wide and per signed-in user. Those come from GPO or Intune and are **not** changed by the script — a local edit would be undone at the next refresh. The Microsoft 365 Apps admin center can also switch off the automatic install (*Modern Apps settings*); that is not visible on the machine.
 - `-ComputerName` needs WinRM from where you run it to the hosts (domain-joined hosts: Kerberos works as is). For Entra-joined hosts that is often not set up; run the script on each host through NinjaOne instead.
 - The FSLogix error for a user stops after that user signs out once on a host that provisions the package — FSLogix then saves the current version.
 - After step 5 restart the host when convenient, so the deployment engine rereads the store.

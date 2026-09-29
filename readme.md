@@ -850,6 +850,22 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-29 (9)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Copilot` diagnoses and restores Copilot. Step 1d reports the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`) as registered and provisioned, the unified Microsoft Copilot app that Edge Update installs since the September 2026 unification (read from `EdgeUpdate\Clients\{C50565E9-...}`), the Edge Update version against the 1.3.253.25 it needs, and every policy that keeps Copilot away — `Install` / `Uninstall` / `Update{C50565E9-...}` under `Policies\Microsoft\EdgeUpdate` (with Force Installs overriding Uninstall, as documented), the unification pause, and Windows' `WindowsCopilot` / `WindowsAI` policies machine-wide and per signed-in user. Policies are reported with path and value and fail the run, but are never changed: they come from GPO or Intune |
+| With `-Provision` Copilot is installed for all users with Microsoft's documented `M365CopilotDesktopInstaller.exe --quiet --start -p` from `go.microsoft.com/fwlink/?linkid=2325486` — checked today to deliver a Microsoft-signed `xpdBootstrapper` 16.0.19305 — and accepted when either the AppX package is provisioned or the unified app appears under Edge Update. `-Copilot` also puts both packages' Deprovisioned markers in scope, which is what a debloat tool leaves behind. winget has only an `.exe` for it, so `-UseWinget` falls back to the installer. The pool table gained a Copilot column; the menu (`R`) takes `copilot` as the package answer |
+| Renumbered the previous entry to (8): it and the SharePoint entry below were both committed as (7) the same afternoon |
+| Verified in PowerShell 5.1 and 7: step 1d against this machine's real registry and packages, and against mocked Edge Update policies (Uninstall alone fails the run, Uninstall with Force Installs does not); the orchestrator's pool table with the new column; the installer download and its signature. **Not run on a session host**: the installer's `-p` provisioning and the unified app appearing afterwards are untested |
+
+### 2026-09-29 (8)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` runs across a pool with `-ComputerName lem-avd-4,lem-avd-5,lem-avd-6` (optionally `-Credential`): it copies itself to `C:\IT\AppxRepair` on each host over PowerShell remoting, runs there with the same parameters — the host's own output streams back — and ends with one table across the pool (exit code, FSLogix build, provisioned Teams / Outlook) that names any difference between hosts. A repair is confirmed once for the whole pool, because a remote session cannot answer a confirmation prompt reliably. Wired into the menu (key `R` asks for the hosts) |
+| The verify step's advice was wrong. After a live `-Provision` run it said Teams (26225) and Outlook (1.2026.818) were "still older than the 26246 / 902 profiles ask for - bring the other hosts to the same build". But no host is ahead: both apps update themselves per user, and Microsoft's installers provision a last-known-good build that is behind that, so the profile will always be ahead of every host and provisioning newer only lasts until the next update. What decides whether it hurts is FSLogix: from 2210 HF4 (Teams) / 25.06 (Outlook) it registers by family name and the gap is harmless (now reported as OK, exit code 0); on an older build the advice is to update FSLogix. Such a gap no longer counts as something to provision |
+| A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
+| Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
+
 ### 2026-09-29 (7)
 | Change |
 |--------|
@@ -858,14 +874,6 @@ These scripts are provided as-is. Always test in a non-production environment be
 | The app-only authentication and SharePoint REST layer is shared with the permissions report, byte for byte, delimited by `SHARED BLOCK START/END`. It took four live runs against a tenant to get right, and a second copy that quietly drifts is a correctness risk in the script that deletes permissions. To make that shareable the report's banner moved above the block and the temp app name now comes from `$TempAppNamePrefix`; the report's behaviour is unchanged |
 | Added `scripts/SharePoint/Test-SharePointAccessScripts.ps1`, which asserts the two copies are identical (printing the first differing line when they are not) and drives the revocation funnel for real: a dry run records its intent and executes nothing, `-Apply` executes and records, a failure lands in the audit trail instead of vanishing, and the refusals above stay refused. 27 checks, all passing, runnable from any directory |
 | Added the menu entry (key `W`) and documented both scripts in the SharePoint folder readme, the repository tree and this category list. Verified every `docs` anchor in that readme resolves |
-
-### 2026-09-29 (7)
-| Change |
-|--------|
-| `Repair-AppxPackageStore.ps1` runs across a pool with `-ComputerName lem-avd-4,lem-avd-5,lem-avd-6` (optionally `-Credential`): it copies itself to `C:\IT\AppxRepair` on each host over PowerShell remoting, runs there with the same parameters — the host's own output streams back — and ends with one table across the pool (exit code, FSLogix build, provisioned Teams / Outlook) that names any difference between hosts. A repair is confirmed once for the whole pool, because a remote session cannot answer a confirmation prompt reliably. Wired into the menu (key `R` asks for the hosts) |
-| The verify step's advice was wrong. After a live `-Provision` run it said Teams (26225) and Outlook (1.2026.818) were "still older than the 26246 / 902 profiles ask for - bring the other hosts to the same build". But no host is ahead: both apps update themselves per user, and Microsoft's installers provision a last-known-good build that is behind that, so the profile will always be ahead of every host and provisioning newer only lasts until the next update. What decides whether it hurts is FSLogix: from 2210 HF4 (Teams) / 25.06 (Outlook) it registers by family name and the gap is harmless (now reported as OK, exit code 0); on an older build the advice is to update FSLogix. Such a gap no longer counts as something to provision |
-| A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
-| Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
 
 ### 2026-09-29 (6)
 | Change |
