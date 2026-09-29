@@ -202,6 +202,31 @@ $groupsCsv    = Join-Path $outputDir "SharePoint_Permissions_Groups_$ts.csv"
 $effectiveCsv = Join-Path $outputDir "SharePoint_Permissions_EffectiveAccess_$ts.csv"
 $siteAccessCsv = Join-Path $outputDir "SharePoint_Permissions_SiteAccess_$ts.csv"
 
+$TempAppNamePrefix = 'SP-PermissionsReport'
+
+# ── Header ────────────────────────────────────────────────────────────────────
+Write-Host ''
+Write-Host '  ================================================' -ForegroundColor Cyan
+Write-Host '   Get-SharePointPermissionsReport' -ForegroundColor Cyan
+Write-Host '  ================================================' -ForegroundColor Cyan
+Write-Host ''
+Write-Host ("  Scope     : {0}" -f $(switch ($Scope) {
+    'Site' { 'Sites and sub-sites only' }
+    'List' { 'Sites, sub-sites, lists and libraries' }
+    'Item' { 'Everything — sites, lists, folders and files with unique permissions' }
+})) -ForegroundColor Cyan
+Write-Host ("  Target    : {0}" -f $(if ($SiteUrl) { $SiteUrl } else { "$TenantUrl (tenant-wide)" })) -ForegroundColor Cyan
+Write-Host  '  Mode      : Read-only — this script never changes a permission' -ForegroundColor DarkGray
+Write-Host ''
+
+# ── SHARED BLOCK START ────────────────────────────────────────────────────────
+# Everything from here to SHARED BLOCK END is kept byte-identical with the copy in
+# scripts/SharePoint/Revoke-SharePointUserAccess.ps1. It is the app-only authentication and
+# SharePoint REST layer, and it took four live runs against a tenant to get right: certificate
+# credentials because SharePoint refuses secret-based app-only tokens, tokens that must prove
+# they carry their app roles before being cached, 401 treated as fatal rather than per-site, and
+# paging that cannot loop. A second, drifting copy of that is a correctness risk in a script that
+# deletes permissions, so a test asserts the two are identical. Set $TempAppNamePrefix before it.
 # ── Well-known application IDs ────────────────────────────────────────────────
 $GraphAppId      = '00000003-0000-0000-c000-000000000000'
 $SharePointAppId = '00000003-0000-0ff1-ce00-000000000000'
@@ -861,21 +886,6 @@ function Get-SharingLinkDescription {
     }
 }
 
-# ── Header ────────────────────────────────────────────────────────────────────
-Write-Host ''
-Write-Host '  ================================================' -ForegroundColor Cyan
-Write-Host '   Get-SharePointPermissionsReport' -ForegroundColor Cyan
-Write-Host '  ================================================' -ForegroundColor Cyan
-Write-Host ''
-Write-Host ("  Scope     : {0}" -f $(switch ($Scope) {
-    'Site' { 'Sites and sub-sites only' }
-    'List' { 'Sites, sub-sites, lists and libraries' }
-    'Item' { 'Everything — sites, lists, folders and files with unique permissions' }
-})) -ForegroundColor Cyan
-Write-Host ("  Target    : {0}" -f $(if ($SiteUrl) { $SiteUrl } else { "$TenantUrl (tenant-wide)" })) -ForegroundColor Cyan
-Write-Host  '  Mode      : Read-only — this script never changes a permission' -ForegroundColor DarkGray
-Write-Host ''
-
 # ── Module preflight ──────────────────────────────────────────────────────────
 $missingModules = @('Microsoft.Graph.Authentication') | Where-Object { -not (Get-Module -ListAvailable -Name $_) }
 if ($missingModules.Count -gt 0) {
@@ -971,7 +981,9 @@ try {
             Remove-TempApp; exit 1
         }
 
-        $tempAppName = "SP-PermissionsReport-Temp-$ts"
+        # Named from a variable so this whole block stays byte-identical to the copy in
+        # Revoke-SharePointUserAccess.ps1 — see the shared-block note above Remove-TempApp.
+        $tempAppName = "$TempAppNamePrefix-Temp-$ts"
         Write-Host "  Creating temporary App Registration '$tempAppName'..." -ForegroundColor Cyan
 
         # Certificate, not a password: SharePoint Online returns 401 "Unsupported app only token"
@@ -1057,6 +1069,7 @@ try {
     Write-Host "  a client secret is not accepted by SharePoint Online for app-only access." -ForegroundColor Yellow
     Remove-TempApp; exit 1
 }
+# ── SHARED BLOCK END ──────────────────────────────────────────────────────────
 
 # ── Site discovery ────────────────────────────────────────────────────────────
 # Three sources, de-duplicated on URL, because no single one is complete:

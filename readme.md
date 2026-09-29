@@ -284,6 +284,19 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
 
 Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 
+#### Revoke User Access
+
+**Revoke-SharePointUserAccess.ps1** — the counterpart to the permissions report: that one says who can reach what, this one takes it away. Reports by default, removes with `-Apply`, and writes a CSV of every grant found and what happened to it.
+
+- Site collection administrator first, because it overrides every role assignment below it
+- Direct role assignments on the site, a sub-site, a list or library, a folder or a single file
+- SharePoint group membership, and **sharing links** — the `SharingLinks.*` groups that "Anyone with the link" and "Specific people" actually put a person in
+- It deliberately never changes Entra ID group membership: a user who gets in through a security or Microsoft 365 group keeps that access, and removing them from SharePoint does not take it away. Those routes are reported with the group named, so offboarding is two steps and the second one is visible
+- Grants to `Everyone` are left alone for the same reason in reverse — removing one revokes access for the whole tenant, not for this person
+- `ConfirmImpact = 'High'`, so it asks per removal unless `-Confirm:$false`
+
+**Test-SharePointAccessScripts.ps1** verifies this script and the permissions report without touching a tenant: the app-only auth layer both share must stay byte-identical, and the revocation funnel must record a dry run without executing it, execute and record under `-Apply`, and keep refusing the grants it must not remove.
+
 #### Recycle Bin Restore
 
 Restore deleted files and folders from a site or OneDrive recycle bin — dry-run by default, `-Apply` to actually restore.
@@ -731,6 +744,8 @@ M365-Scripts/
     │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
     │   ├── Search-SharePointContent.ps1 ← same, tenant-wide via Graph app-only: delta + /permissions, sharing links and guests (files/folders)
     │   ├── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   ├── Revoke-SharePointUserAccess.ps1 ← take one user's access away at every level, sharing links included (reports unless -Apply)
+    │   ├── Test-SharePointAccessScripts.ps1 ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── readme.md
     │       ├── Petsolutions-SharePoint-Handleiding.md ← end-user guide (NL) to hand to the customer
@@ -834,6 +849,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-29 (7)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Revoke-SharePointUserAccess.ps1` — the counterpart to the permissions report. It finds every place one named user holds access and removes it: site collection administrator first (it overrides everything below it, so leaving it would make the rest cosmetic), direct role assignments on sites, sub-sites, lists, folders and single files, SharePoint group membership, and the `SharingLinks.*` groups that carry "Anyone with the link" and "Specific people". Reporting is the default; nothing changes without `-Apply`, and every run writes a CSV of what was found and what happened to it |
+| It deliberately refuses two things and says so loudly. An Entra ID group grant is not revoked — the group *is* the grant, and removing the user from SharePoint would leave access in place while looking like it was closed; the group is named in the CSV under `Action = CannotRevoke` so offboarding is visibly two steps. A grant to `Everyone` is left alone for the reverse reason: removing it revokes access for the whole tenant rather than for this person |
+| The app-only authentication and SharePoint REST layer is shared with the permissions report, byte for byte, delimited by `SHARED BLOCK START/END`. It took four live runs against a tenant to get right, and a second copy that quietly drifts is a correctness risk in the script that deletes permissions. To make that shareable the report's banner moved above the block and the temp app name now comes from `$TempAppNamePrefix`; the report's behaviour is unchanged |
+| Added `scripts/SharePoint/Test-SharePointAccessScripts.ps1`, which asserts the two copies are identical (printing the first differing line when they are not) and drives the revocation funnel for real: a dry run records its intent and executes nothing, `-Apply` executes and records, a failure lands in the audit trail instead of vanishing, and the refusals above stay refused. 27 checks, all passing, runnable from any directory |
+| Added the menu entry (key `W`) and documented both scripts in the SharePoint folder readme, the repository tree and this category list. Verified every `docs` anchor in that readme resolves |
 
 ### 2026-09-29 (6)
 | Change |
