@@ -835,6 +835,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-29 (6)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` no longer tries to re-register a package that has been superseded. The first live run tried `aimgr_0.20.61.0` in step 3 and got `0x80073D06` ("a higher version 0.20.62.0 of this package is already installed"): an old version whose status is not Ok while a newer one of the same package sits next to it is not damage but Windows waiting to remove it, and re-registering it can never succeed. The diagnosis now compares versions per package name, architecture and resource id, reports these as *Superseded* in one grey line, and leaves them out of the repair count; step 3 also treats a `0x80073D06` that turns up anyway as "left for Windows" rather than a warning |
+| Verified offline in PowerShell 7 and 5.1 with that exact pair (0.20.61.0 `Modified` next to 0.20.62.0 `Ok`): reported as superseded and not counted, while a genuinely damaged package in the same run is still picked up for re-registration. Not yet re-run on the host where it happened |
+
 ### 2026-09-29 (5)
 | Change |
 |--------|
