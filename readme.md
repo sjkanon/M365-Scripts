@@ -152,6 +152,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `8` / `F8` | Device | Disable-InternalMic |
 | `I` | Device | Remove-OemBloatware — remove OEM + generic Store bloatware |
 | `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
+| `R` | Device | Repair-AppxPackageStore — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `L` | Startup | Test-MarkdownLinks — check every readme link: files and in-page anchors |
@@ -547,6 +548,12 @@ Veelgebruikte NinjaOne script parameters:
 - Application & system logs: dynamic scan of entire C:\ for `logs`/`log`/`logging` folders
 - Dry-run by default; use `-Apply` to delete. Per-category summary with space freed
 
+**Repair-AppxPackageStore.ps1** — Repair AppX packages (Teams, new Outlook, any other) that fail with `0x80070490` / "Deployment Register operation ... from:  (AppxManifest.xml)":
+- Diagnoses registrations whose files are gone, provisioned copies without files, and orphaned `AppxAllUserStore` entries (no profile, no files, no manifest)
+- On FSLogix hosts reads the `Microsoft-FSLogix-Apps` errors: which exact version the profiles ask for against what this host provisions, the FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, and AppX install policies
+- Repairs in a fixed order — deprovision, re-register, remove, then back up every registry key to `.reg` before removing it — and reads everything back; `-Provision` puts Teams / new Outlook back for all users with Microsoft's own installer
+- `-CheckOnly` changes nothing; with `-Name '*'` system/framework packages and Deprovisioned markers are never touched
+
 #### DNS Management
 
 Scripts for managing DNS records in Active Directory-integrated DNS zones.
@@ -664,6 +671,7 @@ M365-Scripts/
     │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   ├── Clear-TempFiles.ps1
     │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
+    │   ├── Repair-AppxPackageStore.ps1  ← repair AppX 0x80070490 (orphaned store entries, FSLogix replay)
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── Update-TeamsClient.ps1       ← update new Teams + meeting add-in when a newer build exists
     │   ├── Update-TeamsClient.md        ← how that script decides, step by step
@@ -825,6 +833,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-29 (4)
+| Change |
+|--------|
+| New `scripts/Device/Repair-AppxPackageStore.ps1`: repairs AppX packages that fail with `0x80070490` and an empty path ("Deployment Register operation ... from:  (AppxManifest.xml)"), for any package — the same error came back for `Microsoft.OutlookForWindows` on a host where only Teams had a repair, and `Update-TeamsClient.ps1 -RepairAppxStore` is scoped to `MSTeams` by design |
+| The errors on that host were logged by `Apps (Microsoft-FSLogix-Apps)`, which is a different cause than a damaged store: FSLogix saves each user's packages by exact version in `AppxPackages.xml` and replays them at sign-in (`InstallAppxPackages`, default on), so a host that provisions another build — or none — answers `0x80070490`. The script reads those events and compares the version the profiles ask for with what the host provisions, checks the FSLogix build against the first releases that register Teams (2210 HF4) and Outlook (25.06) by family name, and with `-Provision` puts Teams / new Outlook back for all users with Microsoft's own installer (`teamsbootstrapper.exe -p`, Outlook `Setup.exe --provision true --quiet --start-`; both links checked to resolve to Microsoft's CDN, both signature-checked before running) |
+| The store repair generalises the Teams one and adds what makes it safe to run on a whole store: every registry key is exported to a `.reg` backup before it is removed, and not removed when the backup fails; with a wildcard `-Name`, system and framework packages are reported but never touched and Deprovisioned markers (how bloatware removals are remembered) are left alone; a user registration also counts as orphaned when its package has no files anywhere, not only when its SID has no profile. Editing `StateRepository-Machine.srd` or `AppxPackages.xml` was researched and deliberately left out — both unsupported |
+| Wired into `menu.ps1` as Device key `R` (diagnose unless you confirm the repair; asks separately about provisioning), documented in the Device readme |
+| Verified offline in PowerShell 7 and 5.1 with mocked AppX cmdlets, FSLogix events and a scratch `AppxAllUserStore` in HKCU: the empty-path Teams package is found as a ghost, its user and machine entries as orphans, an Outlook entry for a SID without profile as orphan, the older provisioned Teams and the missing Outlook as needing provisioning, a framework ghost and a Deprovisioned marker are left alone with `*` and included when named, and the `.reg` backup is written. That run also caught `-Name A,B` arriving as one string through `powershell.exe -File` (and through the script's own relaunches), now split. **Not run on a live host**: no elevation or AVD host was available here, so the removals, the registry edits and both installers have not been exercised for real |
 
 ### 2026-09-29 (3)
 | Change |

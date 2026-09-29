@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-181 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+182 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -129,6 +129,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Remove-SharePointStructure.ps1`](SharePoint/Provisioning/Remove-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Remove what the structure scripts created, in the order that works. Reports only unless you pass -Apply. |
 | [`Remove-TemporaryConditionalAccessPolicies.ps1`](Entra/Remove-TemporaryConditionalAccessPolicies.ps1) | [`Entra/`](Entra/readme.md) | Remove temporary Conditional Access policies created by this toolkit. |
 | [`Remove-Workspace365Environment.ps1`](LegacyUtilities/Workspace365/Remove-Workspace365Environment.ps1) | [`LegacyUtilities/Workspace365/`](LegacyUtilities/Workspace365/readme.md) | Delete a Workspace 365 environment via the Provisioning API. |
+| [`Repair-AppxPackageStore.ps1`](Device/Repair-AppxPackageStore.ps1) | [`Device/`](Device/readme.md) | Find and repair AppX packages that Windows lists but can no longer find, the state behind "Deployment Register operation ... from: (AppxManifest.xml) failed wi… |
 | [`Repair-StuckWin32AppEnforcement.ps1`](Intune/Repair-StuckWin32AppEnforcement.ps1) | [`Intune/`](Intune/readme.md) | Detect and clear Win32 apps stuck behind Intune's GRS retry cooldown on this device. |
 | [`Restart-Time-Sync.ps1`](Device/Time%20sync/Restart-Time-Sync.ps1) | [`Device/Time sync/`](Device/Time%20sync/readme.md) | Repair Windows time synchronisation and keep it repaired with a scheduled task. |
 | [`Restore-MailboxMessages.ps1`](Exchange/Restore-MailboxMessages.ps1) | [`Exchange/`](Exchange/readme.md) | Put messages that were moved or deleted on a given day back where they came from, and report who moved or deleted them. Preview by default. |

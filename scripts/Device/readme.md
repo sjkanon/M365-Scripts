@@ -12,6 +12,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Invoke-WindowsActivation.ps1`](Invoke-WindowsActivation.ps1) ([docs](#invoke-windowsactivationps1)) | Activate Windows, manage product keys and KMS settings |
 | [`Invoke-WindowsCleanup.ps1`](Invoke-WindowsCleanup.ps1) ([docs](#invoke-windowscleanupps1)) | Scan and remove reclaimable disk space |
 | [`Remove-OemBloatware.ps1`](Remove-OemBloatware.ps1) ([docs](#remove-oembloatwareps1)) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
+| [`Repair-AppxPackageStore.ps1`](Repair-AppxPackageStore.ps1) ([docs](#repair-appxpackagestoreps1)) | Repair AppX packages that fail with `0x80070490` — orphaned package store entries, and FSLogix replaying a version the host does not have (Teams, new Outlook, any package) |
 | [`Test-OpenVpnDiagnostics.ps1`](Test-OpenVpnDiagnostics.ps1) ([docs](#test-openvpndiagnosticsps1)) | Diagnose OpenVPN Connect issues |
 | [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1) ([docs](#update-teamsclientps1)) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build ([how it works](Update-TeamsClient.md), [IT Glue](Update-TeamsClient-ITGlue.md)) |
 | [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
@@ -166,6 +167,74 @@ Detects the device manufacturer and removes known OEM bloatware via `winget`, pl
 A CSV report (found/removed per app) is saved to `C:\Temp\` after each run.
 
 **Requires:** `winget` (App Installer from the Microsoft Store) for OEM package removal; Administrator privileges.
+
+---
+
+## Repair-AppxPackageStore.ps1
+
+Repairs AppX packages that fail with `0x80070490` ("Element not found"), typically logged as:
+
+```
+MSTeams installation error: Deployment Register operation with target volume C: on Package
+MSTeams_26246.1604.5133.838_x64__8wekyb3d8bbwe from:  (AppxManifest.xml)  failed with error 0x80070490.
+```
+
+The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying a registration that has no install location. There are two causes, and the script diagnoses both:
+
+- **The host's package store is inconsistent.** `AppxAllUserStore` lists a package for a SID with no profile, a package whose files are gone, or a machine-wide entry without a manifest. `Remove-AppxPackage`, DISM and installers all read that store, so they all fail, and draining the host or rebooting changes nothing.
+- **FSLogix replays a version the host does not have** (event source `Apps (Microsoft-FSLogix-Apps)`, at sign-in). At sign-out FSLogix saves the user's packages by full name — exact version — to `AppxPackages.xml` in the profile container, and re-registers them at the next sign-in (`HKLM\SOFTWARE\FSLogix\Profiles\InstallAppxPackages`, on by default). A host with a different build, or none at all, answers `0x80070490`. The fix is to **provision** the package for all users, at the same build on every host in the pool, and to run an FSLogix build that registers by family name (2210 HF4 for Teams, 25.06 for new Outlook). `AppxPackages.xml` is not edited: Microsoft says it is not meant to be, and FSLogix rewrites it at the next sign-out.
+
+**Steps**
+
+| Step | What it does |
+|------|--------------|
+| 1. Diagnose | Registered packages whose files are gone (*Ghost*) or whose status is not Ok (*Damaged*), provisioned packages without files, orphaned `AppxAllUserStore` entries, recent AppX deployment errors |
+| 1b. FSLogix | FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, the packages FSLogix failed to register in the last `-Days` days against what this host provisions, AppX install policies |
+| 2. Provisioned | `Remove-AppxProvisionedPackage` for provisioned copies whose files are gone |
+| 3. Re-register | `Add-AppxPackage -Register` from the package's own manifest where the files are still there |
+| 4. Remove | `Remove-AppxPackage -AllUsers` for ghosts, per user where that refuses |
+| 5. Store | Each remaining orphaned registry key is exported to a `.reg` backup, and only then removed — no backup, no removal |
+| 6. Provision | `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, downloaded from Microsoft and signature-checked. `-Source`: any MSIX you supply |
+| 7. Verify | The diagnosis runs again; exit code 1 when anything survived |
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows` |
+| `-CheckOnly` | Diagnose only, change nothing (exit code `2` when there is work) |
+| `-Provision` | Provision Teams / new Outlook for all users with Microsoft's installer: what FSLogix showed is missing or behind, plus either one named explicitly in `-Name` |
+| `-Source` | Provision this `.msix` / `.msixbundle` after the store is clean |
+| `-IncludeDeprovisioned` | Also clear Deprovisioned markers with a wildcard `-Name` (they are cleared by default only for explicitly named packages) |
+| `-SkipSignatureCheck` | Do not require a valid Microsoft signature on the installer or `-Source` |
+| `-Days` | How far back to read the FSLogix Apps log (default `7`) |
+| `-WorkingDir` | Download folder for the installers (default `C:\IT\AppxRepair`) |
+| `-LogPath` | Transcript and `.reg` backups (default `C:\Temp`) |
+
+Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
+
+**Examples**
+
+```powershell
+# What is broken on this host? Changes nothing.
+.\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
+
+# Repair and put Teams + new Outlook back for all users, unattended
+.\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# Scan the whole store; system and framework packages are reported, never touched
+.\Repair-AppxPackageStore.ps1 -CheckOnly
+```
+
+**Notes**
+
+- Exit codes: `0` clean, `1` failed or something survived, `2` check-only found work.
+- On an FSLogix pool, run it on **every** host: a host that provisions an older build than another host is flagged, because the profiles carry the newest version any host gave them.
+- The FSLogix error for a user stops after that user signs out once on a host that provisions the package — FSLogix then saves the current version.
+- After step 5 restart the host when convenient, so the deployment engine rereads the store.
+- A backup `.reg` file can be double-clicked to put an entry back.
+- Not done on purpose: editing `StateRepository-Machine.srd` or `AppxPackages.xml`. Both are unsupported, and the first breaks Start and every app on a multi-session host when it goes wrong.
+- For Teams specifically, [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1) `-RepairAppxStore` does the store part as part of an update; this script covers every package and the FSLogix side.
 
 ---
 

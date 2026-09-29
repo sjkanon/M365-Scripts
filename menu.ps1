@@ -652,6 +652,22 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='R'; FKey=$null; Category='Device'
+        Label='Repair-AppxStore    — repair AppX packages failing with 0x80070490 (Teams, Outlook, FSLogix)'
+        Script="$ROOT\scripts\Device\Repair-AppxPackageStore.ps1"
+        Params={
+            $names = Read-Host "  Packages [MSTeams,Microsoft.OutlookForWindows] (* = everything)"
+            $apply = Read-Host "  Repair now (not just diagnose)? [y/N]"
+            $a = @{ Name = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('MSTeams', 'Microsoft.OutlookForWindows') } }
+            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+            else {
+                $a['Confirm'] = $false   # already answered here, don't ask twice
+                $prov = Read-Host "  Also provision Teams / new Outlook for all users? [y/N]"
+                if ($prov -match '^[Yy]') { $a['Provision'] = $true }
+            }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
         Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
         Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"
