@@ -12,6 +12,8 @@ admin sign-in on any (customer) tenant.
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | The same question tenant-wide through Microsoft Graph, app-only, no interactive login — files and folders |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
+| [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
+| [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Verify the two access scripts without touching a tenant — shared auth block identical, and the revocation funnel behaves |
 | [`Provisioning/`](Provisioning/readme.md) | Provision and maintain a whole structure — metadata model, content types, libraries and group permissions — from one config file, plus a sharing audit and a drift check |
 
 ---
@@ -446,4 +448,94 @@ app creation entirely.
 ```powershell
 Install-Module PnP.PowerShell -Scope CurrentUser              # PowerShell 7.4+
 Install-Module Microsoft.Graph.Applications -Scope CurrentUser # only for the one-time app registration
+```
+
+---
+
+### Revoke-SharePointUserAccess.ps1
+
+De tegenhanger van [`Get-SharePointPermissionsReport.ps1`](../Reporting/readme.md#get-sharepointpermissionsreportps1): dat script vertelt wie waar bij kan, dit script haalt het weg. Het zoekt elke plek waar één genoemde gebruiker toegang heeft en verwijdert die:
+
+- **Site collection-beheerder** — als eerste, want die overschrijft elke roltoewijzing eronder; laten staan zou de rest cosmetisch maken
+- **Directe roltoewijzingen** op site, sub-site, lijst/bibliotheek, map of los bestand
+- **SharePoint-groepen** (Owners, Members, Visitors en eigen groepen)
+- **Deellinks** — de `SharingLinks.*`-groepen waar een gedeelde link zijn ontvangers in zet. Dat is hoe "iedereen met de link" en "specifieke personen" een persoon daadwerkelijk toegang geven
+
+Rapporteren is de standaard. Er verandert niets zonder `-Apply`, en elke run schrijft een CSV met precies wat er gevonden is en wat ermee gebeurd is.
+
+#### Wat het bewust níét doet
+
+| | Waarom |
+|---|---|
+| Entra ID-groepslidmaatschap wijzigen | Wie via een security- of M365-groep binnenkomt, houdt die toegang — de groep *is* de toekenning. Dit script raakt Entra niet aan, maar meldt die routes wel nadrukkelijk, mét groepsnaam. Anders denk je dat het dicht is terwijl het openstaat |
+| `Everyone` / `Everyone except external users` verwijderen | Dat ontneemt de hele tenant toegang, niet deze persoon. Wordt gemeld, niet aangeraakt |
+| Eigenaarschap en metadata opschonen | Een ingetrokken gebruiker blijft de auteur van wat die gemaakt heeft |
+
+> **Offboarding is dus twee stappen.** Draai dit script, en werk daarna de Entra-groepen af die in de CSV onder `Action = CannotRevoke` staan. Zonder die tweede stap is de toegang niet weg.
+
+#### Parameters
+
+| Parameter | Type | Standaard | Omschrijving |
+|---|---|---|---|
+| `-UserPrincipalName` | string | — | **Verplicht.** De gebruiker, bijv. `jan@contoso.com`. Voor een gast mag ook het echte adres (`jan@partner.com`) — het script vindt de `#ext#`-variant zelf |
+| `-TenantUrl` | string | — | Tenant-root. Verplicht voor een tenantbrede run |
+| `-SiteUrl` | string | — | Eén site collection in plaats van de hele tenant |
+| `-Apply` | switch | uit | Daadwerkelijk intrekken. Zonder dit alleen rapporteren |
+| `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep naar directe toekenningen wordt gezocht |
+| `-IncludeGroupAccess` | switch | uit | Meldt ook de sites die de gebruiker via Entra-groepen bereikt, óók waar die verder niets heeft. Alleen rapporteren |
+| `-KeepSharingLinks` | switch | uit | Deellinks met rust laten; alle andere routes worden wel ingetrokken |
+| `-RemoveFromSite` | switch | uit | Verwijdert de gebruiker daarna ook uit de gebruikerslijst van elke site collection. Vangt wat de scope-voor-scope pas niet zag, maar de naam rendert daarna als verwijderd account in oudere metadata |
+| `-IncludeOneDriveSites` | switch | uit | Ook persoonlijke OneDrive-sites doorzoeken |
+| `-IncludeHiddenLists` | switch | uit | Ook verborgen en systeemlijsten |
+| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Eigen app-registratie in plaats van de tijdelijke |
+| `-ClientSecret` | string | — | Werkt voor Graph maar **niet** voor SharePoint (zie authenticatie bij het rapport) |
+| `-OutputPath` | string | `C:\Temp` | Outputmap |
+| `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout en retries |
+
+Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseerde app-registratie met SharePoint `Sites.FullControl.All`, die na afloop weer wordt verwijderd.
+
+#### Output
+
+`SharePoint_Revoke_<user>_<ts>.csv`, één regel per gevonden toekenning, met kolom `Action`:
+
+| Action | Betekenis |
+|---|---|
+| `WouldRevoke` | Gevonden, en zou verwijderd worden — dit is wat je zonder `-Apply` krijgt |
+| `Revoked` | Verwijderd |
+| `Failed` | Poging mislukt; de reden staat in `Detail` |
+| `CannotRevoke` | Via een Entra-groep of `Everyone` — moet elders opgelost worden |
+| `Kept` | Bewust laten staan door `-KeepSharingLinks` |
+| `Skipped` | Bij de bevestigingsvraag geweigerd |
+
+#### Voorbeelden
+
+```powershell
+# Wat kan Jan allemaal bereiken? Verandert niets
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com"
+
+# Hetzelfde, en nu daadwerkelijk intrekken
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -Apply
+
+# Een gast uit één site collection halen, deellinks inbegrepen
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName gast@partner.com -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -Apply
+
+# Offboarding-checklist: ook de Entra-groepen die toegang geven
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -IncludeGroupAccess
+```
+
+> Onbeheerd draaien? Geef `-Confirm:$false` mee, anders vraagt het script per verwijdering om bevestiging (`ConfirmImpact = 'High'`).
+
+---
+
+### Test-SharePointAccessScripts.ps1
+
+Controleert `Revoke-SharePointUserAccess.ps1` en `Get-SharePointPermissionsReport.ps1` zonder een tenant aan te raken. Draai het na elke wijziging aan één van beide; exitcode 0 betekent dat beide in orde zijn.
+
+Twee dingen worden gecontroleerd, allebei fouten die in productie geruisloos misgaan:
+
+1. **Het gedeelde authenticatieblok is byte-identiek.** Beide scripts bevatten dezelfde app-only auth- en SharePoint REST-laag, afgebakend met `SHARED BLOCK START/END`. Die laag kostte vier live-runs tegen een tenant om goed te krijgen — certificaat in plaats van secret, tokens die hun app-rollen moeten aantonen vóór ze gecachet worden, 401 als fataal in plaats van per site, paging die niet kan blijven hangen. Een tweede kopie die stilletjes afdrijft is een correctheidsrisico in júist het script dat rechten verwijdert. Bij verschil wordt de eerste afwijkende regel getoond.
+2. **De revocatie-trechter gedraagt zich.** Een dry-run moet zijn voornemen vastleggen en niets uitvoeren, `-Apply` moet uitvoeren én vastleggen, een mislukking moet in het audit-spoor belanden in plaats van te verdwijnen, en de toekenningen die het script moet weigeren te verwijderen (via een Entra-groep, of aan iedereen) moeten geweigerd blijven.
+
+```powershell
+.\Test-SharePointAccessScripts.ps1
 ```

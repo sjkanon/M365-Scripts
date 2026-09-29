@@ -743,6 +743,29 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='W'; FKey=$null; Category='SharePoint'
+        Label='SharePoint-Revoke    — take one user''s access away, sharing links included'
+        Script="$ROOT\scripts\SharePoint\Revoke-SharePointUserAccess.ps1"
+        Params={
+            $upn = Read-Host '  User to revoke (UPN or e-mail address)'
+            if (-not $upn) { Write-Warning 'A user is required.'; return $null }
+            $a = @{ UserPrincipalName = $upn }
+            $site = Read-Host '  One site collection URL (empty = whole tenant)'
+            if ($site) {
+                $a['SiteUrl'] = $site
+            } else {
+                $tenant = Read-Host '  Tenant URL (https://contoso.sharepoint.com)'
+                if (-not $tenant) { Write-Warning 'A tenant URL is required for a tenant-wide run.'; return $null }
+                $a['TenantUrl'] = $tenant
+            }
+            $grp = Read-Host '  Also list the Entra groups that grant access? [Y/n]'
+            if ($grp -notmatch '^[Nn]') { $a['IncludeGroupAccess'] = $true }
+            # Report first, on purpose: -Apply is a deliberate second run against a list you have read.
+            $apply = Read-Host '  Actually revoke now? Answering no only reports [y/N]'
+            if ($apply -match '^[Yy]') { $a['Apply'] = $true; $a['Confirm'] = $false }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='S'; FKey=$null; Category='SharePoint'
         Label='SharePoint-Structure — provision/check metadata, libraries and rights'
         Action={
