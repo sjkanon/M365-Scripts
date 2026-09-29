@@ -23,6 +23,14 @@
                  where they were without needing the audit log. Who deleted each
                  one is looked up in the audit log by subject and time.
 
+                 Without the Mailbox Import Export role those cmdlets do not
+                 exist for you, and the run switches to Graph: every message in
+                 Deleted Items and Recoverable Items\Deletions that changed in
+                 the window goes back. Audited ones go to the folder the audit
+                 log says they left; the rest, and anything deleted out of
+                 Deleted Items itself, go to the Inbox. Purges (hard-deleted) is
+                 out of Graph's reach and is reported as Unreachable.
+
       Moved      Every audited Move on the day is traced back to the first folder
                  the message left, the message is located over Graph by its
                  Internet MessageId, and moved back. Moves out of Deleted Items or
@@ -106,10 +114,11 @@
                 Get-/Restore-RecoverableItems need the "Mailbox Import Export"
                 role, which no role group has by default:
                   New-ManagementRoleAssignment -Role "Mailbox Import Export" -User admin@contoso.com
-                then reconnect. Without it the Deleted part is skipped with a
-                message saying so; the rest still runs.
+                then reconnect. Without it the Deleted part runs over Graph
+                instead (see above) - everything but Purges.
 
-      Graph     App-only Mail.ReadWrite, only for the Moved part. Same three
+      Graph     App-only Mail.ReadWrite, for the Moved part and for the Deleted
+                part when the role is missing. Same three
                 routes as Remove-PhishingMessage.ps1: an existing app-only
                 session, your own app (-ClientId), or a temporary app created
                 with a device code sign-in (Global Administrator or Privileged
@@ -713,16 +722,6 @@ function Test-MessageClass {
 function Invoke-DeletedRestore {
     param([string] $Identity)
 
-    Write-Host ""
-    Write-Host "  -- Deleted messages ------------------------------" -ForegroundColor Cyan
-
-    if (-not (Get-Command Get-RecoverableItems -ErrorAction SilentlyContinue)) {
-        # Exchange RBAC only exposes the cmdlets your roles allow - a missing
-        # cmdlet here means the role, not the module.
-        Write-Warning "Get-RecoverableItems is not available: your account lacks the 'Mailbox Import Export' role. Assign it (New-ManagementRoleAssignment -Role 'Mailbox Import Export' -User <you>), reconnect in a new window, and re-run. The deleted messages are skipped this run."
-        return
-    }
-
     # Which audit operation put an item in each place.
     $opsFor = @{
         DeletedItems     = @('MoveToDeletedItems', 'Move')
@@ -835,164 +834,247 @@ function Get-WellKnownFolderId {
     try { return (Invoke-Graph -Uri "$Base/mailFolders/$Name`?`$select=id").id } catch { return $null }
 }
 
-function Invoke-MovedRestore {
+$script:FolderCtx = $null
+function Get-FolderContext {
+    # Read once per run: both the deleted and the moved part need it.
     param([string] $GraphMailbox)
-
-    Write-Host ""
-    Write-Host "  -- Moved messages --------------------------------" -ForegroundColor Cyan
+    if ($script:FolderCtx) { return $script:FolderCtx }
 
     $base = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($GraphMailbox))"
-    $rel  = "/users/$([uri]::EscapeDataString($GraphMailbox))"
-
     Write-Host "  Reading the folder tree..." -ForegroundColor DarkGray
-    $map        = Get-FolderMap -Base $base
-    $inboxId    = Get-WellKnownFolderId -Base $base -Name 'inbox'
-    $archiveId  = Get-WellKnownFolderId -Base $base -Name 'archive'
-    $deletedId  = Get-WellKnownFolderId -Base $base -Name 'deleteditems'
-    $deletedKey = if ($deletedId -and $map.IdToPath.ContainsKey($deletedId)) { ConvertTo-FolderKey $map.IdToPath[$deletedId] } else { '' }
-    $inboxPath  = if ($inboxId -and $map.IdToPath.ContainsKey($inboxId)) { $map.IdToPath[$inboxId] } else { 'Inbox' }
+    $map = Get-FolderMap -Base $base
+    $ctx = @{
+        Base      = $base
+        Rel       = "/users/$([uri]::EscapeDataString($GraphMailbox))"
+        Map       = $map
+        InboxId   = Get-WellKnownFolderId -Base $base -Name 'inbox'
+        ArchiveId = Get-WellKnownFolderId -Base $base -Name 'archive'
+        DeletedId = Get-WellKnownFolderId -Base $base -Name 'deleteditems'
+        RecovId   = Get-WellKnownFolderId -Base $base -Name 'recoverableitemsdeletions'
+    }
+    # Recoverable Items sits outside the folder tree Graph lists; name it so
+    # reports show where a message was found.
+    if ($ctx.RecovId) { $map.IdToPath[$ctx.RecovId] = 'Recoverable Items\Deletions' }
+    $ctx.DeletedKey = if ($ctx.DeletedId -and $map.IdToPath.ContainsKey($ctx.DeletedId)) { ConvertTo-FolderKey $map.IdToPath[$ctx.DeletedId] } else { '' }
+    $ctx.InboxPath  = if ($ctx.InboxId -and $map.IdToPath.ContainsKey($ctx.InboxId)) { $map.IdToPath[$ctx.InboxId] } else { 'Inbox' }
+    $script:FolderCtx = $ctx
+    return $ctx
+}
 
-    # ── Audited moves: first source per message ──────────────────────────────
-    # A message moved A -> B -> C on the same day goes back to A: the folder it
-    # was in before the day's first move.
-    $moves = @($script:AuditEvents | Where-Object { $_.Operation -eq 'Move' -and $_.InternetMessageId })
-    $plans = [System.Collections.Generic.List[PSObject]]::new()
-    $skippedRestores = 0
-    foreach ($g in @($moves | Group-Object InternetMessageId)) {
+function Get-FolderLabel {
+    param($Ctx, [string] $FolderId)
+    if ($FolderId -and $Ctx.Map.IdToPath.ContainsKey($FolderId)) { return $Ctx.Map.IdToPath[$FolderId] }
+    return $FolderId
+}
+
+function Resolve-RestoreTarget {
+    <#
+        Folder id to put a message back in, from the path the audit log gave.
+        Falls back to the Inbox when the folder is gone - and, for a deleted
+        message, when the folder it was deleted FROM was Deleted Items itself,
+        since putting it back there is not recovering it.
+    #>
+    param($Ctx, [string] $SourcePath, [switch] $NotDeletedItems)
+
+    $key = ConvertTo-FolderKey $SourcePath
+    $id  = if ($key -and $Ctx.Map.PathToId.ContainsKey($key)) { $Ctx.Map.PathToId[$key] } else { $null }
+    if ($id -and $NotDeletedItems -and ($id -eq $Ctx.DeletedId -or $id -eq $Ctx.RecovId)) {
+        return @{ Id = $Ctx.InboxId; Path = $Ctx.InboxPath; Detail = 'Was deleted from Deleted Items; restored to the Inbox' }
+    }
+    if ($id) { return @{ Id = $id; Path = (Get-FolderLabel $Ctx $id); Detail = '' } }
+    $shown = "$SourcePath".Trim().Trim('\')
+    return @{ Id = $Ctx.InboxId; Path = $Ctx.InboxPath; Detail = "Original folder '$shown' not found; restored to the Inbox" }
+}
+
+function Get-AuditPlans {
+    <#
+        One plan per message: the first audited action of the window on it, so
+        a message moved A -> B -> C (or moved and then deleted) goes back to A.
+    #>
+    param([string[]] $Operations)
+    $plans = @{}
+    $events = @($script:AuditEvents | Where-Object { $Operations -contains $_.Operation -and $_.InternetMessageId })
+    foreach ($g in @($events | Group-Object InternetMessageId)) {
         $ordered = @($g.Group | Sort-Object Time)
-        $first   = $ordered[0]
-        $srcKey  = ConvertTo-FolderKey $first.SourcePath
+        $plans[$g.Name] = [PSCustomObject]@{ First = $ordered[0]; Last = $ordered[-1] }
+    }
+    return $plans
+}
+
+function Find-MessagesById {
+    <#
+        Locates messages by Internet MessageId, in the mailbox and in
+        Recoverable Items\Deletions - /messages does not reach the latter.
+        Returns key -> @{ Hits; Error }.
+    #>
+    param($Ctx, [hashtable] $IdsByKey)
+
+    $requests = [System.Collections.Generic.List[object]]::new()
+    foreach ($k in $IdsByKey.Keys) {
+        $filter = [uri]::EscapeDataString("internetMessageId eq '$($IdsByKey[$k].Replace("'", "''"))'")
+        $sel    = '$select=id,parentFolderId,subject,receivedDateTime'
+        $requests.Add(@{ id = "$k|m"; method = 'GET'; url = "$($Ctx.Rel)/messages?`$filter=$filter&$sel" })
+        if ($Ctx.RecovId) {
+            $requests.Add(@{ id = "$k|r"; method = 'GET'; url = "$($Ctx.Rel)/mailFolders/recoverableitemsdeletions/messages?`$filter=$filter&$sel" })
+        }
+    }
+    $out = @{}
+    if ($requests.Count -eq 0) { return $out }
+    $resp = Invoke-GraphBatch -Requests $requests.ToArray()
+    foreach ($k in $IdsByKey.Keys) {
+        $hits = [System.Collections.Generic.List[object]]::new()
+        $err  = ''
+        foreach ($suffix in @('m', 'r')) {
+            $r = $resp["$k|$suffix"]
+            if (-not $r) { continue }
+            if ([int]$r.status -eq 200) {
+                foreach ($v in @($r.body.value)) { if ($v) { $hits.Add($v) } }
+            } elseif ($suffix -eq 'm') {
+                $err = Get-BatchError $r
+            }
+        }
+        $out[$k] = @{ Hits = @($hits); Error = $err }
+    }
+    return $out
+}
+
+function Set-RestoreAction {
+    # Decides what happens to one located message and queues the move.
+    param($Work, [string] $Key, $Row, $Msg, [string] $TargetId)
+
+    $Row.CurrentFolder = Get-FolderLabel $Work.Ctx $Msg.parentFolderId
+    if ($Msg.receivedDateTime -and -not $Row.Received) { $Row.Received = ([datetime]$Msg.receivedDateTime).ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
+    if (-not $Row.Subject) { $Row.Subject = $Msg.subject }
+
+    if (-not $TargetId) {
+        $Row.Status = 'Error'
+        $Row.Detail = 'No target folder could be resolved'
+    } elseif ($Msg.parentFolderId -eq $TargetId) {
+        $Row.Status = 'AlreadyInPlace'
+    } elseif ($Apply) {
+        $Work.Requests.Add(@{ id = $Key; method = 'POST'; url = "$($Work.Ctx.Rel)/messages/$($Msg.id)/move"; body = @{ destinationId = $TargetId } })
+        $Row.Status = 'Pending'
+    } else {
+        $Row.Status = 'WouldRestore'
+    }
+}
+
+function Add-AuditedRestore {
+    <#
+        Puts back every message an audited action of the given kind touched,
+        wherever it is now. Messages already handled (by key in $Skip) are left
+        to whoever handled them.
+    #>
+    param($Work, [string] $Phase, [string[]] $Operations, [hashtable] $Skip = @{}, [switch] $SkipRestores, [switch] $NotDeletedItems)
+
+    $ctx   = $Work.Ctx
+    $plans = Get-AuditPlans -Operations $Operations
+    $ids   = @{}
+    $skippedRestores = 0
+    $n = 0
+    foreach ($imid in @($plans.Keys)) {
+        if ($Skip.ContainsKey($imid)) { continue }
+        $srcKey = ConvertTo-FolderKey $plans[$imid].First.SourcePath
         # A move OUT of Deleted Items or Recoverable Items was a restore.
         # Reversing it would delete the message again.
-        if ($srcKey -like 'recoverable items*' -or ($deletedKey -and $srcKey -eq $deletedKey)) {
+        if ($SkipRestores -and ($srcKey -like 'recoverable items*' -or ($ctx.DeletedKey -and $srcKey -eq $ctx.DeletedKey))) {
             $skippedRestores++
             continue
         }
-        $plans.Add([PSCustomObject]@{
-            InternetMessageId = $g.Name
-            Event             = $first
-            Last              = $ordered[-1]
-            SourcePath        = $first.SourcePath
-            TargetId          = $map.PathToId[$srcKey]
-        })
+        $ids["$Phase$n"] = $imid
+        $n++
     }
-    $auditedIds = @{}
-    foreach ($m in $moves) { $auditedIds[$m.InternetMessageId] = $true }
-
-    Write-Host "  $($plans.Count) audited moved message(s) to trace back." -ForegroundColor DarkGray
     if ($skippedRestores -gt 0) {
         Write-Host "  $skippedRestores move(s) out of Deleted/Recoverable Items left alone - those were restores." -ForegroundColor DarkGray
     }
+    if ($ids.Count -eq 0) { return }
+    Write-Host "  $($ids.Count) audited message(s) to trace back." -ForegroundColor DarkGray
 
-    # ── Locate each message now ──────────────────────────────────────────────
-    $lookups = @()
-    for ($i = 0; $i -lt $plans.Count; $i++) {
-        $filter = "internetMessageId eq '$($plans[$i].InternetMessageId.Replace("'", "''"))'"
-        $lookups += @{ id = "$i"; method = 'GET'; url = "$rel/messages?`$filter=$([uri]::EscapeDataString($filter))&`$select=id,parentFolderId,subject,receivedDateTime" }
-    }
-    $found = if ($lookups.Count -gt 0) { Invoke-GraphBatch -Requests $lookups } else { @{} }
+    $found = Find-MessagesById -Ctx $ctx -IdsByKey $ids
+    foreach ($k in @($ids.Keys | Sort-Object { [int]($_ -replace '\D', '') })) {
+        $imid   = $ids[$k]
+        $p      = $plans[$imid]
+        $target = Resolve-RestoreTarget -Ctx $ctx -SourcePath $p.First.SourcePath -NotDeletedItems:$NotDeletedItems
+        $row = New-ResultRow -Phase $Phase -Operation $p.First.Operation -ActionTime $p.First.Time -Subject $p.First.Subject `
+                    -Received '' -InternetMessageId $imid -CurrentFolder '' -TargetFolder $target.Path `
+                    -AuditEvent $p.First -Status '' -Detail $target.Detail
 
-    $moveRequests = [System.Collections.Generic.List[object]]::new()
-    $moveRows     = @{}
-    for ($i = 0; $i -lt $plans.Count; $i++) {
-        $p    = $plans[$i]
-        $resp = $found["$i"]
-        $targetId   = $p.TargetId
-        $targetPath = "$($p.SourcePath)".Trim().Trim('\')
-        $detail     = ''
-        if (-not $targetId) {
-            $targetId   = $inboxId
-            $detail     = "Original folder '$targetPath' not found; restored to the Inbox instead"
-            $targetPath = $inboxPath
+        $f    = $found[$k]
+        $hits = @($f.Hits)
+        if ($hits.Count -gt 1) {
+            # The same MessageId twice (e.g. a copy). Prefer the one where the
+            # window's last action put it, then one in Deleted/Recoverable Items.
+            $destKey = ConvertTo-FolderKey $p.Last.DestPath
+            $pick = @($hits | Where-Object { $destKey -and (ConvertTo-FolderKey (Get-FolderLabel $ctx $_.parentFolderId)) -eq $destKey })
+            if ($pick.Count -eq 0) { $pick = @($hits | Where-Object { $_.parentFolderId -in @($ctx.DeletedId, $ctx.RecovId) }) }
+            if ($pick.Count -gt 0) { $hits = $pick }
         }
 
-        $row = New-ResultRow -Phase 'Moved' -Operation 'Move' -ActionTime $p.Event.Time -Subject $p.Event.Subject `
-                    -Received '' -InternetMessageId $p.InternetMessageId -CurrentFolder '' -TargetFolder $targetPath `
-                    -AuditEvent $p.Event -Status '' -Detail $detail
-
-        if (-not $resp -or [int]$resp.status -ne 200) {
-            $row.Status = 'Error'
-            $row.Detail = "Lookup failed - $(Get-BatchError $resp)"
+        if ($hits.Count -eq 0) {
+            $row.Status = if ($f.Error) { 'Error' } else { 'NotFound' }
+            $row.Detail = if ($f.Error) { "Lookup failed - $($f.Error)" } else { 'Not in the mailbox or Recoverable Items any more' }
+        } elseif ($hits.Count -gt 1) {
+            $row.Status = 'Ambiguous'
+            $row.Detail = 'Several copies of this message; left alone'
         } else {
-            $hits = @($resp.body.value)
-            if ($hits.Count -gt 1) {
-                # The same MessageId twice (e.g. a copy). Prefer the one sitting
-                # where the day's last move put it.
-                $destKey = ConvertTo-FolderKey $p.Last.DestPath
-                $hits = @($hits | Where-Object { $_.parentFolderId -and $map.IdToPath[$_.parentFolderId] -and (ConvertTo-FolderKey $map.IdToPath[$_.parentFolderId]) -eq $destKey })
-            }
-            if ($hits.Count -eq 0) {
-                $row.Status = if (@($resp.body.value).Count -gt 1) { 'Ambiguous' } else { 'NotFound' }
-                $row.Detail = if ($row.Status -eq 'Ambiguous') { 'Several copies, none in the folder it was moved to' } else { 'Not in the mailbox any more (deleted since? see the Deleted part)' }
-            } elseif ($hits.Count -gt 1) {
-                $row.Status = 'Ambiguous'
-                $row.Detail = 'Several copies in the same folder'
-            } else {
-                $msg = $hits[0]
-                $row.CurrentFolder = if ($msg.parentFolderId -and $map.IdToPath[$msg.parentFolderId]) { $map.IdToPath[$msg.parentFolderId] } else { $msg.parentFolderId }
-                if ($msg.receivedDateTime) { $row.Received = ([datetime]$msg.receivedDateTime).ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
-                if (-not $row.Subject) { $row.Subject = $msg.subject }
-                if ($msg.parentFolderId -eq $targetId) {
-                    $row.Status = 'AlreadyInPlace'
-                } elseif (-not $targetId) {
-                    $row.Status = 'Error'
-                    $row.Detail = 'No target folder could be resolved'
-                } elseif ($Apply) {
-                    $moveRequests.Add(@{ id = "$i"; method = 'POST'; url = "$rel/messages/$($msg.id)/move"; body = @{ destinationId = $targetId } })
-                    $row.Status = 'Pending'
-                } else {
-                    $row.Status = 'WouldRestore'
-                }
-            }
+            Set-RestoreAction -Work $Work -Key $k -Row $row -Msg $hits[0] -TargetId $target.Id
         }
-        $moveRows["$i"] = $row
+        $Work.Handled[$imid] = $true
+        $Work.Rows[$k] = $row
     }
+}
 
-    # ── Unaudited: Archive folder, by modification time ─────────────────────
-    $unaudited = @()
-    if ($archiveId) {
-        $from = $windowStart.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        $to   = $windowEnd.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        $filter = "lastModifiedDateTime ge $from and lastModifiedDateTime lt $to"
-        try {
-            $unaudited = @(Get-GraphPaged -Uri "$base/mailFolders/archive/messages?`$filter=$([uri]::EscapeDataString($filter))&`$select=id,internetMessageId,subject,receivedDateTime,lastModifiedDateTime&`$top=500" |
-                            Where-Object { -not $auditedIds.ContainsKey("$($_.internetMessageId)") })
-        } catch {
-            Write-Warning "Could not read the Archive folder: $($_.Exception.Message)"
-        }
-    }
-    if ($unaudited.Count -gt 0) {
-        Write-Host "  $($unaudited.Count) message(s) in Archive changed in the window without an audit record." -ForegroundColor DarkGray
-        if (-not $UnauditedArchiveToInbox) {
-            Write-Host "  Listed only - add -UnauditedArchiveToInbox to move them to the Inbox." -ForegroundColor DarkGray
-        }
-    }
-    $archivePath = if ($archiveId -and $map.IdToPath.ContainsKey($archiveId)) { $map.IdToPath[$archiveId] } else { 'Archive' }
-    for ($j = 0; $j -lt $unaudited.Count; $j++) {
-        $m  = $unaudited[$j]
-        $id = "u$j"
-        $row = New-ResultRow -Phase 'Unaudited' -Operation 'Move?' -ActionTime ([datetime]$m.lastModifiedDateTime).ToLocalTime() `
-                    -Subject $m.subject -Received $(if ($m.receivedDateTime) { ([datetime]$m.receivedDateTime).ToLocalTime().ToString('yyyy-MM-dd HH:mm') } else { '' }) `
-                    -InternetMessageId $m.internetMessageId -CurrentFolder $archivePath -TargetFolder $inboxPath -AuditEvent $null `
-                    -Status 'NotAudited' -Detail 'No audit record: modified in Archive in the window (moved, read or flagged)'
-        if ($UnauditedArchiveToInbox) {
-            if ($Apply) {
-                $moveRequests.Add(@{ id = $id; method = 'POST'; url = "$rel/messages/$($m.id)/move"; body = @{ destinationId = $inboxId } })
-                $row.Status = 'Pending'
-            } else {
-                $row.Status = 'WouldRestore'
-            }
-        }
-        $moveRows[$id] = $row
-    }
+function Add-FolderWindowRestore {
+    <#
+        Everything in one folder that changed in the window and was not handled
+        through the audit log. For Deleted Items and Recoverable Items that
+        change is the deletion, so these go back too - to the Inbox, since
+        without an audit record the original folder is unknown.
+    #>
+    param($Work, [string] $Phase, [string] $WellKnown, [string] $Label, [switch] $ListOnly, [string] $ListOnlyDetail)
 
-    # ── Apply ─────────────────────────────────────────────────────────────────
-    if ($moveRequests.Count -gt 0) {
-        Write-Host "  Moving $($moveRequests.Count) message(s) back..." -ForegroundColor Cyan
-        $moved = Invoke-GraphBatch -Requests $moveRequests.ToArray()
-        foreach ($req in $moveRequests) {
+    $ctx = $Work.Ctx
+    $from = $windowStart.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $to   = $windowEnd.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $filter = [uri]::EscapeDataString("lastModifiedDateTime ge $from and lastModifiedDateTime lt $to")
+    $msgs = @()
+    try {
+        $msgs = @(Get-GraphPaged -Uri "$($ctx.Base)/mailFolders/$WellKnown/messages?`$filter=$filter&`$select=id,internetMessageId,subject,receivedDateTime,lastModifiedDateTime,parentFolderId&`$top=500" |
+                    Where-Object { -not $Work.Handled.ContainsKey("$($_.internetMessageId)") })
+    } catch {
+        Write-Warning "Could not read $Label : $($_.Exception.Message)"
+        return
+    }
+    Write-Host ("  {0,-28} {1} message(s) without an audit record changed in the window" -f $Label, $msgs.Count) -ForegroundColor DarkGray
+
+    for ($j = 0; $j -lt $msgs.Count; $j++) {
+        $m   = $msgs[$j]
+        $key = "$Phase$WellKnown$j"
+        $row = New-ResultRow -Phase $Phase -Operation "$Label (no audit record)" -ActionTime ([datetime]$m.lastModifiedDateTime).ToLocalTime() `
+                    -Subject $m.subject -Received '' -InternetMessageId $m.internetMessageId -CurrentFolder '' `
+                    -TargetFolder $ctx.InboxPath -AuditEvent $null -Status '' -Detail 'No audit record: original folder unknown, restored to the Inbox'
+        if ($ListOnly) {
+            $row.CurrentFolder = $Label
+            if ($m.receivedDateTime) { $row.Received = ([datetime]$m.receivedDateTime).ToLocalTime().ToString('yyyy-MM-dd HH:mm') }
+            $row.Status = 'NotAudited'
+            $row.Detail = $ListOnlyDetail
+        } else {
+            Set-RestoreAction -Work $Work -Key $key -Row $row -Msg $m -TargetId $ctx.InboxId
+        }
+        if ($m.internetMessageId) { $Work.Handled["$($m.internetMessageId)"] = $true }
+        $Work.Rows[$key] = $row
+    }
+}
+
+function Complete-GraphRestore {
+    # Sends the queued moves, then reports every row of this part.
+    param($Work)
+    if ($Work.Requests.Count -gt 0) {
+        Write-Host "  Moving $($Work.Requests.Count) message(s) back..." -ForegroundColor Cyan
+        $moved = Invoke-GraphBatch -Requests $Work.Requests.ToArray()
+        foreach ($req in $Work.Requests) {
             $r   = $moved[$req.id]
-            $row = $moveRows[$req.id]
+            $row = $Work.Rows[$req.id]
             if ($r -and [int]$r.status -in @(200, 201)) {
                 $row.Status = 'Restored'
             } else {
@@ -1001,12 +1083,76 @@ function Invoke-MovedRestore {
             }
         }
     }
-
-    foreach ($k in @($moveRows.Keys | Sort-Object { if ($_ -like 'u*') { 100000 + [int]$_.Substring(1) } else { [int]$_ } })) {
-        Write-ResultRow $moveRows[$k]
-        $results.Add($moveRows[$k])
+    foreach ($k in $Work.Rows.Keys) {
+        Write-ResultRow $Work.Rows[$k]
+        $results.Add($Work.Rows[$k])
     }
 }
+
+function New-RestoreWork {
+    param([string] $GraphMailbox)
+    return @{
+        Ctx      = Get-FolderContext -GraphMailbox $GraphMailbox
+        Rows     = [ordered]@{}
+        Requests = [System.Collections.Generic.List[object]]::new()
+        Handled  = @{}
+    }
+}
+
+function Invoke-DeletedRestoreViaGraph {
+    <#
+        The Deleted part without the Mailbox Import Export role. Audited
+        deletions go back to the folder the audit log says they left; everything
+        else deleted in the window - found in Deleted Items and Recoverable
+        Items by the moment it changed - goes to the Inbox. Only Purges
+        (hard-deleted, kept under a hold) is out of Graph's reach.
+    #>
+    param([string] $GraphMailbox)
+
+    Write-Host "  Restoring deleted messages over Graph instead (Deleted Items + Recoverable Items)." -ForegroundColor DarkGray
+    $work = New-RestoreWork -GraphMailbox $GraphMailbox
+
+    Add-AuditedRestore -Work $work -Phase 'Deleted' -Operations @('MoveToDeletedItems', 'SoftDelete') -NotDeletedItems
+    Add-FolderWindowRestore -Work $work -Phase 'Deleted' -WellKnown 'deleteditems' -Label 'Deleted Items'
+    if ($work.Ctx.RecovId) {
+        Add-FolderWindowRestore -Work $work -Phase 'Deleted' -WellKnown 'recoverableitemsdeletions' -Label 'Recoverable Items\Deletions'
+    }
+
+    $hard = @($script:AuditEvents | Where-Object { $_.Operation -eq 'HardDelete' })
+    foreach ($h in $hard) {
+        $row = New-ResultRow -Phase 'Deleted' -Operation 'HardDelete' -ActionTime $h.Time -Subject $h.Subject -Received '' `
+                    -InternetMessageId $h.InternetMessageId -CurrentFolder 'Recoverable Items\Purges' -TargetFolder '' `
+                    -AuditEvent $h -Status 'Unreachable' -Detail "Hard-deleted: only Restore-RecoverableItems reaches Purges (needs the Mailbox Import Export role, and a hold for it to still be there)"
+        $work.Rows["DeletedHard$($work.Rows.Count)"] = $row
+    }
+
+    Complete-GraphRestore -Work $work
+}
+
+function Invoke-MovedRestore {
+    param([string] $GraphMailbox)
+
+    Write-Host ""
+    Write-Host "  -- Moved messages --------------------------------" -ForegroundColor Cyan
+    $work = New-RestoreWork -GraphMailbox $GraphMailbox
+
+    Add-AuditedRestore -Work $work -Phase 'Moved' -Operations @('Move') -SkipRestores
+
+    # Archive without an audit record: listed, and moved only on request - a
+    # message that was merely read or flagged in Archive changed as well.
+    if ($work.Ctx.ArchiveId) {
+        $archiveLabel = Get-FolderLabel $work.Ctx $work.Ctx.ArchiveId
+        if ($UnauditedArchiveToInbox) {
+            Add-FolderWindowRestore -Work $work -Phase 'Unaudited' -WellKnown 'archive' -Label $archiveLabel
+        } else {
+            Add-FolderWindowRestore -Work $work -Phase 'Unaudited' -WellKnown 'archive' -Label $archiveLabel -ListOnly `
+                -ListOnlyDetail 'No audit record: changed in Archive in the window (moved, read or flagged). Add -UnauditedArchiveToInbox to move it'
+        }
+    }
+
+    Complete-GraphRestore -Work $work
+}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  Run
@@ -1072,7 +1218,23 @@ try {
         Write-Warning "Audit log search failed: $($_.Exception.Message). Without it nobody can be named and moves cannot be traced back (needs the View-Only Audit Logs role)."
     }
 
-    if ($Include -contains 'Deleted') { Invoke-DeletedRestore -Identity $mbxSmtp }
+    if ($Include -contains 'Deleted') {
+        Write-Host ""
+        Write-Host "  -- Deleted messages ------------------------------" -ForegroundColor Cyan
+        # Exchange RBAC only exposes the cmdlets your roles allow - a missing
+        # cmdlet here means the role, not the module.
+        if (Get-Command Get-RecoverableItems -ErrorAction SilentlyContinue) {
+            Invoke-DeletedRestore -Identity $mbxSmtp
+        } else {
+            Write-Host "  No 'Mailbox Import Export' role, so Restore-RecoverableItems is not available." -ForegroundColor Yellow
+            if (-not $graphOk) { $graphOk = Connect-GraphForMail }
+            if ($graphOk) {
+                Invoke-DeletedRestoreViaGraph -GraphMailbox $mbxUpn
+            } else {
+                Write-Warning "No Graph access either - the deleted messages are skipped. Assign the role (New-ManagementRoleAssignment -Role 'Mailbox Import Export' -User <you>) or supply Graph access, and re-run."
+            }
+        }
+    }
     if ($Include -contains 'Moved' -and $graphOk) { Invoke-MovedRestore -GraphMailbox $mbxUpn }
 } finally {
     # The temporary app must go before the delegated token that can delete it expires.
@@ -1117,8 +1279,8 @@ if ($Apply) {
 } else {
     Write-Host "  Would restore       : $(& $count 'WouldRestore') - preview. Re-run with -Apply." -ForegroundColor Yellow
 }
-$problems = @($results | Where-Object { $_.Status -in @('Error', 'NotRestored', 'NotFound', 'Ambiguous') }).Count
-if ($problems -gt 0)         { Write-Host "  Needs a look        : $problems (Error / NotRestored / NotFound / Ambiguous - see CSV)" -ForegroundColor Red }
+$problems = @($results | Where-Object { $_.Status -in @('Error', 'NotRestored', 'NotFound', 'Ambiguous', 'Unreachable') }).Count
+if ($problems -gt 0)         { Write-Host "  Needs a look        : $problems (Error / NotRestored / NotFound / Ambiguous / Unreachable - see CSV)" -ForegroundColor Red }
 if ($script:AuditTruncated)  { Write-Host "  Audit log truncated : yes - narrow the window." -ForegroundColor Yellow }
 
 # ── Output ────────────────────────────────────────────────────────────────────
