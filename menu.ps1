@@ -657,8 +657,10 @@ $menu = @(
         Script="$ROOT\scripts\Device\Repair-AppxPackageStore.ps1"
         Params={
             $names = Read-Host "  Packages [MSTeams,Microsoft.OutlookForWindows] (* = everything)"
+            $hosts = Read-Host "  Session hosts, e.g. lem-avd-4,lem-avd-5 (empty = this machine)"
             $apply = Read-Host "  Repair now (not just diagnose)? [y/N]"
             $a = @{ Name = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('MSTeams', 'Microsoft.OutlookForWindows') } }
+            if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
             if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
             else {
                 $a['Confirm'] = $false   # already answered here, don't ask twice

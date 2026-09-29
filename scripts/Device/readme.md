@@ -213,6 +213,8 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | `-Days` | How far back to read the FSLogix Apps and AppX deployment logs (default `7`) |
 | `-WorkingDir` | Download folder for the installers (default `C:\IT\AppxRepair`) |
 | `-LogPath` | Transcript and `.reg` backups (default `C:\Temp`) |
+| `-ComputerName` | Run on these session hosts instead of this machine (e.g. `lem-avd-4,lem-avd-5,lem-avd-6`): the script copies itself over PowerShell remoting (WinRM) to `C:\IT\AppxRepair` on each host, runs there with the same parameters, and ends with a pool table — exit code, FSLogix build, provisioned Teams / Outlook per host — naming any difference between hosts. A repair is confirmed once for the whole pool |
+| `-Credential` | Credential for those remoting sessions |
 
 Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
 
@@ -225,6 +227,10 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 # Repair and put Teams + new Outlook back for all users, unattended
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
 
+# The whole pool from one place: diagnose, then repair + provision on every host
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
 # Same, with both packages taken from winget
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false
 
@@ -235,7 +241,9 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 **Notes**
 
 - Exit codes: `0` clean, `1` failed or something survived, `2` check-only found work.
-- On an FSLogix pool, run it on **every** host: a host that provisions an older build than another host is flagged, because the profiles carry the newest version any host gave them.
+- On an FSLogix pool, run it on **every** host — `-ComputerName` does that from one place and shows whether FSLogix, Teams and Outlook are the same everywhere.
+- Profiles asking for a newer Teams / Outlook than a host provisions is normal: both apps update themselves per user, and Microsoft's installers provision a last-known-good build that is behind that (measured: Teams 26225 provisioned vs 26246 in the profiles, Outlook 1.2026.818 vs 902). With FSLogix 2210 HF4 / 25.06 or later that gap does no harm — the package is registered by family name. With an older FSLogix it is the cause of the `0x80070490`, and the fix is updating FSLogix, not chasing the build.
+- `-ComputerName` needs WinRM from where you run it to the hosts (domain-joined hosts: Kerberos works as is). For Entra-joined hosts that is often not set up; run the script on each host through NinjaOne instead.
 - The FSLogix error for a user stops after that user signs out once on a host that provisions the package — FSLogix then saves the current version.
 - After step 5 restart the host when convenient, so the deployment engine rereads the store.
 - A backup `.reg` file can be double-clicked to put an entry back.
