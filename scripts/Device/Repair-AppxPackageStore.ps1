@@ -375,6 +375,18 @@ function Get-BrokenInstalledPackage {
     #>
     param($Installed)
 
+    # Newest installed version per package (name + architecture + resource). An older
+    # version next to a newer one is superseded, not damaged: its status is not Ok
+    # because Windows is waiting to remove it, and re-registering it can only answer
+    # 0x80073D06 ("a higher version is already installed") - measured on aimgr
+    # 0.20.61.0 next to 0.20.62.0.
+    $newest = @{}
+    foreach ($pkg in $Installed) {
+        $key     = '{0}|{1}|{2}' -f $pkg.Name, (Get-PropertyValue $pkg 'Architecture'), (Get-PropertyValue $pkg 'ResourceId')
+        $version = try { [version] (Get-PropertyValue $pkg 'Version') } catch { $null }
+        if ($version -and (-not $newest.ContainsKey($key) -or $newest[$key] -lt $version)) { $newest[$key] = $version }
+    }
+
     foreach ($pkg in $Installed) {
         if (-not (Test-NameInScope $pkg.Name)) { continue }
 
@@ -383,6 +395,10 @@ function Get-BrokenInstalledPackage {
         $status    = [string] (Get-PropertyValue $pkg 'Status')
         $damaged   = (-not $filesGone) -and $status -and $status -ne 'Ok'
         if (-not ($filesGone -or $damaged)) { continue }
+
+        $key        = '{0}|{1}|{2}' -f $pkg.Name, (Get-PropertyValue $pkg 'Architecture'), (Get-PropertyValue $pkg 'ResourceId')
+        $version    = try { [version] (Get-PropertyValue $pkg 'Version') } catch { $null }
+        $superseded = $damaged -and $version -and $newest.ContainsKey($key) -and $version -lt $newest[$key]
 
         $protected = ([string] (Get-PropertyValue $pkg 'SignatureKind') -eq 'System') -or
                      [bool] (Get-PropertyValue $pkg 'IsFramework') -or
@@ -393,11 +409,12 @@ function Get-BrokenInstalledPackage {
             FullName  = $pkg.PackageFullName
             Name      = $pkg.Name
             Location  = $location
-            Problem   = if ($filesGone) { 'Ghost' } else { 'Damaged' }
+            Problem   = if ($filesGone) { 'Ghost' } elseif ($superseded) { 'Superseded' } else { 'Damaged' }
             Reason    = if ($filesGone -and $location) { "its files are gone ($location)" }
                         elseif ($filesGone)          { 'the store holds no install location for it at all' }
+                        elseif ($superseded)         { "its status is $status and $($newest[$key]) is installed next to it - Windows removes this one once no user holds it any more; nothing to repair" }
                         else                         { "its status is $status" }
-            Protected = $protected -and -not $explicitName
+            Protected = ($protected -and -not $explicitName) -or $superseded
             Holders   = @(Get-AppxPackageHolder -Package $pkg)
         }
     }
@@ -538,6 +555,11 @@ function Write-StoreHealth {
     param($Health)
 
     foreach ($item in $Health.Installed) {
+        # Superseded is not a fault, so it is one grey line instead of a warning.
+        if ($item.Problem -eq 'Superseded') {
+            Write-Skip "Superseded: $($item.FullName) - $($item.Reason)"
+            continue
+        }
         $tag = if ($item.Protected) { ' (system or framework package - reported, not touched; name it to include it)' } else { '' }
         Write-Warn "$($item.Problem): $($item.FullName)$tag"
         Write-Warn "  $($item.Reason)"
@@ -1053,7 +1075,12 @@ try {
             Add-AppxPackage -Register $manifest -DisableDevelopmentMode -ForceApplicationShutdown -ErrorAction Stop
             Write-Ok "Re-registered $($item.FullName)"
         } catch {
-            Write-Warn "Could not re-register $($item.FullName): $($_.Exception.Message)"
+            # A newer version turned up after the diagnosis: nothing to re-register.
+            if ($_.Exception.Message -match '0x80073D06') {
+                Write-Skip "  $($item.FullName): a newer version is installed, so this one is left for Windows to remove"
+            } else {
+                Write-Warn "Could not re-register $($item.FullName): $($_.Exception.Message)"
+            }
         }
     }
 

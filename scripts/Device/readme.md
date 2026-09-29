@@ -192,7 +192,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | 1b. FSLogix | FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, the packages FSLogix failed to register in the last `-Days` days against what this host provisions, AppX install policies |
 | 1c. Failing apps | **Every** package that failed to install, update or register in the last `-Days` days, from the AppX deployment log and the FSLogix log together: count, error codes with their meaning, the versions asked for and whether this host has their files. `0x80070490` first, top 15 |
 | 2. Provisioned | `Remove-AppxProvisionedPackage` for provisioned copies whose files are gone |
-| 3. Re-register | `Add-AppxPackage -Register` from the package's own manifest where the files are still there |
+| 3. Re-register | `Add-AppxPackage -Register` from the package's own manifest where the files are still there. An older version next to a newer one of the same package is *Superseded*, not damaged — reported in grey and left for Windows to remove, because re-registering it can only fail with `0x80073D06` |
 | 4. Remove | `Remove-AppxPackage -AllUsers` for ghosts, per user where that refuses |
 | 5. Store | Each remaining orphaned registry key is exported to a `.reg` backup, and only then removed — no backup, no removal |
 | 6. Provision | `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, downloaded from Microsoft and signature-checked. With `-UseWinget` the MSIX from winget instead (`Microsoft.Teams`, `Microsoft.Outlook`), provisioned with `Add-AppxProvisionedPackage` together with any dependencies winget brought. `-WingetId`: the same for any other package. `-Source`: any MSIX you supply |
