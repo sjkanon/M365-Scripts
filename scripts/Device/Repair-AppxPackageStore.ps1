@@ -109,6 +109,18 @@
 .PARAMETER LogPath
     Folder for the transcript and the .reg backups. Default C:\Temp.
 
+.PARAMETER ComputerName
+    Session hosts to run on instead of this machine, e.g. lem-avd-4,lem-avd-5,lem-avd-6.
+    The script copies itself to C:\IT\AppxRepair on each host over PowerShell
+    remoting (WinRM), runs there with the same parameters, and ends with one table
+    across the pool: exit code, FSLogix build and provisioned Teams / Outlook per
+    host, with any difference between hosts named. A repair is confirmed once for
+    the whole pool, not per change on each host.
+
+.PARAMETER Credential
+    Credential for the remoting sessions, when the current account is not an
+    administrator on the hosts.
+
 .EXAMPLE
     # What is broken on this host? Changes nothing.
     .\Repair-AppxPackageStore.ps1 -CheckOnly
@@ -120,6 +132,11 @@
 .EXAMPLE
     # Same, but take both packages from winget
     .\Repair-AppxPackageStore.ps1 -Name 'MSTeams','Microsoft.OutlookForWindows' -Provision -UseWinget -Confirm:$false
+
+.EXAMPLE
+    # The whole pool: diagnose first, then repair and provision on every host
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
 
 .EXAMPLE
     # Every app that failed in the last 14 days, and the store for all of them
@@ -147,11 +164,115 @@ param (
     [ValidateRange(1, 90)]
     [int]      $Days       = 7,
     [string]   $WorkingDir = 'C:\IT\AppxRepair',
-    [string]   $LogPath    = 'C:\Temp'
+    [string]   $LogPath    = 'C:\Temp',
+    [string[]] $ComputerName,
+    [pscredential] $Credential
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -- Several session hosts -----------------------------------------------------
+# With -ComputerName this run only orchestrates: it copies itself to each host over
+# PowerShell remoting, runs there with the same parameters, and ends with one table
+# across the pool - which is the question on a pooled host ("is every host on the
+# same build?") that no single host can answer.
+$ComputerName = @($ComputerName | ForEach-Object { $_ -split '[,;\s]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($ComputerName.Count -gt 0) {
+    $forward = @{}
+    foreach ($entry in $PSBoundParameters.GetEnumerator()) {
+        if ($entry.Key -in @('ComputerName', 'Credential', 'Confirm')) { continue }
+        $forward[$entry.Key] = if ($entry.Value -is [switch]) { [bool] $entry.Value } else { $entry.Value }
+    }
+
+    # A remote session cannot answer a confirmation prompt reliably, so the
+    # question is asked once here, for the whole pool, and not again per change.
+    $changes = -not ($CheckOnly -or $WhatIfPreference)
+    $confirmOff = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
+    if ($changes -and -not $confirmOff) {
+        $answer = Read-Host ("  Repair the package store on {0}? [y/N]" -f ($ComputerName -join ', '))
+        if ($answer -notmatch '^[Yy]') { Write-Host '  Cancelled - nothing was changed.' -ForegroundColor DarkGray; exit 0 }
+    }
+    if ($changes) { $forward['Confirm'] = $false }
+    if ($WhatIfPreference) { $forward['WhatIf'] = $true }
+
+    $remotePath = 'C:\IT\AppxRepair\Repair-AppxPackageStore.ps1'
+    $watch      = @('MSTeams', 'Microsoft.OutlookForWindows')
+    $summary    = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($computer in $ComputerName) {
+        Write-Host ''
+        Write-Host ("  ==== {0} " -f $computer).PadRight(80, '=') -ForegroundColor Cyan
+        $row = [ordered]@{ Host = $computer; Exit = $null; FSLogix = ''; MSTeams = ''; Outlook = ''; Note = '' }
+        $session = $null
+        try {
+            $sessionArgs = @{ ComputerName = $computer; ErrorAction = 'Stop' }
+            if ($Credential) { $sessionArgs['Credential'] = $Credential }
+            $session = New-PSSession @sessionArgs
+
+            Invoke-Command -Session $session -ScriptBlock {
+                param($Path) New-Item -ItemType Directory -Path (Split-Path $Path) -Force | Out-Null
+            } -ArgumentList $remotePath
+            Copy-Item -Path $PSCommandPath -Destination $remotePath -ToSession $session -Force
+
+            # The host's own output streams back as it runs; the last object is the
+            # state afterwards, read on the host itself.
+            $result = Invoke-Command -Session $session -ScriptBlock {
+                param($Path, $Params, $Watch)
+                & $Path @Params
+                $code = $LASTEXITCODE
+                $frx  = Join-Path $env:ProgramFiles 'FSLogix\Apps\frxsvc.exe'
+                $info = if (Test-Path $frx) { (Get-Item $frx).VersionInfo } else { $null }
+                $prov = @{}
+                foreach ($p in @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -in $Watch })) {
+                    if (-not $prov.ContainsKey($p.DisplayName) -or [version] $prov[$p.DisplayName] -lt [version] $p.Version) { $prov[$p.DisplayName] = $p.Version }
+                }
+                [PSCustomObject]@{
+                    RepairResult = $true
+                    ExitCode     = $code
+                    FSLogix      = if ($info) { '{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart } else { 'not installed' }
+                    Provisioned  = $prov
+                }
+            } -ArgumentList $remotePath, $forward, $watch
+
+            $state = @($result | Where-Object { $_ -and $_.PSObject.Properties.Name -contains 'RepairResult' }) | Select-Object -Last 1
+            if ($state) {
+                $row.Exit    = $state.ExitCode
+                $row.FSLogix = $state.FSLogix
+                $row.MSTeams = if ($state.Provisioned.ContainsKey('MSTeams')) { $state.Provisioned['MSTeams'] } else { '-' }
+                $row.Outlook = if ($state.Provisioned.ContainsKey('Microsoft.OutlookForWindows')) { $state.Provisioned['Microsoft.OutlookForWindows'] } else { '-' }
+            } else {
+                $row.Exit = 1; $row.Note = 'no result came back'
+            }
+        } catch {
+            $row.Exit = 1
+            # The full reason is printed above; the table keeps its gist.
+            $gist     = ($_.Exception.Message -replace '^Connecting to remote server \S+ failed with the following error message : ', '') -replace '\s+', ' '
+            $row.Note = 'not reached: ' + $(if ($gist.Length -gt 70) { $gist.Substring(0, 70) + '...' } else { $gist })
+            Write-Host "  [FAIL] $computer - $($_.Exception.Message)" -ForegroundColor Red
+        } finally {
+            if ($session) { Remove-PSSession $session -ErrorAction SilentlyContinue }
+        }
+        $summary.Add([PSCustomObject] $row)
+    }
+
+    # Differences between hosts are the finding, so they are named, not left for
+    # the reader to spot in the table.
+    Write-Host ''
+    Write-Host '  ==== Pool '.PadRight(80, '=') -ForegroundColor Cyan
+    $summary | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+    foreach ($column in 'FSLogix', 'MSTeams', 'Outlook') {
+        $values = @($summary | Where-Object { $null -ne $_.Exit -and -not $_.Note } | ForEach-Object { $_.$column } | Select-Object -Unique)
+        if ($values.Count -gt 1) {
+            Write-Host "  [WARN] $column differs between hosts ($($values -join ' / ')) - users moving between them get a different build" -ForegroundColor Yellow
+        }
+    }
+    $worst = @($summary | ForEach-Object { [int] $_.Exit } | Sort-Object -Descending | Select-Object -First 1)[0]
+    # 1 (failed) outranks 2 (check-only found work).
+    if (@($summary | Where-Object { $_.Exit -eq 1 }).Count -gt 0) { $worst = 1 }
+    Write-Host ''
+    exit $worst
+}
 
 function Get-ForwardedArgument {
     <# Rebuild the caller's own parameters as a command line for a relaunch. #>
@@ -658,6 +779,16 @@ function Get-ProvisionedVersion {
     return $map
 }
 
+function Get-FslogixVersion {
+    <#
+        The installed FSLogix build, or $null. The numeric file version, not
+        ProductVersion: that one can carry a suffix that does not parse.
+    #>
+    if (-not (Test-Path $FslogixServicePath)) { return $null }
+    $info = (Get-Item $FslogixServicePath).VersionInfo
+    return [version] ('{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
+}
+
 function Get-FslogixRequest {
     <#
         What FSLogix tried to register at sign-in and could not. At sign-out FSLogix
@@ -693,6 +824,32 @@ function Get-FslogixRequest {
     return @($found.Values | Sort-Object Name, Version)
 }
 
+function Write-VersionGap {
+    <#
+        Profiles asking for a newer build than this host provisions. Teams and new
+        Outlook update themselves per user, and Microsoft's installers provision a
+        last-known-good build that is usually behind that (measured: Teams 26225
+        provisioned against 26246 in the profiles, Outlook 1.2026.818 against 902),
+        so the gap is normal and closing it by provisioning only lasts until the next
+        update. What decides whether it hurts is FSLogix: a build that registers the
+        package by family name gives the user whatever version is there; an older
+        one replays the exact saved version and fails. Returns $true when it hurts.
+    #>
+    param([string] $Package, $Have, $Asked, $Fslogix)
+
+    $minimum = if ($FslogixMinimum.ContainsKey($Package)) { $FslogixMinimum[$Package] } else { $null }
+    if ($minimum -and $Fslogix -and $Fslogix -ge $minimum) {
+        Write-Ok "  $Package provisioned at $Have; profiles carry $Asked because the app updates itself per user. FSLogix $Fslogix registers it by family name, so users get it at sign-in and it updates itself - no action needed"
+        return $false
+    }
+    if ($minimum) {
+        Write-Warn "  $Package provisioned at $Have while profiles ask for $Asked. The app updates itself per user, so the profile will always be ahead of any host - the fix is FSLogix $minimum or later, which registers by family name instead of the exact saved version"
+    } else {
+        Write-Warn "  $Package provisioned at $Have, older than the $Asked profiles ask for - provision the newer build on every host in the pool"
+    }
+    return $true
+}
+
 function Write-FslogixStatus {
     <#
         The FSLogix side: which build, whether it replays AppX packages at sign-in,
@@ -702,15 +859,11 @@ function Write-FslogixStatus {
     param([hashtable] $Provisioned, $Requests)
 
     $needs = @()
-    if (-not (Test-Path $FslogixServicePath)) {
+    $fslogixVersion = Get-FslogixVersion
+    if (-not $fslogixVersion) {
         Write-Skip 'FSLogix is not installed'
         return $needs
     }
-
-    # The numeric file version, not ProductVersion: that one can carry a suffix
-    # that does not parse as a version.
-    $info           = (Get-Item $FslogixServicePath).VersionInfo
-    $fslogixVersion = [version] ('{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart)
     Write-Ok "FSLogix $fslogixVersion"
 
     $replay = Get-PropertyValue (Get-ItemProperty $FslogixProfilesPath -ErrorAction SilentlyContinue) 'InstallAppxPackages'
@@ -753,8 +906,9 @@ function Write-FslogixStatus {
             Write-Bad "  This host does not provision $($group.Name) at all - users whose profile asks for it get nothing. Provision it (-Provision)"
             $needs += $group.Name
         } elseif ($newest -and $have -lt $newest) {
-            Write-Warn "  This host provisions $have, older than the $newest profiles ask for - another host in the pool is ahead. Bring every host to the same build (-Provision)"
-            $needs += $group.Name
+            # [void]: its $true/$false would otherwise land in this function's output
+            # and be returned as a package name to provision.
+            [void] (Write-VersionGap -Package $group.Name -Have $have -Asked $newest -Fslogix $fslogixVersion)
         } else {
             Write-Ok "  This host provisions $have - Windows registers that at sign-in; the error is FSLogix replaying an old saved version and stops once each user has signed out once on a current host"
         }
@@ -1040,8 +1194,14 @@ try {
         if (-not (Test-Path $LogPath)) { New-Item -ItemType Directory -Path $LogPath -Force | Out-Null }
         $stamp     = Get-Date -Format 'yyyyMMdd_HHmmss'
         $backupDir = Join-Path $LogPath "Repair-AppxPackageStore_$stamp"
-        Start-Transcript -Path (Join-Path $LogPath "Repair-AppxPackageStore_$stamp.log") | Out-Null
-        $transcribing = $true
+        # A transcript is worth having, not worth aborting a repair over - some
+        # remote and RMM hosts refuse it.
+        try {
+            Start-Transcript -Path (Join-Path $LogPath "Repair-AppxPackageStore_$stamp.log") | Out-Null
+            $transcribing = $true
+        } catch {
+            Write-Warn "No transcript: $($_.Exception.Message)"
+        }
     } else {
         $backupDir = Join-Path $LogPath 'Repair-AppxPackageStore_WhatIf'
     }
@@ -1224,8 +1384,9 @@ try {
         foreach ($target in $needs) {
             $asked = ($requestsAfter | Where-Object { $_.Name -eq $target } | Sort-Object Version -Descending | Select-Object -First 1 | ForEach-Object { $_.Version })
             if ($provisionedAfter.ContainsKey($target) -and $asked -and $provisionedAfter[$target] -lt $asked) {
-                Write-Warn "$target is provisioned at $($provisionedAfter[$target]), still older than the $asked profiles ask for - bring the other hosts in the pool to the same build"
-                $exitCode = 1
+                if (Write-VersionGap -Package $target -Have $provisionedAfter[$target] -Asked $asked -Fslogix (Get-FslogixVersion)) {
+                    $exitCode = 1
+                }
             } elseif ($provisionedAfter.ContainsKey($target)) {
                 Write-Ok "$target is provisioned: $($provisionedAfter[$target]) - users get it at their next sign-in, and FSLogix saves that version at their next sign-out"
             } else {
