@@ -656,12 +656,11 @@ $menu = @(
         Label='Repair-AppxStore    — repair AppX packages failing with 0x80070490 (Teams, Outlook, FSLogix)'
         Script="$ROOT\scripts\Device\Repair-AppxPackageStore.ps1"
         Params={
-            $names = Read-Host "  Packages [MSTeams,Microsoft.OutlookForWindows] (* = everything, copilot = Copilot)"
+            $names = Read-Host "  Packages [teams,outlook] (e.g. outlook,copilot - * = everything)"
             $hosts = Read-Host "  Session hosts, e.g. lem-avd-4,lem-avd-5 (empty = this machine)"
             $apply = Read-Host "  Repair now (not just diagnose)? [y/N]"
-            $a = @{}
-            if ($names -match '^\s*copilot\s*$') { $a['Copilot'] = $true }
-            else { $a['Name'] = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('MSTeams', 'Microsoft.OutlookForWindows') } }
+            # teams / outlook / copilot are shorthands the script itself understands.
+            $a = @{ Name = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('teams', 'outlook') } }
             if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
             if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
             else {
