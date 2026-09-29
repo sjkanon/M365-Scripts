@@ -24,6 +24,7 @@ Scripts for Exchange Online calendar, mailbox, and distribution group management
 | [`Get-DistributionGroupMembers.ps1`](Get-DistributionGroupMembers.ps1) ([docs](#get-distributiongroupmembersps1)) | Who is on which distribution list, as an Excel workbook the customer can read — or only the lists holding one address (`-Member jan@contoso.com`) or a whole domain (`-Member @be.verizon.com`) |
 | [`Get-MessageTraceReport.ps1`](Get-MessageTraceReport.ps1) ([docs](#get-messagetracereportps1)) | Trace who received what, at what exact time, and where it was forwarded to |
 | [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)) | Delete a phishing message from one, several, or all mailboxes — dry-run by default |
+| [`Restore-MailboxMessages.ps1`](Restore-MailboxMessages.ps1) ([docs](#restore-mailboxmessagesps1)) | Put messages that were moved or deleted on a given day back in their original folder, and report **who** moved or deleted them — preview by default |
 
 ---
 
@@ -1064,3 +1065,86 @@ Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # optional, s
 ```
 
 Microsoft.Graph.Authentication is only needed to reuse an existing `Connect-MgGraph` session or to use `-CertificateThumbprint`. The `-ClientSecret` and automatic temporary-app routes run on plain REST and need nothing beyond ExchangeOnlineManagement.
+
+---
+
+### Restore-MailboxMessages.ps1
+
+Undoes a bad day in one mailbox: messages that were **moved** or **deleted** on a given date go back to the folder they came from, and the run reports **who did it** — account, as owner / delegate / admin, with which client, from which IP. Preview by default — nothing is moved without `-Apply`.
+
+**Three sources, because none covers every case**
+
+| Part | Where it looks | How it knows the original folder | Who did it |
+|------|----------------|----------------------------------|------------|
+| Audit log | `Search-UnifiedAuditLog` — `Move`, `MoveToDeletedItems`, `SoftDelete`, `HardDelete` on this mailbox | Records the source folder of every move | **Yes** — account, logon type, client, IP, app ID |
+| `Deleted` | `Get-/Restore-RecoverableItems` over Deleted Items, Recoverable Items and Purges (only kept under a hold), filtered on the moment of deletion | Exchange keeps it itself (`LastParentPath`) | Looked up in the audit log by subject and time |
+| `Moved` | Every audited `Move` on the day, traced to the **first** folder the message left, found over Graph by Internet MessageId and moved back | From the audit log only | From the audit record |
+
+> **Why the audit log matters twice.** A plain move leaves no trace of where a message came from — not in Graph, not in Exchange. The audit record is the only place that knows, and the same record names the person. Moves **out of** Deleted Items or Recoverable Items are left alone: those were restores, and reversing them would delete the message again.
+
+Messages that landed in **Archive** without an audit record — Exchange does not audit the owner's own `Move` by default, and app-driven archiving (e.g. [`Move-InboxToArchive.ps1`](Move-InboxToArchive.ps1)) can be missing too — are **listed** from the Archive folder by modification time. They are only moved to the Inbox with `-UnauditedArchiveToInbox`, because reading or flagging a message changes that time as well.
+
+**Parameters**
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `-Mailbox` | Yes | — | UPN or primary SMTP address |
+| `-Date` | One of | — | The day the messages were moved or deleted (local time, whole day) |
+| `-After` | these | — | Start of a precise window (local time) instead of `-Date` |
+| `-Before` | No | now | End of that window |
+| `-Include` | No | `Deleted`, `Moved` | Which part to run. The who-did-what report is always produced |
+| `-UnauditedArchiveToInbox` | No | off | Also move unaudited Archive items modified in the window to the Inbox |
+| `-Apply` | No | off | **Actually restore.** Without it the run only reports |
+| `-OutputPath` | No | `C:\Temp\` / `~/Downloads` | CSV report path; the audit trail is written next to it as `*_Audit.csv` |
+| `-TenantId` | No | — | Tenant ID or domain; needed for app-only Graph unless resolvable from GDAP |
+| `-ClientId` | No | — | Your own App Registration (Mail.ReadWrite application) — skips the temporary app |
+| `-ClientSecret` | No | — | Client secret for `-ClientId` |
+| `-CertificateThumbprint` | No | — | Certificate thumbprint for `-ClientId` |
+
+**Examples**
+
+```powershell
+# 1. What was moved or deleted on 25 September, by whom, and what would go back?
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25
+
+# 2. Put it all back
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 -Apply
+
+# 3. Only the deletions, in a precise window — no Graph access needed at all
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Include Deleted `
+    -After "2026-09-25 14:00" -Before "2026-09-25 16:00" -Apply
+
+# 4. Undo a Move-InboxToArchive.ps1 run, including the unaudited Archive items
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 `
+    -UnauditedArchiveToInbox -Apply
+```
+
+**Output**
+
+- On screen: every message with `[Status] time | current folder -> target folder | who | subject`, then a **who moved / deleted what** table grouped by account, logon type, client and operation, with the time span and IPs.
+- `MailRestore_<mailbox>_<timestamp>.csv` — one row per message: phase, action time, actor, logon type, client, IP, subject, current and target folder, status.
+- `..._Audit.csv` — the raw audit trail for the mailbox in the window, source and destination folder included.
+
+| Status | Meaning |
+|--------|---------|
+| `WouldRestore` / `Restored` | Preview / done |
+| `AlreadyInPlace` | Already back in the original folder — nothing to do |
+| `NotFound` | The moved message is no longer in the mailbox (deleted since — the `Deleted` part covers that) |
+| `Ambiguous` | Several copies with the same MessageId; left alone |
+| `NotAudited` | Archive item without an audit record, listed only |
+| `NotRestored` | Restore-RecoverableItems reported nothing, but the item is still in Recoverable Items afterwards |
+
+**Required permissions**
+
+| Part | Permission |
+|------|-----------|
+| Audit log | **View-Only Audit Logs** or **Audit Logs** (Organization Management / Compliance Management) |
+| `Deleted` | **Mailbox Import Export** — not in any role group by default: `New-ManagementRoleAssignment -Role "Mailbox Import Export" -User admin@contoso.com`, then reconnect. Without it this part is skipped with a message |
+| `Moved` | App-only `Mail.ReadWrite`, through the same three routes as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): an existing app-only session, `-ClientId`, or a temporary app removed at the end |
+
+**Notes**
+
+- The audit log is **30–90 minutes** (sometimes 24 hours) behind. A run on the same day can miss the latest actions.
+- The run lists which of `Move`, `MoveToDeletedItems`, `SoftDelete`, `HardDelete` are **not audited** for owner, delegate and admin on this mailbox. By default the owner's own `Move` is not — those moves cannot be traced back or attributed. Enable it for next time: `Set-Mailbox user@contoso.com -AuditOwner @{Add='Move'}`.
+- Moves by an Inbox rule run as the mailbox itself and are often not audited. Moves into the **online archive mailbox** by a retention policy are a different mailbox and out of scope.
+- When the original folder of a move no longer exists, the message goes to the Inbox and the CSV says so.

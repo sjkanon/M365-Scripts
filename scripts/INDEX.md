@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-180 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+181 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -131,6 +131,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Remove-Workspace365Environment.ps1`](LegacyUtilities/Workspace365/Remove-Workspace365Environment.ps1) | [`LegacyUtilities/Workspace365/`](LegacyUtilities/Workspace365/readme.md) | Delete a Workspace 365 environment via the Provisioning API. |
 | [`Repair-StuckWin32AppEnforcement.ps1`](Intune/Repair-StuckWin32AppEnforcement.ps1) | [`Intune/`](Intune/readme.md) | Detect and clear Win32 apps stuck behind Intune's GRS retry cooldown on this device. |
 | [`Restart-Time-Sync.ps1`](Device/Time%20sync/Restart-Time-Sync.ps1) | [`Device/Time sync/`](Device/Time%20sync/readme.md) | Repair Windows time synchronisation and keep it repaired with a scheduled task. |
+| [`Restore-MailboxMessages.ps1`](Exchange/Restore-MailboxMessages.ps1) | [`Exchange/`](Exchange/readme.md) | Put messages that were moved or deleted on a given day back where they came from, and report who moved or deleted them. Preview by default. |
 | [`Restore-RecycleBinItems.ps1`](SharePoint/Restore-RecycleBinItems.ps1) | [`SharePoint/`](SharePoint/readme.md) | Restore deleted files and folders from SharePoint or OneDrive recycle bins - one site, or every SharePoint site in a tenant - with interactive admin sign-in. |
 | [`Rollback-InternalMic.ps1`](Device/audio/Rollback-InternalMic.ps1) | [`Device/audio/`](Device/audio/readme.md) | Rollback: Re-enable Internal Microphone |
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |

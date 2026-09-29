@@ -310,6 +310,18 @@ $ExchangeSubmenu = @(
         if ($m365 -match '^[Yy]') { $p['IncludeM365Groups'] = $true }
         & "$ROOT\scripts\Exchange\Get-DistributionGroupMembers.ps1" @p
     }}
+    @{ Key='L'; Label='Restore-MailboxMessages  — put back mail moved/deleted on a date, and show who did it'; Action={
+        $path = Join-Path $ROOT 'scripts\Exchange\Restore-MailboxMessages.ps1'
+        $mbx  = Read-Host "  Mailbox UPN"
+        $day  = Read-Host "  Day the messages were moved/deleted [yyyy-MM-dd]"
+        $arc  = Read-Host "  Also move unaudited Archive items back to the Inbox (e.g. after Move-InboxToArchive)? [y/N]"
+        $p = @{ Mailbox = $mbx; Date = [datetime]$day }
+        if ($arc -match '^[Yy]') { $p['UnauditedArchiveToInbox'] = $true }
+        # Always a preview first - it also shows who did what - then an explicit second step.
+        & $path @p
+        $confirm = Read-Host "  Preview completed. Put the messages back now (-Apply)? [y/N]"
+        if ($confirm -match '^[Yy]') { & $path @p -Apply }
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"

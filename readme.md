@@ -185,6 +185,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
 | `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
+| `L` | Restore-MailboxMessages — put back mail that was moved or deleted on a given day, and show who did it (always previews first) |
 
 **Entra ID submenu (`D`)**
 
@@ -231,6 +232,9 @@ Scripts for calendar and mailbox management.
   - Two engines: **Purview** Content Search + purge (tenant-wide, the only one that can HardDelete) and **Graph** (per-mailbox, no search-index lag, per-message report)
   - `Recycle` / `SoftDelete` / `HardDelete`; refuses to run without a content selector so a date range alone can never match every message
   - Loops purge rounds automatically around Purview's 10-items-per-mailbox limit, and writes a CSV of everything matched and deleted
+- **Restore-MailboxMessages.ps1** — put back messages that were moved or deleted on a given day, and report who did it; preview by default
+  - Deleted messages go back via `Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges); moved messages are traced to their original folder through the audit log and moved back over Graph
+  - Names the actor from the Unified Audit Log — account, owner/delegate/admin, client, IP — and says which actions are not audited on the mailbox
 
 ---
 
@@ -614,6 +618,7 @@ M365-Scripts/
     │   ├── Set-Calendar-rights.ps1
     │   ├── Set-Distributionlist-dynamic-static.ps1
     │   ├── Move-InboxToArchive.ps1
+    │   ├── Restore-MailboxMessages.ps1  ← put back mail moved/deleted on a date, and who did it
     │   ├── Test-CalendarPermissions.ps1
     │   ├── Get-CalendarMappings.ps1  ← where each calendar is mapped in Outlook, next to the rights behind it
     │   ├── Test-MailboxPermissions.ps1
@@ -820,6 +825,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-29
+| Change |
+|--------|
+| New `scripts/Exchange/Restore-MailboxMessages.ps1`: put back the messages that were moved or deleted in one mailbox on a given day, and say who did it. There was no way back from a bad archive run or a mass delete short of restoring by hand in Outlook, and no answer to "who did this" without writing an audit log query from scratch |
+| Deleted messages go back through `Get-/Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges), one `EntryID` at a time, filtered on the moment of deletion — Exchange knows the original folder itself. After an `-Apply` the folders are read again, and anything still there is reported as `NotRestored` instead of trusting the cmdlet's silence |
+| Moved messages have no such memory: neither Graph nor Exchange records where a moved message came from. The Unified Audit Log does, so every audited `Move` is traced to the **first** folder the message left that day, located over Graph by Internet MessageId and moved back through `$batch`. Folders are matched on their path as the audit log writes it, which is in the mailbox's own language (`\Postvak IN\Projecten`). Moves out of Deleted Items or Recoverable Items are skipped, because those were restores and reversing them would delete the message again |
+| The same audit records name the actor — account, owner/delegate/admin, client (Outlook, OWA, Graph app with app ID), IP — per message in the CSV, as a grouped "who moved / deleted what" table on screen, and as a raw `_Audit.csv`. Deletions are attributed by subject and nearest time, since recoverable items carry no MessageId. The run also lists which of the four actions are not audited on the mailbox, because by default the owner's own `Move` is not, and a missing record would otherwise read as "nobody did it" |
+| Archive items without an audit record (e.g. after `Move-InboxToArchive.ps1`) are listed by modification time and only moved to the Inbox with `-UnauditedArchiveToInbox`, since reading or flagging also changes that time. Graph access reuses the REST-only three-route pattern of `Remove-PhishingMessage.ps1`, so it runs next to the Exchange session without the MSAL clash. Added to the Exchange submenu as `L` (preview first, then `-Apply`) |
+| Verified offline only, in PowerShell 7 and Windows PowerShell 5.1: syntax check, audit-record parsing against fabricated records (mailbox filter, UTC to local time, logon types, client labels, subject/time attribution), and the whole moved-message path against a mocked Graph — a chain of moves going back to the first folder, Dutch folder names, a user's restore left alone, an already-returned message skipped, an audited Archive item kept out of the unaudited list, and the resulting move requests. **Not yet run against a live tenant**: the exact output properties of `Get-RecoverableItems`, how it interprets the filter times, and whether the audit records carry `InternetMessageId` for every client are all untested |
 
 ### 2026-09-28 (6)
 | Change |
