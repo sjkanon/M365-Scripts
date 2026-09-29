@@ -826,6 +826,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-29 (2)
+| Change |
+|--------|
+| `Restore-MailboxMessages.ps1` no longer needs the Mailbox Import Export role to bring deleted mail back. The first real run stopped at "Get-RecoverableItems is not available" and skipped every deleted message, while the role is in no role group by default — so on most tenants the deleted part simply did nothing |
+| Without the role the run now switches to Graph and restores **everything** deleted in the window, not only what the audit log saw: every message in Deleted Items and Recoverable Items\Deletions whose modification time falls in the window goes back. Audited deletions (`MoveToDeletedItems`, `SoftDelete`, which Exchange audits for the owner by default) go to the folder the record says they left, with the actor matched exactly by MessageId; the rest go to the Inbox. A message deleted *out of* Deleted Items goes to the Inbox too, because putting it back in Deleted Items is not recovering it. Hard-deleted items (Purges) are out of Graph's reach and reported as `Unreachable` instead of silently missing |
+| Message lookups now also search `recoverableitemsdeletions`, which `/messages` does not cover, so a message that was moved and then deleted is found in either part. The moved and deleted parts share one lookup / move / report path instead of two copies |
+| Verified offline in PowerShell 7 and 5.1 against a mocked Graph: moved-then-soft-deleted goes back to the original subfolder, deleted-from-Deleted-Items goes to the Inbox, unaudited items from both folders are restored, an item deleted five days earlier is left alone, a hard delete is reported `Unreachable`, and preview and `-Apply` issue exactly the expected moves. **Not run against a live tenant**; in particular whether Graph allows a move out of `recoverableitemsdeletions`, and whether a move changes `lastModifiedDateTime`, are untested |
+
 ### 2026-09-29
 | Change |
 |--------|

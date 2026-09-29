@@ -1078,6 +1078,7 @@ Undoes a bad day in one mailbox: messages that were **moved** or **deleted** on 
 |------|----------------|----------------------------------|------------|
 | Audit log | `Search-UnifiedAuditLog` — `Move`, `MoveToDeletedItems`, `SoftDelete`, `HardDelete` on this mailbox | Records the source folder of every move | **Yes** — account, logon type, client, IP, app ID |
 | `Deleted` | `Get-/Restore-RecoverableItems` over Deleted Items, Recoverable Items and Purges (only kept under a hold), filtered on the moment of deletion | Exchange keeps it itself (`LastParentPath`) | Looked up in the audit log by subject and time |
+| `Deleted` without the role | Graph: **everything** in Deleted Items and Recoverable Items\Deletions that changed in the window, plus every audited `MoveToDeletedItems` / `SoftDelete` | The audit log for audited deletions; otherwise — and for anything deleted out of Deleted Items itself — the **Inbox** | From the audit record (exact, by MessageId) |
 | `Moved` | Every audited `Move` on the day, traced to the **first** folder the message left, found over Graph by Internet MessageId and moved back | From the audit log only | From the audit record |
 
 > **Why the audit log matters twice.** A plain move leaves no trace of where a message came from — not in Graph, not in Exchange. The audit record is the only place that knows, and the same record names the person. Moves **out of** Deleted Items or Recoverable Items are left alone: those were restores, and reversing them would delete the message again.
@@ -1133,14 +1134,15 @@ Messages that landed in **Archive** without an audit record — Exchange does no
 | `Ambiguous` | Several copies with the same MessageId; left alone |
 | `NotAudited` | Archive item without an audit record, listed only |
 | `NotRestored` | Restore-RecoverableItems reported nothing, but the item is still in Recoverable Items afterwards |
+| `Unreachable` | Hard-deleted (Purges) while the run is on the Graph route — only `Restore-RecoverableItems` with the role can reach it |
 
 **Required permissions**
 
 | Part | Permission |
 |------|-----------|
 | Audit log | **View-Only Audit Logs** or **Audit Logs** (Organization Management / Compliance Management) |
-| `Deleted` | **Mailbox Import Export** — not in any role group by default: `New-ManagementRoleAssignment -Role "Mailbox Import Export" -User admin@contoso.com`, then reconnect. Without it this part is skipped with a message |
-| `Moved` | App-only `Mail.ReadWrite`, through the same three routes as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): an existing app-only session, `-ClientId`, or a temporary app removed at the end |
+| `Deleted` | **Mailbox Import Export** — not in any role group by default: `New-ManagementRoleAssignment -Role "Mailbox Import Export" -User admin@contoso.com`, then reconnect. **Optional:** without it the run restores over Graph instead — everything except hard-deleted items |
+| `Moved` (and `Deleted` without the role) | App-only `Mail.ReadWrite`, through the same three routes as [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): an existing app-only session, `-ClientId`, or a temporary app removed at the end |
 
 **Notes**
 
