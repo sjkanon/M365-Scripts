@@ -56,6 +56,8 @@
 
 .PARAMETER After
     Start of the window in which the messages were moved or deleted (local time).
+    Without -Before this means "everything from this date until now". Aliases:
+    -From, -Since.
 
 .PARAMETER Before
     End of that window (local time). Default: now.
@@ -95,6 +97,10 @@
 .EXAMPLE
     # Put it all back
     .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 -Apply
+
+.EXAMPLE
+    # Everything moved or deleted from 20 September until now
+    .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Since 2026-09-20 -Apply
 
 .EXAMPLE
     # Only the deletions, in a precise window - needs no Graph access at all
@@ -148,6 +154,7 @@ param(
     [Parameter(Mandatory)]
     [string]   $Mailbox,
     [datetime] $Date,
+    [Alias('From', 'Since')]
     [datetime] $After,
     [datetime] $Before,
     [ValidateSet('Deleted', 'Moved')]
@@ -602,33 +609,52 @@ function Get-ClientLabel {
 
 function Get-AuditEvents {
     <#
-        Pulls every Move / delete on the day from the Unified Audit Log and keeps
-        this mailbox's. The search runs tenant-wide because -UserIds filters on
-        the actor, and the actor is exactly what we do not know yet.
+        Pulls every Move / delete in the window from the Unified Audit Log and
+        keeps this mailbox's. The search runs tenant-wide because -UserIds
+        filters on the actor, and the actor is exactly what we do not know yet.
+
+        One search session stops at 50,000 records, which a tenant-wide search
+        over weeks easily exceeds - so the window is searched one day at a time,
+        and only records mentioning this mailbox are kept in memory.
     #>
     param([string] $MailboxGuid, [string] $MailboxUpn, [string] $MailboxSmtp)
 
     $ops = @('Move', 'MoveToDeletedItems', 'SoftDelete', 'HardDelete')
-    $sid = "MailRestore_$([guid]::NewGuid())"
     $raw = [System.Collections.Generic.List[object]]::new()
-    $total = 0
-
-    Write-Host "  Searching the audit log ($($ops -join ', '))..." -ForegroundColor DarkGray
-    for ($page = 1; $page -le 12; $page++) {
-        $batch = @(Search-UnifiedAuditLog -StartDate $windowStart.ToUniversalTime() -EndDate $windowEnd.ToUniversalTime() `
-                    -Operations $ops -SessionId $sid -SessionCommand ReturnLargeSet -ResultSize 5000 -ErrorAction Stop)
-        if ($batch.Count -eq 0) { break }
-        if ($total -eq 0) { $total = [int]$batch[0].ResultCount }
-        $raw.AddRange($batch)
-        if ($raw.Count -ge $total) { break }
-    }
-    if ($total -gt 50000) {
-        # ReturnLargeSet stops at 50,000 records per session.
-        $script:AuditTruncated = $true
-        Write-Warning "The audit log holds $total records for this window; only 50,000 can be read in one search. Narrow the window with -After/-Before."
-    }
-
     $ids = @($MailboxGuid, $MailboxUpn, $MailboxSmtp) | Where-Object { $_ } | ForEach-Object { "$_".ToLowerInvariant() }
+    # Cheap text pre-filter before the JSON is parsed properly below.
+    $mention = ($ids | ForEach-Object { [regex]::Escape($_) }) -join '|'
+
+    $days = [Math]::Ceiling(($windowEnd - $windowStart).TotalDays)
+    Write-Host "  Searching the audit log ($($ops -join ', ')), $days day(s)..." -ForegroundColor DarkGray
+
+    $sliceStart = $windowStart
+    while ($sliceStart -lt $windowEnd) {
+        $sliceEnd = $sliceStart.AddDays(1)
+        if ($sliceEnd -gt $windowEnd) { $sliceEnd = $windowEnd }
+        if ($days -gt 1) { Write-Progress -Activity 'Searching the audit log' -Status $sliceStart.ToString('yyyy-MM-dd') -PercentComplete ([int](($sliceStart - $windowStart).TotalDays / $days * 100)) }
+
+        $sid   = "MailRestore_$([guid]::NewGuid())"
+        $read  = 0
+        $total = 0
+        for ($page = 1; $page -le 12; $page++) {
+            $batch = @(Search-UnifiedAuditLog -StartDate $sliceStart.ToUniversalTime() -EndDate $sliceEnd.ToUniversalTime() `
+                        -Operations $ops -SessionId $sid -SessionCommand ReturnLargeSet -ResultSize 5000 -ErrorAction Stop)
+            if ($batch.Count -eq 0) { break }
+            if ($total -eq 0) { $total = [int]$batch[0].ResultCount }
+            $read += $batch.Count
+            foreach ($rec in $batch) { if ("$($rec.AuditData)" -match $mention) { $raw.Add($rec) } }
+            if ($read -ge $total) { break }
+        }
+        if ($total -gt 50000) {
+            # ReturnLargeSet stops at 50,000 records per session.
+            $script:AuditTruncated = $true
+            Write-Warning "$($sliceStart.ToString('yyyy-MM-dd')): the audit log holds $total records that day; only 50,000 can be read in one search, so some actions on this mailbox may be missing."
+        }
+        $sliceStart = $sliceEnd
+    }
+    if ($days -gt 1) { Write-Progress -Activity 'Searching the audit log' -Completed }
+
     foreach ($rec in $raw) {
         try { $d = $rec.AuditData | ConvertFrom-Json } catch { continue }
         $owner = @("$($d.MailboxGuid)", "$($d.MailboxOwnerUPN)") | ForEach-Object { $_.ToLowerInvariant() }
@@ -1197,6 +1223,18 @@ try {
     if ($mbx.AuditEnabled -eq $false) {
         Write-Warning "Mailbox auditing is disabled on this mailbox - expect no audit records."
     }
+    # A long window can reach past what the mailbox still keeps. Say so up
+    # front, rather than let "0 found" read as "nothing was deleted".
+    $retain = $null
+    try { $retain = [timespan]"$($mbx.RetainDeletedItemsFor)" } catch {}
+    $onHold = $mbx.LitigationHoldEnabled -or @($mbx.InPlaceHolds).Count -gt 0
+    if ($retain -and -not $onHold -and $windowStart -lt (Get-Date).Add(-$retain)) {
+        Write-Warning ("Recoverable Items keeps deleted items for {0} days on this mailbox and it is not on hold: anything removed from Recoverable Items before {1} is permanently gone. Deleted Items itself is unaffected." -f [int]$retain.TotalDays, (Get-Date).Add(-$retain).ToString('yyyy-MM-dd'))
+    }
+    if ($windowStart -lt (Get-Date).AddDays(-180)) {
+        Write-Warning "The window starts more than 180 days ago. The audit log usually keeps 180 days (90 on older tenants); before that nothing can be traced back or attributed."
+    }
+
     $notAudited = @()
     foreach ($pair in @(@('Owner', $mbx.AuditOwner), @('Delegate', $mbx.AuditDelegate), @('Admin', $mbx.AuditAdmin))) {
         $set = @($pair[1] | ForEach-Object { "$_" })

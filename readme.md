@@ -185,7 +185,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
 | `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
-| `L` | Restore-MailboxMessages — put back mail that was moved or deleted on a given day, and show who did it (always previews first) |
+| `L` | Restore-MailboxMessages — put back mail that was moved or deleted on a given day, or from a date until now, and show who did it (always previews first) |
 
 **Entra ID submenu (`D`)**
 
@@ -825,6 +825,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-29 (3)
+| Change |
+|--------|
+| `Restore-MailboxMessages.ps1` now handles "everything from this date until now" as a first-class case: `-After` gained the aliases `-From` and `-Since`, and the menu entry (`L`) asks whether to restore only that day or everything since. The window itself already allowed it, but the audit search ran as one query over the whole window, and a single search session stops at 50,000 records tenant-wide — over a few weeks that silently dropped actions on the mailbox being restored |
+| The audit log is now searched one day at a time, each day in its own session with paging, and only records that mention this mailbox are kept in memory. A day that alone exceeds 50,000 records is named in a warning |
+| A long window can reach past what the mailbox still keeps, which would read as "nothing was deleted". The run now warns when the window starts before the mailbox's `RetainDeletedItemsFor` (14 days by default) and the mailbox is not on hold, and when it starts more than 180 days ago, beyond the usual audit retention |
+| Verified offline in PowerShell 7 and 5.1: `-Since` binds to `-After`; a mocked `Search-UnifiedAuditLog` over a 2.6-day window was called per day with UTC boundaries, the last slice ending at the window's end, day one paged across two calls in one session, and only this mailbox's records kept. The retention warning is **not** exercised - it needs a live `Get-Mailbox` |
 
 ### 2026-09-29 (2)
 | Change |

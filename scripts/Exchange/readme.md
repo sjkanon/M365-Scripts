@@ -1091,7 +1091,7 @@ Messages that landed in **Archive** without an audit record — Exchange does no
 |-----------|----------|---------|-------------|
 | `-Mailbox` | Yes | — | UPN or primary SMTP address |
 | `-Date` | One of | — | The day the messages were moved or deleted (local time, whole day) |
-| `-After` | these | — | Start of a precise window (local time) instead of `-Date` |
+| `-After` | these | — | Start of a window (local time) instead of `-Date`. Without `-Before`: **everything from this date until now**. Aliases `-From`, `-Since` |
 | `-Before` | No | now | End of that window |
 | `-Include` | No | `Deleted`, `Moved` | Which part to run. The who-did-what report is always produced |
 | `-UnauditedArchiveToInbox` | No | off | Also move unaudited Archive items modified in the window to the Inbox |
@@ -1110,6 +1110,9 @@ Messages that landed in **Archive** without an audit record — Exchange does no
 
 # 2. Put it all back
 .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 -Apply
+
+# 2b. Everything moved or deleted from 20 September until now
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Since 2026-09-20 -Apply
 
 # 3. Only the deletions, in a precise window — no Graph access needed at all
 .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Include Deleted `
@@ -1147,6 +1150,7 @@ Messages that landed in **Archive** without an audit record — Exchange does no
 **Notes**
 
 - The audit log is **30–90 minutes** (sometimes 24 hours) behind. A run on the same day can miss the latest actions.
+- Longer windows (`-Since`) are searched in the audit log **one day at a time**, because a single search stops at 50,000 records tenant-wide. The run warns when the window reaches past what is still kept: Recoverable Items holds deleted items for `RetainDeletedItemsFor` (14 days by default, 30 at most) unless the mailbox is on hold, and the audit log usually keeps 180 days. Deleted Items itself is not affected by that limit.
 - The run lists which of `Move`, `MoveToDeletedItems`, `SoftDelete`, `HardDelete` are **not audited** for owner, delegate and admin on this mailbox. By default the owner's own `Move` is not — those moves cannot be traced back or attributed. Enable it for next time: `Set-Mailbox user@contoso.com -AuditOwner @{Add='Move'}`.
 - Moves by an Inbox rule run as the mailbox itself and are often not audited. Moves into the **online archive mailbox** by a retention policy are a different mailbox and out of scope.
 - When the original folder of a move no longer exists, the message goes to the Inbox and the CSV says so.

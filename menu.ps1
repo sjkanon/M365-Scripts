@@ -313,9 +313,11 @@ $ExchangeSubmenu = @(
     @{ Key='L'; Label='Restore-MailboxMessages  — put back mail moved/deleted on a date, and show who did it'; Action={
         $path = Join-Path $ROOT 'scripts\Exchange\Restore-MailboxMessages.ps1'
         $mbx  = Read-Host "  Mailbox UPN"
-        $day  = Read-Host "  Day the messages were moved/deleted [yyyy-MM-dd]"
+        $day  = Read-Host "  Date the messages were moved/deleted [yyyy-MM-dd]"
+        $scope = Read-Host "  [O]nly that day, or everything from that date [U]ntil now? [O]"
         $arc  = Read-Host "  Also move unaudited Archive items back to the Inbox (e.g. after Move-InboxToArchive)? [y/N]"
-        $p = @{ Mailbox = $mbx; Date = [datetime]$day }
+        $p = @{ Mailbox = $mbx }
+        if ($scope -match '^[Uu]') { $p['After'] = [datetime]$day } else { $p['Date'] = [datetime]$day }
         if ($arc -match '^[Yy]') { $p['UnauditedArchiveToInbox'] = $true }
         # Always a preview first - it also shows who did what - then an explicit second step.
         & $path @p
