@@ -202,7 +202,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 
 | Parameter | Description |
 |-----------|-------------|
-| `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows` |
+| `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows`. Shorthands: `teams`, `outlook`, `copilot` (= `-Copilot`) — `-Name outlook,copilot` is enough |
 | `-CheckOnly` | Diagnose only, change nothing (exit code `2` when there is work) |
 | `-Provision` | Provision Teams / new Outlook for all users with Microsoft's installer: what FSLogix showed is missing or behind, plus either one named explicitly in `-Name` |
 | `-UseWinget` | With `-Provision`: take Teams / new Outlook from winget instead of Microsoft's installer. winget checks the SHA256, the script the Microsoft signature. winget's manifests lag behind (measured: Teams 26198 vs 26246, Outlook 1.2026.812 vs 902); the run warns when the build is older than what the profiles ask for |
@@ -215,7 +215,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | `-LogPath` | Transcript and `.reg` backups (default `C:\Temp`) |
 | `-ComputerName` | Run on these session hosts instead of this machine (e.g. `lem-avd-4,lem-avd-5,lem-avd-6`): the script copies itself over PowerShell remoting (WinRM) to `C:\IT\AppxRepair` on each host, runs there with the same parameters, and ends with a pool table — exit code, FSLogix build, provisioned Teams / Outlook per host — naming any difference between hosts. A repair is confirmed once for the whole pool |
 | `-Credential` | Credential for those remoting sessions |
-| `-Copilot` | Look at Copilot (step 1d): the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`), the **unified Microsoft Copilot app** Edge Update installs since September 2026, and every policy that removes or blocks it. Their Deprovisioned markers are in scope. With `-Provision` Copilot is installed for all users with Microsoft's documented `M365CopilotDesktopInstaller.exe --quiet --start -p` |
+| `-Copilot` | Look at Copilot (step 1d): the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`), the **unified Microsoft Copilot app** Edge Update installs since September 2026, and every policy that removes or blocks it. Their Deprovisioned markers are in scope. With `-Provision` the **new** app is installed machine-wide the way Microsoft documents it: `Install{C50565E9-...}` = 5 (Force Installs), `UpdaterExperimentationAndConfigurationServiceControl` = 1 and `CopilotUnificationAllowed{...}` = 1 under `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate` (after a `.reg` backup), Edge Update is asked to check now, and the run waits up to 10 minutes for the app. When it does not appear, `M365CopilotDesktopInstaller.exe --quiet --start -p` (the old app, which the unification moves over) is the fallback. A policy that forbids the install (`Install` = 0) is never overridden |
 
 Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
 
@@ -232,9 +232,9 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
 
-# Copilot missing on the pool: why, then put it back for all users
-.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Copilot -CheckOnly
-.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Copilot -Provision -Confirm:$false
+# New Outlook and the new Copilot app on the pool: why they are missing, then install for all users
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -CheckOnly
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision -Confirm:$false
 
 # Same, with both packages taken from winget
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false

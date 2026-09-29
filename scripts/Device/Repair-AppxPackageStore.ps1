@@ -70,6 +70,8 @@
 .PARAMETER Name
     Package names to look at, wildcards allowed. Default '*': the whole store.
     Examples: 'MSTeams', 'Microsoft.OutlookForWindows', 'MSTeams','Microsoft.OutlookForWindows'.
+    Shorthands: teams (MSTeams), outlook (Microsoft.OutlookForWindows) and copilot
+    (the same as -Copilot), so -Name outlook,copilot is enough.
 
 .PARAMETER CheckOnly
     Diagnose and report, change nothing. Exit code 2 when there is something to repair.
@@ -130,12 +132,21 @@
 
 .PARAMETER Copilot
     Look at Copilot: adds Microsoft.MicrosoftOfficeHub and Microsoft.Copilot to -Name
-    (so their Deprovisioned markers are in scope) and runs step 1d. With -Provision
-    the app is installed for all users with Microsoft's documented installer,
-    M365CopilotDesktopInstaller.exe --quiet --start -p from
-    go.microsoft.com/fwlink/?linkid=2325486, signature-checked; the result is
-    accepted as the AppX package provisioned or the unified app under Edge Update.
-    A policy that removes Copilot is reported and fails the run, but is not changed.
+    (so their Deprovisioned markers are in scope) and runs step 1d. What counts as
+    installed is the new, unified Microsoft Copilot app that Edge Update puts on the
+    machine.
+
+    With -Provision that app is installed machine-wide the way Microsoft documents
+    it: Edge Update's Install{C50565E9-CCCF-44B4-BA15-5AC5C6569197} = 5 (Force
+    Installs), UpdaterExperimentationAndConfigurationServiceControl = 1 and
+    CopilotUnificationAllowed{...} = 1 are written under
+    HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate after a .reg backup of that key,
+    Edge Update is asked to check now, and the run waits up to 10 minutes for the
+    app. When it does not appear, the Microsoft 365 Copilot installer
+    (M365CopilotDesktopInstaller.exe --quiet --start -p, signature-checked) is the
+    fallback; the unification moves that old app over later. A policy that forbids
+    or removes Copilot (Install = 0, Uninstall without Force Installs, Windows'
+    TurnOff/Remove policies) is reported and fails the run, but is never overridden.
 
 .EXAMPLE
     # What is broken on this host? Changes nothing.
@@ -155,9 +166,9 @@
     .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
 
 .EXAMPLE
-    # Copilot on the whole pool: why it is missing, then put it back for all users
-    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Copilot -CheckOnly
-    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Copilot -Provision -Confirm:$false
+    # New Outlook and the new Copilot app on the whole pool: diagnose, then install
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -CheckOnly
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision -Confirm:$false
 
 .EXAMPLE
     # Every app that failed in the last 14 days, and the store for all of them
@@ -380,14 +391,23 @@ if (-not $PSBoundParameters.ContainsKey('LogPath')              -and $env:logPat
 # powershell.exe -File passes 'MSTeams,Microsoft.OutlookForWindows' as one string -
 # which is also how the relaunches above hand it over - so the list is split here.
 $Name = @($Name | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($Name.Count -eq 0) { $Name = @('*') }
 if (-not $PSBoundParameters.ContainsKey('Copilot') -and $env:copilot -in $rmmTrue) { $Copilot = $true }
+# Shorthands, so -Name outlook,copilot is enough. 'copilot' is the -Copilot switch.
+$Name = @(foreach ($entry in $Name) {
+    switch ($entry) {
+        'teams'   { 'MSTeams' }
+        'outlook' { 'Microsoft.OutlookForWindows' }
+        'copilot' { $Copilot = $true }
+        default   { $entry }
+    }
+})
+if ($Name.Count -eq 0 -and -not $Copilot) { $Name = @('*') }
 # -Copilot names both Copilot packages, so they are explicit: their Deprovisioned
 # markers are in scope and -Provision installs the app. Added to -Name when that was
 # given, instead of it when it was left at '*'.
 if ($Copilot) {
-    $Name = @(if ($PSBoundParameters.ContainsKey('Name') -or $env:packageName) { $Name } else { @() }) + @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot') |
-            Select-Object -Unique
+    $keep = @($Name | Where-Object { $_ -ne '*' -or $PSBoundParameters.ContainsKey('Name') -or $env:packageName })
+    $Name = @($keep + @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot') | Select-Object -Unique)
 }
 $WingetId = @($WingetId | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
@@ -793,8 +813,14 @@ function Backup-RegistryKey {
     param([Parameter(Mandatory)] [string] $Key, [Parameter(Mandatory)] [string] $Folder)
 
     if (-not (Test-Path $Folder)) { New-Item -ItemType Directory -Path $Folder -Force | Out-Null }
+    # reg.exe wants the long hive name.
+    $Key  = $Key -replace '^HKLM:\\?', 'HKEY_LOCAL_MACHINE\' -replace '^HKCU:\\?', 'HKEY_CURRENT_USER\'
     $file = Join-Path $Folder (($Key -replace '^HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Appx\\', '' -replace '[\\/:*?"<>|]', '_') + '.reg')
-    & reg.exe export $Key $file /y 2>&1 | Out-Null
+    # Under Windows PowerShell 5.1 with ErrorActionPreference Stop, a native command
+    # writing to stderr is a terminating error - a failed export would have ended the
+    # whole run instead of answering "no backup". Measured with reg.exe.
+    $ErrorActionPreference = 'Continue'
+    & reg.exe export $Key $file /y 2>$null | Out-Null
     return ($LASTEXITCODE -eq 0 -and (Test-Path $file))
 }
 
@@ -1037,6 +1063,79 @@ function Get-EdgeUpdateClientVersion {
     param([Parameter(Mandatory)] [string] $AppId)
     $key = Get-ItemProperty "$EdgeUpdateStatePath\Clients\$AppId" -ErrorAction SilentlyContinue
     return Get-PropertyValue $key 'pv'
+}
+
+function Install-UnifiedCopilot {
+    <#
+        The new, unified Microsoft Copilot app, the way Microsoft documents putting it
+        on a machine: Edge Update's Install policy for the Copilot app id set to
+        Force Installs (5, machine-wide - which is what a session host needs), with
+        UpdaterExperimentationAndConfigurationServiceControl = 1, which Force Installs
+        requires, and CopilotUnificationAllowed = 1 for machines that already carry
+        one of the old apps. Then Edge Update is asked to check now, and this waits
+        for the app to appear under its Clients key.
+
+        These are written as local policy, after a .reg backup of the key. A policy
+        that forbids the install (Install = 0) is not overridden: somebody decided
+        that, in a GPO or Intune, and a local value would be undone at the next
+        refresh anyway. Returns the installed version, or $null.
+    #>
+    param([string] $BackupFolder, [int] $WaitMinutes = 10)
+
+    $policy = Get-ItemProperty $EdgeUpdatePolicyPath -ErrorAction SilentlyContinue
+    if ((Get-PropertyValue $policy "Install$CopilotEdgeUpdateId") -eq 0) {
+        Write-Bad "Policy Install$CopilotEdgeUpdateId = 0 forbids the Copilot install - not overridden; change it in the GPO or Intune profile that sets it"
+        return $null
+    }
+
+    $updater = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe'
+    if (-not (Test-Path $updater)) {
+        Write-Warn 'Edge Update is not installed, so the unified Copilot app cannot come through it'
+        return $null
+    }
+
+    if ((Test-Path $EdgeUpdatePolicyPath) -and $BackupFolder) {
+        if (Backup-RegistryKey -Key $EdgeUpdatePolicyPath -Folder $BackupFolder) { Write-Skip "  Backed up $EdgeUpdatePolicyPath to $BackupFolder" }
+        else { Write-Warn "  Could not back up $EdgeUpdatePolicyPath - continuing, the values written are listed below" }
+    }
+    if (-not (Test-Path $EdgeUpdatePolicyPath)) { New-Item -Path $EdgeUpdatePolicyPath -Force | Out-Null }
+
+    foreach ($value in @(
+        @{ Name = "Install$CopilotEdgeUpdateId";                   Data = 5; Why = 'Force Installs, machine-wide' }
+        @{ Name = 'UpdaterExperimentationAndConfigurationServiceControl'; Data = 1; Why = 'required for Force Installs' }
+        @{ Name = "CopilotUnificationAllowed$CopilotEdgeUpdateId";  Data = 1; Why = 'moves an old Copilot app to the unified one' }
+    )) {
+        if ((Get-PropertyValue $policy $value.Name) -eq $value.Data) { continue }
+        New-ItemProperty -Path $EdgeUpdatePolicyPath -Name $value.Name -Value $value.Data -PropertyType DWord -Force | Out-Null
+        Write-Ok "  Set $($value.Name) = $($value.Data) ($($value.Why))"
+    }
+
+    if ((Get-PropertyValue (Get-ItemProperty $EdgeUpdateStatePath -ErrorAction SilentlyContinue) 'PauseCopilotAppUnificationRollout') -eq 1) {
+        Write-Warn "  PauseCopilotAppUnificationRollout = 1 is set under $EdgeUpdateStatePath - left alone; it can hold the unified app back"
+    }
+
+    # Edge Update checks by itself on a schedule; asking now saves waiting for it.
+    # Its own machine task first, the updater's documented /ua check otherwise.
+    $task = @(Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTaskMachineUA*' -ErrorAction SilentlyContinue) | Select-Object -First 1
+    if ($task) {
+        Start-ScheduledTask -InputObject $task
+        Write-Skip "  Started the Edge Update task $($task.TaskName)"
+    } else {
+        Start-Process -FilePath $updater -ArgumentList '/ua /installsource scheduler' -WindowStyle Hidden | Out-Null
+        Write-Skip '  Started an Edge Update check (MicrosoftEdgeUpdate.exe /ua)'
+    }
+
+    $deadline = (Get-Date).AddMinutes($WaitMinutes)
+    while ((Get-Date) -lt $deadline) {
+        $version = Get-EdgeUpdateClientVersion -AppId $CopilotEdgeUpdateId
+        if ($version) {
+            Write-Ok "Unified Microsoft Copilot app $version installed machine-wide by Edge Update"
+            return $version
+        }
+        Start-Sleep -Seconds 15
+    }
+    Write-Warn "  The unified Copilot app did not appear within $WaitMinutes minutes - the policy is in place, so Edge Update installs it at its next check"
+    return $null
 }
 
 function Write-CopilotStatus {
@@ -1353,12 +1452,12 @@ try {
         Write-Step '1d. Copilot'
         $copilotBlocked = [bool] (Write-CopilotStatus)
         if ($copilotBlocked) { $work++ }
-        # Registered for some users is not enough on a session host: a user signing
-        # in for the first time only gets what is provisioned or machine-wide.
-        $copilotMissing = -not (Get-EdgeUpdateClientVersion -AppId $CopilotEdgeUpdateId) -and
-                          -not $provisionedNow.ContainsKey('Microsoft.MicrosoftOfficeHub')
+        # What counts is the new, unified app installed machine-wide: the old
+        # Microsoft 365 Copilot app is what the unification replaces, and a package
+        # registered for some users is not what a first sign-in on a session host gets.
+        $copilotMissing = -not (Get-EdgeUpdateClientVersion -AppId $CopilotEdgeUpdateId)
         if ($copilotMissing) {
-            Write-Warn 'Copilot is not installed for all users on this machine - -Copilot -Provision installs it with Microsoft''s installer'
+            Write-Warn 'The new Microsoft Copilot app is not installed on this machine - -Copilot -Provision installs it machine-wide through Edge Update'
             $work++
         }
     }
@@ -1508,7 +1607,21 @@ try {
             $how  = if ($viaWinget) { "winget download $($spec.WingetId) + Add-AppxProvisionedPackage" } else { "$($spec.File) $($spec.Args)" }
             if (-not $PSCmdlet.ShouldProcess($target, "Provision for all users ($how)")) { continue }
             try {
-                if ($viaWinget) {
+                if ($target -eq 'Microsoft.MicrosoftOfficeHub' -and $copilotAsked) {
+                    # The new Copilot app comes through Edge Update. Only when that
+                    # does not deliver is the Microsoft 365 Copilot installer used -
+                    # the old app, which the unification then moves over.
+                    $forbidden = (Get-PropertyValue (Get-ItemProperty $EdgeUpdatePolicyPath -ErrorAction SilentlyContinue) "Install$CopilotEdgeUpdateId") -eq 0
+                    if (-not (Install-UnifiedCopilot -BackupFolder $backupDir)) {
+                        if ($forbidden) {
+                            # A forbidding policy would undo the old app just the same.
+                            $exitCode = 1
+                        } else {
+                            Write-Skip '  Falling back to the Microsoft 365 Copilot installer'
+                            if (-not (Invoke-KnownInstaller -PackageName $target)) { $exitCode = 1 }
+                        }
+                    }
+                } elseif ($viaWinget) {
                     $got = Invoke-WingetProvision -PackageId $spec.WingetId
                     # winget's manifest lags behind Microsoft's installers; say so
                     # when it is behind what the profiles on this pool ask for.
@@ -1600,8 +1713,8 @@ try {
         if ($copilotAsked) {
             $officeHub = (Get-ProvisionedVersion)['Microsoft.MicrosoftOfficeHub']
             $unified   = Get-EdgeUpdateClientVersion -AppId $CopilotEdgeUpdateId
-            if ($unified)       { Write-Ok "Copilot: unified Microsoft Copilot app $unified is installed machine-wide" }
-            elseif ($officeHub) { Write-Ok "Copilot: Microsoft.MicrosoftOfficeHub $officeHub is provisioned for all users" }
+            if ($unified)       { Write-Ok "Copilot: the new Microsoft Copilot app $unified is installed machine-wide" }
+            elseif ($officeHub) { Write-Warn "Copilot: only the old Microsoft 365 Copilot app ($officeHub) is provisioned - the new app follows at Edge Update's next check if the policy is in place" }
             else                { Write-Warn 'Copilot is not installed machine-wide - run with -Copilot -Provision' }
             # The one thing this script will not change: a policy that removes Copilot
             # wins over any install, so it is the answer, not a footnote.

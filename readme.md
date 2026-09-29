@@ -850,6 +850,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-29 (10)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Copilot -Provision` now installs the **new**, unified Microsoft Copilot app instead of the old Microsoft 365 Copilot app. The installer added in (9) delivers the old AppX package, which the unification then has to move over; the new app is installed machine-wide by Edge Update. The documented way is used: `Install{C50565E9-...}` = 5 (Force Installs), `UpdaterExperimentationAndConfigurationServiceControl` = 1 (which Force Installs requires) and `CopilotUnificationAllowed{...}` = 1 under `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate`, written after a `.reg` backup of that key; then Edge Update's machine task is started and the run waits up to 10 minutes for the app under `EdgeUpdate\Clients`. If it does not appear the old installer is the fallback. `Install` = 0 is never overridden. Diagnosis and verification now count Copilot as present only when the new app is |
+| `-Name` understands `teams`, `outlook` and `copilot`, so new Outlook and the new Copilot app on the pool is `-ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision`. The menu (`R`) takes the same words |
+| Found while testing, fixed: under Windows PowerShell 5.1 with `ErrorActionPreference = Stop`, `reg.exe` writing to stderr is a terminating error, so a single failed `.reg` backup would have ended the whole run instead of leaving that key alone. The backup also takes `HKLM:`/`HKCU:` paths now |
+| Verified in PowerShell 5.1 and 7: the shorthands (five combinations), the Edge Update install against a mocked policy key and task — values written, backup made, the app "appearing" is picked up — and `Install` = 0 left untouched; the earlier store scenario unchanged. **Not run on a session host**: whether Edge Update installs the app within the 10 minutes there is untested |
+
 ### 2026-09-29 (9)
 | Change |
 |--------|
