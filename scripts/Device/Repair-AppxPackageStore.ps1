@@ -83,9 +83,16 @@
 
 .PARAMETER Provision
     Provision for all users, with Microsoft's own installer, the packages FSLogix
-    failed to register that this host does not provision (or provisions older), and
-    any of MSTeams / Microsoft.OutlookForWindows named explicitly in -Name. Other
-    packages need -Source.
+    failed to register that this host does not provision, and any of MSTeams /
+    Microsoft.OutlookForWindows named explicitly in -Name. Other packages need
+    -Source.
+
+    Where FSLogix fails on a newer Teams or Outlook build than this host
+    provisions, that exact build is provisioned instead: the MSIX is downloaded
+    from Microsoft's CDN at the versioned URL winget's manifests use (checked to
+    serve Outlook 1.2026.812-915 and Teams 26198-26246), its signature is checked,
+    and the provisioned version is read back. The installers only ever deliver an
+    older last-known-good build, and older is what fails.
 
 .PARAMETER UseWinget
     With -Provision, take Teams / new Outlook from winget (Microsoft.Teams,
@@ -442,18 +449,25 @@ $PackageRoots = @(
 # MSIX on Microsoft's CDN (checked: Microsoft.Teams -> MSTeams-x64.msix,
 # Microsoft.Outlook -> Microsoft.OutlookForWindows_x64.msix). winget's manifests lag
 # behind the installers above, which is why the installers are the default.
+# VersionUrl is where Microsoft's CDN serves one exact build as an MSIX - the URLs
+# winget's manifests point at, with the version in the path. Checked for Outlook
+# 1.2026.812/818/902/915 and Teams 26198/26225/26246: every one answers 200. That is
+# what lets -Provision put down exactly the build the profiles ask for, instead of
+# the older last-known-good build the installers provision.
 $KnownInstallers = @{
     'MSTeams' = @{
-        Url      = 'https://go.microsoft.com/fwlink/?linkid=2243204&clcid=0x409'
-        File     = 'teamsbootstrapper.exe'
-        Args     = '-p'
-        WingetId = 'Microsoft.Teams'
+        Url        = 'https://go.microsoft.com/fwlink/?linkid=2243204&clcid=0x409'
+        File       = 'teamsbootstrapper.exe'
+        Args       = '-p'
+        WingetId   = 'Microsoft.Teams'
+        VersionUrl = 'https://teamsinstaller.public.onecdn.static.microsoft/production-windows-{1}/{0}/MSTeams-{1}.msix'
     }
     'Microsoft.OutlookForWindows' = @{
-        Url      = 'https://go.microsoft.com/fwlink/?linkid=2207851'
-        File     = 'OutlookSetup.exe'
-        Args     = '--provision true --quiet --start-'
-        WingetId = 'Microsoft.Outlook'
+        Url        = 'https://go.microsoft.com/fwlink/?linkid=2207851'
+        File       = 'OutlookSetup.exe'
+        Args       = '--provision true --quiet --start-'
+        WingetId   = 'Microsoft.Outlook'
+        VersionUrl = 'https://res.cdn.office.net/nativehost/5mttl/installer/v2/{0}/Microsoft.OutlookForWindows_{1}.msix'
     }
     # The Microsoft 365 Copilot app, renamed Microsoft Copilot in 2026. Installer and
     # switches exactly as Microsoft Learn documents them ("Deploy the Microsoft 365
@@ -912,28 +926,89 @@ function Get-FslogixRequest {
 
 function Write-VersionGap {
     <#
-        Profiles asking for a newer build than this host provisions. Teams and new
+        Profiles asking for a newer build than this host provisions, and FSLogix
+        failing on it - which is only ever called with failures in hand. Teams and new
         Outlook update themselves per user, and Microsoft's installers provision a
-        last-known-good build that is usually behind that (measured: Teams 26225
-        provisioned against 26246 in the profiles, Outlook 1.2026.818 against 902),
-        so the gap is normal and closing it by provisioning only lasts until the next
-        update. What decides whether it hurts is FSLogix: a build that registers the
-        package by family name gives the user whatever version is there; an older
-        one replays the exact saved version and fails. Returns $true when it hurts.
+        last-known-good build behind that (measured: Teams 26225 against 26246,
+        Outlook 1.2026.818 against 902 and 915).
+
+        An earlier version called this harmless once FSLogix was new enough to
+        register by family name. A production host proved otherwise: Outlook failed
+        186 times with 0x80070490 while the files of both requested builds were on
+        disk. So the gap is work whenever the failures are there, and the fix is to
+        provision exactly the build asked for. Returns $true.
     #>
     param([string] $Package, $Have, $Asked, $Fslogix)
 
+    $exact   = $KnownInstallers.ContainsKey($Package) -and $KnownInstallers[$Package].ContainsKey('VersionUrl')
     $minimum = if ($FslogixMinimum.ContainsKey($Package)) { $FslogixMinimum[$Package] } else { $null }
-    if ($minimum -and $Fslogix -and $Fslogix -ge $minimum) {
-        Write-Ok "  $Package provisioned at $Have; profiles carry $Asked because the app updates itself per user. FSLogix $Fslogix registers it by family name, so users get it at sign-in and it updates itself - no action needed"
-        return $false
-    }
-    if ($minimum) {
-        Write-Warn "  $Package provisioned at $Have while profiles ask for $Asked. The app updates itself per user, so the profile will always be ahead of any host - the fix is FSLogix $minimum or later, which registers by family name instead of the exact saved version"
+    if ($exact) {
+        Write-Warn "  $Package provisioned at $Have while the profiles ask for $Asked and FSLogix fails on it - -Provision installs exactly $Asked from Microsoft's CDN"
     } else {
         Write-Warn "  $Package provisioned at $Have, older than the $Asked profiles ask for - provision the newer build on every host in the pool"
     }
+    if ($minimum -and $Fslogix -and $Fslogix -lt $minimum) {
+        Write-Warn "  FSLogix $Fslogix predates $minimum and replays the exact saved version, so the next self-update opens the same gap - update FSLogix on the image as well"
+    } else {
+        Write-Skip '  The app updates itself per user, so a later update can open a new gap - run this on a schedule to keep the hosts level'
+    }
     return $true
+}
+
+function Get-ExactTarget {
+    <#
+        The builds to provision exactly: per package with a VersionUrl, the newest
+        version FSLogix failed on, when that is newer than what this host provisions.
+        One object per package, with the URL for this host's architecture.
+    #>
+    param([hashtable] $Provisioned, $Requests)
+
+    foreach ($group in @($Requests | Group-Object Name)) {
+        if (-not $KnownInstallers.ContainsKey($group.Name)) { continue }
+        $spec = $KnownInstallers[$group.Name]
+        if (-not $spec.ContainsKey('VersionUrl')) { continue }
+        $newest = $group.Group | Sort-Object Version -Descending | Select-Object -First 1
+        if (-not $newest.Version) { continue }
+        if ($Provisioned.ContainsKey($group.Name) -and $Provisioned[$group.Name] -ge $newest.Version) { continue }
+        $arch = (($newest.FullName -split '_')[2]).ToLowerInvariant()
+        if ($arch -notin @('x64', 'arm64', 'x86')) { $arch = 'x64' }
+        [PSCustomObject]@{
+            Name     = $group.Name
+            Version  = $newest.Version
+            FullName = $newest.FullName
+            Url      = $spec.VersionUrl -f $newest.Version, $arch
+        }
+    }
+}
+
+function Invoke-ExactProvision {
+    <#
+        Provision one exact build for all users: the MSIX straight from Microsoft's
+        CDN, its signature checked, then Add-AppxProvisionedPackage, then the
+        provisioned version read back. Returns $true when that version is there.
+    #>
+    param([Parameter(Mandatory)] $Target)
+
+    if (-not (Test-Path $WorkingDir)) { New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null }
+    $file = Join-Path $WorkingDir ('{0}_{1}.msix' -f $Target.Name, $Target.Version)
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri $Target.Url -OutFile $file -UseBasicParsing
+    Write-Skip ("  Downloaded {0} ({1} MB) from {2}" -f (Split-Path $file -Leaf), [math]::Round((Get-Item $file).Length / 1MB, 0), $Target.Url)
+    if (-not $SkipSignatureCheck -and -not (Test-MicrosoftSignature -Path $file)) {
+        throw "$(Split-Path $file -Leaf) is not validly signed by Microsoft - refusing to provision it"
+    }
+
+    Add-AppxProvisionedPackage -Online -PackagePath $file -SkipLicense -ErrorAction Stop | Out-Null
+    $now = (Get-ProvisionedVersion)[$Target.Name]
+    if ($now -and $now -ge $Target.Version) {
+        Write-Ok "$($Target.Name) $now provisioned for all users - the build the profiles ask for"
+        Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        return $true
+    }
+    Write-Bad "$($Target.Name): Add-AppxProvisionedPackage completed but the provisioned version is $now, not $($Target.Version)"
+    return $false
 }
 
 function Write-FslogixStatus {
@@ -1366,17 +1441,29 @@ function Get-FailingApp {
     }
 }
 
-# The deployment errors worth a name. Anything else is shown as its bare code.
+# What a code means for this script, on top of what Windows calls it.
 $AppxErrorText = @{
-    '0x80070490' = 'not found - the store lists what it cannot find (this script repairs that)'
-    '0x80070005' = 'access denied'
-    '0x80073CF0' = 'package could not be opened'
-    '0x80073CF3' = 'a dependency or conflicting package blocks it'
-    '0x80073CF6' = 'registration failed'
-    '0x80073CF9' = 'install failed'
-    '0x80073CFB' = 'a package with that name is already installed'
-    '0x80073D02' = 'in use - it retries when the app is closed'
-    '0x80073D06' = 'a newer version is already installed'
+    '0x80070490' = 'the store or FSLogix asks for something it cannot find - this script repairs that'
+    '0x80073D02' = 'retries when the app is closed'
+    '0x80073D06' = 'harmless, the newer version stays'
+    '0x80073D19' = 'harmless, the user signed out during registration'
+}
+
+function Get-HResultText {
+    <#
+        Windows' own text for an AppX HRESULT - every 0x8007xxxx is a Win32 code,
+        and Windows has the message - plus this script's note where it has one.
+        Measured: 0x80073D19 reads "An error occurred because a user was logged off".
+    #>
+    param([string] $Code)
+
+    $text = $null
+    if ($Code -match '^0x8007([0-9A-Fa-f]{4})$') {
+        $text = ([ComponentModel.Win32Exception]::new([Convert]::ToInt32($Matches[1], 16)).Message -replace '\s+', ' ').Trim().TrimEnd('.')
+        if ($text -match '^Unknown error') { $text = $null }
+    }
+    $note = if ($AppxErrorText.ContainsKey($Code)) { $AppxErrorText[$Code] } else { $null }
+    return (@($text, $note) | Where-Object { $_ }) -join ' - '
 }
 
 function Write-FailingApp {
@@ -1393,12 +1480,13 @@ function Write-FailingApp {
     $failing = @($failing | Sort-Object @{ Expression = { $_.Codes -notmatch '0x80070490' } }, @{ Expression = 'Count'; Descending = $true })
     Write-Warn "$($failing.Count) package(s) failed to deploy in the last $Days day(s):"
     foreach ($app in @($failing | Select-Object -First $Top)) {
-        $codes = @($app.Codes -split ', ' | ForEach-Object {
-            $code = ($_ -split ' ')[0]
-            if ($AppxErrorText.ContainsKey($code)) { "$_ ($($AppxErrorText[$code]))" } else { $_ }
-        }) -join ', '
         Write-Warn ("  {0}: {1}x ({2}), last {3:yyyy-MM-dd HH:mm}" -f $app.Name, $app.Count, $app.Sources, $app.Last)
-        Write-Skip "    $codes"
+        # One code per line: three codes with their meaning on one line wrapped
+        # into something nobody reads.
+        foreach ($part in @($app.Codes -split ', ')) {
+            $meaning = Get-HResultText (($part -split ' ')[0])
+            Write-Skip ("    {0}{1}" -f $part, $(if ($meaning) { " - $meaning" } else { '' }))
+        }
         foreach ($version in $app.Versions) {
             $onDisk = if (Test-PackageFiles $version) { 'files on this host' } else { 'no files on this host' }
             Write-Skip "    $version ($onDisk)"
@@ -1432,7 +1520,12 @@ try {
     Write-Out ''
     Write-Step '1b. FSLogix and installation policy'
     $provisionedNow = Get-ProvisionedVersion
-    $needs = @(Write-FslogixStatus -Provisioned $provisionedNow -Requests @(Get-FslogixRequest))
+    $requests       = @(Get-FslogixRequest)
+    $needs          = @(Write-FslogixStatus -Provisioned $provisionedNow -Requests $requests)
+    # The exact builds FSLogix fails on, where Microsoft's CDN serves that build.
+    # They win over the installer for the same package: the installer's build is
+    # older, and older is what fails.
+    $exactTargets   = @(Get-ExactTarget -Provisioned $provisionedNow -Requests $requests)
     Write-AppxPolicyStatus
 
     # -- 1c. Everything that fails --------------------------------------------
@@ -1468,13 +1561,14 @@ try {
     if ($Provision -and $explicitName) {
         $provisionTargets += @($KnownInstallers.Keys | Where-Object { Test-NameInScope $_ })
     }
-    $provisionTargets = @($provisionTargets | Where-Object { $KnownInstallers.ContainsKey($_) } | Select-Object -Unique)
+    $provisionTargets = @($provisionTargets | Where-Object { $KnownInstallers.ContainsKey($_) -and $_ -notin @($exactTargets.Name) } | Select-Object -Unique)
+    $work += @($exactTargets | Where-Object { $_.Name -notin $needs }).Count
     foreach ($missing in @($needs | Where-Object { -not $KnownInstallers.ContainsKey($_) })) {
         Write-Warn "No known installer for $missing - provision it with -Source <msix>"
     }
 
     $work += $needs.Count
-    if ($work -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and $provisionTargets.Count -gt 0)) {
+    if ($work -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count) -gt 0)) {
         $plannedExit = 0
         throw 'Nothing to repair.'
     }
@@ -1596,7 +1690,17 @@ try {
     Write-Out ''
     Write-Step '6. Provision'
     if ($Provision) {
-        if ($provisionTargets.Count -eq 0) { Write-Skip 'Nothing to provision with a known installer' }
+        foreach ($target in $exactTargets) {
+            if (-not $PSCmdlet.ShouldProcess("$($target.Name) $($target.Version)", "Provision for all users (exact build from $($target.Url))")) { continue }
+            try {
+                if (-not (Invoke-ExactProvision -Target $target)) { $exitCode = 1 }
+            } catch {
+                Write-Bad "Provisioning $($target.Name) $($target.Version) failed: $($_.Exception.Message)"
+                Write-AppxDeploymentError -Minutes 20
+                $exitCode = 1
+            }
+        }
+        if (($provisionTargets.Count + $exactTargets.Count) -eq 0) { Write-Skip 'Nothing to provision with a known installer' }
         foreach ($target in $provisionTargets) {
             $spec = $KnownInstallers[$target]
             # Copilot has no MSIX in winget, so -UseWinget falls back to its installer.
@@ -1639,8 +1743,9 @@ try {
                 $exitCode = 1
             }
         }
-    } elseif ($provisionTargets.Count -gt 0) {
-        Write-Bad ("Still to do: provision {0} - run again with -Provision" -f ($provisionTargets -join ', '))
+    } elseif (($provisionTargets.Count + $exactTargets.Count) -gt 0) {
+        $todo = @($provisionTargets) + @($exactTargets | ForEach-Object { "$($_.Name) $($_.Version)" })
+        Write-Bad ("Still to do: provision {0} - run again with -Provision" -f ($todo -join ', '))
         $exitCode = 1
     }
     if ($copilotMissing -and -not $Provision) {
@@ -1697,6 +1802,15 @@ try {
         # What FSLogix asked for, against what this host provisions now.
         $provisionedAfter = Get-ProvisionedVersion
         $requestsAfter    = @(Get-FslogixRequest)
+        foreach ($target in @($exactTargets | Where-Object { $_.Name -notin $needs })) {
+            $now = $provisionedAfter[$target.Name]
+            if ($now -and $now -ge $target.Version) {
+                Write-Ok "$($target.Name) is provisioned at $now, the build the profiles ask for"
+            } elseif ($Provision) {
+                Write-Bad "$($target.Name) is provisioned at $now, still older than the $($target.Version) the profiles ask for"
+                $exitCode = 1
+            }
+        }
         foreach ($target in $needs) {
             $asked = ($requestsAfter | Where-Object { $_.Name -eq $target } | Sort-Object Version -Descending | Select-Object -First 1 | ForEach-Object { $_.Version })
             if ($provisionedAfter.ContainsKey($target) -and $asked -and $provisionedAfter[$target] -lt $asked) {
