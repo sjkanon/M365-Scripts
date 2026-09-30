@@ -36,6 +36,12 @@ files. Never write the two header lines (language switcher, breadcrumb) by hand 
 `scripts/Startup/Test-MarkdownLinks.ps1`. Plaintext passwords or secrets are not copied
 into the translations.
 
+The hooks in `.claude/settings.json` (and the git hook in `.githooks/pre-commit`) run
+`.claude/hooks/sync-docs.ps1`: after every edit it regenerates `scripts/INDEX.md` and the
+readme headers and runs the link check in the background, waking you only when something is
+broken. The Stop hook blocks once when an English readme changed without its translations,
+or a script changed without its folder readme — resolve it, don't argue past it.
+
 1. **The folder readme** (`scripts/<Workload>/readme.md`)
    - Add or update the row in the `## Scripts` table (script link + one-line description).
    - Add or update the `### <Script>.ps1` section below it: purpose, the `**Parameters**`

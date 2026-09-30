@@ -873,6 +873,20 @@ When adding new scripts:
 4. Place the script in the appropriate workload folder
 5. Add it to `menu.ps1` and update this readme
 6. Update `Version History` in this file for every functional or structural change (required), including changes requested or applied via Copilot/AI assistant
+7. Write the change in all three readme languages (`readme.md`, `readme.nl.md`, `readme.fr.md`)
+
+**What updates itself.** `scripts/INDEX.md`, the language switcher and breadcrumb at the top of every readme, and the link check are kept current automatically — you do not run them by hand:
+
+| When | What runs |
+|------|-----------|
+| You commit | The git hook [`.githooks/pre-commit`](.githooks/pre-commit) regenerates the index and the readme headers, adds them to the commit, and stops the commit on a broken link. It warns when an English readme changed without its Dutch/French version — ask Claude to translate |
+| Claude Code edits a file | A hook in [`.claude/settings.json`](.claude/settings.json) does the same in the background after every edit, and before Claude finishes it checks that changed readmes were translated and changed scripts were documented |
+
+Turn the git hook on once per clone:
+
+```powershell
+git config core.hooksPath .githooks
+```
 
 ---
 
@@ -885,6 +899,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-30 (5)
+| Change |
+|--------|
+| Documentation now keeps itself current. `.claude/hooks/sync-docs.ps1` regenerates `scripts/INDEX.md` and the readme headers and runs the link check; it is called by a git pre-commit hook (`.githooks/pre-commit`, for changes made by hand) and by Claude Code hooks in `.claude/settings.json` (after every edit, in the background). Before, all three had to be remembered — and `INDEX.md` had already fallen two scripts behind |
+| Before Claude finishes, a Stop hook checks that an English readme change was also made in Dutch and French, and that a changed script has its folder readme touched; the git hook warns about the first, because a hook cannot translate. A broken link stops the commit |
+| Verified: every mode run against this repository — a clean edit is silent, an injected broken link exits 2 with the file and target, an untranslated readme and an undocumented script each block Stop once (and not a second time), and the Claude hook was seen firing after an edit. The pre-commit hook ran on this commit |
 
 ### 2026-09-30 (4)
 | Change |

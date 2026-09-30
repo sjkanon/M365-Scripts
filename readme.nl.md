@@ -873,6 +873,20 @@ Bij het toevoegen van nieuwe scripts:
 4. Zet het script in de juiste workloadmap
 5. Voeg het toe aan `menu.ps1` en werk deze readme bij
 6. Werk de `Versiegeschiedenis` in dit bestand bij voor elke functionele of structurele wijziging (verplicht), ook voor wijzigingen die via Copilot/een AI-assistent zijn gevraagd of doorgevoerd
+7. Schrijf de wijziging in alle drie de readmetalen (`readme.md`, `readme.nl.md`, `readme.fr.md`)
+
+**Wat zichzelf bijwerkt.** `scripts/INDEX.md`, de taalwissel en het kruimelpad bovenaan elke readme, en de linkcontrole blijven automatisch actueel — die draai je niet met de hand:
+
+| Wanneer | Wat er draait |
+|---------|---------------|
+| Je commit | De git-hook [`.githooks/pre-commit`](.githooks/pre-commit) genereert de index en de readme-headers opnieuw, neemt ze op in de commit, en stopt de commit bij een kapotte link. Hij waarschuwt als een Engelse readme is gewijzigd zonder de Nederlandse/Franse versie — vraag Claude dan om te vertalen |
+| Claude Code past een bestand aan | Een hook in [`.claude/settings.json`](.claude/settings.json) doet na elke wijziging hetzelfde op de achtergrond, en voordat Claude klaar is controleert hij of gewijzigde readmes vertaald zijn en gewijzigde scripts gedocumenteerd |
+
+Zet de git-hook eenmalig aan per clone:
+
+```powershell
+git config core.hooksPath .githooks
+```
 
 ---
 
@@ -885,6 +899,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-09-30 (5)
+| Wijziging |
+|--------|
+| De documentatie houdt zichzelf nu actueel. `.claude/hooks/sync-docs.ps1` genereert `scripts/INDEX.md` en de readme-headers opnieuw en draait de linkcontrole; hij wordt aangeroepen door een git pre-commit hook (`.githooks/pre-commit`, voor wijzigingen met de hand) en door Claude Code-hooks in `.claude/settings.json` (na elke wijziging, op de achtergrond). Voorheen moest je aan alle drie denken — en `INDEX.md` liep al twee scripts achter |
+| Voordat Claude klaar is, controleert een Stop-hook of een wijziging aan een Engelse readme ook in het Nederlands en Frans is gedaan, en of bij een gewijzigd script de readme van de map is aangepast; de git-hook waarschuwt voor het eerste, omdat een hook niet kan vertalen. Een kapotte link stopt de commit |
+| Geverifieerd: elke modus gedraaid op deze repository — een schone wijziging blijft stil, een ingevoegde kapotte link geeft exitcode 2 met bestand en doel, een onvertaalde readme en een ongedocumenteerd script blokkeren Stop elk één keer (en geen tweede keer), en de Claude-hook is na een wijziging zien afgaan. De pre-commit hook draaide op deze commit |
 
 ### 2026-09-30 (4)
 | Wijziging |

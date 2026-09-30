@@ -873,6 +873,20 @@ Lorsque vous ajoutez de nouveaux scripts :
 4. Placez le script dans le dossier de charge de travail approprié
 5. Ajoutez-le à `menu.ps1` et mettez à jour ce readme
 6. Mettez à jour l'`Historique des versions` de ce fichier pour chaque changement fonctionnel ou structurel (obligatoire), y compris les changements demandés ou appliqués via Copilot/un assistant IA
+7. Rédigez la modification dans les trois langues des readmes (`readme.md`, `readme.nl.md`, `readme.fr.md`)
+
+**Ce qui se met à jour tout seul.** `scripts/INDEX.md`, le sélecteur de langue et le fil d'Ariane en tête de chaque readme, et la vérification des liens restent à jour automatiquement — vous ne les lancez pas à la main :
+
+| Quand | Ce qui s'exécute |
+|-------|------------------|
+| Vous commitez | Le hook git [`.githooks/pre-commit`](.githooks/pre-commit) régénère l'index et les en-têtes des readmes, les ajoute au commit, et arrête le commit en cas de lien cassé. Il avertit lorsqu'un readme anglais a changé sans sa version néerlandaise/française — demandez alors à Claude de traduire |
+| Claude Code modifie un fichier | Un hook dans [`.claude/settings.json`](.claude/settings.json) fait de même en arrière-plan après chaque modification, et avant que Claude ne termine il vérifie que les readmes modifiés ont été traduits et les scripts modifiés documentés |
+
+Activez le hook git une fois par clone :
+
+```powershell
+git config core.hooksPath .githooks
+```
 
 ---
 
@@ -885,6 +899,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-09-30 (5)
+| Modification |
+|--------|
+| La documentation se tient désormais à jour d'elle-même. `.claude/hooks/sync-docs.ps1` régénère `scripts/INDEX.md` et les en-têtes des readmes et lance la vérification des liens ; il est appelé par un hook git pre-commit (`.githooks/pre-commit`, pour les modifications faites à la main) et par des hooks Claude Code dans `.claude/settings.json` (après chaque modification, en arrière-plan). Auparavant il fallait penser aux trois — et `INDEX.md` avait déjà deux scripts de retard |
+| Avant que Claude ne termine, un hook Stop vérifie qu'une modification d'un readme anglais a aussi été faite en néerlandais et en français, et qu'un script modifié a vu le readme de son dossier mis à jour ; le hook git avertit pour le premier cas, car un hook ne sait pas traduire. Un lien cassé arrête le commit |
+| Vérifié : chaque mode exécuté sur ce dépôt — une modification propre reste silencieuse, un lien cassé injecté sort avec le code 2 en indiquant fichier et cible, un readme non traduit et un script non documenté bloquent chacun le Stop une fois (et pas une seconde), et le hook Claude a été vu se déclencher après une modification. Le hook pre-commit s'est exécuté sur ce commit |
 
 ### 2026-09-30 (4)
 | Modification |
