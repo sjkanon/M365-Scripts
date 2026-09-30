@@ -910,6 +910,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-09-30 (11)
+| Wijziging |
+|-----------|
+| `scripts/SharePoint/Revoke-SharePointUserAccess.ps1` meldde een bestaand, actief account als `Not found in Entra ID`. De tijdelijke app kreeg nooit Graph `User.Read.All` — `GroupMember.Read.All` geeft geen toegang tot een willekeurig gebruikersobject — dus `GET /users/{upn}` gaf `403`, en de catch las dat als "gebruiker bestaat niet" |
+| Dezelfde fout als eerder, op een nieuwe plek: geweigerd worden is een ander feit dan er niet zijn, en maar één daarvan mag je laten passeren. Het script stopt nu en noemt de ontbrekende permissie. Dat gaat verder dan een verkeerde melding — zonder de gebruiker opgelost worden de Entra-groepen die óók toegang geven nooit opgesomd, en juist die lijst is de helft van het rapport die zegt wat dit script **niet** kan intrekken |
+| `User.Read.All` toegevoegd aan de rollen die het revoke-script vraagt. Om het rapport op least privilege te houden staat de rollenlijst niet meer hardgecodeerd in het gedeelde blok: elk script zet `$RequiredAppRoles` ervóór, en de tokenrol-controle valideert wat dát script heeft gevraagd in plaats van een vast paar. Het rapport vraagt nog steeds geen `User.Read.All`, want dat breidt groepen uit en leest nooit een gebruikersobject |
+| Geverifieerd met 63 controles (10 nieuw): het revoke-script vraagt `User.Read.All` en het rapport niet, beide vragen nog steeds de drie gedeelde rollen, de tokencontrole volgt de lijst per script, een `403` bij de lookup is fataal en noemt de permissie, en een echte afwezigheid waarschuwt nog steeds alleen |
+
 ### 2026-09-30 (10)
 | Wijziging |
 |-----------|

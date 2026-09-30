@@ -599,7 +599,7 @@ Ce script supprime des autorisations ; ses modes de défaillance diffèrent donc
 | `-RemoveFromSite` | switch | désactivé | Retire ensuite aussi l'utilisateur de la liste des utilisateurs de chaque site collection. Rattrape ce que le passage étendue par étendue n'a pas vu, mais le nom s'affiche ensuite comme compte supprimé dans les métadonnées plus anciennes |
 | `-IncludeOneDriveSites` | switch | désactivé | Parcourt aussi les sites OneDrive personnels |
 | `-IncludeHiddenLists` | switch | désactivé | Inclut aussi les listes masquées et système |
-| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Votre propre app registration au lieu de l'application temporaire |
+| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Votre propre app registration au lieu de l'application temporaire. Elle a besoin de SharePoint `Sites.FullControl.All` ainsi que de Graph `Sites.Read.All`, `User.Read.All` et `GroupMember.Read.All`. Sans `User.Read.All`, la recherche de l'utilisateur renvoie `403` et l'exécution s'arrête, au lieu de prendre cela pour un compte inexistant |
 | `-ClientSecret` | string | — | Fonctionne pour Graph mais **pas** pour SharePoint (voir l'authentification dans le rapport) |
 | `-OutputPath` | string | `C:\Temp` | Dossier de sortie |
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout et nouvelles tentatives |

@@ -204,6 +204,16 @@ $siteAccessCsv = Join-Path $outputDir "SharePoint_Permissions_SiteAccess_$ts.csv
 
 $TempAppNamePrefix = 'SP-PermissionsReport'
 
+# What the temporary app is granted. Sites.FullControl.All is not an oversight: SharePoint gates
+# reading role assignments behind the EnumeratePermissions right, which only Full Control carries.
+# This report never reads a user object directly — it expands groups — so it does not ask for
+# User.Read.All.
+$RequiredAppRoles = @(
+    @{ ResourceAppId = $SharePointAppId; Role = 'Sites.FullControl.All'; Why = 'role assignments, site groups, unique scopes' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'Sites.Read.All';        Why = 'tenant-wide site enumeration' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'Entra group membership expansion' }
+)
+
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ''
 Write-Host '  ================================================' -ForegroundColor Cyan
@@ -1005,11 +1015,10 @@ try {
         # assignments behind the EnumeratePermissions right, which only Full Control carries.
         # Read, Write and Manage all return 403 on /roleassignments. The app stays read-only in
         # practice — every call this script makes is a GET — and it is deleted when the run ends.
-        $requiredRoles = @(
-            @{ ResourceAppId = $SharePointAppId; Role = 'Sites.FullControl.All'; Why = 'role assignments, site groups, unique scopes' }
-            @{ ResourceAppId = $GraphAppId;      Role = 'Sites.Read.All';        Why = 'tenant-wide site enumeration' }
-            @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'Entra group membership expansion' }
-        )
+        # Set by each script before the shared block: the report and the revoke script need
+        # different directory permissions, and granting a temporary Full Control app more
+        # than it uses is not a detail worth being sloppy about.
+        $requiredRoles = $RequiredAppRoles
         foreach ($required in $requiredRoles) {
             $resourceSp = Get-MgServicePrincipal -Filter "appId eq '$($required.ResourceAppId)'" -ErrorAction Stop
             if (-not $resourceSp) { throw "Could not resolve service principal for resource $($required.ResourceAppId)." }
@@ -1033,8 +1042,8 @@ try {
         # that now — while the run has produced nothing yet — is the difference between a clear
         # "the grant has not replicated" and a scan that walks the whole tenant on a dead token.
         Write-Host "  Obtaining app-only tokens (waiting for the grants to replicate)..." -ForegroundColor Cyan
-        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @('Sites.Read.All', 'GroupMember.Read.All'))
-        Write-Host "  [OK]   Graph token carries Sites.Read.All and GroupMember.Read.All." -ForegroundColor DarkGray
+        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @($RequiredAppRoles | Where-Object { $_.ResourceAppId -eq $GraphAppId } | ForEach-Object { $_.Role }))
+        Write-Host ("  [OK]   Graph token carries {0}." -f ((@($RequiredAppRoles | Where-Object { $_.ResourceAppId -eq $GraphAppId } | ForEach-Object { $_.Role })) -join ', ')) -ForegroundColor DarkGray
 
         $sharePointResource = Get-ResourceRootFromUrl -Url $(if ($SiteUrl) { $SiteUrl } else { $TenantUrl })
         [void](Get-ResourceToken -Resource $sharePointResource -RequiredRoles @('Sites.FullControl.All'))

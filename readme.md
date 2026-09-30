@@ -910,6 +910,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-30 (11)
+| Change |
+|--------|
+| `scripts/SharePoint/Revoke-SharePointUserAccess.ps1` reported a real, enabled account as `Not found in Entra ID`. The temporary app was never granted Graph `User.Read.All` — `GroupMember.Read.All` does not allow reading an arbitrary user object — so `GET /users/{upn}` came back `403`, and the catch treated that as the user not existing |
+| The same mistake as before in a new place: being refused a lookup is a different fact from the thing not being there, and only one of them is safe to shrug at. It now stops with the missing permission named. That matters beyond the wrong message — without the user resolved, the Entra groups that also grant access are never listed, and that list is the half of the report saying what this script **cannot** revoke |
+| Added `User.Read.All` to the roles the revoke script asks for. To keep the report at least privilege, the shared block no longer hardcodes the role list: each script sets `$RequiredAppRoles` before it, and the token-role check validates whatever that script asked for rather than a fixed pair. The report still does not ask for `User.Read.All`, because it expands groups and never reads a user object |
+| Verified with 63 checks (10 new): the revoke script asks for `User.Read.All` and the report does not, both still ask for the three they share, the token check follows the per-script list, a `403` on the lookup is fatal and names the permission, and a genuine absence still only warns |
+
 ### 2026-09-30 (10)
 | Change |
 |--------|

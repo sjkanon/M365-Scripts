@@ -910,6 +910,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-09-30 (11)
+| Modification |
+|--------------|
+| `scripts/SharePoint/Revoke-SharePointUserAccess.ps1` signalait un compte réel et actif comme `Not found in Entra ID`. L''application temporaire n''avait jamais reçu Graph `User.Read.All` — `GroupMember.Read.All` ne permet pas de lire un objet utilisateur quelconque — donc `GET /users/{upn}` renvoyait `403`, et le bloc catch l''interprétait comme un utilisateur inexistant |
+| La même erreur qu''auparavant, à un nouvel endroit : se voir refuser une lecture n''est pas le même fait que l''absence de la chose, et un seul des deux peut être ignoré. Le script s''arrête désormais en nommant la permission manquante. Cela va au-delà du message : sans utilisateur résolu, les groupes Entra qui accordent aussi l''accès ne sont jamais listés, et c''est précisément la moitié du rapport qui dit ce que ce script **ne peut pas** révoquer |
+| `User.Read.All` ajouté aux rôles demandés par le script de révocation. Pour garder le rapport au privilège minimal, la liste des rôles n''est plus codée en dur dans le bloc partagé : chaque script définit `$RequiredAppRoles` avant, et la vérification des rôles du jeton valide ce que ce script a demandé plutôt qu''une paire fixe. Le rapport ne demande toujours pas `User.Read.All`, car il développe des groupes et ne lit jamais un objet utilisateur |
+| Vérifié par 63 contrôles (10 nouveaux) : le script de révocation demande `User.Read.All` et le rapport non, les deux demandent toujours les trois rôles communs, la vérification du jeton suit la liste propre au script, un `403` sur la recherche est fatal et nomme la permission, et une absence réelle ne fait toujours qu''avertir |
+
 ### 2026-09-30 (10)
 | Modification |
 |--------------|

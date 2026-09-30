@@ -65,6 +65,29 @@ Check 'the block carries no script-specific name' ($a -notmatch 'Get-SharePointP
 Check 'both set the app name prefix before it' (
     ((Get-Content $report -Raw) -match '\$TempAppNamePrefix\s*=') -and ((Get-Content $revoke -Raw) -match '\$TempAppNamePrefix\s*='))
 
+$revokeAst  = [System.Management.Automation.Language.Parser]::ParseFile($revoke, [ref]$null, [ref]$null)
+$revokeText = Get-Content $revoke -Raw
+# ── The app must be granted what it actually calls ──────────────────────────
+# A missing app role does not fail loudly: Graph answers 403 and the script reads it as "no such
+# user". The revoke script resolves a user object directly, which GroupMember.Read.All does not
+# cover, so it needs User.Read.All where the report does not.
+$reportRoles = @([regex]::Matches((Get-Content $report -Raw), "Role = '([\w.]+)'") | ForEach-Object { $_.Groups[1].Value })
+$revokeRoles = @([regex]::Matches($revokeText, "Role = '([\w.]+)'") | ForEach-Object { $_.Groups[1].Value })
+Check 'the revoke script asks for User.Read.All'   ($revokeRoles -contains 'User.Read.All')
+Check 'both ask for SharePoint Full Control'       (($reportRoles -contains 'Sites.FullControl.All') -and ($revokeRoles -contains 'Sites.FullControl.All'))
+Check 'both ask for tenant site enumeration'       (($reportRoles -contains 'Sites.Read.All') -and ($revokeRoles -contains 'Sites.Read.All'))
+Check 'both ask for group membership'              (($reportRoles -contains 'GroupMember.Read.All') -and ($revokeRoles -contains 'GroupMember.Read.All'))
+# Least privilege the other way: the report never reads a user object, so it must not ask.
+Check 'the report does not over-ask'               ($reportRoles -notcontains 'User.Read.All')
+Check 'the role list is set per script'            (($revokeText -match '\$RequiredAppRoles = @\(') -and ((Get-Content $report -Raw) -match '\$RequiredAppRoles = @\('))
+# The token check must validate whatever that script asked for, not a hardcoded pair.
+Check 'the token check follows the role list'      ($revokeText -match 'RequiredRoles @\(\$RequiredAppRoles')
+
+# A refused directory lookup must never be reported as a missing account.
+Check 'a 403 on the user lookup is fatal'          ($revokeText -match 'entraLookupDenied')
+Check 'and names the missing permission'           ($revokeText -match 'missing Graph User\.Read\.All')
+Check 'a real absence still only warns'            ($revokeText -match 'No such account in Entra ID')
+
 # ── Checkpoint kinds must agree with themselves ─────────────────────────────
 # A kind that is written but missing from the ValidateSet throws on every site, and a kind that
 # is written but never read back silently loses its resume state. Both are invisible until a
@@ -90,8 +113,6 @@ foreach ($p in @($report, $revoke)) {
 }
 
 # ── Safety: the destructive script must not act without being told to ───────
-$revokeAst  = [System.Management.Automation.Language.Parser]::ParseFile($revoke, [ref]$null, [ref]$null)
-$revokeText = Get-Content $revoke -Raw
 $params     = $revokeAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }
 Check 'it takes -Apply'                       ($params -contains 'Apply')
 Check 'it supports ShouldProcess'             ($revokeText -match 'SupportsShouldProcess\s*=?\s*\$?true|SupportsShouldProcess\b')
