@@ -84,9 +84,13 @@ Check 'writes go through one funnel'          (([regex]::Matches($revokeText, 'I
 Check 'every write is inside Invoke-Revocation or the funnel' (
     ([regex]::Matches($revokeText, 'Invoke-Revocation ')).Count -ge 4)
 
-# Dry-run must be the default: -Apply absent has to short-circuit before any write.
-$dryBranch = [regex]::Match($revokeText, '(?s)if \(-not \$Apply\) \{.*?return \$false')
+# Dry-run must be the default: -Apply absent, or -WhatIf given, has to short-circuit before any
+# write. -WhatIf belongs in the same branch, or it records a declined prompt instead of intent.
+$dryBranch = [regex]::Match($revokeText, '(?s)if \(-not \$Apply -or \$WhatIfPreference\) \{.*?return \$false')
 Check 'no -Apply returns before writing'      ($dryBranch.Success -and $dryBranch.Value -notmatch 'Invoke-SPPost')
+Check '-WhatIf takes the same dry-run branch' ($dryBranch.Success -and $dryBranch.Value -match 'WouldRevoke')
+Check 'an already-gone removal is not a failure' ($revokeText -match "AlreadyGone")
+Check 'the audit row is written as it happens' ($revokeText -match 'Append-CheckpointRows -Path \$script:ActionCsvPath')
 
 # ── Safety: the things it must refuse to remove ─────────────────────────────
 Check 'an Entra group grant is not revoked'   ($revokeText -match "hit\.Kind -eq 'EntraGroup'[\s\S]{0,200}CannotRevoke")
@@ -94,12 +98,45 @@ Check 'an Everyone grant is not revoked'      ($revokeText -match "hit\.Kind -eq
 Check 'it never touches Entra membership'     ($revokeText -notmatch 'removeMemberFromGroup|/members/\$ref|Remove-MgGroupMember')
 Check 'it warns that group access survives'   ($revokeText -match 'The group is the grant')
 
-# ── The revocation funnel, driven for real ──────────────────────────────────
+# ── Identifying the right user ──────────────────────────────────────────────
+# The one mistake this script must never make. Revoking the wrong person is worse than revoking
+# nothing, so the matching is exact and is tested against the near-misses that make it tempting
+# to be loose.
 foreach ($fn in $revokeAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
-    if ($fn.Name -in @('Add-ActionRow', 'Invoke-Revocation', 'Write-ProgressHost')) { . ([scriptblock]::Create($fn.Extent.Text)) }
+    if ($fn.Name -in @('ConvertFrom-GuestLoginName', 'Test-UserIdentityMatch', 'Add-ActionRow',
+                       'Invoke-Revocation', 'Write-ProgressHost', 'Append-CheckpointRows',
+                       'Get-ResponseStatusCode')) {
+        . ([scriptblock]::Create($fn.Extent.Text))
+    }
 }
+
+function SiteUser($login, $upn, $mail) { [PSCustomObject]@{ Id = 7; LoginName = $login; UserPrincipalName = $upn; Email = $mail; PrincipalType = 1 } }
+
+Check 'a guest login decodes to the address'  ((ConvertFrom-GuestLoginName 'i:0#.f|membership|jan_partner.com#ext#@contoso.onmicrosoft.com') -eq 'jan@partner.com')
+Check 'a local part with an underscore works' ((ConvertFrom-GuestLoginName 'i:0#.f|membership|jan_de_vries_partner.com#ext#@contoso.onmicrosoft.com') -eq 'jan_de_vries@partner.com')
+Check 'a normal member login decodes to null' ($null -eq (ConvertFrom-GuestLoginName 'i:0#.f|membership|jan@contoso.com'))
+Check 'empty input decodes to null'           ($null -eq (ConvertFrom-GuestLoginName ''))
+
+Check 'an exact UPN matches'                  (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan@contoso.com' 'jan@contoso.com' 'jan@contoso.com') -Needle 'jan@contoso.com')
+Check 'the claim suffix alone matches'        (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan@contoso.com' $null $null) -Needle 'jan@contoso.com')
+Check 'a guest matches on their real address' (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan_partner.com#ext#@contoso.onmicrosoft.com' $null $null) -Needle 'jan@partner.com')
+Check 'a guest matches on their tenant UPN'   (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan_partner.com#ext#@contoso.onmicrosoft.com' $null $null) -Needle 'jan_partner.com#ext#@contoso.onmicrosoft.com')
+Check 'matching on mail works'                (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|weird' $null 'jan@contoso.com') -Needle 'jan@contoso.com')
+
+# The near-misses. Each of these would have matched a substring test.
+Check 'a shorter address does NOT match'      (-not (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan@contoso.com' 'jan@contoso.com' $null) -Needle 'an@contoso.com'))
+Check 'a longer address does NOT match'       (-not (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan@contoso.com' 'jan@contoso.com' $null) -Needle 'marjan@contoso.com'))
+Check 'a different domain does NOT match'     (-not (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan@contoso.com' 'jan@contoso.com' $null) -Needle 'jan@contoso.com.evil.net'))
+Check 'another tenant guest does NOT match'   (-not (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan_other.com#ext#@contoso.onmicrosoft.com' $null $null) -Needle 'jan@partner.com'))
+Check 'an empty needle matches nobody'        (-not (Test-UserIdentityMatch -SiteUser (SiteUser 'i:0#.f|membership|jan@contoso.com' 'jan@contoso.com' $null) -Needle ''))
+Check 'the lookup refuses on ambiguity'       ($revokeText -match 'different accounts in this site')
+
+# ── The revocation funnel, driven for real ──────────────────────────────────
 $UserPrincipalName = 'jan@contoso.com'
 $script:ActionRows = [System.Collections.Generic.List[object]]::new()
+$auditDir  = Join-Path $env:TEMP "sp-revoke-test-$PID"
+New-Item -ItemType Directory -Path $auditDir -Force | Out-Null
+$script:ActionCsvPath = Join-Path $auditDir 'audit.csv'
 $row = @{ SiteUrl = 'https://c/sites/F'; WebUrl = 'https://c/sites/F'; ScopeType = 'Web'
           ScopeTitle = 'F'; ScopeUrl = 'https://c/sites/F'; AccessVia = 'Direct'; PermissionLevels = 'Read' }
 
@@ -137,6 +174,29 @@ Check 'and lands in the audit trail'          ($script:ActionRows[-1].Action -eq
 $names = @($script:ActionRows | ForEach-Object { ($_.PSObject.Properties.Name | Sort-Object) -join ',' } | Select-Object -Unique)
 Check 'all audit rows share one schema'       ($names.Count -eq 1)
 Check 'the schema carries the decision'       ($names[0] -match 'Action' -and $names[0] -match 'AccessVia' -and $names[0] -match 'Detail')
+
+# The audit trail must be on disk already, not waiting for the end of the run: a script that
+# revokes two hundred things and then dies has to leave a record of what it removed.
+Check 'the CSV exists mid-run'                (Test-Path $script:ActionCsvPath)
+$onDisk = @(Import-Csv $script:ActionCsvPath)
+Check 'every row reached the file'            ($onDisk.Count -eq $script:ActionRows.Count)
+Check 'the file holds the outcomes'           ((($onDisk.Action | Sort-Object -Unique) -join ',') -match 'Revoked')
+Check 'and the failure, not just the success' (($onDisk | Where-Object { $_.Action -eq 'Failed' }).Count -eq 1)
+
+# An already-gone removal must read as success, not as a failed revocation.
+function Test-AlreadyGone {
+    [CmdletBinding(SupportsShouldProcess = $true)] param()
+    return Invoke-Revocation -Target 'F' -Operation 'Remove direct Read' -Row $row -Do {
+        $resp = [PSCustomObject]@{ StatusCode = 404; Headers = @{} }
+        $ex = [System.Exception]::new('HTTP 404')
+        $ex | Add-Member -NotePropertyName Response -NotePropertyValue $resp -Force
+        throw [System.Management.Automation.ErrorRecord]::new($ex, 'e', 'InvalidResult', $null)
+    }
+}
+[void](Test-AlreadyGone -Confirm:$false)
+Check 'a 404 is recorded as already gone'     ($script:ActionRows[-1].Action -eq 'AlreadyGone')
+
+Remove-Item -Path $auditDir -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ''
 if ($fail) { Write-Host "$fail check(s) FAILED" -ForegroundColor Red; exit 1 }
