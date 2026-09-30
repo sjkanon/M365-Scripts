@@ -204,6 +204,13 @@ $siteAccessCsv = Join-Path $outputDir "SharePoint_Permissions_SiteAccess_$ts.csv
 
 $TempAppNamePrefix = 'SP-PermissionsReport'
 
+# ── Well-known application IDs ────────────────────────────────────────────────
+# Defined before the shared block, not inside it: each script builds $RequiredAppRoles from
+# these, and that happens before the block runs.
+$GraphAppId      = '00000003-0000-0000-c000-000000000000'
+$SharePointAppId = '00000003-0000-0ff1-ce00-000000000000'
+$GraphResource   = 'https://graph.microsoft.com'
+
 # What the temporary app is granted. Sites.FullControl.All is not an oversight: SharePoint gates
 # reading role assignments behind the EnumeratePermissions right, which only Full Control carries.
 # This report never reads a user object directly — it expands groups — so it does not ask for
@@ -237,11 +244,6 @@ Write-Host ''
 # they carry their app roles before being cached, 401 treated as fatal rather than per-site, and
 # paging that cannot loop. A second, drifting copy of that is a correctness risk in a script that
 # deletes permissions, so a test asserts the two are identical. Set $TempAppNamePrefix before it.
-# ── Well-known application IDs ────────────────────────────────────────────────
-$GraphAppId      = '00000003-0000-0000-c000-000000000000'
-$SharePointAppId = '00000003-0000-0ff1-ce00-000000000000'
-$GraphResource   = 'https://graph.microsoft.com'
-
 # ── Cleanup / shared state ────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false

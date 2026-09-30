@@ -83,6 +83,20 @@ Check 'the role list is set per script'            (($revokeText -match '\$Requi
 # The token check must validate whatever that script asked for, not a hardcoded pair.
 Check 'the token check follows the role list'      ($revokeText -match 'RequiredRoles @\(\$RequiredAppRoles')
 
+# Order matters and the parser will not catch it: $RequiredAppRoles is built from the well-known
+# application ids, so those have to exist first. Get it wrong and every ResourceAppId is empty,
+# the filter becomes "appId eq ''" and Graph answers Request_UnsupportedQuery.
+foreach ($f in @($report, $revoke)) {
+    $ls    = [IO.File]::ReadAllLines($f)
+    $idAt  = [array]::FindIndex($ls, [Predicate[string]] { param($l) $l -like '$GraphAppId*=*' })
+    $spAt  = [array]::FindIndex($ls, [Predicate[string]] { param($l) $l -like '$SharePointAppId*=*' })
+    $rolAt = [array]::FindIndex($ls, [Predicate[string]] { param($l) $l -eq '$RequiredAppRoles = @(' })
+    $blkAt = [array]::FindIndex($ls, [Predicate[string]] { param($l) $l -like '*SHARED BLOCK START*' })
+    $n = Split-Path $f -Leaf
+    Check ("{0}: app ids precede the role list" -f $n) ($idAt -ge 0 -and $spAt -ge 0 -and $rolAt -gt $idAt -and $rolAt -gt $spAt)
+    Check ("{0}: the role list precedes the block" -f $n) ($rolAt -ge 0 -and $blkAt -gt $rolAt)
+}
+
 # A refused directory lookup must never be reported as a missing account.
 Check 'a 403 on the user lookup is fatal'          ($revokeText -match 'entraLookupDenied')
 Check 'and names the missing permission'           ($revokeText -match 'missing Graph User\.Read\.All')
