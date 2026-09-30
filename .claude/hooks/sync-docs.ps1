@@ -113,10 +113,21 @@ switch ($Mode) {
     'PreCommit' {
         $staged = @(Get-ChangedFile -Staged)
         $problems = Sync-Generated
-        # Re-stage what the generators rewrote: the index always, a readme only when it
-        # is already part of this commit - never someone's unrelated unstaged work.
-        $restage = @('scripts/INDEX.md') + @($staged | Where-Object { $_ -match 'readme(\.nl|\.fr)?\.md$' })
-        git -C $root add -- @restage
+        # Re-stage what the generators rewrote, never someone's unrelated work: a readme
+        # only when it is already part of this commit, and the index only when every
+        # script it lists is committed or in this commit. INDEX.md is built from the files
+        # on disk, so a script still being written would otherwise land in the index as
+        # a link to a file GitHub does not have.
+        $restage = @($staged | Where-Object { $_ -match 'readme(\.nl|\.fr)?\.md$' })
+        $wip = @(git -C $root -c core.quotepath=false ls-files --others --exclude-standard -- 'scripts/*.ps1') +
+               @(git -C $root -c core.quotepath=false diff --name-only --diff-filter=A -- 'scripts/*.ps1') |
+               Where-Object { $_ -and $_ -notin $staged }
+        if ($wip.Count) {
+            Write-Host "NOTE: scripts/INDEX.md not added to this commit - it would list scripts that are not committed: $($wip -join ', ')" -ForegroundColor Yellow
+        } else {
+            $restage += 'scripts/INDEX.md'
+        }
+        if ($restage.Count) { git -C $root add -- @restage }
 
         $behind = @(Get-UntranslatedReadme -Changed @(Get-ChangedFile -Staged))
         if ($behind.Count) {
