@@ -910,6 +910,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-09-30 (12)
+| Modification |
+|--------------|
+| Correction de `Request_UnsupportedQuery: Unsupported or invalid query filter clause specified for property appId` au démarrage, introduite par le commit précédent. En sortant la liste des rôles du bloc partagé vers `\`, elle sest retrouvée **au-dessus** des identifiants dapplication dont elle dépend : chaque `ResourceAppId` était vide et le filtre devenait `appId eq ` |
+| Les constantes figurent désormais au-dessus de la liste des rôles dans chaque script plutôt que dans le bloc partagé, ce qui est leur place dès lors que la liste les utilise |
+| Lanalyseur ne détecte pas une variable utilisée avant son affectation : le test vérifie donc lordre directement — les identifiants avant la liste des rôles, la liste avant le bloc partagé. Également prouvé en exécutant le prologue de chaque script et en confirmant que chaque rôle correspond à un vrai GUID |
+
 ### 2026-09-30 (11)
 | Modification |
 |--------------|

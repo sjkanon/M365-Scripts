@@ -173,6 +173,13 @@ $actionCsv = Join-Path $outputDir "SharePoint_Revoke_${safeUser}_$ts.csv"
 
 $TempAppNamePrefix = 'SP-RevokeAccess'
 
+# ── Well-known application IDs ────────────────────────────────────────────────
+# Defined before the shared block, not inside it: each script builds $RequiredAppRoles from
+# these, and that happens before the block runs.
+$GraphAppId      = '00000003-0000-0000-c000-000000000000'
+$SharePointAppId = '00000003-0000-0ff1-ce00-000000000000'
+$GraphResource   = 'https://graph.microsoft.com'
+
 # What the temporary app is granted. User.Read.All is what the permissions report does not need
 # and this script does: it has to resolve the named user before it can revoke anything, and
 # GroupMember.Read.All does not allow reading an arbitrary user object. Without it every lookup
@@ -214,11 +221,6 @@ Write-Host ''
 # they carry their app roles before being cached, 401 treated as fatal rather than per-site, and
 # paging that cannot loop. A second, drifting copy of that is a correctness risk in a script that
 # deletes permissions, so a test asserts the two are identical. Set $TempAppNamePrefix before it.
-# ── Well-known application IDs ────────────────────────────────────────────────
-$GraphAppId      = '00000003-0000-0000-c000-000000000000'
-$SharePointAppId = '00000003-0000-0ff1-ce00-000000000000'
-$GraphResource   = 'https://graph.microsoft.com'
-
 # ── Cleanup / shared state ────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false

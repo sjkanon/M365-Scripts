@@ -910,6 +910,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-09-30 (12)
+| Wijziging |
+|-----------|
+| `Request_UnsupportedQuery: Unsupported or invalid query filter clause specified for property appId` bij het opstarten opgelost, veroorzaakt door de vorige commit. Door de rollenlijst uit het gedeelde blok te halen naar `\` kwam die **bóven** de app-id-constanten te staan waaruit hij wordt opgebouwd, dus was elke `ResourceAppId` leeg en werd het filter `appId eq ` |
+| De constanten staan nu in elk script boven de rollenlijst in plaats van in het gedeelde blok — daar horen ze als de rollenlijst ze gebruikt |
+| Een variabele die vóór haar toewijzing wordt gebruikt vangt geen parser, dus de test controleert de volgorde nu rechtstreeks: de app-ids moeten vóór de rollenlijst staan, en de rollenlijst vóór het gedeelde blok. Ook bewezen door de proloog van elk script uit te voeren en te bevestigen dat elke rol naar een echte GUID verwijst |
+
 ### 2026-09-30 (11)
 | Wijziging |
 |-----------|

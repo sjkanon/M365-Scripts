@@ -910,6 +910,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-30 (12)
+| Change |
+|--------|
+| Fixed `Request_UnsupportedQuery: Unsupported or invalid query filter clause specified for property appId` at startup, introduced by the previous commit. Moving the role list out of the shared block into `\` put it **above** the well-known application ids it is built from, so every `ResourceAppId` was empty and the lookup filter became `appId eq ` |
+| The constants now sit above the role list in each script rather than inside the shared block, which is where they have to be if the role list is going to use them |
+| The parser cannot catch a variable used before it is assigned, so the test now checks the order directly: the application ids must precede the role list, and the role list must precede the shared block. Also proved by executing each scripts prologue and confirming every role resolves to a real GUID |
+
 ### 2026-09-30 (11)
 | Change |
 |--------|
