@@ -1204,6 +1204,10 @@ $script:SiteGroupCache   = @{}   # site collection URL -> @{ groupId -> group ob
 $script:EntraGroupCache  = @{}   # Entra group object id -> resolved member list
 $script:GroupRowsWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:SiteAccessWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+# Which $select a list template accepts, learned once and reused for every site after that, plus
+# the templates whose quirk has already been reported so the log says it once instead of 131 times.
+$script:LadderStart    = @{}
+$script:LadderReported = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 # Site collection URL -> its root web title. A consolidated view of 130 sites is not readable as
 # 130 URLs, and the title is only known while the root web is being scanned.
 $script:SiteTitles = @{}
@@ -2089,8 +2093,11 @@ try {
                 # nothing for an access review — and the list's own scope is already reported
                 # above. Skipping it removes 121 false "could not be read" rows per tenant scan.
                 $skipItemSweep = ([int]$list.BaseTemplate -eq 112)
-                if ($skipItemSweep -and $Scope -eq 'Item' -and [int]$list.ItemCount -gt 0) {
-                    Write-ProgressHost -Message ("    [SKIP] {0}: SharePoint does not support item enumeration on this system list." -f $list.Title) -ForegroundColor DarkGray
+                if ($skipItemSweep -and $Scope -eq 'Item' -and [int]$list.ItemCount -gt 0 -and
+                    -not $script:LadderReported.Contains('skip112')) {
+                    # Once, not once per site: this list exists on every site in the tenant.
+                    [void]$script:LadderReported.Add('skip112')
+                    Write-ProgressHost -Message ("    [SKIP] {0}: SharePoint does not support item enumeration on this system list — skipped on every site." -f $list.Title) -ForegroundColor DarkGray
                 }
 
                 if ($Scope -eq 'Item' -and -not $skipItemSweep -and [int]$list.ItemCount -gt 0) {
@@ -2120,7 +2127,17 @@ try {
                     $sweep = [PSCustomObject]@{ Scanned = 0 }
                     $itemSweepFailed = $null
 
-                    foreach ($selectFields in $selectLadder) {
+                    # Which fields a list will accept is a property of its template, not of the
+                    # site: the same three system lists rejected the same fields on all 131 sites
+                    # of a live tenant, costing a wasted round trip and a log line every time.
+                    # Learn it once per template and start there.
+                    $templateKey = [string]$list.BaseTemplate
+                    $firstRung   = 0
+                    if ($script:LadderStart.ContainsKey($templateKey)) { $firstRung = $script:LadderStart[$templateKey] }
+                    if ($firstRung -ge $selectLadder.Count) { $firstRung = $selectLadder.Count - 1 }
+
+                    for ($rung = $firstRung; $rung -lt $selectLadder.Count; $rung++) {
+                        $selectFields = $selectLadder[$rung]
                         $itemsUri = "{0}/_api/web/lists(guid'{1}')/items?`$select={2}&`$top=2000" -f $webUrl, $listId, $selectFields
                         $uniqueItems.Clear()
                         $sweep.Scanned  = 0
@@ -2140,15 +2157,26 @@ try {
                             $itemSweepFailed = $_.Exception.Message
                         }
 
-                        if (-not $itemSweepFailed) { break }
+                        if (-not $itemSweepFailed) {
+                            $script:LadderStart[$templateKey] = $rung
+                            break
+                        }
                         # Only a rejected query is worth narrowing. Anything else — denied,
                         # throttled, gone — answers the same way however few fields we ask for.
                         if ($itemSweepFailed -notmatch '400|Bad Request') { break }
 
-                        if ($selectFields -eq $selectLadder[-1]) {
-                            Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
-                        } else {
-                            Write-ProgressHost -Message ("    [INFO] {0} rejected those fields — retrying with fewer." -f $list.Title)
+                        # Remember the rejection so the next site with this template skips it.
+                        $script:LadderStart[$templateKey] = $rung + 1
+
+                        # Say it once per template. Repeating it for every site turns a useful
+                        # line into 350 lines that hide everything else in the log.
+                        if (-not $script:LadderReported.Contains($templateKey)) {
+                            [void]$script:LadderReported.Add($templateKey)
+                            if ($rung -eq $selectLadder.Count - 1) {
+                                Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
+                            } else {
+                                Write-ProgressHost -Message ("    [INFO] {0} (template {1}) rejected those fields — narrowing, and remembering it for the rest of the run." -f $list.Title, $templateKey)
+                            }
                         }
                     }
 

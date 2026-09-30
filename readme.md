@@ -910,6 +910,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-30 (10)
+| Change |
+|--------|
+| A live tenant-wide run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1` showed the select-ladder rediscovering the same answer on every site: three system lists (`Galerie van thema''s`, `Galerie met basispagina''s`, `Bibliotheek met onderhoudslogboeken`) rejected the same fields on all 131 sites, each costing a wasted round trip and a log line |
+| Which fields a list accepts is a property of its **template**, not of the site, so the outcome is now learned once per template and reused. A simulation of the observed pattern over 131 sites puts it at half the round trips (1048 to 528) with every template still landing on exactly the rung it accepts, so no field is lost to the shortcut |
+| The log says it once per template instead of once per site — the `[SKIP]` for the User Information List too, which appeared on all 131. Roughly 350 repeated lines removed, which is what was hiding everything else |
+| Verified by simulating the ladder across 131 sites with and without the memory: fewer calls, identical resolution per template, and a template that accepts nothing still terminates instead of looping |
+
 ### 2026-09-30 (9)
 | Change |
 |--------|

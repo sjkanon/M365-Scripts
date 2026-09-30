@@ -910,6 +910,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-09-30 (10)
+| Wijziging |
+|-----------|
+| Een tenantbrede run van `scripts/Reporting/Get-SharePointPermissionsReport.ps1` liet zien dat de veldselectie-ladder op elke site hetzelfde opnieuw ontdekte: drie systeemlijsten (`Galerie van thema''s`, `Galerie met basispagina''s`, `Bibliotheek met onderhoudslogboeken`) weigerden dezelfde velden op alle 131 sites, telkens goed voor een verspilde round trip en een logregel |
+| Welke velden een lijst accepteert is een eigenschap van het **template**, niet van de site. De uitkomst wordt nu één keer per template geleerd en hergebruikt. Een simulatie van het waargenomen patroon over 131 sites komt uit op de helft van de round trips (1048 naar 528), waarbij elk template nog steeds precies op de trede landt die het accepteert — er gaat dus geen veld verloren aan de snelkoppeling |
+| De log meldt het één keer per template in plaats van één keer per site — ook de `[SKIP]` voor de User Information List, die op alle 131 sites verscheen. Zo''n 350 herhaalde regels minder, precies wat de rest onzichtbaar maakte |
+| Geverifieerd door de ladder over 131 sites te simuleren met en zonder geheugen: minder calls, identieke uitkomst per template, en een template dat niets accepteert stopt nog steeds in plaats van te blijven draaien |
+
 ### 2026-09-30 (9)
 | Wijziging |
 |-----------|

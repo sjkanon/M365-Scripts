@@ -910,6 +910,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-09-30 (10)
+| Modification |
+|--------------|
+| Une exécution sur tout le locataire de `scripts/Reporting/Get-SharePointPermissionsReport.ps1` a montré que l''échelle de sélection redécouvrait la même réponse sur chaque site : trois listes système (`Galerie van thema''s`, `Galerie met basispagina''s`, `Bibliotheek met onderhoudslogboeken`) refusaient les mêmes champs sur les 131 sites, chacune au prix d''un aller-retour inutile et d''une ligne de journal |
+| Les champs qu''une liste accepte relèvent de son **modèle**, pas du site : le résultat est désormais appris une fois par modèle puis réutilisé. Une simulation du schéma observé sur 131 sites donne la moitié des allers-retours (1048 à 528), chaque modèle atterrissant toujours exactement sur le barreau qu''il accepte — aucun champ n''est perdu par ce raccourci |
+| Le journal le signale une fois par modèle au lieu d''une fois par site — y compris le `[SKIP]` de la User Information List, présent sur les 131. Environ 350 lignes répétées en moins, précisément ce qui masquait le reste |
+| Vérifié en simulant l''échelle sur 131 sites avec et sans mémoire : moins d''appels, résolution identique par modèle, et un modèle qui n''accepte rien se termine toujours au lieu de boucler |
+
 ### 2026-09-30 (9)
 | Modification |
 |--------------|
