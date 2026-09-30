@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-182 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+185 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -134,6 +134,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Restart-Time-Sync.ps1`](Device/Time%20sync/Restart-Time-Sync.ps1) | [`Device/Time sync/`](Device/Time%20sync/readme.md) | Repair Windows time synchronisation and keep it repaired with a scheduled task. |
 | [`Restore-MailboxMessages.ps1`](Exchange/Restore-MailboxMessages.ps1) | [`Exchange/`](Exchange/readme.md) | Put messages that were moved or deleted on a given day back where they came from, and report who moved or deleted them. Preview by default. |
 | [`Restore-RecycleBinItems.ps1`](SharePoint/Restore-RecycleBinItems.ps1) | [`SharePoint/`](SharePoint/readme.md) | Restore deleted files and folders from SharePoint or OneDrive recycle bins - one site, or every SharePoint site in a tenant - with interactive admin sign-in. |
+| [`Revoke-SharePointUserAccess.ps1`](SharePoint/Revoke-SharePointUserAccess.ps1) | [`SharePoint/`](SharePoint/readme.md) | Revoke one user's access to SharePoint Online everywhere it is granted — site collection admin, role assignments at every level, SharePoint group membership an… |
 | [`Rollback-InternalMic.ps1`](Device/audio/Rollback-InternalMic.ps1) | [`Device/audio/`](Device/audio/readme.md) | Rollback: Re-enable Internal Microphone |
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |
 | [`Search-MailboxAuditLog.ps1`](Office365Toolkit/Exchange/Search-MailboxAuditLog.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Search the Microsoft 365 Unified Audit Log for sign-in and mailbox access events. |
@@ -178,6 +179,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Test-RDSDiagnostics.ps1`](RDS/Test-RDSDiagnostics.ps1) | [`RDS/`](RDS/readme.md) | Diagnose why users cannot log in to an RDP server or RD Web Access server. |
 | [`Test-SASWorkDirectory.ps1`](SAS/Test-SASWorkDirectory.ps1) | [`SAS/`](SAS/readme.md) | Test SAS WORK directory health and permissions |
 | [`Test-SharedMailboxSignIn.ps1`](Office365Toolkit/Security/Test-SharedMailboxSignIn.ps1) | [`Office365Toolkit/Security/`](Office365Toolkit/Security/readme.md) | Report (and optionally block) direct interactive sign-in to shared mailboxes. |
+| [`Test-SharePointAccessScripts.ps1`](SharePoint/Test-SharePointAccessScripts.ps1) | [`SharePoint/`](SharePoint/readme.md) | Verify Get-SharePointPermissionsReport.ps1 and Revoke-SharePointUserAccess.ps1 without touching a tenant. |
 | [`Test-SharePointSharingConfig.ps1`](PatronToolkit/SharePoint/Test-SharePointSharingConfig.ps1) | [`PatronToolkit/SharePoint/`](PatronToolkit/SharePoint/readme.md) | Report SharePoint Online tenant sharing configuration and (optionally) external users. |
 | [`Test-SharePointStructure.ps1`](SharePoint/Provisioning/Test-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Compare the live SharePoint structure with the configuration and report every difference. Reads only - changes nothing, ever. |
 | [`testsmtp_5min.ps1`](SMTP/testsmtp_5min.ps1) | [`SMTP/`](SMTP/readme.md) | Recurring SMTP test — sends a test email every N minutes until stopped. |
@@ -189,6 +191,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Update-BreakGlassAdminPassword.ps1`](TenantOnboarding/MultiTenant/Update-BreakGlassAdminPassword.ps1) | [`TenantOnboarding/MultiTenant/`](TenantOnboarding/MultiTenant/readme.md) | Rotate the password of a named break-glass admin account, in one tenant or across all GDAP customers. |
 | [`Update-iOSCompliancePolicy.ps1`](Intune/iOS-Compliance-Updater/Update-iOSCompliancePolicy.ps1) | [`Intune/iOS-Compliance-Updater/`](Intune/iOS-Compliance-Updater/readme.md) | Automatically updates the minimum iOS version in an Intune compliance policy. |
 | [`Update-Modules.ps1`](Startup/Update-Modules.ps1) | [`Startup/`](Startup/readme.md) | updaten van modules |
+| [`Update-ReadmeHeader.ps1`](Startup/Update-ReadmeHeader.ps1) | [`Startup/`](Startup/readme.md) | Put the language switcher and the breadcrumb at the top of every readme, in all three languages. Supports -WhatIf. |
 | [`Update-ScriptIndex.ps1`](Startup/Update-ScriptIndex.ps1) | [`Startup/`](Startup/readme.md) | Build scripts/INDEX.md - one searchable A-Z table of every script in the repo, with a link to the file, its folder readme and what it does. Supports -WhatIf. |
 | [`Update-SharePointShareStatus.ps1`](SharePoint/Provisioning/Update-SharePointShareStatus.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Work out how every document is actually shared and write that back to the Deelstatus column. Reports files shared wider than their Vertrouwelijkheid tag allows… |
 | [`Update-TeamsClient.ps1`](Device/Update-TeamsClient.ps1) | [`Device/`](Device/readme.md) | Update the new Microsoft Teams client, including the Teams Meeting Add-in for Outlook, only when Microsoft publishes a newer build. Supports -WhatIf. |

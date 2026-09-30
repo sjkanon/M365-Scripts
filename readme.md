@@ -1,3 +1,5 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
 # M365-Scripts
 
 > A collection of PowerShell scripts and M365 management tools for MSP engineers, maintained by Sjoerd Kanon.
@@ -883,6 +885,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-30 (3)
+| Change |
+|--------|
+| New `scripts/Startup/Update-ReadmeHeader.ps1` writes the two lines at the top of every readme: a language switcher (`English · Nederlands · Français`) and the breadcrumb back up the tree, each level linking to its readme in the current language. Hand-kept, those relative paths are what breaks when a folder moves; generated from the folder a readme sits in, they cannot. `-Check` exits 1 on a stale header or a missing language version |
+| `scripts/INDEX.md` regenerated: besides the new script it now also lists `Revoke-SharePointUserAccess.ps1` and `Test-SharePointAccessScripts.ps1`, which had been added without rerunning `Update-ScriptIndex.ps1` |
+| Verified: syntax check clean; run in PowerShell 7 and a `-Check` run in Windows PowerShell 5.1 against this repository — 66 folders, 198 readmes, every header current afterwards |
 
 ### 2026-09-30 (2)
 | Change |
