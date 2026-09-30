@@ -310,6 +310,20 @@ $ExchangeSubmenu = @(
         if ($m365 -match '^[Yy]') { $p['IncludeM365Groups'] = $true }
         & "$ROOT\scripts\Exchange\Get-DistributionGroupMembers.ps1" @p
     }}
+    @{ Key='L'; Label='Restore-MailboxMessages  — put back mail moved/deleted on a date, and show who did it'; Action={
+        $path = Join-Path $ROOT 'scripts\Exchange\Restore-MailboxMessages.ps1'
+        $mbx  = Read-Host "  Mailbox UPN"
+        $day  = Read-Host "  Date the messages were moved/deleted [yyyy-MM-dd]"
+        $scope = Read-Host "  [O]nly that day, or everything from that date [U]ntil now? [O]"
+        $arc  = Read-Host "  Also move unaudited Archive items back to the Inbox (e.g. after Move-InboxToArchive)? [y/N]"
+        $p = @{ Mailbox = $mbx }
+        if ($scope -match '^[Uu]') { $p['After'] = [datetime]$day } else { $p['Date'] = [datetime]$day }
+        if ($arc -match '^[Yy]') { $p['UnauditedArchiveToInbox'] = $true }
+        # Always a preview first - it also shows who did what - then an explicit second step.
+        & $path @p
+        $confirm = Read-Host "  Preview completed. Put the messages back now (-Apply)? [y/N]"
+        if ($confirm -match '^[Yy]') { & $path @p -Apply }
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"
@@ -638,6 +652,40 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='R'; FKey=$null; Category='Device'
+        Label='Repair-AppxStore    — repair AppX packages failing with 0x80070490 (Teams, Outlook, FSLogix)'
+        Script="$ROOT\scripts\Device\Repair-AppxPackageStore.ps1"
+        Params={
+            $names = Read-Host "  Packages [teams,outlook] (e.g. outlook,copilot - * = everything)"
+            $hosts = Read-Host "  Session hosts, e.g. lem-avd-4,lem-avd-5 (empty = this machine)"
+            $apply = Read-Host "  Repair now (not just diagnose)? [y/N]"
+            # teams / outlook / copilot are shorthands the script itself understands.
+            $a = @{ Name = if ($names) { @($names -split '[,;]' | ForEach-Object { $_.Trim() }) } else { @('teams', 'outlook') } }
+            if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
+            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+            else {
+                $a['Confirm'] = $false   # already answered here, don't ask twice
+                $prov = Read-Host "  Also install the apps for all users (provision)? [y/N]"
+                if ($prov -match '^[Yy]') {
+                    $a['Provision'] = $true
+                    $wg = Read-Host "  Take them from winget instead of Microsoft's installer? [y/N]"
+                    if ($wg -match '^[Yy]') { $a['UseWinget'] = $true }
+                }
+            }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
+        Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
+        Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"
+        Params={
+            $apply = Read-Host "  Repair it now (not just report)? [y/N]"
+            $a = @{}
+            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"
@@ -695,6 +743,47 @@ $menu = @(
             if ($eff -match '^[Yy]') { $a['IncludeEffectiveAccess'] = $true }
             $xl = Read-Host '  Also write one Excel workbook with all sheets? [Y/n]'
             if ($xl -notmatch '^[Nn]') { $a['Excel'] = $true }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='W'; FKey=$null; Category='SharePoint'
+        Label='SharePoint-Revoke    — take one user''s access away, sharing links included'
+        Script="$ROOT\scripts\SharePoint\Revoke-SharePointUserAccess.ps1"
+        Params={
+            $upn = Read-Host '  User to revoke (UPN or e-mail address)'
+            if (-not $upn) { Write-Warning 'A user is required.'; return $null }
+            $a = @{ UserPrincipalName = $upn }
+            $site = Read-Host '  One site collection URL (empty = whole tenant)'
+            if ($site) {
+                $a['SiteUrl'] = $site
+            } else {
+                $tenant = Read-Host '  Tenant URL (https://contoso.sharepoint.com)'
+                if (-not $tenant) { Write-Warning 'A tenant URL is required for a tenant-wide run.'; return $null }
+                $a['TenantUrl'] = $tenant
+            }
+            $grp = Read-Host '  Also list the Entra groups that grant access? [Y/n]'
+            if ($grp -notmatch '^[Nn]') { $a['IncludeGroupAccess'] = $true }
+            # Report first, on purpose: -Apply is a deliberate second run against a list you have read.
+            $apply = Read-Host '  Actually revoke now? Answering no only reports [y/N]'
+            if ($apply -match '^[Yy]') { $a['Apply'] = $true; $a['Confirm'] = $false }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='O'; FKey=$null; Category='SharePoint'
+        Label='SharePoint-Trace     — where did a file go: renamed, moved, deleted (audit log)'
+        Script="$ROOT\scripts\SharePoint\Trace-SharePointFile.ps1"
+        Params={
+            $what = Read-Host '  File name (wildcards allowed) or full URL of the file'
+            if (-not $what) { Write-Warning 'A file name or URL is required.'; return $null }
+            $a = if ($what -match '^https?://') { @{ Url = $what } } else { @{ Name = $what } }
+            $site = Read-Host '  Only this site or OneDrive URL (empty = whole tenant)'
+            if ($site) { $a['SiteUrl'] = $site }
+            $from = Read-Host '  From (Brussels time, e.g. 01-09-2026 or 01-09-2026 08:00; empty = last 30 days)'
+            if ($from) { $a['StartDate'] = $from }
+            $to = Read-Host '  To (empty = now; a date alone includes that whole day)'
+            if ($to) { $a['EndDate'] = $to }
+            $act = Read-Host '  Also show opens, edits and downloads? Slower [y/N]'
+            if ($act -match '^[Yy]') { $a['IncludeActivity'] = $true }
             return $a
         }
     }

@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **LegacyUtilities**
+
 # Legacy Utilities
 
 Modernized, house-style equivalents of a batch of scripts from a retired internal
@@ -8,9 +12,11 @@ replaced with Microsoft Graph / Exchange Online equivalents, and every hardcoded
 customer name, tenant domain, hostname, password, or secret found in the
 originals was generalized into a parameter — none of that data was carried over.
 
+## Folders
+
 This folder is organized by theme, one subfolder per area:
 
-| Folder | Contents |
+| Folder | Description |
 |--------|----------|
 | [`Exchange/`](Exchange/readme.md) | Mailbox delegate access, bulk shared mailbox/contact creation, contact sync, message trace, mailbox dedup |
 | [`Entra/`](Entra/readme.md) | Group membership changes, Conditional Access policy backup |

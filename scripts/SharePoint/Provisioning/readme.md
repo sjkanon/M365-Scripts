@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [SharePoint](../readme.md) › **Provisioning**
+
 # SharePoint Structure Provisioning
 
 Provision and maintain a SharePoint structure — metadata model, libraries, content

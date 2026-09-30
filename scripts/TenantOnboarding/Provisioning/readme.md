@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [TenantOnboarding](../readme.md) › **Provisioning**
+
 # Provisioning
 
 Scripts for bootstrapping a single newly onboarded tenant: break-glass admin account, baseline security groups, and applying baseline Intune policy assignments. Replaces an old interactive menu-driven install script with atomic, parameterized scripts consistent with the rest of this repo — run them in the order below as part of a new-tenant checklist.

@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../../readme.md) › [scripts](../../../readme.md) › [Intune](../../readme.md) › [Desktop](../readme.md) › **Add Lockscreen to start and desktop**
+
 # Add Lockscreen to Start and Desktop
 
 Pins a "Lock Workstation" shortcut to Start / Desktop via a downloaded `.bat` + `.ico`, using the undocumented `Windows.taskbarpin` Explorer verb to pin without user interaction.

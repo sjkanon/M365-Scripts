@@ -24,14 +24,31 @@ These rules apply to every change in this repo, without being asked each time.
 ## 3. Update the readmes with the change
 
 A code change is not finished until the documentation matches it. For every functional or
-structural change, update **all** of the following that apply:
+structural change, update **all** of the following that apply.
+
+**Every readme exists in three languages**: `readme.md` (English, the main version),
+`readme.nl.md` (Dutch) and `readme.fr.md` (French). Make every change below in all three,
+including the root readme's `Version History` entry. Script-name headings
+(`### Set-UserManager.ps1`) stay untranslated so their anchors match across languages;
+links to another folder readme point to the same-language file. A new folder gets all three
+files. Never write the two header lines (language switcher, breadcrumb) by hand — run
+`pwsh -NoProfile -File scripts/Startup/Update-ReadmeHeader.ps1` afterwards, then
+`scripts/Startup/Test-MarkdownLinks.ps1`. Plaintext passwords or secrets are not copied
+into the translations.
+
+The hooks in `.claude/settings.json` (and the git hook in `.githooks/pre-commit`) run
+`.claude/hooks/sync-docs.ps1`: after every edit it regenerates `scripts/INDEX.md` and the
+readme headers and runs the link check in the background, waking you only when something is
+broken. The Stop hook blocks once when an English readme changed without its translations,
+or a script changed without its folder readme — resolve it, don't argue past it.
 
 1. **The folder readme** (`scripts/<Workload>/readme.md`)
    - Add or update the row in the `## Scripts` table (script link + one-line description).
    - Add or update the `### <Script>.ps1` section below it: purpose, the `**Parameters**`
      table, `**Examples**` block, and `**Notes**`.
-   - If a folder was added, add it to the `## Folders` table of the parent readme, and give
-     the new folder its own `readme.md`.
+   - If a folder was added, add it to the `## Folders` table of the parent readme (and to the
+     root readme's `## Folders` table for a new workload folder), and give the new folder its
+     own `readme.md`, `readme.nl.md` and `readme.fr.md`.
 2. **Parent folder readmes** up the chain, if the entry there no longer describes reality.
 3. **The root `readme.md`**
    - Update the relevant `Script Categories` entry and the `Repository Structure` tree.

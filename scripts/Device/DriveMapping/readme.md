@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Device](../readme.md) › **DriveMapping**
+
 # DriveMapping
 
 Maps SharePoint Online / OneDrive document libraries to persistent drive letters via the WebDAV redirector — for use as a per-user logon script (Intune Win32 app or a scheduled task at logon), not via [`menu.ps1`](../../../menu.ps1).

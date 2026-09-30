@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **ActiveDirectory**
+
 # ActiveDirectory
 
 On-prem Active Directory Domain Services monitoring — as opposed to [`Entra/`](../Entra/readme.md), which targets the cloud directory via Microsoft Graph.

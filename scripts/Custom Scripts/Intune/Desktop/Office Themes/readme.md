@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../../../readme.md) › [scripts](../../../../readme.md) › [Custom Scripts](../../../readme.md) › [Intune](../../readme.md) › [Desktop](../readme.md) › **Office Themes**
+
 # Office Theme Colors
 
 Deploys the VIAS Institute Office color palette (theme colors only, not the full `.thmx` theme — see [`Deploy-OfficeTheme.ps1`](../readme.md#deploy-officethemeps1) in the parent folder for that).

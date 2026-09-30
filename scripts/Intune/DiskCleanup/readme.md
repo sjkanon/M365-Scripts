@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Intune](../readme.md) › **DiskCleanup**
+
 # DiskCleanup
 
 Intune Win32-app deployment that runs [`Invoke-WindowsCleanup.ps1`](../../Device/readme.md#invoke-windowscleanupps1) (`scripts/Device/`) on the C:\ drive as SYSTEM and reboots the device afterwards. Built as a thin wrapper so all cleanup logic stays in one place — nothing here duplicates it.

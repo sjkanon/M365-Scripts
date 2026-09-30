@@ -1,0 +1,4 @@
+#!/bin/sh
+# Keep INDEX.md, the readme headers and the markdown links in step with every commit.
+# Enabled per clone with: git config core.hooksPath .githooks
+exec pwsh -NoProfile -File "$(git rev-parse --show-toplevel)/.claude/hooks/sync-docs.ps1" -Mode PreCommit

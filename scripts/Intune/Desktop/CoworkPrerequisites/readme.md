@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../../readme.md) › [scripts](../../../readme.md) › [Intune](../../readme.md) › [Desktop](../readme.md) › **CoworkPrerequisites**
+
 # CoworkPrerequisites
 
 Machine-wide Intune deployment of the Windows-side prerequisites for [Claude Cowork](https://support.claude.com/en/articles/12622667-enterprise-configuration-for-claude-desktop) — the `VirtualMachinePlatform` optional feature and disabling Windows Fast Startup — packaged as its **own, independent** Win32 app, separate from [`../ClaudeDesktop/`](../ClaudeDesktop/readme.md).

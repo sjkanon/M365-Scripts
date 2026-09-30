@@ -1,0 +1,517 @@
+[English](readme.md) · **Nederlands** · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.nl.md) › [scripts](../readme.nl.md) › **Reporting**
+
+# Reporting Scripts
+
+Scripts voor het genereren van rapporten over Active Directory, SharePoint Online en licenties.
+
+---
+
+## Mappen
+
+| Map | Omschrijving |
+|--------|-------------|
+| [`Licensing/`](Licensing/readme.nl.md) | Maandelijks licentie- en Azure-kostenrapport uit Pax8- en Ingram-data |
+
+## Scripts
+
+| Script | Omschrijving |
+|--------|-------------|
+| [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Laatste inlogdatum van computerobjecten in één of meerdere OUs, met export naar CSV |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis en prullenbak |
+| [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Wie heeft waar toegang, via welke groep en met welk niveau — elke site, lijst, map en bestand met eigen rechten. Alleen-lezen, naar CSV en één Excel-werkmap |
+| [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Verwijdert bestandsversies ouder dan een datum; de huidige versie blijft altijd staan. Standaard alleen rapporteren |
+
+---
+
+## Get-ComputerLastLogon.ps1
+
+Rapporteert de **laatste inlogdatum** van computerobjecten in één of meerdere OUs, met export naar CSV.
+
+### Hoe het werkt
+
+Twee nauwkeurigheidsmodi:
+
+| Modus | Attribuut | Vertraging | Snelheid |
+|---|---|---|---|
+| Standaard | `LastLogonTimestamp` (gerepliceerd) | max. 14 dagen | Snel |
+| `-AllDCs` | `LastLogon` per DC, beste waarde | Geen | Trager |
+
+Gebruik de standaardmodus voor stale-device rapportages. Gebruik `-AllDCs` als absolute nauwkeurigheid vereist is.
+
+### Parameters
+
+| Parameter | Type | Standaard | Omschrijving |
+|---|---|---|---|
+| `-SearchBase` | `string[]` | _(heel domein)_ | Een of meerdere OU distinguished names |
+| `-AllDCs` | switch | uit | Bevraagt alle DC's voor nauwkeurigste `LastLogon` |
+| `-InactiveDays` | int | `90` | Drempel in dagen waarna een computer als _Stale_ geldt |
+| `-IncludeDisabled` | switch | uit | Neemt uitgeschakelde computerobjecten ook mee |
+| `-ExportPath` | string | `C:\Temp\` | Map voor het CSV-bestand |
+
+### Vereisten
+
+- ActiveDirectory PowerShell module (RSAT)
+- Leesrechten op de opgegeven OUs
+
+### Voorbeelden
+
+```powershell
+# Laptops en Computers OU
+.\Get-ComputerLastLogon.ps1 `
+    -SearchBase "OU=Laptops,OU=Computers,DC=bedrijf,DC=local",
+               "OU=Computers,DC=bedrijf,DC=local"
+
+# Nauwkeurigste modus — bevraagt alle DC's
+.\Get-ComputerLastLogon.ps1 -SearchBase "OU=Computers,DC=bedrijf,DC=local" -AllDCs
+
+# Inclusief uitgeschakelde computers, drempel op 60 dagen
+.\Get-ComputerLastLogon.ps1 -SearchBase "OU=Computers,DC=bedrijf,DC=local" `
+    -IncludeDisabled -InactiveDays 60
+```
+
+### Statuswaarden
+
+| Status | Betekenis |
+|---|---|
+| `Active` | LastLogon binnen de `-InactiveDays` drempel |
+| `Active (pwd recent)` | LastLogon ziet er stale uit door replicatievertraging, maar het computeraccount-wachtwoord werd < 35 dagen geleden vernieuwd — device is online |
+| `Stale` | Zowel LastLogon als PasswordLastSet overschrijden de drempel — vermoedelijk echt inactief |
+| `Never` | Nooit ingelogd én geen recent wachtwoord |
+| `Disabled` | Account uitgeschakeld in AD |
+
+> **Tip:** `Active (pwd recent)` zijn PC's die wél actief zijn maar door de 9-14 daagse replicatievertraging van `LastLogonTimestamp` ten onrechte als stale verschijnen. Gebruik `-AllDCs` voor exacte gegevens als dit onderscheid kritisch is.
+
+### CSV-kolommen
+
+| Kolom | Omschrijving |
+|---|---|
+| `Name` | Computernaam |
+| `Status` | Zie statuswaarden hierboven |
+| `Enabled` | True/False |
+| `LastLogon` | Laatste inlogdatum (dd/MM/yyyy HH:mm) |
+| `DaysSinceLogon` | Aantal dagen geleden |
+| `PasswordLastSet` | Datum laatste wachtwoordwijziging computeraccount (dd/MM/yyyy) |
+| `DaysSincePasswordSet` | Dagen geleden dat het wachtwoord vernieuwd werd |
+| `OperatingSystem` | OS-naam |
+| `OperatingSystemVersion` | OS-versie |
+| `IPv4Address` | IP-adres (indien beschikbaar) |
+| `OU` | OU-pad (leesbaar formaat) |
+| `Created` | Aanmaakdatum in AD |
+| `Description` | Omschrijving uit AD |
+| `DistinguishedName` | Volledig AD-pad |
+
+---
+
+## Licensing/
+
+Zie [Licensing/](Licensing/) voor het maandelijkse licentierapport.
+
+---
+
+## Get-SharePointStorageReport.ps1
+
+Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard verbindt het script delegated en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd.
+
+
+### Dekking
+
+- Alle SharePoint site collections (OneDrive personal sites worden uitgesloten)
+- Onderliggende sub-sites op alle niveaus
+- Teams-gerelateerde SharePoint-locaties:
+    - Standaard channels als libraries/folders in de parent Teams-site
+    - Private/shared channels als aparte site collections
+- Onderliggende mappen en bestanden in document libraries (alleen met `-Apply`)
+- Detailoutput bevat zowel folders als files (`ItemType`), zodat je de volledige structuur ziet
+- In `-Apply` mode wordt alles in 1 ranked CSV gezet (grootste folders + files, inclusief version history)
+- CSV bevat ook `Level` (diepte): root = `0`, topfolder = `1`, enz.
+- CSV bevat ook `ParentPath` voor hiërarchische analyses (tree-opbouw in Excel/Power BI)
+
+### Prullenbak (recycle bin)
+
+De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt daarom **apart** van de library-scan opgehaald, alleen voor echte SharePoint site collections (geen OneDrive):
+
+- Standaard (`-Apply`, als Phase 2b) of los via **`-RecycleBinOnly`** (slaat de library-scan helemaal over, alleen prullenbak)
+- Alleen root site collections hebben een eigen prullenbak (sub-webs delen die van de root)
+- Uitvoer: extra rij per site in de summary-CSV (`Library = "Recycle Bin (stage 1 + 2)"`) plus een rij per verwijderd item in de detail-CSV
+
+```powershell
+# Alleen prullenbak
+.\Get-SharePointStorageReport.ps1 -RecycleBinOnly
+
+# Volledige scan + prullenbak als extra fase
+.\Get-SharePointStorageReport.ps1 -Apply
+```
+
+### Hervatten na onderbreking (checkpoints) en voortgang
+
+Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-prullenbak) een checkpoint weggeschreven in de outputmap: `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. De `<hash>` is afgeleid van alle scanparameters (site, mode, outputmap, enz.), dus:
+
+- **Opnieuw starten met dezelfde parameters** hervat automatisch vanaf de laatst voltooide library — al afgeronde libraries worden overgeslagen (`[SKIP] Already completed in a previous run.`).
+- **`-Restart`** gooit een bestaand checkpoint weg en start de scan volledig opnieuw, ook als de parameters hetzelfde zijn.
+- De checkpointbestanden worden automatisch opgeruimd zodra de scan succesvol volledig afrondt — blijven ze staan, dan is de vorige run onderbroken.
+
+Tijdens een lange scan toont het script zowel scrollende logregels als (in een interactieve console) geneste progress-balken per fase: sites/libraries inventariseren, per bibliotheek mappen/bestanden scannen, versiegeschiedenis ophalen, en recycle bins. Als Microsoft Graph throttlet (bijvoorbeeld `activityLimitReached` tijdens version-history lookups) verschijnt er een `[WAIT] throttled by Microsoft Graph — waiting ...`-melding met de wachttijd, in plaats van dat het script stil lijkt te hangen.
+
+> **Let op (delegated/SDK-calls):** de Microsoft.Graph SDK-cmdlets retryen op 429/503 standaard *zelf* stil, met een eigen interne backoff die bij `activityLimitReached` een flink `Retry-After` kan respecteren — dat kon minutenlange stiltes geven zonder dat de eigen `[WAIT]`-melding van het script ooit in beeld kwam. Het script zet daarom `Set-MgRequestContext -ClientTimeout <-GraphTimeoutSec> -MaxRetry 0` direct na het verbinden, zodat elke Graph-SDK-call een harde timeout krijgt en alle retries via de eigen, zichtbare logica van het script lopen.
+
+```powershell
+# Hervat automatisch een onderbroken tenantscan
+.\Get-SharePointStorageReport.ps1 -Apply
+
+# Negeer het checkpoint en begin helemaal opnieuw
+.\Get-SharePointStorageReport.ps1 -Apply -Restart
+```
+
+### Site collection-totalen (vergelijken met het adminportaal)
+
+Sub-sites en Teams-kanalen delen de opslagquota van hun root site collection, maar worden in de scan als **losse site-rijen** gerapporteerd; de prullenbak wordt weer in een **eigen rij** bijgehouden. Los van elkaar zijn die cijfers dus niet 1-op-1 te vergelijken met het ene "storage used"-getal dat het SharePoint-adminportaal per site collection toont.
+
+Bij `-Apply` (Phase 2c) telt het script daarom alles automatisch weer bij elkaar op per root site collection: de library-totalen van alle onderliggende sub-sites/kanalen + de prullenbak van die site collection. Uitvoer: `SharePoint_SiteCollectionTotals_<timestamp>.csv`, met per site collection `LibrariesMB`, `RecycleBinMB`, `GrandTotalMB`/`GrandTotalGB` en het aantal sub-sites/kanalen dat is meegeteld. De console toont ook de top 10.
+
+Wijkt `GrandTotalGB` voor een site nog steeds af van het adminportaal-cijfer, dan is de meest waarschijnlijke oorzaak een van:
+- **Timing** — het adminportaal-cijfer kan tot 24u vertraagd zijn t.o.v. een live scan
+- **Stil overgeslagen mappen** — een `[ERROR] Cannot read folder`-melding in de console betekent dat die submap-boom (permissieprobleem) niet is meegeteld
+- **Mislukte version-lookups** — vallen terug op "0 versies" bij herhaalde Graph-fouten (zeldzaam, alleen na 3 mislukte retries)
+- Vergelijk eerst zonder `-Apply` (quick mode) — dat gebruikt hetzelfde officiële `quota.used`-cijfer als het adminportaal, dus wijkt dat ook al af, dan zit het verschil niet in de `-Apply`-telling zelf
+
+### Performance (version history lookups)
+
+Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie optimalisaties beperken dat:
+
+- **Overgeslagen wanneer versiebeheer uit staat** — is voor een library met zekerheid bekend dat versiebeheer uitstaat, dan wordt er geen version-call per bestand gedaan (0 versies is dan toch het antwoord). Bij onbekende status (fallback via `Get-MgSiteDrive`) wordt uit voorzichtigheid altijd nog opgehaald.
+- **Batched via Graph's `$batch`-endpoint** — version-lookups voor bestanden in een library worden nu in groepen van 20 in 1 HTTP-call opgehaald, in plaats van 1 losse call per bestand.
+- **Kortere retry voor deze specifieke calls** — max. 3 pogingen met een korte backoff (in plaats van de standaard `-MaxGraphRetry`/backoff die voor kritieke calls tot ~2 minuten per poging kan oplopen). Een mislukte version-lookup valt terug op "0 versies" in plaats van de hele scan op te houden.
+
+`-SkipVersions` blijft de snelste optie als versiehistorie niet nodig is — dan wordt er helemaal geen version-call gedaan.
+
+Daarnaast is `-SiteUrl` (1 specifieke site) geoptimaliseerd: in normale mode gebruikt het script direct delegated Graph-calls voor alleen die site, wat de opstarttijd gelijk trekt met andere commando's.
+
+Voor GDAP-betrouwbaarheid schakelt het script bij single-site scans automatisch naar app-only bootstrap wanneer `authMode=GDAP` is gedetecteerd (uit `load.config.ps1`/launcher-context). Wil je dat altijd forceren, gebruik dan `-ForceAppOnlySingleSite`.
+
+Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-context (`$global:cid`/`-TenantId`) voor zowel `Connect-MgGraph` als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden.
+
+### Parameters
+
+| Parameter | Omschrijving |
+|---|---|
+| `-SiteUrl` | Scan 1 specifieke site. Tenant-root URL (bijv. `https://contoso.sharepoint.com`) triggert automatisch een tenantbrede scan |
+| `-SkipVersions` | Neemt versiehistorie niet mee (sneller) |
+| `-OutputPath` | Overschrijft de standaard outputmap (`C:\Temp\` / `~/Downloads/`) |
+| `-TenantId` | Entra ID tenant ID — automatisch gedetecteerd indien niet opgegeven; verplicht in combinatie met `-ClientId` |
+| `-ClientId` | Bestaande App Registration client ID — slaat auto-create over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
+| `-ClientSecret` | Client secret voor een bestaande app registration |
+| `-CertificateThumbprint` | Certificate thumbprint voor een bestaande app registration |
+| `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting |
+| `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken |
+| `-RecycleBinOnly` | Slaat storage/library scanning over — leest alleen recycle bin items (stage 1 + stage 2) per site collection |
+| `-ForceAppOnlySingleSite` | Forceert tijdelijke app-bootstrap voor `-SiteUrl` scans (handig voor GDAP/delegated beperkingen) |
+| `-GraphTimeoutSec` | Timeout in seconden per Graph-call (standaard: `120`) |
+| `-MaxGraphRetry` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-VersionBatchConcurrency` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis, 1-8 (standaard: `4`) |
+| `-MaxVersionRetryPasses` | Max. aantal retry-passes voor versiegeschiedenis onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — SharePoint hanteert een harde activity-ceiling van ~1500-2500 opgeloste versie-lookups per pass, dus bij tenants met honderdduizenden bestanden gaf een vaste lage waarde (voorheen hardcoded op 8) vroegtijdig op voor het gros van de scan. Zet expliciet hoger/lager om de auto-schaling te overschrijven |
+| `-Restart` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
+
+### Voorbeelden
+
+```powershell
+# Snelle samenvatting — alleen site quota, geen file scan
+.\Get-SharePointStorageReport.ps1
+
+# Volledige tenantscan inclusief sub-sites en bestanden (auto app registration)
+.\Get-SharePointStorageReport.ps1 -Apply
+
+# Idem, maar met hogere tijdelijke app-rechten indien nodig
+.\Get-SharePointStorageReport.ps1 -Apply -UseHighPrivilege
+
+# Enkel een specifieke Teams-site
+.\Get-SharePointStorageReport.ps1 -SiteUrl "https://contoso.sharepoint.com/teams/Operations" -Apply
+
+# Volledige scan met een bestaande app registration
+.\Get-SharePointStorageReport.ps1 -Apply -ClientId "..." -TenantId "..." -ClientSecret "..."
+
+# Onderbroken run negeren en volledig opnieuw beginnen
+.\Get-SharePointStorageReport.ps1 -Apply -Restart
+```
+
+---
+
+## Get-SharePointPermissionsReport.ps1
+
+Rapporteert **wie waar toegang toe heeft** in SharePoint Online — elke site, sub-site, lijst/bibliotheek, map en bestand dat eigen rechten draagt, geëxporteerd naar CSV. Alleen-lezen: het script doet uitsluitend `GET`-aanroepen en wijzigt nooit een recht.
+
+### Dekking
+
+- Site collection-beheerders
+- Roltoewijzingen op web-niveau (site en sub-site), inclusief doorbroken overerving
+- SharePoint-groepen (Owners/Members/Visitors en eigen groepen) met hun volledige ledenlijst
+- Roltoewijzingen op lijsten en documentbibliotheken
+- Map- en bestandsniveau: elk item met `HasUniqueRoleAssignments`
+- Deellinks (anoniem / organisatie / specifieke personen) en met wie er gedeeld is
+- Externe en gastgebruikers, plus `Everyone` en `Everyone except external users`
+- Entra ID-groepen, doorvertaald naar hun transitieve ledenlijst
+
+Overerving wordt gevolgd zoals SharePoint die zelf modelleert: een item verschijnt alleen als eigen scope wanneer het eigen rechten heeft. De rest erft van de dichtstbijzijnde parent, die één keer wordt gerapporteerd. De CSV blijft daarmee een kaart van de rechtenstructuur in plaats van een regel per bestand.
+
+> Sites worden bewust dubbel opgehaald: eerst tenantbreed via Graph (`getAllSites`), daarna opnieuw uitgevraagd op sub-sites via zowel Graph als SharePoint REST (`/_api/web/webs`), en ontdubbeld op URL. Klassieke sub-webs die Graph overslaat komen zo alsnog mee.
+
+### Authenticatie
+
+Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onder de Read/Write/Manage-rollen van SharePoint: daarvoor is de applicatierol `Sites.FullControl.All` nodig. Het script logt je daarom één keer interactief in en maakt vervolgens zelf een kortlevende App Registration aan met:
+
+| Resource | Rol | Waarvoor |
+|---|---|---|
+| SharePoint | `Sites.FullControl.All` | Roltoewijzingen, sitegroepen, item-scopes |
+| Graph | `Sites.Read.All` | Tenantbrede site-enumeratie |
+| Graph | `GroupMember.Read.All` | Entra-groepslidmaatschap oplossen |
+
+Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft.
+
+> **Certificaat, geen secret — en dat is geen voorkeur.** SharePoint Online weigert elk app-only token dat met een client secret is opgehaald: je krijgt `401` met `x-ms-diagnostics: ... Unsupported app only token`. Alleen certificaat-gebaseerde app-only authenticatie werkt tegen `_api`. De tijdelijke app krijgt daarom een certificaat dat het script **in het geheugen** aanmaakt en op de app registreert; het komt niet in de certificate store en niet op schijf, dus er valt achteraf niets op te ruimen. Geef je `-ClientSecret` mee bij een eigen app, dan waarschuwt het script: de Graph-helft werkt dan wel, de SharePoint-helft niet.
+
+#### Waarom niet gewoon Graph?
+
+Graph kan een deel: op een `driveItem` geeft `/permissions` de rechten, de deellinks (met type en vervaldatum) en via `inheritedFrom` of de overerving doorbroken is. Maar de rest van het beeld ontbreekt daar simpelweg — er is geen Graph-endpoint voor:
+
+| Wat | Graph | SharePoint REST |
+|---|---|---|
+| Roltoewijzingen op site-/webniveau | ❌ bestaat niet | ✅ `/_api/web/roleassignments` |
+| SharePoint-groepen en hun leden | ❌ bestaat niet | ✅ `/_api/web/sitegroups` |
+| Site collection-beheerders | ❌ bestaat niet | ✅ `/_api/web/siteusers` |
+| Naam van het permissieniveau (Full Control, Bewerken, eigen niveaus) | ❌ alleen `read`/`write`/`owner` | ✅ `RoleDefinitionBindings` |
+| Lijsten zonder `driveItem` (gewone lijsten) | ❌ | ✅ |
+| Goedkoop filteren op eigen rechten | ❌ één call per item | ✅ `HasUniqueRoleAssignments` in één sweep |
+
+Die laatste rij is ook een snelheidsverschil: via Graph zou je voor élk bestand een `/permissions`-call moeten doen, terwijl SharePoint in één doorloop per lijst al vertelt wélke items eigen rechten hebben. Een Graph-only variant zou wél met een client secret kunnen en met minder rechten (`Sites.Read.All`), maar levert een rapport op zonder site-eigenaren, zonder groepen en zonder permissieniveaus — precies waar een rechtenreview mee begint.
+
+### Uitvoer
+
+| Bestand | Inhoud |
+|---|---|
+| `SharePoint_Permissions_Detail_<ts>.csv` | Eén regel per grant: scope, principal, permissieniveaus, deellink-type, extern ja/nee, ledenaantal. Onleesbare scopes staan er als `ItemType = Error` met de reden in de kolom `Error`; `UnitKey` koppelt een regel aan de checkpoint-unit die hem schreef |
+| `SharePoint_Permissions_Summary_<ts>.csv` | Per site: aantal grants, unieke scopes, webs, lijsten, mappen/bestanden met eigen rechten, deellinks, anonieme links, externe principals, `Everyone`-grants |
+| `SharePoint_Permissions_SiteAccess_<ts>.csv` | **Per site een regel per persoon**, met de groep waardoor de toegang loopt en het niveau. Zie hieronder |
+| `SharePoint_Permissions_Groups_<ts>.csv` | Per groep een regel per lid — SharePoint-groepen, de Entra-groepen die daarin genest zitten, én Entra-groepen die rechtstreeks op een scope zijn toegekend. Allemaal platgeslagen naar personen |
+| `SharePoint_Permissions_EffectiveAccess_<ts>.csv` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope, met de groep waardoor die toegang loopt |
+
+> Op een grote tenant kan het effective-access-bestand ordes van grootte groter zijn dan de detail-CSV. Daarom staat het uit tenzij je erom vraagt.
+
+#### Wie heeft waar toegang, via welke groep — in één tabblad
+
+De vraag waarmee je dit rapport meestal opent is niet "welke grants bestaan er" maar **"wie kan bij deze SharePoint, en hoe komt die daar"**. Dat stond eerder verspreid: `Rechten` zei dát een groep rechten had, `Groepen` zei wie erin zat, en je moest die zelf koppelen. `Site Owners heeft Volledig beheer` plus `Site Owners bevat vijf mensen` is nog geen antwoord.
+
+Daarom is er `SharePoint_Permissions_SiteAccess_<ts>.csv` (tabblad `Toegang`): **één regel per persoon per site**, met de groep waardoor die toegang loopt en het niveau.
+
+| Kolom | Inhoud |
+|---|---|
+| `SiteTitle` / `SiteUrl` | De site, op naam — 130 URL's zijn geen "één oogopslag" |
+| `UserDisplayName` / `UserPrincipalName` / `UserEmail` | Wie |
+| `IsExternal` / `AccountEnabled` | Gast of intern, account actief |
+| `ViaType` | `Direct`, `SharePointGroup`, `SecurityGroup`, `M365Group`, `Everyone`, … |
+| `ViaName` / `ViaId` | Welke groep, of `(direct toegekend)`. De id staat erbij omdat een titel als `Site Owners` op elke site voorkomt |
+| `PermissionLevels` | Het niveau van die toekenning |
+
+Het is bewust **geconsolideerd per site collection**: iemand die via dezelfde groep op dertig mappen in dezelfde site uitkomt, is één regel — niet dertig. Een ander niveau of een andere groep is wél een aparte regel, want dat is andere toegang. Wil je het per losse map of bestand zien, gebruik dan `-IncludeEffectiveAccess`; dat tabblad (`Effectief`) is per scope en daardoor veel groter.
+
+Drie dingen die hier expres niet wegvallen:
+
+- **Rechtstreeks toegekende personen** staan er als zichzelf, met `ViaType = Direct` en `ViaName = (direct toegekend)`.
+- **`Everyone` en `Everyone except external users`** lossen naar niemand op, maar zijn juist wat je wil zien. Ze krijgen één regel met de claim als naam.
+- Ook met `-SkipGroupExpansion` blijven rechtstreeks toegekende personen zichtbaar; alleen de groepsleden ontbreken dan.
+
+> Vergeleken met [NovaPoint](https://github.com/Barbarur/NovaPoint/wiki/Solution-Report-PermissionsReport), dat dezelfde vraag beantwoordt met `AccessType` + `GroupId` en een kolom `Users` met een lijst gebruikers erin: hier staat elke gebruiker op een eigen regel. Dat leest minder compact, maar het is het verschil tussen wel en niet kunnen filteren of pivotten op een persoon.
+
+#### Alles in één Excel-bestand
+
+Met `-Excel` komt er naast de CSV's één werkmap bij, `SharePoint_Permissions_<ts>.xlsx`, met een tabblad per rapport:
+
+| Tabblad | Inhoud |
+|---|---|
+| `Samenvatting` | Per site: grants, unieke scopes, deellinks, externe principals, `Everyone`-grants, fouten |
+| `Rechten` | Elke grant afzonderlijk |
+| `Toegang` | **Per site, per persoon: welk recht en via welke groep.** Het tabblad om mee te beginnen |
+| `Groepen` | Elke groep met zijn leden — SharePoint-groepen, de Entra-groepen die daarin genest zitten, **én** Entra-groepen die rechtstreeks op een scope zijn toegekend |
+| `Effectief` | Alleen met `-IncludeEffectiveAccess`: één regel per gebruiker per scope |
+
+Elk tabblad is een echte Excel-tabel, dus met filterknoppen en bevroren koprij. Getallen komen als getallen binnen, niet als tekst, dus optellen en sorteren werkt zonder eerst te converteren.
+
+#### Draaitabellen
+
+Er komen vijf kant-en-klare draaitabellen bij, elk op een eigen tabblad:
+
+| Tabblad | Rijen | Kolommen | Waarde | Filters |
+|---|---|---|---|---|
+| `Pivot rechten` | Site | Permissieniveau | Aantal grants | Principaltype, scopetype |
+| `Pivot principals` | Principal | Scopetype | Aantal scopes | Site, extern ja/nee |
+| `Pivot groepen` | Groep | Lid extern ja/nee | Aantal leden | Site, groepstype |
+| `Pivot toegang` | **Site → groep → persoon** | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
+| `Pivot per persoon` | Persoon → site → groep | Permissieniveau | Aantal | Extern ja/nee, toegangstype |
+
+`Pivot toegang` volgt hoe SharePoint rechten werkelijk uitdeelt: een site heeft groepen, en groepen hebben mensen. Ingeklapt zie je welke groepen op een site zitten; uitgeklapt wie die groepen binnenlaten. `Pivot per persoon` leest dezelfde data van de andere kant — wat bereikt déze persoon en waardoor — wat de vraag is bij een offboarding.
+
+> Een rechtstreeks toegekende persoon heeft geen groep. In `ViaName` staat dan `(direct toegekend)` in plaats van niets: een leeg niveau in de hiërarchie leest als ontbrekende data, niet als "zonder groep toegekend".
+
+> **`PermissionLevels` is niet pivot-baar, `PrimaryPermission` wel.** SharePoint geeft een grant vaak meerdere niveaus tegelijk, en die staan in één kolom als `Read; Limited Access`. Een draaitabel maakt daar een aparte waarde van, dus `Full Control` en `Full Control; Limited Access` belanden op verschillende rijen. Daarom staat er in de tabbladen `Rechten` en `Effectief` een extra kolom `PrimaryPermission` naast de volledige tekst, met het zwaarste niveau van die grant. `Limited Access` verliest daarbij altijd van een echt niveau — dat zet SharePoint zelf neer zodat iemand naar iets wat dieper is toegekend kan navigeren. Een eigen permissieniveau telt zwaarder dan `Lezen` maar lichter dan `Volledig beheer`: het is met opzet aangemaakt, dus het hoort niet weg te vallen. Nederlandse en Engelse niveaunamen worden allebei herkend.
+
+Wil je zelf een draaitabel maken: zet de cursor in een tabblad en kies **Invoegen → Draaitabel**; de tabel is al benoemd, dus het bereik klopt meteen en groeit mee.
+
+De CSV's blijven altijd staan; de werkmap komt er bovenop. Dat is met opzet: de CSV's zijn waar de scan naartoe streamt en waar een hervatte run op aanvult, dus ze bestaan sowieso — en als het schrijven van de werkmap misgaat (module ontbreekt, bestand open in Excel, te weinig geheugen) kost dat nooit het rapport zelf.
+
+> **Rijlimiet.** Een werkblad in Excel stopt bij 1.048.576 regels en laat de rest zonder melding vallen. Het script kapt daarom bewust af op 1.000.000 en zegt erbij welk tabblad is ingekort en in welke CSV de volledige data staat. Alleen `Effectief` komt daar op een grote tenant realistisch in de buurt.
+
+`-Excel` heeft de module `ImportExcel` nodig (staat in `Install-Modules.ps1`). Ontbreekt die, dan meldt het script dat en blijven de CSV's gewoon staan.
+
+### Hervatten na onderbreking (checkpoints)
+
+Na elke afgeronde lijst wordt een checkpoint weggeschreven in de outputmap: `SharePoint_Permissions_<hash>.state.json`, `.keys.partial.log` en `.detail/.groups/.effective.partial.csv`. Anders dan bij de twee scripts hierboven worden de regels direct naar die partials gestreamd in plaats van in het geheugen bewaard — een tenantbrede run op itemniveau levert miljoenen regels op. De summary-CSV bestaat daarom niet als checkpoint: die wordt aan het eind uit het detailbestand opgebouwd, zodat een hervatte run alles samenvat wat er ooit voor deze `<hash>` is weggeschreven en niet alleen het deel van de laatste sessie. De `<hash>` komt uit de scanparameters, dus opnieuw starten met dezelfde parameters hervat vanaf de laatst voltooide lijst. `-Restart` gooit dat checkpoint weg en begint opnieuw. De checkpointbestanden worden pas opgeruimd zodra de definitieve CSV's op schijf staan — blijven ze staan, dan is de vorige run onderbroken.
+
+Welke units al klaar zijn staat in `.keys.partial.log`, één regel per sleutel, alleen aangevuld. Dat is bewust geen lijst in de JSON: die na elke lijst opnieuw gesorteerd wegschrijven is kwadratisch werk, en op een tenant met duizenden lijsten kost het checkpoint dan meer tijd dan het scannen zelf. Een halve laatste regel (proces hardgekild tijdens het schrijven) wordt genegeerd — die ene unit wordt dan gewoon opnieuw gescand.
+
+### Robuustheid
+
+Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hieronder zijn geen randgevallen maar te verwachten. Hoe het script ermee omgaat:
+
+| Situatie | Gedrag |
+|---|---|
+| App-rol nog niet gerepliceerd | Het token moet vóór de scan aantonen dát het de rollen draagt (`roles`-claim). Entra geeft namelijk gewoon een token uit zonder de net toegekende rol, en Graph antwoordt daarop met `401` — niet `403`. Zo'n token wordt niet gecachet; er wordt opnieuw geminst tot de rol erin staat (tot ~2,5 min), daarna een duidelijke fout |
+| Token geweigerd (`401`) | Eén keer opnieuw authenticeren met een vers token; blijft het weigeren, dan **stopt de run** met de reden uit `x-ms-diagnostics`. Een 401 geldt nooit voor één site, dus hij wordt niet per site gemeld |
+| Geen toegang tot één site (`403`) of object weg (`404`) | Die ene site/dat ene object wordt overgeslagen, de rest loopt door |
+| Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`, anders exponentiële backoff tot 3 minuten |
+| Eén lijst faalt (view threshold, raar template) | Foutregel in de detail-CSV, de overige lijsten van die site lopen gewoon door. De unit wordt **niet** als klaar gemarkeerd, dus een hervatte run probeert hem opnieuw |
+| Lijst met eigen rechten maar zonder roltoewijzingen | Levert geen regels op, en dat is correct. Voorheen liep dit vast op `Cannot bind argument to parameter 'RoleAssignments'` |
+| Roltoewijzingen niet te lezen (`403`) | **Foutregel, geen lege uitkomst.** Dit is het enige punt waar een 403 niet wordt overgeslagen: een lege lijst roltoewijzingen leest als "niemand heeft rechten op deze scope", en "ik mag niet kijken" is een ander feit dan "er is niets te zien" |
+| Galerie-lijst weigert de veldselectie (`400`) | De query wordt stapsgewijs versmald (vier varianten) tot SharePoint hem accepteert. Op `Galerie van thema's` en `Galerie met basispagina's` bestaan niet alle velden; liever de bestandsnaam kwijt dan de unieke scopes van die lijst. Welke variant werkt is een eigenschap van het **template**, dus het wordt één keer geleerd en daarna op elke volgende site hergebruikt — op een tenant met 131 sites halveert dat de round trips, en de log meldt elke eigenaardigheid één keer in plaats van per site |
+| `Lijst met gebruikersgegevens` (template 112) | Item-scan wordt overgeslagen. SharePoint weigert `/items` op deze verborgen systeemlijst bij élke veldbreedte, en de items zijn gebruikersrecords, geen content — item-rechten zeggen daar niets. De lijst zelf wordt wel gerapporteerd. Dit scheelde 121 valse foutregels per tenantscan |
+| Foutregels uit een eerdere, afgebroken poging | Worden bij het wegschrijven weggelaten zodra dezelfde unit later wél is gelukt. Anders telt het rapport fouten mee die al opgelost zijn, en klopt het getal "N scopes niet leesbaar" niet — precies het getal waarop iemand actie onderneemt |
+| Item-sweep faalt | Aparte foutregel: zonder die regel zou de lijst er uitzien alsof er niets met eigen rechten in zat |
+| CSV staat open in Excel | Vijf keer opnieuw met oplopende wachttijd; lukt het dan nog niet, stopt de run in plaats van stilzwijgend regels te laten vallen |
+| Token verloopt midden in een grote bibliotheek | Elke wave haalt het token opnieuw op — workers krijgen een kopie en zien een latere refresh niet |
+| SharePoint herhaalt een paging-link | Wordt gedetecteerd en afgebroken in plaats van eindeloos door te draaien |
+| Onverwachte fout waar dan ook | Een `trap` ruimt de tijdelijke App Registration op voordat het script stopt — er blijft nooit een Full Control-app achter |
+
+> Aan het eind meldt het script expliciet of álles gelezen kon worden. Staat er een `[WARN]` over onleesbare scopes, filter dan de detail-CSV op `ItemType = Error`: een rapport met gaten mag er niet uitzien als een rapport zonder bevindingen.
+
+### Parameters
+
+| Parameter | Type | Standaard | Omschrijving |
+|---|---|---|---|
+| `-TenantUrl` | string | — | Tenant-root, bijv. `https://contoso.sharepoint.com`. Verplicht voor een tenantbrede run |
+| `-SiteUrl` | string | — | Eén site collection (inclusief sub-sites) in plaats van de hele tenant |
+| `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep: alleen webs, webs + lijsten, of alles tot map- en bestandsniveau |
+| `-TenantId` | string | _(uit de sessie)_ | Entra tenant-ID. Verplicht bij `-ClientId` |
+| `-ClientId` | string | — | Bestaande App Registration; slaat de tijdelijke app over |
+| `-ClientSecret` | string | — | Secret bij `-ClientId`. **Werkt niet tegen SharePoint** (zie Authenticatie); het script waarschuwt |
+| `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My`. Dit is de werkende variant |
+| `-OutputPath` | string | `C:\Temp` | Outputmap |
+| `-IncludeOneDriveSites` | switch | uit | Neemt ook persoonlijke OneDrive-sites mee (één site per gebruiker) |
+| `-IncludeHiddenLists` | switch | uit | Neemt verborgen en systeemlijsten mee (Form Templates, Style Library, workflowhistorie, …) |
+| `-ListTitle` | string[] | _(alles)_ | Beperk tot één of meer lijst-/bibliotheektitels |
+| `-ExcludeLimitedAccess` | switch | uit | Laat `Limited Access`-toewijzingen weg. Die zet SharePoint zelf neer zodat iemand naar een dieper toegekend item kan navigeren — ruis in de meeste reviews, maar ze verklaren wél waarom iemand een mappad ziet |
+| `-SkipGroupExpansion` | switch | uit | Groepslidmaatschap niet oplossen. Sneller, maar dan weet je alleen wélke groep toegang heeft, niet wie erin zit |
+| `-IncludeEffectiveAccess` | switch | uit | Schrijft daarnaast de effective-access-CSV |
+| `-Excel` | switch | uit | Schrijft daarnaast één `.xlsx` met een tabblad per rapport. Vereist `ImportExcel` |
+| `-GraphTimeoutSec` | int | `120` | Timeout per Graph-/SharePoint-aanroep |
+| `-MaxGraphRetry` | int | `6` | Aantal retries bij throttling of timeouts |
+| `-Concurrency` | int (1-8) | `4` | Parallelle workers voor de per-item lookups die een `-Scope Item`-run domineren. `1` schakelt parallellisme uit |
+| `-Restart` | switch | uit | Negeer een bestaand checkpoint en begin opnieuw |
+
+### Vereisten
+
+- Module `Microsoft.Graph.Authentication` (en `Microsoft.Graph.Applications` zolang je de tijdelijke app laat aanmaken) — `.\scripts\Startup\Install-Modules.ps1`
+- Een account dat een App Registration mag aanmaken en admin consent mag geven, tenzij je `-ClientId` van een bestaande app meegeeft
+
+### Voorbeelden
+
+```powershell
+# Alles, tenantbreed: sites, sub-sites, bibliotheken, mappen en bestanden met eigen rechten
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com"
+
+# Eén site collection, plus een CSV met effectieve toegang per gebruiker
+.\Get-SharePointPermissionsReport.ps1 -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -IncludeEffectiveAccess
+
+# Alles in één Excel-werkmap: samenvatting, rechten, groepen met leden, en effectieve toegang
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -IncludeEffectiveAccess -Excel
+
+# Sneller overzicht: stoppen op lijst-/bibliotheekniveau en automatische traversal-grants verbergen
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -Scope List -ExcludeLimitedAccess
+
+# Onderbroken tenantscan negeren en volledig opnieuw beginnen
+.\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -Restart
+```
+
+---
+
+## Remove-SharePointFileVersionsByDate.ps1
+
+Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document libraries op basis van een cutoff-datum, terwijl de **huidige versie behouden blijft**.
+
+### Gedrag
+
+- Standaard: alleen preview/reporting
+- Met `-Apply`: verwijdert matching vorige versies echt
+- Werkt op één site of tenantbreed over alle sites
+- Standaard geen OneDrive-sites en geen hidden libraries
+- Gebaseerd op Microsoft Graph (`Invoke-MgGraphRequest`) — **geen** `PnP.PowerShell` en **geen** eigen Entra app-registratie nodig voor het standaardgeval
+
+### Authenticatie
+
+Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
+
+Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al de application permission `Sites.ReadWrite.All` hebben.
+
+> **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie-garantie is.
+
+### Hervatten na onderbreking (checkpoints) en voortgang
+
+Net als `Get-SharePointStorageReport.ps1` schrijft dit script na elke afgeronde library een checkpoint weg in de outputmap: `SharePoint_VersionCleanup_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. De `<hash>` is afgeleid van alle scanparameters (cutoff-datum, site, mode, outputmap, enz.):
+
+- **Opnieuw starten met dezelfde parameters** hervat automatisch — al afgeronde libraries worden overgeslagen (`[SKIP] Already completed in a previous run.`).
+- **`-Restart`** gooit het checkpoint weg en start volledig opnieuw. Dit beïnvloedt alleen de voortgangsregistratie, niet wat er (bij `-Apply`) al daadwerkelijk verwijderd is in SharePoint zelf — verwijderde versies blijven uiteraard verwijderd.
+- De checkpointbestanden worden automatisch opgeruimd zodra de scan succesvol volledig afrondt.
+
+Tijdens de scan toont het script geneste progress-balken (sites → libraries → mappen/bestanden scannen / versiegeschiedenis ophalen) naast de scrollende logregels, en een `[WAIT] throttled by Microsoft Graph — waiting ...`-melding zodra Graph throttlet, zodat een lange pauze niet aanvoelt als een hang.
+
+> **Let op (delegated/SDK-calls):** net als bij `Get-SharePointStorageReport.ps1` zet het script `Set-MgRequestContext -ClientTimeout <-GraphTimeoutSec> -MaxRetry 0` direct na het verbinden — zonder die instelling retryen de Microsoft.Graph SDK-cmdlets 429/503 zelf stil met een eigen backoff, wat bij `activityLimitReached` minutenlange stiltes kan geven zonder dat de eigen `[WAIT]`-melding van het script in beeld komt.
+
+### Parameters
+
+| Parameter | Type | Omschrijving |
+|---|---|---|
+| `-BeforeDate` | `datetime` | Verwijder versies ouder dan deze datum |
+| `-SiteUrl` | `string` | Optioneel: scan één site |
+| `-TenantUrl` | `string` | Vereist voor een scan over alle sites, bv. `https://contoso.sharepoint.com` |
+| `-TenantId` | `string` | Entra ID tenant ID — automatisch gedetecteerd indien niet opgegeven; verplicht in combinatie met `-ClientId` |
+| `-ClientId` | `string` | Bestaande App Registration client ID — slaat de tijdelijke app over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
+| `-ClientSecret` | `string` | Client secret voor een bestaande app registration |
+| `-CertificateThumbprint` | `string` | Certificate thumbprint voor een bestaande app registration |
+| `-Apply` | `switch` | Voert de verwijdering echt uit |
+| `-IncludeOneDriveSites` | `switch` | Neemt OneDrive-sites mee in de tenantscan |
+| `-IncludeHiddenLibraries` | `switch` | Neemt hidden document libraries mee |
+| `-LibraryTitle` | `string[]` | Optionele filter op librarytitel |
+| `-GraphTimeoutSec` | `int` | Timeout in seconden per Graph-call (standaard: `120`) |
+| `-MaxGraphRetry` | `int` | Max. aantal retries bij Graph throttling/timeouts (standaard: `6`) |
+| `-VersionBatchConcurrency` | `int` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis in tenantbrede scans, 1-8 (standaard: `4`). Boven `1` wordt ook de tweede tijdelijke app aangemaakt (zie Authenticatie) |
+| `-MaxVersionRetryPasses` | `int` | Max. aantal retry-passes voor het ophalen van versielijsten onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — zelfde aanpak en reden als bij `Get-SharePointStorageReport.ps1` hierboven |
+| `-Restart` | `switch` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
+
+### Voorbeelden
+
+```powershell
+# Preview tenantbreed: alles ouder dan 1 januari 2025
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -TenantUrl "https://contoso.sharepoint.com" `
+    -BeforeDate "2025-01-01"
+
+# Echt verwijderen op één site
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -SiteUrl "https://contoso.sharepoint.com/sites/Finance" `
+    -BeforeDate "2025-01-01" `
+    -Apply
+
+# Onderbroken tenantscan negeren en volledig opnieuw beginnen
+.\Remove-SharePointFileVersionsByDate.ps1 `
+    -TenantUrl "https://contoso.sharepoint.com" `
+    -BeforeDate "2025-01-01" `
+    -Apply -Restart
+```

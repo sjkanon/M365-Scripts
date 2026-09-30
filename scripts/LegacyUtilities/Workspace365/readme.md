@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [LegacyUtilities](../readme.md) › **Workspace365**
+
 # Legacy Utilities — Workspace 365
 
 Provisioning scripts for [Workspace 365](https://workspace365.net) digital

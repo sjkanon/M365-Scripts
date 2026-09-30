@@ -1,3 +1,5 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
 # M365-Scripts
 
 > A collection of PowerShell scripts and M365 management tools for MSP engineers, maintained by Sjoerd Kanon.
@@ -6,6 +8,7 @@
 
 ## Table of Contents
 
+- [Folders](#folders)
 - [Getting Started](#getting-started)
 - [Finding a script](#finding-a-script)
 - [Quick Launcher](#quick-launcher)
@@ -26,6 +29,39 @@
 - [Repository Structure](#repository-structure)
 - [Contributing](#contributing)
 - [Version History](#version-history)
+
+---
+
+## Folders
+
+Every workload has its own folder under [`scripts/`](scripts/readme.md), and every folder has a readme: what each script is for, its parameters, examples and notes. Start here and click through; every readme has a breadcrumb at the top to get back up.
+
+| Folder | Description |
+|--------|-------------|
+| [`ActiveDirectory/`](scripts/ActiveDirectory/readme.md) | On-prem AD DS monitoring (account lockout watcher) — targets a DC/file server directly, not Entra ID |
+| [`Azure/`](scripts/Azure/readme.md) | Azure IaaS VM management (disk controller conversion) — targets Azure directly via `Az`, not the M365 tenant |
+| [`Entra/`](scripts/Entra/readme.md) | User lifecycle, manager assignment, license reporting, Conditional Access baseline, temporary CA windows, TAP codes, M365 Group audit (Microsoft Graph) |
+| [`Exchange/`](scripts/Exchange/readme.md) | Calendar migration/permissions, distribution groups, mailbox/calendar/DKIM/forwarding audits |
+| [`Graph/`](scripts/Graph/readme.md) | Microsoft Graph application permission management |
+| [`Intune/`](scripts/Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
+| [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration), and where a file went: renamed, moved or deleted (audit log) |
+| [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
+| [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
+| [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
+| [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics and live session monitoring |
+| [`SMTP/`](scripts/SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
+| [`Deployment/`](scripts/Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
+| [`DNS/`](scripts/DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
+| [`SAS/`](scripts/SAS/readme.md) | SAS batch job error monitoring with Zabbix integration |
+| [`Teams/`](scripts/Teams/readme.md) | Microsoft Teams / SharePoint export and archiving |
+| [`Startup/`](scripts/Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap + syntax checker, dot-sourced by the menu |
+| [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) | Path-pinned scripts — Office theme deployment (hardcodes its download URL to this repo path) |
+| [`TenantOnboarding/`](scripts/TenantOnboarding/readme.md) | New-tenant provisioning, multi-tenant/GDAP reporting, app deployment, device config, OneDrive management, user management — modernized from a retired internal tenant-setup toolkit |
+| [`Office365Toolkit/`](scripts/Office365Toolkit/readme.md) | Security/Exchange/Intune rewrites of still-useful capabilities from the retired `directorcia/Office365` (CIAOPS) toolkit |
+| [`PatronToolkit/`](scripts/PatronToolkit/readme.md) | Entra/Exchange/Intune/Security/SharePoint/Teams rewrites of still-useful capabilities from the retired `directorcia/patron` toolkit |
+| [`LegacyUtilities/`](scripts/LegacyUtilities/readme.md) | Misc modernized scripts (Exchange, Entra, Teams, Network, Device, Workspace 365) from assorted small tools in the retired internal toolkit |
+
+Know the script name but not the folder? [`scripts/INDEX.md`](scripts/INDEX.md) lists every script A–Z.
 
 ---
 
@@ -152,6 +188,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `8` / `F8` | Device | Disable-InternalMic |
 | `I` | Device | Remove-OemBloatware — remove OEM + generic Store bloatware |
 | `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
+| `R` | Device | Repair-AppxPackageStore — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `L` | Startup | Test-MarkdownLinks — check every readme link: files and in-page anchors |
@@ -185,6 +222,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load `functies.ps1` on first use —
 | `I` | Convert-SharedCalendar — move a shared calendar out of a user's mailbox into a room/equipment mailbox (always previews first) |
 | `J` | Move-SharedCalendar — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
 | `K` | Get-DLMembers — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
+| `L` | Restore-MailboxMessages — put back mail that was moved or deleted on a given day, or from a date until now, and show who did it (always previews first) |
 
 **Entra ID submenu (`D`)**
 
@@ -231,6 +269,9 @@ Scripts for calendar and mailbox management.
   - Two engines: **Purview** Content Search + purge (tenant-wide, the only one that can HardDelete) and **Graph** (per-mailbox, no search-index lag, per-message report)
   - `Recycle` / `SoftDelete` / `HardDelete`; refuses to run without a content selector so a date range alone can never match every message
   - Loops purge rounds automatically around Purview's 10-items-per-mailbox limit, and writes a CSV of everything matched and deleted
+- **Restore-MailboxMessages.ps1** — put back messages that were moved or deleted on a given day, and report who did it; preview by default
+  - Deleted messages go back via `Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges); moved messages are traced to their original folder through the audit log and moved back over Graph
+  - Names the actor from the Unified Audit Log — account, owner/delegate/admin, client, IP — and says which actions are not audited on the mailbox
 
 ---
 
@@ -278,6 +319,28 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
 ### 📁 SharePoint & OneDrive
 
 Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
+
+#### Trace a File
+
+**Trace-SharePointFile.ps1** — "where did my file go?" for OneDrive and SharePoint, from the Unified Audit Log (Exchange Online, not PnP). Read-only.
+
+- Follows renames, moves, copies, deletes and restores of one file by name (wildcards), old URL or item ID — a chain `A → B → C` ends at C
+- Replays folder renames, moves and deletes onto the file, because those move every file inside without a record per file
+- Every time in Brussels time with the UTC offset; `-StartDate` / `-EndDate` in Belgian notation (`15-09-2026 08:30`), a bare end date includes the whole day
+- Reads per day and splits a slice with more than 50,000 records, retries failing searches; last known location and status per item, CSV plus the raw audit records as JSON
+
+#### Revoke User Access
+
+**Revoke-SharePointUserAccess.ps1** — the counterpart to the permissions report: that one says who can reach what, this one takes it away. Reports by default, removes with `-Apply`, and writes a CSV of every grant found and what happened to it.
+
+- Site collection administrator first, because it overrides every role assignment below it
+- Direct role assignments on the site, a sub-site, a list or library, a folder or a single file
+- SharePoint group membership, and **sharing links** — the `SharingLinks.*` groups that "Anyone with the link" and "Specific people" actually put a person in
+- It deliberately never changes Entra ID group membership: a user who gets in through a security or Microsoft 365 group keeps that access, and removing them from SharePoint does not take it away. Those routes are reported with the group named, so offboarding is two steps and the second one is visible
+- Grants to `Everyone` are left alone for the same reason in reverse — removing one revokes access for the whole tenant, not for this person
+- `ConfirmImpact = 'High'`, so it asks per removal unless `-Confirm:$false`
+
+**Test-SharePointAccessScripts.ps1** verifies this script and the permissions report without touching a tenant: the app-only auth layer both share must stay byte-identical, and the revocation funnel must record a dry run without executing it, execute and record under `-Apply`, and keep refusing the grants it must not remove.
 
 #### Recycle Bin Restore
 
@@ -474,6 +537,20 @@ Comprehensive disk space cleanup for Windows endpoints.
 - Config-driven via a mappings CSV (`DriveLetter`, `Url`, optional `Label`); dry-run by default, `-Apply` to actually map
 - No stored credentials — relies on the signed-in user's existing tenant session (same as browser WebDAV access)
 
+#### Temp Disk & Pagefile (Azure / AVD)
+
+Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD session host in place, and keep the pagefile on it.
+
+| Script | Doel |
+|---|---|
+| [`Init-TempDisk.ps1`](scripts/Device/TempDisk/Init-TempDisk.ps1) | Restore the temp disk as `D:` and configure the pagefile on it |
+| [`Register-InitTempDiskTask.ps1`](scripts/Device/TempDisk/Register-InitTempDiskTask.ps1) | Install that script on the device and run it at every boot as SYSTEM |
+
+- The temp disk is wiped on every deallocate, resize or host move — and Windows reads the pagefile configuration at boot, so a pagefile on a drive letter that is not there at boot is never created and the machine pages on `C:` again
+- Restores the volume (RAW disks only — a disk that still carries partitions is reported, never formatted), moves an optical drive off `D:` when it is in the way, then points the pagefile at `D:\pagefile.sys` and removes the entry for every other drive
+- Windows only reads that configuration at boot, so `-RestartIfNeeded` (what the boot task uses) restarts the machine once when that is the only thing left - never after a failed run, never while someone is signed in, and at most once an hour. The countdown only applies when someone is signed in to see it; at boot it restarts within seconds
+- `-CheckOnly` reports without changing anything (exit code `2` = work is due); `-WhatIf` walks the whole flow; `-Quiet` keeps a healthy boot silent
+
 ---
 
 ### 🔧 Custom Tools
@@ -528,6 +605,13 @@ Veelgebruikte NinjaOne script parameters:
 - Event logs, DISM component store (`/StartComponentCleanup /ResetBase`)
 - Application & system logs: dynamic scan of entire C:\ for `logs`/`log`/`logging` folders
 - Dry-run by default; use `-Apply` to delete. Per-category summary with space freed
+
+**Repair-AppxPackageStore.ps1** — Repair AppX packages (Teams, new Outlook, any other) that fail with `0x80070490` / "Deployment Register operation ... from:  (AppxManifest.xml)":
+- Diagnoses registrations whose files are gone, provisioned copies without files, and orphaned `AppxAllUserStore` entries (no profile, no files, no manifest)
+- On FSLogix hosts reads the `Microsoft-FSLogix-Apps` errors: which exact version the profiles ask for against what this host provisions, the FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, and AppX install policies
+- Lists **every** app that failed to install, update or register in the last `-Days` days (AppX deployment log + FSLogix log), with the meaning of each error code
+- Repairs in a fixed order — deprovision, re-register, remove, then back up every registry key to `.reg` before removing it — and reads everything back; `-Provision` puts Teams / new Outlook back for all users with Microsoft's own installer, or from winget with `-UseWinget`; `-WingetId` does the same for any other app
+- `-CheckOnly` changes nothing; with `-Name '*'` system/framework packages and Deprovisioned markers are never touched
 
 #### DNS Management
 
@@ -600,6 +684,7 @@ M365-Scripts/
     │   ├── Set-Calendar-rights.ps1
     │   ├── Set-Distributionlist-dynamic-static.ps1
     │   ├── Move-InboxToArchive.ps1
+    │   ├── Restore-MailboxMessages.ps1  ← put back mail moved/deleted on a date, and who did it
     │   ├── Test-CalendarPermissions.ps1
     │   ├── Get-CalendarMappings.ps1  ← where each calendar is mapped in Outlook, next to the rights behind it
     │   ├── Test-MailboxPermissions.ps1
@@ -645,6 +730,7 @@ M365-Scripts/
     │   ├── Invoke-WindowsCleanup.ps1    ← temp, cache, WU, DISM, browser, event logs
     │   ├── Clear-TempFiles.ps1
     │   ├── Remove-OemBloatware.ps1      ← HP/Lenovo/Dell + generic Store bloatware removal
+    │   ├── Repair-AppxPackageStore.ps1  ← repair AppX 0x80070490 (orphaned store entries, FSLogix replay)
     │   ├── Test-OpenVpnDiagnostics.ps1  ← OpenVPN Connect diagnostics
     │   ├── Update-TeamsClient.ps1       ← update new Teams + meeting add-in when a newer build exists
     │   ├── Update-TeamsClient.md        ← how that script decides, step by step
@@ -657,6 +743,10 @@ M365-Scripts/
     │   ├── DriveMapping/
     │   │   ├── readme.md
     │   │   └── New-CloudDriveMapping.ps1   ← map SharePoint/OneDrive libraries to drive letters (WebDAV)
+    │   ├── TempDisk/
+    │   │   ├── readme.md
+    │   │   ├── Init-TempDisk.ps1              ← restore the ephemeral temp disk as D: and put the pagefile on it
+    │   │   └── Register-InitTempDiskTask.ps1  ← install that script and run it at every boot as SYSTEM
     │   └── Time sync/
     │       ├── readme.md
     │       └── Restart-Time-Sync.ps1
@@ -699,6 +789,9 @@ M365-Scripts/
     │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
     │   ├── Search-SharePointContent.ps1 ← same, tenant-wide via Graph app-only: delta + /permissions, sharing links and guests (files/folders)
     │   ├── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   ├── Trace-SharePointFile.ps1     ← where did a file go: renames, moves, copies, deletes (incl. via a folder) from the audit log, in Brussels time
+    │   ├── Revoke-SharePointUserAccess.ps1 ← take one user's access away at every level, sharing links included (reports unless -Apply)
+    │   ├── Test-SharePointAccessScripts.ps1 ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── readme.md
     │       ├── Petsolutions-SharePoint-Handleiding.md ← end-user guide (NL) to hand to the customer
@@ -790,6 +883,20 @@ When adding new scripts:
 4. Place the script in the appropriate workload folder
 5. Add it to `menu.ps1` and update this readme
 6. Update `Version History` in this file for every functional or structural change (required), including changes requested or applied via Copilot/AI assistant
+7. Write the change in all three readme languages (`readme.md`, `readme.nl.md`, `readme.fr.md`)
+
+**What updates itself.** `scripts/INDEX.md`, the language switcher and breadcrumb at the top of every readme, and the link check are kept current automatically — you do not run them by hand:
+
+| When | What runs |
+|------|-----------|
+| You commit | The git hook [`.githooks/pre-commit`](.githooks/pre-commit) regenerates the index and the readme headers, adds them to the commit, and stops the commit on a broken link. It warns when an English readme changed without its Dutch/French version — ask Claude to translate |
+| Claude Code edits a file | A hook in [`.claude/settings.json`](.claude/settings.json) does the same in the background after every edit, and before Claude finishes it checks that changed readmes were translated and changed scripts were documented |
+
+Turn the git hook on once per clone:
+
+```powershell
+git config core.hooksPath .githooks
+```
 
 ---
 
@@ -802,6 +909,265 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-30 (12)
+| Change |
+|--------|
+| Fixed `Request_UnsupportedQuery: Unsupported or invalid query filter clause specified for property appId` at startup, introduced by the previous commit. Moving the role list out of the shared block into `\` put it **above** the well-known application ids it is built from, so every `ResourceAppId` was empty and the lookup filter became `appId eq ` |
+| The constants now sit above the role list in each script rather than inside the shared block, which is where they have to be if the role list is going to use them |
+| The parser cannot catch a variable used before it is assigned, so the test now checks the order directly: the application ids must precede the role list, and the role list must precede the shared block. Also proved by executing each scripts prologue and confirming every role resolves to a real GUID |
+
+### 2026-09-30 (11)
+| Change |
+|--------|
+| `scripts/SharePoint/Revoke-SharePointUserAccess.ps1` reported a real, enabled account as `Not found in Entra ID`. The temporary app was never granted Graph `User.Read.All` — `GroupMember.Read.All` does not allow reading an arbitrary user object — so `GET /users/{upn}` came back `403`, and the catch treated that as the user not existing |
+| The same mistake as before in a new place: being refused a lookup is a different fact from the thing not being there, and only one of them is safe to shrug at. It now stops with the missing permission named. That matters beyond the wrong message — without the user resolved, the Entra groups that also grant access are never listed, and that list is the half of the report saying what this script **cannot** revoke |
+| Added `User.Read.All` to the roles the revoke script asks for. To keep the report at least privilege, the shared block no longer hardcodes the role list: each script sets `$RequiredAppRoles` before it, and the token-role check validates whatever that script asked for rather than a fixed pair. The report still does not ask for `User.Read.All`, because it expands groups and never reads a user object |
+| Verified with 63 checks (10 new): the revoke script asks for `User.Read.All` and the report does not, both still ask for the three they share, the token check follows the per-script list, a `403` on the lookup is fatal and names the permission, and a genuine absence still only warns |
+
+### 2026-09-30 (10)
+| Change |
+|--------|
+| A live tenant-wide run of `scripts/Reporting/Get-SharePointPermissionsReport.ps1` showed the select-ladder rediscovering the same answer on every site: three system lists (`Galerie van thema''s`, `Galerie met basispagina''s`, `Bibliotheek met onderhoudslogboeken`) rejected the same fields on all 131 sites, each costing a wasted round trip and a log line |
+| Which fields a list accepts is a property of its **template**, not of the site, so the outcome is now learned once per template and reused. A simulation of the observed pattern over 131 sites puts it at half the round trips (1048 to 528) with every template still landing on exactly the rung it accepts, so no field is lost to the shortcut |
+| The log says it once per template instead of once per site — the `[SKIP]` for the User Information List too, which appeared on all 131. Roughly 350 repeated lines removed, which is what was hiding everything else |
+| Verified by simulating the ladder across 131 sites with and without the memory: fewer calls, identical resolution per template, and a template that accepts nothing still terminates instead of looping |
+
+### 2026-09-30 (9)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointPermissionsReport.ps1` failing on **every** site with `Cannot validate argument on parameter 'Kind'. The argument "A" does not belong to the set "U,G"`. Adding the consolidated site-access view taught the checkpoint to *read* a third key kind (`A`) but never widened the `ValidateSet` on the function that *writes* one, so the first web threw and each of the 131 sites reported a failure |
+| Introduced alongside the `Toegang` sheet and not caught because the report's test suite lived in a session scratchpad that was cleared between sessions — the cost of that loss, exactly as flagged at the time |
+| Added a check for the whole class rather than this one case: every kind written must be in the `ValidateSet` **and** be read back by the resume switch, and every allowed kind must actually be used. Proved it fires by running it against both broken variants — the kind missing from the set, and a kind written but never read, which would silently lose resume state instead of throwing |
+| No data was lost. The failed webs wrote error rows carrying their `UnitKey`, and the supersede logic drops those once the web succeeds, so a plain re-run cleans up after itself |
+
+### 2026-09-30 (8)
+| Change |
+|--------|
+| Hardening pass on `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, driven by reading the code for the failure modes a destructive script has rather than the ones a report has. Three were real |
+| **Matching a guest could have revoked the wrong person.** The fallback lookup compared with `-like "*needle*"`, and `an@contoso.com` is a substring of `jan@contoso.com`. Replaced with exact comparison against the UPN, the mail address, the claim suffix and a properly decoded guest login (`jan_partner.com#ext#@tenant` back to `jan@partner.com`, splitting on the last underscore so a local part may contain one). When two different accounts answer to the same address the site is left untouched and the run stops naming both — choosing is the operator's call, not the script's |
+| **The audit CSV was written once, at the end.** A run that revoked two hundred things and then died would have left no record of what it removed, which is the one thing a script like this must never do. Rows are now appended as they happen, through the shared helper that retries a locked file and stops the run rather than dropping a row |
+| **A `404` on a removal counted as a failure.** It means the grant is already gone, which on a second pass is the normal outcome — a clean re-run would have reported failures. Recorded as `AlreadyGone` instead |
+| A failed site collection administrator removal is now loud and counts as a failure: that role reaches every scope in the site, so every other removal there is cosmetic while it stands. The summary says so explicitly rather than reading like a success |
+| `-WhatIf` now takes the same branch as a dry run, so it records `WouldRevoke` instead of `Skipped`, which had implied someone declined a prompt |
+| `Test-SharePointAccessScripts.ps1` grew from 27 to 50 checks: guest-login decoding including an underscored local part, exact matching against the near-misses a substring test would have accepted (shorter, longer, suffixed domain, another tenant's guest, empty), the audit CSV existing and holding every row mid-run, and a 404 reading as already gone. **Still not verified against a live tenant** |
+
+### 2026-09-30 (7)
+| Change |
+|--------|
+| Removed a dead `-Restart` parameter from `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. It was declared and its help promised it would `discard any existing checkpoint and start over instead of resuming` - but the script has no checkpoint and no resume, so the switch did nothing and the help described behaviour that does not exist. Found by comparing the parameter block against the comment-based help and the folder readme rather than assuming they agreed |
+| Replaced it with a `.NOTES` entry saying why there is deliberately no resume: revoking is idempotent, so a second run finds only what the first did not remove. Re-running after an interruption is both the recovery and the verification, and safer than resuming a partly applied destructive operation from a saved position |
+| Verified all 17 remaining parameters appear in the comment-based help and the folder readme, that `Get-Help` no longer mentions `-Restart`, and that the 27 checks in `Test-SharePointAccessScripts.ps1` still pass |
+
+### 2026-09-30 (6)
+| Change |
+|--------|
+| New `scripts/SharePoint/Trace-SharePointFile.ps1`: finds where a OneDrive or SharePoint file went — renamed, moved, copied, deleted, restored — by whom and when, from the Unified Audit Log. Before, this meant clicking through the Purview audit search by hand, where a rename chain or a renamed parent folder is easy to miss |
+| The trail is followed by item ID and by the path a file was renamed or moved to, so `A → B → C` ends at C. Folder renames, moves and deletes are replayed onto the file's path, because SharePoint writes no record per file for those |
+| Times are shown in Brussels time (`Europe/Brussels`, with the UTC offset, summer/winter time handled) and the period is given as Brussels wall-clock time in day-first notation; a bare end date includes the whole day |
+| Robustness: the window is read per day, a slice with more than 50,000 records is split (down to 15 minutes), a failing or inconsistent search (`ResultIndex -1`) is retried with backoff, and duplicate records are dropped. `menu.ps1` has it under key `O` |
+| Verified: syntax check; runs in PowerShell 7 and Windows PowerShell 5.1 against a **mocked** `Search-UnifiedAuditLog` — rename chain, copy reported but not followed, folder rename and folder recycle replayed onto the file, old URL and `/:w:/r/` sharing link, `-SiteUrl` not matching a neighbouring site with the same prefix, the DST switch on 29 March 2026 (+01:00 → +02:00), and the 50,000-record split. **Not yet run against a live tenant**; the audit field layout (`SourceRelativeUrl`, `DestinationFileName`, `ListItemUniqueId`) follows Microsoft's documented schema |
+
+### 2026-09-30 (5)
+| Change |
+|--------|
+| Documentation now keeps itself current. `.claude/hooks/sync-docs.ps1` regenerates `scripts/INDEX.md` and the readme headers and runs the link check; it is called by a git pre-commit hook (`.githooks/pre-commit`, for changes made by hand) and by Claude Code hooks in `.claude/settings.json` (after every edit, in the background). Before, all three had to be remembered — and `INDEX.md` had already fallen two scripts behind |
+| Before Claude finishes, a Stop hook checks that an English readme change was also made in Dutch and French, and that a changed script has its folder readme touched; the git hook warns about the first, because a hook cannot translate. A broken link stops the commit |
+| Verified: every mode run against this repository — a clean edit is silent, an injected broken link exits 2 with the file and target, an untranslated readme and an undocumented script each block Stop once (and not a second time), and the Claude hook was seen firing after an edit. The pre-commit hook ran on this commit |
+
+### 2026-09-30 (4)
+| Change |
+|--------|
+| Every readme now exists in three languages: `readme.md` (English, still the main version), `readme.nl.md` (Dutch) and `readme.fr.md` (French) — 66 folders, the root readme including its full Version History. The switcher at the top of each page goes to the same page in the other language, and the breadcrumbs stay within the language you are reading |
+| Script-name headings (`### Set-UserManager.ps1`) are not translated, so every `#…ps1` anchor is the same in all three languages; other headings are, with their in-page links adjusted. Parameter names, commands, paths and the literal strings a script prints or writes (Dutch Excel tab names, error messages) stay as they are in every language |
+| `Reporting/readme.md` and part of `SharePoint/readme.md` were Dutch in an English set; they were made English first, and the Dutch versions keep the original wording |
+| The local-admin password that appears in plain text in `scripts/Deployment/readme.md` and in this Version History is **not** copied into the Dutch and French versions; there it reads as omitted |
+| `.claude/CLAUDE.md` now requires a change to a readme to be made in all three languages, followed by `Update-ReadmeHeader.ps1` |
+| Verified with `Test-MarkdownLinks.ps1`: 204 markdown files, every internal link resolves; `Update-ReadmeHeader.ps1 -Check` reports every header current. The translations were checked for structure (sections, tables, line counts against the English), not proofread line by line by a native speaker |
+
+### 2026-09-30 (3)
+| Change |
+|--------|
+| New `scripts/Startup/Update-ReadmeHeader.ps1` writes the two lines at the top of every readme: a language switcher (`English · Nederlands · Français`) and the breadcrumb back up the tree, each level linking to its readme in the current language. Hand-kept, those relative paths are what breaks when a folder moves; generated from the folder a readme sits in, they cannot. `-Check` exits 1 on a stale header or a missing language version |
+| `scripts/INDEX.md` regenerated: besides the new script it now also lists `Revoke-SharePointUserAccess.ps1` and `Test-SharePointAccessScripts.ps1`, which had been added without rerunning `Update-ScriptIndex.ps1` |
+| Verified: syntax check clean; run in PowerShell 7 and a `-Check` run in Windows PowerShell 5.1 against this repository — 66 folders, 198 readmes, every header current afterwards |
+
+### 2026-09-30 (2)
+| Change |
+|--------|
+| Every readme now starts with a breadcrumb (`M365-Scripts › scripts › Intune › Desktop`) linking each level back up. Before, 40 of the 66 folder readmes had no way back to their parent except the browser's back button |
+| The root readme opens with a `## Folders` table linking every workload folder, so the repository can be browsed from the front page down instead of via `scripts/readme.md` only |
+| Subfolders are listed under a `## Folders` heading everywhere. `Device/`, `Network/`, `Reporting/` and `SharePoint/` mixed them into the Scripts table, `Intune/Desktop/` and `Custom Scripts/Intune/Desktop/` used a `Contents` table, `TenantOnboarding/` said `Subfolders` and `LegacyUtilities/` had no heading at all |
+| Verified with `Test-MarkdownLinks.ps1`: 1,072 internal links across 72 markdown files resolve. Documentation only; no script changed |
+
+### 2026-09-29 (11)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` provisions the **exact** Teams / Outlook build FSLogix fails on. A production host showed Outlook failing 196× in a week — 186× `0x80070490` — for 1.2026.902 and 915 while the host provisioned 818 and the files of both requested builds were on disk. The earlier verdict ("with a current FSLogix the gap is harmless, no action needed") was wrong, and so was chasing it with the installers, which only deliver an older last-known-good build |
+| The MSIX for one exact build is on Microsoft's CDN at the versioned URL winget's manifests use (`res.cdn.office.net/.../v2/<version>/Microsoft.OutlookForWindows_x64.msix`, `teamsinstaller.public.onecdn.static.microsoft/production-windows-x64/<version>/MSTeams-x64.msix`) — checked to answer for Outlook 812/818/902/915 and Teams 26198/26225/26246. `-Provision` now takes the newest build FSLogix failed on, downloads it, checks the Microsoft signature, provisions it and reads the provisioned version back; the installer is skipped for that package |
+| Error codes are decoded with Windows' own message for every Win32 code instead of a short hand-written list, one code per line: `0x80073D19` turned out to be "An error occurred because a user was logged off" — harmless — and is now labelled as such |
+| Verified in PowerShell 5.1: the scenario from that host (FSLogix asking 902 and 915, host at 818) yields 915 with the right URL, a **real** download of that 32 MB MSIX with a valid Microsoft signature, the provisioned version read back (with `Add-AppxProvisionedPackage` mocked), and no target once the host has 915; earlier scenarios unchanged. **Not run on the host itself** |
+
+### 2026-09-29 (10)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Copilot -Provision` now installs the **new**, unified Microsoft Copilot app instead of the old Microsoft 365 Copilot app. The installer added in (9) delivers the old AppX package, which the unification then has to move over; the new app is installed machine-wide by Edge Update. The documented way is used: `Install{C50565E9-...}` = 5 (Force Installs), `UpdaterExperimentationAndConfigurationServiceControl` = 1 (which Force Installs requires) and `CopilotUnificationAllowed{...}` = 1 under `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate`, written after a `.reg` backup of that key; then Edge Update's machine task is started and the run waits up to 10 minutes for the app under `EdgeUpdate\Clients`. If it does not appear the old installer is the fallback. `Install` = 0 is never overridden. Diagnosis and verification now count Copilot as present only when the new app is |
+| `-Name` understands `teams`, `outlook` and `copilot`, so new Outlook and the new Copilot app on the pool is `-ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision`. The menu (`R`) takes the same words |
+| Found while testing, fixed: under Windows PowerShell 5.1 with `ErrorActionPreference = Stop`, `reg.exe` writing to stderr is a terminating error, so a single failed `.reg` backup would have ended the whole run instead of leaving that key alone. The backup also takes `HKLM:`/`HKCU:` paths now |
+| Verified in PowerShell 5.1 and 7: the shorthands (five combinations), the Edge Update install against a mocked policy key and task — values written, backup made, the app "appearing" is picked up — and `Install` = 0 left untouched; the earlier store scenario unchanged. **Not run on a session host**: whether Edge Update installs the app within the 10 minutes there is untested |
+
+### 2026-09-29 (9)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Copilot` diagnoses and restores Copilot. Step 1d reports the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`) as registered and provisioned, the unified Microsoft Copilot app that Edge Update installs since the September 2026 unification (read from `EdgeUpdate\Clients\{C50565E9-...}`), the Edge Update version against the 1.3.253.25 it needs, and every policy that keeps Copilot away — `Install` / `Uninstall` / `Update{C50565E9-...}` under `Policies\Microsoft\EdgeUpdate` (with Force Installs overriding Uninstall, as documented), the unification pause, and Windows' `WindowsCopilot` / `WindowsAI` policies machine-wide and per signed-in user. Policies are reported with path and value and fail the run, but are never changed: they come from GPO or Intune |
+| With `-Provision` Copilot is installed for all users with Microsoft's documented `M365CopilotDesktopInstaller.exe --quiet --start -p` from `go.microsoft.com/fwlink/?linkid=2325486` — checked today to deliver a Microsoft-signed `xpdBootstrapper` 16.0.19305 — and accepted when either the AppX package is provisioned or the unified app appears under Edge Update. `-Copilot` also puts both packages' Deprovisioned markers in scope, which is what a debloat tool leaves behind. winget has only an `.exe` for it, so `-UseWinget` falls back to the installer. The pool table gained a Copilot column; the menu (`R`) takes `copilot` as the package answer |
+| Renumbered the previous entry to (8): it and the SharePoint entry below were both committed as (7) the same afternoon |
+| Verified in PowerShell 5.1 and 7: step 1d against this machine's real registry and packages, and against mocked Edge Update policies (Uninstall alone fails the run, Uninstall with Force Installs does not); the orchestrator's pool table with the new column; the installer download and its signature. **Not run on a session host**: the installer's `-p` provisioning and the unified app appearing afterwards are untested |
+
+### 2026-09-29 (8)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` runs across a pool with `-ComputerName lem-avd-4,lem-avd-5,lem-avd-6` (optionally `-Credential`): it copies itself to `C:\IT\AppxRepair` on each host over PowerShell remoting, runs there with the same parameters — the host's own output streams back — and ends with one table across the pool (exit code, FSLogix build, provisioned Teams / Outlook) that names any difference between hosts. A repair is confirmed once for the whole pool, because a remote session cannot answer a confirmation prompt reliably. Wired into the menu (key `R` asks for the hosts) |
+| The verify step's advice was wrong. After a live `-Provision` run it said Teams (26225) and Outlook (1.2026.818) were "still older than the 26246 / 902 profiles ask for - bring the other hosts to the same build". But no host is ahead: both apps update themselves per user, and Microsoft's installers provision a last-known-good build that is behind that, so the profile will always be ahead of every host and provisioning newer only lasts until the next update. What decides whether it hurts is FSLogix: from 2210 HF4 (Teams) / 25.06 (Outlook) it registers by family name and the gap is harmless (now reported as OK, exit code 0); on an older build the advice is to update FSLogix. Such a gap no longer counts as something to provision |
+| A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
+| Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
+
+### 2026-09-29 (7)
+| Change |
+|--------|
+| Added `scripts/SharePoint/Revoke-SharePointUserAccess.ps1` — the counterpart to the permissions report. It finds every place one named user holds access and removes it: site collection administrator first (it overrides everything below it, so leaving it would make the rest cosmetic), direct role assignments on sites, sub-sites, lists, folders and single files, SharePoint group membership, and the `SharingLinks.*` groups that carry "Anyone with the link" and "Specific people". Reporting is the default; nothing changes without `-Apply`, and every run writes a CSV of what was found and what happened to it |
+| It deliberately refuses two things and says so loudly. An Entra ID group grant is not revoked — the group *is* the grant, and removing the user from SharePoint would leave access in place while looking like it was closed; the group is named in the CSV under `Action = CannotRevoke` so offboarding is visibly two steps. A grant to `Everyone` is left alone for the reverse reason: removing it revokes access for the whole tenant rather than for this person |
+| The app-only authentication and SharePoint REST layer is shared with the permissions report, byte for byte, delimited by `SHARED BLOCK START/END`. It took four live runs against a tenant to get right, and a second copy that quietly drifts is a correctness risk in the script that deletes permissions. To make that shareable the report's banner moved above the block and the temp app name now comes from `$TempAppNamePrefix`; the report's behaviour is unchanged |
+| Added `scripts/SharePoint/Test-SharePointAccessScripts.ps1`, which asserts the two copies are identical (printing the first differing line when they are not) and drives the revocation funnel for real: a dry run records its intent and executes nothing, `-Apply` executes and records, a failure lands in the audit trail instead of vanishing, and the refusals above stay refused. 27 checks, all passing, runnable from any directory |
+| Added the menu entry (key `W`) and documented both scripts in the SharePoint folder readme, the repository tree and this category list. Verified every `docs` anchor in that readme resolves |
+
+### 2026-09-29 (6)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` no longer tries to re-register a package that has been superseded. The first live run tried `aimgr_0.20.61.0` in step 3 and got `0x80073D06` ("a higher version 0.20.62.0 of this package is already installed"): an old version whose status is not Ok while a newer one of the same package sits next to it is not damage but Windows waiting to remove it, and re-registering it can never succeed. The diagnosis now compares versions per package name, architecture and resource id, reports these as *Superseded* in one grey line, and leaves them out of the repair count; step 3 also treats a `0x80073D06` that turns up anyway as "left for Windows" rather than a warning |
+| Verified offline in PowerShell 7 and 5.1 with that exact pair (0.20.61.0 `Modified` next to 0.20.62.0 `Ok`): reported as superseded and not counted, while a genuinely damaged package in the same run is still picked up for re-registration. Not yet re-run on the host where it happened |
+
+### 2026-09-29 (5)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` can take Teams and new Outlook from winget (`-UseWinget`): `winget download` of `Microsoft.Teams` / `Microsoft.Outlook`, whose manifests point at the MSIX on Microsoft's CDN, then `Add-AppxProvisionedPackage` with any dependencies winget brought, so the package lands for all users rather than only for whoever ran `winget install`. Every file must carry a valid Microsoft signature. winget's manifests lag behind Microsoft's installers (checked today: Teams 26198 against the 26246 profiles ask for, Outlook 1.2026.812 against 902), so the installers stay the default and the run warns when winget's build is older than what the profiles ask for. `-WingetId` provisions any other app the same way |
+| It now lists every app that fails, not only the ones in the package store: step 1c reads the AppX deployment log and the FSLogix Apps log over `-Days`, grouped per package, with the error codes named (`0x80073D02` in use, `0x80073CF6` registration failed, ...), the versions asked for and whether this host has their files; `0x80070490` first, top 15 |
+| Found while testing, fixed: `Get-WinEvent` throws a terminating error for a provider that is not registered — any machine without FSLogix — which `-ErrorAction SilentlyContinue` does not catch, so the FSLogix check would have aborted the run there; all event reads go through one wrapper now. And the winget progress filter held two non-ASCII characters, which Windows PowerShell 5.1 reads as ANSI in a file without BOM and then fails to parse — the whole script would not have run from NinjaOne. The file is pure ASCII again, checked |
+| Verified in PowerShell 7 and 5.1: the failing-apps overview against this machine's **real** AppX log (20 packages, codes translated, capped at 15); a **real** `winget download` of `Microsoft.Outlook` (32 MB MSIX, hash verified by winget, signature by the script) through to a mocked `Add-AppxProvisionedPackage`; and the earlier mocked store scenario, unchanged. Provisioning itself and the Teams download (271 MB) were not run here |
+
+### 2026-09-29 (4)
+| Change |
+|--------|
+| New `scripts/Device/Repair-AppxPackageStore.ps1`: repairs AppX packages that fail with `0x80070490` and an empty path ("Deployment Register operation ... from:  (AppxManifest.xml)"), for any package — the same error came back for `Microsoft.OutlookForWindows` on a host where only Teams had a repair, and `Update-TeamsClient.ps1 -RepairAppxStore` is scoped to `MSTeams` by design |
+| The errors on that host were logged by `Apps (Microsoft-FSLogix-Apps)`, which is a different cause than a damaged store: FSLogix saves each user's packages by exact version in `AppxPackages.xml` and replays them at sign-in (`InstallAppxPackages`, default on), so a host that provisions another build — or none — answers `0x80070490`. The script reads those events and compares the version the profiles ask for with what the host provisions, checks the FSLogix build against the first releases that register Teams (2210 HF4) and Outlook (25.06) by family name, and with `-Provision` puts Teams / new Outlook back for all users with Microsoft's own installer (`teamsbootstrapper.exe -p`, Outlook `Setup.exe --provision true --quiet --start-`; both links checked to resolve to Microsoft's CDN, both signature-checked before running) |
+| The store repair generalises the Teams one and adds what makes it safe to run on a whole store: every registry key is exported to a `.reg` backup before it is removed, and not removed when the backup fails; with a wildcard `-Name`, system and framework packages are reported but never touched and Deprovisioned markers (how bloatware removals are remembered) are left alone; a user registration also counts as orphaned when its package has no files anywhere, not only when its SID has no profile. Editing `StateRepository-Machine.srd` or `AppxPackages.xml` was researched and deliberately left out — both unsupported |
+| Wired into `menu.ps1` as Device key `R` (diagnose unless you confirm the repair; asks separately about provisioning), documented in the Device readme |
+| Verified offline in PowerShell 7 and 5.1 with mocked AppX cmdlets, FSLogix events and a scratch `AppxAllUserStore` in HKCU: the empty-path Teams package is found as a ghost, its user and machine entries as orphans, an Outlook entry for a SID without profile as orphan, the older provisioned Teams and the missing Outlook as needing provisioning, a framework ghost and a Deprovisioned marker are left alone with `*` and included when named, and the `.reg` backup is written. That run also caught `-Name A,B` arriving as one string through `powershell.exe -File` (and through the script's own relaunches), now split. **Not run on a live host**: no elevation or AVD host was available here, so the removals, the registry edits and both installers have not been exercised for real |
+
+### 2026-09-29 (3)
+| Change |
+|--------|
+| `Restore-MailboxMessages.ps1` now handles "everything from this date until now" as a first-class case: `-After` gained the aliases `-From` and `-Since`, and the menu entry (`L`) asks whether to restore only that day or everything since. The window itself already allowed it, but the audit search ran as one query over the whole window, and a single search session stops at 50,000 records tenant-wide — over a few weeks that silently dropped actions on the mailbox being restored |
+| The audit log is now searched one day at a time, each day in its own session with paging, and only records that mention this mailbox are kept in memory. A day that alone exceeds 50,000 records is named in a warning |
+| A long window can reach past what the mailbox still keeps, which would read as "nothing was deleted". The run now warns when the window starts before the mailbox's `RetainDeletedItemsFor` (14 days by default) and the mailbox is not on hold, and when it starts more than 180 days ago, beyond the usual audit retention |
+| Verified offline in PowerShell 7 and 5.1: `-Since` binds to `-After`; a mocked `Search-UnifiedAuditLog` over a 2.6-day window was called per day with UTC boundaries, the last slice ending at the window's end, day one paged across two calls in one session, and only this mailbox's records kept. The retention warning is **not** exercised - it needs a live `Get-Mailbox` |
+
+### 2026-09-29 (2)
+| Change |
+|--------|
+| `Restore-MailboxMessages.ps1` no longer needs the Mailbox Import Export role to bring deleted mail back. The first real run stopped at "Get-RecoverableItems is not available" and skipped every deleted message, while the role is in no role group by default — so on most tenants the deleted part simply did nothing |
+| Without the role the run now switches to Graph and restores **everything** deleted in the window, not only what the audit log saw: every message in Deleted Items and Recoverable Items\Deletions whose modification time falls in the window goes back. Audited deletions (`MoveToDeletedItems`, `SoftDelete`, which Exchange audits for the owner by default) go to the folder the record says they left, with the actor matched exactly by MessageId; the rest go to the Inbox. A message deleted *out of* Deleted Items goes to the Inbox too, because putting it back in Deleted Items is not recovering it. Hard-deleted items (Purges) are out of Graph's reach and reported as `Unreachable` instead of silently missing |
+| Message lookups now also search `recoverableitemsdeletions`, which `/messages` does not cover, so a message that was moved and then deleted is found in either part. The moved and deleted parts share one lookup / move / report path instead of two copies |
+| Verified offline in PowerShell 7 and 5.1 against a mocked Graph: moved-then-soft-deleted goes back to the original subfolder, deleted-from-Deleted-Items goes to the Inbox, unaudited items from both folders are restored, an item deleted five days earlier is left alone, a hard delete is reported `Unreachable`, and preview and `-Apply` issue exactly the expected moves. **Not run against a live tenant**; in particular whether Graph allows a move out of `recoverableitemsdeletions`, and whether a move changes `lastModifiedDateTime`, are untested |
+
+### 2026-09-29
+| Change |
+|--------|
+| New `scripts/Exchange/Restore-MailboxMessages.ps1`: put back the messages that were moved or deleted in one mailbox on a given day, and say who did it. There was no way back from a bad archive run or a mass delete short of restoring by hand in Outlook, and no answer to "who did this" without writing an audit log query from scratch |
+| Deleted messages go back through `Get-/Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges), one `EntryID` at a time, filtered on the moment of deletion — Exchange knows the original folder itself. After an `-Apply` the folders are read again, and anything still there is reported as `NotRestored` instead of trusting the cmdlet's silence |
+| Moved messages have no such memory: neither Graph nor Exchange records where a moved message came from. The Unified Audit Log does, so every audited `Move` is traced to the **first** folder the message left that day, located over Graph by Internet MessageId and moved back through `$batch`. Folders are matched on their path as the audit log writes it, which is in the mailbox's own language (`\Postvak IN\Projecten`). Moves out of Deleted Items or Recoverable Items are skipped, because those were restores and reversing them would delete the message again |
+| The same audit records name the actor — account, owner/delegate/admin, client (Outlook, OWA, Graph app with app ID), IP — per message in the CSV, as a grouped "who moved / deleted what" table on screen, and as a raw `_Audit.csv`. Deletions are attributed by subject and nearest time, since recoverable items carry no MessageId. The run also lists which of the four actions are not audited on the mailbox, because by default the owner's own `Move` is not, and a missing record would otherwise read as "nobody did it" |
+| Archive items without an audit record (e.g. after `Move-InboxToArchive.ps1`) are listed by modification time and only moved to the Inbox with `-UnauditedArchiveToInbox`, since reading or flagging also changes that time. Graph access reuses the REST-only three-route pattern of `Remove-PhishingMessage.ps1`, so it runs next to the Exchange session without the MSAL clash. Added to the Exchange submenu as `L` (preview first, then `-Apply`) |
+| Verified offline only, in PowerShell 7 and Windows PowerShell 5.1: syntax check, audit-record parsing against fabricated records (mailbox filter, UTC to local time, logon types, client labels, subject/time attribution), and the whole moved-message path against a mocked Graph — a chain of moves going back to the first folder, Dutch folder names, a user's restore left alone, an already-returned message skipped, an audited Archive item kept out of the unaudited list, and the resulting move requests. **Not yet run against a live tenant**: the exact output properties of `Get-RecoverableItems`, how it interprets the filter times, and whether the audit records carry `InternetMessageId` for every client are all untested |
+
+### 2026-09-28 (6)
+| Change |
+|--------|
+| The restart `-RestartIfNeeded` triggers waited 60 seconds on a host where nobody could be watching. The countdown exists to warn people, so it now only applies when there are people: with someone signed in it is `-RestartDelaySeconds` and `shutdown /a` stops it; with nobody signed in - the normal case at boot, and the guaranteed one on a session host whose pool is set to drain - it restarts within seconds. A few seconds are kept so the run's own log line is written before the shutdown starts |
+| Considered draining logons from inside the guest (`change logon /drainuntilrestart`) to close the window between the task starting and the restart, and dropped it: a host being restarted this way already has its pool on drain, so the guest-side switch would only duplicate what the pool guarantees - and it would leave logons blocked on any run that crashed before re-enabling them |
+| Verified that `change.exe` and `chglogon.exe` exist on this Windows 11 build and that `change logon /query` reports "Session logins are currently ENABLED" while exiting 1, which is why the idea was measured before being dropped rather than after |
+
+### 2026-09-28 (5)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` can now repair the host instead of only diagnosing it. A session host where every route answered `0x80070490` had an `AppxAllUserStore` full of entries Windows can no longer resolve, and the honest advice at that point was "redeploy" — which is not what anyone wants to hear about a machine that is otherwise fine |
+| `-RepairAppxStore` does it in two steps. A package whose files are still on disk is re-registered from its own manifest (`Add-AppxPackage -Register`), which rebuilds the store's knowledge of it and usually makes the ordinary removal work again. What survives that is removed key by key: registrations under a SID with no profile on this host (also under `EndOfLife` and `DeferredRemoval`), a machine-wide `Applications` entry whose manifest is gone, and the `Deprovisioned` marker that refuses the provision outright. Each key is named with its full registry path before it goes, and nothing outside MSTeams is ever touched |
+| Preflight reports those orphans whether or not the switch is given, so `-CheckOnly` is the diagnosis and the repair is a separate decision — the same shape as `-ClearOrphanedAddInRegistration` for Windows Installer |
+| `-UseWinget` attacks it from the other side: winget downloads the MSIX, checking it against the SHA256 in its own manifest, and the bootstrapper provisions that file with `-p -o`. The deployment then has an explicit source rather than a store entry it has to resolve, and the run knows which build it installed. winget's manifest lags the config service — measured at `26198.304.4946.9672` against a `26246` build — and the run says so when it does |
+| Run as System, winget is not on `PATH` at all: its alias is a per-user MSIX shim. It is resolved from `Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*` instead, verified by emptying `PATH` and watching the fallback find it |
+| The store reader was run against this workstation's live `AppxAllUserStore`, where it found two genuine orphans (`S-1-0-0` and a deleted profile's SID under `EndOfLife`), reported none for healthy packages and kept every path inside the store. The **removal** was exercised for real against a store rebuilt under `HKCU`: 9 MSTeams entries, 6 orphaned, all 6 removed, while the healthy registrations, the `Staged` entry, another product's orphan and the dead SID's own key all survived |
+| `winget download` was measured end to end: 271 MB in 23 seconds, no Store account, its own hash check, a valid `O=Microsoft Corporation` signature, the staging folder emptied first and removed after. Against a host whose package store is actually damaged, both switches are **untested** — no machine here has one |
+| The reboot line stopped naming a reason. It said "MSI returned 3010" while three different things set it, and pointed readers at an installer that had never run |
+
+### 2026-09-28 (4)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` was giving advice that could not help. A production session host answered `0x80070490` ("Element not found") for **every** holder of the package, `NT AUTHORITY\SYSTEM` among them, and the script still said to drain the host and sign users out — on a host that was already drained and had nobody on it. A registration the package store cannot find is not a user holding the package |
+| Preflight now says whether a pending removal has anybody left to wait for. `Installed(pending removal)` only completes at a sign-out, so a SID with no profile under `ProfileList` waits for an event that can never happen; those are reported apart from the ones that really are waiting, and only the latter flag a reboot |
+| It also checks the one state nothing recovers from by itself: a package the store lists whose `InstallLocation` is gone, or that has no install location at all. That single line explains the whole failure — every removal answers `0x80070490` because there is nothing to remove, and provisioning the same version answers it too |
+| When the per-user removal answers that code for every holder, the run says so plainly, and the final failure changes its advice with it: not "drain the host", but that `Remove-AppxPackage`, the bootstrapper and DISM all read the same inconsistent store, so none of them can repair it — a pooled session host is redeployed from its image, a personal one is repaired in place |
+| Exercised against the strings that host really printed, plus a live SID from this machine as the contrast case: four orphaned profiles read as orphaned, a real profile still reads as "sign them out", a package with no install location is flagged, and a healthy package stays quiet. The **remediation** is untested — this machine has no damaged package store to try it on |
+
+### 2026-09-28 (3)
+| Change |
+|--------|
+| `Init-TempDisk.ps1` repaired the temp disk and configured the pagefile on it, and then let the machine run the rest of that session without one - Windows reads the pagefile configuration at boot and never re-reads it, so the boot that had to rebuild `D:` is exactly the boot on which the pagefile does not exist. Added `-RestartIfNeeded`, which closes that gap instead of waiting for the next boot |
+| A script that runs at every boot and may restart the machine is a reboot loop waiting to happen, so it only fires when all of this holds: the run finished clean (a failed run never restarts - that would hide the failure behind a reboot), the disk is there, the pagefile is configured on it, and the only thing missing is that this session is not using it |
+| Nobody may be signed in, connected or disconnected. Sessions are counted as one `explorer.exe` per interactive desktop rather than by parsing `query.exe`, whose column headers follow the display language and would read an empty list out of a Dutch session host. `-RestartEvenIfUsersSignedIn` overrides it where the countdown is warning enough |
+| At most one restart per `-RestartCooldownMinutes` (default 60), remembered as a round-trip timestamp under `HKLM:\SOFTWARE\ICTKanon\InitTempDisk` - a locale-formatted timestamp written by one run and read by another is how a cooldown quietly stops working. A second restart for the same thing means the first one did not help, and the run says so instead of repeating it |
+| The restart goes through `shutdown.exe` with a 60-second countdown and the planned "Operating System: Reconfiguration" reason, so anyone on the machine sees it coming, `shutdown /a` stops it, and it is not reported as an unexpected restart |
+| `Register-InitTempDiskTask.ps1` now deploys the task with `-Quiet -RestartIfNeeded`, and says at registration time whether the task may restart the machine. `-ScriptArguments '-Quiet'` leaves the restart out |
+| Numbered the two earlier entries of today: two identical `### 2026-09-28` headings had ended up in the history, which reads as one change split in half |
+| Verified on this machine under PowerShell 5.1 and 7: session detection names the signed-in account (so this machine would refuse to restart), a missing marker reads as `$null`, a marker written and read back parses to a `DateTime` and blocks a second restart inside the cooldown, a 90-minute-old marker allows one, and a corrupt marker degrades to "no marker" rather than throwing |
+| Also measured how a failing `shutdown.exe` reports itself, because the code branches on it: `shutdown /a` with nothing pending answers 1116 and sets `$LASTEXITCODE` in both 5.1 and 7.6 without throwing, so the exit-code branch is the one that runs. The `try` around it stays for `$PSNativeCommandUseErrorActionPreference`, which can turn that into a terminating error on 7.4 and later |
+| **No restart was triggered from this session** and the guards remain unverified against a live Azure VM |
+
+### 2026-09-28 (2)
+| Change |
+|--------|
+| `Update-TeamsClient.ps1` crashed in preflight on any machine where the meeting add-in is registered nowhere: `The property 'Count' cannot be found on this object`. `$x = if (...) { @() }` assigns `$null`, because an empty array written to the pipeline is zero objects — the `@()` has to go around the whole `if`, not inside its branches. Reproduced against the committed version and fixed; all five paths through the reporting function now pass, and the three empty ones provably threw before |
+| A package the AppX stack refuses to remove no longer ends the run. `Remove-AppxPackage -AllUsers` answered `Catastrophic failure` on a session host carrying two `MSTeams` versions, and `-ErrorAction` does not cover a terminating error, so it needed a `try`/`catch`. The run continues and the provision upgrades in place whatever survived — aborting there had left the host with the add-in uninstalled and no Teams put back |
+| The add-in **uninstall** moved from step 6 to step 8, next to the install that replaces it. The sweep had already moved there; leaving the uninstall behind meant any later failure produced the same outcome by a different route. Everything destructive about the add-in now sits with the thing that undoes it |
+| Exit codes are readable. `teamsbootstrapper.exe` answers with an HRESULT, which PowerShell prints as a large negative integer: "exit code -2147023728" says nothing, `0x80070490 - Element not found` says where to look. MSI codes stay plain numbers, and an HRESULT outside the Win32 facility falls back to bare hex rather than inventing a meaning |
+| A failed provision now tries Microsoft's documented machine-wide uninstall (`teamsbootstrapper.exe -x -m`) once and provisions again before giving up, and the failure it raises names the usual cause on a session host: a package held by a signed-in user. **Untested** — that recovery has not yet run on a host that needed it |
+| That failure message then ate its own exit code: `-f` binds tighter than `+`, so formatting a concatenated string applied the format to the last piece only and printed a literal `{0}`. Reported from a live host, where it hid the very code the reader needed |
+| The bootstrapper prints its own verdict, and running it hidden threw that away. `Invoke-Installer` can now capture stdout and stderr, and the bootstrapper's lines are echoed as `bootstrapper:` output. Verified with a process that prints a JSON verdict and exits non-zero; without the switch nothing is captured and no temp files are left behind |
+| Capturing that output then broke every verdict, and only on the runtime that matters: under Windows PowerShell 5.1 a redirected `Start-Process -PassThru` reports no exit code at all unless the process handle is touched first. A `-x -m` that printed `{"success": true}` was reported as a failure. Measured on both runtimes; `$null = $proc.Handle` fixes it, and PowerShell 7 never had the problem |
+| Success is now decided by the bootstrapper's own JSON verdict where there is one, not by an exit code that can go missing. Non-JSON, foreign JSON and malformed output all fall back to the exit code rather than guessing |
+| Preflight counted `PackageUserInformation` entries and called a package "installed for 1 user profile" when its only entry was `S-1-5-18` **staging** it — not a user, and not installed. It reads the states now: staged-only says so, and a package whose entries read `Installed(pending removal)` is reported as already removed and waiting for those users to sign out, by name, with the reboot flagged. Measured against the two packages a production session host really reported |
+| `Remove-AppxPackage -AllUsers` is all or nothing, so a single profile it cannot touch fails the whole call. When it does, the package is now removed per user instead, and whoever still holds it is named — "a signed-in user is holding it" is not actionable until you know which user. The SID comes out of `PackageUserInformation`'s string form, which differs across builds, exercised against seven shapes including the Entra `S-1-12-1` one. **Untested** against a package that really refuses removal |
+| The AppX log then answered the question the bootstrapper's `0x80070490` hid: it is provisioning `MSTeams_26246...`, the build registered for one profile, and Windows cannot find that package's files. Two MSTeams versions side by side with one of them broken is the state to look for |
+| A failed provision now also prints the AppX deployment errors Windows logged, which carry the reason its `0x80070490` hides — "Unable to install because the following apps need to be closed &lt;package&gt;". Read-only, 10 ms, and quiet when the log holds nothing recent |
+| Preflight reports an AppX package whose `Status` is not `Ok`. Windows considering a package Modified or Tampered is exactly what makes `Remove-AppxPackage` answer `Catastrophic failure` and the provision fail after it, and it was invisible until now |
+
+### 2026-09-28
+| Change |
+|--------|
+| Added `scripts/Device/TempDisk/Init-TempDisk.ps1`: an Azure VM's ephemeral temp disk is wiped on every deallocate, resize or host move and comes back RAW, offline or without its drive letter. Windows reads the pagefile configuration at boot and never re-reads it, so a pagefile configured on `D:` that is not there at boot is simply never created and the machine pages on `C:` again - or runs with no pagefile at all. The script restores the volume as `D:` and points the pagefile back at it |
+| A temp disk that only lost its drive letter is given the letter back rather than reformatted, recognised by its label (`Temporary Storage`) or by the `DataLoss_Warning_Readme.txt` Azure writes on the resource disk. Only a RAW, non-boot, non-system disk is ever initialised: an empty temp disk and an unformatted data disk look identical from the outside, so a disk with partitions is reported and left alone, and more than one RAW candidate makes the script refuse to guess and ask for `-DiskNumber`. `-Force` plus `-DiskNumber` is the only route to formatting a disk that still carries data |
+| An optical drive holding `D:` is moved out of the way first - Windows hands `D:` to the DVD on an image with no temp disk and never gives it back, which is the second way the pagefile ends up on `C:` |
+| The run distinguishes the pagefile as *configured* (registry) from the pagefile *in use* (this session) and says which is which, instead of reporting success for a change that only lands at the next restart. Configuring a pagefile on a drive that could not be restored is a hard failure rather than a setting Windows quietly ignores |
+| Added `scripts/Device/TempDisk/Register-InitTempDiskTask.ps1`, built on a draft that had two faults: its `-ScriptSourcePath` default referenced `$ScriptTargetDir`, a parameter declared *after* it, so the default expanded to `\Init-TempDisk.ps1` and never resolved; and the copy ran with `-ErrorAction SilentlyContinue`, so a missing source registered a boot task against a file that is not there - it then fails at every boot with nobody watching. The source now defaults to the copy next to the script, a missing source is a hard error, and the task is verified to exist after registering |
+| Documented both in a new `scripts/Device/TempDisk/readme.md`, added the folder to the `Device/` readme and the repository tree, gave the root readme a **Temp Disk & Pagefile (Azure / AVD)** entry, and wired `Init-TempDisk.ps1` into `menu.ps1` as Device key `V` (defaults to `-CheckOnly` unless you confirm the repair) |
+| Verified: both files parse clean through `Test-PowerShellSyntax.ps1`. The read-only helpers were run for real on this Windows 11 machine under both PowerShell 5.1 and 7 with `Set-StrictMode -Version Latest` - free-letter search, optical-drive lookup, temp-disk and RAW-candidate detection, and the pagefile state read (which correctly reported automatic management on and `C:\pagefile.sys` in use) - and the scheduled-task trigger, principal and settings objects were constructed and their values checked. **Not yet verified on a live Azure VM or session host**: no disk was initialised, no pagefile was changed and no task was registered from this session |
+
+### 2026-09-25 (20)
+| Change |
+|--------|
+| Turned the `Pivot toegang` sheet around to nest **site → group → person** instead of site → person → group. That is how SharePoint actually grants access — a site has groups, groups have people — so collapsed it lists the groups on a site and expanded it names everyone they let in |
+| Added `Pivot per persoon` (person → site → group) so the other direction is still answerable from the same sheet: what does this one person reach, and through what. That is the offboarding question, and a site-first pivot cannot answer it |
+| A directly granted person has no group, and in a three-level hierarchy that empty middle level reads as missing data rather than as "granted without a group". `ViaName` now says `(direct toegekend)` for those rows instead of being blank |
+| Verified locally with 240 checks across eleven suites: both pivots read back out of the workbook with their row fields in the intended order, and a direct grant is named rather than empty |
 
 ### 2026-09-25 (19)
 | Change |
