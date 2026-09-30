@@ -910,6 +910,33 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-09-30 (9)
+| Modification |
+|--------------|
+| Correction de `scripts/Reporting/Get-SharePointPermissionsReport.ps1` qui échouait sur **chaque** site avec `Cannot validate argument on parameter 'Kind'. The argument "A" does not belong to the set "U,G"`. L'ajout de la vue d'accès consolidée a appris au point de contrôle à *lire* un troisième type de clé (`A`) sans jamais élargir le `ValidateSet` de la fonction qui en *écrit* une : le premier web levait une erreur et les 131 sites signalaient un échec |
+| Introduit en même temps que l'onglet `Toegang` et non détecté parce que la suite de tests du rapport vivait dans un dossier temporaire de session, vidé entre deux sessions — exactement le coût signalé à ce moment-là |
+| Un contrôle a été ajouté pour toute la classe plutôt que pour ce seul cas : chaque type écrit doit figurer dans le `ValidateSet` **et** être relu par le commutateur de reprise, et chaque type autorisé doit réellement être utilisé. Vérifié qu'il se déclenche en l'exécutant sur les deux variantes cassées — le type absent de l'ensemble, et un type écrit mais jamais lu, qui ne lève rien mais perd silencieusement son état de reprise |
+| Aucune donnée perdue. Les webs en échec ont écrit des lignes d'erreur portant leur `UnitKey`, et la logique de remplacement les supprime dès que le web réussit : une simple ré-exécution se nettoie elle-même |
+
+
+### 2026-09-30 (8)
+| Modification |
+|--------|
+| Passe de durcissement sur `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, guidée par une lecture du code à la recherche des modes de défaillance propres à un script destructif plutôt que de ceux d'un rapport. Trois étaient réels |
+| **La correspondance d'un invité aurait pu révoquer la mauvaise personne.** La recherche de repli comparait avec `-like "*needle*"`, et `an@contoso.com` est une sous-chaîne de `jan@contoso.com`. Remplacée par une comparaison exacte avec l'UPN, l'adresse mail, le suffixe de claim et une connexion invité correctement décodée (`jan_partner.com#ext#@tenant` redevient `jan@partner.com`, en coupant sur le dernier underscore afin qu'une partie locale puisse en contenir un). Lorsque deux comptes différents répondent à la même adresse, le site reste intact et l'exécution s'arrête en nommant les deux — choisir revient à l'opérateur, pas au script |
+| **Le CSV d'audit était écrit une seule fois, à la fin.** Une exécution qui aurait révoqué deux cents éléments avant de planter n'aurait laissé aucune trace de ce qu'elle avait supprimé, ce qui est précisément la seule chose qu'un tel script ne doit jamais faire. Les lignes sont désormais ajoutées au fil de l'eau, via le helper partagé qui réessaie sur un fichier verrouillé et arrête l'exécution plutôt que de perdre une ligne |
+| **Un `404` lors d'une suppression comptait comme un échec.** Il signifie que l'accès a déjà disparu, ce qui est le résultat normal lors d'un second passage — une ré-exécution propre aurait signalé des échecs. Enregistré désormais comme `AlreadyGone` |
+| L'échec de la suppression d'un administrateur de collection de sites est désormais bien visible et compte comme un échec : ce rôle couvre chaque périmètre du site, donc toute autre suppression y est cosmétique tant qu'il subsiste. Le résumé le dit explicitement plutôt que de ressembler à un succès |
+| `-WhatIf` emprunte désormais la même branche qu'un essai à blanc, et enregistre donc `WouldRevoke` au lieu de `Skipped`, qui laissait entendre que quelqu'un avait refusé une demande de confirmation |
+| `Test-SharePointAccessScripts.ps1` est passé de 27 à 50 contrôles : décodage des connexions invité, y compris une partie locale contenant un underscore, correspondance exacte face aux quasi-correspondances qu'un test de sous-chaîne aurait acceptées (plus court, plus long, domaine suffixé, invité d'un autre tenant, vide), existence du CSV d'audit contenant chaque ligne en cours d'exécution, et un 404 interprété comme déjà disparu. **Toujours non vérifié sur un tenant réel** |
+
+### 2026-09-30 (7)
+| Modification |
+|--------|
+| Suppression d'un paramètre `-Restart` mort dans `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. Il était déclaré et son aide promettait qu'il allait `discard any existing checkpoint and start over instead of resuming` - mais le script n'a ni checkpoint ni reprise, donc le switch ne faisait rien et l'aide décrivait un comportement inexistant. Trouvé en comparant le bloc de paramètres avec l'aide basée sur les commentaires et le readme du dossier, plutôt qu'en supposant qu'ils concordaient |
+| Remplacé par une entrée `.NOTES` expliquant pourquoi il n'y a délibérément pas de reprise : la révocation est idempotente, donc une seconde exécution ne trouve que ce que la première n'a pas supprimé. Relancer après une interruption constitue à la fois la récupération et la vérification, et c'est plus sûr que de reprendre une opération destructive partiellement appliquée à partir d'une position enregistrée |
+| Vérifié que les 17 paramètres restants figurent dans l'aide basée sur les commentaires et dans le readme du dossier, que `Get-Help` ne mentionne plus `-Restart`, et que les 27 contrôles de `Test-SharePointAccessScripts.ps1` passent toujours |
+
 ### 2026-09-30 (6)
 | Modification |
 |--------|
@@ -982,24 +1009,6 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 | Le conseil de l'étape de vérification était faux. Après une exécution réelle de `-Provision`, il indiquait que Teams (26225) et Outlook (1.2026.818) étaient « toujours plus anciens que les 26246 / 902 demandés par les profils - amenez les autres hôtes au même build ». Mais aucun hôte n'est en avance : les deux applications se mettent à jour elles-mêmes par utilisateur, et les installateurs de Microsoft provisionnent un build last-known-good qui est en retard sur celui-ci, de sorte que le profil sera toujours en avance sur chaque hôte et que provisionner plus récent ne tient que jusqu'à la prochaine mise à jour. Ce qui détermine si cela pose problème, c'est FSLogix : à partir de 2210 HF4 (Teams) / 25.06 (Outlook), il enregistre par nom de famille et l'écart est sans conséquence (désormais signalé comme OK, code de sortie 0) ; sur un build plus ancien, le conseil est de mettre à jour FSLogix. Un tel écart ne compte plus comme quelque chose à provisionner |
 | Une transcription qui refuse de démarrer — comme dans certaines sessions distantes et RMM — n'interrompt plus la réparation ; c'est un avertissement |
 | Vérifié sous PowerShell 5.1 et 7 : l'orchestrateur contre deux hôtes injoignables (chacun nommé avec son erreur WinRM, le tableau du pool, code de sortie 1), et l'écart de version avec un FSLogix simulé au-dessus et en dessous du minimum. **Non exécuté contre de vrais hôtes de session** : pas de WinRM vers lem-avd-4/5/6 depuis ici, donc la copie, l'exécution distante et le tableau du pool avec des valeurs réelles n'ont pas été testés |
-
-### 2026-09-30 (2)
-| Modification |
-|--------|
-| Passe de durcissement sur `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, guidée par une lecture du code à la recherche des modes de défaillance propres à un script destructif plutôt que de ceux d'un rapport. Trois étaient réels |
-| **La correspondance d'un invité aurait pu révoquer la mauvaise personne.** La recherche de repli comparait avec `-like "*needle*"`, et `an@contoso.com` est une sous-chaîne de `jan@contoso.com`. Remplacée par une comparaison exacte avec l'UPN, l'adresse mail, le suffixe de claim et une connexion invité correctement décodée (`jan_partner.com#ext#@tenant` redevient `jan@partner.com`, en coupant sur le dernier underscore afin qu'une partie locale puisse en contenir un). Lorsque deux comptes différents répondent à la même adresse, le site reste intact et l'exécution s'arrête en nommant les deux — choisir revient à l'opérateur, pas au script |
-| **Le CSV d'audit était écrit une seule fois, à la fin.** Une exécution qui aurait révoqué deux cents éléments avant de planter n'aurait laissé aucune trace de ce qu'elle avait supprimé, ce qui est précisément la seule chose qu'un tel script ne doit jamais faire. Les lignes sont désormais ajoutées au fil de l'eau, via le helper partagé qui réessaie sur un fichier verrouillé et arrête l'exécution plutôt que de perdre une ligne |
-| **Un `404` lors d'une suppression comptait comme un échec.** Il signifie que l'accès a déjà disparu, ce qui est le résultat normal lors d'un second passage — une ré-exécution propre aurait signalé des échecs. Enregistré désormais comme `AlreadyGone` |
-| L'échec de la suppression d'un administrateur de collection de sites est désormais bien visible et compte comme un échec : ce rôle couvre chaque périmètre du site, donc toute autre suppression y est cosmétique tant qu'il subsiste. Le résumé le dit explicitement plutôt que de ressembler à un succès |
-| `-WhatIf` emprunte désormais la même branche qu'un essai à blanc, et enregistre donc `WouldRevoke` au lieu de `Skipped`, qui laissait entendre que quelqu'un avait refusé une demande de confirmation |
-| `Test-SharePointAccessScripts.ps1` est passé de 27 à 50 contrôles : décodage des connexions invité, y compris une partie locale contenant un underscore, correspondance exacte face aux quasi-correspondances qu'un test de sous-chaîne aurait acceptées (plus court, plus long, domaine suffixé, invité d'un autre tenant, vide), existence du CSV d'audit contenant chaque ligne en cours d'exécution, et un 404 interprété comme déjà disparu. **Toujours non vérifié sur un tenant réel** |
-
-### 2026-09-30
-| Modification |
-|--------|
-| Suppression d'un paramètre `-Restart` mort dans `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. Il était déclaré et son aide promettait qu'il allait `discard any existing checkpoint and start over instead of resuming` - mais le script n'a ni checkpoint ni reprise, donc le switch ne faisait rien et l'aide décrivait un comportement inexistant. Trouvé en comparant le bloc de paramètres avec l'aide basée sur les commentaires et le readme du dossier, plutôt qu'en supposant qu'ils concordaient |
-| Remplacé par une entrée `.NOTES` expliquant pourquoi il n'y a délibérément pas de reprise : la révocation est idempotente, donc une seconde exécution ne trouve que ce que la première n'a pas supprimé. Relancer après une interruption constitue à la fois la récupération et la vérification, et c'est plus sûr que de reprendre une opération destructive partiellement appliquée à partir d'une position enregistrée |
-| Vérifié que les 17 paramètres restants figurent dans l'aide basée sur les commentaires et dans le readme du dossier, que `Get-Help` ne mentionne plus `-Restart`, et que les 27 contrôles de `Test-SharePointAccessScripts.ps1` passent toujours |
 
 ### 2026-09-29 (7)
 | Modification |

@@ -910,6 +910,33 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-09-30 (9)
+| Wijziging |
+|-----------|
+| `scripts/Reporting/Get-SharePointPermissionsReport.ps1` faalde op **elke** site met `Cannot validate argument on parameter 'Kind'. The argument "A" does not belong to the set "U,G"`. Het toevoegen van de geconsolideerde toegangsweergave leerde het checkpoint een derde sleutelsoort (`A`) te *lezen*, maar de `ValidateSet` van de functie die er een *schrijft* is nooit meegegroeid — de eerste web gooide een fout en alle 131 sites meldden een mislukking |
+| Ontstaan samen met het tabblad `Toegang` en niet opgemerkt omdat de testsuite van het rapport in een sessie-scratchpad stond die tussen sessies is geleegd — precies de prijs die daar destijds voor is benoemd |
+| Er is een controle op de hele klasse toegevoegd in plaats van op dit ene geval: elke geschreven soort moet in de `ValidateSet` staan **én** door de resume-switch worden teruggelezen, en elke toegestane soort moet daadwerkelijk gebruikt worden. Bewezen dat hij afgaat door hem op beide kapotte varianten te draaien — de soort die niet in de set staat, en een soort die wel geschreven maar nooit gelezen wordt, wat geen fout geeft maar stilzwijgend de hervat-status verliest |
+| Er is geen data verloren. De mislukte webs schreven foutregels mét hun `UnitKey`, en de supersede-logica laat die vallen zodra de web wél slaagt, dus een gewone her-run ruimt zichzelf op |
+
+
+### 2026-09-30 (8)
+| Wijziging |
+|--------|
+| Hardeningronde op `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, gestuurd door de code te lezen op de faalwijzen die een destructief script heeft in plaats van die van een rapport. Drie ervan waren echt |
+| **Het matchen van een gast had de verkeerde persoon kunnen intrekken.** De fallback-lookup vergeleek met `-like "*needle*"`, en `an@contoso.com` is een substring van `jan@contoso.com`. Vervangen door een exacte vergelijking met de UPN, het mailadres, het claim-achtervoegsel en een correct gedecodeerde gastlogin (`jan_partner.com#ext#@tenant` terug naar `jan@partner.com`, gesplitst op de laatste underscore zodat het lokale deel er zelf een mag bevatten). Wanneer twee verschillende accounts op hetzelfde adres antwoorden, blijft de site onaangeroerd en stopt de run met beide bij naam te noemen — kiezen is aan de operator, niet aan het script |
+| **De audit-CSV werd één keer geschreven, aan het einde.** Een run die tweehonderd dingen had ingetrokken en daarna crashte, zou geen enkel spoor hebben achtergelaten van wat hij had verwijderd, en dat is het enige wat een script als dit nooit mag doen. Rijen worden nu toegevoegd op het moment dat het gebeurt, via de gedeelde helper die een vergrendeld bestand opnieuw probeert en de run stopt in plaats van een rij te laten vallen |
+| **Een `404` bij een verwijdering telde als fout.** Het betekent dat de toekenning al weg is, wat bij een tweede ronde de normale uitkomst is — een schone herhaling zou fouten hebben gerapporteerd. Wordt nu vastgelegd als `AlreadyGone` |
+| Een mislukte verwijdering van een sitecollectiebeheerder is nu luid en telt als fout: die rol reikt tot elk bereik in de site, dus elke andere verwijdering daar is cosmetisch zolang hij blijft staan. De samenvatting zegt dat expliciet in plaats van als een succes te lezen |
+| `-WhatIf` neemt nu dezelfde tak als een proefdraai, dus legt het `WouldRevoke` vast in plaats van `Skipped`, wat suggereerde dat iemand een prompt had afgewezen |
+| `Test-SharePointAccessScripts.ps1` groeide van 27 naar 50 controles: het decoderen van gastlogins inclusief een lokaal deel met underscore, exacte matching tegen de bijna-treffers die een substringtest zou hebben geaccepteerd (korter, langer, domein met achtervoegsel, de gast van een andere tenant, leeg), de audit-CSV die halverwege de run bestaat en elke rij bevat, en een 404 die als al verdwenen wordt gelezen. **Nog steeds niet geverifieerd op een live tenant** |
+
+### 2026-09-30 (7)
+| Wijziging |
+|--------|
+| Een dode `-Restart`-parameter verwijderd uit `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. Hij was gedeclareerd en de help beloofde dat hij `discard any existing checkpoint and start over instead of resuming` zou doen - maar het script heeft geen checkpoint en geen hervatting, dus de switch deed niets en de help beschreef gedrag dat niet bestaat. Gevonden door het parameterblok te vergelijken met de comment-based help en de mapreadme in plaats van aan te nemen dat ze overeenkwamen |
+| Vervangen door een `.NOTES`-regel die uitlegt waarom er bewust geen hervatting is: intrekken is idempotent, dus een tweede run vindt alleen wat de eerste niet heeft verwijderd. Opnieuw draaien na een onderbreking is zowel het herstel als de verificatie, en veiliger dan een half toegepaste destructieve operatie hervatten vanaf een opgeslagen positie |
+| Geverifieerd dat alle 17 resterende parameters in de comment-based help en de mapreadme staan, dat `Get-Help` `-Restart` niet meer noemt, en dat de 27 controles in `Test-SharePointAccessScripts.ps1` nog steeds slagen |
+
 ### 2026-09-30 (6)
 | Wijziging |
 |--------|
@@ -982,24 +1009,6 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 | Het advies van de verificatiestap was fout. Na een live `-Provision`-run zei het dat Teams (26225) en Outlook (1.2026.818) "still older than the 26246 / 902 profiles ask for - bring the other hosts to the same build" waren. Maar geen enkele host loopt voor: beide apps werken zichzelf per gebruiker bij, en Microsofts installers provisionen een last-known-good build die daarachter ligt, dus het profiel loopt altijd voor op elke host en een nieuwere build provisionen houdt alleen stand tot de volgende update. Wat bepaalt of het pijn doet is FSLogix: vanaf 2210 HF4 (Teams) / 25.06 (Outlook) registreert het op family name en is het verschil onschadelijk (nu als OK gerapporteerd, exitcode 0); op een oudere build is het advies om FSLogix bij te werken. Zo'n verschil telt niet langer als iets om te provisionen |
 | Een transcript dat niet wil starten — zoals in sommige remote- en RMM-sessies — breekt de reparatie niet meer af; het is een waarschuwing |
 | Geverifieerd in PowerShell 5.1 en 7: de orchestrator tegen twee onbereikbare hosts (elk benoemd met zijn WinRM-fout, de pooltabel, exitcode 1), en het versieverschil met een gemockte FSLogix boven en onder het minimum. **Niet tegen echte sessiehosts uitgevoerd**: van hieruit geen WinRM naar lem-avd-4/5/6, dus het kopiëren, de remote run en de pooltabel met echte waarden zijn niet getest |
-
-### 2026-09-30 (2)
-| Wijziging |
-|--------|
-| Hardeningronde op `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, gestuurd door de code te lezen op de faalwijzen die een destructief script heeft in plaats van die van een rapport. Drie ervan waren echt |
-| **Het matchen van een gast had de verkeerde persoon kunnen intrekken.** De fallback-lookup vergeleek met `-like "*needle*"`, en `an@contoso.com` is een substring van `jan@contoso.com`. Vervangen door een exacte vergelijking met de UPN, het mailadres, het claim-achtervoegsel en een correct gedecodeerde gastlogin (`jan_partner.com#ext#@tenant` terug naar `jan@partner.com`, gesplitst op de laatste underscore zodat het lokale deel er zelf een mag bevatten). Wanneer twee verschillende accounts op hetzelfde adres antwoorden, blijft de site onaangeroerd en stopt de run met beide bij naam te noemen — kiezen is aan de operator, niet aan het script |
-| **De audit-CSV werd één keer geschreven, aan het einde.** Een run die tweehonderd dingen had ingetrokken en daarna crashte, zou geen enkel spoor hebben achtergelaten van wat hij had verwijderd, en dat is het enige wat een script als dit nooit mag doen. Rijen worden nu toegevoegd op het moment dat het gebeurt, via de gedeelde helper die een vergrendeld bestand opnieuw probeert en de run stopt in plaats van een rij te laten vallen |
-| **Een `404` bij een verwijdering telde als fout.** Het betekent dat de toekenning al weg is, wat bij een tweede ronde de normale uitkomst is — een schone herhaling zou fouten hebben gerapporteerd. Wordt nu vastgelegd als `AlreadyGone` |
-| Een mislukte verwijdering van een sitecollectiebeheerder is nu luid en telt als fout: die rol reikt tot elk bereik in de site, dus elke andere verwijdering daar is cosmetisch zolang hij blijft staan. De samenvatting zegt dat expliciet in plaats van als een succes te lezen |
-| `-WhatIf` neemt nu dezelfde tak als een proefdraai, dus legt het `WouldRevoke` vast in plaats van `Skipped`, wat suggereerde dat iemand een prompt had afgewezen |
-| `Test-SharePointAccessScripts.ps1` groeide van 27 naar 50 controles: het decoderen van gastlogins inclusief een lokaal deel met underscore, exacte matching tegen de bijna-treffers die een substringtest zou hebben geaccepteerd (korter, langer, domein met achtervoegsel, de gast van een andere tenant, leeg), de audit-CSV die halverwege de run bestaat en elke rij bevat, en een 404 die als al verdwenen wordt gelezen. **Nog steeds niet geverifieerd op een live tenant** |
-
-### 2026-09-30
-| Wijziging |
-|--------|
-| Een dode `-Restart`-parameter verwijderd uit `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. Hij was gedeclareerd en de help beloofde dat hij `discard any existing checkpoint and start over instead of resuming` zou doen - maar het script heeft geen checkpoint en geen hervatting, dus de switch deed niets en de help beschreef gedrag dat niet bestaat. Gevonden door het parameterblok te vergelijken met de comment-based help en de mapreadme in plaats van aan te nemen dat ze overeenkwamen |
-| Vervangen door een `.NOTES`-regel die uitlegt waarom er bewust geen hervatting is: intrekken is idempotent, dus een tweede run vindt alleen wat de eerste niet heeft verwijderd. Opnieuw draaien na een onderbreking is zowel het herstel als de verificatie, en veiliger dan een half toegepaste destructieve operatie hervatten vanaf een opgeslagen positie |
-| Geverifieerd dat alle 17 resterende parameters in de comment-based help en de mapreadme staan, dat `Get-Help` `-Restart` niet meer noemt, en dat de 27 controles in `Test-SharePointAccessScripts.ps1` nog steeds slagen |
 
 ### 2026-09-29 (7)
 | Wijziging |

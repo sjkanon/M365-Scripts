@@ -910,6 +910,32 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-30 (9)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointPermissionsReport.ps1` failing on **every** site with `Cannot validate argument on parameter 'Kind'. The argument "A" does not belong to the set "U,G"`. Adding the consolidated site-access view taught the checkpoint to *read* a third key kind (`A`) but never widened the `ValidateSet` on the function that *writes* one, so the first web threw and each of the 131 sites reported a failure |
+| Introduced alongside the `Toegang` sheet and not caught because the report's test suite lived in a session scratchpad that was cleared between sessions — the cost of that loss, exactly as flagged at the time |
+| Added a check for the whole class rather than this one case: every kind written must be in the `ValidateSet` **and** be read back by the resume switch, and every allowed kind must actually be used. Proved it fires by running it against both broken variants — the kind missing from the set, and a kind written but never read, which would silently lose resume state instead of throwing |
+| No data was lost. The failed webs wrote error rows carrying their `UnitKey`, and the supersede logic drops those once the web succeeds, so a plain re-run cleans up after itself |
+
+### 2026-09-30 (8)
+| Change |
+|--------|
+| Hardening pass on `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, driven by reading the code for the failure modes a destructive script has rather than the ones a report has. Three were real |
+| **Matching a guest could have revoked the wrong person.** The fallback lookup compared with `-like "*needle*"`, and `an@contoso.com` is a substring of `jan@contoso.com`. Replaced with exact comparison against the UPN, the mail address, the claim suffix and a properly decoded guest login (`jan_partner.com#ext#@tenant` back to `jan@partner.com`, splitting on the last underscore so a local part may contain one). When two different accounts answer to the same address the site is left untouched and the run stops naming both — choosing is the operator's call, not the script's |
+| **The audit CSV was written once, at the end.** A run that revoked two hundred things and then died would have left no record of what it removed, which is the one thing a script like this must never do. Rows are now appended as they happen, through the shared helper that retries a locked file and stops the run rather than dropping a row |
+| **A `404` on a removal counted as a failure.** It means the grant is already gone, which on a second pass is the normal outcome — a clean re-run would have reported failures. Recorded as `AlreadyGone` instead |
+| A failed site collection administrator removal is now loud and counts as a failure: that role reaches every scope in the site, so every other removal there is cosmetic while it stands. The summary says so explicitly rather than reading like a success |
+| `-WhatIf` now takes the same branch as a dry run, so it records `WouldRevoke` instead of `Skipped`, which had implied someone declined a prompt |
+| `Test-SharePointAccessScripts.ps1` grew from 27 to 50 checks: guest-login decoding including an underscored local part, exact matching against the near-misses a substring test would have accepted (shorter, longer, suffixed domain, another tenant's guest, empty), the audit CSV existing and holding every row mid-run, and a 404 reading as already gone. **Still not verified against a live tenant** |
+
+### 2026-09-30 (7)
+| Change |
+|--------|
+| Removed a dead `-Restart` parameter from `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. It was declared and its help promised it would `discard any existing checkpoint and start over instead of resuming` - but the script has no checkpoint and no resume, so the switch did nothing and the help described behaviour that does not exist. Found by comparing the parameter block against the comment-based help and the folder readme rather than assuming they agreed |
+| Replaced it with a `.NOTES` entry saying why there is deliberately no resume: revoking is idempotent, so a second run finds only what the first did not remove. Re-running after an interruption is both the recovery and the verification, and safer than resuming a partly applied destructive operation from a saved position |
+| Verified all 17 remaining parameters appear in the comment-based help and the folder readme, that `Get-Help` no longer mentions `-Restart`, and that the 27 checks in `Test-SharePointAccessScripts.ps1` still pass |
+
 ### 2026-09-30 (6)
 | Change |
 |--------|
@@ -982,32 +1008,6 @@ These scripts are provided as-is. Always test in a non-production environment be
 | The verify step's advice was wrong. After a live `-Provision` run it said Teams (26225) and Outlook (1.2026.818) were "still older than the 26246 / 902 profiles ask for - bring the other hosts to the same build". But no host is ahead: both apps update themselves per user, and Microsoft's installers provision a last-known-good build that is behind that, so the profile will always be ahead of every host and provisioning newer only lasts until the next update. What decides whether it hurts is FSLogix: from 2210 HF4 (Teams) / 25.06 (Outlook) it registers by family name and the gap is harmless (now reported as OK, exit code 0); on an older build the advice is to update FSLogix. Such a gap no longer counts as something to provision |
 | A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
 | Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
-
-### 2026-09-30 (3)
-| Change |
-|--------|
-| Fixed `scripts/Reporting/Get-SharePointPermissionsReport.ps1` failing on **every** site with `Cannot validate argument on parameter 'Kind'. The argument "A" does not belong to the set "U,G"`. Adding the consolidated site-access view taught the checkpoint to *read* a third key kind (`A`) but never widened the `ValidateSet` on the function that *writes* one, so the first web threw and each of the 131 sites reported a failure |
-| Introduced alongside the `Toegang` sheet and not caught because the report's test suite lived in a session scratchpad that was cleared between sessions — the cost of that loss, exactly as flagged at the time |
-| Added a check for the whole class rather than this one case: every kind written must be in the `ValidateSet` **and** be read back by the resume switch, and every allowed kind must actually be used. Proved it fires by running it against both broken variants — the kind missing from the set, and a kind written but never read, which would silently lose resume state instead of throwing |
-| No data was lost. The failed webs wrote error rows carrying their `UnitKey`, and the supersede logic drops those once the web succeeds, so a plain re-run cleans up after itself |
-
-### 2026-09-30 (2)
-| Change |
-|--------|
-| Hardening pass on `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, driven by reading the code for the failure modes a destructive script has rather than the ones a report has. Three were real |
-| **Matching a guest could have revoked the wrong person.** The fallback lookup compared with `-like "*needle*"`, and `an@contoso.com` is a substring of `jan@contoso.com`. Replaced with exact comparison against the UPN, the mail address, the claim suffix and a properly decoded guest login (`jan_partner.com#ext#@tenant` back to `jan@partner.com`, splitting on the last underscore so a local part may contain one). When two different accounts answer to the same address the site is left untouched and the run stops naming both — choosing is the operator's call, not the script's |
-| **The audit CSV was written once, at the end.** A run that revoked two hundred things and then died would have left no record of what it removed, which is the one thing a script like this must never do. Rows are now appended as they happen, through the shared helper that retries a locked file and stops the run rather than dropping a row |
-| **A `404` on a removal counted as a failure.** It means the grant is already gone, which on a second pass is the normal outcome — a clean re-run would have reported failures. Recorded as `AlreadyGone` instead |
-| A failed site collection administrator removal is now loud and counts as a failure: that role reaches every scope in the site, so every other removal there is cosmetic while it stands. The summary says so explicitly rather than reading like a success |
-| `-WhatIf` now takes the same branch as a dry run, so it records `WouldRevoke` instead of `Skipped`, which had implied someone declined a prompt |
-| `Test-SharePointAccessScripts.ps1` grew from 27 to 50 checks: guest-login decoding including an underscored local part, exact matching against the near-misses a substring test would have accepted (shorter, longer, suffixed domain, another tenant's guest, empty), the audit CSV existing and holding every row mid-run, and a 404 reading as already gone. **Still not verified against a live tenant** |
-
-### 2026-09-30
-| Change |
-|--------|
-| Removed a dead `-Restart` parameter from `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. It was declared and its help promised it would `discard any existing checkpoint and start over instead of resuming` - but the script has no checkpoint and no resume, so the switch did nothing and the help described behaviour that does not exist. Found by comparing the parameter block against the comment-based help and the folder readme rather than assuming they agreed |
-| Replaced it with a `.NOTES` entry saying why there is deliberately no resume: revoking is idempotent, so a second run finds only what the first did not remove. Re-running after an interruption is both the recovery and the verification, and safer than resuming a partly applied destructive operation from a saved position |
-| Verified all 17 remaining parameters appear in the comment-based help and the folder readme, that `Get-Help` no longer mentions `-Restart`, and that the 27 checks in `Test-SharePointAccessScripts.ps1` still pass |
 
 ### 2026-09-29 (7)
 | Change |
