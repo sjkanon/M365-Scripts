@@ -1777,7 +1777,9 @@ function Save-CheckpointState {
 }
 
 function Add-CheckpointKey {
-    param([ValidateSet('U', 'G')][string]$Kind, [string]$Key)
+    # U = completed unit, G = group whose membership is written, A = site access row already
+    # emitted. Every kind written here must also be read back by the resume switch below.
+    param([ValidateSet('U', 'G', 'A')][string]$Kind, [string]$Key)
     if ([string]::IsNullOrWhiteSpace($Key)) { return }
     for ($attempt = 1; $attempt -le 5; $attempt++) {
         try {

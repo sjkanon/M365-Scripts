@@ -983,6 +983,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 | A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
 | Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
 
+### 2026-09-30 (3)
+| Change |
+|--------|
+| Fixed `scripts/Reporting/Get-SharePointPermissionsReport.ps1` failing on **every** site with `Cannot validate argument on parameter 'Kind'. The argument "A" does not belong to the set "U,G"`. Adding the consolidated site-access view taught the checkpoint to *read* a third key kind (`A`) but never widened the `ValidateSet` on the function that *writes* one, so the first web threw and each of the 131 sites reported a failure |
+| Introduced alongside the `Toegang` sheet and not caught because the report's test suite lived in a session scratchpad that was cleared between sessions — the cost of that loss, exactly as flagged at the time |
+| Added a check for the whole class rather than this one case: every kind written must be in the `ValidateSet` **and** be read back by the resume switch, and every allowed kind must actually be used. Proved it fires by running it against both broken variants — the kind missing from the set, and a kind written but never read, which would silently lose resume state instead of throwing |
+| No data was lost. The failed webs wrote error rows carrying their `UnitKey`, and the supersede logic drops those once the web succeeds, so a plain re-run cleans up after itself |
+
 ### 2026-09-30 (2)
 | Change |
 |--------|

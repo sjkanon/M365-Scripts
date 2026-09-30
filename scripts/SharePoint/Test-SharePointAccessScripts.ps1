@@ -65,6 +65,23 @@ Check 'the block carries no script-specific name' ($a -notmatch 'Get-SharePointP
 Check 'both set the app name prefix before it' (
     ((Get-Content $report -Raw) -match '\$TempAppNamePrefix\s*=') -and ((Get-Content $revoke -Raw) -match '\$TempAppNamePrefix\s*='))
 
+# ── Checkpoint kinds must agree with themselves ─────────────────────────────
+# A kind that is written but missing from the ValidateSet throws on every site, and a kind that
+# is written but never read back silently loses its resume state. Both are invisible until a
+# tenant-wide run, so they are checked here rather than discovered there.
+$reportText = Get-Content $report -Raw
+$validate = [regex]::Match($reportText, "ValidateSet\(((?:'[A-Z]',?\s*)+)\)\]\[string\]\`$Kind")
+if ($validate.Success) {
+    $allowed = @([regex]::Matches($validate.Groups[1].Value, "'([A-Z])'") | ForEach-Object { $_.Groups[1].Value })
+    $written = @([regex]::Matches($reportText, "Add-CheckpointKey -Kind '([A-Z])'") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+    $readBack = @([regex]::Matches($reportText, "(?m)^\s+'([A-Z])' \{ \[void\]\`$script:") | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+    Check 'a kind is written that nothing allows'  (@($written | Where-Object { $_ -notin $allowed }).Count -eq 0)
+    Check 'a kind is written that nothing reads'   (@($written | Where-Object { $_ -notin $readBack }).Count -eq 0)
+    Check 'every allowed kind is actually used'    (@($allowed | Where-Object { $_ -notin $written }).Count -eq 0)
+} else {
+    Check 'the checkpoint kind set was found'      $false
+}
+
 # ── Both scripts still parse ────────────────────────────────────────────────
 foreach ($p in @($report, $revoke)) {
     $errs = $null
