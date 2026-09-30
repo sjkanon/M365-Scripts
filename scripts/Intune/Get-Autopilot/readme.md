@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Intune](../readme.md) › **Get-Autopilot**
+
 # Get-Autopilot
 
 Windows Autopilot hardware hash collection — for USB/OOBE enrollment, see also [`Deployment/`](../../Deployment/readme.md), which copies these two files onto its USB toolkit.

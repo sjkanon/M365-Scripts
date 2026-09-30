@@ -1,3 +1,5 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **SMTP**
+
 # SMTP Test Scripts
 
 > Author: Sjoerd Kanon

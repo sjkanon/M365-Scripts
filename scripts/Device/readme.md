@@ -1,8 +1,19 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Device**
+
 # Device Management Scripts
 
 Scripts for managing and maintaining Windows endpoints. All scripts require administrator privileges.
 
 ---
+
+## Folders
+
+| Folder | Description |
+|--------|-------------|
+| [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
+| [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
+| [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
+| [`TempDisk/`](TempDisk/readme.md) | Restore the ephemeral temp disk as `D:` at every boot and keep the pagefile on it |
 
 ## Scripts
 
@@ -15,10 +26,6 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Repair-AppxPackageStore.ps1`](Repair-AppxPackageStore.ps1) ([docs](#repair-appxpackagestoreps1)) | Repair AppX packages that fail with `0x80070490` — orphaned package store entries, and FSLogix replaying a version the host does not have (Teams, new Outlook, any package) |
 | [`Test-OpenVpnDiagnostics.ps1`](Test-OpenVpnDiagnostics.ps1) ([docs](#test-openvpndiagnosticsps1)) | Diagnose OpenVPN Connect issues |
 | [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1) ([docs](#update-teamsclientps1)) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build ([how it works](Update-TeamsClient.md), [IT Glue](Update-TeamsClient-ITGlue.md)) |
-| [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
-| [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
-| [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
-| [`TempDisk/`](TempDisk/readme.md) | Restore the ephemeral temp disk as `D:` at every boot and keep the pagefile on it |
 
 ---
 

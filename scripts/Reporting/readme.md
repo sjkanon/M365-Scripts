@@ -1,8 +1,16 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Reporting**
+
 # Reporting Scripts
 
 Scripts voor het genereren van rapporten over Active Directory, SharePoint Online en licenties.
 
 ---
+
+## Folders
+
+| Folder | Description |
+|--------|-------------|
+| [`Licensing/`](Licensing/readme.md) | Maandelijks licentie- en Azure-kostenrapport uit Pax8- en Ingram-data |
 
 ## Scripts
 
@@ -12,7 +20,6 @@ Scripts voor het genereren van rapporten over Active Directory, SharePoint Onlin
 | [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis en prullenbak |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Wie heeft waar toegang, via welke groep en met welk niveau — elke site, lijst, map en bestand met eigen rechten. Alleen-lezen, naar CSV en één Excel-werkmap |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Verwijdert bestandsversies ouder dan een datum; de huidige versie blijft altijd staan. Standaard alleen rapporteren |
-| [`Licensing/`](Licensing/readme.md) | Maandelijks licentie- en Azure-kostenrapport uit Pax8- en Ingram-data |
 
 ---
 

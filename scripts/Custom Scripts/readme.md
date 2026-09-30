@@ -1,3 +1,5 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Custom Scripts**
+
 # Custom Scripts
 
 Scripts pinned to their current path because something else depends on the exact location — currently: Office theme deployment, whose scripts hardcode a download URL back into this repo. Everything else generic/reusable lives under the top-level category folders in [`scripts/`](../readme.md).

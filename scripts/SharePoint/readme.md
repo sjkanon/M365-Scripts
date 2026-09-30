@@ -1,9 +1,17 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **SharePoint**
+
 # SharePoint Scripts
 
 SharePoint Online and OneDrive content operations via PnP PowerShell, with interactive
 admin sign-in on any (customer) tenant.
 
 ---
+
+## Folders
+
+| Folder | Description |
+|--------|-------------|
+| [`Provisioning/`](Provisioning/readme.md) | Provision and maintain a whole structure — metadata model, content types, libraries and group permissions — from one config file, plus a sharing audit and a drift check |
 
 ## Scripts
 
@@ -14,7 +22,6 @@ admin sign-in on any (customer) tenant.
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Verify the two access scripts without touching a tenant — shared auth block identical, and the revocation funnel behaves |
-| [`Provisioning/`](Provisioning/readme.md) | Provision and maintain a whole structure — metadata model, content types, libraries and group permissions — from one config file, plus a sharing audit and a drift check |
 
 ---
 

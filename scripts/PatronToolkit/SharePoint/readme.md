@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [PatronToolkit](../readme.md) › **SharePoint**
+
 # Patron Toolkit — SharePoint
 
 SharePoint Online tenant sharing configuration and external user auditing.

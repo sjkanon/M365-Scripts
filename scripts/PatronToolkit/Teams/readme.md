@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [PatronToolkit](../readme.md) › **Teams**
+
 # Patron Toolkit — Teams
 
 Microsoft Teams tenant governance and inventory reporting.

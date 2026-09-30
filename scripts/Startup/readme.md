@@ -1,3 +1,5 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Startup**
+
 # Startup
 
 Entry-point scripts and the core M365 function library.

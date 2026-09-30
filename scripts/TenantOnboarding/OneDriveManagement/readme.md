@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [TenantOnboarding](../readme.md) › **OneDriveManagement**
+
 # OneDriveManagement
 
 Device-side OneDrive for Business maintenance scripts: a restart/reset watchdog, per-library sync teardown, and Known Folder Move redirection. Distinct from [`scripts/Device/DriveMapping/`](../../Device/DriveMapping/readme.md) (SharePoint/OneDrive drive-letter mapping via WebDAV), which is a different capability.

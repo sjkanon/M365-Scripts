@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Device](../readme.md) › **TempDisk**
+
 # Temp Disk
 
 Keeps the ephemeral temp disk (`D:`) of an Azure VM or AVD session host in place, and keeps the pagefile on it.

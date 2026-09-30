@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [PatronToolkit](../readme.md) › **Security**
+
 # Patron Toolkit — Security
 
 Tenant security posture reporting: app consent risk, mailbox-rule BEC detection, security

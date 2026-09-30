@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Intune](../readme.md) › **iOS-Compliance-Updater**
+
 # Intune — iOS Compliance Updater
 
 Automatically keeps the minimum iOS version requirement in an Intune compliance policy up to date via Microsoft Graph API. Runs as a scheduled task on a Windows server — no manual work required.
