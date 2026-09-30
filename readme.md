@@ -886,6 +886,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-09-30 (4)
+| Change |
+|--------|
+| Every readme now exists in three languages: `readme.md` (English, still the main version), `readme.nl.md` (Dutch) and `readme.fr.md` (French) — 66 folders, the root readme including its full Version History. The switcher at the top of each page goes to the same page in the other language, and the breadcrumbs stay within the language you are reading |
+| Script-name headings (`### Set-UserManager.ps1`) are not translated, so every `#…ps1` anchor is the same in all three languages; other headings are, with their in-page links adjusted. Parameter names, commands, paths and the literal strings a script prints or writes (Dutch Excel tab names, error messages) stay as they are in every language |
+| `Reporting/readme.md` and part of `SharePoint/readme.md` were Dutch in an English set; they were made English first, and the Dutch versions keep the original wording |
+| The local-admin password that appears in plain text in `scripts/Deployment/readme.md` and in this Version History is **not** copied into the Dutch and French versions; there it reads as omitted |
+| `.claude/CLAUDE.md` now requires a change to a readme to be made in all three languages, followed by `Update-ReadmeHeader.ps1` |
+| Verified with `Test-MarkdownLinks.ps1`: 204 markdown files, every internal link resolves; `Update-ReadmeHeader.ps1 -Check` reports every header current. The translations were checked for structure (sections, tables, line counts against the English), not proofread line by line by a native speaker |
+
 ### 2026-09-30 (3)
 | Change |
 |--------|
