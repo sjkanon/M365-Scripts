@@ -1,3 +1,5 @@
+[M365-Scripts](../../../../readme.md) › [scripts](../../../readme.md) › [Intune](../../readme.md) › [Desktop](../readme.md) › **Background**
+
 # Background
 
 Corporate desktop wallpaper and lockscreen deployment via Intune. Both use the same `$ImageUrl` / `$ClientName` configuration pattern and PersonalizationCSP for MDM enforcement.

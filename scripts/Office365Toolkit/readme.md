@@ -1,3 +1,5 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Office365Toolkit**
+
 # Office365Toolkit
 
 Modern Microsoft Graph / Exchange Online rewrites of still-useful capabilities from

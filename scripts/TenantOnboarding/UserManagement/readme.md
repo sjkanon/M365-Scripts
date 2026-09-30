@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [TenantOnboarding](../readme.md) › **UserManagement**
+
 # UserManagement
 
 Small Entra ID / Exchange Online user and group management helpers used during tenant onboarding and ongoing feature rollout.

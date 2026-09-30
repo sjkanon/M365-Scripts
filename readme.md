@@ -6,6 +6,7 @@
 
 ## Table of Contents
 
+- [Folders](#folders)
 - [Getting Started](#getting-started)
 - [Finding a script](#finding-a-script)
 - [Quick Launcher](#quick-launcher)
@@ -26,6 +27,39 @@
 - [Repository Structure](#repository-structure)
 - [Contributing](#contributing)
 - [Version History](#version-history)
+
+---
+
+## Folders
+
+Every workload has its own folder under [`scripts/`](scripts/readme.md), and every folder has a readme: what each script is for, its parameters, examples and notes. Start here and click through; every readme has a breadcrumb at the top to get back up.
+
+| Folder | Description |
+|--------|-------------|
+| [`ActiveDirectory/`](scripts/ActiveDirectory/readme.md) | On-prem AD DS monitoring (account lockout watcher) — targets a DC/file server directly, not Entra ID |
+| [`Azure/`](scripts/Azure/readme.md) | Azure IaaS VM management (disk controller conversion) — targets Azure directly via `Az`, not the M365 tenant |
+| [`Entra/`](scripts/Entra/readme.md) | User lifecycle, manager assignment, license reporting, Conditional Access baseline, temporary CA windows, TAP codes, M365 Group audit (Microsoft Graph) |
+| [`Exchange/`](scripts/Exchange/readme.md) | Calendar migration/permissions, distribution groups, mailbox/calendar/DKIM/forwarding audits |
+| [`Graph/`](scripts/Graph/readme.md) | Microsoft Graph application permission management |
+| [`Intune/`](scripts/Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
+| [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration) |
+| [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
+| [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
+| [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
+| [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics and live session monitoring |
+| [`SMTP/`](scripts/SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
+| [`Deployment/`](scripts/Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
+| [`DNS/`](scripts/DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
+| [`SAS/`](scripts/SAS/readme.md) | SAS batch job error monitoring with Zabbix integration |
+| [`Teams/`](scripts/Teams/readme.md) | Microsoft Teams / SharePoint export and archiving |
+| [`Startup/`](scripts/Startup/readme.md) | `functies.ps1` M365 function library + module bootstrap + syntax checker, dot-sourced by the menu |
+| [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) | Path-pinned scripts — Office theme deployment (hardcodes its download URL to this repo path) |
+| [`TenantOnboarding/`](scripts/TenantOnboarding/readme.md) | New-tenant provisioning, multi-tenant/GDAP reporting, app deployment, device config, OneDrive management, user management — modernized from a retired internal tenant-setup toolkit |
+| [`Office365Toolkit/`](scripts/Office365Toolkit/readme.md) | Security/Exchange/Intune rewrites of still-useful capabilities from the retired `directorcia/Office365` (CIAOPS) toolkit |
+| [`PatronToolkit/`](scripts/PatronToolkit/readme.md) | Entra/Exchange/Intune/Security/SharePoint/Teams rewrites of still-useful capabilities from the retired `directorcia/patron` toolkit |
+| [`LegacyUtilities/`](scripts/LegacyUtilities/readme.md) | Misc modernized scripts (Exchange, Entra, Teams, Network, Device, Workspace 365) from assorted small tools in the retired internal toolkit |
+
+Know the script name but not the folder? [`scripts/INDEX.md`](scripts/INDEX.md) lists every script A–Z.
 
 ---
 
@@ -849,6 +883,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-30 (2)
+| Change |
+|--------|
+| Every readme now starts with a breadcrumb (`M365-Scripts › scripts › Intune › Desktop`) linking each level back up. Before, 40 of the 66 folder readmes had no way back to their parent except the browser's back button |
+| The root readme opens with a `## Folders` table linking every workload folder, so the repository can be browsed from the front page down instead of via `scripts/readme.md` only |
+| Subfolders are listed under a `## Folders` heading everywhere. `Device/`, `Network/`, `Reporting/` and `SharePoint/` mixed them into the Scripts table, `Intune/Desktop/` and `Custom Scripts/Intune/Desktop/` used a `Contents` table, `TenantOnboarding/` said `Subfolders` and `LegacyUtilities/` had no heading at all |
+| Verified with `Test-MarkdownLinks.ps1`: 1,072 internal links across 72 markdown files resolve. Documentation only; no script changed |
 
 ### 2026-09-29 (11)
 | Change |

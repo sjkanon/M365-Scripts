@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [LegacyUtilities](../readme.md) › **Device**
+
 # Legacy Utilities — Device
 
 Small workstation configuration utilities.

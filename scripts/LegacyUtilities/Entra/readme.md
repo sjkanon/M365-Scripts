@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [LegacyUtilities](../readme.md) › **Entra**
+
 # Legacy Utilities — Entra
 
 Group membership and Conditional Access utilities via Microsoft Graph. Connect

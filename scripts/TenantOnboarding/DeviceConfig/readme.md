@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [TenantOnboarding](../readme.md) › **DeviceConfig**
+
 # DeviceConfig
 
 Windows device-side configuration and hardening scripts used during tenant/device onboarding — local group self-elevation, credential storage hardening, kiosk power settings, Office removal, Start Menu layout, and the Teams LAN firewall rule.

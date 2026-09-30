@@ -1,3 +1,5 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Entra**
+
 # Entra ID Scripts
 
 Scripts for managing users and resources in Microsoft Entra ID (formerly Azure AD) via Microsoft Graph.

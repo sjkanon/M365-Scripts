@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Device](../readme.md) › **audio**
+
 # Audio — Disable Internal Microphone
 
 Scripts for detecting and disabling the internal microphone on Windows laptops where employees use a browser-based VoIP application.

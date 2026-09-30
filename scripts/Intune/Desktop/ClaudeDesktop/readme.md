@@ -1,3 +1,5 @@
+[M365-Scripts](../../../../readme.md) › [scripts](../../../readme.md) › [Intune](../../readme.md) › [Desktop](../readme.md) › **ClaudeDesktop**
+
 # ClaudeDesktop
 
 Machine-wide Intune deployment of [Claude Desktop](https://claude.com/download) for Windows. Run **one script once a month** to keep the Intune app current — no persistent App Registration or client secret to manage.

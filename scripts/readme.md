@@ -1,3 +1,5 @@
+[M365-Scripts](../readme.md) › **scripts**
+
 # scripts/
 
 All PowerShell tooling for this repo, grouped by workload. Launch everything from the root via [`.\menu.ps1`](../menu.ps1) (or [`.\load.ps1`](../load.ps1) on first run) — see the [root readme](../readme.md) for the full menu reference and getting-started steps.
@@ -12,7 +14,7 @@ The table below is the other way round: what each category is *for*.
 
 ---
 
-## Categories
+## Folders
 
 | Folder | Description |
 |--------|-------------|

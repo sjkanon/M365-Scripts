@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [TenantOnboarding](../readme.md) › **MultiTenant**
+
 # MultiTenant
 
 MSP-wide scripts that operate across every GDAP (Granular Delegated Admin Privileges) customer tenant at once — license reporting, break-glass password rotation, and a quick-links portal index. These are the Microsoft Graph-based replacements for a family of legacy scripts that looped `Get-MsolPartnerContract -All` using the now-retired MSOnline module.

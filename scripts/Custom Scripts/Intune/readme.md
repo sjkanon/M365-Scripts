@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Custom Scripts](../readme.md) › **Intune**
+
 # Intune (Custom Scripts)
 
 Office theme/color deployment — kept separate from [`scripts/Intune/`](../../Intune/readme.md) because `Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` hardcode their download URL to this repo path.

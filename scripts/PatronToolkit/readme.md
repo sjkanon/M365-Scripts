@@ -1,3 +1,5 @@
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **PatronToolkit**
+
 # Patron Toolkit
 
 Modern Microsoft Graph / Exchange Online rewrites of the still-useful capabilities from

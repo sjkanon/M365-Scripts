@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Reporting](../readme.md) › **Licensing**
+
 # Licensing Report Toolkit
 
 > Author: Sjoerd Kanon

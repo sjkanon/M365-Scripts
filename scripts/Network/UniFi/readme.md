@@ -1,3 +1,5 @@
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Network](../readme.md) › **UniFi**
+
 # UniFi
 
 Tooling for a UniFi Network Controller or UniFi OS console (UDM/UDM-Pro/UDR). Talks directly to the controller's API — not part of [`menu.ps1`](../../../menu.ps1), since each run needs a controller URL and credentials. Credentials are always requested via `-Credential`/`Get-Credential`, never hardcoded.
