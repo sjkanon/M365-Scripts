@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **DNS**
+
 # DNS Scripts
 
 Scripts for resolving and importing DNS records into Active Directory-integrated DNS zones.

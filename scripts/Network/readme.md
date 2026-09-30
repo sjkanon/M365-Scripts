@@ -1,8 +1,18 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Network**
+
 # Network
 
 Network and connectivity diagnostic scripts. Cross-platform where noted; the rest require Windows + Administrator.
 
 ---
+
+## Folders
+
+| Folder | Description |
+|--------|-------------|
+| [`UniFi/`](UniFi/readme.md) | UniFi Controller network documentation report + firmware upgrade tooling |
 
 ## Scripts
 
@@ -11,7 +21,6 @@ Network and connectivity diagnostic scripts. Cross-platform where noted; the res
 | [`Test-Ports.ps1`](Test-Ports.ps1) ([docs](#test-portsps1)) | TCP port connectivity checker (cross-platform) |
 | [`Test-AuthNetworkDiagnostics.ps1`](Test-AuthNetworkDiagnostics.ps1) ([docs](#test-authnetworkdiagnosticsps1)) | Auth/network issue diagnostics (Event Viewer, Kerberos, DNS, shares) |
 | [`Test-FileIODiagnostics.ps1`](Test-FileIODiagnostics.ps1) ([docs](#test-fileiodiagnosticsps1)) | File I/O stress test with live failure diagnostics |
-| [`UniFi/`](UniFi/readme.md) | UniFi Controller network documentation report + firmware upgrade tooling |
 
 ---
 

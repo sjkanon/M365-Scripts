@@ -202,11 +202,48 @@ $groupsCsv    = Join-Path $outputDir "SharePoint_Permissions_Groups_$ts.csv"
 $effectiveCsv = Join-Path $outputDir "SharePoint_Permissions_EffectiveAccess_$ts.csv"
 $siteAccessCsv = Join-Path $outputDir "SharePoint_Permissions_SiteAccess_$ts.csv"
 
+$TempAppNamePrefix = 'SP-PermissionsReport'
+
 # ── Well-known application IDs ────────────────────────────────────────────────
+# Defined before the shared block, not inside it: each script builds $RequiredAppRoles from
+# these, and that happens before the block runs.
 $GraphAppId      = '00000003-0000-0000-c000-000000000000'
 $SharePointAppId = '00000003-0000-0ff1-ce00-000000000000'
 $GraphResource   = 'https://graph.microsoft.com'
 
+# What the temporary app is granted. Sites.FullControl.All is not an oversight: SharePoint gates
+# reading role assignments behind the EnumeratePermissions right, which only Full Control carries.
+# This report never reads a user object directly — it expands groups — so it does not ask for
+# User.Read.All.
+$RequiredAppRoles = @(
+    @{ ResourceAppId = $SharePointAppId; Role = 'Sites.FullControl.All'; Why = 'role assignments, site groups, unique scopes' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'Sites.Read.All';        Why = 'tenant-wide site enumeration' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'Entra group membership expansion' }
+)
+
+# ── Header ────────────────────────────────────────────────────────────────────
+Write-Host ''
+Write-Host '  ================================================' -ForegroundColor Cyan
+Write-Host '   Get-SharePointPermissionsReport' -ForegroundColor Cyan
+Write-Host '  ================================================' -ForegroundColor Cyan
+Write-Host ''
+Write-Host ("  Scope     : {0}" -f $(switch ($Scope) {
+    'Site' { 'Sites and sub-sites only' }
+    'List' { 'Sites, sub-sites, lists and libraries' }
+    'Item' { 'Everything — sites, lists, folders and files with unique permissions' }
+})) -ForegroundColor Cyan
+Write-Host ("  Target    : {0}" -f $(if ($SiteUrl) { $SiteUrl } else { "$TenantUrl (tenant-wide)" })) -ForegroundColor Cyan
+Write-Host  '  Mode      : Read-only — this script never changes a permission' -ForegroundColor DarkGray
+Write-Host ''
+
+# ── SHARED BLOCK START ────────────────────────────────────────────────────────
+# Everything from here to SHARED BLOCK END is kept byte-identical with the copy in
+# scripts/SharePoint/Revoke-SharePointUserAccess.ps1. It is the app-only authentication and
+# SharePoint REST layer, and it took four live runs against a tenant to get right: certificate
+# credentials because SharePoint refuses secret-based app-only tokens, tokens that must prove
+# they carry their app roles before being cached, 401 treated as fatal rather than per-site, and
+# paging that cannot loop. A second, drifting copy of that is a correctness risk in a script that
+# deletes permissions, so a test asserts the two are identical. Set $TempAppNamePrefix before it.
 # ── Cleanup / shared state ────────────────────────────────────────────────────
 $script:TempAppObjectId = $null
 $script:ConnectedHere   = $false
@@ -861,21 +898,6 @@ function Get-SharingLinkDescription {
     }
 }
 
-# ── Header ────────────────────────────────────────────────────────────────────
-Write-Host ''
-Write-Host '  ================================================' -ForegroundColor Cyan
-Write-Host '   Get-SharePointPermissionsReport' -ForegroundColor Cyan
-Write-Host '  ================================================' -ForegroundColor Cyan
-Write-Host ''
-Write-Host ("  Scope     : {0}" -f $(switch ($Scope) {
-    'Site' { 'Sites and sub-sites only' }
-    'List' { 'Sites, sub-sites, lists and libraries' }
-    'Item' { 'Everything — sites, lists, folders and files with unique permissions' }
-})) -ForegroundColor Cyan
-Write-Host ("  Target    : {0}" -f $(if ($SiteUrl) { $SiteUrl } else { "$TenantUrl (tenant-wide)" })) -ForegroundColor Cyan
-Write-Host  '  Mode      : Read-only — this script never changes a permission' -ForegroundColor DarkGray
-Write-Host ''
-
 # ── Module preflight ──────────────────────────────────────────────────────────
 $missingModules = @('Microsoft.Graph.Authentication') | Where-Object { -not (Get-Module -ListAvailable -Name $_) }
 if ($missingModules.Count -gt 0) {
@@ -971,7 +993,9 @@ try {
             Remove-TempApp; exit 1
         }
 
-        $tempAppName = "SP-PermissionsReport-Temp-$ts"
+        # Named from a variable so this whole block stays byte-identical to the copy in
+        # Revoke-SharePointUserAccess.ps1 — see the shared-block note above Remove-TempApp.
+        $tempAppName = "$TempAppNamePrefix-Temp-$ts"
         Write-Host "  Creating temporary App Registration '$tempAppName'..." -ForegroundColor Cyan
 
         # Certificate, not a password: SharePoint Online returns 401 "Unsupported app only token"
@@ -993,11 +1017,10 @@ try {
         # assignments behind the EnumeratePermissions right, which only Full Control carries.
         # Read, Write and Manage all return 403 on /roleassignments. The app stays read-only in
         # practice — every call this script makes is a GET — and it is deleted when the run ends.
-        $requiredRoles = @(
-            @{ ResourceAppId = $SharePointAppId; Role = 'Sites.FullControl.All'; Why = 'role assignments, site groups, unique scopes' }
-            @{ ResourceAppId = $GraphAppId;      Role = 'Sites.Read.All';        Why = 'tenant-wide site enumeration' }
-            @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'Entra group membership expansion' }
-        )
+        # Set by each script before the shared block: the report and the revoke script need
+        # different directory permissions, and granting a temporary Full Control app more
+        # than it uses is not a detail worth being sloppy about.
+        $requiredRoles = $RequiredAppRoles
         foreach ($required in $requiredRoles) {
             $resourceSp = Get-MgServicePrincipal -Filter "appId eq '$($required.ResourceAppId)'" -ErrorAction Stop
             if (-not $resourceSp) { throw "Could not resolve service principal for resource $($required.ResourceAppId)." }
@@ -1021,8 +1044,8 @@ try {
         # that now — while the run has produced nothing yet — is the difference between a clear
         # "the grant has not replicated" and a scan that walks the whole tenant on a dead token.
         Write-Host "  Obtaining app-only tokens (waiting for the grants to replicate)..." -ForegroundColor Cyan
-        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @('Sites.Read.All', 'GroupMember.Read.All'))
-        Write-Host "  [OK]   Graph token carries Sites.Read.All and GroupMember.Read.All." -ForegroundColor DarkGray
+        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @($RequiredAppRoles | Where-Object { $_.ResourceAppId -eq $GraphAppId } | ForEach-Object { $_.Role }))
+        Write-Host ("  [OK]   Graph token carries {0}." -f ((@($RequiredAppRoles | Where-Object { $_.ResourceAppId -eq $GraphAppId } | ForEach-Object { $_.Role })) -join ', ')) -ForegroundColor DarkGray
 
         $sharePointResource = Get-ResourceRootFromUrl -Url $(if ($SiteUrl) { $SiteUrl } else { $TenantUrl })
         [void](Get-ResourceToken -Resource $sharePointResource -RequiredRoles @('Sites.FullControl.All'))
@@ -1057,6 +1080,7 @@ try {
     Write-Host "  a client secret is not accepted by SharePoint Online for app-only access." -ForegroundColor Yellow
     Remove-TempApp; exit 1
 }
+# ── SHARED BLOCK END ──────────────────────────────────────────────────────────
 
 # ── Site discovery ────────────────────────────────────────────────────────────
 # Three sources, de-duplicated on URL, because no single one is complete:
@@ -1191,6 +1215,10 @@ $script:SiteGroupCache   = @{}   # site collection URL -> @{ groupId -> group ob
 $script:EntraGroupCache  = @{}   # Entra group object id -> resolved member list
 $script:GroupRowsWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:SiteAccessWritten = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+# Which $select a list template accepts, learned once and reused for every site after that, plus
+# the templates whose quirk has already been reported so the log says it once instead of 131 times.
+$script:LadderStart    = @{}
+$script:LadderReported = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 # Site collection URL -> its root web title. A consolidated view of 130 sites is not readable as
 # 130 URLs, and the title is only known while the root web is being scanned.
 $script:SiteTitles = @{}
@@ -1405,7 +1433,9 @@ function ConvertTo-PermissionRows {
         if ($null -ne $SiteAccessRows) {
             $levelText = ($levels -join '; ')
             $viaType   = if ($principal.Kind -eq 'User') { 'Direct' } else { $principal.Kind }
-            $viaName   = if ($principal.Kind -eq 'User') { $null } else { $principal.Title }
+            # Named rather than left empty: the pivot nests site over group over person, and a
+            # blank level there reads as missing data instead of "granted without a group".
+            $viaName   = if ($principal.Kind -eq 'User') { '(direct toegekend)' } else { $principal.Title }
 
             $people = @($members)
             if ($people.Count -eq 0 -and $principal.Kind -eq 'User') {
@@ -1762,7 +1792,9 @@ function Save-CheckpointState {
 }
 
 function Add-CheckpointKey {
-    param([ValidateSet('U', 'G')][string]$Kind, [string]$Key)
+    # U = completed unit, G = group whose membership is written, A = site access row already
+    # emitted. Every kind written here must also be read back by the resume switch below.
+    param([ValidateSet('U', 'G', 'A')][string]$Kind, [string]$Key)
     if ([string]::IsNullOrWhiteSpace($Key)) { return }
     for ($attempt = 1; $attempt -le 5; $attempt++) {
         try {
@@ -2072,8 +2104,11 @@ try {
                 # nothing for an access review — and the list's own scope is already reported
                 # above. Skipping it removes 121 false "could not be read" rows per tenant scan.
                 $skipItemSweep = ([int]$list.BaseTemplate -eq 112)
-                if ($skipItemSweep -and $Scope -eq 'Item' -and [int]$list.ItemCount -gt 0) {
-                    Write-ProgressHost -Message ("    [SKIP] {0}: SharePoint does not support item enumeration on this system list." -f $list.Title) -ForegroundColor DarkGray
+                if ($skipItemSweep -and $Scope -eq 'Item' -and [int]$list.ItemCount -gt 0 -and
+                    -not $script:LadderReported.Contains('skip112')) {
+                    # Once, not once per site: this list exists on every site in the tenant.
+                    [void]$script:LadderReported.Add('skip112')
+                    Write-ProgressHost -Message ("    [SKIP] {0}: SharePoint does not support item enumeration on this system list — skipped on every site." -f $list.Title) -ForegroundColor DarkGray
                 }
 
                 if ($Scope -eq 'Item' -and -not $skipItemSweep -and [int]$list.ItemCount -gt 0) {
@@ -2103,7 +2138,17 @@ try {
                     $sweep = [PSCustomObject]@{ Scanned = 0 }
                     $itemSweepFailed = $null
 
-                    foreach ($selectFields in $selectLadder) {
+                    # Which fields a list will accept is a property of its template, not of the
+                    # site: the same three system lists rejected the same fields on all 131 sites
+                    # of a live tenant, costing a wasted round trip and a log line every time.
+                    # Learn it once per template and start there.
+                    $templateKey = [string]$list.BaseTemplate
+                    $firstRung   = 0
+                    if ($script:LadderStart.ContainsKey($templateKey)) { $firstRung = $script:LadderStart[$templateKey] }
+                    if ($firstRung -ge $selectLadder.Count) { $firstRung = $selectLadder.Count - 1 }
+
+                    for ($rung = $firstRung; $rung -lt $selectLadder.Count; $rung++) {
+                        $selectFields = $selectLadder[$rung]
                         $itemsUri = "{0}/_api/web/lists(guid'{1}')/items?`$select={2}&`$top=2000" -f $webUrl, $listId, $selectFields
                         $uniqueItems.Clear()
                         $sweep.Scanned  = 0
@@ -2123,15 +2168,26 @@ try {
                             $itemSweepFailed = $_.Exception.Message
                         }
 
-                        if (-not $itemSweepFailed) { break }
+                        if (-not $itemSweepFailed) {
+                            $script:LadderStart[$templateKey] = $rung
+                            break
+                        }
                         # Only a rejected query is worth narrowing. Anything else — denied,
                         # throttled, gone — answers the same way however few fields we ask for.
                         if ($itemSweepFailed -notmatch '400|Bad Request') { break }
 
-                        if ($selectFields -eq $selectLadder[-1]) {
-                            Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
-                        } else {
-                            Write-ProgressHost -Message ("    [INFO] {0} rejected those fields — retrying with fewer." -f $list.Title)
+                        # Remember the rejection so the next site with this template skips it.
+                        $script:LadderStart[$templateKey] = $rung + 1
+
+                        # Say it once per template. Repeating it for every site turns a useful
+                        # line into 350 lines that hide everything else in the log.
+                        if (-not $script:LadderReported.Contains($templateKey)) {
+                            [void]$script:LadderReported.Add($templateKey)
+                            if ($rung -eq $selectLadder.Count - 1) {
+                                Write-ProgressHost -Message ("    [WARN] Cannot enumerate items in {0}: {1}" -f $list.Title, $itemSweepFailed) -ForegroundColor Yellow
+                            } else {
+                                Write-ProgressHost -Message ("    [INFO] {0} (template {1}) rejected those fields — narrowing, and remembering it for the rest of the run." -f $list.Title, $templateKey)
+                            }
                         }
                     }
 
@@ -2447,10 +2503,13 @@ function Add-PermissionsPivots {
         @{ Name = 'Pivot rechten';   Source = 'Rechten'; Rows = @('SiteUrl');       Columns = @('PrimaryPermission'); Data = @{ 'PrincipalName' = 'Count' }; Filter = @('PrincipalType', 'ScopeType') }
         @{ Name = 'Pivot principals';Source = 'Rechten'; Rows = @('PrincipalName'); Columns = @('ScopeType');          Data = @{ 'ScopeUrl' = 'Count' };      Filter = @('SiteUrl', 'IsExternal') }
         @{ Name = 'Pivot groepen';   Source = 'Groepen'; Rows = @('GroupTitle');    Columns = @('MemberIsExternal');   Data = @{ 'MemberLogin' = 'Count' };   Filter = @('SiteUrl', 'GroupType') }
-        # The one that answers the question people actually open this report with: per site, who
-        # can reach it and through which group. Site over user over group, so collapsing a site
-        # shows its people and expanding a person shows what carried them in.
-        @{ Name = 'Pivot toegang';   Source = 'Toegang'; Rows = @('SiteUrl', 'UserDisplayName', 'ViaName'); Columns = @('PrimaryPermission'); Data = @{ 'UserPrincipalName' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
+        # Site over group over person, which is how SharePoint actually grants access: a site has
+        # groups, and groups have people. Collapsed it lists the groups on a site; expanded it
+        # names everyone they let in.
+        @{ Name = 'Pivot toegang';   Source = 'Toegang'; Rows = @('SiteTitle', 'ViaName', 'UserDisplayName'); Columns = @('PrimaryPermission'); Data = @{ 'UserPrincipalName' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
+        # The same data read from the other end, for the question a pivot by site cannot answer:
+        # what does this one person reach, and through what. That is the offboarding view.
+        @{ Name = 'Pivot per persoon'; Source = 'Toegang'; Rows = @('UserDisplayName', 'SiteTitle', 'ViaName'); Columns = @('PrimaryPermission'); Data = @{ 'SiteUrl' = 'Count' }; Filter = @('IsExternal', 'ViaType') }
     )
 
     $added = 0

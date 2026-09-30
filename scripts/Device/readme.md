@@ -1,8 +1,21 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Device**
+
 # Device Management Scripts
 
 Scripts for managing and maintaining Windows endpoints. All scripts require administrator privileges.
 
 ---
+
+## Folders
+
+| Folder | Description |
+|--------|-------------|
+| [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
+| [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
+| [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
+| [`TempDisk/`](TempDisk/readme.md) | Restore the ephemeral temp disk as `D:` at every boot and keep the pagefile on it |
 
 ## Scripts
 
@@ -12,11 +25,9 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`Invoke-WindowsActivation.ps1`](Invoke-WindowsActivation.ps1) ([docs](#invoke-windowsactivationps1)) | Activate Windows, manage product keys and KMS settings |
 | [`Invoke-WindowsCleanup.ps1`](Invoke-WindowsCleanup.ps1) ([docs](#invoke-windowscleanupps1)) | Scan and remove reclaimable disk space |
 | [`Remove-OemBloatware.ps1`](Remove-OemBloatware.ps1) ([docs](#remove-oembloatwareps1)) | Remove OEM (HP/Lenovo/Dell) and generic Microsoft Store bloatware |
+| [`Repair-AppxPackageStore.ps1`](Repair-AppxPackageStore.ps1) ([docs](#repair-appxpackagestoreps1)) | Repair AppX packages that fail with `0x80070490` — orphaned package store entries, and FSLogix replaying a version the host does not have (Teams, new Outlook, any package) |
 | [`Test-OpenVpnDiagnostics.ps1`](Test-OpenVpnDiagnostics.ps1) ([docs](#test-openvpndiagnosticsps1)) | Diagnose OpenVPN Connect issues |
 | [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1) ([docs](#update-teamsclientps1)) | Update new Teams + Outlook meeting add-in, only when Microsoft published a newer build ([how it works](Update-TeamsClient.md), [IT Glue](Update-TeamsClient-ITGlue.md)) |
-| [`Time sync/`](Time%20sync/readme.md) | Fix Windows time sync by restarting W32tm and registering a scheduled task |
-| [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
-| [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
 
 ---
 
@@ -168,6 +179,95 @@ A CSV report (found/removed per app) is saved to `C:\Temp\` after each run.
 
 ---
 
+## Repair-AppxPackageStore.ps1
+
+Repairs AppX packages that fail with `0x80070490` ("Element not found"), typically logged as:
+
+```
+MSTeams installation error: Deployment Register operation with target volume C: on Package
+MSTeams_26246.1604.5133.838_x64__8wekyb3d8bbwe from:  (AppxManifest.xml)  failed with error 0x80070490.
+```
+
+The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying a registration that has no install location. There are two causes, and the script diagnoses both:
+
+- **The host's package store is inconsistent.** `AppxAllUserStore` lists a package for a SID with no profile, a package whose files are gone, or a machine-wide entry without a manifest. `Remove-AppxPackage`, DISM and installers all read that store, so they all fail, and draining the host or rebooting changes nothing.
+- **FSLogix replays a version the host does not have** (event source `Apps (Microsoft-FSLogix-Apps)`, at sign-in). At sign-out FSLogix saves the user's packages by full name — exact version — to `AppxPackages.xml` in the profile container, and re-registers them at the next sign-in (`HKLM\SOFTWARE\FSLogix\Profiles\InstallAppxPackages`, on by default). A host with a different build, or none at all, answers `0x80070490`. The fix is to **provision** the package for all users, at the same build on every host in the pool, and to run an FSLogix build that registers by family name (2210 HF4 for Teams, 25.06 for new Outlook). `AppxPackages.xml` is not edited: Microsoft says it is not meant to be, and FSLogix rewrites it at the next sign-out.
+
+**Steps**
+
+| Step | What it does |
+|------|--------------|
+| 1. Diagnose | Registered packages whose files are gone (*Ghost*) or whose status is not Ok (*Damaged*), provisioned packages without files, orphaned `AppxAllUserStore` entries, recent AppX deployment errors |
+| 1b. FSLogix | FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, the packages FSLogix failed to register in the last `-Days` days against what this host provisions, AppX install policies |
+| 1c. Failing apps | **Every** package that failed to install, update or register in the last `-Days` days, from the AppX deployment log and the FSLogix log together: count, error codes with their meaning, the versions asked for and whether this host has their files. `0x80070490` first, top 15 |
+| 2. Provisioned | `Remove-AppxProvisionedPackage` for provisioned copies whose files are gone |
+| 3. Re-register | `Add-AppxPackage -Register` from the package's own manifest where the files are still there. An older version next to a newer one of the same package is *Superseded*, not damaged — reported in grey and left for Windows to remove, because re-registering it can only fail with `0x80073D06` |
+| 4. Remove | `Remove-AppxPackage -AllUsers` for ghosts, per user where that refuses |
+| 5. Store | Each remaining orphaned registry key is exported to a `.reg` backup, and only then removed — no backup, no removal |
+| 6. Provision | Where FSLogix fails on a newer Teams / Outlook build than this host provisions: **exactly that build**, as an MSIX from Microsoft's CDN at its versioned URL, signature-checked, then `Add-AppxProvisionedPackage` and read back. Otherwise `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, downloaded from Microsoft and signature-checked. With `-UseWinget` the MSIX from winget instead (`Microsoft.Teams`, `Microsoft.Outlook`), provisioned with `Add-AppxProvisionedPackage` together with any dependencies winget brought. `-WingetId`: the same for any other package. `-Source`: any MSIX you supply |
+| 7. Verify | The diagnosis runs again; exit code 1 when anything survived |
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows`. Shorthands: `teams`, `outlook`, `copilot` (= `-Copilot`) — `-Name outlook,copilot` is enough |
+| `-CheckOnly` | Diagnose only, change nothing (exit code `2` when there is work) |
+| `-Provision` | Provision Teams / new Outlook for all users with Microsoft's installer: what FSLogix showed is missing or behind, plus either one named explicitly in `-Name` |
+| `-UseWinget` | With `-Provision`: take Teams / new Outlook from winget instead of Microsoft's installer. winget checks the SHA256, the script the Microsoft signature. winget's manifests lag behind (measured: Teams 26198 vs 26246, Outlook 1.2026.812 vs 902); the run warns when the build is older than what the profiles ask for |
+| `-WingetId` | winget ids of other packages to provision for all users the same way (only when winget's manifest for it is an MSIX) |
+| `-Source` | Provision this `.msix` / `.msixbundle` after the store is clean |
+| `-IncludeDeprovisioned` | Also clear Deprovisioned markers with a wildcard `-Name` (they are cleared by default only for explicitly named packages) |
+| `-SkipSignatureCheck` | Do not require a valid Microsoft signature on the installer or `-Source` |
+| `-Days` | How far back to read the FSLogix Apps and AppX deployment logs (default `7`) |
+| `-WorkingDir` | Download folder for the installers (default `C:\IT\AppxRepair`) |
+| `-LogPath` | Transcript and `.reg` backups (default `C:\Temp`) |
+| `-ComputerName` | Run on these session hosts instead of this machine (e.g. `lem-avd-4,lem-avd-5,lem-avd-6`): the script copies itself over PowerShell remoting (WinRM) to `C:\IT\AppxRepair` on each host, runs there with the same parameters, and ends with a pool table — exit code, FSLogix build, provisioned Teams / Outlook per host — naming any difference between hosts. A repair is confirmed once for the whole pool |
+| `-Credential` | Credential for those remoting sessions |
+| `-Copilot` | Look at Copilot (step 1d): the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`), the **unified Microsoft Copilot app** Edge Update installs since September 2026, and every policy that removes or blocks it. Their Deprovisioned markers are in scope. With `-Provision` the **new** app is installed machine-wide the way Microsoft documents it: `Install{C50565E9-...}` = 5 (Force Installs), `UpdaterExperimentationAndConfigurationServiceControl` = 1 and `CopilotUnificationAllowed{...}` = 1 under `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate` (after a `.reg` backup), Edge Update is asked to check now, and the run waits up to 10 minutes for the app. When it does not appear, `M365CopilotDesktopInstaller.exe --quiet --start -p` (the old app, which the unification moves over) is the fallback. A policy that forbids the install (`Install` = 0) is never overridden |
+
+Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
+
+**Examples**
+
+```powershell
+# What is broken on this host? Changes nothing.
+.\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
+
+# Repair and put Teams + new Outlook back for all users, unattended
+.\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# The whole pool from one place: diagnose, then repair + provision on every host
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# New Outlook and the new Copilot app on the pool: why they are missing, then install for all users
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -CheckOnly
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision -Confirm:$false
+
+# Same, with both packages taken from winget
+.\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false
+
+# Every app that failed in the last 14 days, plus the whole store; changes nothing
+.\Repair-AppxPackageStore.ps1 -CheckOnly -Days 14
+```
+
+**Notes**
+
+- Exit codes: `0` clean, `1` failed or something survived, `2` check-only found work.
+- On an FSLogix pool, run it on **every** host — `-ComputerName` does that from one place and shows whether FSLogix, Teams and Outlook are the same everywhere.
+- Profiles ask for a newer Teams / Outlook than a host provisions because both apps update themselves per user, while Microsoft's installers provision an older last-known-good build (measured: Teams 26225 vs 26246, Outlook 1.2026.818 vs 902 and 915). Where FSLogix **fails** on that newer build, `-Provision` puts down exactly that build from Microsoft's CDN. A production host showed this is needed even with the files on disk: Outlook failed 186× with `0x80070490` while both requested builds were present. Because the apps keep updating, run the script on a schedule (e.g. daily from NinjaOne with `-Name teams,outlook -Provision -Confirm:$false`) to keep the hosts level; with an FSLogix older than 2210 HF4 (Teams) / 25.06 (Outlook), update FSLogix as well.
+- Error codes are shown with Windows' own text (e.g. `0x80073D19` = "An error occurred because a user was logged off", harmless) plus a note where the script has one.
+- **Copilot, September 2026:** Microsoft is unifying the Microsoft 365 Copilot app and the Windows Copilot app into one *Microsoft Copilot* app, installed and updated by Edge Update (app id `{C50565E9-CCCF-44B4-BA15-5AC5C6569197}`). What keeps it away is usually a policy, and the script names it with its path: `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate` — `Install{id}` = 0 (no install), `Uninstall{id}` = 1/2 (removed at every check, unless `Install{id}` = 5 Force Installs, which overrides it); `PauseCopilotAppUnificationRollout` under `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate`; and Windows' own `WindowsCopilot` / `WindowsAI` policies, machine-wide and per signed-in user. Those come from GPO or Intune and are **not** changed by the script — a local edit would be undone at the next refresh. The Microsoft 365 Apps admin center can also switch off the automatic install (*Modern Apps settings*); that is not visible on the machine.
+- `-ComputerName` needs WinRM from where you run it to the hosts (domain-joined hosts: Kerberos works as is). For Entra-joined hosts that is often not set up; run the script on each host through NinjaOne instead.
+- The FSLogix error for a user stops after that user signs out once on a host that provisions the package — FSLogix then saves the current version.
+- After step 5 restart the host when convenient, so the deployment engine rereads the store.
+- A backup `.reg` file can be double-clicked to put an entry back.
+- Not done on purpose: editing `StateRepository-Machine.srd` or `AppxPackages.xml`. Both are unsupported, and the first breaks Start and every app on a multi-session host when it goes wrong.
+- For Teams specifically, [`Update-TeamsClient.ps1`](Update-TeamsClient.ps1) `-RepairAppxStore` does the store part as part of an update; this script covers every package and the FSLogix side.
+
+---
+
 ## Test-OpenVpnDiagnostics.ps1
 
 Collects and evaluates diagnostic information for OpenVPN Connect issues on a Windows machine. Checks each relevant layer from driver to network and reports any problems found.
@@ -231,9 +331,9 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 | 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector. Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
 | 4 | Classic Teams only (`-RemoveClassicTeams`): uninstall machine-wide installer + per-profile installs | yes |
 | 5 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
-| 6 | Uninstall the add-in MSI (`1612` retried from Windows Installer's cached copy), remove `MSTeams` AppX for all users, deprovision it | yes |
+| 6 | Remove `MSTeams` AppX for all users and deprovision it; a package the AppX stack refuses to remove is reported, not fatal. The add-in is left alone here | yes |
 | 7 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
-| 8 | Compare the staged add-in MSI with what is still registered, clear every other copy of it, install it (`ALLUSERS=1`) | yes |
+| 8 | The whole add-in replacement, once the MSI is in hand: uninstall the registered one (`1612` retried from the cached copy), verify nothing survived, clear every other copy, install it (`ALLUSERS=1`) | yes |
 | 9 | Verify add-in registration (machine-wide + per signed-in user in Outlook), classic removal, provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
 Only what is missing gets done: a current client with a missing add-in installs just the add-in, and on a session host with `-AvdOptimizations` a missing WebRTC redirector installs just that.
@@ -280,6 +380,8 @@ On an endpoint, preflight also checks the three policies that stop the staging: 
 | `-RemoveClassicTeams` | Also remove the classic Teams client: machine-wide installer plus per-profile installs |
 | `-RemoveWebRtcRedirector` | Remove the old WebRTC media optimization, retired 1 October 2026. Cannot be combined with `-AvdOptimizations`; leaves `IsWVDEnvironment` set, because SlimCore needs it too |
 | `-ClearOrphanedAddInRegistration` | Last resort: make Windows Installer forget a meeting add-in it can no longer uninstall (`1612` with its cached MSI gone), which is what keeps refusing a reinstall with `1638` |
+| `-RepairAppxStore` | Last resort for the AppX side: re-register a package whose files are still there, then clear the `AppxAllUserStore` entries Windows can no longer resolve — registrations for SIDs with no profile, a machine-wide entry whose manifest is gone, and the `Deprovisioned` marker. Scoped to MSTeams; preflight names them whether or not the switch is given |
+| `-UseWinget` | Fetch the Teams MSIX with winget and provision that exact file (`teamsbootstrapper.exe -p -o`) instead of letting the bootstrapper download one at run time |
 | `-RepairOutlookAddIn` | Clear a per-user Outlook registration pointing at an add-in DLL that no longer exists, so the machine-wide one takes over again |
 | `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
 | `-Ring` | Update ring queried at the config service (default: `general`) |

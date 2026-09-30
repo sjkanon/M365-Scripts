@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../../readme.md) › [scripts](../../../readme.md) › [Custom Scripts](../../readme.md) › [Intune](../readme.md) › **Desktop**
+
 # Desktop (Office theme)
 
 Office theme and color palette deployment via Intune. Kept at this path deliberately — both scripts hardcode their download URL to this exact repo location (`main` branch), so moving them would break the download until the scripts are updated and redeployed to Intune.
@@ -6,12 +10,17 @@ For wallpaper/lockscreen/taskbar-shortcut deployment, see [`scripts/Intune/Deskt
 
 ---
 
-## Contents
+## Folders
 
-| Item | Description |
-|------|-------------|
-| [`Deploy-OfficeTheme.ps1`](Deploy-OfficeTheme.ps1) ([docs](#deploy-officethemeps1)) | Installs the full VIAS Institute `.thmx` Office theme |
+| Folder | Description |
+|--------|-------------|
 | [`Office Themes/`](Office%20Themes/readme.md) | `Deploy-Officecolors.ps1` — installs just the color scheme |
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Deploy-OfficeTheme.ps1`](Deploy-OfficeTheme.ps1) ([docs](#deploy-officethemeps1)) | Installs the full VIAS Institute `.thmx` Office theme |
 | `2026 Vias institute colours (2).thmx` | The Office theme file downloaded by `Deploy-OfficeTheme.ps1` |
 
 ---

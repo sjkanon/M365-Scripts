@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Office365Toolkit](../readme.md) › **Intune**
+
 # Office365Toolkit / Intune
 
 Tenant-wide Intune / Endpoint Manager policy inventory.

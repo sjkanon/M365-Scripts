@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Graph**
+
 # Graph
 
 Scripts for managing Microsoft Graph application permissions and service principals.

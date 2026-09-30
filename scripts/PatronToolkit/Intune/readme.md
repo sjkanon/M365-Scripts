@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [PatronToolkit](../readme.md) › **Intune**
+
 # Patron Toolkit — Intune
 
 Intune policy assignment reporting and Windows Autopilot device inventory via Microsoft

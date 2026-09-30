@@ -280,6 +280,56 @@ Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserDat
 
 ---
 
+## Alles antwoordt `0x80070490` — level 3
+
+Het beeld: verwijderen lukt niet, per gebruiker verwijderen lukt niet, installeren lukt
+niet, en alle drie geven `0x80070490` ("Element not found"). Komt die code ook terug voor
+`NT AUTHORITY\SYSTEM`, dan weet je genoeg: SYSTEM is geen gebruiker die in Teams zit te
+vergaderen. Er is niemand die iets vasthoudt.
+
+Wat er dan aan de hand is: Windows houdt in het register bij welke pakketten er zijn, en
+die administratie klopt niet meer met de werkelijkheid. Er staan registraties in voor
+gebruikers wier profiel van de machine is verdwenen, of voor een pakket waarvan de
+bestanden weg zijn. Iedereen die het vraagt — `Remove-AppxPackage`, de bootstrapper,
+DISM — leest diezelfde administratie en krijgt hetzelfde nul op het rekest.
+
+**Draineren, uitloggen en herstarten helpen hier niet.** Die adviezen gelden voor een
+drukke host, niet voor deze storing.
+
+### Stap 1 — vaststellen wat er stuk is
+
+```powershell
+.\Update-Teams.ps1 -CheckOnly
+```
+
+Verandert niets. Zoek in de output naar regels die met `Package store orphan` beginnen:
+die noemen per stuk wat er misstaat en in welke registersleutel.
+
+### Stap 2 — repareren
+
+```powershell
+.\Update-Teams.ps1 -Force -RepairAppxStore -UseWinget -Confirm:$false
+```
+
+Twee dingen tegelijk, en ze vullen elkaar aan:
+
+- `-RepairAppxStore` herregistreert eerst elk pakket waarvan de bestanden nog op schijf
+  staan — dat herbouwt de administratie uit het pakket zelf, en meestal laat het zich
+  daarna gewoon verwijderen. Wat dan nog overblijft gaat sleutel voor sleutel weg, elk
+  met naam en volledig pad in het log.
+- `-UseWinget` haalt de MSIX zelf op en geeft die aan de bootstrapper mee. De installatie
+  krijgt dan een concreet bestand als bron in plaats van een verwijzing die Windows zelf
+  moet zien op te lossen — precies het ding dat hier stuk is.
+
+Na afloop vraagt het script om een herstart. Doe die: de deployment-engine leest de
+administratie opnieuw in en begint schoon.
+
+### Stap 3 — pas daarna
+
+Blijft het falen, dan zit het dieper dan het register kan verklaren. Een pooled
+AVD-sessiehost rol je dan opnieuw uit vanaf de image — dat is goedkoper dan doorzoeken.
+Een persoonlijke werkplek krijgt een in-place reparatie van Windows.
+
 ## Waar het script naar Teams zoekt
 
 De preflight inventariseert elke plek waar Teams kan staan, zodat je in één oogopslag ziet wat er op de werkplek leeft:
@@ -476,6 +526,8 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-AvdOptimizations` | Alleen op AVD/VDI-sessiehosts: zet de mediavlag `IsWVDEnvironment` en installeert de WebRTC-redirector |
 | `-RemoveWebRtcRedirector` | Verwijdert de oude WebRTC-optimalisatie. Alleen als élk lokaal apparaat SlimCore aankan. Gaat niet samen met `-AvdOptimizations` |
 | `-ClearOrphanedAddInRegistration` | **Laatste redmiddel, L3.** Laat Windows Installer een add-in vergeten die hij zelf niet meer kan verwijderen (`1612` én de gecachte MSI weg), zodat herinstalleren weer kan. Raakt alleen dat ene product |
+| `-RepairAppxStore` | **Laatste redmiddel, L3.** Repareert de pakketadministratie van Windows waar die Teams is kwijtgeraakt: herregistreert een pakket waarvan de bestanden er nog staan, en verwijdert daarna de vermeldingen onder `AppxAllUserStore` die nergens meer op slaan. Alleen MSTeams, elke sleutel met naam en pad in het log |
+| `-UseWinget` | Haalt de Teams-MSIX op met winget en installeert precies dat bestand (`teamsbootstrapper.exe -p -o`), in plaats van de bootstrapper zelf iets te laten downloaden. Handig bij een beschadigde pakketadministratie, en de run weet dan welke build erop staat |
 | `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
 | `-RepairOutlookAddIn` | Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen |
 | `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
@@ -534,6 +586,13 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `Teams Meeting Add-in installation failed` | Client staat er, add-in niet | Outlook volledig sluiten en het script opnieuw draaien | L2 |
 | `Outlook has the add-in switched off for ... (LoadBehavior 2)` | Outlook heeft de add-in zelf uitgeschakeld, meestal na een crash | Outlook → Bestand → Opties → Invoegtoepassingen → COM-invoegtoepassingen → vinkje terugzetten. Herinstalleren helpt hier niet | L2 |
 | `The add-in is registered for ... but its DLL is gone (...)` | Verouderde registratie van die gebruiker overschaduwt de machinebrede installatie | Draaien met `-RepairOutlookAddIn`; vinkje terugzetten in Outlook helpt niet | L2 |
+| `pending removal for: ...` | De verwijdering is al gelukt en wacht tot die gebruikers uitloggen | Gebruikers uitloggen of de host herstarten, daarna opnieuw draaien | L2 |
+| `... those profiles are no longer on this host` | Zelfde wachtstand, maar het profiel staat er niet meer: er is niemand meer om uit te loggen, dus dit lost zichzelf nooit op | Niet op wachten. Zie de regel hieronder — dit hoort bij een beschadigde pakketdatabase | L3 |
+| `its files are gone (...) while the package store still lists it` | Windows heeft het pakket in zijn administratie staan, maar de bestanden zijn weg | Dit is de kern van de storing: verwijderen antwoordt `0x80070490` omdat er niets te verwijderen is, en installeren van diezelfde versie ook. Zie de regel hieronder | L3 |
+| `Nothing to remove for ... (0x80070490)` | Geen gebruiker die het pakket vasthoudt, maar een registratie die Windows zelf niet kan vinden. Komt dit voor **alle** houders terug, inclusief `SYSTEM`, dan houdt niemand iets vast | Draineren, uitloggen en herstarten helpen geen van drieën: `Remove-AppxPackage`, de bootstrapper en DISM lezen dezelfde administratie. Draai opnieuw met `-RepairAppxStore` — zie de regel hieronder | L3 |
+| `Package store orphan - ... : ...` | Het script noemt precies welke vermelding in `AppxAllUserStore` nergens meer op slaat, met het registerpad erbij | Alleen melden; `-CheckOnly` geeft de volledige lijst. Opruimen doet `-RepairAppxStore` | L2 |
+| `N orphaned MSTeams entries in the package store` | Er zijn wezen gevonden maar de schakelaar stond niet aan | Opnieuw draaien met `-RepairAppxStore`. Dat herregistreert eerst wat nog bestanden op schijf heeft en ruimt daarna de registervermeldingen op, per stuk met naam en pad in het log | L3 |
+| `winget publishes X while the config service publishes Y` | Normaal. Het winget-manifest wordt los onderhouden en loopt een build of twee achter | Geen actie. Wil je per se de allernieuwste build, laat `-UseWinget` dan weg | L1 |
 | `Teams installation failed` | De installatie is niet doorgekomen | Log in `C:\Temp` lezen en doorzetten | L3 |
 | `A reboot is required` | Windows wil herstarten om af te ronden | Herstart inplannen met de gebruiker | L1 |
 

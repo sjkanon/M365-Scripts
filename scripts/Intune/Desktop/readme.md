@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Intune](../readme.md) › **Desktop**
+
 # Desktop
 
 Intune-deployed desktop customization: corporate wallpaper + lockscreen, and a taskbar lock-workstation shortcut.
@@ -6,14 +10,19 @@ Intune-deployed desktop customization: corporate wallpaper + lockscreen, and a t
 
 ---
 
-## Contents
+## Folders
 
-| Item | Description |
-|------|-------------|
+| Folder | Description |
+|--------|-------------|
 | [`Background/`](Background/readme.md) | Corporate wallpaper (`Desktop/`) and lockscreen (`Lockscreen/`) |
 | [`Add Lockscreen to start and desktop/`](Add%20Lockscreen%20to%20start%20and%20desktop/readme.md) | Pins a "Lock Workstation" shortcut to Start |
 | [`ClaudeDesktop/`](ClaudeDesktop/readme.md) | Machine-wide Claude Desktop deployment, one script run monthly to stay current |
 | [`CoworkPrerequisites/`](CoworkPrerequisites/readme.md) | Windows-side Cowork prerequisites (`VirtualMachinePlatform`, Fast Startup) — its own independent Win32 app, not bundled into Claude Desktop |
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
 | [`Deploy-AllIntune.ps1`](Deploy-AllIntune.ps1) ([docs](#deploy-allintuneps1)) | Runs both of the above deploy scripts in one call |
 
 ---

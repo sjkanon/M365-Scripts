@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [TenantOnboarding](../readme.md) › **AppDeployment**
+
 # AppDeployment
 
 Generic, parameterized device-side app deployment scripts — replacing a large family of old scripts that each hardcoded one vendor's download URL or one shortcut/printer's details. Point every script here at your own package repository / URL; none of them hardcode an internal endpoint.

@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [PatronToolkit](../readme.md) › **Entra**
+
 # Patron Toolkit — Entra
 
 MFA/SSPR registration reporting and Conditional Access policy backup via Microsoft Graph.

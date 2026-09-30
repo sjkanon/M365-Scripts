@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **TenantOnboarding**
+
 # Tenant Onboarding
 
 Scripts for onboarding a new M365 tenant and provisioning/managing its devices — ported and modernized from a retired legacy repository. Every script follows this repo's house style: dry-run by default with an `-Apply` switch for anything that changes state, `[CmdletBinding(SupportsShouldProcess)]`, and no hardcoded credentials, tenant/customer names, or internal endpoints.
@@ -6,7 +10,7 @@ Where the legacy source had several near-identical scripts doing slight variatio
 
 ---
 
-## Subfolders
+## Folders
 
 | Folder | Contents |
 |--------|----------|

@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **Startup**
+
 # Startup
 
 Entry-point scripts and the core M365 function library.
@@ -15,6 +19,7 @@ Entry-point scripts and the core M365 function library.
 | [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
 | [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Checks every link in every readme — files that must exist, anchors that must match a heading |
 | [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Builds a self-contained, styled HTML page from a markdown document — for pasting into IT Glue or printing |
+| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) | Writes the language switcher and breadcrumb at the top of every readme, in English, Dutch and French |
 
 ---
 
@@ -303,3 +308,41 @@ pwsh -File scripts/Startup/Test-MarkdownLinks.ps1 -Path scripts/Exchange
 
 Exit codes: `0` = every internal link resolves, `1` = something is broken (each one
 listed with the file it is in and why it failed).
+
+---
+
+## Update-ReadmeHeader.ps1
+
+Every folder has its readme three times: `readme.md` (English), `readme.nl.md` (Dutch) and
+`readme.fr.md` (French). Each opens with the same two lines, different only in their paths:
+a language switcher to the same page in the other languages, and a breadcrumb back up the
+tree in which every level links to its own readme **in the current language**.
+
+Kept by hand, those paths are exactly what goes wrong — one `../` too few after a folder
+moves, or a Dutch page that links to the English parent. So they are generated from the
+folder the readme sits in, and nothing else. Everything above the first heading that is a
+switcher or breadcrumb line is replaced; the rest of the file is not touched.
+
+A folder with a `readme.md` but no Dutch or French version is reported: its switcher would
+link to nothing.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Root` | Repository root (default: two levels above this script) |
+| `-Check` | Write nothing; exit `1` when a header is out of date or a language version is missing |
+| `-WhatIf` | Report which headers would be rewritten without writing |
+
+**Examples**
+
+```powershell
+# After adding or moving a folder readme (write the .nl.md and .fr.md versions first)
+pwsh -File scripts/Startup/Update-ReadmeHeader.ps1
+
+# Fail when a header is stale or a translation is missing — for a hook or a pipeline
+pwsh -File scripts/Startup/Update-ReadmeHeader.ps1 -Check
+```
+
+> Run [`Test-MarkdownLinks.ps1`](#test-markdownlinksps1) afterwards: this script writes the
+> links, that one proves they resolve.

@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Reporting](../readme.md) › **Licensing**
+
 # Licensing Report Toolkit
 
 > Author: Sjoerd Kanon

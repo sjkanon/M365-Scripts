@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [LegacyUtilities](../readme.md) › **Teams**
+
 # Legacy Utilities — Teams
 
 Team and Planner provisioning utilities via Microsoft Graph (and Microsoft

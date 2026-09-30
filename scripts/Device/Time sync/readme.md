@@ -1,3 +1,7 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../../readme.md) › [scripts](../../readme.md) › [Device](../readme.md) › **Time sync**
+
 # Time Sync
 
 Fixes Windows time synchronization drift by pointing `W32time` at Dutch NTP pool servers and keeping it in sync going forward.

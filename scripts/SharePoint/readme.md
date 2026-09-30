@@ -1,9 +1,19 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
+[M365-Scripts](../../readme.md) › [scripts](../readme.md) › **SharePoint**
+
 # SharePoint Scripts
 
 SharePoint Online and OneDrive content operations via PnP PowerShell, with interactive
 admin sign-in on any (customer) tenant.
 
 ---
+
+## Folders
+
+| Folder | Description |
+|--------|-------------|
+| [`Provisioning/`](Provisioning/readme.md) | Provision and maintain a whole structure — metadata model, content types, libraries and group permissions — from one config file, plus a sharing audit and a drift check |
 
 ## Scripts
 
@@ -12,7 +22,9 @@ admin sign-in on any (customer) tenant.
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | The same question tenant-wide through Microsoft Graph, app-only, no interactive login — files and folders |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
-| [`Provisioning/`](Provisioning/readme.md) | Provision and maintain a whole structure — metadata model, content types, libraries and group permissions — from one config file, plus a sharing audit and a drift check |
+| [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Where did a file go? Renames, moves, copies and deletes from the audit log, folder moves included — in Brussels time, over a period you choose |
+| [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
+| [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Verify the two access scripts without touching a tenant — shared auth block identical, and the revocation funnel behaves |
 
 ---
 
@@ -446,4 +458,176 @@ app creation entirely.
 ```powershell
 Install-Module PnP.PowerShell -Scope CurrentUser              # PowerShell 7.4+
 Install-Module Microsoft.Graph.Applications -Scope CurrentUser # only for the one-time app registration
+```
+
+---
+
+### Trace-SharePointFile.ps1
+
+Answers "where did my file go?" for OneDrive and SharePoint: renamed, moved, copied,
+deleted or restored, by whom and when. Every time is shown in **Brussels time**
+(summer and winter time handled, UTC offset alongside), and you can give it a period.
+Read-only: nothing in the tenant changes.
+
+SharePoint does not remember a file's old name or location; the **Unified Audit Log**
+does, so that is the source. The script reads it and rebuilds the file's trail:
+
+| Step | What it does |
+|------|--------------|
+| Read | Every rename, move, copy, delete, recycle, restore and upload of files **and folders** in the window. Read per day; a slice holding more than the 50,000 records one search can return is split until it fits (down to 15 minutes), and a failing or inconsistent search is retried |
+| Seed | The records that mention the file by `-Name`, `-Url` or `-ItemId` |
+| Follow | Every record of the same item (`ListItemUniqueId`, which survives renames and moves) and every record starting at a path the file was renamed or moved to. A chain `A → B → C` ends at C, even though C looks nothing like the name you searched for. A move to another site is followed by its destination path |
+| Folders | Renaming, moving or deleting a folder moves every file in it **without a record per file**. Folder records are replayed against the file's path at that moment, so "moved along with folder X" and "deleted along with folder X" show up too |
+
+Per item you get the timeline, the **last known location** and a status: `Present`,
+`In recycle bin` (restore it with [`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1)),
+`In second-stage recycle bin` or `Permanently deleted`.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `-Name` | string | — | File name as it was at some point. Without an extension it matches any extension (`Offerte` finds `Offerte.docx`); `*` and `?` are wildcards |
+| `-Url` | string | — | Full URL of the file as it was. `?web=1` is ignored and a `/:w:/r/` sharing link is turned back into the path. Opaque sharing links (`/:w:/s/`, `/:w:/g/`) cannot be traced — open them and copy the address they land on |
+| `-ItemId` | guid | — | The `ListItemUniqueId`, e.g. from the CSV of an earlier run |
+| `-SiteUrl` | string | — | Only records of this site or OneDrive. Much faster in a large tenant |
+| `-StartDate` | date or string | `-Days` before `-EndDate` | Wall-clock time in `-TimeZone`: `15-09-2026`, `15/09/2026 08:30`, `2026-09-15 08:30` (day first, Belgian style) |
+| `-EndDate` | date or string | now | Same notation. A date without a time includes that whole day |
+| `-Days` | int | `30` | Window length when `-StartDate` is not given |
+| `-TimeZone` | string | `Europe/Brussels` | IANA or Windows ID; works in Windows PowerShell 5.1 and PowerShell 7 |
+| `-FollowCopies` | switch | off | Also follow copies. By default a copy is reported but not followed — the original stays where it was |
+| `-IncludeActivity` | switch | off | Also opens, edits, downloads, sync and check-in/out: who last worked in it. Many more records, so slower |
+| `-OutputPath` | string | `C:\Temp\FileTrail_<name>_<ts>.csv` | CSV path; the raw audit records of the trail go to the same name with `.json` |
+| `-TenantId` | string | — | Tenant domain for `Connect-ExchangeOnline`; not needed when already connected |
+| `-PassThru` | switch | off | Also return the timeline rows as objects |
+
+**Examples**
+
+```powershell
+# Where did "Offerte Janssens.docx" go in the last 30 days?
+.\Trace-SharePointFile.ps1 -Name "Offerte Janssens.docx" -TenantId contoso.onmicrosoft.com
+
+# A period in Brussels time, one OneDrive only
+.\Trace-SharePointFile.ps1 -Name "Budget*" -StartDate '01-09-2026' -EndDate '15-09-2026' `
+    -SiteUrl https://contoso-my.sharepoint.com/personal/jan_contoso_com
+
+# From the link someone once sent, one afternoon
+.\Trace-SharePointFile.ps1 -Url "https://contoso.sharepoint.com/sites/Sales/Shared Documents/2026/Prijslijst.xlsx" `
+    -StartDate '2026-09-12 13:00' -EndDate '2026-09-12 18:00'
+```
+
+**Notes**
+
+- Needs the **View-Only Audit Logs** or **Audit Logs** role in Exchange Online, and the module `ExchangeOnlineManagement`. Runs in Windows PowerShell 5.1 and PowerShell 7
+- The audit log runs 30–90 minutes (occasionally 24 hours) behind. Audit Standard keeps **180 days**; the script warns when the window starts earlier
+- Only what happened **inside** the window can be followed. A folder renamed before `-StartDate` is invisible; if the trail seems to start halfway, widen the window
+- Renames by the OneDrive sync client (in Explorer) are audited like those in the browser; the `UserAgent` column tells them apart
+- The last known location is what the audit log says — the script does not check that the file is still there
+- CSV columns: `Item, Time, TimeUtc, Action, Operation, User, From, To, ViaFolder, ItemId, ClientIP, UserAgent, RecordId`. `ViaFolder` is filled when the step came from a folder action
+
+---
+
+### Revoke-SharePointUserAccess.ps1
+
+The counterpart of [`Get-SharePointPermissionsReport.ps1`](../Reporting/readme.md#get-sharepointpermissionsreportps1): that script tells you who can get at what, this script takes it away. It finds every place where one named user has access and removes it:
+
+- **Site collection administrator** — first, because that role overrides every role assignment below it; leaving it in place would make the rest cosmetic
+- **Direct role assignments** on a site, subsite, list/library, folder or individual file
+- **SharePoint groups** (Owners, Members, Visitors and custom groups)
+- **Sharing links** — the `SharingLinks.*` groups a shared link puts its recipients in. That is how "anyone with the link" and "specific people" actually give a person access
+
+Reporting is the default. Nothing changes without `-Apply`, and every run writes a CSV with exactly what was found and what was done with it.
+
+#### What it deliberately does *not* do
+
+| | Why |
+|---|---|
+| Change Entra ID group membership | Whoever gets in through a security or M365 group keeps that access — the group *is* the grant. This script does not touch Entra, but it does report those routes explicitly, with the group name. Otherwise you think it is closed while it is still open |
+| Remove `Everyone` / `Everyone except external users` | That takes access away from the whole tenant, not from this person. Reported, not touched |
+| Clean up ownership and metadata | A revoked user remains the author of what they created |
+
+> **So offboarding is two steps.** Run this script, then deal with the Entra groups listed in the CSV under `Action = CannotRevoke`. Without that second step the access is not gone.
+
+#### Robustness
+
+This script removes permissions, so its failure modes differ from those of a report: silently hitting the wrong person, or not being able to tell afterwards what you removed.
+
+| Situation | Behaviour |
+|---|---|
+| Identifying the user | **Exact comparisons only.** On UPN, e-mail, the claim suffix, and the decoded guest name (`jan_partner.com#ext#@tenant` becomes `jan@partner.com`). Never on a substring: `an@contoso.com` is contained in `jan@contoso.com`, and that is exactly how you revoke the wrong person |
+| Two accounts with the same address | The site is **not** touched; the script stops with both login names in the error. Choosing is up to you, not the script |
+| Audit CSV | Written row by row during the run, not at the end. A run that revokes two hundred things and then crashes must still be able to tell you *what* is gone |
+| CSV is open in Excel | Five attempts with increasing wait time, then the run stops — better an aborted run than removing permissions without a trace |
+| Removal returns `404` | `AlreadyGone`, not an error. On a second run that is the normal outcome; counted as an error, a clean run would look broken |
+| `-WhatIf` | Same branch as a dry run, so `WouldRevoke` in the CSV — not `Skipped`, which would suggest someone declined a prompt |
+| Site collection administrator cannot be removed | **Reported loudly, and the run counts it as failed.** That role reaches every scope in the site, so all other removals there are then cosmetic |
+| Throttling (`429`/`503`) | Retry with `Retry-After`; a rejected token is fetched fresh once before the run stops |
+| Unexpected error | A `trap` cleans up the temporary Full Control app before the script stops |
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `-UserPrincipalName` | string | — | **Required.** The user, e.g. `jan@contoso.com`. For a guest the real address (`jan@partner.com`) works too — the script finds the `#ext#` variant itself |
+| `-TenantUrl` | string | — | Tenant root. Required for a tenant-wide run |
+| `-SiteUrl` | string | — | One site collection instead of the whole tenant |
+| `-Apply` | switch | off | Actually revoke. Without it, report only |
+| `-Scope` | `Site`/`List`/`Item` | `Item` | How deep to search for direct grants |
+| `-IncludeGroupAccess` | switch | off | Also reports the sites the user reaches through Entra groups, *including* where they have nothing else. Report only |
+| `-KeepSharingLinks` | switch | off | Leave sharing links alone; all other routes are still revoked |
+| `-RemoveFromSite` | switch | off | Afterwards also removes the user from the user list of every site collection. Catches what the scope-by-scope pass missed, but the name then renders as a deleted account in older metadata |
+| `-IncludeOneDriveSites` | switch | off | Also search personal OneDrive sites |
+| `-IncludeHiddenLists` | switch | off | Also hidden and system lists |
+| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Your own app registration instead of the temporary one. It needs SharePoint `Sites.FullControl.All` plus Graph `Sites.Read.All`, `User.Read.All` and `GroupMember.Read.All`. Without `User.Read.All` the user lookup comes back `403` and the run stops rather than mistaking that for a missing account |
+| `-ClientSecret` | string | — | Works for Graph but **not** for SharePoint (see authentication under the report) |
+| `-OutputPath` | string | `C:\Temp` | Output folder |
+| `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout and retries |
+
+Authentication is identical to the report: a short-lived, certificate-based app registration with SharePoint `Sites.FullControl.All`, which is deleted again afterwards.
+
+#### Output
+
+`SharePoint_Revoke_<user>_<ts>.csv`, one row per grant found, with an `Action` column:
+
+| Action | Meaning |
+|---|---|
+| `WouldRevoke` | Found, and would be removed — this is what you get without `-Apply` |
+| `Revoked` | Removed |
+| `Failed` | Attempt failed; the reason is in `Detail` |
+| `AlreadyGone` | Nothing left to remove — the normal outcome on a second run |
+| `CannotRevoke` | Through an Entra group or `Everyone` — has to be resolved elsewhere |
+| `Kept` | Deliberately left in place by `-KeepSharingLinks` |
+| `Skipped` | Declined at the confirmation prompt |
+
+#### Examples
+
+```powershell
+# What can Jan reach? Changes nothing
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com"
+
+# The same, and now actually revoke
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -Apply
+
+# Remove a guest from one site collection, sharing links included
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName gast@partner.com -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -Apply
+
+# Offboarding checklist: also the Entra groups that give access
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -IncludeGroupAccess
+```
+
+> Running unattended? Pass `-Confirm:$false`, otherwise the script asks for confirmation for every removal (`ConfirmImpact = 'High'`).
+
+---
+
+### Test-SharePointAccessScripts.ps1
+
+Checks `Revoke-SharePointUserAccess.ps1` and `Get-SharePointPermissionsReport.ps1` without touching a tenant. Run it after every change to either of them; exit code 0 means both are in order.
+
+Two things are checked, both of them errors that go wrong silently in production:
+
+1. **The shared authentication block is byte-identical.** Both scripts contain the same app-only auth and SharePoint REST layer, delimited by `SHARED BLOCK START/END`. That layer took four live runs against a tenant to get right — certificate instead of secret, tokens that have to prove their app roles before they are cached, 401 as fatal instead of per site, paging that cannot get stuck. A second copy that silently drifts is a correctness risk in precisely the script that removes permissions. On a difference, the first line that differs is shown.
+2. **The revocation funnel behaves.** A dry run must record its intent and execute nothing, `-Apply` must execute *and* record, a failure must end up in the audit trail instead of disappearing, and the grants the script must refuse to remove (through an Entra group, or to everyone) must stay refused.
+
+```powershell
+.\Test-SharePointAccessScripts.ps1
 ```
