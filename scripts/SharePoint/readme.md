@@ -1,3 +1,5 @@
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+
 [M365-Scripts](../../readme.md) › [scripts](../readme.md) › **SharePoint**
 
 # SharePoint Scripts
@@ -461,104 +463,104 @@ Install-Module Microsoft.Graph.Applications -Scope CurrentUser # only for the on
 
 ### Revoke-SharePointUserAccess.ps1
 
-De tegenhanger van [`Get-SharePointPermissionsReport.ps1`](../Reporting/readme.md#get-sharepointpermissionsreportps1): dat script vertelt wie waar bij kan, dit script haalt het weg. Het zoekt elke plek waar één genoemde gebruiker toegang heeft en verwijdert die:
+The counterpart of [`Get-SharePointPermissionsReport.ps1`](../Reporting/readme.md#get-sharepointpermissionsreportps1): that script tells you who can get at what, this script takes it away. It finds every place where one named user has access and removes it:
 
-- **Site collection-beheerder** — als eerste, want die overschrijft elke roltoewijzing eronder; laten staan zou de rest cosmetisch maken
-- **Directe roltoewijzingen** op site, sub-site, lijst/bibliotheek, map of los bestand
-- **SharePoint-groepen** (Owners, Members, Visitors en eigen groepen)
-- **Deellinks** — de `SharingLinks.*`-groepen waar een gedeelde link zijn ontvangers in zet. Dat is hoe "iedereen met de link" en "specifieke personen" een persoon daadwerkelijk toegang geven
+- **Site collection administrator** — first, because that role overrides every role assignment below it; leaving it in place would make the rest cosmetic
+- **Direct role assignments** on a site, subsite, list/library, folder or individual file
+- **SharePoint groups** (Owners, Members, Visitors and custom groups)
+- **Sharing links** — the `SharingLinks.*` groups a shared link puts its recipients in. That is how "anyone with the link" and "specific people" actually give a person access
 
-Rapporteren is de standaard. Er verandert niets zonder `-Apply`, en elke run schrijft een CSV met precies wat er gevonden is en wat ermee gebeurd is.
+Reporting is the default. Nothing changes without `-Apply`, and every run writes a CSV with exactly what was found and what was done with it.
 
-#### Wat het bewust níét doet
+#### What it deliberately does *not* do
 
-| | Waarom |
+| | Why |
 |---|---|
-| Entra ID-groepslidmaatschap wijzigen | Wie via een security- of M365-groep binnenkomt, houdt die toegang — de groep *is* de toekenning. Dit script raakt Entra niet aan, maar meldt die routes wel nadrukkelijk, mét groepsnaam. Anders denk je dat het dicht is terwijl het openstaat |
-| `Everyone` / `Everyone except external users` verwijderen | Dat ontneemt de hele tenant toegang, niet deze persoon. Wordt gemeld, niet aangeraakt |
-| Eigenaarschap en metadata opschonen | Een ingetrokken gebruiker blijft de auteur van wat die gemaakt heeft |
+| Change Entra ID group membership | Whoever gets in through a security or M365 group keeps that access — the group *is* the grant. This script does not touch Entra, but it does report those routes explicitly, with the group name. Otherwise you think it is closed while it is still open |
+| Remove `Everyone` / `Everyone except external users` | That takes access away from the whole tenant, not from this person. Reported, not touched |
+| Clean up ownership and metadata | A revoked user remains the author of what they created |
 
-> **Offboarding is dus twee stappen.** Draai dit script, en werk daarna de Entra-groepen af die in de CSV onder `Action = CannotRevoke` staan. Zonder die tweede stap is de toegang niet weg.
+> **So offboarding is two steps.** Run this script, then deal with the Entra groups listed in the CSV under `Action = CannotRevoke`. Without that second step the access is not gone.
 
-#### Robuustheid
+#### Robustness
 
-Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: stil de verkeerde persoon raken, of niet kunnen navertellen wat je hebt weggehaald.
+This script removes permissions, so its failure modes differ from those of a report: silently hitting the wrong person, or not being able to tell afterwards what you removed.
 
-| Situatie | Gedrag |
+| Situation | Behaviour |
 |---|---|
-| Gebruiker identificeren | **Alleen exacte vergelijkingen.** Op UPN, e-mail, het claim-achtervoegsel, en de gedecodeerde gastnaam (`jan_partner.com#ext#@tenant` wordt `jan@partner.com`). Nooit op deelstring: `an@contoso.com` zit in `jan@contoso.com`, en dat is precies hoe je de verkeerde persoon intrekt |
-| Twee accounts met hetzelfde adres | De site wordt **niet** aangeraakt; het script stopt met beide loginnamen in de fout. Kiezen is aan jou, niet aan het script |
-| Audit-CSV | Regel voor regel weggeschreven tijdens de run, niet aan het eind. Een run die tweehonderd dingen intrekt en dan crasht, moet nog steeds kunnen navertellen wát er weg is |
-| CSV staat open in Excel | Vijf pogingen met oplopende wachttijd, daarna stopt de run — liever een afgebroken run dan rechten verwijderen zonder spoor |
-| Verwijdering geeft `404` | `AlreadyGone`, geen fout. Bij een tweede run is dat de normale uitkomst; als fout geteld zou een schone run kapot lijken |
-| `-WhatIf` | Zelfde tak als een dry-run, dus `WouldRevoke` in de CSV — niet `Skipped`, wat zou suggereren dat iemand een prompt heeft geweigerd |
-| Site collection-beheerder niet te verwijderen | **Luid gemeld, en de run telt het als mislukt.** Die rol bereikt elke scope in de site, dus alle andere verwijderingen daar zijn dan cosmetisch |
-| Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`; een geweigerd token wordt één keer vers opgehaald voordat de run stopt |
-| Onverwachte fout | Een `trap` ruimt de tijdelijke Full Control-app op voordat het script stopt |
+| Identifying the user | **Exact comparisons only.** On UPN, e-mail, the claim suffix, and the decoded guest name (`jan_partner.com#ext#@tenant` becomes `jan@partner.com`). Never on a substring: `an@contoso.com` is contained in `jan@contoso.com`, and that is exactly how you revoke the wrong person |
+| Two accounts with the same address | The site is **not** touched; the script stops with both login names in the error. Choosing is up to you, not the script |
+| Audit CSV | Written row by row during the run, not at the end. A run that revokes two hundred things and then crashes must still be able to tell you *what* is gone |
+| CSV is open in Excel | Five attempts with increasing wait time, then the run stops — better an aborted run than removing permissions without a trace |
+| Removal returns `404` | `AlreadyGone`, not an error. On a second run that is the normal outcome; counted as an error, a clean run would look broken |
+| `-WhatIf` | Same branch as a dry run, so `WouldRevoke` in the CSV — not `Skipped`, which would suggest someone declined a prompt |
+| Site collection administrator cannot be removed | **Reported loudly, and the run counts it as failed.** That role reaches every scope in the site, so all other removals there are then cosmetic |
+| Throttling (`429`/`503`) | Retry with `Retry-After`; a rejected token is fetched fresh once before the run stops |
+| Unexpected error | A `trap` cleans up the temporary Full Control app before the script stops |
 
 #### Parameters
 
-| Parameter | Type | Standaard | Omschrijving |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `-UserPrincipalName` | string | — | **Verplicht.** De gebruiker, bijv. `jan@contoso.com`. Voor een gast mag ook het echte adres (`jan@partner.com`) — het script vindt de `#ext#`-variant zelf |
-| `-TenantUrl` | string | — | Tenant-root. Verplicht voor een tenantbrede run |
-| `-SiteUrl` | string | — | Eén site collection in plaats van de hele tenant |
-| `-Apply` | switch | uit | Daadwerkelijk intrekken. Zonder dit alleen rapporteren |
-| `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep naar directe toekenningen wordt gezocht |
-| `-IncludeGroupAccess` | switch | uit | Meldt ook de sites die de gebruiker via Entra-groepen bereikt, óók waar die verder niets heeft. Alleen rapporteren |
-| `-KeepSharingLinks` | switch | uit | Deellinks met rust laten; alle andere routes worden wel ingetrokken |
-| `-RemoveFromSite` | switch | uit | Verwijdert de gebruiker daarna ook uit de gebruikerslijst van elke site collection. Vangt wat de scope-voor-scope pas niet zag, maar de naam rendert daarna als verwijderd account in oudere metadata |
-| `-IncludeOneDriveSites` | switch | uit | Ook persoonlijke OneDrive-sites doorzoeken |
-| `-IncludeHiddenLists` | switch | uit | Ook verborgen en systeemlijsten |
-| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Eigen app-registratie in plaats van de tijdelijke |
-| `-ClientSecret` | string | — | Werkt voor Graph maar **niet** voor SharePoint (zie authenticatie bij het rapport) |
-| `-OutputPath` | string | `C:\Temp` | Outputmap |
-| `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout en retries |
+| `-UserPrincipalName` | string | — | **Required.** The user, e.g. `jan@contoso.com`. For a guest the real address (`jan@partner.com`) works too — the script finds the `#ext#` variant itself |
+| `-TenantUrl` | string | — | Tenant root. Required for a tenant-wide run |
+| `-SiteUrl` | string | — | One site collection instead of the whole tenant |
+| `-Apply` | switch | off | Actually revoke. Without it, report only |
+| `-Scope` | `Site`/`List`/`Item` | `Item` | How deep to search for direct grants |
+| `-IncludeGroupAccess` | switch | off | Also reports the sites the user reaches through Entra groups, *including* where they have nothing else. Report only |
+| `-KeepSharingLinks` | switch | off | Leave sharing links alone; all other routes are still revoked |
+| `-RemoveFromSite` | switch | off | Afterwards also removes the user from the user list of every site collection. Catches what the scope-by-scope pass missed, but the name then renders as a deleted account in older metadata |
+| `-IncludeOneDriveSites` | switch | off | Also search personal OneDrive sites |
+| `-IncludeHiddenLists` | switch | off | Also hidden and system lists |
+| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Your own app registration instead of the temporary one |
+| `-ClientSecret` | string | — | Works for Graph but **not** for SharePoint (see authentication under the report) |
+| `-OutputPath` | string | `C:\Temp` | Output folder |
+| `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout and retries |
 
-Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseerde app-registratie met SharePoint `Sites.FullControl.All`, die na afloop weer wordt verwijderd.
+Authentication is identical to the report: a short-lived, certificate-based app registration with SharePoint `Sites.FullControl.All`, which is deleted again afterwards.
 
 #### Output
 
-`SharePoint_Revoke_<user>_<ts>.csv`, één regel per gevonden toekenning, met kolom `Action`:
+`SharePoint_Revoke_<user>_<ts>.csv`, one row per grant found, with an `Action` column:
 
-| Action | Betekenis |
+| Action | Meaning |
 |---|---|
-| `WouldRevoke` | Gevonden, en zou verwijderd worden — dit is wat je zonder `-Apply` krijgt |
-| `Revoked` | Verwijderd |
-| `Failed` | Poging mislukt; de reden staat in `Detail` |
-| `AlreadyGone` | Er viel niets meer te verwijderen — bij een tweede run de normale uitkomst |
-| `CannotRevoke` | Via een Entra-groep of `Everyone` — moet elders opgelost worden |
-| `Kept` | Bewust laten staan door `-KeepSharingLinks` |
-| `Skipped` | Bij de bevestigingsvraag geweigerd |
+| `WouldRevoke` | Found, and would be removed — this is what you get without `-Apply` |
+| `Revoked` | Removed |
+| `Failed` | Attempt failed; the reason is in `Detail` |
+| `AlreadyGone` | Nothing left to remove — the normal outcome on a second run |
+| `CannotRevoke` | Through an Entra group or `Everyone` — has to be resolved elsewhere |
+| `Kept` | Deliberately left in place by `-KeepSharingLinks` |
+| `Skipped` | Declined at the confirmation prompt |
 
-#### Voorbeelden
+#### Examples
 
 ```powershell
-# Wat kan Jan allemaal bereiken? Verandert niets
+# What can Jan reach? Changes nothing
 .\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com"
 
-# Hetzelfde, en nu daadwerkelijk intrekken
+# The same, and now actually revoke
 .\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -Apply
 
-# Een gast uit één site collection halen, deellinks inbegrepen
+# Remove a guest from one site collection, sharing links included
 .\Revoke-SharePointUserAccess.ps1 -UserPrincipalName gast@partner.com -SiteUrl "https://contoso.sharepoint.com/sites/Finance" -Apply
 
-# Offboarding-checklist: ook de Entra-groepen die toegang geven
+# Offboarding checklist: also the Entra groups that give access
 .\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -IncludeGroupAccess
 ```
 
-> Onbeheerd draaien? Geef `-Confirm:$false` mee, anders vraagt het script per verwijdering om bevestiging (`ConfirmImpact = 'High'`).
+> Running unattended? Pass `-Confirm:$false`, otherwise the script asks for confirmation for every removal (`ConfirmImpact = 'High'`).
 
 ---
 
 ### Test-SharePointAccessScripts.ps1
 
-Controleert `Revoke-SharePointUserAccess.ps1` en `Get-SharePointPermissionsReport.ps1` zonder een tenant aan te raken. Draai het na elke wijziging aan één van beide; exitcode 0 betekent dat beide in orde zijn.
+Checks `Revoke-SharePointUserAccess.ps1` and `Get-SharePointPermissionsReport.ps1` without touching a tenant. Run it after every change to either of them; exit code 0 means both are in order.
 
-Twee dingen worden gecontroleerd, allebei fouten die in productie geruisloos misgaan:
+Two things are checked, both of them errors that go wrong silently in production:
 
-1. **Het gedeelde authenticatieblok is byte-identiek.** Beide scripts bevatten dezelfde app-only auth- en SharePoint REST-laag, afgebakend met `SHARED BLOCK START/END`. Die laag kostte vier live-runs tegen een tenant om goed te krijgen — certificaat in plaats van secret, tokens die hun app-rollen moeten aantonen vóór ze gecachet worden, 401 als fataal in plaats van per site, paging die niet kan blijven hangen. Een tweede kopie die stilletjes afdrijft is een correctheidsrisico in júist het script dat rechten verwijdert. Bij verschil wordt de eerste afwijkende regel getoond.
-2. **De revocatie-trechter gedraagt zich.** Een dry-run moet zijn voornemen vastleggen en niets uitvoeren, `-Apply` moet uitvoeren én vastleggen, een mislukking moet in het audit-spoor belanden in plaats van te verdwijnen, en de toekenningen die het script moet weigeren te verwijderen (via een Entra-groep, of aan iedereen) moeten geweigerd blijven.
+1. **The shared authentication block is byte-identical.** Both scripts contain the same app-only auth and SharePoint REST layer, delimited by `SHARED BLOCK START/END`. That layer took four live runs against a tenant to get right — certificate instead of secret, tokens that have to prove their app roles before they are cached, 401 as fatal instead of per site, paging that cannot get stuck. A second copy that silently drifts is a correctness risk in precisely the script that removes permissions. On a difference, the first line that differs is shown.
+2. **The revocation funnel behaves.** A dry run must record its intent and execute nothing, `-Apply` must execute *and* record, a failure must end up in the audit trail instead of disappearing, and the grants the script must refuse to remove (through an Entra group, or to everyone) must stay refused.
 
 ```powershell
 .\Test-SharePointAccessScripts.ps1
