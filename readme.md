@@ -882,6 +882,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 | A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
 | Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
 
+### 2026-09-30
+| Change |
+|--------|
+| Removed a dead `-Restart` parameter from `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`. It was declared and its help promised it would `discard any existing checkpoint and start over instead of resuming` - but the script has no checkpoint and no resume, so the switch did nothing and the help described behaviour that does not exist. Found by comparing the parameter block against the comment-based help and the folder readme rather than assuming they agreed |
+| Replaced it with a `.NOTES` entry saying why there is deliberately no resume: revoking is idempotent, so a second run finds only what the first did not remove. Re-running after an interruption is both the recovery and the verification, and safer than resuming a partly applied destructive operation from a saved position |
+| Verified all 17 remaining parameters appear in the comment-based help and the folder readme, that `Get-Help` no longer mentions `-Restart`, and that the 27 checks in `Test-SharePointAccessScripts.ps1` still pass |
+
 ### 2026-09-29 (7)
 | Change |
 |--------|

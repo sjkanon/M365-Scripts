@@ -98,9 +98,6 @@
 .PARAMETER MaxGraphRetry
     Max retries on throttling/timeouts (default: 6).
 
-.PARAMETER Restart
-    Discard any existing checkpoint for this run and start over instead of resuming.
-
 .EXAMPLE
     .\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com"
 
@@ -121,6 +118,12 @@
 
     Report SharePoint-level access and the Entra groups that also let Jan in — the offboarding
     checklist, since those groups have to be handled in Entra.
+.NOTES
+    There is no checkpoint and no resume, unlike the permissions report. Revoking is idempotent —
+    a second run finds only what the first did not remove — so re-running after an interruption
+    is both the recovery and the verification, and it is safer than resuming a partly applied
+    destructive operation from a saved position.
+
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -142,8 +145,7 @@ param(
     [switch] $KeepSharingLinks,
     [switch] $RemoveFromSite,
     [int] $GraphTimeoutSec = 120,
-    [int] $MaxGraphRetry = 6,
-    [switch] $Restart
+    [int] $MaxGraphRetry = 6
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
