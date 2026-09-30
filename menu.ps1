@@ -769,6 +769,24 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='O'; FKey=$null; Category='SharePoint'
+        Label='SharePoint-Trace     — where did a file go: renamed, moved, deleted (audit log)'
+        Script="$ROOT\scripts\SharePoint\Trace-SharePointFile.ps1"
+        Params={
+            $what = Read-Host '  File name (wildcards allowed) or full URL of the file'
+            if (-not $what) { Write-Warning 'A file name or URL is required.'; return $null }
+            $a = if ($what -match '^https?://') { @{ Url = $what } } else { @{ Name = $what } }
+            $site = Read-Host '  Only this site or OneDrive URL (empty = whole tenant)'
+            if ($site) { $a['SiteUrl'] = $site }
+            $from = Read-Host '  From (Brussels time, e.g. 01-09-2026 or 01-09-2026 08:00; empty = last 30 days)'
+            if ($from) { $a['StartDate'] = $from }
+            $to = Read-Host '  To (empty = now; a date alone includes that whole day)'
+            if ($to) { $a['EndDate'] = $to }
+            $act = Read-Host '  Also show opens, edits and downloads? Slower [y/N]'
+            if ($act -match '^[Yy]') { $a['IncludeActivity'] = $true }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='S'; FKey=$null; Category='SharePoint'
         Label='SharePoint-Structure — provision/check metadata, libraries and rights'
         Action={

@@ -22,6 +22,7 @@ admin-aanmelding op elke (klant)tenant.
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Doorzoek een hele site (naam, pad, type, grootte, datum of volledige tekst) en rapporteer de rechten op elke treffer — PnP/CSOM, meldt zich aan als jou |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | Dezelfde vraag tenantbreed via Microsoft Graph, app-only, zonder interactieve login — bestanden en mappen |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Verwijderde bestanden/mappen terugzetten uit de prullenbak van een site of OneDrive (standaard een proefdraai) |
+| [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Waar is een bestand gebleven? Hernoemingen, verplaatsingen, kopieën en verwijderingen uit het auditlog, ook via een map — in Brusselse tijd, over een periode naar keuze |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Neem één gebruiker overal de toegang af: site collection-beheerder, directe toekenningen op elk niveau, SharePoint-groepen en deellinks. Rapporteert standaard, verwijdert met `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Controleer de twee toegangsscripts zonder een tenant aan te raken — gedeeld authenticatieblok identiek, en de revocatie-trechter gedraagt zich |
 
@@ -464,6 +465,71 @@ om het aanmaken van de app helemaal over te slaan.
 Install-Module PnP.PowerShell -Scope CurrentUser              # PowerShell 7.4+
 Install-Module Microsoft.Graph.Applications -Scope CurrentUser # alleen voor de eenmalige app-registratie
 ```
+
+---
+
+### Trace-SharePointFile.ps1
+
+Beantwoordt "waar is mijn bestand gebleven?" voor OneDrive en SharePoint: hernoemd,
+verplaatst, gekopieerd, verwijderd of teruggezet, door wie en wanneer. Elke tijd staat in
+**Brusselse tijd** (zomer- en wintertijd inbegrepen, met de UTC-offset erbij), en je kunt
+een periode meegeven. Alleen-lezen: er verandert niets in de tenant.
+
+SharePoint onthoudt de oude naam of locatie van een bestand niet; het **Unified Audit Log**
+wel, dus dat is de bron. Het script leest het en bouwt het spoor van het bestand opnieuw op:
+
+| Stap | Wat het doet |
+|------|--------------|
+| Lezen | Elke hernoeming, verplaatsing, kopie, verwijdering, prullenbak-actie, terugzetting en upload van bestanden **en mappen** in de periode. Per dag gelezen; een stuk met meer dan de 50.000 records die één zoekopdracht kan teruggeven wordt gesplitst tot het past (tot 15 minuten), en een mislukte of inconsistente zoekopdracht wordt opnieuw geprobeerd |
+| Startpunt | De records die het bestand noemen via `-Name`, `-Url` of `-ItemId` |
+| Volgen | Elk record van hetzelfde item (`ListItemUniqueId`, dat hernoemen en verplaatsen overleeft) en elk record dat begint op een pad waarnaar het bestand hernoemd of verplaatst werd. Een keten `A → B → C` eindigt bij C, ook al lijkt C in niets op de naam waarop je zocht. Een verplaatsing naar een andere site wordt gevolgd via het doelpad |
+| Mappen | Een map hernoemen, verplaatsen of verwijderen verplaatst elk bestand erin **zonder record per bestand**. Maprecords worden daarom afgespeeld op het pad van het bestand op dat moment, zodat "meeverhuisd met map X" en "mee verwijderd met map X" ook zichtbaar zijn |
+
+Per item krijg je de tijdlijn, de **laatst bekende locatie** en een status: `Present`,
+`In recycle bin` (terugzetten met [`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1)),
+`In second-stage recycle bin` of `Permanently deleted`.
+
+**Parameters**
+
+| Parameter | Type | Standaard | Beschrijving |
+|-----------|------|-----------|--------------|
+| `-Name` | string | — | Bestandsnaam zoals die ooit was. Zonder extensie past elke extensie (`Offerte` vindt `Offerte.docx`); `*` en `?` zijn jokertekens |
+| `-Url` | string | — | Volledige URL van het bestand zoals die was. `?web=1` wordt genegeerd en een deellink `/:w:/r/` wordt terug omgezet naar het pad. Ondoorzichtige deellinks (`/:w:/s/`, `/:w:/g/`) zijn niet te volgen — open ze en kopieer het adres waarop ze uitkomen |
+| `-ItemId` | guid | — | De `ListItemUniqueId`, bv. uit de CSV van een eerdere run |
+| `-SiteUrl` | string | — | Alleen records van deze site of OneDrive. Veel sneller in een grote tenant |
+| `-StartDate` | datum of string | `-Days` voor `-EndDate` | Kloktijd in `-TimeZone`: `15-09-2026`, `15/09/2026 08:30`, `2026-09-15 08:30` (dag eerst, Belgisch) |
+| `-EndDate` | datum of string | nu | Zelfde notatie. Een datum zonder tijd neemt die hele dag mee |
+| `-Days` | int | `30` | Lengte van de periode als `-StartDate` niet is opgegeven |
+| `-TimeZone` | string | `Europe/Brussels` | IANA- of Windows-ID; werkt in Windows PowerShell 5.1 en PowerShell 7 |
+| `-FollowCopies` | switch | uit | Ook kopieën volgen. Standaard wordt een kopie gemeld maar niet gevolgd — het origineel blijft waar het was |
+| `-IncludeActivity` | switch | uit | Ook openen, bewerken, downloaden, synchronisatie en in-/uitchecken: wie er het laatst in werkte. Veel meer records, dus trager |
+| `-OutputPath` | string | `C:\Temp\FileTrail_<naam>_<ts>.csv` | CSV-pad; de ruwe auditrecords van het spoor gaan naar dezelfde naam met `.json` |
+| `-TenantId` | string | — | Tenantdomein voor `Connect-ExchangeOnline`; niet nodig als je al verbonden bent |
+| `-PassThru` | switch | uit | Geeft de tijdlijnrijen ook als objecten terug |
+
+**Voorbeelden**
+
+```powershell
+# Waar is "Offerte Janssens.docx" de laatste 30 dagen gebleven?
+.\Trace-SharePointFile.ps1 -Name "Offerte Janssens.docx" -TenantId contoso.onmicrosoft.com
+
+# Een periode in Brusselse tijd, alleen één OneDrive
+.\Trace-SharePointFile.ps1 -Name "Budget*" -StartDate '01-09-2026' -EndDate '15-09-2026' `
+    -SiteUrl https://contoso-my.sharepoint.com/personal/jan_contoso_com
+
+# Vanaf de link die iemand ooit stuurde, één namiddag
+.\Trace-SharePointFile.ps1 -Url "https://contoso.sharepoint.com/sites/Sales/Shared Documents/2026/Prijslijst.xlsx" `
+    -StartDate '2026-09-12 13:00' -EndDate '2026-09-12 18:00'
+```
+
+**Opmerkingen**
+
+- Vereist de rol **View-Only Audit Logs** of **Audit Logs** in Exchange Online, en de module `ExchangeOnlineManagement`. Draait in Windows PowerShell 5.1 en PowerShell 7
+- Het auditlog loopt 30–90 minuten (soms 24 uur) achter. Audit Standard bewaart **180 dagen**; het script waarschuwt als de periode vroeger begint
+- Alleen wat **binnen** de periode gebeurde, kan gevolgd worden. Een map die vóór `-StartDate` hernoemd werd, is onzichtbaar; lijkt het spoor halverwege te beginnen, maak de periode dan groter
+- Hernoemingen door de OneDrive-synchronisatieclient (in Verkenner) worden net als die in de browser geaudit; de kolom `UserAgent` onderscheidt ze
+- De laatst bekende locatie is wat het auditlog zegt — het script controleert niet of het bestand er nog staat
+- CSV-kolommen: `Item, Time, TimeUtc, Action, Operation, User, From, To, ViaFolder, ItemId, ClientIP, UserAgent, RecordId`. `ViaFolder` is ingevuld als de stap uit een mapactie kwam
 
 ---
 
