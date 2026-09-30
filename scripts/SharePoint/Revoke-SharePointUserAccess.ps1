@@ -173,6 +173,17 @@ $actionCsv = Join-Path $outputDir "SharePoint_Revoke_${safeUser}_$ts.csv"
 
 $TempAppNamePrefix = 'SP-RevokeAccess'
 
+# What the temporary app is granted. User.Read.All is what the permissions report does not need
+# and this script does: it has to resolve the named user before it can revoke anything, and
+# GroupMember.Read.All does not allow reading an arbitrary user object. Without it every lookup
+# comes back 403 and the run reports a real account as "not found in Entra ID".
+$RequiredAppRoles = @(
+    @{ ResourceAppId = $SharePointAppId; Role = 'Sites.FullControl.All'; Why = 'role assignments, site groups, sharing links' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'Sites.Read.All';        Why = 'tenant-wide site enumeration' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'User.Read.All';         Why = 'resolving the user to revoke' }
+    @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'the Entra groups that also grant access' }
+)
+
 # Concurrency is fixed at 1: the shared block's parallel helper is for reading, and revocations
 # are writes against the same site. Serial is slower and is the right trade here.
 $Concurrency = 1
@@ -981,11 +992,10 @@ try {
         # assignments behind the EnumeratePermissions right, which only Full Control carries.
         # Read, Write and Manage all return 403 on /roleassignments. The app stays read-only in
         # practice — every call this script makes is a GET — and it is deleted when the run ends.
-        $requiredRoles = @(
-            @{ ResourceAppId = $SharePointAppId; Role = 'Sites.FullControl.All'; Why = 'role assignments, site groups, unique scopes' }
-            @{ ResourceAppId = $GraphAppId;      Role = 'Sites.Read.All';        Why = 'tenant-wide site enumeration' }
-            @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'Entra group membership expansion' }
-        )
+        # Set by each script before the shared block: the report and the revoke script need
+        # different directory permissions, and granting a temporary Full Control app more
+        # than it uses is not a detail worth being sloppy about.
+        $requiredRoles = $RequiredAppRoles
         foreach ($required in $requiredRoles) {
             $resourceSp = Get-MgServicePrincipal -Filter "appId eq '$($required.ResourceAppId)'" -ErrorAction Stop
             if (-not $resourceSp) { throw "Could not resolve service principal for resource $($required.ResourceAppId)." }
@@ -1009,8 +1019,8 @@ try {
         # that now — while the run has produced nothing yet — is the difference between a clear
         # "the grant has not replicated" and a scan that walks the whole tenant on a dead token.
         Write-Host "  Obtaining app-only tokens (waiting for the grants to replicate)..." -ForegroundColor Cyan
-        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @('Sites.Read.All', 'GroupMember.Read.All'))
-        Write-Host "  [OK]   Graph token carries Sites.Read.All and GroupMember.Read.All." -ForegroundColor DarkGray
+        [void](Get-ResourceToken -Resource $GraphResource -RequiredRoles @($RequiredAppRoles | Where-Object { $_.ResourceAppId -eq $GraphAppId } | ForEach-Object { $_.Role }))
+        Write-Host ("  [OK]   Graph token carries {0}." -f ((@($RequiredAppRoles | Where-Object { $_.ResourceAppId -eq $GraphAppId } | ForEach-Object { $_.Role })) -join ', ')) -ForegroundColor DarkGray
 
         $sharePointResource = Get-ResourceRootFromUrl -Url $(if ($SiteUrl) { $SiteUrl } else { $TenantUrl })
         [void](Get-ResourceToken -Resource $sharePointResource -RequiredRoles @('Sites.FullControl.All'))
@@ -1275,23 +1285,43 @@ $entraUser = $null
 try {
     $encodedUpn = [uri]::EscapeDataString($UserPrincipalName)
     $entraUser = Invoke-GraphGet -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,mail,userType,accountEnabled" -f $encodedUpn)
+    $entraLookupDenied = $false
 } catch {
+    # Being refused the directory is not the same fact as the account not existing, and only one
+    # of them is safe to shrug at. A 403 here means the app is missing User.Read.All, and reading
+    # it as "not found" would hide a real account and silently skip every Entra group it belongs
+    # to — which is the half of the report that says what this script cannot revoke.
+    $entraLookupDenied = ((Get-ResponseStatusCode -ErrorRecord $_) -in @(401, 403))
+
     # A guest is often addressable by their real address rather than their tenant UPN.
     try {
         $filter = [uri]::EscapeDataString("mail eq '$UserPrincipalName' or userPrincipalName eq '$UserPrincipalName'")
         $found = Invoke-GraphGet -Uri ("https://graph.microsoft.com/v1.0/users?`$filter={0}&`$select=id,displayName,userPrincipalName,mail,userType,accountEnabled" -f $filter)
         $entraUser = @($found.value) | Select-Object -First 1
-    } catch { $entraUser = $null }
+        if ($entraUser) { $entraLookupDenied = $false }
+    } catch {
+        if ((Get-ResponseStatusCode -ErrorRecord $_) -in @(401, 403)) { $entraLookupDenied = $true }
+        $entraUser = $null
+    }
 }
 
 if ($entraUser) {
     Write-Host ("  [OK]   {0} <{1}>{2}{3}" -f $entraUser.displayName, $entraUser.userPrincipalName,
         $(if ($entraUser.userType -eq 'Guest') { ' — guest' } else { '' }),
         $(if ($entraUser.accountEnabled -eq $false) { ' — account disabled' } else { '' })) -ForegroundColor DarkGray
+} elseif ($entraLookupDenied) {
+    Write-Host ''
+    Write-Host "  [ERROR] Entra ID refused the lookup of $UserPrincipalName (403)." -ForegroundColor Red
+    Write-Host "  The app is missing Graph User.Read.All, so this run could not tell whether the account" -ForegroundColor Red
+    Write-Host "  exists — and without it the Entra groups that also grant access are never listed, which" -ForegroundColor Red
+    Write-Host "  is exactly the part of the report saying what this script cannot revoke." -ForegroundColor Red
+    Write-Host "  Using your own -ClientId? Grant it User.Read.All. Otherwise re-run and let the script" -ForegroundColor Yellow
+    Write-Host "  create its own app, which now asks for it." -ForegroundColor Yellow
+    Remove-TempApp; exit 1
 } else {
-    # Not fatal. A user deleted from Entra can still hold SharePoint grants, and those are
-    # exactly the ones worth removing.
-    Write-Host "  [WARN] Not found in Entra ID — continuing on the SharePoint side only." -ForegroundColor Yellow
+    # Genuinely absent, and not fatal: a user deleted from Entra can still hold SharePoint
+    # grants, and those are exactly the ones worth removing.
+    Write-Host "  [WARN] No such account in Entra ID — continuing on the SharePoint side only." -ForegroundColor Yellow
     Write-Host "         A deleted account can still hold grants, which is a reason to run this, not to stop." -ForegroundColor Yellow
 }
 

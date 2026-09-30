@@ -578,7 +578,7 @@ This script removes permissions, so its failure modes differ from those of a rep
 | `-RemoveFromSite` | switch | off | Afterwards also removes the user from the user list of every site collection. Catches what the scope-by-scope pass missed, but the name then renders as a deleted account in older metadata |
 | `-IncludeOneDriveSites` | switch | off | Also search personal OneDrive sites |
 | `-IncludeHiddenLists` | switch | off | Also hidden and system lists |
-| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Your own app registration instead of the temporary one |
+| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Your own app registration instead of the temporary one. It needs SharePoint `Sites.FullControl.All` plus Graph `Sites.Read.All`, `User.Read.All` and `GroupMember.Read.All`. Without `User.Read.All` the user lookup comes back `403` and the run stops rather than mistaking that for a missing account |
 | `-ClientSecret` | string | — | Works for Graph but **not** for SharePoint (see authentication under the report) |
 | `-OutputPath` | string | `C:\Temp` | Output folder |
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout and retries |

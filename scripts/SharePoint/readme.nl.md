@@ -584,7 +584,7 @@ Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: 
 | `-RemoveFromSite` | switch | uit | Verwijdert de gebruiker daarna ook uit de gebruikerslijst van elke site collection. Vangt wat de scope-voor-scope-ronde niet zag, maar de naam rendert daarna als verwijderd account in oudere metadata |
 | `-IncludeOneDriveSites` | switch | uit | Ook persoonlijke OneDrive-sites doorzoeken |
 | `-IncludeHiddenLists` | switch | uit | Ook verborgen en systeemlijsten |
-| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Eigen app-registratie in plaats van de tijdelijke |
+| `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Eigen app-registratie in plaats van de tijdelijke. Die heeft SharePoint `Sites.FullControl.All` nodig plus Graph `Sites.Read.All`, `User.Read.All` en `GroupMember.Read.All`. Zonder `User.Read.All` geeft de gebruikerslookup `403` en stopt de run, in plaats van dat aan te zien voor een niet-bestaand account |
 | `-ClientSecret` | string | — | Werkt voor Graph maar **niet** voor SharePoint (zie authenticatie bij het rapport) |
 | `-OutputPath` | string | `C:\Temp` | Outputmap |
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout en retries |
