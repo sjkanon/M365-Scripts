@@ -473,6 +473,22 @@ Rapporteren is de standaard. Er verandert niets zonder `-Apply`, en elke run sch
 
 > **Offboarding is dus twee stappen.** Draai dit script, en werk daarna de Entra-groepen af die in de CSV onder `Action = CannotRevoke` staan. Zonder die tweede stap is de toegang niet weg.
 
+#### Robuustheid
+
+Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: stil de verkeerde persoon raken, of niet kunnen navertellen wat je hebt weggehaald.
+
+| Situatie | Gedrag |
+|---|---|
+| Gebruiker identificeren | **Alleen exacte vergelijkingen.** Op UPN, e-mail, het claim-achtervoegsel, en de gedecodeerde gastnaam (`jan_partner.com#ext#@tenant` wordt `jan@partner.com`). Nooit op deelstring: `an@contoso.com` zit in `jan@contoso.com`, en dat is precies hoe je de verkeerde persoon intrekt |
+| Twee accounts met hetzelfde adres | De site wordt **niet** aangeraakt; het script stopt met beide loginnamen in de fout. Kiezen is aan jou, niet aan het script |
+| Audit-CSV | Regel voor regel weggeschreven tijdens de run, niet aan het eind. Een run die tweehonderd dingen intrekt en dan crasht, moet nog steeds kunnen navertellen wát er weg is |
+| CSV staat open in Excel | Vijf pogingen met oplopende wachttijd, daarna stopt de run — liever een afgebroken run dan rechten verwijderen zonder spoor |
+| Verwijdering geeft `404` | `AlreadyGone`, geen fout. Bij een tweede run is dat de normale uitkomst; als fout geteld zou een schone run kapot lijken |
+| `-WhatIf` | Zelfde tak als een dry-run, dus `WouldRevoke` in de CSV — niet `Skipped`, wat zou suggereren dat iemand een prompt heeft geweigerd |
+| Site collection-beheerder niet te verwijderen | **Luid gemeld, en de run telt het als mislukt.** Die rol bereikt elke scope in de site, dus alle andere verwijderingen daar zijn dan cosmetisch |
+| Throttling (`429`/`503`) | Opnieuw proberen met `Retry-After`; een geweigerd token wordt één keer vers opgehaald voordat de run stopt |
+| Onverwachte fout | Een `trap` ruimt de tijdelijke Full Control-app op voordat het script stopt |
+
 #### Parameters
 
 | Parameter | Type | Standaard | Omschrijving |
@@ -503,6 +519,7 @@ Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseer
 | `WouldRevoke` | Gevonden, en zou verwijderd worden — dit is wat je zonder `-Apply` krijgt |
 | `Revoked` | Verwijderd |
 | `Failed` | Poging mislukt; de reden staat in `Detail` |
+| `AlreadyGone` | Er viel niets meer te verwijderen — bij een tweede run de normale uitkomst |
 | `CannotRevoke` | Via een Entra-groep of `Everyone` — moet elders opgelost worden |
 | `Kept` | Bewust laten staan door `-KeepSharingLinks` |
 | `Skipped` | Bij de bevestigingsvraag geweigerd |

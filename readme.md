@@ -882,6 +882,17 @@ These scripts are provided as-is. Always test in a non-production environment be
 | A transcript that will not start — as in some remote and RMM sessions — no longer aborts the repair; it is a warning |
 | Verified in PowerShell 5.1 and 7: the orchestrator against two unreachable hosts (each named with its WinRM error, the pool table, exit code 1), and the version gap with a mocked FSLogix above and below the minimum. **Not run against real session hosts**: no WinRM to lem-avd-4/5/6 from here, so copying, the remote run and the pool table with real values are untested |
 
+### 2026-09-30 (2)
+| Change |
+|--------|
+| Hardening pass on `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, driven by reading the code for the failure modes a destructive script has rather than the ones a report has. Three were real |
+| **Matching a guest could have revoked the wrong person.** The fallback lookup compared with `-like "*needle*"`, and `an@contoso.com` is a substring of `jan@contoso.com`. Replaced with exact comparison against the UPN, the mail address, the claim suffix and a properly decoded guest login (`jan_partner.com#ext#@tenant` back to `jan@partner.com`, splitting on the last underscore so a local part may contain one). When two different accounts answer to the same address the site is left untouched and the run stops naming both — choosing is the operator's call, not the script's |
+| **The audit CSV was written once, at the end.** A run that revoked two hundred things and then died would have left no record of what it removed, which is the one thing a script like this must never do. Rows are now appended as they happen, through the shared helper that retries a locked file and stops the run rather than dropping a row |
+| **A `404` on a removal counted as a failure.** It means the grant is already gone, which on a second pass is the normal outcome — a clean re-run would have reported failures. Recorded as `AlreadyGone` instead |
+| A failed site collection administrator removal is now loud and counts as a failure: that role reaches every scope in the site, so every other removal there is cosmetic while it stands. The summary says so explicitly rather than reading like a success |
+| `-WhatIf` now takes the same branch as a dry run, so it records `WouldRevoke` instead of `Skipped`, which had implied someone declined a prompt |
+| `Test-SharePointAccessScripts.ps1` grew from 27 to 50 checks: guest-login decoding including an underscored local part, exact matching against the near-misses a substring test would have accepted (shorter, longer, suffixed domain, another tenant's guest, empty), the audit CSV existing and holding every row mid-run, and a 404 reading as already gone. **Still not verified against a live tenant** |
+
 ### 2026-09-30
 | Change |
 |--------|

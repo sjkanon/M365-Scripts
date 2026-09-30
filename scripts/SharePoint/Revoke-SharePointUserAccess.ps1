@@ -1119,32 +1119,72 @@ function Invoke-SPPost {
 }
 
 # ── Finding the user ──────────────────────────────────────────────────────────
+function ConvertFrom-GuestLoginName {
+    # A guest's identity in SharePoint is not their address. It is stored as
+    # jan_partner.com#ext#@contoso.onmicrosoft.com — the local part and the domain of their real
+    # address joined by an underscore, with the host tenant appended. Turn that back into
+    # jan@partner.com so it can be compared to what the caller typed.
+    param([string]$Value)
+    if (-not $Value) { return $null }
+    $name = ($Value -split '\|')[-1]           # strip the i:0#.f|membership| claim prefix
+    if ($name -notmatch '#ext#') { return $null }
+    $external = ($name -split '#ext#')[0]
+    $cut = $external.LastIndexOf('_')          # last underscore: a local part may contain one
+    if ($cut -lt 1) { return $null }
+    return ($external.Substring(0, $cut) + '@' + $external.Substring($cut + 1)).ToLowerInvariant()
+}
+
+function Test-UserIdentityMatch {
+    # Exact comparisons only. A substring test here would be a way to revoke the wrong person —
+    # "an@contoso.com" is a substring of "jan@contoso.com", and this script deletes permissions.
+    param($SiteUser, [string]$Needle)
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($field in @($SiteUser.UserPrincipalName, $SiteUser.Email)) {
+        if ($field) { $candidates.Add(([string]$field).ToLowerInvariant()) | Out-Null }
+    }
+    if ($SiteUser.LoginName) {
+        $login = ([string]$SiteUser.LoginName).ToLowerInvariant()
+        # The identity is whatever follows the last pipe of the claim.
+        $candidates.Add(($login -split '\|')[-1]) | Out-Null
+        $guest = ConvertFrom-GuestLoginName -Value $login
+        if ($guest) { $candidates.Add($guest) | Out-Null }
+    }
+    return ($candidates -contains $Needle)
+}
+
 function Get-SiteUserEntry {
     # The user as this site collection knows them, or $null when they have never been given
     # anything here. Returning $null is the fast path: a site the user is unknown in has nothing
     # to revoke, and skipping it is what keeps a tenant-wide run to minutes instead of hours.
     param([Parameter(Mandatory = $true)][string]$WebUrl)
 
+    $select = 'Id,Title,LoginName,Email,UserPrincipalName,IsSiteAdmin,PrincipalType'
+
     # The membership claim is how a cloud identity is written; try it directly before falling
     # back to reading the whole user list.
-    $claim = "i:0#.f|membership|$UserPrincipalName"
+    $claim   = "i:0#.f|membership|$UserPrincipalName"
     $encoded = [uri]::EscapeDataString($claim)
-    $direct = Invoke-SPGet -Uri ("{0}/_api/web/siteusers/getByLoginName(@v)?@v='{1}'&`$select=Id,Title,LoginName,Email,UserPrincipalName,IsSiteAdmin,PrincipalType" -f $WebUrl, $encoded)
+    $direct  = Invoke-SPGet -Uri ("{0}/_api/web/siteusers/getByLoginName(@v)?@v='{1}'&`$select={2}" -f $WebUrl, $encoded, $select)
     if ($direct -and $direct.Id) { return $direct }
 
-    # A guest's login name is not their address — it is jan_partner.com#ext#@tenant... — so the
-    # direct lookup misses them. Scan the site's users and match on any field that can carry the
-    # address the caller typed.
-    $needle = $UserPrincipalName.ToLowerInvariant()
-    foreach ($user in @(Get-SPCollection -Uri ("{0}/_api/web/siteusers?`$select=Id,Title,LoginName,Email,UserPrincipalName,IsSiteAdmin,PrincipalType&`$top=500" -f $WebUrl))) {
+    # A guest is not addressable that way, so fall back to reading the site's users. Every match
+    # is collected rather than the first one returned: two different accounts answering to the
+    # same address means the caller has to say which, not that this script picks one and starts
+    # deleting.
+    $needle  = $UserPrincipalName.ToLowerInvariant()
+    $matches = [System.Collections.Generic.List[object]]::new()
+    foreach ($user in @(Get-SPCollection -Uri ("{0}/_api/web/siteusers?`$select={1}&`$top=500" -f $WebUrl, $select))) {
         if ([int]$user.PrincipalType -ne 1) { continue }
-        foreach ($field in @($user.UserPrincipalName, $user.Email, $user.LoginName)) {
-            if (-not $field) { continue }
-            $value = ([string]$field).ToLowerInvariant()
-            if ($value -eq $needle -or $value.EndsWith("|$needle") -or
-                $value -replace '_', '@' -like "*$needle*") { return $user }
-        }
+        if (Test-UserIdentityMatch -SiteUser $user -Needle $needle) { $matches.Add($user) | Out-Null }
     }
+
+    $distinct = @($matches | Group-Object { [string]$_.LoginName })
+    if ($distinct.Count -gt 1) {
+        throw ("{0} matches {1} different accounts in this site ({2}) — name the exact one to revoke." -f
+               $UserPrincipalName, $distinct.Count, (($distinct | ForEach-Object { $_.Name }) -join ' | '))
+    }
+    if ($matches.Count -gt 0) { return $matches[0] }
     return $null
 }
 
@@ -1157,14 +1197,15 @@ function Get-UserSiteGroups {
 }
 
 # ── Recording what happens ────────────────────────────────────────────────────
-$script:ActionRows = [System.Collections.Generic.List[object]]::new()
+$script:ActionRows   = [System.Collections.Generic.List[object]]::new()
+$script:ActionCsvPath = $actionCsv
 
 function Add-ActionRow {
     param(
         [string]$SiteUrl, [string]$WebUrl, [string]$ScopeType, [string]$ScopeTitle, [string]$ScopeUrl,
         [string]$AccessVia, [string]$PermissionLevels, [string]$Action, [string]$Detail
     )
-    $script:ActionRows.Add([PSCustomObject]@{
+    $row = [PSCustomObject]@{
         UserPrincipalName = $UserPrincipalName
         SiteUrl           = $SiteUrl
         WebUrl            = $WebUrl
@@ -1176,7 +1217,14 @@ function Add-ActionRow {
         Action            = $Action
         Detail            = $Detail
         RunUtc            = (Get-Date).ToUniversalTime().ToString('s')
-    }) | Out-Null
+    }
+    $script:ActionRows.Add($row) | Out-Null
+
+    # Written as it happens, not at the end. A run that revokes two hundred things and then dies
+    # would otherwise leave no record of what it removed, which is the one thing a destructive
+    # script must never do. Append-CheckpointRows retries a locked file and throws if it cannot
+    # write at all — losing the run is recoverable, losing the audit trail is not.
+    Append-CheckpointRows -Path $script:ActionCsvPath -Rows @($row)
 }
 
 function Invoke-Revocation {
@@ -1188,7 +1236,9 @@ function Invoke-Revocation {
         [Parameter(Mandatory = $true)][scriptblock]$Do,
         [Parameter(Mandatory = $true)][hashtable]$Row
     )
-    if (-not $Apply) {
+    # -WhatIf is a dry run by any other name, so it records the same intent rather than looking
+    # like someone declined a prompt.
+    if (-not $Apply -or $WhatIfPreference) {
         Add-ActionRow @Row -Action 'WouldRevoke' -Detail $Operation
         Write-ProgressHost -Message ("    [DRY ] {0}: {1}" -f $Operation, $Target) -ForegroundColor DarkGray
         return $false
@@ -1203,6 +1253,16 @@ function Invoke-Revocation {
         Write-ProgressHost -Message ("    [DONE] {0}: {1}" -f $Operation, $Target) -ForegroundColor Green
         return $true
     } catch {
+        # Already gone is the outcome this script wants, not a failure. SharePoint answers a
+        # removal of something that is no longer there with 404, and on a re-run after a partial
+        # pass that is the normal case — counting it as failed would make a clean second run
+        # look broken.
+        $status = Get-ResponseStatusCode -ErrorRecord $_
+        if ($status -eq 404 -or $_.Exception.Message -match 'does not exist|not found|cannot be found') {
+            Add-ActionRow @Row -Action 'AlreadyGone' -Detail 'Nothing left to remove'
+            Write-ProgressHost -Message ("    [ OK ] {0}: {1} — already gone" -f $Operation, $Target) -ForegroundColor DarkGray
+            return $false
+        }
         Add-ActionRow @Row -Action 'Failed' -Detail $_.Exception.Message
         Write-ProgressHost -Message ("    [FAIL] {0}: {1} — {2}" -f $Operation, $Target, $_.Exception.Message) -ForegroundColor Red
         return $false
@@ -1351,7 +1411,7 @@ foreach ($web in $targetWebs) {
     $siteCollections[$sc].Add($web) | Out-Null
 }
 
-$stats = [PSCustomObject]@{ SitesSearched = 0; SitesWithAccess = 0; Revoked = 0; Failed = 0; Found = 0; GroupOnly = 0 }
+$stats = [PSCustomObject]@{ SitesSearched = 0; SitesWithAccess = 0; Revoked = 0; Failed = 0; Found = 0; GroupOnly = 0; AdminLeft = 0 }
 $scIndex = 0
 
 try {
@@ -1399,7 +1459,16 @@ try {
                 Invoke-SPPost -WebUrl $rootWeb -Uri ("{0}/_api/web/getUserById({1})" -f $rootWeb, $userId) `
                     -Body '{"IsSiteAdmin": false}' -ExtraHeaders @{ 'X-HTTP-Method' = 'MERGE'; 'IF-MATCH' = '*' } | Out-Null
             }
-            if ($done) { $stats.Revoked++ }
+            if ($done) {
+                $stats.Revoked++
+            } elseif ($Apply -and -not $WhatIfPreference) {
+                # Everything below this point is cosmetic while the flag is still set: a site
+                # collection administrator reaches every scope in the site regardless of role
+                # assignments. Saying so here beats a summary that reads like a success.
+                $stats.Failed++
+                $stats.AdminLeft++
+                Write-ProgressHost -Message ("  [FAIL] Still a site collection administrator on {0} — every other removal here is cosmetic until that is fixed." -f $siteCollectionUrl) -ForegroundColor Red
+            }
         }
 
         # -- SharePoint groups, sharing links included -------------------------
@@ -1576,9 +1645,7 @@ try {
 }
 
 # ── Result ────────────────────────────────────────────────────────────────────
-if ($script:ActionRows.Count -gt 0) {
-    $script:ActionRows | Export-Csv -Path $actionCsv -NoTypeInformation -Encoding UTF8
-}
+# The CSV was written row by row as the run went, so there is nothing to export here.
 
 Write-Host ''
 Write-Host '  ================================================' -ForegroundColor Cyan
@@ -1599,6 +1666,12 @@ if ($Apply) {
     Write-Host ("  Revoked           : {0}" -f $stats.Revoked) -ForegroundColor $(if ($stats.Revoked -gt 0) { 'Magenta' } else { 'DarkGray' })
     if ($stats.Failed -gt 0) {
         Write-Host ("  Failed            : {0} — see the CSV, Action = Failed" -f $stats.Failed) -ForegroundColor Red
+    }
+    if ($stats.AdminLeft -gt 0) {
+        Write-Host ''
+        Write-Host ("  [FAIL] Still a site collection administrator on {0} site(s)." -f $stats.AdminLeft) -ForegroundColor Red
+        Write-Host "         That role reaches every scope in the site, so the other removals there" -ForegroundColor Red
+        Write-Host "         changed nothing in practice. Fix this before treating the user as revoked." -ForegroundColor Red
     }
 } else {
     Write-Host ''
