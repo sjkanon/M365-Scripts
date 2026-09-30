@@ -44,7 +44,7 @@ Elke workload heeft een eigen map onder [`scripts/`](scripts/readme.nl.md), en e
 | [`Exchange/`](scripts/Exchange/readme.nl.md) | Agendamigratie/-rechten, distributiegroepen, audits van mailboxen/agenda's/DKIM/doorsturen |
 | [`Graph/`](scripts/Graph/readme.nl.md) | Beheer van Microsoft Graph-toepassingsmachtigingen |
 | [`Intune/`](scripts/Intune/readme.nl.md) | Autopilot-inschrijving, updater voor het iOS-compliancebeleid, uitrol van bedrijfsachtergrond/-vergrendelscherm |
-| [`SharePoint/`](scripts/SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak terugzetten per site of tenantbreed (PnP PowerShell, automatische app-registratie) |
+| [`SharePoint/`](scripts/SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak terugzetten per site of tenantbreed (PnP PowerShell, automatische app-registratie), en waar een bestand gebleven is: hernoemd, verplaatst of verwijderd (auditlog) |
 | [`Reporting/`](scripts/Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
 | [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD |
 | [`Network/`](scripts/Network/readme.nl.md) | Controle van TCP-poorten, diagnose van authenticatie/netwerk, stresstest van bestands-I/O |
@@ -319,6 +319,15 @@ Scripts voor apparaatinschrijving, Autopilot-registratie en beheer van complianc
 ### 📁 SharePoint en OneDrive
 
 Contentbewerkingen op SharePoint Online-sites en OneDrive via PnP PowerShell.
+
+#### Bestand traceren
+
+**Trace-SharePointFile.ps1** — "waar is mijn bestand gebleven?" voor OneDrive en SharePoint, uit het Unified Audit Log (Exchange Online, geen PnP). Alleen-lezen.
+
+- Volgt hernoemingen, verplaatsingen, kopieën, verwijderingen en terugzettingen van één bestand op naam (jokertekens), oude URL of item-ID — een keten `A → B → C` eindigt bij C
+- Speelt hernoemingen, verplaatsingen en verwijderingen van mappen af op het bestand, omdat die elk bestand erin verplaatsen zonder record per bestand
+- Elke tijd in Brusselse tijd met de UTC-offset; `-StartDate` / `-EndDate` in Belgische notatie (`15-09-2026 08:30`), een einddatum zonder tijd neemt de hele dag mee
+- Leest per dag en splitst een stuk met meer dan 50.000 records, probeert mislukte zoekopdrachten opnieuw; laatst bekende locatie en status per item, CSV plus de ruwe auditrecords als JSON
 
 #### Gebruikerstoegang intrekken
 
@@ -780,6 +789,7 @@ M365-Scripts/
     │   ├── Find-SiteContent.ps1         ← een hele site doorzoeken (naam/pad/type/datum of volledige tekst) + de rechten op elke treffer rapporteren (PnP)
     │   ├── Search-SharePointContent.ps1 ← hetzelfde, tenantbreed via Graph app-only: delta + /permissions, deellinks en gasten (bestanden/mappen)
     │   ├── Restore-RecycleBinItems.ps1  ← verwijderde bestanden terugzetten uit een prullenbak: één site/OneDrive of tenantbreed (PnP, automatische app-registratie)
+    │   ├── Trace-SharePointFile.ps1     ← waar is een bestand gebleven: hernoemingen, verplaatsingen, kopieën, verwijderingen (ook via een map) uit het auditlog, in Brusselse tijd
     │   ├── Revoke-SharePointUserAccess.ps1 ← de toegang van één gebruiker op elk niveau intrekken, deellinks inbegrepen (rapporteert tenzij -Apply)
     │   ├── Test-SharePointAccessScripts.ps1 ← de twee toegangsscripts verifiëren zonder tenant (gedeeld auth-blok + intrekkingstrechter)
     │   └── Provisioning/                ← een complete structuur inrichten vanuit één JSON-config (PnP + Graph)
@@ -899,6 +909,15 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-09-30 (6)
+| Wijziging |
+|--------|
+| Nieuw `scripts/SharePoint/Trace-SharePointFile.ps1`: zoekt uit waar een OneDrive- of SharePoint-bestand gebleven is — hernoemd, verplaatst, gekopieerd, verwijderd, teruggezet — door wie en wanneer, uit het Unified Audit Log. Voordien was dat met de hand door de auditzoekfunctie van Purview klikken, waar een keten van hernoemingen of een hernoemde bovenliggende map makkelijk gemist wordt |
+| Het spoor wordt gevolgd via het item-ID en via het pad waarnaar een bestand hernoemd of verplaatst werd, zodat `A → B → C` eindigt bij C. Hernoemingen, verplaatsingen en verwijderingen van mappen worden afgespeeld op het pad van het bestand, omdat SharePoint daarvoor geen record per bestand schrijft |
+| Tijden staan in Brusselse tijd (`Europe/Brussels`, met de UTC-offset, zomer-/wintertijd inbegrepen) en de periode wordt opgegeven als Brusselse kloktijd in notatie met de dag eerst; een einddatum zonder tijd neemt de hele dag mee |
+| Robuustheid: de periode wordt per dag gelezen, een stuk met meer dan 50.000 records wordt gesplitst (tot 15 minuten), een mislukte of inconsistente zoekopdracht (`ResultIndex -1`) wordt met oplopende wachttijd opnieuw geprobeerd, en dubbele records worden weggelaten. `menu.ps1` heeft het onder toets `O` |
+| Geverifieerd: syntaxcontrole; draait in PowerShell 7 en Windows PowerShell 5.1 tegen een **gesimuleerde** `Search-UnifiedAuditLog` — keten van hernoemingen, kopie gemeld maar niet gevolgd, hernoemde en naar de prullenbak verplaatste map afgespeeld op het bestand, oude URL en deellink `/:w:/r/`, `-SiteUrl` die een naburige site met hetzelfde voorvoegsel niet meeneemt, de overgang naar zomertijd op 29 maart 2026 (+01:00 → +02:00), en het splitsen bij 50.000 records. **Nog niet gedraaid tegen een echte tenant**; de indeling van de auditvelden (`SourceRelativeUrl`, `DestinationFileName`, `ListItemUniqueId`) volgt het gedocumenteerde schema van Microsoft |
 
 ### 2026-09-30 (5)
 | Wijziging |

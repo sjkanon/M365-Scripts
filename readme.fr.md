@@ -44,7 +44,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`Exchange/`](scripts/Exchange/readme.fr.md) | Migration/droits des calendriers, groupes de distribution, audits des boîtes aux lettres/calendriers/DKIM/transferts |
 | [`Graph/`](scripts/Graph/readme.fr.md) | Gestion des autorisations d'application Microsoft Graph |
 | [`Intune/`](scripts/Intune/readme.fr.md) | Inscription Autopilot, mise à jour de la stratégie de conformité iOS, déploiement du fond d'écran/écran de verrouillage de l'entreprise |
-| [`SharePoint/`](scripts/SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique) |
+| [`SharePoint/`](scripts/SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique), et où est passé un fichier : renommé, déplacé ou supprimé (journal d'audit) |
 | [`Reporting/`](scripts/Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
 | [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
@@ -319,6 +319,15 @@ Scripts d'inscription des appareils, d'enregistrement Autopilot et de gestion de
 ### 📁 SharePoint et OneDrive
 
 Opérations sur le contenu des sites SharePoint Online et de OneDrive via PnP PowerShell.
+
+#### Retrouver un fichier
+
+**Trace-SharePointFile.ps1** — « où est passé mon fichier ? » pour OneDrive et SharePoint, depuis le Unified Audit Log (Exchange Online, pas PnP). Lecture seule.
+
+- Suit les renommages, déplacements, copies, suppressions et restaurations d'un fichier par nom (caractères génériques), ancienne URL ou ID d'élément — une chaîne `A → B → C` aboutit à C
+- Rejoue sur le fichier les renommages, déplacements et suppressions de dossiers, car ceux-ci déplacent chaque fichier qu'ils contiennent sans enregistrement par fichier
+- Chaque heure en heure de Bruxelles avec le décalage UTC ; `-StartDate` / `-EndDate` en notation belge (`15-09-2026 08:30`), une date de fin sans heure inclut toute la journée
+- Lit par jour et scinde une tranche de plus de 50 000 enregistrements, relance les recherches en échec ; dernier emplacement connu et statut par élément, CSV plus les enregistrements d'audit bruts en JSON
 
 #### Révoquer l'accès d'un utilisateur
 
@@ -780,6 +789,7 @@ M365-Scripts/
     │   ├── Find-SiteContent.ps1         ← rechercher dans tout un site (nom/chemin/type/date ou texte intégral) + rapporter les autorisations de chaque résultat (PnP)
     │   ├── Search-SharePointContent.ps1 ← idem, à l'échelle du tenant via Graph app-only : delta + /permissions, liens de partage et invités (fichiers/dossiers)
     │   ├── Restore-RecycleBinItems.ps1  ← restaurer des fichiers supprimés depuis une corbeille : un site/OneDrive ou tout le tenant (PnP, inscription d'application automatique)
+    │   ├── Trace-SharePointFile.ps1     ← où est passé un fichier : renommages, déplacements, copies, suppressions (y compris via un dossier) depuis le journal d'audit, en heure de Bruxelles
     │   ├── Revoke-SharePointUserAccess.ps1 ← retirer l'accès d'un utilisateur à tous les niveaux, liens de partage compris (rapport seul sans -Apply)
     │   ├── Test-SharePointAccessScripts.ps1 ← vérifier les deux scripts d'accès sans tenant (bloc d'authentification partagé + entonnoir de révocation)
     │   └── Provisioning/                ← provisionner toute une structure à partir d'une seule config JSON (PnP + Graph)
@@ -899,6 +909,15 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-09-30 (6)
+| Modification |
+|--------|
+| Nouveau `scripts/SharePoint/Trace-SharePointFile.ps1` : retrouve où est passé un fichier OneDrive ou SharePoint — renommé, déplacé, copié, supprimé, restauré — par qui et quand, depuis le Unified Audit Log. Auparavant il fallait parcourir à la main la recherche d'audit de Purview, où une chaîne de renommages ou un dossier parent renommé passe facilement inaperçu |
+| La trace est suivie par ID d'élément et par le chemin vers lequel un fichier a été renommé ou déplacé, de sorte que `A → B → C` aboutit à C. Les renommages, déplacements et suppressions de dossiers sont rejoués sur le chemin du fichier, car SharePoint n'écrit pas d'enregistrement par fichier pour ceux-ci |
+| Les heures sont affichées en heure de Bruxelles (`Europe/Brussels`, avec le décalage UTC, heure d'été/d'hiver prise en compte) et la période s'indique en heure locale de Bruxelles, jour d'abord ; une date de fin sans heure inclut toute la journée |
+| Robustesse : la période est lue par jour, une tranche de plus de 50 000 enregistrements est scindée (jusqu'à 15 minutes), une recherche en échec ou incohérente (`ResultIndex -1`) est relancée avec une attente croissante, et les enregistrements en double sont écartés. `menu.ps1` le propose sous la touche `O` |
+| Vérifié : contrôle de syntaxe ; fonctionne dans PowerShell 7 et Windows PowerShell 5.1 contre un `Search-UnifiedAuditLog` **simulé** — chaîne de renommages, copie signalée mais non suivie, renommage et mise à la corbeille d'un dossier rejoués sur le fichier, ancienne URL et lien de partage `/:w:/r/`, `-SiteUrl` qui n'inclut pas un site voisin au même préfixe, le passage à l'heure d'été le 29 mars 2026 (+01:00 → +02:00), et la scission à 50 000 enregistrements. **Pas encore exécuté contre un tenant réel** ; la structure des champs d'audit (`SourceRelativeUrl`, `DestinationFileName`, `ListItemUniqueId`) suit le schéma documenté par Microsoft |
 
 ### 2026-09-30 (5)
 | Modification |

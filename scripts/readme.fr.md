@@ -26,7 +26,7 @@ Le tableau ci-dessous fonctionne dans l'autre sens : à quoi *sert* chaque caté
 | [`Exchange/`](Exchange/readme.fr.md) | Migration/autorisations de calendriers, listes de distribution, audits des boîtes aux lettres/calendriers/DKIM/transferts |
 | [`Graph/`](Graph/readme.fr.md) | Gestion des autorisations d'application Microsoft Graph |
 | [`Intune/`](Intune/readme.fr.md) | Inscription Autopilot, mise à jour de la stratégie de conformité iOS, déploiement du fond d'écran/écran de verrouillage de l'entreprise |
-| [`SharePoint/`](SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique) |
+| [`SharePoint/`](SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique), et où est passé un fichier : renommé, déplacé ou supprimé (journal d'audit) |
 | [`Reporting/`](Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
 | [`Device/`](Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD |
 | [`Network/`](Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, tests de charge des E/S fichiers |

@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-185 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+186 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -184,6 +184,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Test-SharePointStructure.ps1`](SharePoint/Provisioning/Test-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Compare the live SharePoint structure with the configuration and report every difference. Reads only - changes nothing, ever. |
 | [`testsmtp_5min.ps1`](SMTP/testsmtp_5min.ps1) | [`SMTP/`](SMTP/readme.md) | Recurring SMTP test — sends a test email every N minutes until stopped. |
 | [`testsmtp.ps1`](SMTP/testsmtp.ps1) | [`SMTP/`](SMTP/readme.md) | One-time SMTP connectivity test. |
+| [`Trace-SharePointFile.ps1`](SharePoint/Trace-SharePointFile.ps1) | [`SharePoint/`](SharePoint/readme.md) | Find out where a file in OneDrive or SharePoint went: renamed, moved, copied, deleted or restored, by whom and when - from the Unified Audit Log, in Brussels t… |
 | [`UnifiApi.ps1`](Network/UniFi/UnifiApi.ps1) | [`Network/UniFi/`](Network/UniFi/readme.md) | Shared helper functions for talking to a UniFi Network Controller / UniFi OS console. |
 | [`Uninstall-ClaudeDesktop-Intune.ps1`](Intune/Desktop/ClaudeDesktop/Uninstall-ClaudeDesktop-Intune.ps1) | [`Intune/Desktop/ClaudeDesktop/`](Intune/Desktop/ClaudeDesktop/readme.md) | Intune Win32-app uninstall script voor Claude Desktop. |
 | [`Uninstall-CoworkPrerequisites-Intune.ps1`](Intune/Desktop/CoworkPrerequisites/Uninstall-CoworkPrerequisites-Intune.ps1) | [`Intune/Desktop/CoworkPrerequisites/`](Intune/Desktop/CoworkPrerequisites/readme.md) | Intune Win32-app uninstall script voor de Cowork Windows-vereisten. |

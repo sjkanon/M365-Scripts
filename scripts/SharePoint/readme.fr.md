@@ -22,6 +22,7 @@ administrateur interactive sur n'importe quel tenant (client).
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Rechercher dans tout un site (nom, chemin, type, taille, date ou texte intégral) et indiquer les autorisations de chaque résultat — PnP/CSOM, se connecte avec votre compte |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | La même question à l'échelle du tenant via Microsoft Graph, en app-only, sans connexion interactive — fichiers et dossiers |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restaurer des fichiers/dossiers supprimés depuis la corbeille d'un site ou d'un OneDrive (essai à blanc par défaut) |
+| [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Où est passé un fichier ? Renommages, déplacements, copies et suppressions depuis le journal d'audit, y compris via un dossier — en heure de Bruxelles, sur une période au choix |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Retirer partout l'accès d'un utilisateur : administrateur de site collection, attributions directes à tous les niveaux, groupes SharePoint et liens de partage. Rapport par défaut, suppression avec `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Vérifier les deux scripts d'accès sans toucher à un tenant — bloc d'authentification partagé identique, et l'entonnoir de révocation se comporte correctement |
 
@@ -478,6 +479,72 @@ Passez un `-ClientId` existant pour ignorer entièrement la création de l'appli
 Install-Module PnP.PowerShell -Scope CurrentUser              # PowerShell 7.4+
 Install-Module Microsoft.Graph.Applications -Scope CurrentUser # uniquement pour l'enregistrement unique de l'application
 ```
+
+---
+
+### Trace-SharePointFile.ps1
+
+Répond à « où est passé mon fichier ? » pour OneDrive et SharePoint : renommé, déplacé,
+copié, supprimé ou restauré, par qui et quand. Chaque heure est affichée en **heure de
+Bruxelles** (heure d'été et d'hiver prises en compte, avec le décalage UTC), et vous pouvez
+indiquer une période. Lecture seule : rien ne change dans le tenant.
+
+SharePoint ne garde pas l'ancien nom ni l'ancien emplacement d'un fichier ; le **Unified
+Audit Log**, si — c'est donc la source. Le script le lit et reconstitue la trace du fichier :
+
+| Étape | Ce qu'elle fait |
+|-------|-----------------|
+| Lecture | Chaque renommage, déplacement, copie, suppression, mise à la corbeille, restauration et chargement de fichiers **et de dossiers** dans la période. Lu par jour ; une tranche contenant plus des 50 000 enregistrements qu'une recherche peut renvoyer est scindée jusqu'à ce qu'elle tienne (jusqu'à 15 minutes), et une recherche en échec ou incohérente est relancée |
+| Point de départ | Les enregistrements qui citent le fichier via `-Name`, `-Url` ou `-ItemId` |
+| Suivi | Chaque enregistrement du même élément (`ListItemUniqueId`, qui survit aux renommages et déplacements) et chaque enregistrement qui part d'un chemin vers lequel le fichier a été renommé ou déplacé. Une chaîne `A → B → C` aboutit à C, même si C ne ressemble en rien au nom recherché. Un déplacement vers un autre site est suivi via le chemin de destination |
+| Dossiers | Renommer, déplacer ou supprimer un dossier déplace chaque fichier qu'il contient **sans enregistrement par fichier**. Les enregistrements de dossier sont donc rejoués sur le chemin du fichier à ce moment, pour que « déplacé avec le dossier X » et « supprimé avec le dossier X » apparaissent aussi |
+
+Pour chaque élément vous obtenez la chronologie, le **dernier emplacement connu** et un
+statut : `Present`, `In recycle bin` (à restaurer avec
+[`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1)), `In second-stage recycle bin`
+ou `Permanently deleted`.
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|-----------|------|--------|-------------|
+| `-Name` | string | — | Nom du fichier tel qu'il a été à un moment donné. Sans extension, toute extension correspond (`Offerte` trouve `Offerte.docx`) ; `*` et `?` sont des caractères génériques |
+| `-Url` | string | — | URL complète du fichier telle qu'elle était. `?web=1` est ignoré et un lien de partage `/:w:/r/` est reconverti en chemin. Les liens de partage opaques (`/:w:/s/`, `/:w:/g/`) ne peuvent pas être suivis — ouvrez-les et copiez l'adresse sur laquelle ils aboutissent |
+| `-ItemId` | guid | — | Le `ListItemUniqueId`, p. ex. tiré du CSV d'une exécution précédente |
+| `-SiteUrl` | string | — | Uniquement les enregistrements de ce site ou de ce OneDrive. Beaucoup plus rapide dans un grand tenant |
+| `-StartDate` | date ou string | `-Days` avant `-EndDate` | Heure locale dans `-TimeZone` : `15-09-2026`, `15/09/2026 08:30`, `2026-09-15 08:30` (jour d'abord, à la belge) |
+| `-EndDate` | date ou string | maintenant | Même notation. Une date sans heure inclut toute cette journée |
+| `-Days` | int | `30` | Durée de la période si `-StartDate` n'est pas indiqué |
+| `-TimeZone` | string | `Europe/Brussels` | ID IANA ou Windows ; fonctionne dans Windows PowerShell 5.1 et PowerShell 7 |
+| `-FollowCopies` | switch | désactivé | Suivre aussi les copies. Par défaut une copie est signalée mais pas suivie — l'original reste où il était |
+| `-IncludeActivity` | switch | désactivé | Aussi les ouvertures, modifications, téléchargements, synchronisations et archivages/extractions : qui y a travaillé en dernier. Beaucoup plus d'enregistrements, donc plus lent |
+| `-OutputPath` | string | `C:\Temp\FileTrail_<nom>_<ts>.csv` | Chemin du CSV ; les enregistrements d'audit bruts de la trace vont dans le même nom avec `.json` |
+| `-TenantId` | string | — | Domaine du tenant pour `Connect-ExchangeOnline` ; inutile si vous êtes déjà connecté |
+| `-PassThru` | switch | désactivé | Renvoie aussi les lignes de la chronologie sous forme d'objets |
+
+**Exemples**
+
+```powershell
+# Où est passé « Offerte Janssens.docx » ces 30 derniers jours ?
+.\Trace-SharePointFile.ps1 -Name "Offerte Janssens.docx" -TenantId contoso.onmicrosoft.com
+
+# Une période en heure de Bruxelles, un seul OneDrive
+.\Trace-SharePointFile.ps1 -Name "Budget*" -StartDate '01-09-2026' -EndDate '15-09-2026' `
+    -SiteUrl https://contoso-my.sharepoint.com/personal/jan_contoso_com
+
+# À partir du lien que quelqu'un a envoyé un jour, un après-midi
+.\Trace-SharePointFile.ps1 -Url "https://contoso.sharepoint.com/sites/Sales/Shared Documents/2026/Prijslijst.xlsx" `
+    -StartDate '2026-09-12 13:00' -EndDate '2026-09-12 18:00'
+```
+
+**Remarques**
+
+- Nécessite le rôle **View-Only Audit Logs** ou **Audit Logs** dans Exchange Online, et le module `ExchangeOnlineManagement`. Fonctionne dans Windows PowerShell 5.1 et PowerShell 7
+- Le journal d'audit a 30 à 90 minutes (parfois 24 heures) de retard. Audit Standard conserve **180 jours** ; le script avertit si la période commence plus tôt
+- Seul ce qui s'est passé **dans** la période peut être suivi. Un dossier renommé avant `-StartDate` est invisible ; si la trace semble commencer en cours de route, élargissez la période
+- Les renommages par le client de synchronisation OneDrive (dans l'Explorateur) sont audités comme ceux du navigateur ; la colonne `UserAgent` les distingue
+- Le dernier emplacement connu est ce que dit le journal d'audit — le script ne vérifie pas que le fichier s'y trouve encore
+- Colonnes du CSV : `Item, Time, TimeUtc, Action, Operation, User, From, To, ViaFolder, ItemId, ClientIP, UserAgent, RecordId`. `ViaFolder` est rempli quand l'étape provient d'une action sur un dossier
 
 ---
 

@@ -22,6 +22,7 @@ admin sign-in on any (customer) tenant.
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | The same question tenant-wide through Microsoft Graph, app-only, no interactive login — files and folders |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
+| [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Where did a file go? Renames, moves, copies and deletes from the audit log, folder moves included — in Brussels time, over a period you choose |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Verify the two access scripts without touching a tenant — shared auth block identical, and the revocation funnel behaves |
 
@@ -458,6 +459,71 @@ app creation entirely.
 Install-Module PnP.PowerShell -Scope CurrentUser              # PowerShell 7.4+
 Install-Module Microsoft.Graph.Applications -Scope CurrentUser # only for the one-time app registration
 ```
+
+---
+
+### Trace-SharePointFile.ps1
+
+Answers "where did my file go?" for OneDrive and SharePoint: renamed, moved, copied,
+deleted or restored, by whom and when. Every time is shown in **Brussels time**
+(summer and winter time handled, UTC offset alongside), and you can give it a period.
+Read-only: nothing in the tenant changes.
+
+SharePoint does not remember a file's old name or location; the **Unified Audit Log**
+does, so that is the source. The script reads it and rebuilds the file's trail:
+
+| Step | What it does |
+|------|--------------|
+| Read | Every rename, move, copy, delete, recycle, restore and upload of files **and folders** in the window. Read per day; a slice holding more than the 50,000 records one search can return is split until it fits (down to 15 minutes), and a failing or inconsistent search is retried |
+| Seed | The records that mention the file by `-Name`, `-Url` or `-ItemId` |
+| Follow | Every record of the same item (`ListItemUniqueId`, which survives renames and moves) and every record starting at a path the file was renamed or moved to. A chain `A → B → C` ends at C, even though C looks nothing like the name you searched for. A move to another site is followed by its destination path |
+| Folders | Renaming, moving or deleting a folder moves every file in it **without a record per file**. Folder records are replayed against the file's path at that moment, so "moved along with folder X" and "deleted along with folder X" show up too |
+
+Per item you get the timeline, the **last known location** and a status: `Present`,
+`In recycle bin` (restore it with [`Restore-RecycleBinItems.ps1`](#restore-recyclebinitemsps1)),
+`In second-stage recycle bin` or `Permanently deleted`.
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `-Name` | string | — | File name as it was at some point. Without an extension it matches any extension (`Offerte` finds `Offerte.docx`); `*` and `?` are wildcards |
+| `-Url` | string | — | Full URL of the file as it was. `?web=1` is ignored and a `/:w:/r/` sharing link is turned back into the path. Opaque sharing links (`/:w:/s/`, `/:w:/g/`) cannot be traced — open them and copy the address they land on |
+| `-ItemId` | guid | — | The `ListItemUniqueId`, e.g. from the CSV of an earlier run |
+| `-SiteUrl` | string | — | Only records of this site or OneDrive. Much faster in a large tenant |
+| `-StartDate` | date or string | `-Days` before `-EndDate` | Wall-clock time in `-TimeZone`: `15-09-2026`, `15/09/2026 08:30`, `2026-09-15 08:30` (day first, Belgian style) |
+| `-EndDate` | date or string | now | Same notation. A date without a time includes that whole day |
+| `-Days` | int | `30` | Window length when `-StartDate` is not given |
+| `-TimeZone` | string | `Europe/Brussels` | IANA or Windows ID; works in Windows PowerShell 5.1 and PowerShell 7 |
+| `-FollowCopies` | switch | off | Also follow copies. By default a copy is reported but not followed — the original stays where it was |
+| `-IncludeActivity` | switch | off | Also opens, edits, downloads, sync and check-in/out: who last worked in it. Many more records, so slower |
+| `-OutputPath` | string | `C:\Temp\FileTrail_<name>_<ts>.csv` | CSV path; the raw audit records of the trail go to the same name with `.json` |
+| `-TenantId` | string | — | Tenant domain for `Connect-ExchangeOnline`; not needed when already connected |
+| `-PassThru` | switch | off | Also return the timeline rows as objects |
+
+**Examples**
+
+```powershell
+# Where did "Offerte Janssens.docx" go in the last 30 days?
+.\Trace-SharePointFile.ps1 -Name "Offerte Janssens.docx" -TenantId contoso.onmicrosoft.com
+
+# A period in Brussels time, one OneDrive only
+.\Trace-SharePointFile.ps1 -Name "Budget*" -StartDate '01-09-2026' -EndDate '15-09-2026' `
+    -SiteUrl https://contoso-my.sharepoint.com/personal/jan_contoso_com
+
+# From the link someone once sent, one afternoon
+.\Trace-SharePointFile.ps1 -Url "https://contoso.sharepoint.com/sites/Sales/Shared Documents/2026/Prijslijst.xlsx" `
+    -StartDate '2026-09-12 13:00' -EndDate '2026-09-12 18:00'
+```
+
+**Notes**
+
+- Needs the **View-Only Audit Logs** or **Audit Logs** role in Exchange Online, and the module `ExchangeOnlineManagement`. Runs in Windows PowerShell 5.1 and PowerShell 7
+- The audit log runs 30–90 minutes (occasionally 24 hours) behind. Audit Standard keeps **180 days**; the script warns when the window starts earlier
+- Only what happened **inside** the window can be followed. A folder renamed before `-StartDate` is invisible; if the trail seems to start halfway, widen the window
+- Renames by the OneDrive sync client (in Explorer) are audited like those in the browser; the `UserAgent` column tells them apart
+- The last known location is what the audit log says — the script does not check that the file is still there
+- CSV columns: `Item, Time, TimeUtc, Action, Operation, User, From, To, ViaFolder, ItemId, ClientIP, UserAgent, RecordId`. `ViaFolder` is filled when the step came from a folder action
 
 ---
 

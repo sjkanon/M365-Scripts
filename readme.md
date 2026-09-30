@@ -44,7 +44,7 @@ Every workload has its own folder under [`scripts/`](scripts/readme.md), and eve
 | [`Exchange/`](scripts/Exchange/readme.md) | Calendar migration/permissions, distribution groups, mailbox/calendar/DKIM/forwarding audits |
 | [`Graph/`](scripts/Graph/readme.md) | Microsoft Graph application permission management |
 | [`Intune/`](scripts/Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
-| [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration) |
+| [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration), and where a file went: renamed, moved or deleted (audit log) |
 | [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
 | [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
 | [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
@@ -319,6 +319,15 @@ Scripts for device enrollment, Autopilot registration, and compliance policy man
 ### 📁 SharePoint & OneDrive
 
 Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
+
+#### Trace a File
+
+**Trace-SharePointFile.ps1** — "where did my file go?" for OneDrive and SharePoint, from the Unified Audit Log (Exchange Online, not PnP). Read-only.
+
+- Follows renames, moves, copies, deletes and restores of one file by name (wildcards), old URL or item ID — a chain `A → B → C` ends at C
+- Replays folder renames, moves and deletes onto the file, because those move every file inside without a record per file
+- Every time in Brussels time with the UTC offset; `-StartDate` / `-EndDate` in Belgian notation (`15-09-2026 08:30`), a bare end date includes the whole day
+- Reads per day and splits a slice with more than 50,000 records, retries failing searches; last known location and status per item, CSV plus the raw audit records as JSON
 
 #### Revoke User Access
 
@@ -780,6 +789,7 @@ M365-Scripts/
     │   ├── Find-SiteContent.ps1         ← search a whole site (name/path/type/date or full text) + report the permissions on every hit (PnP)
     │   ├── Search-SharePointContent.ps1 ← same, tenant-wide via Graph app-only: delta + /permissions, sharing links and guests (files/folders)
     │   ├── Restore-RecycleBinItems.ps1  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
+    │   ├── Trace-SharePointFile.ps1     ← where did a file go: renames, moves, copies, deletes (incl. via a folder) from the audit log, in Brussels time
     │   ├── Revoke-SharePointUserAccess.ps1 ← take one user's access away at every level, sharing links included (reports unless -Apply)
     │   ├── Test-SharePointAccessScripts.ps1 ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
@@ -899,6 +909,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-09-30 (6)
+| Change |
+|--------|
+| New `scripts/SharePoint/Trace-SharePointFile.ps1`: finds where a OneDrive or SharePoint file went — renamed, moved, copied, deleted, restored — by whom and when, from the Unified Audit Log. Before, this meant clicking through the Purview audit search by hand, where a rename chain or a renamed parent folder is easy to miss |
+| The trail is followed by item ID and by the path a file was renamed or moved to, so `A → B → C` ends at C. Folder renames, moves and deletes are replayed onto the file's path, because SharePoint writes no record per file for those |
+| Times are shown in Brussels time (`Europe/Brussels`, with the UTC offset, summer/winter time handled) and the period is given as Brussels wall-clock time in day-first notation; a bare end date includes the whole day |
+| Robustness: the window is read per day, a slice with more than 50,000 records is split (down to 15 minutes), a failing or inconsistent search (`ResultIndex -1`) is retried with backoff, and duplicate records are dropped. `menu.ps1` has it under key `O` |
+| Verified: syntax check; runs in PowerShell 7 and Windows PowerShell 5.1 against a **mocked** `Search-UnifiedAuditLog` — rename chain, copy reported but not followed, folder rename and folder recycle replayed onto the file, old URL and `/:w:/r/` sharing link, `-SiteUrl` not matching a neighbouring site with the same prefix, the DST switch on 29 March 2026 (+01:00 → +02:00), and the 50,000-record split. **Not yet run against a live tenant**; the audit field layout (`SourceRelativeUrl`, `DestinationFileName`, `ListItemUniqueId`) follows Microsoft's documented schema |
 
 ### 2026-09-30 (5)
 | Change |

@@ -26,7 +26,7 @@ De tabel hieronder werkt andersom: waar elke categorie *voor* is.
 | [`Exchange/`](Exchange/readme.nl.md) | Agendamigratie/-rechten, distributiegroepen, audits van mailboxen/agenda's/DKIM/doorsturen |
 | [`Graph/`](Graph/readme.nl.md) | Beheer van Microsoft Graph-applicatierechten |
 | [`Intune/`](Intune/readme.nl.md) | Autopilot-inschrijving, updater voor iOS-compliancebeleid, uitrol van bedrijfsachtergrond/-vergrendelscherm |
-| [`SharePoint/`](SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak herstellen per site of tenantbreed (PnP PowerShell, automatische app-registratie) |
+| [`SharePoint/`](SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak herstellen per site of tenantbreed (PnP PowerShell, automatische app-registratie), en waar een bestand gebleven is: hernoemd, verplaatst of verwijderd (auditlog) |
 | [`Reporting/`](Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
 | [`Device/`](Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschoning, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile voor Azure/AVD |
 | [`Network/`](Network/readme.nl.md) | TCP-poortcontroles, authenticatie-/netwerkdiagnose, stresstests voor bestands-I/O |
