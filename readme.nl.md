@@ -910,6 +910,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-01 (3)
+| Wijziging |
+|--------|
+| `Repair-AppxPackageStore.ps1` brak de eerste live poolrun af met `The property 'Name' cannot be found on this object` (lem-avd-4). `@($exactTargets.Name)` gooit onder `Set-StrictMode` in Windows PowerShell 5.1 een fout als de lijst leeg is — en dat is hij op een host die al de nieuwste build heeft. Nu opgebouwd vanuit de items zelf |
+| Gevonden door de end-to-endrun die er eerder al had moeten zijn: met `-Name teams,outlook -Provision` draaiden de installers van Microsoft ook voor pakketten die al geprovisiond waren, en die leveren een oudere laatst bekende goede build — Outlook 818 over een geprovisionde 915, een downgrade. De installers draaien nu alleen voor een pakket dat helemaal niet geprovisiond is; nieuwere builds komen via de route voor de exacte build / `-Latest` |
+| Geverifieerd door het **hele** script te draaien in Windows PowerShell 5.1 met de AppX-cmdlets, eventlogs, downloads en handtekeningen nagebootst, in het scenario van lem-avd-4 (915 geprovisiond, FSLogix faalt op 902/915), dat van lem-avd-5 (profielen vragen 922) en een lege host, met `-Name teams,outlook -Latest -Provision -RemoveOld` en met `-CheckOnly`: geen afbreking, geen installer over een geprovisiond pakket, 922 exact geprovisiond in het lem-avd-5-scenario, exitcodes 0/1/2 zoals verwacht. Nog niet opnieuw op de hosts gedraaid |
+
 ### 2026-10-01 (2)
 | Wijziging |
 |--------|

@@ -910,6 +910,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-01 (3)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1` aborted on the first live pool run with `The property 'Name' cannot be found on this object` (lem-avd-4). `@($exactTargets.Name)` throws under `Set-StrictMode` in Windows PowerShell 5.1 when the list is empty — which it is on a host that already has the newest build. Built from the items instead |
+| Found by the end-to-end run that should have existed before: with `-Name teams,outlook -Provision`, Microsoft's installers also ran for packages already provisioned, and they deliver an older last-known-good build — Outlook 818 over a provisioned 915, a downgrade. The installers now only run for a package that is not provisioned at all; newer builds come from the exact-build / `-Latest` route |
+| Verified by running the **whole** script in Windows PowerShell 5.1 with the AppX cmdlets, event logs, downloads and signatures mocked, in the lem-avd-4 scenario (915 provisioned, FSLogix failing on 902/915), the lem-avd-5 scenario (profiles asking 922) and an empty host, with `-Name teams,outlook -Latest -Provision -RemoveOld` and with `-CheckOnly`: no abort, no installer over a provisioned package, 922 provisioned exactly on the lem-avd-5 scenario, exit codes 0/1/2 as expected. Not yet re-run on the hosts |
+
 ### 2026-10-01 (2)
 | Change |
 |--------|

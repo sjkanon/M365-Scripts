@@ -910,6 +910,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-01 (3)
+| Modification |
+|--------|
+| `Repair-AppxPackageStore.ps1` s'est arrêté lors de la première exécution réelle sur le pool avec `The property 'Name' cannot be found on this object` (lem-avd-4). `@($exactTargets.Name)` lève une erreur sous `Set-StrictMode` dans Windows PowerShell 5.1 lorsque la liste est vide — ce qui est le cas sur un hôte qui a déjà la build la plus récente. Désormais construit à partir des éléments eux-mêmes |
+| Trouvé grâce à l'exécution de bout en bout qui aurait dû exister plus tôt : avec `-Name teams,outlook -Provision`, les programmes d'installation de Microsoft s'exécutaient aussi pour des paquets déjà provisionnés, et ils livrent une build plus ancienne (« last known good ») — Outlook 818 par-dessus une 915 provisionnée, une rétrogradation. Les programmes d'installation ne s'exécutent plus que pour un paquet qui n'est pas provisionné du tout ; les builds plus récentes passent par la voie build exacte / `-Latest` |
+| Vérifié en exécutant le script **entier** dans Windows PowerShell 5.1 avec les cmdlets AppX, les journaux d'événements, les téléchargements et les signatures simulés, dans le scénario de lem-avd-4 (915 provisionnée, FSLogix échouant sur 902/915), celui de lem-avd-5 (profils demandant 922) et un hôte vide, avec `-Name teams,outlook -Latest -Provision -RemoveOld` et avec `-CheckOnly` : aucun arrêt, aucun programme d'installation par-dessus un paquet provisionné, 922 provisionnée exactement dans le scénario lem-avd-5, codes de sortie 0/1/2 comme attendu. Pas encore réexécuté sur les hôtes |
+
 ### 2026-10-01 (2)
 | Modification |
 |--------|
