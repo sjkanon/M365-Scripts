@@ -1787,9 +1787,20 @@ try {
     # known package named explicitly (a deliberate "bring this to the current build").
     $provisionTargets = @($needs)
     if ($Provision -and $explicitName) {
-        $provisionTargets += @($KnownInstallers.Keys | Where-Object { Test-NameInScope $_ })
+        # Only what is not provisioned at all. The installers deliver an older
+        # last-known-good build (Outlook 818 while 915 was provisioned), so running
+        # them over a provisioned package is a downgrade - which a full end-to-end
+        # run of -Name teams,outlook -Provision showed it would have done.
+        # Copilot is the exception: its state lives in Edge Update, not here.
+        $provisionTargets += @($KnownInstallers.Keys | Where-Object {
+            (Test-NameInScope $_) -and (-not $provisionedNow.ContainsKey($_) -or $_ -eq 'Microsoft.MicrosoftOfficeHub')
+        })
     }
-    $provisionTargets = @($provisionTargets | Where-Object { $KnownInstallers.ContainsKey($_) -and $_ -notin @($exactTargets.Name) } | Select-Object -Unique)
+    # Not @($exactTargets.Name): under Set-StrictMode in Windows PowerShell 5.1 that
+    # throws "The property 'Name' cannot be found" when the list is empty - which
+    # aborted a live run on a host that already had the newest build.
+    $exactNames       = @($exactTargets | ForEach-Object { $_.Name })
+    $provisionTargets = @($provisionTargets | Where-Object { $KnownInstallers.ContainsKey($_) -and $_ -notin $exactNames } | Select-Object -Unique)
     $work += @($exactTargets | Where-Object { $_.Name -notin $needs }).Count
     foreach ($missing in @($needs | Where-Object { -not $KnownInstallers.ContainsKey($_) })) {
         Write-Warn "No known installer for $missing - provision it with -Source <msix>"
