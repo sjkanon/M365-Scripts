@@ -910,6 +910,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-01
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Latest` provisions the newest Teams / Outlook build there is, not only the build FSLogix failed on. Teams comes from Microsoft's config service, the feed the client itself uses (26246 today, with its MSIX link). Outlook has no such feed — the Store catalog answered 1.2026.818.0 while 915.300 was already on the CDN and in users' profiles — so the newest build that can be proven is used (asked for by FSLogix, registered for a user on the host, or present in `WindowsApps`), and the run says which source it used |
+| The run no longer says "Nothing to repair" when a package keeps failing with the right build provisioned. A live run after the exact-build fix showed Outlook 1.2026.915.300 provisioned, FSLogix 26.01, the profiles asking for 902 and 915 — and FSLogix still failing that afternoon, plus 55× `0x80073CF9`. Step 1b now says that is not a version gap (where it used to guess "an old saved version that clears at the next sign-out"), the run exits 1, and step 1c shows the evidence: the newest AppX deployment error with Windows' specific error text and its `Get-AppPackageLog -ActivityID`, and the package's lines in FSLogix's profile log |
+| Verified in PowerShell 5.1: `-Latest` against the **real** Teams config service (26246 found newer than a provisioned 26225, with the right MSIX URL) and with Outlook taken from what was seen (915 over 818); the evidence against this machine's **real** AppX log, which printed the specific error text and an ActivityId. Not yet run on the session hosts |
+
 ### 2026-09-30 (12)
 | Change |
 |--------|

@@ -910,6 +910,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-01
+| Modification |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Latest` provisionne la build Teams / Outlook la plus récente qui existe, pas seulement celle sur laquelle FSLogix a échoué. Teams provient du service de configuration de Microsoft, le flux qu'utilise le client lui-même (26246 aujourd'hui, avec son lien MSIX). Outlook n'a pas de tel flux — le catalogue du Store indiquait 1.2026.818.0 alors que 915.300 était déjà sur le CDN et dans les profils des utilisateurs — on utilise donc la build la plus récente dont l'existence est prouvée (demandée par FSLogix, enregistrée pour un utilisateur sur l'hôte, ou présente dans `WindowsApps`), et l'exécution indique la source utilisée |
+| L'exécution n'affiche plus « Nothing to repair » lorsqu'un paquet continue d'échouer alors que la bonne build est provisionnée. Une exécution réelle après le correctif de build exacte montrait Outlook 1.2026.915.300 provisionné, FSLogix 26.01, des profils demandant 902 et 915 — et FSLogix échouant encore le même après-midi, plus 55× `0x80073CF9`. L'étape 1b indique désormais qu'il ne s'agit pas d'un écart de version (là où elle supposait « une ancienne version enregistrée qui disparaît à la prochaine déconnexion »), l'exécution se termine par 1, et l'étape 1c affiche les preuves : la dernière erreur de déploiement AppX avec le texte d'erreur spécifique de Windows et son `Get-AppPackageLog -ActivityID`, ainsi que les lignes du paquet dans le journal de profil de FSLogix |
+| Vérifié dans PowerShell 5.1 : `-Latest` contre le **vrai** service de configuration Teams (26246 trouvée plus récente qu'une 26225 provisionnée, avec la bonne URL MSIX) et avec Outlook déduit de ce qui a été vu (915 au-dessus de 818) ; les preuves contre le **vrai** journal AppX de cette machine, qui a affiché le texte d'erreur spécifique et un ActivityId. Pas encore exécuté sur les hôtes de session |
+
 ### 2026-09-30 (12)
 | Modification |
 |--------------|

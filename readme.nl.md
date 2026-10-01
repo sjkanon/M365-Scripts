@@ -910,6 +910,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-01
+| Wijziging |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Latest` provisiont de nieuwste Teams-/Outlook-build die er is, niet alleen de build waarop FSLogix faalde. Teams komt van de configuratieservice van Microsoft, de feed die de client zelf gebruikt (vandaag 26246, met de MSIX-link). Voor Outlook bestaat zo'n feed niet — de Store-catalogus meldde 1.2026.818.0 terwijl 915.300 al op het CDN en in de profielen van gebruikers stond — dus wordt de nieuwste build gebruikt die aantoonbaar bestaat (gevraagd door FSLogix, geregistreerd voor een gebruiker op de host, of aanwezig in `WindowsApps`), en de run zegt welke bron hij gebruikte |
+| De run zegt niet langer "Nothing to repair" als een pakket blijft falen terwijl de juiste build is geprovisiond. Een live run na de fix voor de exacte build toonde Outlook 1.2026.915.300 geprovisiond, FSLogix 26.01, profielen die om 902 en 915 vragen — en FSLogix die die middag nog steeds faalde, plus 55× `0x80073CF9`. Stap 1b zegt nu dat het geen versieverschil is (waar hij eerder gokte op "een oude opgeslagen versie die bij de volgende afmelding verdwijnt"), de run eindigt met 1, en stap 1c toont het bewijs: de nieuwste AppX-deploymentfout met de specifieke fouttekst van Windows en de bijbehorende `Get-AppPackageLog -ActivityID`, en de regels over het pakket in het profiellog van FSLogix |
+| Geverifieerd in PowerShell 5.1: `-Latest` tegen de **echte** Teams-configuratieservice (26246 gevonden als nieuwer dan een geprovisionde 26225, met de juiste MSIX-URL) en met Outlook afgeleid van wat gezien is (915 boven 818); het bewijs tegen het **echte** AppX-log van deze machine, dat de specifieke fouttekst en een ActivityId toonde. Nog niet op de sessiehosts gedraaid |
+
 ### 2026-09-30 (12)
 | Wijziging |
 |-----------|
