@@ -910,6 +910,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-01 (4)
+| Modification |
+|--------|
+| Pour un paquet qui continue d'échouer alors que la bonne build est provisionnée, `Repair-AppxPackageStore.ps1` répond maintenant à la question qui détermine si cela compte : chaque utilisateur connecté a-t-il l'application ? lem-avd-4 avait Outlook 915 provisionné et FSLogix journalisait encore cet après-midi-là `Deployment Register ... from:  (AppxManifest.xml) failed with error 0x80070490` — FSLogix enregistrant avec un chemin vide. L'erreur ne permettait pas de savoir si des utilisateurs étaient privés d'Outlook ou si seul le journal se remplissait |
+| L'exécution compare les ruches utilisateur chargées avec les utilisateurs pour lesquels le paquet est enregistré (Installed), et nomme la build la plus récente de chacun. Tous couverts : les échecs sont la propre relecture de FSLogix, l'exécution le dit, indique `InstallAppxPackages = 0` comme méthode documentée par Microsoft pour le faire taire sans le modifier, et se termine par 0. S'il manque à quelqu'un : la personne est nommée et l'exécution échoue |
+| Vérifié de bout en bout dans Windows PowerShell 5.1 avec un état AppX simulé : lem-avd-4 avec Outlook enregistré pour l'utilisateur connecté → « all 1 signed-in user(s) have it (1.2026.915.300) », code 0 ; lem-avd-5 avec l'application enregistrée pour quelqu'un d'autre → l'utilisateur est nommé, code 2 ; un hôte vide → code 0. Pas encore exécuté sur les hôtes |
+
 ### 2026-10-01 (3)
 | Modification |
 |--------|

@@ -910,6 +910,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-01 (4)
+| Wijziging |
+|--------|
+| Voor een pakket dat blijft falen terwijl de juiste build geprovisiond is, beantwoordt `Repair-AppxPackageStore.ps1` nu de vraag die bepaalt of het ertoe doet: heeft elke aangemelde gebruiker de app? lem-avd-4 had Outlook 915 geprovisiond en FSLogix logde die middag nog steeds `Deployment Register ... from:  (AppxManifest.xml) failed with error 0x80070490` — FSLogix die registreert met een leeg pad. Of gebruikers zonder Outlook zaten of dat alleen het log vol liep, viel uit de fout niet af te lezen |
+| De run vergelijkt de geladen gebruikershives met de gebruikers voor wie het pakket geregistreerd (Installed) is, en noemt de nieuwste build die elk heeft. Iedereen gedekt: de fouten zijn de eigen herhaalpoging van FSLogix, de run zegt dat, wijst op `InstallAppxPackages = 0` als de gedocumenteerde manier van Microsoft om het stil te zetten zonder het te veranderen, en eindigt met 0. Mist iemand de app: die wordt genoemd en de run faalt |
+| End-to-end geverifieerd in Windows PowerShell 5.1 met nagebootste AppX-status: lem-avd-4 met Outlook geregistreerd voor de aangemelde gebruiker → "all 1 signed-in user(s) have it (1.2026.915.300)", exit 0; lem-avd-5 met de app geregistreerd voor iemand anders → de gebruiker wordt genoemd, exit 2; een lege host → exit 0. Nog niet op de hosts gedraaid |
+
 ### 2026-10-01 (3)
 | Wijziging |
 |--------|

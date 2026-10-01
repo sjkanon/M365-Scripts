@@ -910,6 +910,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-01 (4)
+| Change |
+|--------|
+| For a package that keeps failing with the right build provisioned, `Repair-AppxPackageStore.ps1` now answers the question that decides whether it matters: does every signed-in user have the app? lem-avd-4 had Outlook 915 provisioned and FSLogix still logging `Deployment Register ... from:  (AppxManifest.xml) failed with error 0x80070490` that afternoon — FSLogix registering with an empty path. Whether users were without Outlook or only the log was noisy could not be read from the error |
+| The run compares the loaded user hives with the users the package is registered (Installed) for, and names the newest build each has. All covered: the failures are FSLogix's own replay, the run says so, points at `InstallAppxPackages = 0` as Microsoft's documented way to silence it without changing it, and ends with 0. Anyone missing: named, and the run fails |
+| Verified end-to-end in Windows PowerShell 5.1 with mocked AppX state: lem-avd-4 with Outlook registered for the signed-in user → "all 1 signed-in user(s) have it (1.2026.915.300)", exit 0; lem-avd-5 with it registered for someone else → the user named, exit 2; an empty host → exit 0. Not yet run on the hosts |
+
 ### 2026-10-01 (3)
 | Change |
 |--------|
