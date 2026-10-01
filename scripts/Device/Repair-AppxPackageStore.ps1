@@ -155,6 +155,18 @@
     or removes Copilot (Install = 0, Uninstall without Force Installs, Windows'
     TurnOff/Remove policies) is reported and fails the run, but is never overridden.
 
+.PARAMETER Latest
+    Provision the newest build there is of Teams / Outlook in scope, not only the
+    one FSLogix failed on. Teams: Microsoft's config service, the feed the client
+    itself uses (version and MSIX link). Outlook has no such feed - the Store
+    catalog answered 1.2026.818.0 while 915.300 was already out - so the newest
+    build that can be proven is used: the newest FSLogix asked for, registered for
+    any user here, or present in WindowsApps. Use with -Provision.
+
+.EXAMPLE
+    # The very newest Teams and Outlook on the whole pool
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -Confirm:$false
+
 .EXAMPLE
     # What is broken on this host? Changes nothing.
     .\Repair-AppxPackageStore.ps1 -CheckOnly
@@ -206,7 +218,8 @@ param (
     [string]   $LogPath    = 'C:\Temp',
     [string[]] $ComputerName,
     [pscredential] $Credential,
-    [switch]   $Copilot
+    [switch]   $Copilot,
+    [switch]   $Latest
 )
 
 Set-StrictMode -Version Latest
@@ -399,6 +412,7 @@ if (-not $PSBoundParameters.ContainsKey('LogPath')              -and $env:logPat
 # which is also how the relaunches above hand it over - so the list is split here.
 $Name = @($Name | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if (-not $PSBoundParameters.ContainsKey('Copilot') -and $env:copilot -in $rmmTrue) { $Copilot = $true }
+if (-not $PSBoundParameters.ContainsKey('Latest')  -and $env:latest  -in $rmmTrue) { $Latest  = $true }
 # Shorthands, so -Name outlook,copilot is enough. 'copilot' is the -Copilot switch.
 $Name = @(foreach ($entry in $Name) {
     switch ($entry) {
@@ -426,6 +440,7 @@ $exitCode     = 0
 $plannedExit  = $null
 $transcribing = $false
 $storeEdited  = $false
+$script:unexplained = @()
 
 # A name without wildcards is a deliberate choice of package; only then are system
 # packages, frameworks and Deprovisioned markers in scope.
@@ -981,6 +996,67 @@ function Get-ExactTarget {
     }
 }
 
+function Get-LatestTarget {
+    <#
+        -Latest: the newest build there is, per Teams / Outlook in scope, when it is
+        newer than what this host provisions.
+
+          Teams    Microsoft's config service, the feed the client itself uses to
+                   decide it is out of date - newest version and its MSIX link.
+          Outlook  No such feed exists: the Store catalog answered 1.2026.818.0 while
+                   915.300 was already on the CDN and in users' profiles. So the
+                   newest build that can be proven is used - the newest of what
+                   FSLogix asked for, what is registered for any user here, and what
+                   has a folder in WindowsApps - and the run says that is what it is.
+    #>
+    param([hashtable] $Provisioned, $Requests)
+
+    foreach ($pkgName in @('MSTeams', 'Microsoft.OutlookForWindows')) {
+        if (-not (Test-NameInScope $pkgName)) { continue }
+        $spec = $KnownInstallers[$pkgName]
+        $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+        $best = $null; $source = $null; $url = $null
+
+        if ($pkgName -eq 'MSTeams') {
+            try {
+                [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+                $config = Invoke-RestMethod -UseBasicParsing -TimeoutSec 30 -Uri ('https://config.teams.microsoft.com/config/v1/MicrosoftTeams/0.0.0.0' +
+                          '?environment=prod&audienceGroup=general&teamsRing=general&agent=TeamsBuilds')
+                $node = Get-PropertyValue (Get-PropertyValue (Get-PropertyValue $config 'BuildSettings') 'WebView2PreAuth') $arch
+                $v    = Get-PropertyValue $node 'latestVersion'
+                if ($v) { $best = [version] $v; $source = 'the Teams config service'; $url = Get-PropertyValue $node 'buildLink' }
+            } catch {
+                Write-Warn "  Could not reach the Teams config service: $($_.Exception.Message)"
+            }
+        }
+
+        # Every build of this package this host can prove exists.
+        $seen = @()
+        $seen += @($Requests | Where-Object { $_.Name -eq $pkgName } | ForEach-Object { $_.Version })
+        $seen += @(Get-AppxPackage -AllUsers -Name $pkgName -ErrorAction SilentlyContinue | ForEach-Object { try { [version] $_.Version } catch { } })
+        $seen += @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -Filter "${pkgName}_*_${arch}__*" -ErrorAction SilentlyContinue |
+                   ForEach-Object { Get-PackageVersionFromFullName $_.Name })
+        $seenBest = @($seen | Where-Object { $_ } | Sort-Object -Descending) | Select-Object -First 1
+        if ($seenBest -and (-not $best -or $seenBest -gt $best)) {
+            $best = $seenBest; $source = 'the newest build seen on this host and in the profiles'; $url = $null
+        }
+        if (-not $best) { continue }
+
+        $have = if ($Provisioned.ContainsKey($pkgName)) { $Provisioned[$pkgName] } else { $null }
+        if ($have -and $have -ge $best) {
+            Write-Ok "  $pkgName $have provisioned - the newest build there is ($source)"
+            continue
+        }
+        Write-Warn "  $pkgName newest build is $best ($source), this host provisions $(if ($have) { $have } else { 'nothing' })"
+        [PSCustomObject]@{
+            Name     = $pkgName
+            Version  = $best
+            FullName = $null
+            Url      = if ($url) { $url } else { $spec.VersionUrl -f $best, $arch }
+        }
+    }
+}
+
 function Invoke-ExactProvision {
     <#
         Provision one exact build for all users: the MSIX straight from Microsoft's
@@ -1070,11 +1146,53 @@ function Write-FslogixStatus {
             # [void]: its $true/$false would otherwise land in this function's output
             # and be returned as a package name to provision.
             [void] (Write-VersionGap -Package $group.Name -Have $have -Asked $newest -Fslogix $fslogixVersion)
+        } elseif ($last -gt (Get-Date).AddHours(-24)) {
+            # Measured on a production host: Outlook 1.2026.915.300 provisioned, the
+            # profiles asking for 902 and 915, FSLogix 26.01 - and still failing that
+            # same afternoon. Calling that "an old saved version that clears at the
+            # next sign-out" was a guess. Not a version gap, so it is said as such
+            # and the evidence is shown in step 1c.
+            Write-Warn "  This host provisions $have, which is what the profiles ask for, yet FSLogix still failed on it in the last 24 hours - not a version gap; step 1c shows what Windows and FSLogix logged"
+            $script:unexplained += $group.Name
         } else {
-            Write-Ok "  This host provisions $have - Windows registers that at sign-in; the error is FSLogix replaying an old saved version and stops once each user has signed out once on a current host"
+            Write-Ok "  This host provisions $have and nothing failed in the last 24 hours - the older failures were FSLogix replaying a saved version"
         }
     }
     return $needs
+}
+
+function Write-FailureEvidence {
+    <#
+        Why a package keeps failing, in the words of the two components involved:
+        the newest AppX deployment error for it, whose text carries the reason the
+        bare code does not, with its ActivityId for Get-AppPackageLog; and the lines
+        about it in FSLogix's own profile log.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName)
+
+    $since  = (Get-Date).AddDays(-$Days)
+    $latest = @(Get-EventSafe -Filter @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Level = 2; StartTime = $since } |
+                Where-Object { $_.Message -match [regex]::Escape($PackageName) }) | Select-Object -First 1
+    if ($latest) {
+        $text = (($latest.Message -replace '\s+', ' ')).Trim()
+        if ($text.Length -gt 500) { $text = $text.Substring(0, 500) + '...' }
+        Write-Skip ("    newest AppX error, {0:yyyy-MM-dd HH:mm}: {1}" -f $latest.TimeCreated, $text)
+        $activity = Get-PropertyValue $latest 'ActivityId'
+        if ($activity) { Write-Skip "    full trace: Get-AppPackageLog -ActivityID $activity" }
+    }
+
+    $logDir = 'C:\ProgramData\FSLogix\Logs\Profile'
+    $log    = @(Get-ChildItem -Path $logDir -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending) | Select-Object -First 1
+    if ($log) {
+        $lines = @(Select-String -LiteralPath $log.FullName -Pattern ([regex]::Escape($PackageName)) -ErrorAction SilentlyContinue |
+                   Select-Object -Last 4)
+        foreach ($line in $lines) {
+            $text = $line.Line.Trim()
+            if ($text.Length -gt 300) { $text = $text.Substring(0, 300) + '...' }
+            Write-Skip "    FSLogix log ($($log.Name)): $text"
+        }
+        if ($lines.Count -eq 0) { Write-Skip "    FSLogix log $($log.FullName) says nothing about $PackageName" }
+    }
 }
 
 function Write-AppxPolicyStatus {
@@ -1492,6 +1610,8 @@ function Write-FailingApp {
             Write-Skip "    $version ($onDisk)"
         }
         if ($Provisioned.ContainsKey($app.Name)) { Write-Skip "    provisioned here: $($Provisioned[$app.Name])" }
+        # The reason, for what is still failing today - the code alone is not one.
+        if ($app.Last -gt (Get-Date).AddHours(-24)) { Write-FailureEvidence -PackageName $app.Name }
     }
     if ($failing.Count -gt $Top) {
         Write-Skip "  ... and $($failing.Count - $Top) more - narrow it down with -Name"
@@ -1526,6 +1646,15 @@ try {
     # They win over the installer for the same package: the installer's build is
     # older, and older is what fails.
     $exactTargets   = @(Get-ExactTarget -Provisioned $provisionedNow -Requests $requests)
+    if ($Latest) {
+        # The newest build replaces the one FSLogix asked for when it is newer.
+        foreach ($newest in @(Get-LatestTarget -Provisioned $provisionedNow -Requests $requests)) {
+            $same = @($exactTargets | Where-Object { $_.Name -eq $newest.Name })
+            if ($same.Count -eq 0 -or $same[0].Version -lt $newest.Version) {
+                $exactTargets = @($exactTargets | Where-Object { $_.Name -ne $newest.Name }) + $newest
+            }
+        }
+    }
     Write-AppxPolicyStatus
 
     # -- 1c. Everything that fails --------------------------------------------
@@ -1569,6 +1698,11 @@ try {
 
     $work += $needs.Count
     if ($work -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count) -gt 0)) {
+        # "Nothing to repair" while a package failed today is not the same as healthy.
+        if ($script:unexplained.Count -gt 0) {
+            $plannedExit = 1
+            throw ("Nothing this script can repair, but {0} still failed in the last 24 hours with the right build provisioned - the evidence in step 1c is the next lead" -f ($script:unexplained -join ', '))
+        }
         $plannedExit = 0
         throw 'Nothing to repair.'
     }
