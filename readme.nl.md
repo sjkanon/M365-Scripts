@@ -910,6 +910,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-01 (2)
+| Wijziging |
+|--------|
+| `Repair-AppxPackageStore.ps1 -RemoveOld` verwijdert elke verwijzing die een host nog heeft naar een oudere build van de genoemde pakketten, nadat de nieuwste is geprovisiond: oudere geprovisionde kopieën, oudere builds die voor een gebruiker zijn geregistreerd (voor alle gebruikers, per gebruiker waar dat weigert), en wat `AppxAllUserStore` er nog van onthoudt in gebruikers-, end-of-life-, deferred-removal- en machinevermeldingen — elke sleutel eerst geback-upt naar `.reg`. Op de host die bleef falen stond Outlook 818 nog geprovisiond naast 915 en was 902 nog geregistreerd, waardoor oudere builds binnen bereik van een aanmelding bleven |
+| Bewust begrensd: alleen pakketten die één voor één genoemd zijn (`-Name teams,outlook`; genegeerd bij een wildcard), en helemaal niets als de build die blijft niet geprovisiond is, zodat geen gebruiker zonder de app komt te zitten. De mappen in `WindowsApps` laat het aan Windows over, dat ze beheert en verwijdert zodra niets er nog naar verwijst, en de lijst in elke profielcontainer aan FSLogix, dat die bij de volgende afmelding herschrijft — beide worden gemeld. Menu `R` vraagt ernaar na het provisionen, samen met `-Latest` |
+| Geverifieerd in PowerShell 5.1 met de cmdlets nagebootst en een kladversie van `AppxAllUserStore`: met 915 als blijvende build werden de geprovisionde 818, de geregistreerde 902 en de drie storevermeldingen voor 902/818 verwijderd (drie `.reg`-back-ups), bleef 915 overal staan en werden de twee oude `WindowsApps`-mappen benoemd; zonder geprovisionde build werd niets verwijderd. Niet op een sessiehost gedraaid |
+
 ### 2026-10-01
 | Wijziging |
 |--------|

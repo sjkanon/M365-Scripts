@@ -910,6 +910,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-01 (2)
+| Modification |
+|--------|
+| `Repair-AppxPackageStore.ps1 -RemoveOld` supprime toute référence qu'un hôte garde à une build plus ancienne des paquets nommés, une fois la plus récente provisionnée : copies provisionnées plus anciennes, builds plus anciennes enregistrées pour un utilisateur (pour tous les utilisateurs, ou par utilisateur quand cela échoue), et ce que `AppxAllUserStore` en retient encore dans les entrées utilisateur, fin de vie, suppression différée et machine — chaque clé sauvegardée en `.reg` d'abord. Sur l'hôte qui continuait d'échouer, Outlook 818 était encore provisionné à côté de 915 et 902 encore enregistré, ce qui laissait d'anciennes builds à portée d'une ouverture de session |
+| Volontairement limité : uniquement les paquets nommés un par un (`-Name teams,outlook` ; ignoré avec un caractère générique), et rien du tout si la build conservée n'est pas provisionnée, afin qu'aucun utilisateur ne se retrouve sans l'application. Les dossiers `WindowsApps` sont laissés à Windows, qui en est propriétaire et les supprime dès que plus rien n'y fait référence, et la liste de chaque conteneur de profil à FSLogix, qui la réécrit à la prochaine déconnexion — les deux sont signalés. Le menu `R` le propose après le provisionnement, avec `-Latest` |
+| Vérifié dans PowerShell 5.1 avec les cmdlets simulées et un `AppxAllUserStore` de test : en conservant 915, la 818 provisionnée, la 902 enregistrée et les trois entrées du magasin pour 902/818 ont été supprimées (trois sauvegardes `.reg`), 915 est restée partout et les deux anciens dossiers `WindowsApps` ont été nommés ; sans build provisionnée, rien n'a été supprimé. Pas exécuté sur un hôte de session |
+
 ### 2026-10-01
 | Modification |
 |--------|

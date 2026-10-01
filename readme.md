@@ -910,6 +910,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-01 (2)
+| Change |
+|--------|
+| `Repair-AppxPackageStore.ps1 -RemoveOld` removes every reference a host keeps to an older build of the named packages, after the newest is provisioned: older provisioned copies, older builds registered for any user (for all users, per user where that refuses), and what `AppxAllUserStore` still remembers of them under user, end-of-life, deferred-removal and machine entries — each key backed up to `.reg` first. On the host that kept failing, Outlook 818 was still provisioned next to 915 and 902 still registered, which keeps older builds within reach of a sign-in |
+| Deliberately bounded: only packages named one by one (`-Name teams,outlook`; ignored with a wildcard), nothing at all when the build to keep is not provisioned, so no user is left without the app. The `WindowsApps` folders are left to Windows, which owns them and deletes them once nothing references them, and the list in each profile container to FSLogix, which rewrites it at the next sign-out — both are reported. Menu `R` asks for it after provisioning, together with `-Latest` |
+| Verified in PowerShell 5.1 with the cmdlets mocked and a scratch `AppxAllUserStore`: keeping 915 removed the provisioned 818, the registered 902 and the three store entries for 902/818 (three `.reg` backups), left 915 everywhere and named the two old `WindowsApps` folders; with nothing provisioned it removed nothing. Not run on a session host |
+
 ### 2026-10-01
 | Change |
 |--------|
