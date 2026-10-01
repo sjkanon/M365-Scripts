@@ -205,6 +205,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | 4. Remove | `Remove-AppxPackage -AllUsers` for ghosts, per user where that refuses |
 | 5. Store | Each remaining orphaned registry key is exported to a `.reg` backup, and only then removed — no backup, no removal |
 | 6. Provision | Where FSLogix fails on a newer Teams / Outlook build than this host provisions: **exactly that build**, as an MSIX from Microsoft's CDN at its versioned URL, signature-checked, then `Add-AppxProvisionedPackage` and read back. Otherwise `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, downloaded from Microsoft and signature-checked. With `-UseWinget` the MSIX from winget instead (`Microsoft.Teams`, `Microsoft.Outlook`), provisioned with `Add-AppxProvisionedPackage` together with any dependencies winget brought. `-WingetId`: the same for any other package. `-Source`: any MSIX you supply |
+| 6b. Older builds | `-RemoveOld`, after provisioning: every older build of the named packages — older provisioned copies, older builds registered for any user, and their `AppxAllUserStore` entries (backed up to `.reg` first). Only when the build to keep is provisioned; `WindowsApps` folders are left to Windows, the list in the profile container to FSLogix |
 | 7. Verify | The diagnosis runs again; exit code 1 when anything survived |
 
 **Parameters**
@@ -226,6 +227,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | `-Credential` | Credential for those remoting sessions |
 | `-Copilot` | Look at Copilot (step 1d): the Microsoft 365 Copilot app (`Microsoft.MicrosoftOfficeHub`) and the Windows Copilot app (`Microsoft.Copilot`), the **unified Microsoft Copilot app** Edge Update installs since September 2026, and every policy that removes or blocks it. Their Deprovisioned markers are in scope. With `-Provision` the **new** app is installed machine-wide the way Microsoft documents it: `Install{C50565E9-...}` = 5 (Force Installs), `UpdaterExperimentationAndConfigurationServiceControl` = 1 and `CopilotUnificationAllowed{...}` = 1 under `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate` (after a `.reg` backup), Edge Update is asked to check now, and the run waits up to 10 minutes for the app. When it does not appear, `M365CopilotDesktopInstaller.exe --quiet --start -p` (the old app, which the unification moves over) is the fallback. A policy that forbids the install (`Install` = 0) is never overridden |
 | `-Latest` | Provision the **newest** build there is of Teams / Outlook in scope, not only the one FSLogix failed on. Teams: Microsoft's config service (the feed the client itself uses). Outlook has no such feed — the Store catalog reported 1.2026.818.0 while 915.300 was already out — so the newest build that can be proven is used: the newest FSLogix asked for, registered for any user on the host, or present in `WindowsApps`. Use with `-Provision` |
+| `-RemoveOld` | After provisioning, remove every reference this host keeps to an **older** build of the named packages: older provisioned copies, older builds registered for any user, and what `AppxAllUserStore` still remembers of them (backed up to `.reg` first). Only for packages named explicitly (`-Name teams,outlook`), and only once the build to keep is provisioned — users are never left without the app. `WindowsApps` folders are left to Windows; the list in each profile container is rewritten by FSLogix at the next sign-out |
 
 Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. NinjaOne script variables: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
 
@@ -247,7 +249,7 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision -Confirm:$false
 
 # The very newest Teams and Outlook on the pool, not only the build FSLogix asks for
-.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -Confirm:$false
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -RemoveOld -Confirm:$false
 
 # Same, with both packages taken from winget
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false

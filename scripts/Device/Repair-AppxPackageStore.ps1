@@ -163,9 +163,17 @@
     build that can be proven is used: the newest FSLogix asked for, registered for
     any user here, or present in WindowsApps. Use with -Provision.
 
+.PARAMETER RemoveOld
+    After provisioning, remove every reference this host keeps to an older build of
+    the named packages: older provisioned copies, older builds registered for any
+    user, and what AppxAllUserStore still remembers of them (backed up to .reg
+    first). Only for packages named explicitly, and only once the build to keep is
+    provisioned. The WindowsApps folders are left to Windows, and the list in each
+    profile container to FSLogix, which rewrites it at the next sign-out.
+
 .EXAMPLE
-    # The very newest Teams and Outlook on the whole pool
-    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -Confirm:$false
+    # The very newest Teams and Outlook on the whole pool, and nothing older left
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -RemoveOld -Confirm:$false
 
 .EXAMPLE
     # What is broken on this host? Changes nothing.
@@ -219,7 +227,8 @@ param (
     [string[]] $ComputerName,
     [pscredential] $Credential,
     [switch]   $Copilot,
-    [switch]   $Latest
+    [switch]   $Latest,
+    [switch]   $RemoveOld
 )
 
 Set-StrictMode -Version Latest
@@ -413,6 +422,7 @@ if (-not $PSBoundParameters.ContainsKey('LogPath')              -and $env:logPat
 $Name = @($Name | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if (-not $PSBoundParameters.ContainsKey('Copilot') -and $env:copilot -in $rmmTrue) { $Copilot = $true }
 if (-not $PSBoundParameters.ContainsKey('Latest')  -and $env:latest  -in $rmmTrue) { $Latest  = $true }
+if (-not $PSBoundParameters.ContainsKey('RemoveOld') -and $env:removeOld -in $rmmTrue) { $RemoveOld = $true }
 # Shorthands, so -Name outlook,copilot is enough. 'copilot' is the -Copilot switch.
 $Name = @(foreach ($entry in $Name) {
     switch ($entry) {
@@ -1429,6 +1439,95 @@ function Write-CopilotStatus {
     return $blocked
 }
 
+# -- Older builds --------------------------------------------------------------
+function Remove-OlderBuild {
+    <#
+        -RemoveOld: every reference this host keeps to an older build of one package,
+        once the build to keep is provisioned - so a sign-in can only ever land on
+        the current one. In this order, each read back:
+
+          provisioned   older provisioned copies (Remove-AppxProvisionedPackage)
+          registered    older builds registered for any user (Remove-AppxPackage
+                        -AllUsers, per user where that refuses)
+          store         what AppxAllUserStore still remembers of older builds -
+                        user, end-of-life, deferred-removal and machine entries -
+                        backed up to .reg first, like step 5
+
+        Not touched: the files under WindowsApps - TrustedInstaller owns them and
+        Windows deletes them itself once nothing references them - and the list in
+        each user's profile container (AppxPackages.xml), which FSLogix rewrites at
+        the user's next sign-out. Both are reported.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [string] $BackupFolder)
+
+    $keep = (Get-ProvisionedVersion)[$PackageName]
+    if (-not $keep) {
+        Write-Warn "  $PackageName is not provisioned on this host - nothing is removed, so users are never left without it"
+        return
+    }
+    Write-Skip "  $PackageName - keeping $keep, removing every older build"
+    $removed = 0
+
+    foreach ($prov in @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $PackageName })) {
+        $v = try { [version] $prov.Version } catch { $null }
+        if (-not $v -or $v -ge $keep) { continue }
+        if (-not $PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online (older build)')) { continue }
+        try {
+            Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
+            Write-Ok "  Deprovisioned the older $($prov.PackageName)"; $removed++
+        } catch { Write-Warn "  Could not deprovision $($prov.PackageName): $($_.Exception.Message)" }
+    }
+
+    foreach ($pkg in @(Get-AppxPackage -AllUsers -Name $PackageName -ErrorAction SilentlyContinue)) {
+        $v = try { [version] $pkg.Version } catch { $null }
+        if (-not $v -or $v -ge $keep) { continue }
+        if (-not $PSCmdlet.ShouldProcess($pkg.PackageFullName, 'Remove-AppxPackage -AllUsers (older build)')) { continue }
+        try {
+            Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
+            Write-Ok "  Removed the older $($pkg.PackageFullName) for all users"; $removed++
+        } catch {
+            Write-Warn "  Removing $($pkg.PackageFullName) for all users failed: $($_.Exception.Message)"
+            foreach ($holder in @(Get-AppxPackageHolder -Package $pkg)) {
+                try {
+                    Remove-AppxPackage -Package $pkg.PackageFullName -User $holder.Sid -ErrorAction Stop
+                    Write-Ok "    Removed it for $($holder.Account)"; $removed++
+                } catch {
+                    Write-Warn "    Still there for $($holder.Account): $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+
+    # What the registry still remembers of older builds, after the cmdlets above.
+    $roots = @($AppxAllUserStorePath, "$AppxAllUserStorePath\EndOfLife", "$AppxAllUserStorePath\DeferredRemoval")
+    $keys  = @(foreach ($root in $roots) {
+        Get-ChildItem $root -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -like 'S-1-*' } |
+            ForEach-Object { Get-ChildItem $_.PSPath -ErrorAction SilentlyContinue }
+    }) + @(Get-ChildItem "$AppxAllUserStorePath\Applications" -ErrorAction SilentlyContinue)
+    foreach ($key in @($keys | Where-Object { $_.PSChildName -like "${PackageName}_*" })) {
+        $v = Get-PackageVersionFromFullName $key.PSChildName
+        if (-not $v -or $v -ge $keep) { continue }
+        if (-not $PSCmdlet.ShouldProcess($key.Name, 'Back up and remove the store entry of an older build')) { continue }
+        if ($BackupFolder -and -not (Backup-RegistryKey -Key $key.Name -Folder $BackupFolder)) {
+            Write-Warn "  Could not back up $($key.Name) - left in place"
+            continue
+        }
+        Remove-Item -Path $key.PSPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $key.PSPath) { Write-Warn "  Could not remove $($key.Name)" }
+        else { Write-Ok "  Removed the store entry $($key.Name)"; $removed++; $script:storeEdited = $true }
+    }
+
+    if ($removed -eq 0) { Write-Ok "  No older build of $PackageName referenced on this host" }
+
+    $folders = @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -Filter "${PackageName}_*" -ErrorAction SilentlyContinue |
+                 Where-Object { ($v = Get-PackageVersionFromFullName $_.Name) -and $v -lt $keep })
+    if ($folders.Count -gt 0) {
+        Write-Skip ("  {0} older folder(s) left in WindowsApps ({1}) - Windows deletes them once nothing references them; they are not touched here" -f
+                    $folders.Count, (($folders | ForEach-Object { Get-PackageVersionFromFullName $_.Name }) -join ', '))
+    }
+    Write-Skip '  Users whose profile still lists an older build get it rewritten by FSLogix at their next sign-out'
+}
+
 # -- winget --------------------------------------------------------------------
 function Get-WingetPath {
     <#
@@ -1697,7 +1796,18 @@ try {
     }
 
     $work += $needs.Count
-    if ($work -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count) -gt 0)) {
+    # -RemoveOld only ever acts on packages named one by one: "every older build of
+    # everything" is not a request anyone should be able to make by accident.
+    $removeOldTargets = @()
+    if ($RemoveOld) {
+        if (-not $explicitName) {
+            Write-Warn '-RemoveOld needs the packages named, e.g. -Name teams,outlook - ignored for a wildcard'
+        } else {
+            $removeOldTargets = @($Name | Where-Object { $_ -notin $CopilotPackages })
+        }
+    }
+
+    if ($work -eq 0 -and $removeOldTargets.Count -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count) -gt 0)) {
         # "Nothing to repair" while a package failed today is not the same as healthy.
         if ($script:unexplained.Count -gt 0) {
             $plannedExit = 1
@@ -1914,6 +2024,19 @@ try {
                 Write-AppxDeploymentError -Minutes 10
                 $exitCode = 1
             }
+        }
+    }
+
+    # -- 6b. Older builds -------------------------------------------------------
+    # After provisioning, never before: what is kept has to be in place first.
+    if ($removeOldTargets.Count -gt 0) {
+        Write-Out ''
+        Write-Step '6b. Remove older builds'
+        foreach ($proc in @(Get-Process -Name 'olk', 'ms-teams' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -Unique)) {
+            Write-Warn "  $proc is running - an older build in use is closed or finishes at that user's sign-out"
+        }
+        foreach ($pkgName in $removeOldTargets) {
+            Remove-OlderBuild -PackageName $pkgName -BackupFolder $backupDir
         }
     }
 

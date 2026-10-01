@@ -670,6 +670,10 @@ $menu = @(
                     $a['Provision'] = $true
                     $wg = Read-Host "  Take them from winget instead of Microsoft's installer? [y/N]"
                     if ($wg -match '^[Yy]') { $a['UseWinget'] = $true }
+                    $lt = Read-Host "  The very newest build (not only what FSLogix asks for)? [y/N]"
+                    if ($lt -match '^[Yy]') { $a['Latest'] = $true }
+                    $ro = Read-Host "  Remove every older build afterwards? [y/N]"
+                    if ($ro -match '^[Yy]') { $a['RemoveOld'] = $true }
                 }
             }
             return $a

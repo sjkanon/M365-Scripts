@@ -205,6 +205,7 @@ Het lege pad vóór `(AppxManifest.xml)` verraadt het: Windows speelt een regist
 | 4. Verwijderen | `Remove-AppxPackage -AllUsers` voor ghosts, per gebruiker waar dat wordt geweigerd |
 | 5. Store | Elke overgebleven verweesde registersleutel wordt geëxporteerd naar een `.reg`-back-up en pas daarna verwijderd — geen back-up, geen verwijdering |
 | 6. Provisionen | Waar FSLogix faalt op een nieuwere Teams-/Outlook-build dan deze host provisiont: **precies die build**, als MSIX van Microsofts CDN op de URL met versienummer, handtekening gecontroleerd, dan `Add-AppxProvisionedPackage` en teruggelezen. Anders `-Provision`: `teamsbootstrapper.exe -p` / Outlook `Setup.exe --provision true --quiet --start-`, gedownload van Microsoft en handtekening gecontroleerd. Met `-UseWinget` in plaats daarvan de MSIX uit winget (`Microsoft.Teams`, `Microsoft.Outlook`), geprovisiond met `Add-AppxProvisionedPackage` samen met eventuele afhankelijkheden die winget meebracht. `-WingetId`: hetzelfde voor elk ander pakket. `-Source`: elke MSIX die je zelf aanlevert |
+| 6b. Oudere builds | `-RemoveOld`, na het provisionen: elke oudere build van de genoemde pakketten — oudere geprovisionde kopieën, oudere builds die voor een gebruiker zijn geregistreerd, en hun vermeldingen in `AppxAllUserStore` (eerst geback-upt naar `.reg`). Alleen als de build die blijft geprovisiond is; mappen in `WindowsApps` laat het aan Windows over, de lijst in de profielcontainer aan FSLogix |
 | 7. Verificatie | De diagnose draait opnieuw; exitcode 1 als er iets heeft overleefd |
 
 **Parameters**
@@ -226,6 +227,7 @@ Het lege pad vóór `(AppxManifest.xml)` verraadt het: Windows speelt een regist
 | `-Credential` | Referenties voor die remotingsessies |
 | `-Copilot` | Kijk naar Copilot (stap 1d): de Microsoft 365 Copilot-app (`Microsoft.MicrosoftOfficeHub`) en de Windows Copilot-app (`Microsoft.Copilot`), de **samengevoegde Microsoft Copilot-app** die Edge Update sinds september 2026 installeert, en elk beleid dat hem verwijdert of blokkeert. Hun Deprovisioned-markeringen vallen binnen de scope. Met `-Provision` wordt de **nieuwe** app machinebreed geïnstalleerd zoals Microsoft het documenteert: `Install{C50565E9-...}` = 5 (Force Installs), `UpdaterExperimentationAndConfigurationServiceControl` = 1 en `CopilotUnificationAllowed{...}` = 1 onder `HKLM\SOFTWARE\Policies\Microsoft\EdgeUpdate` (na een `.reg`-back-up), Edge Update wordt gevraagd nu te controleren, en de run wacht tot 10 minuten op de app. Verschijnt hij niet, dan is `M365CopilotDesktopInstaller.exe --quiet --start -p` (de oude app, die de samenvoeging overzet) de terugvaloptie. Een beleid dat de installatie verbiedt (`Install` = 0) wordt nooit overschreven |
 | `-Latest` | De **nieuwste** build van Teams / Outlook binnen het bereik provisionen, niet alleen die waarop FSLogix faalde. Teams: de configuratieservice van Microsoft (de feed die de client zelf gebruikt). Voor Outlook bestaat zo'n feed niet — de Store-catalogus meldde 1.2026.818.0 terwijl 915.300 al uit was — dus wordt de nieuwste build gebruikt die aantoonbaar bestaat: de nieuwste waar FSLogix om vroeg, die voor een gebruiker op de host is geregistreerd, of die in `WindowsApps` staat. Gebruik met `-Provision` |
+| `-RemoveOld` | Na het provisionen elke verwijzing op deze host naar een **oudere** build van de genoemde pakketten verwijderen: oudere geprovisionde kopieën, oudere builds die voor een gebruiker zijn geregistreerd, en wat `AppxAllUserStore` er nog van onthoudt (eerst geback-upt naar `.reg`). Alleen voor expliciet genoemde pakketten (`-Name teams,outlook`), en alleen als de build die blijft geprovisiond is — gebruikers zitten nooit zonder de app. Mappen in `WindowsApps` laat het aan Windows over; de lijst in elke profielcontainer herschrijft FSLogix bij de volgende afmelding |
 
 Ondersteunt `-WhatIf` en `-Confirm`; vraagt per wijziging tenzij `-Confirm:$false`. NinjaOne-scriptvariabelen: `packageName`, `checkOnly`, `provision`, `useWinget`, `wingetId`, `source`, `includeDeprovisioned`, `skipSignatureCheck`, `days`, `workingDir`, `logPath`.
 
@@ -247,7 +249,7 @@ Ondersteunt `-WhatIf` en `-Confirm`; vraagt per wijziging tenzij `-Confirm:$fals
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name outlook,copilot -Provision -Confirm:$false
 
 # De allernieuwste Teams en Outlook op de pool, niet alleen de build waar FSLogix om vraagt
-.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -Confirm:$false
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -RemoveOld -Confirm:$false
 
 # Hetzelfde, met beide pakketten uit winget
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -UseWinget -Confirm:$false
