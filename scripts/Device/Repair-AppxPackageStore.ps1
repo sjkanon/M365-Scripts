@@ -451,6 +451,7 @@ $plannedExit  = $null
 $transcribing = $false
 $storeEdited  = $false
 $script:unexplained = @()
+$script:coverage    = @{}
 
 # A name without wildcards is a deliberate choice of package; only then are system
 # packages, frameworks and Deprovisioned markers in scope.
@@ -1171,6 +1172,49 @@ function Write-FslogixStatus {
     return $needs
 }
 
+function Write-UserCoverage {
+    <#
+        The question that decides whether a failure matters: do the users who are
+        signed in right now have the app? FSLogix's replay can fail while Windows
+        registers the provisioned build at sign-in anyway, and then the error is
+        noise. Signed-in means a loaded user hive; "has it" means registered and
+        Installed for that SID, whatever the version.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName)
+
+    $signedIn = @(Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
+                  Where-Object { $_.PSChildName -match '^S-1-(5-21|12-1)-[\d-]+$' } |
+                  ForEach-Object { $_.PSChildName })
+    if ($signedIn.Count -eq 0) {
+        Write-Skip "    nobody is signed in, so whether users get $PackageName cannot be seen right now"
+        return
+    }
+
+    $holders = @{}
+    foreach ($pkg in @(Get-AppxPackage -AllUsers -Name $PackageName -ErrorAction SilentlyContinue)) {
+        foreach ($holder in @(Get-AppxPackageHolder -Package $pkg)) {
+            if ($holder.State -notmatch '^Installed' -or $holder.State -match 'pending removal') { continue }
+            # The newest build a user has, not whichever was listed last.
+            $v = try { [version] $pkg.Version } catch { $null }
+            if (-not $holders.ContainsKey($holder.Sid) -or ($v -and $v -gt [version] $holders[$holder.Sid])) { $holders[$holder.Sid] = $pkg.Version }
+        }
+    }
+    $have    = @($signedIn | Where-Object { $holders.ContainsKey($_) })
+    $missing = @($signedIn | Where-Object { -not $holders.ContainsKey($_) })
+    $builds  = (@($have | ForEach-Object { $holders[$_] } | Select-Object -Unique) -join ', ')
+
+    $script:coverage[$PackageName] = ($missing.Count -eq 0)
+    if ($missing.Count -eq 0) {
+        Write-Ok ("    all {0} signed-in user(s) have {1} ({2}) - the failures are FSLogix's own replay; Windows registers the provisioned build at sign-in regardless, so users are not affected" -f
+                  $signedIn.Count, $PackageName, $builds)
+        Write-Skip '    to silence it: FSLogix Profiles\InstallAppxPackages = 0 (Microsoft''s documented workaround; it stops FSLogix replaying any AppX package) - not changed by this script'
+    } else {
+        Write-Bad ("    {0} of {1} signed-in user(s) do NOT have {2}: {3}" -f
+                   $missing.Count, $signedIn.Count, $PackageName, (($missing | ForEach-Object { Resolve-SidName $_ }) -join ', '))
+        if ($have.Count -gt 0) { Write-Skip "    the other $($have.Count) have it ($builds)" }
+    }
+}
+
 function Write-FailureEvidence {
     <#
         Why a package keeps failing, in the words of the two components involved:
@@ -1190,6 +1234,8 @@ function Write-FailureEvidence {
         $activity = Get-PropertyValue $latest 'ActivityId'
         if ($activity) { Write-Skip "    full trace: Get-AppPackageLog -ActivityID $activity" }
     }
+
+    Write-UserCoverage -PackageName $PackageName
 
     $logDir = 'C:\ProgramData\FSLogix\Logs\Profile'
     $log    = @(Get-ChildItem -Path $logDir -Filter '*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending) | Select-Object -First 1
@@ -1762,6 +1808,8 @@ try {
     Write-Out ''
     Write-Step '1c. Failing apps'
     Write-FailingApp -Provisioned $provisionedNow
+    # A failure every signed-in user is unaffected by is noise, not a fault.
+    $script:unexplained = @($script:unexplained | Where-Object { -not ($script:coverage.ContainsKey($_) -and $script:coverage[$_]) })
 
     # -- 1d. Copilot -----------------------------------------------------------
     # Only when asked for: with -Copilot, or a Copilot package named explicitly.
@@ -2104,6 +2152,9 @@ try {
                 Write-Bad 'A policy removes or blocks Copilot (see step 1d) - fix it in the GPO or Intune profile that sets it; until then any install is undone'
                 $exitCode = 1
             }
+        }
+        foreach ($pkgName in $script:unexplained) {
+            Write-Warn "$pkgName was failing before this run with the right build provisioned - step 1c says whether signed-in users have it; check again after the next sign-ins"
         }
         if ($storeEdited) {
             Write-Warn 'The package store was edited - restart this host when convenient so the deployment engine rereads it from scratch'
