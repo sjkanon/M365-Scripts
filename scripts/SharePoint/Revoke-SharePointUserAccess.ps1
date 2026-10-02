@@ -1929,6 +1929,9 @@ try {
 
         # -- Optionally drop the user from the site collection entirely --------
         if ($RemoveFromSite -and $siteUser) {
+            # Counted like any other finding, or a dry run whose only action is this one reports
+            # "Grants found: 0" while the CSV says something would be removed.
+            $stats.Found++
             $row = @{ SiteUrl = $siteCollectionUrl; WebUrl = $rootWeb; ScopeType = 'SiteCollection'
                       ScopeTitle = $siteCollectionUrl; ScopeUrl = $siteCollectionUrl
                       AccessVia = 'Site user list'; PermissionLevels = $null }
