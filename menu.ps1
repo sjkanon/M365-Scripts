@@ -783,6 +783,9 @@ $menu = @(
             }
             $grp = Read-Host '  Also list the Entra groups that grant access? [Y/n]'
             if ($grp -notmatch '^[Nn]') { $a['IncludeGroupAccess'] = $true }
+            # Default no: this one reaches past SharePoint into Teams, mailboxes and licences.
+            $rmg = Read-Host '  Also REMOVE the user from the Entra groups seen granting access? [y/N]'
+            if ($rmg -match '^[Yy]') { $a['RemoveFromEntraGroups'] = $true }
             # Report first, on purpose: -Apply is a deliberate second run against a list you have read.
             $apply = Read-Host '  Actually revoke now? Answering no only reports [y/N]'
             if ($apply -match '^[Yy]') { $a['Apply'] = $true; $a['Confirm'] = $false }

@@ -20,11 +20,13 @@
 
     What it deliberately does NOT do:
 
-      * It never changes Entra ID group membership. A user who reaches a site through a security
-        group or a Microsoft 365 group keeps that access, and removing them from SharePoint will
-        not take it away — the group is the grant. Those routes are reported, loudly, with the
-        group named, so the access is not silently believed to be gone. Use -IncludeGroupAccess
-        to have them listed even where the user has no SharePoint-level grant at all.
+      * It does not change Entra ID group membership unless -RemoveFromEntraGroups is given. A
+        user who reaches a site through a security group or a Microsoft 365 group keeps that
+        access otherwise, and removing them from SharePoint will not take it away — the group is
+        the grant. Those routes are reported, loudly, with the group named, so the access is not
+        silently believed to be gone. Use -IncludeGroupAccess to have them listed even where the
+        user has no SharePoint-level grant at all. With -RemoveFromEntraGroups, only the groups
+        this run actually saw granting access are touched, never every group the user is in.
       * It does not touch grants to Everyone, Everyone except external users, or authenticated
         users. Removing one of those revokes access for the whole tenant, not for this person.
         They are reported for the same reason.
@@ -86,6 +88,25 @@
     Leave sharing-link groups alone. The user keeps access through any link already shared with
     them; every other route is still revoked.
 
+.PARAMETER RemoveFromEntraGroups
+    Also remove the user from the Entra ID groups that were found granting access, completing
+    the second half of an offboarding instead of only reporting it.
+
+    Only the groups this run actually caught holding a role assignment on a scope in range are
+    touched — never every group the user belongs to. Even so, an Entra group is not a SharePoint
+    object: the same membership commonly carries Teams, a mailbox, licences and app assignments,
+    so removing someone from one reaches well beyond anything this report can see. Read the
+    report first, then re-run with this.
+
+    Four cases are reported rather than forced, because forcing them would either fail or do
+    the wrong thing: a dynamic group (membership follows a rule, so there is nothing to remove),
+    a group synced from on-premises AD (read-only in the cloud), a membership inherited through
+    a nested group (the access has to be cut at the group that actually holds the user), and a
+    user who could not be resolved in Entra at all.
+
+    Needs Graph GroupMember.ReadWrite.All, which the temporary app only asks for when this
+    switch is given.
+
 .PARAMETER RemoveFromSite
     After revoking, also remove the user from each site collection's user list. This clears any
     grant the per-scope pass could not see, but it also drops their entry from the site — people
@@ -118,6 +139,14 @@
 
     Report SharePoint-level access and the Entra groups that also let Jan in — the offboarding
     checklist, since those groups have to be handled in Entra.
+
+.EXAMPLE
+    .\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -TenantUrl "https://contoso.sharepoint.com" -RemoveFromEntraGroups -Apply -Confirm:$false
+
+    The whole offboarding in one run: SharePoint access, and the Entra groups that were seen
+    granting it. Read the report from a run without -Apply first — those memberships usually
+    carry more than SharePoint.
+
 .NOTES
     There is no checkpoint and no resume, unlike the permissions report. Revoking is idempotent —
     a second run finds only what the first did not remove — so re-running after an interruption
@@ -143,6 +172,7 @@ param(
     [switch] $IncludeHiddenLists,
     [switch] $IncludeGroupAccess,
     [switch] $KeepSharingLinks,
+    [switch] $RemoveFromEntraGroups,
     [switch] $RemoveFromSite,
     [int] $GraphTimeoutSec = 120,
     [int] $MaxGraphRetry = 6
@@ -190,6 +220,11 @@ $RequiredAppRoles = @(
     @{ ResourceAppId = $GraphAppId;      Role = 'User.Read.All';         Why = 'resolving the user to revoke' }
     @{ ResourceAppId = $GraphAppId;      Role = 'GroupMember.Read.All';  Why = 'the Entra groups that also grant access' }
 )
+# Write access to directory groups is asked for only when it will be used. A report-only run has
+# no business holding a permission that can change group membership tenant-wide.
+if ($RemoveFromEntraGroups) {
+    $RequiredAppRoles += @{ ResourceAppId = $GraphAppId; Role = 'GroupMember.ReadWrite.All'; Why = 'removing the user from the groups that grant access' }
+}
 
 # Concurrency is fixed at 1: the shared block's parallel helper is for reading, and revocations
 # are writes against the same site. Serial is slower and is the right trade here.
@@ -211,6 +246,8 @@ Write-Host ("  Scope     : {0}" -f $(switch ($Scope) {
 Write-Host ("  Mode      : {0}" -f $(if ($Apply) { 'APPLY — access will be removed' } else { 'Report only — nothing is changed without -Apply' })) `
     -ForegroundColor $(if ($Apply) { 'Yellow' } else { 'DarkGray' })
 Write-Host ("  Links     : {0}" -f $(if ($KeepSharingLinks) { 'sharing links are left alone' } else { 'sharing links are revoked too' })) -ForegroundColor DarkGray
+Write-Host ("  Entra     : {0}" -f $(if ($RemoveFromEntraGroups) { 'ALSO removing from the Entra groups seen granting access' } else { 'Entra group membership is reported, never changed' })) `
+    -ForegroundColor $(if ($RemoveFromEntraGroups) { 'Yellow' } else { 'DarkGray' })
 Write-Host ''
 
 # ── SHARED BLOCK START ────────────────────────────────────────────────────────
@@ -1082,6 +1119,32 @@ function Get-SPFormDigest {
     return $value
 }
 
+function Invoke-GraphDelete {
+    # The only call in this script that changes the directory rather than SharePoint. Mirrors
+    # Invoke-GraphGet's retry and re-auth so a throttle does not read as a failed removal.
+    param([Parameter(Mandatory = $true)][string]$Uri)
+    $reauthTried = $false
+    for ($attempt = 1; $attempt -le $MaxGraphRetry; $attempt++) {
+        try {
+            $headers = Get-ResourceToken -Resource $GraphResource
+            return Invoke-RestMethod -Method DELETE -Uri $Uri -Headers $headers -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
+        } catch {
+            $statusCode = Get-ResponseStatusCode -ErrorRecord $_
+            if ($statusCode -eq 401 -and -not $reauthTried) {
+                $reauthTried = $true
+                $script:TokenCache.Remove($GraphResource)
+                Start-Sleep -Seconds 2
+                continue
+            }
+            $isRetryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
+            if (-not $isRetryable -or $attempt -eq $MaxGraphRetry) { throw }
+            $delay = Get-RetryDelaySeconds -Attempt $attempt -ErrorRecord $_
+            Write-ProgressHost -Message ("[WAIT] Graph throttled on a write — retry ({0}/{1}) in {2}s" -f $attempt, $MaxGraphRetry, $delay) -ForegroundColor Yellow
+            Start-Sleep -Seconds $delay
+        }
+    }
+}
+
 function Invoke-SPPost {
     # The one call in this script that changes anything. Mirrors Invoke-SPGet's retry and 401
     # handling so a throttle does not read as a failed revocation.
@@ -1209,6 +1272,11 @@ function Get-UserSiteGroups {
 }
 
 # ── Recording what happens ────────────────────────────────────────────────────
+# Only the Entra groups this run actually caught holding a role assignment on a scope in range.
+# Not $userGroupIds, which is every group the user belongs to: a leaver can be in fifty groups,
+# and -RemoveFromEntraGroups must touch exactly the ones that were seen granting SharePoint
+# access and nothing else.
+$script:GrantingEntraGroups = @{}
 $script:ActionRows   = [System.Collections.Generic.List[object]]::new()
 $script:ActionCsvPath = $actionCsv
 
@@ -1443,7 +1511,7 @@ foreach ($web in $targetWebs) {
     $siteCollections[$sc].Add($web) | Out-Null
 }
 
-$stats = [PSCustomObject]@{ SitesSearched = 0; SitesWithAccess = 0; Revoked = 0; Failed = 0; Found = 0; GroupOnly = 0; AdminLeft = 0 }
+$stats = [PSCustomObject]@{ SitesSearched = 0; SitesWithAccess = 0; Revoked = 0; Failed = 0; Found = 0; GroupOnly = 0; AdminLeft = 0; EntraRemoved = 0 }
 $scIndex = 0
 
 try {
@@ -1555,7 +1623,8 @@ try {
                     } elseif ($sharingLinkGroupIds.ContainsKey([string]$pid)) {
                         $hits.Add([PSCustomObject]@{ Kind = 'SharingLink'; PrincipalId = $pid; Via = "Sharing link $($principal.Title)"; Levels = ($levels -join '; ') }) | Out-Null
                     } elseif ($principal.DirectoryId -and $userGroupIds.ContainsKey([string]$principal.DirectoryId)) {
-                        $hits.Add([PSCustomObject]@{ Kind = 'EntraGroup'; PrincipalId = $pid; Via = "Entra group $($principal.Title)"; Levels = ($levels -join '; ') }) | Out-Null
+                        $hits.Add([PSCustomObject]@{ Kind = 'EntraGroup'; PrincipalId = $pid; Via = "Entra group $($principal.Title)"; Levels = ($levels -join '; ')
+                                                     DirectoryId = $principal.DirectoryId; GroupName = $principal.Title }) | Out-Null
                     } elseif ($principal.Kind -in @('Everyone', 'EveryoneExceptExternalUsers', 'AllAuthenticatedUsers')) {
                         $hits.Add([PSCustomObject]@{ Kind = 'Everyone'; PrincipalId = $pid; Via = $principal.Title; Levels = ($levels -join '; ') }) | Out-Null
                     }
@@ -1574,7 +1643,16 @@ try {
                               AccessVia = $hit.Via; PermissionLevels = $hit.Levels }
 
                     if ($hit.Kind -eq 'EntraGroup') {
-                        Add-ActionRow @row -Action 'CannotRevoke' -Detail 'Granted through an Entra ID group — remove the user from that group in Entra'
+                        # Remembered so -RemoveFromEntraGroups can act on exactly these groups
+                        # afterwards, and on no others: the user may be in fifty groups, and only
+                        # the ones that actually grant SharePoint access are in scope here.
+                        if ($hit.DirectoryId) { $script:GrantingEntraGroups[[string]$hit.DirectoryId] = $hit.GroupName }
+                        $detail = if ($RemoveFromEntraGroups) {
+                            'Granted through an Entra ID group — handled in the Entra phase below'
+                        } else {
+                            'Granted through an Entra ID group — remove the user from that group in Entra, or re-run with -RemoveFromEntraGroups'
+                        }
+                        Add-ActionRow @row -Action 'CannotRevoke' -Detail $detail
                         $script:stats.GroupOnly++
                         continue
                     }
@@ -1671,6 +1749,74 @@ try {
             if ($done) { $stats.Revoked++ } elseif ($Apply) { $stats.Failed++ }
         }
     }
+    # ── Entra ID groups that grant access ─────────────────────────────────
+    # Deliberately last, and deliberately narrow. Only the groups this run actually saw granting
+    # SharePoint access are touched — never every group the user belongs to. An Entra group is
+    # also not a SharePoint object: it can carry Teams, mailboxes, licences and app assignments,
+    # so removing someone from one reaches much further than this report can see.
+    if ($RemoveFromEntraGroups -and $script:GrantingEntraGroups.Count -gt 0) {
+        Write-Out ''
+        Write-ProgressHost -Message ("Entra ID groups that grant access: {0}" -f $script:GrantingEntraGroups.Count) -ForegroundColor Cyan
+        Write-ProgressHost -Message "  These grant more than SharePoint — Teams, mailboxes and licences ride on the same membership." -ForegroundColor Yellow
+
+        if (-not $entraUser) {
+            Write-ProgressHost -Message "  [SKIP] The user could not be resolved in Entra, so membership cannot be changed." -ForegroundColor Yellow
+        }
+
+        foreach ($groupId in $script:GrantingEntraGroups.Keys) {
+            $groupName = $script:GrantingEntraGroups[$groupId]
+            $row = @{ SiteUrl = 'Entra ID'; WebUrl = $null; ScopeType = 'EntraGroup'
+                      ScopeTitle = $groupName; ScopeUrl = "https://entra.microsoft.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Members/groupId/$groupId"
+                      AccessVia = "Entra group $groupName"; PermissionLevels = $null }
+
+            if (-not $entraUser) {
+                Add-ActionRow @row -Action 'CannotRevoke' -Detail 'The user was not resolved in Entra ID'
+                continue
+            }
+
+            $group = $null
+            try {
+                $group = Invoke-GraphGet -Uri ("https://graph.microsoft.com/v1.0/groups/{0}?`$select=id,displayName,groupTypes,membershipRule,onPremisesSyncEnabled,mailEnabled,securityEnabled" -f $groupId)
+            } catch {
+                Add-ActionRow @row -Action 'Failed' -Detail "Could not read the group: $($_.Exception.Message)"
+                $stats.Failed++
+                continue
+            }
+
+            # Membership of a dynamic group is computed from a rule, not stored, so there is
+            # nothing to remove — editing the rule or the user's attributes is the only way out.
+            if (@($group.groupTypes) -contains 'DynamicMembership') {
+                Add-ActionRow @row -Action 'CannotRevoke' -Detail 'Dynamic group — membership follows a rule; change the rule or the attributes it matches'
+                Write-ProgressHost -Message ("    [SKIP] {0}: dynamic membership, nothing to remove" -f $groupName) -ForegroundColor Yellow
+                continue
+            }
+            # A group mastered on-premises is read-only in the cloud; the change belongs in AD.
+            if ($group.onPremisesSyncEnabled) {
+                Add-ActionRow @row -Action 'CannotRevoke' -Detail 'Synced from on-premises Active Directory — remove the membership there, it cannot be changed in the cloud'
+                Write-ProgressHost -Message ("    [SKIP] {0}: synced from on-premises AD" -f $groupName) -ForegroundColor Yellow
+                continue
+            }
+
+            # Only a direct member can be removed. Access through a nested group has to be cut
+            # at the group that actually holds the user, and saying which one beats a 404.
+            $isDirect = $false
+            try {
+                $direct = Invoke-GraphGet -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/members/{1}?`$select=id" -f $groupId, $entraUser.id)
+                $isDirect = [bool]($direct -and $direct.id)
+            } catch { $isDirect = $false }
+
+            if (-not $isDirect) {
+                Add-ActionRow @row -Action 'CannotRevoke' -Detail 'Not a direct member — the access comes through a nested group, which is where it has to be cut'
+                Write-ProgressHost -Message ("    [SKIP] {0}: membership is inherited from a nested group" -f $groupName) -ForegroundColor Yellow
+                continue
+            }
+
+            $done = Invoke-Revocation -Target "$groupName (Entra ID)" -Operation 'Remove from Entra ID group' -Row $row -Do {
+                Invoke-GraphDelete -Uri ("https://graph.microsoft.com/v1.0/groups/{0}/members/{1}/`$ref" -f $groupId, $entraUser.id)
+            }
+            if ($done) { $stats.EntraRemoved++; $stats.GroupOnly-- } elseif ($Apply) { $stats.Failed++ }
+        }
+    }
 } finally {
     1, 2, 3 | ForEach-Object { Complete-ScanProgress -Id $_ }
     Remove-TempApp
@@ -1711,6 +1857,18 @@ if ($Apply) {
 }
 
 # The routes this script cannot close are the ones most likely to be assumed closed.
+if ($stats.EntraRemoved -gt 0) {
+    Write-Host ''
+    Write-Host ("  Entra groups      : removed from {0}" -f $stats.EntraRemoved) -ForegroundColor Magenta
+    Write-Host "  Those memberships often carried more than SharePoint — check Teams, mailboxes and" -ForegroundColor Yellow
+    Write-Host "  licences for this user if that was not intended." -ForegroundColor Yellow
+}
+if ($RemoveFromEntraGroups -and $script:GrantingEntraGroups.Count -eq 0) {
+    Write-Host ''
+    Write-Host "  [NOTE] -RemoveFromEntraGroups was given, but no Entra group was seen granting access." -ForegroundColor DarkGray
+    Write-Host "         Only groups this run caught holding a role assignment are touched, never every" -ForegroundColor DarkGray
+    Write-Host "         group the user belongs to." -ForegroundColor DarkGray
+}
 if ($stats.GroupOnly -gt 0) {
     Write-Host ''
     Write-Host ("  [WARN] {0} grant(s) reach this user through an Entra ID group and were NOT revoked." -f $stats.GroupOnly) -ForegroundColor Yellow

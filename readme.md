@@ -920,6 +920,16 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-02 (2)
+| Change |
+|--------|
+| Added `-RemoveFromEntraGroups` to `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, completing the second half of an offboarding instead of only reporting it. Until now the script removed every SharePoint-level grant and then told you to go and handle the Entra groups yourself |
+| **Only the groups this run actually caught holding a role assignment on a scope in range are touched** — never every group the user belongs to. A leaver can be in fifty groups, and widening this to all of them would be the difference between revoking an access and detaching someone from the organisation |
+| An Entra group is not a SharePoint object: the same membership commonly carries a Teams team, a mailbox, licences and app assignments that this report cannot see. The switch is off by default, the banner and summary say what it reaches, and the menu entry defaults to no |
+| Four cases are reported rather than forced, because forcing them would fail or do the wrong thing: a dynamic group (membership follows a rule, so there is nothing stored to remove), a group synced from on-premises AD (read-only in the cloud), a membership inherited through a nested group (the user is not a direct member, so the cut has to be made at the group that actually holds them), and a user who could not be resolved in Entra |
+| The write permission follows the switch: `GroupMember.ReadWrite.All` is only requested when `-RemoveFromEntraGroups` is given, so a report-only run holds nothing that can change group membership tenant-wide. Removals go through the same funnel as every other change, so `-Apply`, `-WhatIf`, the confirmation prompt and the audit CSV behave identically |
+| Verified with 76 checks (11 new): the switch exists and gates the write role, the Entra phase iterates the groups seen granting access and never `$userGroupIds`, all four refusals are present, the removal goes through the funnel, and the per-scope pass still only records an Entra grant rather than acting on it |
+
 ### 2026-10-02
 | Change |
 |--------|

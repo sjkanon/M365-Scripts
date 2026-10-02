@@ -920,6 +920,16 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-02 (2)
+| Wijziging |
+|-----------|
+| `-RemoveFromEntraGroups` toegevoegd aan `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, waarmee de tweede helft van een offboarding wordt afgemaakt in plaats van alleen gemeld. Tot nu toe haalde het script elke SharePoint-toekenning weg en zei daarna dat je de Entra-groepen zelf moest doen |
+| **Alleen de groepen die deze run daadwerkelijk een roltoewijzing zag houden op een scope binnen bereik worden aangeraakt** — nooit elke groep waar de gebruiker in zit. Iemand die vertrekt zit vaak in vijftig groepen, en dat verbreden zou het verschil zijn tussen een toegang intrekken en iemand van de organisatie losknippen |
+| Een Entra-groep is geen SharePoint-object: datzelfde lidmaatschap draagt vaak een Teams-team, een mailbox, licenties en app-toewijzingen die dit rapport niet ziet. De schakelaar staat standaard uit, de banner en de samenvatting zeggen wat hij raakt, en het menu-item staat standaard op nee |
+| Vier gevallen worden gemeld in plaats van afgedwongen, omdat afdwingen zou falen of het verkeerde zou doen: een dynamische groep (lidmaatschap volgt een regel, er staat niets opgeslagen om te verwijderen), een groep gesynchroniseerd uit on-premises AD (alleen-lezen in de cloud), een lidmaatschap via een geneste groep (de gebruiker is geen direct lid, dus de knip moet bij de groep die hem écht bevat), en een gebruiker die niet in Entra gevonden kon worden |
+| De schrijfpermissie volgt de schakelaar: `GroupMember.ReadWrite.All` wordt alleen gevraagd als `-RemoveFromEntraGroups` is meegegeven, zodat een rapportage-run niets bezit dat tenantbreed groepslidmaatschap kan wijzigen. Verwijderingen lopen door dezelfde trechter als elke andere wijziging, dus `-Apply`, `-WhatIf`, de bevestigingsvraag en de audit-CSV gedragen zich identiek |
+| Geverifieerd met 76 controles (11 nieuw): de schakelaar bestaat en bepaalt de schrijfrol, de Entra-fase loopt over de groepen die toegang bleken te geven en nooit over `$userGroupIds`, alle vier de weigeringen zijn aanwezig, de verwijdering loopt door de trechter, en de scope-voor-scope pas registreert een Entra-toekenning nog steeds alleen in plaats van erop te handelen |
+
 ### 2026-10-02
 | Wijziging |
 |--------|

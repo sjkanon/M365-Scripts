@@ -548,7 +548,7 @@ Rapporteren is de standaard. Er verandert niets zonder `-Apply`, en elke run sch
 
 | | Waarom |
 |---|---|
-| Entra ID-groepslidmaatschap wijzigen | Wie via een security- of M365-groep binnenkomt, houdt die toegang — de groep *is* de toekenning. Dit script raakt Entra niet aan, maar meldt die routes wel nadrukkelijk, mét groepsnaam. Anders denk je dat het dicht is terwijl het openstaat |
+| Entra ID-groepslidmaatschap wijzigen | **Tenzij je `-RemoveFromEntraGroups` meegeeft.** Standaard houdt wie via een security- of M365-groep binnenkomt die toegang — de groep *is* de toekenning — en worden die routes nadrukkelijk gemeld, mét groepsnaam, zodat je niet denkt dat het dicht is terwijl het openstaat |
 | `Everyone` / `Everyone except external users` verwijderen | Dat ontneemt de hele tenant toegang, niet deze persoon. Wordt gemeld, niet aangeraakt |
 | Eigenaarschap en metadata opschonen | Een ingetrokken gebruiker blijft de auteur van wat die gemaakt heeft |
 
@@ -581,6 +581,7 @@ Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: 
 | `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep naar directe toekenningen wordt gezocht |
 | `-IncludeGroupAccess` | switch | uit | Meldt ook de sites die de gebruiker via Entra-groepen bereikt, óók waar die verder niets heeft. Alleen rapporteren |
 | `-KeepSharingLinks` | switch | uit | Deellinks met rust laten; alle andere routes worden wel ingetrokken |
+| `-RemoveFromEntraGroups` | switch | uit | **Verwijdert de gebruiker ook uit de Entra ID-groepen die toegang bleken te geven** — alleen die, nooit elke groep waar iemand in zit. Vereist Graph `GroupMember.ReadWrite.All`, die de tijdelijke app alleen met deze schakelaar vraagt. Zie hieronder |
 | `-RemoveFromSite` | switch | uit | Verwijdert de gebruiker daarna ook uit de gebruikerslijst van elke site collection. Vangt wat de scope-voor-scope-ronde niet zag, maar de naam rendert daarna als verwijderd account in oudere metadata |
 | `-IncludeOneDriveSites` | switch | uit | Ook persoonlijke OneDrive-sites doorzoeken |
 | `-IncludeHiddenLists` | switch | uit | Ook verborgen en systeemlijsten |
@@ -590,6 +591,23 @@ Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: 
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout en retries |
 
 Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseerde app-registratie met SharePoint `Sites.FullControl.All`, die na afloop weer wordt verwijderd.
+
+#### Ook de Entra ID-groepen verwijderen
+
+`-RemoveFromEntraGroups` maakt de tweede helft van een offboarding af in plaats van hem alleen te melden. **Alleen de groepen die deze run daadwerkelijk een roltoewijzing zag houden op een scope binnen bereik worden aangeraakt** — nooit elke groep waar de gebruiker in zit. Iemand die vertrekt zit vaak in vijftig groepen; alleen die SharePoint-toegang geven zijn hier in scope.
+
+> **Dit reikt verder dan SharePoint.** Een Entra-groep is geen SharePoint-object. Datzelfde lidmaatschap draagt vaak een Teams-team, een mailbox, licenties en app-toewijzingen — niets daarvan ziet dit rapport. Lees eerst het rapport van een run zónder `-Apply`, draai daarna pas met de schakelaar.
+
+Vier gevallen worden gemeld in plaats van afgedwongen, omdat afdwingen óf zou falen óf het verkeerde zou doen:
+
+| Geval | Waarom het blijft staan |
+|---|---|
+| Dynamische groep | Lidmaatschap volgt een regel en wordt niet opgeslagen, dus er valt niets te verwijderen. Pas de regel aan, of de gebruikerskenmerken waarop die matcht |
+| Gesynchroniseerd uit on-premises AD | Alleen-lezen in de cloud. Het lidmaatschap moet in Active Directory weg |
+| Lid via een geneste groep | De gebruiker is geen direct lid, dus verwijderen zou hier mislukken. De toegang moet worden afgesneden bij de groep die hem écht bevat — het rapport noemt die |
+| Gebruiker niet gevonden in Entra | Er is niets om hem uit te verwijderen; de SharePoint-kant draait gewoon door |
+
+De verwijdering loopt door dezelfde trechter als elke andere wijziging, dus `-Apply`, `-WhatIf`, de bevestigingsvraag en de audit-CSV gedragen zich identiek. Vereist Graph `GroupMember.ReadWrite.All`, die de tijdelijke app **alleen** vraagt als de schakelaar is meegegeven — een rapportage-run houdt geen permissie die groepslidmaatschap kan wijzigen.
 
 #### Uitvoer
 

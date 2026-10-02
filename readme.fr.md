@@ -920,6 +920,16 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-02 (2)
+| Modification |
+|--------------|
+| Ajout de `-RemoveFromEntraGroups` à `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, qui termine la seconde moitié d'un départ au lieu de se contenter de la signaler. Jusqu'ici le script retirait chaque attribution SharePoint puis vous renvoyait traiter les groupes Entra vous-même |
+| **Seuls les groupes que cette exécution a réellement vus détenir une attribution de rôle sur une portée dans le périmètre sont touchés** — jamais tous les groupes auxquels l'utilisateur appartient. Un partant peut être dans cinquante groupes, et élargir reviendrait à confondre révoquer un accès et détacher quelqu'un de l'organisation |
+| Un groupe Entra n'est pas un objet SharePoint : la même appartenance porte souvent une équipe Teams, une boîte aux lettres, des licences et des attributions d'applications que ce rapport ne voit pas. Le commutateur est désactivé par défaut, la bannière et le résumé disent ce qu'il atteint, et l'entrée de menu répond non par défaut |
+| Quatre cas sont signalés plutôt que forcés, car les forcer échouerait ou ferait la mauvaise chose : un groupe dynamique (l'appartenance suit une règle, rien n'est stocké à retirer), un groupe synchronisé depuis AD on-premises (en lecture seule dans le cloud), une appartenance héritée d'un groupe imbriqué (l'utilisateur n'est pas membre direct, la coupure doit se faire au groupe qui le contient), et un utilisateur introuvable dans Entra |
+| La permission d'écriture suit le commutateur : `GroupMember.ReadWrite.All` n'est demandée que si `-RemoveFromEntraGroups` est fourni, de sorte qu'une exécution en lecture seule ne détient rien qui puisse modifier une appartenance à l'échelle du locataire. Les retraits passent par le même entonnoir que toute autre modification : `-Apply`, `-WhatIf`, la confirmation et le CSV d'audit se comportent à l'identique |
+| Vérifié par 76 contrôles (11 nouveaux) : le commutateur existe et conditionne le rôle d'écriture, la phase Entra parcourt les groupes vus accordant l'accès et jamais `$userGroupIds`, les quatre refus sont présents, le retrait passe par l'entonnoir, et la passe par portée se contente toujours d'enregistrer une attribution Entra sans agir dessus |
+
 ### 2026-10-02
 | Modification |
 |--------|
