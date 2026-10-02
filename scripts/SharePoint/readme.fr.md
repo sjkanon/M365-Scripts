@@ -614,6 +614,8 @@ L'authentification est identique à celle du rapport : une app registration de c
 
 > **Cela dépasse SharePoint.** Un groupe Entra n'est pas un objet SharePoint. La même appartenance porte souvent une équipe Teams, une boîte aux lettres, des licences et des attributions d'applications, qu'aucun de ces rapports ne voit. Lisez d'abord le rapport d'une exécution sans `-Apply`, puis relancez avec le commutateur.
 
+> **La liste nest complète que dans la mesure du scan.** Une exécution sur un seul site, un `-Scope` restreint, OneDrive ou les listes masquées exclues et les portées illisibles la réduisent — un groupe accordant laccès à un endroit jamais fouillé ny figure pas. Lexécution nomme chaque limite avant tout retrait et de nouveau dans le résumé. Le script de révocation effectue son propre scan : le rapport de permissions nest pas un prérequis.
+
 Quatre cas sont signalés plutôt que forcés, car les forcer échouerait ou ferait la mauvaise chose :
 
 | Cas | Pourquoi il est laissé tel quel |

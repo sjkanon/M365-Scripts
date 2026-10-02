@@ -920,6 +920,15 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-02 (3)
+| Modification |
+|--------------|
+| `-RemoveFromEntraGroups` ne pouvait agir que sur les groupes trouvés par le scan de l''exécution elle-même, et rien ne le disait. Une exécution sur un seul site, un `-Scope` restreint, OneDrive ou les listes masquées exclues, ou des portées illisibles réduisent cette liste — et « tous les groupes accordant l''accès ont été retirés » se lit alors comme complet alors que ce ne l''est pas. C''est ainsi qu''un départ est validé à moitié |
+| L''exécution détermine désormais ce qu''elle n''a **pas** couvert et le dit deux fois : avant tout retrait, puis de nouveau dans le résumé, en nommant chaque limite. Un groupe accordant l''accès à un endroit jamais fouillé est explicitement signalé comme absent de la liste |
+| À dire clairement, car la question était légitime : le script de révocation effectue son propre scan. `Get-SharePointPermissionsReport.ps1` n''est pas un prérequis — découverte, révocation et phase Entra se déroulent dans une seule exécution, dans cet ordre |
+| `$scanLimits` est déclaré à côté de `$stats` plutôt que dans le scan, afin qu''une exécution interrompue tôt laisse au résumé une liste vide au lieu d''une variable inexistante |
+| Vérifié par 83 contrôles (7 nouveaux) : chaque limite est collectée, l''avertissement apparaît avant les retraits et de nouveau à la fin, et la liste survit à une sortie précoce |
+
 ### 2026-10-02 (2)
 | Modification |
 |--------------|

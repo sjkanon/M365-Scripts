@@ -163,6 +163,16 @@ Check 'an on-prem synced group is refused'    ($revokeText -match "onPremisesSyn
 Check 'a nested membership is refused'        ($revokeText -match "Not a direct member")
 Check 'an unresolved user is refused'         ($revokeText -match "not resolved in Entra ID")
 Check 'the removal goes through the funnel'   ($revokeText -match "Invoke-Revocation -Target .*Entra ID.*-Operation 'Remove from Entra ID group'")
+
+# The Entra phase can only act on what the scan found, so a narrowed or partly failed scan must
+# not read as "every group that grants access has been removed".
+Check 'scan limits are collected'             ($revokeText -match '\$scanLimits = @\(\)')
+Check 'a single site counts as a limit'       ($revokeText -match 'if \(\$SiteUrl\)\s+\{ \$scanLimits')
+Check 'a narrowed scope counts as a limit'    (($revokeText -match 'Scope -eq ''Site''\s*\)\s*\{ \$scanLimits') -and ($revokeText -match 'Scope -eq ''List''\s*\)\s*\{ \$scanLimits'))
+Check 'unread scopes count as a limit'        ($revokeText -match 'stats\.Failed -gt 0\s*\)\s*\{ \$scanLimits')
+Check 'the limits are warned before removing' ($revokeText -match 'This list is only as complete as the scan behind it')
+Check 'and repeated in the summary'           ($revokeText -match 'the ones this scan found')
+Check 'the limit list survives an early exit' ($revokeText -match '(?s)\$stats = \[PSCustomObject\].{0,400}\$scanLimits = @\(\)')
 Check 'it warns that group access survives'   ($revokeText -match 'The group is the grant')
 
 # ── Identifying the right user ──────────────────────────────────────────────

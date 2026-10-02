@@ -598,6 +598,8 @@ Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseer
 
 > **Dit reikt verder dan SharePoint.** Een Entra-groep is geen SharePoint-object. Datzelfde lidmaatschap draagt vaak een Teams-team, een mailbox, licenties en app-toewijzingen — niets daarvan ziet dit rapport. Lees eerst het rapport van een run zónder `-Apply`, draai daarna pas met de schakelaar.
 
+> **De lijst is net zo volledig als de scan.** Een run op één site, een versmalde `-Scope`, uitgesloten OneDrive- of verborgen lijsten en onleesbare scopes maken hem kleiner — een groep die toegang geeft op een plek die nooit doorzocht is, staat er niet in. De run noemt elke beperking vóór er iets verwijderd wordt en opnieuw in de samenvatting. Het revoke-script draait zijn eigen scan, dus het rechtenrapport is geen voorwaarde.
+
 Vier gevallen worden gemeld in plaats van afgedwongen, omdat afdwingen óf zou falen óf het verkeerde zou doen:
 
 | Geval | Waarom het blijft staan |

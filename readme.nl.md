@@ -920,6 +920,15 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-02 (3)
+| Wijziging |
+|-----------|
+| `-RemoveFromEntraGroups` kon altijd alleen handelen op de groepen die de eigen scan van die run had gevonden, en nergens stond dat. Een run op één site, een versmalde `-Scope`, uitgesloten OneDrive- of verborgen lijsten, of scopes die niet gelezen konden worden maken die lijst kleiner — en "alle groepen die toegang geven verwijderd" leest dan als volledig terwijl het dat niet is. Zo wordt een offboarding half afgetekend |
+| De run bepaalt nu wat hij **niet** heeft gedekt en zegt dat twee keer: vóór er iets verwijderd wordt, en opnieuw in de samenvatting, met elke beperking erbij. Een groep die toegang geeft op een plek die nooit doorzocht is, wordt expliciet als ontbrekend genoemd |
+| Expliciet vermeld, want het was een terechte vraag: het revoke-script draait zijn eigen scan. `Get-SharePointPermissionsReport.ps1` is geen voorwaarde — ontdekking, intrekken en de Entra-fase gebeuren in één run, in die volgorde |
+| `$scanLimits` staat nu naast `$stats` in plaats van binnen de scan, zodat een run die vroeg afbreekt de samenvatting een lege lijst geeft in plaats van een niet-bestaande variabele |
+| Geverifieerd met 83 controles (7 nieuw): elke beperking wordt verzameld, de waarschuwing verschijnt vóór de verwijderingen én aan het eind, en de lijst overleeft een vroege afbreking |
+
 ### 2026-10-02 (2)
 | Wijziging |
 |-----------|

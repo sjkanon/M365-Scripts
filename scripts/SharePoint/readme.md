@@ -593,6 +593,8 @@ Authentication is identical to the report: a short-lived, certificate-based app 
 
 > **This reaches past SharePoint.** An Entra group is not a SharePoint object. The same membership commonly carries a Teams team, a mailbox, licences and app assignments, none of which this report can see. Read the report from a run without `-Apply`, then re-run with the switch.
 
+> **The list is only as complete as the scan.** A single-site run, a narrowed `-Scope`, excluded OneDrive or hidden lists, and scopes that could not be read all shrink it — a group granting access somewhere that was never searched is not in it. The run names every such limit before removing anything and again in the summary. The revoke script runs its own scan, so the permissions report is not a prerequisite.
+
 Four cases are reported rather than forced, because forcing them would either fail or do the wrong thing:
 
 | Case | Why it is left alone |

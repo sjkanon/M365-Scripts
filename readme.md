@@ -920,6 +920,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-02 (3)
+| Change |
+|--------|
+| `-RemoveFromEntraGroups` could only ever act on the groups the run''s own scan found, and nothing said so. A single-site run, a narrowed `-Scope`, excluded OneDrive or hidden lists, or scopes that failed to read all shrink that list — and "removed every group that grants access" then reads as complete when it is not, which is how an offboarding gets signed off half-finished |
+| The run now works out what it did **not** cover and says so twice: before removing anything, and again in the summary, naming each limit. A group granting access somewhere that was never searched is explicitly called out as absent from the list |
+| Worth stating plainly, because it was a fair question: the revoke script runs its own scan. `Get-SharePointPermissionsReport.ps1` is not a prerequisite — discovery, revocation and the Entra phase happen in one run, in that order |
+| `$scanLimits` is declared alongside `$stats` rather than inside the scan, so a run that dies early leaves the summary an empty list instead of an undefined variable |
+| Verified with 83 checks (7 new): each limit is collected, the warning appears before the removals and again at the end, and the list survives an early exit |
+
 ### 2026-10-02 (2)
 | Change |
 |--------|

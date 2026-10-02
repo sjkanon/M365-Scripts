@@ -1512,6 +1512,9 @@ foreach ($web in $targetWebs) {
 }
 
 $stats = [PSCustomObject]@{ SitesSearched = 0; SitesWithAccess = 0; Revoked = 0; Failed = 0; Found = 0; GroupOnly = 0; AdminLeft = 0; EntraRemoved = 0 }
+# Declared here, filled just before the Entra phase: the summary reads it after the scan's
+# finally, and a run that dies early must leave it an empty list rather than undefined.
+$scanLimits = @()
 $scIndex = 0
 
 try {
@@ -1754,10 +1757,26 @@ try {
     # SharePoint access are touched — never every group the user belongs to. An Entra group is
     # also not a SharePoint object: it can carry Teams, mailboxes, licences and app assignments,
     # so removing someone from one reaches much further than this report can see.
+    # What this phase can see is bounded by what the scan found, so say where those bounds are
+    # before acting on the result. "Removed every group that grants access" is only true of the
+    # ground the scan actually covered, and treating a narrowed or partly failed run as complete
+    # is how someone concludes an offboarding is finished when it is not.
+    if ($SiteUrl)          { $scanLimits += "only $SiteUrl was searched, not the tenant" }
+    if ($Scope -eq 'Site') { $scanLimits += 'only site level was searched, so grants on lists, folders and files were never looked at' }
+    if ($Scope -eq 'List') { $scanLimits += 'folders and files were not searched' }
+    if (-not $IncludeOneDriveSites -and -not $SiteUrl) { $scanLimits += 'OneDrive sites were excluded' }
+    if (-not $IncludeHiddenLists)  { $scanLimits += 'hidden and system lists were skipped' }
+    if ($stats.Failed -gt 0)       { $scanLimits += "$($stats.Failed) scope(s) could not be read" }
+
     if ($RemoveFromEntraGroups -and $script:GrantingEntraGroups.Count -gt 0) {
         Write-Out ''
         Write-ProgressHost -Message ("Entra ID groups that grant access: {0}" -f $script:GrantingEntraGroups.Count) -ForegroundColor Cyan
         Write-ProgressHost -Message "  These grant more than SharePoint — Teams, mailboxes and licences ride on the same membership." -ForegroundColor Yellow
+        if ($scanLimits.Count -gt 0) {
+            Write-ProgressHost -Message "  [WARN] This list is only as complete as the scan behind it:" -ForegroundColor Yellow
+            foreach ($limit in $scanLimits) { Write-ProgressHost -Message ("           - {0}" -f $limit) -ForegroundColor Yellow }
+            Write-ProgressHost -Message "         A group granting access somewhere that was not searched is not in this list." -ForegroundColor Yellow
+        }
 
         if (-not $entraUser) {
             Write-ProgressHost -Message "  [SKIP] The user could not be resolved in Entra, so membership cannot be changed." -ForegroundColor Yellow
@@ -1862,6 +1881,15 @@ if ($stats.EntraRemoved -gt 0) {
     Write-Host ("  Entra groups      : removed from {0}" -f $stats.EntraRemoved) -ForegroundColor Magenta
     Write-Host "  Those memberships often carried more than SharePoint — check Teams, mailboxes and" -ForegroundColor Yellow
     Write-Host "  licences for this user if that was not intended." -ForegroundColor Yellow
+}
+# Repeated at the end on purpose: the groups removed are the ones the scan found, and a reader
+# who only sees the last screen should not take that for "every group that grants access".
+if ($RemoveFromEntraGroups -and $scanLimits.Count -gt 0) {
+    Write-Host ''
+    Write-Host "  [WARN] The Entra groups handled above are the ones this scan found. It did not cover:" -ForegroundColor Yellow
+    foreach ($limit in $scanLimits) { Write-Host ("           - {0}" -f $limit) -ForegroundColor Yellow }
+    Write-Host "         Re-run without -SiteUrl and at -Scope Item for the complete picture before" -ForegroundColor Yellow
+    Write-Host "         treating this user as fully offboarded." -ForegroundColor Yellow
 }
 if ($RemoveFromEntraGroups -and $script:GrantingEntraGroups.Count -eq 0) {
     Write-Host ''
