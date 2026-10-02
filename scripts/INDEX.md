@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-186 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+187 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -87,6 +87,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Install-SharePointStructure.ps1`](SharePoint/Provisioning/Install-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Build the whole SharePoint structure in one run: app registration, metadata model, libraries, permissions, views and a verification pass. Supports -WhatIf. |
 | [`Install-Win32AppPackage.ps1`](TenantOnboarding/AppDeployment/Install-Win32AppPackage.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Download a zipped PSAppDeployToolkit (or similar) package and run its silent install. |
 | [`Invoke-DiskCleanupIntune.ps1`](Intune/DiskCleanup/Invoke-DiskCleanupIntune.ps1) | [`Intune/DiskCleanup/`](Intune/DiskCleanup/readme.md) | Intune Win32-app install command: schoont C:\ op en herstart het apparaat. |
+| [`Invoke-FSLogixShrink.ps1`](RDS/Invoke-FSLogixShrink.ps1) | [`RDS/`](RDS/readme.md) | Shrinks FSLogix profile / ODFC containers on a share with Invoke-FslShrinkDisk, and checks whether FSLogix's own compaction at sign-out is doing that job. |
 | [`Invoke-WindowsActivation.ps1`](Device/Invoke-WindowsActivation.ps1) | [`Device/`](Device/readme.md) | Activate Windows or manage product key and KMS settings. |
 | [`Invoke-WindowsCleanup.ps1`](Device/Invoke-WindowsCleanup.ps1) | [`Device/`](Device/readme.md) | Clean up temporary files, caches, and reclaimable disk space on Windows. |
 | [`logic-permissies.ps1`](Graph/logic-permissies.ps1) | [`Graph/`](Graph/readme.md) | Grant a Microsoft Graph application permission to a Logic App's managed identity. Supports -WhatIf. |

@@ -30,7 +30,7 @@ De tabel hieronder werkt andersom: waar elke categorie *voor* is.
 | [`Reporting/`](Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
 | [`Device/`](Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschoning, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile voor Azure/AVD |
 | [`Network/`](Network/readme.nl.md) | TCP-poortcontroles, authenticatie-/netwerkdiagnose, stresstests voor bestands-I/O |
-| [`RDS/`](RDS/readme.nl.md) | Diagnose van RDP-/RD Web Access-aanmeldingen en live sessiemonitoring |
+| [`RDS/`](RDS/readme.nl.md) | Diagnose van RDP-/RD Web Access-aanmeldingen, live sessiemonitoring, diagnose en verkleining van FSLogix-profielschijven |
 | [`SMTP/`](SMTP/readme.nl.md) | Connectiviteitstests voor SMTP-relay (eenmalig en terugkerend) |
 | [`Deployment/`](Deployment/readme.nl.md) | USB-toolkit voor Windows-installatie en Autopilot-inschrijving tijdens OOBE |
 | [`DNS/`](DNS/readme.nl.md) | DNS-records resolven en importeren in AD-geïntegreerde DNS-zones |

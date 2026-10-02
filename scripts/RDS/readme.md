@@ -15,6 +15,7 @@ Diagnostic and monitoring scripts for RDP / RD Web Access infrastructure. Run di
 | [`Test-RDSDiagnostics.ps1`](Test-RDSDiagnostics.ps1) ([docs](#test-rdsdiagnosticsps1)) | One-shot health check — services, config, certs, user account, event logs |
 | [`Watch-RDSLive.ps1`](Watch-RDSLive.ps1) ([docs](#watch-rdsliveps1)) | Real-time session + licensing event monitor |
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | FSLogix / Azure Files profile diagnostics on an AVD session host |
+| [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
 
 ---
 
@@ -132,3 +133,64 @@ disk errors. Read-only: it gathers and reports, it repairs nothing.
 > event data only exist there. The whole run is written to
 > `FSLogixDiag_<host>_<timestamp>.log` in the output folder, which is the file to
 > attach to a ticket.
+
+---
+
+### Invoke-FSLogixShrink.ps1
+
+Gives the space back that FSLogix profile and ODFC containers keep after data inside
+them was deleted: a dynamic VHDX grows but never shrinks on its own. It is a wrapper
+around [Invoke-FslShrinkDisk](https://github.com/FSLogix/Invoke-FslShrinkDisk), the
+FSLogix team's own shrink script — still the best tool for this; the forks and
+alternatives on GitHub do the same with less behind them.
+
+**What it does**
+
+| Step | Details |
+|------|---------|
+| Download | Fetches Invoke-FslShrinkDisk at a **pinned commit** to `C:\Scripts\Invoke-FslShrinkDisk`, unblocks it and checks the SHA-256 of the script. A changed upstream version is never run unseen; a tampered local copy is refused |
+| Report | Every `.vhd`/`.vhdx` on the share, largest first, with folder, size and last write, and the total |
+| Shrink | Runs Invoke-FslShrinkDisk recursively, then summarises its CSV log: disks shrunk, GB recovered, and the disks it could not process |
+| `-CheckHost` | On a session host: can FSLogix's **built-in compaction at sign-out** run? FSLogix version (2210 / 2.9.8361 or later), `VHDCompactDisk`, the Optimize Drives service (`defragsvc` not Disabled) and dynamic disks |
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Path` | The share holding the containers, e.g. `\\<storageaccount>.file.core.windows.net\<share>\Profiles`. Searched recursively |
+| `-ReportOnly` | Only list the disks and their size; shrink nothing |
+| `-IgnoreLessThanGB` | Skip disks smaller than this (default: `5`) |
+| `-RatioFreeSpace` | Only shrink a disk with at least this fraction free inside (default: `0.1` = 10%) |
+| `-ThrottleLimit` | Disks processed at the same time (default: `4`; at most twice the CPU cores) |
+| `-LogFilePath` | CSV log (default: `C:\Temp\FslShrink_<timestamp>.csv`); the folder is created when missing |
+| `-ToolPath` | Where Invoke-FslShrinkDisk is kept (default: `C:\Scripts\Invoke-FslShrinkDisk`) |
+| `-Force` | Download Invoke-FslShrinkDisk again |
+| `-CheckHost` | Check FSLogix's own compaction on this host instead; needs no `-Path` |
+
+**Examples**
+
+```powershell
+# Look first: every container on the share, largest first
+.\Invoke-FSLogixShrink.ps1 -Path \\sa.file.core.windows.net\profiles\Profiles -ReportOnly
+
+# Shrink everything of 5 GB or more with at least 10% free inside
+.\Invoke-FSLogixShrink.ps1 -Path \\sa.file.core.windows.net\profiles\Profiles
+
+# Does FSLogix compact the disks itself on this host?
+.\Invoke-FSLogixShrink.ps1 -CheckHost
+```
+
+**Notes**
+
+- FSLogix 2210 and later compacts a container itself at every sign-out, when the disk is
+  over 1 GB and at least 20% can be won ([Microsoft Learn](https://learn.microsoft.com/en-us/fslogix/concepts-vhd-disk-compaction)).
+  Run `-CheckHost` first: when that passes, a manual shrink only catches up disks of users
+  who rarely sign out, or below the 20% threshold.
+- A disk that is attached — the user is signed in — cannot be shrunk; it shows up in the
+  summary as not processed and the run ends with exit code 1. Run it out of hours or with
+  the hosts drained.
+- Run elevated (each disk is mounted), with access to the share: on Azure Files through
+  Kerberos or the storage account key. Hyper-V is not needed.
+- To move to a newer Invoke-FslShrinkDisk: put the new commit and the SHA-256 of its
+  `Invoke-FslShrinkDisk.ps1` in `$ToolCommit` / `$ToolHash` at the top of the script,
+  after reading the diff.
