@@ -15,6 +15,7 @@ Scripts de diagnostic et de supervision pour l'infrastructure RDP / RD Web Acces
 | [`Test-RDSDiagnostics.ps1`](Test-RDSDiagnostics.ps1) ([docs](#test-rdsdiagnosticsps1)) | Contrôle d'état ponctuel — services, configuration, certificats, compte utilisateur, journaux d'événements |
 | [`Watch-RDSLive.ps1`](Watch-RDSLive.ps1) ([docs](#watch-rdsliveps1)) | Surveillance en temps réel des événements de session et de licences |
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | Diagnostic des profils FSLogix / Azure Files sur un hôte de session AVD |
+| [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Réduire les disques de profil FSLogix d'un partage (Invoke-FslShrinkDisk), ou vérifier si FSLogix les compacte lui-même à la déconnexion |
 
 ---
 
@@ -132,3 +133,65 @@ problème SMB/Azure Files ou erreurs de disque. Lecture seule : il collecte et r
 > conteneur, SMB et événements n'existent que là. L'ensemble de l'exécution est écrit dans
 > `FSLogixDiag_<host>_<timestamp>.log` dans le dossier de sortie ; c'est ce fichier qu'il
 > faut joindre à un ticket.
+
+---
+
+### Invoke-FSLogixShrink.ps1
+
+Récupère l'espace que les conteneurs de profil et ODFC FSLogix conservent après la
+suppression de données à l'intérieur : un VHDX dynamique grandit mais ne rétrécit jamais
+de lui-même. C'est une enveloppe autour de
+[Invoke-FslShrinkDisk](https://github.com/FSLogix/Invoke-FslShrinkDisk), le script de
+réduction de l'équipe FSLogix elle-même — toujours le meilleur outil pour cela ; les forks
+et alternatives sur GitHub font la même chose avec moins de garanties.
+
+**Ce qu'il fait**
+
+| Étape | Détails |
+|-------|---------|
+| Téléchargement | Récupère Invoke-FslShrinkDisk à un **commit épinglé** dans `C:\Scripts\Invoke-FslShrinkDisk`, le débloque et vérifie le SHA-256 du script. Une version modifiée en amont n'est jamais exécutée sans être vue ; une copie locale altérée est refusée |
+| Rapport | Chaque `.vhd`/`.vhdx` du partage, du plus grand au plus petit, avec dossier, taille et dernière écriture, et le total |
+| Réduction | Exécute Invoke-FslShrinkDisk de façon récursive, puis résume son journal CSV : disques réduits, Go récupérés, et les disques qui n'ont pas pu être traités |
+| `-CheckHost` | Sur un hôte de session : la **compaction intégrée de FSLogix à la déconnexion** peut-elle s'exécuter ? Version de FSLogix (2210 / 2.9.8361 ou ultérieure), `VHDCompactDisk`, le service Optimiser les lecteurs (`defragsvc` non désactivé) et disques dynamiques |
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-Path` | Le partage contenant les conteneurs, par ex. `\\<storageaccount>.file.core.windows.net\<share>\Profiles`. Parcouru récursivement |
+| `-ReportOnly` | Lister uniquement les disques et leur taille ; ne rien réduire |
+| `-IgnoreLessThanGB` | Ignorer les disques plus petits que cette valeur (défaut : `5`) |
+| `-RatioFreeSpace` | Ne réduire qu'un disque ayant au moins cette fraction d'espace libre à l'intérieur (défaut : `0.1` = 10 %) |
+| `-ThrottleLimit` | Disques traités simultanément (défaut : `4` ; au plus deux fois le nombre de cœurs) |
+| `-LogFilePath` | Journal CSV (défaut : `C:\Temp\FslShrink_<timestamp>.csv`) ; le dossier est créé s'il manque |
+| `-ToolPath` | Emplacement d'Invoke-FslShrinkDisk (défaut : `C:\Scripts\Invoke-FslShrinkDisk`) |
+| `-Force` | Télécharger à nouveau Invoke-FslShrinkDisk |
+| `-CheckHost` | Vérifier plutôt la compaction propre de FSLogix sur cet hôte ; pas besoin de `-Path` |
+
+**Exemples**
+
+```powershell
+# D'abord regarder : chaque conteneur du partage, du plus grand au plus petit
+.\Invoke-FSLogixShrink.ps1 -Path \\sa.file.core.windows.net\profiles\Profiles -ReportOnly
+
+# Réduire tout ce qui fait 5 Go ou plus avec au moins 10 % libre à l'intérieur
+.\Invoke-FSLogixShrink.ps1 -Path \\sa.file.core.windows.net\profiles\Profiles
+
+# FSLogix compacte-t-il lui-même les disques sur cet hôte ?
+.\Invoke-FSLogixShrink.ps1 -CheckHost
+```
+
+**Remarques**
+
+- FSLogix 2210 et ultérieur compacte lui-même un conteneur à chaque déconnexion, si le
+  disque dépasse 1 Go et qu'au moins 20 % peuvent être gagnés ([Microsoft Learn](https://learn.microsoft.com/en-us/fslogix/concepts-vhd-disk-compaction)).
+  Lancez d'abord `-CheckHost` : s'il réussit, une réduction manuelle ne fait que rattraper
+  les disques des utilisateurs qui se déconnectent rarement, ou sous le seuil de 20 %.
+- Un disque attaché — l'utilisateur est connecté — ne peut pas être réduit ; il apparaît
+  dans le résumé comme non traité et l'exécution se termine avec le code 1. Lancez-le en
+  dehors des heures de bureau ou avec les hôtes vidés.
+- À exécuter en mode élevé (chaque disque est monté), avec accès au partage : sur Azure
+  Files via Kerberos ou la clé du compte de stockage. Hyper-V n'est pas nécessaire.
+- Pour passer à une version plus récente d'Invoke-FslShrinkDisk : mettez le nouveau commit
+  et le SHA-256 de son `Invoke-FslShrinkDisk.ps1` dans `$ToolCommit` / `$ToolHash` en haut
+  du script, après avoir lu le diff.

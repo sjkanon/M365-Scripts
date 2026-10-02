@@ -48,7 +48,7 @@ Elke workload heeft een eigen map onder [`scripts/`](scripts/readme.nl.md), en e
 | [`Reporting/`](scripts/Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
 | [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD |
 | [`Network/`](scripts/Network/readme.nl.md) | Controle van TCP-poorten, diagnose van authenticatie/netwerk, stresstest van bestands-I/O |
-| [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access en live monitoring van sessies |
+| [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access, live monitoring van sessies, diagnose en verkleining van FSLogix-profielschijven |
 | [`SMTP/`](scripts/SMTP/readme.nl.md) | Connectiviteitstests voor een SMTP-relay (eenmalig en terugkerend) |
 | [`Deployment/`](scripts/Deployment/readme.nl.md) | USB-toolkit voor Windows-installatie en Autopilot-inschrijving tijdens OOBE |
 | [`DNS/`](scripts/DNS/readme.nl.md) | DNS-records opzoeken en importeren in AD-geïntegreerde DNS-zones |
@@ -189,6 +189,7 @@ De launcher (`menu.ps1`) dekt alle tools in deze repo. Druk op een toets om te s
 | `I` | Device | Remove-OemBloatware — OEM- en generieke Store-bloatware verwijderen |
 | `T` | Device | Update-TeamsClient — de nieuwe Teams en de Outlook-invoegtoepassing voor vergaderingen bijwerken als ze verouderd zijn |
 | `R` | Device | Repair-AppxPackageStore — AppX-pakketten repareren die falen met 0x80070490 (Teams, nieuwe Outlook, FSLogix) |
+| `K` | Device | FSLogix-Shrink — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — [`scripts/INDEX.md`](scripts/INDEX.md) opnieuw opbouwen, de A–Z-lijst van alle scripts |
 | `L` | Startup | Test-MarkdownLinks — elke readme-link controleren: bestanden en ankers binnen de pagina |
@@ -428,6 +429,13 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Licenties: gebeurtenissen van `TerminalServices-Licensing/Admin` + provider `TermServLicensing` in het systeemlogboek
   - Hartslagregel per bevraging met het aantal actieve sessies en het aantal nieuwe gebeurtenissen
   - Rechtstreeks uitvoeren op elke RDS-/RDWeb-server; `-IntervalSeconds` (standaard 20), `-NoLogFile` om geen bestand te schrijven
+
+- FSLogix-profieldiagnose (`Get-FSlogix-errors.ps1`) — verzamelt versie, configuratie, gekoppelde containers, SMB-/Azure Files-status en FSLogix-/schijfgebeurtenissen op een AVD-sessiehost in één transcript
+
+- FSLogix-schijven verkleinen (`Invoke-FSLogixShrink.ps1`) — geeft de ruimte terug die dynamische profiel-/ODFC-VHDX-bestanden vasthouden:
+  - Downloadt Invoke-FslShrinkDisk (FSLogix-team) op een vastgezette commit en controleert de SHA-256
+  - `-ReportOnly` toont elke container op de share, grootste eerst; anders verkleint het ze en vat het teruggewonnen GB en niet-verwerkte (gekoppelde) schijven samen
+  - `-CheckHost` controleert of de ingebouwde compressie van FSLogix bij afmelden kan draaien (versie, `VHDCompactDisk`, `defragsvc`, dynamische schijven)
 
 ---
 
@@ -762,6 +770,8 @@ M365-Scripts/
     │       └── Update-UnifiFirmware.ps1       ← firmware-upgrades over sites heen oplijsten/starten
     ├── RDS/
     │   ├── readme.md
+    │   ├── Get-FSlogix-errors.ps1            ← diagnose van FSLogix- / Azure Files-profielen
+    │   ├── Invoke-FSLogixShrink.ps1          ← FSLogix-profielschijven verkleinen, compressie controleren
     │   ├── Test-RDSDiagnostics.ps1           ← diagnose van mislukte RDP-/RDWeb-aanmeldingen
     │   └── Watch-RDSLive.ps1                 ← realtime monitor van sessies + licenties
     ├── SMTP/
@@ -909,6 +919,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-02
+| Wijziging |
+|--------|
+| `scripts/RDS/Invoke-FSLogixShrink.ps1` toegevoegd: dynamische FSLogix-profiel-/ODFC-VHDX-bestanden groeien maar geven nooit ruimte terug, en het verkleinen gebeurde met de hand vanuit geplakte commando's die downloadden wat er op dat moment op de master-branch van Invoke-FslShrinkDisk stond, het log naar een `C:\Temp` schreven die misschien niet bestaat (de `Export-Csv` faalt dan), en de share van één klant noemden. Het script downloadt Invoke-FslShrinkDisk op een vastgezette commit (`bfe0504`, 2025-06-19) en weigert het tenzij de SHA-256 klopt, toont elke container op de share met de grootste eerst (`-ReportOnly`), verkleint met dezelfde standaarden (≥ 5 GB, ≥ 10% vrij, 4 tegelijk), maakt de logmap aan, en vat teruggewonnen GB samen plus de schijven die niet verwerkt konden worden — meestal gekoppeld omdat de gebruiker is aangemeld |
+| Op GitHub gezocht naar iets beters: Invoke-FslShrinkDisk wordt nog onderhouden door het FSLogix-team en blijft het gereedschap; de forks en ShrinkVHD doen hetzelfde met minder erachter. De echte verbetering is de eigen VHD Disk Compaction van FSLogix bij elke afmelding (2210 en later, standaard aan), dus `-CheckHost` vertelt of die op een host kan draaien: versie, `VHDCompactDisk`, `defragsvc` niet Disabled, dynamische schijven. Slaagt die, dan haalt een handmatige verkleining alleen nog in |
+| Menu-item `K` (FSLogix-Shrink) toegevoegd, en `Get-FSlogix-errors.ps1` aan de RDS-categorie en de structuurboom van de root-readme, waar het ontbrak |
+| Geverifieerd in Windows PowerShell 5.1 op een werkstation: de download van de vastgezette commit en de hashcontrole, de tweede run die die hergebruikt, een aangepaste kopie geweigerd, `-ReportOnly` op een testmap met twee VHDX-bestanden (6 GB en 1 GB, plus een niet-VHD-bestand overgeslagen), `-CheckHost` die meldt dat FSLogix niet is geïnstalleerd (exit 1), en de CSV-samenvatting op een voorbeeldlog (4,75 GB teruggewonnen, een gekoppelde schijf genoemd, exit 1). Het echte verkleinen is niet tegen een share gedraaid — dat vraagt een verhoogde sessie op een host met toegang tot de profielshare |
 
 ### 2026-10-01 (4)
 | Wijziging |

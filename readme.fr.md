@@ -48,7 +48,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`Reporting/`](scripts/Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
 | [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
-| [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access et surveillance des sessions en direct |
+| [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix |
 | [`SMTP/`](scripts/SMTP/readme.fr.md) | Tests de connectivité d'un relais SMTP (ponctuels et récurrents) |
 | [`Deployment/`](scripts/Deployment/readme.fr.md) | Boîte à outils USB pour l'installation de Windows et l'inscription Autopilot pendant l'OOBE |
 | [`DNS/`](scripts/DNS/readme.fr.md) | Résoudre des enregistrements DNS et les importer dans des zones DNS intégrées à AD |
@@ -189,6 +189,7 @@ Le lanceur (`menu.ps1`) couvre tous les outils de ce dépôt. Appuyez sur une to
 | `I` | Device | Remove-OemBloatware — supprimer les bloatwares OEM + génériques du Store |
 | `T` | Device | Update-TeamsClient — mettre à jour le nouveau Teams + le complément de réunion Outlook s'ils sont obsolètes |
 | `R` | Device | Repair-AppxPackageStore — réparer les paquets AppX qui échouent avec 0x80070490 (Teams, nouvel Outlook, FSLogix) |
+| `K` | Device | FSLogix-Shrink — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — reconstruire [`scripts/INDEX.md`](scripts/INDEX.md), la liste A–Z de tous les scripts |
 | `L` | Startup | Test-MarkdownLinks — vérifier chaque lien des readmes : fichiers et ancres internes à la page |
@@ -428,6 +429,13 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Licences : événements `TerminalServices-Licensing/Admin` + fournisseur `TermServLicensing` du journal Système
   - Ligne de pulsation à chaque interrogation, avec le nombre de sessions actives et de nouveaux événements
   - À exécuter directement sur chaque serveur RDS/RDWeb ; `-IntervalSeconds` (20 par défaut), `-NoLogFile` pour ne pas écrire de fichier
+
+- Diagnostic des profils FSLogix (`Get-FSlogix-errors.ps1`) — rassemble la version, la configuration, les conteneurs attachés, l'état SMB/Azure Files et les événements FSLogix/disque d'un hôte de session AVD dans une seule transcription
+
+- Réduction des disques FSLogix (`Invoke-FSLogixShrink.ps1`) — récupère l'espace que conservent les fichiers VHDX dynamiques de profil/ODFC :
+  - Télécharge Invoke-FslShrinkDisk (équipe FSLogix) à un commit épinglé et vérifie son SHA-256
+  - `-ReportOnly` liste chaque conteneur du partage, du plus grand au plus petit ; sinon les réduit et résume les Go récupérés et les disques non traités (en cours d'utilisation)
+  - `-CheckHost` vérifie si la compaction intégrée de FSLogix à la déconnexion peut s'exécuter (version, `VHDCompactDisk`, `defragsvc`, disques dynamiques)
 
 ---
 
@@ -762,6 +770,8 @@ M365-Scripts/
     │       └── Update-UnifiFirmware.ps1       ← lister/déclencher les mises à niveau du firmware sur plusieurs sites
     ├── RDS/
     │   ├── readme.md
+    │   ├── Get-FSlogix-errors.ps1            ← diagnostic des profils FSLogix / Azure Files
+    │   ├── Invoke-FSLogixShrink.ps1          ← réduire les disques FSLogix, vérifier la compaction
     │   ├── Test-RDSDiagnostics.ps1           ← diagnostic des échecs de connexion RDP/RDWeb
     │   └── Watch-RDSLive.ps1                 ← surveillance en temps réel des sessions + licences
     ├── SMTP/
@@ -909,6 +919,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-02
+| Modification |
+|--------|
+| Ajout de `scripts/RDS/Invoke-FSLogixShrink.ps1` : les fichiers VHDX dynamiques de profil/ODFC FSLogix grandissent mais ne rendent jamais d'espace, et la réduction se faisait à la main à partir de commandes collées qui téléchargeaient ce qui se trouvait à ce moment sur la branche master d'Invoke-FslShrinkDisk, écrivaient le journal dans un `C:\Temp` qui n'existe peut-être pas (son `Export-Csv` échoue alors) et nommaient le partage d'un client. Le script télécharge Invoke-FslShrinkDisk à un commit épinglé (`bfe0504`, 2025-06-19) et le refuse si le SHA-256 ne correspond pas, liste chaque conteneur du partage du plus grand au plus petit (`-ReportOnly`), réduit avec les mêmes valeurs par défaut (≥ 5 Go, ≥ 10 % libre, 4 à la fois), crée le dossier du journal, et résume les Go récupérés et les disques qui n'ont pas pu être traités — généralement attachés parce que l'utilisateur est connecté |
+| Recherche sur GitHub d'une meilleure solution : Invoke-FslShrinkDisk est toujours maintenu par l'équipe FSLogix et reste l'outil ; les forks et ShrinkVHD font la même chose avec moins de garanties. La vraie amélioration est la VHD Disk Compaction propre à FSLogix à chaque déconnexion (2210 et ultérieur, activée par défaut) ; `-CheckHost` indique donc si elle peut s'exécuter sur un hôte : version, `VHDCompactDisk`, `defragsvc` non désactivé, disques dynamiques. S'il réussit, une réduction manuelle ne fait que rattraper |
+| Ajout de l'entrée de menu `K` (FSLogix-Shrink), et de `Get-FSlogix-errors.ps1` dans la catégorie RDS et l'arborescence du readme racine, où il manquait |
+| Vérifié dans Windows PowerShell 5.1 sur un poste de travail : le téléchargement du commit épinglé et le contrôle du hachage, la deuxième exécution qui le réutilise, une copie altérée refusée, `-ReportOnly` sur un dossier de test avec deux fichiers VHDX (6 Go et 1 Go, plus un fichier non VHD ignoré), `-CheckHost` signalant que FSLogix n'est pas installé (code 1), et le résumé CSV sur un journal d'exemple (4,75 Go récupérés, un disque en cours d'utilisation nommé, code 1). La réduction réelle n'a pas été exécutée sur un partage — cela demande une session élevée sur un hôte ayant accès au partage de profils |
 
 ### 2026-10-01 (4)
 | Modification |

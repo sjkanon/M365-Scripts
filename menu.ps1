@@ -679,6 +679,22 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='K'; FKey=$null; Category='Device'
+        Label='FSLogix-Shrink      — shrink FSLogix profile disks on a share, or check compaction at sign-out'
+        Script="$ROOT\scripts\RDS\Invoke-FSLogixShrink.ps1"
+        Params={
+            $share = Read-Host "  Profile share, e.g. \\sa.file.core.windows.net\profiles\Profiles (empty = check this host)"
+            if (-not $share) { return @{ CheckHost = $true } }
+            $a = @{ Path = $share }
+            $apply = Read-Host "  Shrink now (not just list the disks)? [y/N]"
+            if ($apply -notmatch '^[Yy]') { $a['ReportOnly'] = $true }
+            else {
+                $min = Read-Host "  Skip disks smaller than GB [5]"
+                if ($min) { $a['IgnoreLessThanGB'] = [int]$min }
+            }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
         Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
         Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"

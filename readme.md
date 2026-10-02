@@ -48,7 +48,7 @@ Every workload has its own folder under [`scripts/`](scripts/readme.md), and eve
 | [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
 | [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
 | [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
-| [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics and live session monitoring |
+| [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking |
 | [`SMTP/`](scripts/SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
 | [`Deployment/`](scripts/Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
 | [`DNS/`](scripts/DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
@@ -189,6 +189,7 @@ The launcher (`menu.ps1`) covers all tools in this repo. Press a key to launch:
 | `I` | Device | Remove-OemBloatware — remove OEM + generic Store bloatware |
 | `T` | Device | Update-TeamsClient — update new Teams + the Outlook meeting add-in when outdated |
 | `R` | Device | Repair-AppxPackageStore — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
+| `K` | Device | FSLogix-Shrink — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `L` | Startup | Test-MarkdownLinks — check every readme link: files and in-page anchors |
@@ -428,6 +429,13 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Licensing: `TerminalServices-Licensing/Admin` events + System log `TermServLicensing` provider
   - Heartbeat line per poll showing active session count and new event count
   - Run directly on each RDS/RDWeb server; `-IntervalSeconds` (default 20), `-NoLogFile` to skip file output
+
+- FSLogix profile diagnostics (`Get-FSlogix-errors.ps1`) — collects version, configuration, attached containers, SMB/Azure Files state and FSLogix/disk events on an AVD session host into one transcript
+
+- FSLogix disk shrink (`Invoke-FSLogixShrink.ps1`) — gives back the space dynamic profile/ODFC VHDX files keep:
+  - Downloads Invoke-FslShrinkDisk (FSLogix team) at a pinned commit and verifies its SHA-256
+  - `-ReportOnly` lists every container on the share, largest first; otherwise shrinks them and summarises GB recovered and disks not processed (in use)
+  - `-CheckHost` checks whether FSLogix's built-in compaction at sign-out can run (version, `VHDCompactDisk`, `defragsvc`, dynamic disks)
 
 ---
 
@@ -762,6 +770,8 @@ M365-Scripts/
     │       └── Update-UnifiFirmware.ps1       ← list/trigger firmware upgrades across sites
     ├── RDS/
     │   ├── readme.md
+    │   ├── Get-FSlogix-errors.ps1            ← FSLogix / Azure Files profile diagnostics
+    │   ├── Invoke-FSLogixShrink.ps1          ← shrink FSLogix profile disks, check compaction
     │   ├── Test-RDSDiagnostics.ps1           ← RDP/RDWeb login failure diagnostics
     │   └── Watch-RDSLive.ps1                 ← real-time session + licensing monitor
     ├── SMTP/
@@ -909,6 +919,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-02
+| Change |
+|--------|
+| Added `scripts/RDS/Invoke-FSLogixShrink.ps1`: dynamic FSLogix profile/ODFC VHDX files grow but never give space back, and the shrink was being done by hand from pasted commands that downloaded whatever was on Invoke-FslShrinkDisk's master branch, wrote the log to a `C:\Temp` that might not exist (its `Export-Csv` then fails), and named one customer's share. The script downloads Invoke-FslShrinkDisk at a pinned commit (`bfe0504`, 2025-06-19) and refuses it unless the SHA-256 matches, lists every container on the share largest first (`-ReportOnly`), shrinks with the same defaults (≥ 5 GB, ≥ 10% free, 4 at a time), creates the log folder, and summarises GB recovered and the disks it could not process — usually attached because the user is signed in |
+| Looked on GitHub for something better: Invoke-FslShrinkDisk is still maintained by the FSLogix team and remains the tool; the forks and ShrinkVHD do the same with less behind them. The real improvement is FSLogix's own VHD Disk Compaction at every sign-out (2210 and later, on by default), so `-CheckHost` tells whether that can run on a host: version, `VHDCompactDisk`, `defragsvc` not Disabled, dynamic disks. When it passes, a manual shrink only catches up |
+| Added menu entry `K` (FSLogix-Shrink), and `Get-FSlogix-errors.ps1` to the root readme's RDS category and structure tree, where it was missing |
+| Verified in Windows PowerShell 5.1 on a workstation: the download of the pinned commit and the hash check, the second run reusing it, a tampered copy refused, `-ReportOnly` on a test folder with two VHDX files (6 GB and 1 GB, plus a non-VHD file skipped), `-CheckHost` reporting FSLogix not installed (exit 1), and the CSV summary on a sample log (4.75 GB recovered, an in-use disk named, exit 1). The actual shrink has not been run against a share — that needs an elevated session on a host with access to the profile share |
 
 ### 2026-10-01 (4)
 | Change |

@@ -30,7 +30,7 @@ The table below is the other way round: what each category is *for*.
 | [`Reporting/`](Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
 | [`Device/`](Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
 | [`Network/`](Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
-| [`RDS/`](RDS/readme.md) | RDP / RD Web Access login diagnostics and live session monitoring |
+| [`RDS/`](RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking |
 | [`SMTP/`](SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
 | [`Deployment/`](Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
 | [`DNS/`](DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
