@@ -920,6 +920,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-02 (4)
+| Change |
+|--------|
+| Paired the two SharePoint access scripts through the reports own output. `Revoke-SharePointUserAccess.ps1` gained `-FromReport`: it takes the sites to visit from a `Get-SharePointPermissionsReport.ps1` run instead of walking the tenant a second time. The report answers who can reach what, you read it and decide, and the revoke acts on exactly what you were looking at — on a tenant where a full sweep takes a quarter of an hour, a user with access to a handful of sites is now revoked in seconds |
+| It reads the reports site-access file in preference to the raw grant list. That file already resolved every group to its people, so a site is only visited when the user is genuinely in the group granting access. The first version used the grant list, which names the group but not its members — on a tenant where most sites grant through `Site Members` that meant visiting nearly every site, losing the entire point. A test now proves the preferred path visits fewer sites than the fallback |
+| The report decides where to look, never what to remove: every site it names is still read live, so a grant that disappeared in between comes back as `AlreadyGone` rather than a failure, and one removed by hand is not resurrected. The reverse is called out rather than assumed — anything granted after the report, and anything the report itself could not read, is named in the summary, and a report older than a day says so |
+| `-FromReport` accepts the detail CSV, any sibling from the same run, or the folder; without `-TenantUrl` the tenant is taken from the report as well, since repeating a URL the file already contains is a way to get it wrong |
+| Verified with 120 checks (22 new), 20 of them driving the real functions against real report files on disk: resolving the detail CSV from a folder, a sibling or the workbook; the preferred and fallback paths; a guest matched on either their mail or their tenant UPN; another persons rows ignored; an error row adding no site; and a substring of a real UPN matching nothing. **Not yet verified against a live tenant** |
+
 ### 2026-10-02 (3)
 | Change |
 |--------|

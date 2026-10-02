@@ -575,6 +575,7 @@ This script removes permissions, so its failure modes differ from those of a rep
 | `-Scope` | `Site`/`List`/`Item` | `Item` | How deep to search for direct grants |
 | `-IncludeGroupAccess` | switch | off | Also reports the sites the user reaches through Entra groups, *including* where they have nothing else. Report only |
 | `-KeepSharingLinks` | switch | off | Leave sharing links alone; all other routes are still revoked |
+| `-FromReport` | string | — | Take the sites to visit from a permissions-report run instead of walking the tenant again. The detail CSV, any sibling from the same run, or the folder. Without `-TenantUrl` the tenant comes from the report too. See below |
 | `-RemoveFromEntraGroups` | switch | off | **Also remove the user from the Entra ID groups that were seen granting access** — only those, never every group they belong to. Needs Graph `GroupMember.ReadWrite.All`, which the temporary app asks for only with this switch. See below |
 | `-RemoveFromSite` | switch | off | Afterwards also removes the user from the user list of every site collection. Catches what the scope-by-scope pass missed, but the name then renders as a deleted account in older metadata |
 | `-IncludeOneDriveSites` | switch | off | Also search personal OneDrive sites |
@@ -606,6 +607,24 @@ Four cases are reported rather than forced, because forcing them would either fa
 
 The removal goes through the same funnel as every other change, so `-Apply`, `-WhatIf`, the confirmation prompt and the audit CSV all behave identically. Needs Graph `GroupMember.ReadWrite.All`, which the temporary app asks for **only** when the switch is given — a report-only run holds no permission that can change group membership.
 
+
+#### Working from the permissions report
+
+`-FromReport` takes the sites to visit from a [`Get-SharePointPermissionsReport.ps1`](../Reporting/readme.md#get-sharepointpermissionsreportps1) run instead of walking the tenant again. This is how the two scripts pair up: the report answers who can reach what, you read it and decide, and the revoke acts on exactly what you were looking at.
+
+```powershell
+# 1. List everything, tenant-wide, as one workbook
+.\..\Reporting\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -IncludeEffectiveAccess -Excel
+
+# 2. Read it, decide, then revoke one person from the same data
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -FromReport C:\Temp
+```
+
+Point it at the detail CSV, any other file from the same run, or the folder they are in. Without `-TenantUrl` the tenant is taken from the report as well.
+
+It prefers the report's site-access file (`..._SiteAccess_...csv`), which already resolved every group to its people — so a site is only visited when that user is actually in the group granting access. Falling back to the raw grant list means a SharePoint group has to be taken on trust, and every site holding one is visited; the run says which source it used.
+
+> **The report decides where to look, never what to remove.** Every site it names is still read live, so a grant that disappeared in between is reported as `AlreadyGone` rather than failing, and one removed by hand is not resurrected. The reverse does not hold: anything granted *after* the report was written is invisible here, as is anything the report itself could not read. Both are named in the summary, and a report older than a day says so.
 #### Output
 
 `SharePoint_Revoke_<user>_<ts>.csv`, one row per grant found, with an `Action` column:

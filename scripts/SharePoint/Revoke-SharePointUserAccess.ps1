@@ -80,6 +80,24 @@
 .PARAMETER IncludeHiddenLists
     Also search hidden and system lists.
 
+.PARAMETER FromReport
+    Take the webs to visit from a Get-SharePointPermissionsReport.ps1 run instead of walking the
+    tenant again. Point it at the detail CSV, any other file from the same run, or the folder
+    they are in.
+
+    This is the pairing between the two scripts: the report answers who can reach what, you read
+    it and decide, and the revoke acts on exactly the webs you were looking at. On a tenant where
+    a full sweep takes a quarter of an hour, a user with access to a handful of sites is revoked
+    in seconds.
+
+    The report decides where to look, never what to remove. Every web it names is still read
+    live, so a grant that disappeared between the two runs is reported as already gone rather
+    than failing, and one that was removed by hand is not resurrected. The reverse does not hold:
+    anything granted *after* the report was written is invisible here, and so is anything the
+    report itself could not read — both are named in the summary.
+
+    Without -TenantUrl the tenant is taken from the report.
+
 .PARAMETER IncludeGroupAccess
     Also report the sites the user reaches through Entra ID groups, including sites where they
     have no SharePoint-level grant at all. Reported only; never revoked.
@@ -170,6 +188,7 @@ param(
     [string] $Scope = 'Item',
     [switch] $IncludeOneDriveSites,
     [switch] $IncludeHiddenLists,
+    [string] $FromReport,
     [switch] $IncludeGroupAccess,
     [switch] $KeepSharingLinks,
     [switch] $RemoveFromEntraGroups,
@@ -202,6 +221,39 @@ $safeUser  = ($UserPrincipalName -replace '[^\w.@-]', '_')
 $actionCsv = Join-Path $outputDir "SharePoint_Revoke_${safeUser}_$ts.csv"
 
 $TempAppNamePrefix = 'SP-RevokeAccess'
+
+# ── Tenant from the report ────────────────────────────────────────────────────
+# Authenticating needs a SharePoint host before anything is read, and -FromReport on its own
+# does not give one. Rather than making the caller repeat a tenant URL the report already
+# contains, take the first site out of it. Deliberately a cheap peek, not the full read: the
+# real parse happens later, once the connection exists.
+if ($FromReport -and -not $TenantUrl -and -not $SiteUrl) {
+    try {
+        $peekPath = $FromReport
+        if ((Get-Item -LiteralPath $peekPath -ErrorAction Stop).PSIsContainer) {
+            $peekPath = (Get-ChildItem -LiteralPath $FromReport -Filter 'SharePoint_Permissions_Detail_*.csv' |
+                         Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+        }
+        foreach ($row in (Import-Csv -LiteralPath $peekPath | Select-Object -First 50)) {
+            $candidate = if ($row.SiteUrl) { [string]$row.SiteUrl } else { [string]$row.WebUrl }
+            if ($candidate -match '^https?://[^/]+') {
+                $TenantUrl = $Matches[0]
+                break
+            }
+        }
+        if ($TenantUrl) {
+            Write-Host "  Tenant taken from the report: $TenantUrl" -ForegroundColor DarkGray
+        }
+    } catch {
+        Write-Host "  [ERROR] -FromReport could not be read to find the tenant: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Pass -TenantUrl as well, or point -FromReport at the detail CSV." -ForegroundColor Yellow
+        exit 1
+    }
+    if (-not $TenantUrl) {
+        Write-Host "  [ERROR] No site URL found in the report, so the tenant is unknown. Pass -TenantUrl." -ForegroundColor Red
+        exit 1
+    }
+}
 
 # ── Well-known application IDs ────────────────────────────────────────────────
 # Defined before the shared block, not inside it: each script builds $RequiredAppRoles from
@@ -237,7 +289,7 @@ Write-Host '   Revoke-SharePointUserAccess' -ForegroundColor Cyan
 Write-Host '  ================================================' -ForegroundColor Cyan
 Write-Host ''
 Write-Host ("  User      : {0}" -f $UserPrincipalName) -ForegroundColor Cyan
-Write-Host ("  Target    : {0}" -f $(if ($SiteUrl) { $SiteUrl } else { "$TenantUrl (tenant-wide)" })) -ForegroundColor Cyan
+Write-Host ("  Target    : {0}" -f $(if ($FromReport) { "webs named in $(Split-Path $FromReport -Leaf)" } elseif ($SiteUrl) { $SiteUrl } else { "$TenantUrl (tenant-wide)" })) -ForegroundColor Cyan
 Write-Host ("  Scope     : {0}" -f $(switch ($Scope) {
     'Site' { 'Sites and sub-sites' }
     'List' { 'Sites, sub-sites, lists and libraries' }
@@ -921,7 +973,7 @@ if ($missingModules.Count -gt 0) {
 }
 
 $allSitesMode = [string]::IsNullOrWhiteSpace($SiteUrl)
-if ($allSitesMode -and [string]::IsNullOrWhiteSpace($TenantUrl)) {
+if ($allSitesMode -and -not $FromReport -and [string]::IsNullOrWhiteSpace($TenantUrl)) {
     Write-Host '  [ERROR] -TenantUrl is required when scanning all sites.' -ForegroundColor Red
     exit 1
 }
@@ -1411,6 +1463,107 @@ if ($entraUser) {
     }
 }
 
+# ── Reading the permissions report ────────────────────────────────────────────
+function Resolve-ReportFile {
+    # -FromReport takes whatever is to hand: the detail CSV, the site-access CSV, the Excel
+    # workbook, or just the folder they are in. Anything else would mean remembering which of
+    # four filenames the report wrote.
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { throw "Report not found: $Path" }
+    $item = Get-Item -LiteralPath $Path
+
+    if ($item.PSIsContainer) {
+        # Newest detail CSV in the folder — a folder usually holds several runs.
+        $candidate = Get-ChildItem -LiteralPath $Path -Filter 'SharePoint_Permissions_Detail_*.csv' |
+                     Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if (-not $candidate) { throw "No SharePoint_Permissions_Detail_*.csv in $Path — point -FromReport at the report folder or the detail CSV itself." }
+        return $candidate.FullName
+    }
+
+    if ($item.Name -like 'SharePoint_Permissions_Detail_*.csv') { return $item.FullName }
+
+    # Any other file from the same run: find its detail sibling by the shared timestamp.
+    if ($item.Name -match '_(\d{8}_\d{6})\.(csv|xlsx)$') {
+        $sibling = Join-Path $item.DirectoryName ("SharePoint_Permissions_Detail_{0}.csv" -f $Matches[1])
+        if (Test-Path -LiteralPath $sibling) { return $sibling }
+    }
+    throw "Could not find the detail CSV belonging to $($item.Name). Point -FromReport at SharePoint_Permissions_Detail_<timestamp>.csv or at the folder."
+}
+
+function Get-ReportSitesForUser {
+    # Which site collections the report says this user can reach. The report's own site-access
+    # view already answers that per person — resolved through groups and sharing links — so it is
+    # read in preference to the raw grant list, which only names the group and would force every
+    # site holding any SharePoint group to be visited. On a tenant where most sites grant through
+    # "Site Members", that is the difference between visiting five sites and visiting all of them.
+    param([Parameter(Mandatory = $true)][string]$ReportPath)
+
+    $detail = Resolve-ReportFile -Path $ReportPath
+    Write-ProgressHost -Message ("Reading {0}..." -f (Split-Path $detail -Leaf)) -ForegroundColor Cyan
+
+    # A report is a snapshot, and acting on a stale one silently misses everything granted since.
+    $age = (Get-Date) - (Get-Item -LiteralPath $detail).LastWriteTime
+    if ($age.TotalDays -ge 1) {
+        Write-ProgressHost -Message ("  [WARN] This report is {0:N0} day(s) old. Access granted since then is not in it." -f $age.TotalDays) -ForegroundColor Yellow
+    }
+
+    $needle = $UserPrincipalName.ToLowerInvariant()
+    $sites  = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+    function Test-ReportIdentity([string]$Login, [string]$Mail, [string]$Upn) {
+        foreach ($value in @($Upn, $Mail)) {
+            if ($value -and $value.ToLowerInvariant() -eq $needle) { return $true }
+        }
+        if ($Login) {
+            $low = $Login.ToLowerInvariant()
+            if (($low -split '\|')[-1] -eq $needle) { return $true }
+            if ((ConvertFrom-GuestLoginName -Value $low) -eq $needle) { return $true }
+        }
+        return $false
+    }
+
+    # Preferred source: one row per person per site, groups already resolved to people.
+    $siteAccess = $detail -replace '_Detail_', '_SiteAccess_'
+    if (Test-Path -LiteralPath $siteAccess) {
+        $rows = 0
+        Import-Csv -LiteralPath $siteAccess | ForEach-Object {
+            $rows++
+            if (Test-ReportIdentity -Login $null -Mail ([string]$_.UserEmail) -Upn ([string]$_.UserPrincipalName)) {
+                if ($_.SiteUrl) { [void]$sites.Add([string]$_.SiteUrl) }
+            }
+        }
+        Write-ProgressHost -Message ("  {0:N0} access row(s) read; {1} site(s) name this user" -f $rows, $sites.Count) -ForegroundColor DarkGray
+    } else {
+        # Older report, or one written before the site-access view existed. Fall back to the raw
+        # grants: direct ones are exact, and a SharePoint group has to be taken on trust because
+        # this file does not say who is in it.
+        Write-ProgressHost -Message "  No site-access file beside the report — falling back to the grant list." -ForegroundColor Yellow
+        $direct = 0; $viaGroup = 0
+        Import-Csv -LiteralPath $detail | ForEach-Object {
+            if ($_.ItemType -eq 'Error') { return }
+            $site = if ($_.SiteUrl) { [string]$_.SiteUrl } else { [string]$_.WebUrl }
+            if (-not $site) { return }
+            if (Test-ReportIdentity -Login ([string]$_.PrincipalLogin) -Mail ([string]$_.PrincipalEmail) -Upn $null) {
+                [void]$sites.Add($site); $direct++; return
+            }
+            if ($_.DirectoryObjectId -and $userGroupIds.ContainsKey([string]$_.DirectoryObjectId)) {
+                [void]$sites.Add($site); $viaGroup++; return
+            }
+            if ($_.PrincipalType -in @('SharePointGroup', 'SharingLink')) { [void]$sites.Add($site); $viaGroup++ }
+        }
+        Write-ProgressHost -Message ("  {0} direct grant(s), {1} through a group or link" -f $direct, $viaGroup) -ForegroundColor DarkGray
+    }
+
+    # The report's own gaps are this run's gaps, so they are counted and reported rather than
+    # inherited quietly.
+    $errorRows = @(Import-Csv -LiteralPath $detail | Where-Object { $_.ItemType -eq 'Error' }).Count
+    if ($errorRows -gt 0) {
+        Write-ProgressHost -Message ("  [WARN] The report itself recorded {0} scope(s) it could not read — those are blind spots here too." -f $errorRows) -ForegroundColor Yellow
+    }
+    return @($sites)
+}
+
 # ── Site discovery ────────────────────────────────────────────────────────────
 # Same three sources as the permissions report, for the same reason: no single one is complete,
 # and a sub-web Graph does not know about is exactly where a forgotten grant hides.
@@ -1428,7 +1581,25 @@ function Add-TargetWeb {
     return $true
 }
 
-if (-not $allSitesMode) {
+if ($FromReport) {
+    # The permissions report already walked the tenant and wrote down where this user can reach.
+    # Reusing that instead of walking it again is the difference between minutes and seconds, and
+    # it means the revocation acts on exactly the webs you read in the report rather than on a
+    # second, slightly different scan.
+    $reportSites = Get-ReportSitesForUser -ReportPath $FromReport
+    foreach ($site in $reportSites) { [void](Add-TargetWeb -WebUrl $site -Title $null -GraphId $null) }
+
+    Write-ProgressHost -Message ("From the report: {0} site collection(s) where {1} holds access" -f $targetWebs.Count, $UserPrincipalName) -ForegroundColor Green
+    if ($targetWebs.Count -eq 0) {
+        Write-Host ''
+        Write-Host ("  [OK]   The report lists no access for {0}. Nothing to revoke." -f $UserPrincipalName) -ForegroundColor Green
+        Write-Host "         If that is a surprise, check the report covered the ground you expected." -ForegroundColor DarkGray
+        Remove-TempApp; exit 0
+    }
+    # A report is a snapshot. Anything granted after it was written is invisible here, so the
+    # webs are still scanned live — the report decides where to look, never what to remove.
+    Write-ProgressHost -Message "  Each web is still read live; the report only decides which ones to visit." -ForegroundColor DarkGray
+} elseif (-not $allSitesMode) {
     try {
         $uri  = [System.Uri]$SiteUrl.TrimEnd('/')
         $obj  = Invoke-GraphGet -Uri ("https://graph.microsoft.com/v1.0/sites/{0}:{1}?`$select=id,displayName,webUrl" -f $uri.Host, $uri.AbsolutePath.TrimEnd('/'))
@@ -1761,6 +1932,9 @@ try {
     # before acting on the result. "Removed every group that grants access" is only true of the
     # ground the scan actually covered, and treating a narrowed or partly failed run as complete
     # is how someone concludes an offboarding is finished when it is not.
+    # With -FromReport the ground covered is the report's, not this run's: a web the report never
+    # visited is a web this run never saw, whatever flags were passed here.
+    if ($FromReport)       { $scanLimits += "only the webs named in $(Split-Path $FromReport -Leaf) were visited, so this inherits whatever that report did not cover" }
     if ($SiteUrl)          { $scanLimits += "only $SiteUrl was searched, not the tenant" }
     if ($Scope -eq 'Site') { $scanLimits += 'only site level was searched, so grants on lists, folders and files were never looked at' }
     if ($Scope -eq 'List') { $scanLimits += 'folders and files were not searched' }

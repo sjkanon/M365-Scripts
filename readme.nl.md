@@ -920,6 +920,15 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-02 (4)
+| Wijziging |
+|-----------|
+| De twee SharePoint-toegangsscripts aan elkaar gekoppeld via de uitvoer van het rapport zelf. `Revoke-SharePointUserAccess.ps1` kreeg `-FromReport`: het haalt de te bezoeken sites uit een run van `Get-SharePointPermissionsReport.ps1` in plaats van de tenant een tweede keer af te lopen. Het rapport beantwoordt wie waar bij kan, jij leest het en beslist, en de revoke werkt op precies datgene waar je naar keek — op een tenant waar een volledige sweep een kwartier duurt, is een gebruiker met toegang tot een handvol sites nu in seconden ingetrokken |
+| Het leest bij voorkeur het site-access bestand van het rapport in plaats van de ruwe grant-lijst. In dat bestand is elke groep al naar personen herleid, dus een site wordt alleen bezocht als de gebruiker daadwerkelijk in de groep zit die toegang geeft. De eerste versie gebruikte de grant-lijst, die de groep noemt maar niet de leden — op een tenant waar de meeste sites via `Site Members` toegang geven betekende dat bijna elke site bezoeken, waarmee het hele nut verdween. Een test bewijst nu dat de voorkeursroute minder sites bezoekt dan de terugval |
+| Het rapport bepaalt waar gekeken wordt, nooit wat er weg moet: elke genoemde site wordt alsnog live gelezen, dus een toekenning die er tussentijds al af was komt terug als `AlreadyGone` in plaats van als fout, en iets dat met de hand is verwijderd wordt niet teruggezet. Het omgekeerde wordt benoemd in plaats van aangenomen — alles wat ná het rapport is toegekend, en alles wat het rapport zelf niet kon lezen, staat in de samenvatting, en een rapport ouder dan een dag meldt dat |
+| `-FromReport` accepteert de detail-CSV, een ander bestand uit dezelfde run, of de map; zonder `-TenantUrl` wordt de tenant ook uit het rapport gehaald, want een URL herhalen die al in het bestand staat is een manier om hem fout te typen |
+| Geverifieerd met 120 controles (22 nieuw), waarvan 20 de echte functies tegen echte rapportbestanden op schijf draaien: de detail-CSV vinden vanuit een map, een ander bestand of de werkmap; de voorkeurs- en terugvalroute; een gast gevonden op zijn e-mail óf zijn tenant-UPN; regels van iemand anders genegeerd; een foutregel die geen site toevoegt; en een deelstring van een echte UPN die niets matcht. **Nog niet geverifieerd tegen een echte tenant** |
+
 ### 2026-10-02 (3)
 | Wijziging |
 |-----------|

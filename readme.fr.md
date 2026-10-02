@@ -920,6 +920,15 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-02 (4)
+| Modification |
+|--------------|
+| Les deux scripts daccès SharePoint sont désormais couplés par la sortie même du rapport. `Revoke-SharePointUserAccess.ps1` reçoit `-FromReport` : il prend les sites à visiter dans une exécution de `Get-SharePointPermissionsReport.ps1` au lieu de reparcourir le locataire. Le rapport dit qui peut atteindre quoi, vous le lisez et décidez, et la révocation agit exactement sur ce que vous regardiez — sur un locataire où un balayage complet prend un quart dheure, un utilisateur ayant accès à quelques sites est révoqué en quelques secondes |
+| Il lit de préférence le fichier daccès par site plutôt que la liste brute des attributions. Ce fichier a déjà résolu chaque groupe en personnes : un site nest visité que si lutilisateur appartient réellement au groupe qui accorde laccès. La première version utilisait la liste des attributions, qui nomme le groupe mais pas ses membres — sur un locataire où la plupart des sites accordent via `Site Members`, cela revenait à visiter presque tous les sites, annulant tout lintérêt. Un test prouve désormais que la voie privilégiée visite moins de sites que le repli |
+| Le rapport décide où chercher, jamais quoi supprimer : chaque site nommé est tout de même lu en direct, donc une attribution disparue entre-temps revient en `AlreadyGone` plutôt quen échec, et une suppression manuelle nest pas annulée. Linverse est signalé plutôt que supposé — tout ce qui a été accordé après le rapport, et tout ce que le rapport na pas pu lire, figure dans le résumé, et un rapport de plus dun jour le signale |
+| `-FromReport` accepte le CSV de détail, un fichier frère de la même exécution, ou le dossier ; sans `-TenantUrl`, le locataire est aussi tiré du rapport, car répéter une URL déjà contenue dans le fichier est une façon de se tromper |
+| Vérifié par 120 contrôles (22 nouveaux), dont 20 exécutent les vraies fonctions sur de vrais fichiers de rapport : résolution du CSV de détail depuis un dossier, un fichier frère ou le classeur ; les voies privilégiée et de repli ; un invité retrouvé par son adresse ou son UPN de locataire ; les lignes dune autre personne ignorées ; une ligne derreur najoutant aucun site ; et une sous-chaîne dun UPN réel ne correspondant à rien. **Pas encore vérifié sur un locataire réel** |
+
 ### 2026-10-02 (3)
 | Modification |
 |--------------|
