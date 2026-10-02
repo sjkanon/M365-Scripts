@@ -563,7 +563,7 @@ Le rapport est le comportement par défaut. Rien ne change sans `-Apply`, et cha
 
 | | Pourquoi |
 |---|---|
-| Modifier l'appartenance aux groupes Entra ID | Quiconque entre via un groupe de sécurité ou M365 conserve cet accès — le groupe *est* l'attribution. Ce script ne touche pas à Entra, mais il signale explicitement ces chemins, avec le nom du groupe. Sinon, vous croyez que c'est fermé alors que c'est encore ouvert |
+| Modifier l'appartenance aux groupes Entra ID | **Sauf si `-RemoveFromEntraGroups` est fourni.** Par défaut, quiconque entre via un groupe de sécurité ou M365 conserve cet accès — le groupe *est* l'attribution — et ces chemins sont signalés explicitement, avec le nom du groupe, pour que vous ne croyiez pas que c'est fermé alors que c'est encore ouvert |
 | Supprimer `Everyone` / `Everyone except external users` | Cela retire l'accès à tout le tenant, pas à cette personne. Signalé, pas modifié |
 | Nettoyer la propriété et les métadonnées | Un utilisateur révoqué reste l'auteur de ce qu'il a créé |
 
@@ -596,6 +596,7 @@ Ce script supprime des autorisations ; ses modes de défaillance diffèrent donc
 | `-Scope` | `Site`/`List`/`Item` | `Item` | Profondeur de recherche des attributions directes |
 | `-IncludeGroupAccess` | switch | désactivé | Signale aussi les sites que l'utilisateur atteint via des groupes Entra, *y compris* là où il n'a rien d'autre. Rapport uniquement |
 | `-KeepSharingLinks` | switch | désactivé | Laisse les liens de partage intacts ; tous les autres chemins sont bien révoqués |
+| `-RemoveFromEntraGroups` | switch | désactivé | **Retire aussi l'utilisateur des groupes Entra ID vus en train d'accorder l'accès** — ceux-là uniquement, jamais tous les groupes dont il fait partie. Nécessite Graph `GroupMember.ReadWrite.All`, que l'application temporaire ne demande qu'avec ce commutateur. Voir ci-dessous |
 | `-RemoveFromSite` | switch | désactivé | Retire ensuite aussi l'utilisateur de la liste des utilisateurs de chaque site collection. Rattrape ce que le passage étendue par étendue n'a pas vu, mais le nom s'affiche ensuite comme compte supprimé dans les métadonnées plus anciennes |
 | `-IncludeOneDriveSites` | switch | désactivé | Parcourt aussi les sites OneDrive personnels |
 | `-IncludeHiddenLists` | switch | désactivé | Inclut aussi les listes masquées et système |
@@ -605,6 +606,24 @@ Ce script supprime des autorisations ; ses modes de défaillance diffèrent donc
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout et nouvelles tentatives |
 
 L'authentification est identique à celle du rapport : une app registration de courte durée, basée sur un certificat, avec SharePoint `Sites.FullControl.All`, supprimée à la fin.
+
+
+#### Retirer aussi les groupes Entra ID
+
+`-RemoveFromEntraGroups` termine la seconde moitié d'un départ au lieu de se contenter de la signaler. **Seuls les groupes que cette exécution a réellement vus détenir une attribution de rôle sur une portée dans le périmètre sont touchés** — jamais tous les groupes auxquels l'utilisateur appartient. Un partant peut être dans cinquante groupes ; ceux qui accordent l'accès SharePoint sont ceux concernés ici.
+
+> **Cela dépasse SharePoint.** Un groupe Entra n'est pas un objet SharePoint. La même appartenance porte souvent une équipe Teams, une boîte aux lettres, des licences et des attributions d'applications, qu'aucun de ces rapports ne voit. Lisez d'abord le rapport d'une exécution sans `-Apply`, puis relancez avec le commutateur.
+
+Quatre cas sont signalés plutôt que forcés, car les forcer échouerait ou ferait la mauvaise chose :
+
+| Cas | Pourquoi il est laissé tel quel |
+|---|---|
+| Groupe dynamique | L'appartenance suit une règle et n'est pas stockée : il n'y a rien à retirer. Modifiez la règle, ou les attributs de l'utilisateur qu'elle cible |
+| Synchronisé depuis AD on-premises | En lecture seule dans le cloud. L'appartenance doit être retirée dans Active Directory |
+| Membre via un groupe imbriqué | L'utilisateur n'est pas membre direct : le retrait échouerait ici. L'accès doit être coupé au groupe qui le contient réellement, que le rapport nomme |
+| Utilisateur introuvable dans Entra | Rien dont le retirer ; le volet SharePoint s'exécute quand même |
+
+Le retrait passe par le même entonnoir que toute autre modification : `-Apply`, `-WhatIf`, la confirmation et le CSV d'audit se comportent à l'identique. Nécessite Graph `GroupMember.ReadWrite.All`, que l'application temporaire ne demande **que** si le commutateur est fourni — une exécution en lecture seule ne détient aucune permission capable de modifier une appartenance.
 
 #### Sortie
 

@@ -145,9 +145,24 @@ Check 'an already-gone removal is not a failure' ($revokeText -match "AlreadyGon
 Check 'the audit row is written as it happens' ($revokeText -match 'Append-CheckpointRows -Path \$script:ActionCsvPath')
 
 # ── Safety: the things it must refuse to remove ─────────────────────────────
-Check 'an Entra group grant is not revoked'   ($revokeText -match "hit\.Kind -eq 'EntraGroup'[\s\S]{0,200}CannotRevoke")
+# The per-scope pass never removes an Entra grant: it records it and moves on. Removal, when
+# asked for, happens in its own phase after the scan, so the group is judged once rather than
+# once per scope it happens to grant.
+$entraBranch = [regex]::Match($revokeText, "(?s)if \(\`$hit\.Kind -eq 'EntraGroup'\) \{.*?continue")
+Check 'an Entra group grant is not revoked'   ($entraBranch.Success -and $entraBranch.Value -match 'CannotRevoke' -and $entraBranch.Value -notmatch 'Invoke-GraphDelete|Invoke-Revocation')
 Check 'an Everyone grant is not revoked'      ($revokeText -match "hit\.Kind -eq 'Everyone'[\s\S]{0,200}CannotRevoke")
-Check 'it never touches Entra membership'     ($revokeText -notmatch 'removeMemberFromGroup|/members/\$ref|Remove-MgGroupMember')
+# Entra membership may only be changed behind the switch, and only for groups the scan saw.
+Check 'Entra removal is behind a switch'      ($params -contains 'RemoveFromEntraGroups')
+Check 'the write role is asked for only then' ($revokeText -match 'if \(\$RemoveFromEntraGroups\)[\s\S]{0,300}GroupMember\.ReadWrite\.All')
+Check 'it acts on the groups it saw granting' ($revokeText -match '\$script:GrantingEntraGroups\[\[string\]\$hit\.DirectoryId\]')
+Check 'and never on every group the user has' ($revokeText -notmatch 'foreach \(\$groupId in \$userGroupIds')
+Check 'the Entra phase iterates only those'   ($revokeText -match 'foreach \(\$groupId in \$script:GrantingEntraGroups\.Keys\)')
+# The four cases that must be reported rather than attempted.
+Check 'a dynamic group is refused'            ($revokeText -match "DynamicMembership[\s\S]{0,200}CannotRevoke")
+Check 'an on-prem synced group is refused'    ($revokeText -match "onPremisesSyncEnabled[\s\S]{0,200}CannotRevoke")
+Check 'a nested membership is refused'        ($revokeText -match "Not a direct member")
+Check 'an unresolved user is refused'         ($revokeText -match "not resolved in Entra ID")
+Check 'the removal goes through the funnel'   ($revokeText -match "Invoke-Revocation -Target .*Entra ID.*-Operation 'Remove from Entra ID group'")
 Check 'it warns that group access survives'   ($revokeText -match 'The group is the grant')
 
 # ── Identifying the right user ──────────────────────────────────────────────
