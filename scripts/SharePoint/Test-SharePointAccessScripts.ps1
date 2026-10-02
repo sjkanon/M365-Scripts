@@ -102,6 +102,35 @@ Check 'a 403 on the user lookup is fatal'          ($revokeText -match 'entraLoo
 Check 'and names the missing permission'           ($revokeText -match 'missing Graph User\.Read\.All')
 Check 'a real absence still only warns'            ($revokeText -match 'No such account in Entra ID')
 
+# ── Never assign to a read-only automatic variable ──────────────────────────
+# $pid is the process id and cannot be assigned to. Doing so throws at runtime, inside a loop
+# whose catch turned it into nothing at all: a live run reported access on fifteen sites and
+# found zero grants. The parser is happy with it, so it is checked here.
+$readOnlyAutomatics = @('PID', 'HOME', 'PSHOME', 'PSVersionTable', 'PSCulture', 'PSUICulture',
+                        'PSEdition', 'ExecutionContext', 'Host', 'MyInvocation', 'PSScriptRoot',
+                        'PSCommandPath', 'ShellId', 'true', 'false', 'null')
+foreach ($f in @($report, $revoke)) {
+    $fileAst = [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$null, [ref]$null)
+    $bad = @()
+    foreach ($a in $fileAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+        if ($a.Left -is [System.Management.Automation.Language.VariableExpressionAst]) {
+            $name = $a.Left.VariablePath.UserPath
+            if ($readOnlyAutomatics -contains $name) { $bad += ("line {0}: `${1}" -f $a.Extent.StartLineNumber, $name) }
+        }
+    }
+    Check ("{0}: assigns to no read-only automatic" -f (Split-Path $f -Leaf)) ($bad.Count -eq 0)
+    foreach ($b in $bad) { Write-Host "        $b" -ForegroundColor DarkYellow }
+}
+
+# ── Role assignments are read from the collection, not the scope object ─────
+# /_api/web answers with the web; /_api/web/roleassignments answers with its assignments. Asking
+# for the first returns an object with no value array, which reads as "no grants here" and is
+# how a revocation silently finds nothing.
+Check 'role assignments append /roleassignments' ($revokeText -match "roleassignments' \+ \`$query")
+Check 'and the removal URL agrees with it'       ($revokeText -match "roleassignments/removeroleassignment\(principalid=")
+Check 'a non-collection response is refused'     ($revokeText -match 'did not return a collection')
+Check 'the report has the same guard'            ((Get-Content $report -Raw) -match 'did not return a collection')
+
 # ── Checkpoint kinds must agree with themselves ─────────────────────────────
 # A kind that is written but missing from the ValidateSet throws on every site, and a kind that
 # is written but never read back silently loses its resume state. Both are invisible until a

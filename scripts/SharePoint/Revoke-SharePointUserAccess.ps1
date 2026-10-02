@@ -823,6 +823,12 @@ function Invoke-SPCollectionPaged {
         $values = $null
         if ($null -ne $resp.value) { $values = $resp.value }
         elseif ($resp.d -and $null -ne $resp.d.results) { $values = $resp.d.results }
+        elseif ($page -eq 1) {
+            # A collection endpoint always answers with value (or d.results), even when empty.
+            # An object carrying neither is not an empty collection, it is the wrong URL - and
+            # reading it as empty is a silent zero instead of a visible mistake.
+            throw ("{0} did not return a collection - a scope object was asked for where its collection was meant." -f $next)
+        }
         if ($values) { & $OnPage @($values) }
 
         $next = $null
@@ -1670,8 +1676,14 @@ function Get-ScopeRoleAssignments {
     # -ThrowOnDenied for the same reason as in the report: an empty result from a refused read
     # would read as "this user has nothing here", and acting on that is how a revocation quietly
     # misses a grant.
+    # Takes the scope base (.../_api/web, .../lists(guid'..'), .../items(n)) and appends
+    # /roleassignments itself, so it matches what Invoke-ScopeRevocation builds its removal URL
+    # from. Leaving that to the callers is how this came to read the web object instead of its
+    # role assignments: SharePoint answered with the web, there was no value array to find, and
+    # a live run reported access on fifteen sites with nothing to revoke and no error at all.
     param([Parameter(Mandatory = $true)][string]$Uri)
-    return Get-SPCollection -ThrowOnDenied -Uri ($Uri + "?`$expand=Member,RoleDefinitionBindings&`$select=PrincipalId,Member/Id,Member/Title,Member/LoginName,Member/PrincipalType,RoleDefinitionBindings/Name")
+    $query = "?`$expand=Member,RoleDefinitionBindings&`$select=PrincipalId,Member/Id,Member/Title,Member/LoginName,Member/PrincipalType,RoleDefinitionBindings/Name"
+    return Get-SPCollection -ThrowOnDenied -Uri ($Uri.TrimEnd('/') + '/roleassignments' + $query)
 }
 
 # ── Scan and revoke, one site collection at a time ────────────────────────────
@@ -1790,17 +1802,20 @@ try {
                     $levels = @(@($ra.RoleDefinitionBindings) | ForEach-Object { [string]$_.Name } | Where-Object { $_ })
                     if ($levels.Count -eq 0) { continue }
                     $principal = Get-PrincipalInfo -Member $ra.Member
-                    $pid = [int]$ra.PrincipalId
+                    # Not $pid: that is a read-only automatic variable holding the process id, and
+                    # assigning to it throws. Thrown here it killed the evaluation of every scope,
+                    # which is why a live run reported access on 15 sites and nothing to revoke.
+                    $principalId = [int]$ra.PrincipalId
 
-                    if ($siteUser -and $pid -eq $userId) {
-                        $hits.Add([PSCustomObject]@{ Kind = 'Direct'; PrincipalId = $pid; Via = 'Granted directly to the user'; Levels = ($levels -join '; ') }) | Out-Null
-                    } elseif ($sharingLinkGroupIds.ContainsKey([string]$pid)) {
-                        $hits.Add([PSCustomObject]@{ Kind = 'SharingLink'; PrincipalId = $pid; Via = "Sharing link $($principal.Title)"; Levels = ($levels -join '; ') }) | Out-Null
+                    if ($siteUser -and $principalId -eq $userId) {
+                        $hits.Add([PSCustomObject]@{ Kind = 'Direct'; PrincipalId = $principalId; Via = 'Granted directly to the user'; Levels = ($levels -join '; ') }) | Out-Null
+                    } elseif ($sharingLinkGroupIds.ContainsKey([string]$principalId)) {
+                        $hits.Add([PSCustomObject]@{ Kind = 'SharingLink'; PrincipalId = $principalId; Via = "Sharing link $($principal.Title)"; Levels = ($levels -join '; ') }) | Out-Null
                     } elseif ($principal.DirectoryId -and $userGroupIds.ContainsKey([string]$principal.DirectoryId)) {
-                        $hits.Add([PSCustomObject]@{ Kind = 'EntraGroup'; PrincipalId = $pid; Via = "Entra group $($principal.Title)"; Levels = ($levels -join '; ')
+                        $hits.Add([PSCustomObject]@{ Kind = 'EntraGroup'; PrincipalId = $principalId; Via = "Entra group $($principal.Title)"; Levels = ($levels -join '; ')
                                                      DirectoryId = $principal.DirectoryId; GroupName = $principal.Title }) | Out-Null
                     } elseif ($principal.Kind -in @('Everyone', 'EveryoneExceptExternalUsers', 'AllAuthenticatedUsers')) {
-                        $hits.Add([PSCustomObject]@{ Kind = 'Everyone'; PrincipalId = $pid; Via = $principal.Title; Levels = ($levels -join '; ') }) | Out-Null
+                        $hits.Add([PSCustomObject]@{ Kind = 'Everyone'; PrincipalId = $principalId; Via = $principal.Title; Levels = ($levels -join '; ') }) | Out-Null
                     }
                 }
                 return $hits

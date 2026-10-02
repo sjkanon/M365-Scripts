@@ -920,6 +920,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-02 (5)
+| Change |
+|--------|
+| A live run of `Revoke-SharePointUserAccess.ps1` reported `Sites with access: 15` and `Grants found: 0` — with no errors. The permissions report named 30 grants for the same user on those same sites, so the two disagreed and the revoke side was wrong |
+| **The role assignments were read from the wrong URL.** `Get-ScopeRoleAssignments` was handed the scope base (`/_api/web`) and queried that directly instead of `/_api/web/roleassignments`. SharePoint answered with the web object, which carries no `value` array, so the paging helper found nothing to iterate and returned an empty collection. Nothing failed; it simply found nothing. The function now appends `/roleassignments` itself, which also matches what the removal URL is built from |
+| **`\24384` is a read-only automatic variable.** `\24384 = [int]\.PrincipalId` throws `Cannot overwrite variable PID`. It sat behind the URL bug so it never surfaced, and would have turned every scope evaluation into a caught exception. Renamed, and a check now walks both scripts for assignments to any read-only automatic |
+| Added the general guard for the silent half: a collection endpoint always answers with `value` (or `d.results`) even when empty, so a response carrying neither is the wrong URL rather than an empty result. The paging helper now throws instead of returning nothing, in both scripts |
+| Verified with 126 checks (6 new) plus a reproduction built from the shapes that tenant actually returned: a direct Dutch `Beperkte toegang` grant is now matched, as are sharing links, joined Entra groups and `Everyone`, while another person and an unjoined group are not. **The corrected read is not yet verified against a live tenant** |
+
 ### 2026-10-02 (4)
 | Change |
 |--------|

@@ -920,6 +920,15 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-02 (5)
+| Modification |
+|--------------|
+| Une exécution réelle de `Revoke-SharePointUserAccess.ps1` indiquait `Sites with access: 15` et `Grants found: 0`, sans aucune erreur. Le rapport de permissions recensait 30 attributions pour le même utilisateur sur les mêmes sites : les deux se contredisaient, et cest la révocation qui avait tort |
+| **Les attributions de rôle étaient lues à la mauvaise URL.** `Get-ScopeRoleAssignments` recevait la base de portée (`/_api/web`) et linterrogeait telle quelle au lieu de `/_api/web/roleassignments`. SharePoint répondait par lobjet web, dépourvu de tableau `value` : lassistant de pagination navait rien à parcourir et renvoyait une collection vide. Rien néchouait, rien nétait trouvé. La fonction ajoute désormais `/roleassignments` elle-même, ce qui correspond aussi à la base de lURL de suppression |
+| **`\24384` est une variable automatique en lecture seule.** `\24384 = [int]\.PrincipalId` lève `Cannot overwrite variable PID`. Masquée par le bug dURL, elle nest jamais apparue, mais aurait transformé chaque évaluation de portée en exception rattrapée. Renommée, et un contrôle parcourt désormais les deux scripts à la recherche daffectations à une automatique en lecture seule |
+| Ajout du garde-fou général pour la moitié silencieuse : un point de terminaison de collection répond toujours par `value` (ou `d.results`), même vide. Une réponse sans lun ni lautre est donc la mauvaise URL, pas un résultat vide. Lassistant de pagination lève désormais au lieu de ne rien renvoyer, dans les deux scripts |
+| Vérifié par 126 contrôles (6 nouveaux) et une reproduction fondée sur les formes réellement renvoyées par ce locataire : une attribution directe `Beperkte toegang` est désormais trouvée, tout comme les liens de partage, les groupes Entra rejoints et `Everyone`, tandis quune autre personne et un groupe non rejoint ne correspondent pas. **La lecture corrigée nest pas encore vérifiée sur un locataire réel** |
+
 ### 2026-10-02 (4)
 | Modification |
 |--------------|

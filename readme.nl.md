@@ -920,6 +920,15 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-02 (5)
+| Wijziging |
+|-----------|
+| Een live run van `Revoke-SharePointUserAccess.ps1` meldde `Sites with access: 15` en `Grants found: 0` — zonder fouten. Het rechtenrapport noemde 30 toekenningen voor dezelfde gebruiker op dezelfde sites, dus de twee spraken elkaar tegen en de revoke-kant had ongelijk |
+| **De roltoewijzingen werden van de verkeerde URL gelezen.** `Get-ScopeRoleAssignments` kreeg de scope-basis (`/_api/web`) en bevroeg die rechtstreeks in plaats van `/_api/web/roleassignments`. SharePoint antwoordde met het web-object, dat geen `value`-array heeft, dus de paging-helper vond niets om over te lopen en gaf een lege collectie terug. Er faalde niets; er werd simpelweg niets gevonden. De functie plakt `/roleassignments` er nu zelf achter, wat ook overeenkomt met waar de verwijder-URL op gebouwd is |
+| **`\24384` is een alleen-lezen automatische variabele.** `\24384 = [int]\.PrincipalId` gooit `Cannot overwrite variable PID`. Het zat achter de URL-fout en kwam daardoor nooit bovendrijven, maar zou elke scope-evaluatie in een opgevangen uitzondering hebben veranderd. Hernoemd, en een controle loopt nu beide scripts na op toewijzingen aan alleen-lezen automatische variabelen |
+| De algemene afdekking voor de stille helft toegevoegd: een collectie-endpoint antwoordt altijd met `value` (of `d.results`), ook als hij leeg is. Een antwoord zonder beide is dus de verkeerde URL en geen leeg resultaat. De paging-helper gooit nu in plaats van niets terug te geven, in beide scripts |
+| Geverifieerd met 126 controles (6 nieuw) plus een reproductie op de vormen die die tenant werkelijk teruggaf: een directe `Beperkte toegang` wordt nu wél gevonden, net als deellinks, Entra-groepen waar de gebruiker in zit en `Everyone`, terwijl een andere persoon en een groep waar hij niet in zit niet matchen. **De gecorrigeerde leesactie is nog niet tegen een echte tenant geverifieerd** |
+
 ### 2026-10-02 (4)
 | Wijziging |
 |-----------|
