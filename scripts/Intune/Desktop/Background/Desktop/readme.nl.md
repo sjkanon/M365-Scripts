@@ -11,7 +11,7 @@ Bedrijfsachtergrond voor het bureaublad via Intune — instellen, en weer verwij
 | Script | Omschrijving |
 |--------|--------------|
 | [`Set-CorporateWallpaper.ps1`](Set-CorporateWallpaper.ps1) ([docs](#set-corporatewallpaperps1)) | De bedrijfsachtergrond downloaden en afdwingen voor alle gebruikers (PersonalizationCSP, huidige gebruiker, Default User) |
-| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | De bedrijfsachtergrond terugdraaien: PersonalizationCSP-sleutels en achtergrondbestanden verwijderen, achtergrondinstellingen resetten |
+| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | De bedrijfsachtergrond voor elke gebruiker terugdraaien — alleen wat `Set-CorporateWallpaper.ps1` schreef, de bedrijfs-lockscreen blijft |
 
 ---
 
@@ -143,21 +143,36 @@ Verpakken als Win32-app geeft je controle over opnieuw uitvoeren en detectierege
 
 ## Remove-CorporateWallpaper.ps1
 
-Draait terug wat `Set-CorporateWallpaper.ps1` heeft ingesteld. Geen parameters. Uitvoeren als SYSTEM (Intune-platformscript, of de verwijderopdracht van de Win32-app).
+Draait terug wat `Set-CorporateWallpaper.ps1` heeft ingesteld, en alleen dat. Uitvoeren als SYSTEM (Intune-platformscript, of de verwijderopdracht van de Win32-app).
 
-1. Verwijdert de sleutel `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP` (de via MDM afgedwongen achtergrond)
-2. Zet `HKCU\Control Panel\Desktop` terug (`Wallpaper` leeg, `WallpaperStyle` `10`, `TileWallpaper` `0`)
-3. Verwijdert `C:\ProgramData\Wallpapers`
-4. Haalt de achtergrondwaarden uit de Default User-hive (`C:\Users\Default\NTUSER.DAT`), zodat nieuwe accounts de achtergrond niet meer krijgen
-5. Herstart `explorer.exe` zodat de wijziging meteen zichtbaar is
+1. **PersonalizationCSP** — verwijdert de waarden `DesktopImagePath`, `DesktopImageUrl` en `DesktopImageStatus`. De sleutel zelf verdwijnt alleen als hij daarna leeg is: [`Make-lockscreen.ps1`](../Lockscreen/Make-lockscreen.ps1) bewaart zijn `LockScreen*`-waarden in dezelfde sleutel
+2. **`HKLM\...\Policies\System`** — verwijdert `Wallpaper` en `WallpaperStyle`, maar alleen als ze naar een bedrijfsachtergrond wijzen; een beleid dat iets anders zette, blijft staan
+3. **Elke geladen gebruikershive** (`S-1-5-21-*`) — een achtergrond die naar een bedrijfsbestand wijst, gaat terug naar de Windows-standaard (`img0.jpg`, stijl Opvullen), en de getranscodeerde achtergrondcache van die gebruiker wordt gewist zodat de oude afbeelding niet blijft hangen
+4. **`HKCU` van de huidige gebruiker** — dezelfde reset, maar alleen als het niet als SYSTEM draait (als SYSTEM is `HKCU` het eigen profiel van SYSTEM en dekte stap 3 de gebruikers al)
+5. **Default User-profiel** (`C:\Users\Default\NTUSER.DAT`) — dezelfde reset, zodat nieuwe accounts de achtergrond niet meer krijgen. Overgeslagen met een melding als de hive niet geladen kan worden (niet verhoogd)
+6. **Bestanden** — verwijdert de `corporate-background-*`-bestanden in `C:\ProgramData\Wallpapers`. De map verdwijnt alleen als hij leeg is — de lockscreen-afbeelding staat er ook
+7. Herstart `explorer.exe` zodat de wijziging meteen zichtbaar is
 
-**Voorbeeld**
+"Een bedrijfsbestand" is een `corporate-background-*`-bestand in `C:\ProgramData\Wallpapers` — de naam die `Set-CorporateWallpaper.ps1` het geeft.
+
+**Parameters**
+
+| Parameter | Omschrijving |
+|-----------|-------------|
+| `-WhatIf` | Toon elke waarde en elk bestand dat verwijderd of gereset zou worden; wijzig niets |
+
+**Voorbeelden**
 
 ```powershell
+# Als SYSTEM (Intune-platformscript / verwijderopdracht van de Win32-app)
 powershell.exe -ExecutionPolicy Bypass -File Remove-CorporateWallpaper.ps1
+
+# Zien wat het zou doen
+.\Remove-CorporateWallpaper.ps1 -WhatIf
 ```
 
 **Opmerkingen**
 
-- De waarde `Wallpaper` onder `HKLM\...\Policies\System` en de achtergrondwaarden in andere geladen gebruikershives, die `Set-CorporateWallpaper.ps1` (2.3+) ook schrijft, worden niet opgeruimd — controleer die handmatig als de achtergrond afgedwongen blijft.
-- Als SYSTEM uitgevoerd zet stap 2 het SYSTEM-profiel terug, niet dat van de aangemelde gebruiker.
+- Logboek: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-Remove.log`
+- Gebruikers waarvan het profiel niet geladen is (niet aangemeld) houden de achtergrondwaarde in hun eigen hive; Windows toont de standaard zodra het bestand weg is, en de volgende run van dit script terwijl ze aangemeld zijn, zet de waarde terug
+- Eerdere versies verwijderden de hele PersonalizationCSP-sleutel en de hele map `C:\ProgramData\Wallpapers`, waardoor ook de bedrijfs-lockscreen verdween

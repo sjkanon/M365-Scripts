@@ -966,6 +966,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (13)
+| Change |
+|--------|
+| **`Remove-CorporateWallpaper.ps1` also removed the corporate lockscreen.** It deleted the whole `PersonalizationCSP` key and the whole `C:\ProgramData\Wallpapers` folder, but `Make-lockscreen.ps1` keeps its `LockScreen*` values in that key and its image in that folder. It now removes only the `Desktop*` values and the `corporate-background-*` files, and the key or folder only when nothing else is left in it |
+| It also missed half of what `Set-CorporateWallpaper.ps1` writes: the `Policies\System` fallback and every other loaded user hive stayed on the corporate wallpaper, and run as SYSTEM its `HKCU` reset hit SYSTEM's own profile instead of a user's. It now resets the policy values, every loaded user hive and the Default User profile — only where they point at a corporate file — back to the Windows default image, clears those users' transcoded wallpaper cache, and touches `HKCU` only when not running as SYSTEM. Logs to the Intune log folder; `-WhatIf` shows what it would do |
+| Verified: syntax check; the functions tested against a scratch registry key — a corporate value is reset to `img0.jpg` with style Fill, a lockscreen file or a wallpaper elsewhere is not recognised as ours, a foreign wallpaper is kept, and `-WhatIf` changes nothing; and a full `-WhatIf` run on a workstation, which skips the Default User hive with a message when not elevated. Not run as SYSTEM or through Intune |
+
 ### 2026-10-05 (12)
 | Change |
 |--------|

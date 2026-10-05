@@ -966,6 +966,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (13)
+| Modification |
+|--------|
+| **`Remove-CorporateWallpaper.ps1` supprimait aussi l'écran de verrouillage d'entreprise.** Il effaçait toute la clé `PersonalizationCSP` et tout le dossier `C:\ProgramData\Wallpapers`, alors que `Make-lockscreen.ps1` conserve ses valeurs `LockScreen*` dans cette clé et son image dans ce dossier. Il ne supprime désormais que les valeurs `Desktop*` et les fichiers `corporate-background-*`, et la clé ou le dossier seulement s'ils sont ensuite vides |
+| Il oubliait aussi la moitié de ce qu'écrit `Set-CorporateWallpaper.ps1` : la stratégie de repli `Policies\System` et toutes les autres ruches utilisateur chargées restaient sur le fond d'entreprise, et en SYSTEM sa réinitialisation de `HKCU` touchait le profil de SYSTEM au lieu de celui d'un utilisateur. Il remet désormais les valeurs de stratégie, chaque ruche utilisateur chargée et le profil Default User — uniquement là où ils pointent vers un fichier d'entreprise — sur l'image Windows par défaut, vide le cache de fond d'écran transcodé de ces utilisateurs, et ne touche `HKCU` que hors exécution en SYSTEM. Journalise dans le dossier de journaux Intune ; `-WhatIf` montre ce qu'il ferait |
+| Vérifié : contrôle de syntaxe ; les fonctions testées sur une clé de registre temporaire — une valeur d'entreprise est remise sur `img0.jpg` en style Remplir, un fichier d'écran de verrouillage ou un fond situé ailleurs n'est pas reconnu comme le nôtre, un fond étranger est conservé, et `-WhatIf` ne modifie rien ; et une exécution `-WhatIf` complète sur un poste, qui ignore la ruche Default User avec un message lorsqu'elle n'est pas élevée. Non exécuté en SYSTEM ni via Intune |
+
 ### 2026-10-05 (12)
 | Modification |
 |--------|

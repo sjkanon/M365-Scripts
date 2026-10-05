@@ -966,6 +966,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (13)
+| Wijziging |
+|--------|
+| **`Remove-CorporateWallpaper.ps1` verwijderde ook de bedrijfs-lockscreen.** Het wiste de hele `PersonalizationCSP`-sleutel en de hele map `C:\ProgramData\Wallpapers`, terwijl `Make-lockscreen.ps1` zijn `LockScreen*`-waarden in die sleutel en zijn afbeelding in die map bewaart. Het verwijdert nu alleen de `Desktop*`-waarden en de `corporate-background-*`-bestanden, en de sleutel of map alleen als er daarna niets meer in staat |
+| Het miste ook de helft van wat `Set-CorporateWallpaper.ps1` schrijft: de terugval in `Policies\System` en elke andere geladen gebruikershive bleven op de bedrijfsachtergrond staan, en als SYSTEM trof de `HKCU`-reset het eigen profiel van SYSTEM in plaats van dat van een gebruiker. Het zet nu de beleidswaarden, elke geladen gebruikershive en het Default User-profiel — alleen waar ze naar een bedrijfsbestand wijzen — terug naar de standaardafbeelding van Windows, wist de getranscodeerde achtergrondcache van die gebruikers, en raakt `HKCU` alleen aan als het niet als SYSTEM draait. Logt naar de Intune-logmap; `-WhatIf` toont wat het zou doen |
+| Geverifieerd: syntaxcontrole; de functies getest tegen een tijdelijke registersleutel — een bedrijfswaarde wordt teruggezet naar `img0.jpg` met stijl Opvullen, een lockscreen-bestand of een achtergrond elders wordt niet als de onze herkend, een vreemde achtergrond blijft staan, en `-WhatIf` wijzigt niets; en een volledige `-WhatIf`-run op een werkstation, die de Default User-hive met een melding overslaat als het niet verhoogd draait. Niet als SYSTEM of via Intune gedraaid |
+
 ### 2026-10-05 (12)
 | Wijziging |
 |--------|

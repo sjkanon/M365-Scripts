@@ -11,7 +11,7 @@ Corporate desktop wallpaper via Intune — set it, and take it off again.
 | Script | Description |
 |--------|-------------|
 | [`Set-CorporateWallpaper.ps1`](Set-CorporateWallpaper.ps1) ([docs](#set-corporatewallpaperps1)) | Download the corporate wallpaper and enforce it for all users (PersonalizationCSP, current user, Default User) |
-| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | Revert the corporate wallpaper: remove the PersonalizationCSP keys and wallpaper files, reset the wallpaper settings |
+| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | Undo the corporate wallpaper for every user — only what `Set-CorporateWallpaper.ps1` wrote, the corporate lockscreen stays |
 
 ---
 
@@ -143,21 +143,36 @@ Packaging as a Win32 app allows re-run control and detection rules.
 
 ## Remove-CorporateWallpaper.ps1
 
-Reverts what `Set-CorporateWallpaper.ps1` put in place. No parameters. Run as SYSTEM (Intune platform script, or the uninstall command of the Win32 app).
+Reverts what `Set-CorporateWallpaper.ps1` put in place, and only that. Run as SYSTEM (Intune platform script, or the uninstall command of the Win32 app).
 
-1. Deletes the `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP` key (the MDM-enforced wallpaper)
-2. Resets `HKCU\Control Panel\Desktop` (`Wallpaper` empty, `WallpaperStyle` `10`, `TileWallpaper` `0`)
-3. Deletes `C:\ProgramData\Wallpapers`
-4. Removes the wallpaper values from the Default User hive (`C:\Users\Default\NTUSER.DAT`), so new accounts no longer get it
-5. Restarts `explorer.exe` so the change shows immediately
+1. **PersonalizationCSP** — removes the `DesktopImagePath`, `DesktopImageUrl` and `DesktopImageStatus` values. The key itself is removed only when it is then empty: [`Make-lockscreen.ps1`](../Lockscreen/Make-lockscreen.ps1) keeps its `LockScreen*` values in the same key
+2. **`HKLM\...\Policies\System`** — removes `Wallpaper` and `WallpaperStyle`, but only when they point at a corporate wallpaper file; a policy set by something else is left alone
+3. **Every loaded user hive** (`S-1-5-21-*`) — a wallpaper pointing at a corporate file is put back to the Windows default (`img0.jpg`, style Fill), and that user's transcoded wallpaper cache is cleared so the old image does not linger
+4. **The current user's `HKCU`** — the same reset, but only when not running as SYSTEM (as SYSTEM, `HKCU` is SYSTEM's own profile and step 3 already covered the users)
+5. **Default User profile** (`C:\Users\Default\NTUSER.DAT`) — the same reset, so new accounts no longer get the wallpaper. Skipped with a message when the hive cannot be loaded (not elevated)
+6. **Files** — deletes the `corporate-background-*` files in `C:\ProgramData\Wallpapers`. The folder is removed only when it is empty — the lockscreen image lives there too
+7. Restarts `explorer.exe` so the change shows immediately
 
-**Example**
+"A corporate file" means a `corporate-background-*` file in `C:\ProgramData\Wallpapers` — the name `Set-CorporateWallpaper.ps1` gives it.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-WhatIf` | Show every value and file that would be removed or reset; change nothing |
+
+**Examples**
 
 ```powershell
+# As SYSTEM (Intune platform script / Win32 uninstall command)
 powershell.exe -ExecutionPolicy Bypass -File Remove-CorporateWallpaper.ps1
+
+# See what it would do
+.\Remove-CorporateWallpaper.ps1 -WhatIf
 ```
 
 **Notes**
 
-- It does not clear the `Wallpaper` value under `HKLM\...\Policies\System` or the wallpaper values in other loaded user hives that `Set-CorporateWallpaper.ps1` (2.3+) also writes — check those by hand if the wallpaper stays enforced.
-- Run as SYSTEM, step 2 resets the SYSTEM profile rather than the signed-in user's.
+- Log: `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-Remove.log`
+- Users whose profile is not loaded (not signed in) keep the wallpaper value in their own hive; Windows shows the default once the file is gone, and the next run of this script while they are signed in resets the value
+- Earlier versions deleted the whole PersonalizationCSP key and the whole `C:\ProgramData\Wallpapers` folder, which also removed the corporate lockscreen
