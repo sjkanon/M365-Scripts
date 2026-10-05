@@ -12,9 +12,9 @@ Controleert de logs van SAS-batchjobs en de Windows Event Viewer op fouten, met 
 
 | Bestand | Omschrijving |
 |------|-------------|
-| [`Monitor-SASBatchErrors.ps1`](Monitor-SASBatchErrors.ps1) | Hoofdscript — doorzoekt logbestanden en Event Viewer |
-| [`Setup-SASMonitoring.ps1`](Setup-SASMonitoring.ps1) | Eenmalige setup — installeert het script, de geplande taak en de Zabbix-configuratie |
-| [`Test-SASWorkDirectory.ps1`](Test-SASWorkDirectory.ps1) | Controleert de gezondheid en de rechten van de SAS WORK-map |
+| [`Monitor-SASBatchErrors.ps1`](Monitor-SASBatchErrors.ps1) ([docs](#monitor-sasbatcherrorsps1)) | Hoofdscript — doorzoekt logbestanden en Event Viewer |
+| [`Setup-SASMonitoring.ps1`](Setup-SASMonitoring.ps1) ([docs](#setup-sasmonitoringps1)) | Eenmalige setup — installeert het script, de geplande taak en de Zabbix-configuratie |
+| [`Test-SASWorkDirectory.ps1`](Test-SASWorkDirectory.ps1) ([docs](#test-sasworkdirectoryps1)) | Controleert de gezondheid en de rechten van de SAS WORK-map |
 | `rca.md` | Oorzaakanalyse van periodieke access-denied-fouten bij het verwijderen in SAS WORK |
 | `zabbix_sas_monitor.conf` | Voorbeeldconfiguratie voor Zabbix UserParameter |
 
@@ -33,7 +33,7 @@ Controleert de logs van SAS-batchjobs en de Windows Event Viewer op fouten, met 
 
 ---
 
-## Setup
+## Setup-SASMonitoring.ps1
 
 ```powershell
 # Uitvoeren als Administrator
@@ -50,7 +50,7 @@ De setup installeert `Monitor-SASBatchErrors.ps1` in `C:\Scripts\` en maakt een 
 
 ---
 
-## Gebruik
+## Monitor-SASBatchErrors.ps1
 
 ```powershell
 # Laatste 7 dagen doorzoeken, tekstuitvoer
@@ -70,12 +70,20 @@ De setup installeert `Monitor-SASBatchErrors.ps1` in `C:\Scripts\` en maakt een 
 
 # Opslaan in een bestand
 .\Monitor-SASBatchErrors.ps1 -LogDirectory "E:\SAS\Logs" -OutputFile "C:\Temp\report.txt"
-
-# Gezondheidscontrole van WORK/USERWORK met AV-/filterdiagnose
-.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
 ```
 
 **Exitcodes:** `0` = geen critical/high fouten · `1` = ernst high · `2` = critical · `-1` = scriptfout
+
+---
+
+## Test-SASWorkDirectory.ps1
+
+Controleert of de SAS WORK-map (`G:\sas\work`) en USERWORK-map (`U:\sas\userwork`) bereikbaar zijn en werken, met eenvoudige I/O-tests die lopende SAS-jobs niet hinderen (`-Iterations`, standaard 10), en controleert het schijfprofiel van tijdelijke scratchschijven.
+
+```powershell
+# Gezondheidscontrole van WORK/USERWORK met AV-/filterdiagnose
+.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
+```
 
 De AV-diagnose van `Test-SASWorkDirectory.ps1` omvat:
 

@@ -14,8 +14,8 @@ Scripts om SMTP-connectiviteit en -authenticatie te testen tegen Office 365 (of 
 
 | Bestand | Omschrijving |
 |---|---|
-| [`testsmtp.ps1`](testsmtp.ps1) | Eenmalige SMTP-test — vraagt interactief om het wachtwoord |
-| [`testsmtp_5min.ps1`](testsmtp_5min.ps1) | Terugkerende test — verstuurt elke 5 minuten met een opgeslagen wachtwoord |
+| [`testsmtp.ps1`](testsmtp.ps1) ([docs](#testsmtpps1)) | Eenmalige SMTP-test — vraagt interactief om het wachtwoord |
+| [`testsmtp_5min.ps1`](testsmtp_5min.ps1) ([docs](#testsmtp_5minps1)) | Terugkerende test — verstuurt elke 5 minuten met een opgeslagen wachtwoord |
 
 ---
 

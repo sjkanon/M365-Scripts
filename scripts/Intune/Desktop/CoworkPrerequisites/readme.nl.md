@@ -21,15 +21,17 @@ Behandelt je omgeving Cowork als harde eis in plaats van optioneel, rol dan eers
 
 | Script | Rol in Intune |
 |---|---|
-| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) | **Het script dat je uitvoert** voor de Win32-app-route. Verpakt de scripts hieronder en maakt de Win32-app aan of werkt die bij. |
-| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) | Contentscript voor de installatieopdracht van de Win32-app |
-| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) | Contentscript voor de verwijderopdracht van de Win32-app |
-| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) | Aangepast detectiescript van de Win32-app |
-| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) | **Alternatieve**, zelfstandige route — geen Deploy-script, geen verpakking, rechtstreeks geüpload als Intune-"Platform script". Zie "Alternatief: platformscript" hieronder. |
+| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) ([docs](#deploy-coworkprerequisitesintuneps1)) | **Het script dat je uitvoert** voor de Win32-app-route. Verpakt de scripts hieronder en maakt de Win32-app aan of werkt die bij. |
+| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) ([docs](#install-coworkprerequisites-intuneps1)) | Contentscript voor de installatieopdracht van de Win32-app |
+| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) ([docs](#uninstall-coworkprerequisites-intuneps1)) | Contentscript voor de verwijderopdracht van de Win32-app |
+| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) ([docs](#detect-coworkprerequisites-intuneps1)) | Aangepast detectiescript van de Win32-app |
+| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) ([docs](#coworkprerequisites-platformscriptps1)) | **Alternatieve**, zelfstandige route — geen Deploy-script, geen verpakking, rechtstreeks geüpload als Intune-"Platform script". |
 
 Er is hier geen MSIX — anders dan bij Claude Desktop bestaat de "content" alleen uit deze drie scripts, dus een nieuwe run doet alleen iets als je er echt een hebt aangepast (bijgehouden via een `ScriptsHash` in het veld Notes van de app, hetzelfde patroon als `Deploy-ClaudeDesktopIntune.ps1`).
 
-## Wat het installatiescript doet
+## Install-CoworkPrerequisites-Intune.ps1
+
+Installatieopdracht van de Win32-app. Wat het doet:
 
 1. **VirtualMachinePlatform**: `Enable-WindowsOptionalFeature`, met nieuwe pogingen bij tijdelijke DISM-fouten. Doet niets als het al is ingeschakeld.
 2. **Snel opstarten**: zet bij elke run `HiberbootEnabled = 0` onder `HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power` (niet alleen wanneer VMP net is ingeschakeld). De eigen Cowork-documentatie van Anthropic waarschuwt expliciet: *"Restart the machine using Restart, not shut down and power on. With Windows Fast Startup enabled, a shutdown cycle can leave the virtualization services uninitialized."* Snel opstarten staat op vrijwel elk Windows-image standaard aan — zonder het uit te schakelen krijgt een gebruiker die gewoon "afsluit" in plaats van "opnieuw opstart" (het gebruikelijke geval) nooit werkende Cowork-services, hoe vaak het apparaat ook uit en aan gaat, terwijl Intune de app als geïnstalleerd toont.
@@ -37,7 +39,9 @@ Er is hier geen MSIX — anders dan bij Claude Desktop bestaat de "content" alle
 
    De melding wordt **niet** verstuurd door `msg.exe` rechtstreeks vanuit dit script in SYSTEM-context aan te roepen — dat levert een dialoogvenster op waarvan de knop OK niet op klikken reageert (een bekende eigenaardigheid van `msg.exe` bij berichten tussen sessies vanaf een niet-interactieve afzender). In plaats daarvan registreert `Show-UserRestartNotification` een kortlevende geplande taak (`LogonType Interactive`, principal = de eigen gebruiker van de consolesessie) die `msg.exe` *binnen de eigen sessie van de gebruiker* uitvoert, en die taak na verzending weer afmeldt — het dialoogvenster hoort dan bij een echt interactief bureaublad en sluit normaal.
 
-## Wat het detectiescript controleert
+## Detect-CoworkPrerequisites-Intune.ps1
+
+Aangepast detectiescript van de Win32-app.
 
 Meldt alleen "installed" als **zowel** `VirtualMachinePlatform` op `Enabled` staat **als** de onderliggende HCS-services (`vmcompute`, `HNS`, `vfpext`) aanwezig zijn — dat VMP in DISM `Enabled` toont, garandeert niet dat deze services al bestaan (zie de eigen Cowork-probleemoplossing van Anthropic: *"Missing HCS services: HNS, vmcompute, vfpext"*), vooral niet vlak na het inschakelen van VMP maar vóór de vereiste herstart.
 
@@ -53,7 +57,9 @@ Op dezelfde manier opgelost: de update-tak geeft `-RequirementRule` niet meer do
 
 `-CompanyPortalFeaturedApp $true` wordt bij elke run gezet (zowel bij het aanmaken als bij updates), zodat de app uitgelicht in de Bedrijfsportal verschijnt in plaats van onzichtbaar te blijven als vereiste die alleen op de achtergrond draait. Er is hier geen MSIX om een logo uit te halen, dus het standaardpictogram voor Win32-apps van Intune wordt gebruikt — stel achteraf in de Intune-portal handmatig `-Icon` in als je een eigen pictogram wilt.
 
-## Maandelijkse run / run wanneer nodig
+## Deploy-CoworkPrerequisitesIntune.ps1
+
+Voer het maandelijks uit, of wanneer een contentscript is gewijzigd:
 
 ```powershell
 .\Deploy-CoworkPrerequisitesIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
@@ -71,7 +77,13 @@ Zelfde gedrag voor bevestiging/`-Force` als `Deploy-ClaudeDesktopIntune.ps1`. Om
 | `-IntuneWinAppUtilPath` | automatische download | Gebruik een al gedownloade `IntuneWinAppUtil.exe` |
 | `-Force` | uit | Sla de bevestigingsprompt(s) over |
 
-## Verwijderen
+## Uninstall-CoworkPrerequisites-Intune.ps1
+
+Verwijderopdracht van de Win32-app.
+
+| Parameter | Verplicht | Beschrijving |
+|-----------|-----------|--------------|
+| `-DisableVirtualMachinePlatform` | Nee | Schakelt ook de Windows-functie `VirtualMachinePlatform` uit — alleen als niets anders op het apparaat die nodig heeft |
 
 `VirtualMachinePlatform` wordt standaard **niet** uitgeschakeld (andere toepassingen — WSL, op Hyper-V gebaseerde tools, andere Cowork-achtige apps — kunnen er ook van afhangen). Geef `-DisableVirtualMachinePlatform` mee aan het verwijderscript als je zeker weet dat niets anders op het apparaat het nodig heeft. Snel opstarten blijft in beide gevallen uitgeschakeld — dat is een onschuldige, apparaatbrede instelling, niet iets dat specifiek bij Cowork hoort.
 
@@ -80,7 +92,7 @@ Zelfde gedrag voor bevestiging/`-Force` als `Deploy-ClaudeDesktopIntune.ps1`. Om
 - De PowerShell-modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` en `IntuneWin32App` — installeer ze met `.\scripts\Startup\Install-Modules.ps1`
 - Uitvoeren vanaf Windows (de verpakkingstool en de DISM-cmdlets werken alleen op Windows)
 
-## Alternatief: platformscript
+## CoworkPrerequisites-PlatformScript.ps1
 
 `CoworkPrerequisites-PlatformScript.ps1` bevat dezelfde logica voor VMP inschakelen en Snel opstarten uitschakelen, aangepast om rechtstreeks als Intune-**Platform script** te worden geüpload (Devices → Scripts and remediations → Platform scripts) in plaats van via de Win32-app-machinerie hierboven. Geen `.intunewin`-verpakking, geen detectie-/vereistenregel, geen `Deploy-*.ps1` — upload gewoon dat ene bestand.
 

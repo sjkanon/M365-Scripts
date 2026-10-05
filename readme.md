@@ -918,6 +918,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (10)
+| Change |
+|--------|
+| Every folder readme now follows the `scripts/Intune/` pattern: each script in the `## Scripts` table links to the file **and** to its section (`([docs](#…))`). 19 folders did not, in all three languages: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph and Intune/Desktop/Background/Desktop and /Lockscreen had no scripts table at all, and Reporting/Licensing only a tree; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (no file link for `GetAutoPilot.CMD`), UniFi, SAS, SMTP, Startup and one row in SharePoint/Provisioning had rows without a docs link |
+| Where a script was documented under a descriptive heading, the heading now carries the file name so the anchor is the same in every language (checked first that nothing linked to the old anchor). Scripts that had no section got a short one from their own header comment: `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `Test-SASWorkDirectory.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, and a shared section for the ClaudeDesktop install/uninstall/detect scripts. The `Remove-CorporateWallpaper.ps1` notes record that it does not undo everything `Set-CorporateWallpaper.ps1` 2.3+ writes |
+| Also corrected: the Intune readme still said the Office theme scripts hardcode their URL, and the Provisioning notes said the shared module is dot-sourced by "all four" scripts — all ten in the folder use it |
+| Verified: every script in every folder readme has a file link and a docs link whose anchor exists (scripted check over all 57 folder readmes), and the link check passes over 4562 internal links. Nothing was run |
+
 ### 2026-10-05 (9)
 | Change |
 |--------|

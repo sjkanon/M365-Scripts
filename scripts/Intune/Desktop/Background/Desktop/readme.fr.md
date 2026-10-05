@@ -2,7 +2,20 @@
 
 [M365-Scripts](../../../../../readme.fr.md) › [scripts](../../../../readme.fr.md) › [Intune](../../../readme.fr.md) › [Desktop](../../readme.fr.md) › [Background](../readme.fr.md) › **Desktop**
 
-# Set-CorporateWallpaper.ps1
+# Desktop
+
+Fond d'écran d'entreprise du bureau via Intune — le définir, et le retirer.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Set-CorporateWallpaper.ps1`](Set-CorporateWallpaper.ps1) ([docs](#set-corporatewallpaperps1)) | Télécharger le fond d'écran d'entreprise et l'imposer à tous les utilisateurs (PersonalizationCSP, utilisateur actuel, Default User) |
+| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | Annuler le fond d'écran d'entreprise : supprimer les clés PersonalizationCSP et les fichiers de fond d'écran, réinitialiser les paramètres du fond d'écran |
+
+---
+
+## Set-CorporateWallpaper.ps1
 
 > Auteur : Sjoerd Kanon
 
@@ -125,3 +138,26 @@ L'empaquetage en application Win32 permet de contrôler les réexécutions et d'
 | 2026-04-14 | 2.5 | Ajout d'une étape de redémarrage d'`explorer.exe` pour que les changements de fond d'écran/thème soient visibles immédiatement pour les utilisateurs connectés |
 | 2026-04-14 | 2.6 | Rétablissement des valeurs de configuration génériques par défaut (`$ImageUrl`, `$ClientName`) pour des déploiements clients réutilisables |
 | 2026-04-14 | 2.7 | Ajout d'une sauvegarde de sécurité du fond d'écran actuel et modification de l'ordre de remplacement pour que le fond d'écran précédent reste disponible si la mise à jour échoue |
+
+---
+
+## Remove-CorporateWallpaper.ps1
+
+Annule ce que `Set-CorporateWallpaper.ps1` a mis en place. Aucun paramètre. À exécuter en tant que SYSTEM (script de plateforme Intune, ou commande de désinstallation de l'application Win32).
+
+1. Supprime la clé `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP` (le fond d'écran imposé par MDM)
+2. Réinitialise `HKCU\Control Panel\Desktop` (`Wallpaper` vide, `WallpaperStyle` `10`, `TileWallpaper` `0`)
+3. Supprime `C:\ProgramData\Wallpapers`
+4. Retire les valeurs de fond d'écran de la ruche Default User (`C:\Users\Default\NTUSER.DAT`), afin que les nouveaux comptes ne le reçoivent plus
+5. Redémarre `explorer.exe` pour que la modification soit visible immédiatement
+
+**Exemple**
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File Remove-CorporateWallpaper.ps1
+```
+
+**Remarques**
+
+- Il ne supprime pas la valeur `Wallpaper` sous `HKLM\...\Policies\System` ni les valeurs de fond d'écran des autres ruches utilisateur chargées, que `Set-CorporateWallpaper.ps1` (2.3+) écrit également — vérifiez-les manuellement si le fond d'écran reste imposé.
+- Exécuté en tant que SYSTEM, l'étape 2 réinitialise le profil SYSTEM et non celui de l'utilisateur connecté.

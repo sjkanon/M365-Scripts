@@ -12,14 +12,14 @@ Startscripts en de centrale M365-functiebibliotheek.
 
 | Bestand | Omschrijving |
 |------|-------------|
-| [`functies.ps1`](functies.ps1) | M365-functiebibliotheek — bij eerste gebruik door `menu.ps1` gedot-sourced |
-| [`Install-Modules.ps1`](Install-Modules.ps1) | Bootstrapscript — installeert en importeert alle benodigde PowerShell-modules |
-| [`Update-Modules.ps1`](Update-Modules.ps1) | Werkt elke geïnstalleerde PowerShell-module bij naar de nieuwste versie |
-| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) | Controleert `.ps1`-bestanden in de repo op syntaxfouten door ze te parsen, zonder ze uit te voeren |
-| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Genereert [`scripts/INDEX.md`](../INDEX.md) opnieuw — de doorzoekbare A–Z-lijst van alle scripts |
-| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Controleert elke link in elke readme — bestanden die moeten bestaan, anchors die met een kop moeten overeenkomen |
-| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Bouwt van een markdowndocument een op zichzelf staande, opgemaakte HTML-pagina — om in IT Glue te plakken of af te drukken |
-| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) | Zet de taalwissel en het kruimelpad bovenaan elke readme, in het Engels, Nederlands en Frans |
+| [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365-functiebibliotheek — bij eerste gebruik door `menu.ps1` gedot-sourced |
+| [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrapscript — installeert en importeert alle benodigde PowerShell-modules |
+| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Werkt elke geïnstalleerde PowerShell-module bij naar de nieuwste versie |
+| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Controleert `.ps1`-bestanden in de repo op syntaxfouten door ze te parsen, zonder ze uit te voeren |
+| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) ([docs](#update-scriptindexps1)) | Genereert [`scripts/INDEX.md`](../INDEX.md) opnieuw — de doorzoekbare A–Z-lijst van alle scripts |
+| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) ([docs](#test-markdownlinksps1)) | Controleert elke link in elke readme — bestanden die moeten bestaan, anchors die met een kop moeten overeenkomen |
+| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) ([docs](#convert-markdowntohtmlps1)) | Bouwt van een markdowndocument een op zichzelf staande, opgemaakte HTML-pagina — om in IT Glue te plakken of af te drukken |
+| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) ([docs](#update-readmeheaderps1)) | Zet de taalwissel en het kruimelpad bovenaan elke readme, in het Engels, Nederlands en Frans |
 
 ---
 

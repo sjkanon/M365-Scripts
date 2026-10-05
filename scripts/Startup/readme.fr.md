@@ -12,14 +12,14 @@ Scripts de démarrage et bibliothèque de fonctions M365 centrale.
 
 | Fichier | Description |
 |------|-------------|
-| [`functies.ps1`](functies.ps1) | Bibliothèque de fonctions M365 — chargée par dot-sourcing par `menu.ps1` à la première utilisation |
-| [`Install-Modules.ps1`](Install-Modules.ps1) | Script d'amorçage — installe et importe tous les modules PowerShell nécessaires |
-| [`Update-Modules.ps1`](Update-Modules.ps1) | Met à jour chaque module PowerShell installé vers sa dernière version |
-| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) | Vérifie par analyse syntaxique les fichiers `.ps1` du dépôt, sans les exécuter |
-| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Régénère [`scripts/INDEX.md`](../INDEX.md) — la liste A–Z consultable de tous les scripts |
-| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Vérifie chaque lien de chaque readme — fichiers qui doivent exister, ancres qui doivent correspondre à un titre |
-| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Génère une page HTML autonome et mise en forme à partir d'un document markdown — à coller dans IT Glue ou à imprimer |
-| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) | Écrit le sélecteur de langue et le fil d'Ariane en tête de chaque readme, en anglais, néerlandais et français |
+| [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | Bibliothèque de fonctions M365 — chargée par dot-sourcing par `menu.ps1` à la première utilisation |
+| [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Script d'amorçage — installe et importe tous les modules PowerShell nécessaires |
+| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Met à jour chaque module PowerShell installé vers sa dernière version |
+| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Vérifie par analyse syntaxique les fichiers `.ps1` du dépôt, sans les exécuter |
+| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) ([docs](#update-scriptindexps1)) | Régénère [`scripts/INDEX.md`](../INDEX.md) — la liste A–Z consultable de tous les scripts |
+| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) ([docs](#test-markdownlinksps1)) | Vérifie chaque lien de chaque readme — fichiers qui doivent exister, ancres qui doivent correspondre à un titre |
+| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) ([docs](#convert-markdowntohtmlps1)) | Génère une page HTML autonome et mise en forme à partir d'un document markdown — à coller dans IT Glue ou à imprimer |
+| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) ([docs](#update-readmeheaderps1)) | Écrit le sélecteur de langue et le fil d'Ariane en tête de chaque readme, en anglais, néerlandais et français |
 
 ---
 

@@ -2,7 +2,20 @@
 
 [M365-Scripts](../../../../../readme.nl.md) › [scripts](../../../../readme.nl.md) › [Intune](../../../readme.nl.md) › [Desktop](../../readme.nl.md) › [Background](../readme.nl.md) › **Desktop**
 
-# Set-CorporateWallpaper.ps1
+# Desktop
+
+Bedrijfsachtergrond voor het bureaublad via Intune — instellen, en weer verwijderen.
+
+## Scripts
+
+| Script | Omschrijving |
+|--------|--------------|
+| [`Set-CorporateWallpaper.ps1`](Set-CorporateWallpaper.ps1) ([docs](#set-corporatewallpaperps1)) | De bedrijfsachtergrond downloaden en afdwingen voor alle gebruikers (PersonalizationCSP, huidige gebruiker, Default User) |
+| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | De bedrijfsachtergrond terugdraaien: PersonalizationCSP-sleutels en achtergrondbestanden verwijderen, achtergrondinstellingen resetten |
+
+---
+
+## Set-CorporateWallpaper.ps1
 
 > Auteur: Sjoerd Kanon
 
@@ -125,3 +138,26 @@ Verpakken als Win32-app geeft je controle over opnieuw uitvoeren en detectierege
 | 2026-04-14 | 2.5 | Stap toegevoegd die `explorer.exe` herstart, zodat wijzigingen in achtergrond/thema direct zichtbaar worden voor aangemelde gebruikers |
 | 2026-04-14 | 2.6 | Generieke standaardconfiguratiewaarden (`$ImageUrl`, `$ClientName`) hersteld voor herbruikbare klantuitrols |
 | 2026-04-14 | 2.7 | Failsafe-back-up van de huidige achtergrond toegevoegd en de vervangvolgorde aangepast, zodat de vorige achtergrond beschikbaar blijft als de update mislukt |
+
+---
+
+## Remove-CorporateWallpaper.ps1
+
+Draait terug wat `Set-CorporateWallpaper.ps1` heeft ingesteld. Geen parameters. Uitvoeren als SYSTEM (Intune-platformscript, of de verwijderopdracht van de Win32-app).
+
+1. Verwijdert de sleutel `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP` (de via MDM afgedwongen achtergrond)
+2. Zet `HKCU\Control Panel\Desktop` terug (`Wallpaper` leeg, `WallpaperStyle` `10`, `TileWallpaper` `0`)
+3. Verwijdert `C:\ProgramData\Wallpapers`
+4. Haalt de achtergrondwaarden uit de Default User-hive (`C:\Users\Default\NTUSER.DAT`), zodat nieuwe accounts de achtergrond niet meer krijgen
+5. Herstart `explorer.exe` zodat de wijziging meteen zichtbaar is
+
+**Voorbeeld**
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File Remove-CorporateWallpaper.ps1
+```
+
+**Opmerkingen**
+
+- De waarde `Wallpaper` onder `HKLM\...\Policies\System` en de achtergrondwaarden in andere geladen gebruikershives, die `Set-CorporateWallpaper.ps1` (2.3+) ook schrijft, worden niet opgeruimd — controleer die handmatig als de achtergrond afgedwongen blijft.
+- Als SYSTEM uitgevoerd zet stap 2 het SYSTEM-profiel terug, niet dat van de aangemelde gebruiker.

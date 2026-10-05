@@ -12,9 +12,9 @@ Monitors SAS batch job logs and Windows Event Viewer for errors, with optional Z
 
 | File | Description |
 |------|-------------|
-| [`Monitor-SASBatchErrors.ps1`](Monitor-SASBatchErrors.ps1) | Main script — scans log files and Event Viewer |
-| [`Setup-SASMonitoring.ps1`](Setup-SASMonitoring.ps1) | One-time setup — installs script, scheduled task, Zabbix config |
-| [`Test-SASWorkDirectory.ps1`](Test-SASWorkDirectory.ps1) | Validates SAS WORK directory health and permissions |
+| [`Monitor-SASBatchErrors.ps1`](Monitor-SASBatchErrors.ps1) ([docs](#monitor-sasbatcherrorsps1)) | Main script — scans log files and Event Viewer |
+| [`Setup-SASMonitoring.ps1`](Setup-SASMonitoring.ps1) ([docs](#setup-sasmonitoringps1)) | One-time setup — installs script, scheduled task, Zabbix config |
+| [`Test-SASWorkDirectory.ps1`](Test-SASWorkDirectory.ps1) ([docs](#test-sasworkdirectoryps1)) | Validates SAS WORK directory health and permissions |
 | `rca.md` | Root cause analysis for intermittent SAS WORK delete access-denied failures |
 | `zabbix_sas_monitor.conf` | Example Zabbix UserParameter config |
 
@@ -33,7 +33,7 @@ Monitors SAS batch job logs and Windows Event Viewer for errors, with optional Z
 
 ---
 
-## Setup
+## Setup-SASMonitoring.ps1
 
 ```powershell
 # Run as Administrator
@@ -50,7 +50,7 @@ Setup installs `Monitor-SASBatchErrors.ps1` to `C:\Scripts\` and creates a sched
 
 ---
 
-## Usage
+## Monitor-SASBatchErrors.ps1
 
 ```powershell
 # Scan last 7 days, text output
@@ -70,12 +70,20 @@ Setup installs `Monitor-SASBatchErrors.ps1` to `C:\Scripts\` and creates a sched
 
 # Save to file
 .\Monitor-SASBatchErrors.ps1 -LogDirectory "E:\SAS\Logs" -OutputFile "C:\Temp\report.txt"
-
-# WORK/USERWORK health check with AV/filter diagnostics
-.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
 ```
 
 **Exit codes:** `0` = no critical/high errors · `1` = high severity · `2` = critical · `-1` = script error
+
+---
+
+## Test-SASWorkDirectory.ps1
+
+Checks that the SAS WORK (`G:\sas\work`) and USERWORK (`U:\sas\userwork`) directories are reachable and working, with basic I/O tests that do not interfere with running SAS jobs (`-Iterations`, default 10), and checks the drive profile of ephemeral scratch disks.
+
+```powershell
+# WORK/USERWORK health check with AV/filter diagnostics
+.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
+```
 
 `Test-SASWorkDirectory.ps1` AV diagnostics include:
 

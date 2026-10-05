@@ -78,7 +78,7 @@ without Regio.
 | [`Sync-SharePointChannelMember.ps1`](Sync-SharePointChannelMember.ps1) ([docs](#private-channels-and-groups)) | Makes a security group the source of truth for who is in a private channel | channel roster |
 | [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#handing-it-over-to-the-customer)) | Writes the end-user explanation onto the team site, generated from the config | yes |
 | [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#undoing-it)) | Removes what was built — reports only unless you pass `-Apply` | yes, on purpose |
-| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Shared helpers — dot-sourced, not run on its own | — |
+| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) ([docs](#sharepointstructurecommonps1)) | Shared helpers — dot-sourced, not run on its own | — |
 | [`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
 | [`example.config.json`](example.config.json) | The model, as an example to copy — still on `CHANGEME`. Client configs (`<client>.config.json`) live next to it and are git-ignored | — |
 
@@ -397,6 +397,16 @@ Exit code 2 means drift, so it slots straight into a monitor. The check that ear
 keep most often is the **required flag on a content type field** — somebody unticks it
 in the browser and nothing looks wrong until half a library has no Taal on it.
 
+### SharePointStructure.Common.ps1
+
+Shared helpers, dot-sourced by every script in this folder — never run on its own, no
+parameters. It holds what they all need: loading and validating the configuration
+(`Import-StructureConfig`), the PnP and Graph connections that work both interactively and
+app-only (`Connect-Structure`, `Connect-StructureGraph`), the app registration
+(`New-StructureApp`, `Remove-StructureApp`), the CSOM primitives PnP does not expose
+directly (required flag on a field link, breaking inheritance and setting roles on a
+securable object), and the shared `[ OK ]` / `[ >> ]` / `[DIFF]` output vocabulary.
+
 ---
 
 ## The configuration file
@@ -681,9 +691,9 @@ Deliberate omissions, each for a reason:
 ## Notes
 
 - Author: Sjoerd Kanon
-- `SharePointStructure.Common.ps1` is dot-sourced by all four scripts. That is a
+- `SharePointStructure.Common.ps1` is dot-sourced by every script in this folder. That is a
   deliberate exception to the "every script stands alone" rule elsewhere in this repo:
-  these four share one config schema, and three copies of the permission code would
+  they all share one config schema, and a copy of the permission code in each would
   drift apart within a month.
 - Test against a non-production tenant first. The provisioning scripts change
   permissions on a live team.

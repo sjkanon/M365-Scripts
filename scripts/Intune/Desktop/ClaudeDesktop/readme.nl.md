@@ -20,14 +20,16 @@ Intune installeert LOB-MSIX-apps per gebruiker. Dat mislukt voor standaardgebrui
 
 | Script | Rol in Intune |
 |---|---|
-| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) | **Het script dat je uitvoert.** Regelt alles hieronder — zie de sectie "Maandelijkse run". |
-| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) | Contentscript voor de installatieopdracht |
-| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) | Contentscript voor de verwijderopdracht |
-| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) | Aangepast detectiescript |
+| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) ([docs](#deploy-claudedesktopintuneps1)) | **Het script dat je uitvoert.** Regelt alles hieronder — zie de sectie "Maandelijkse run". |
+| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Contentscript voor de installatieopdracht |
+| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Contentscript voor de verwijderopdracht |
+| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Aangepast detectiescript |
 
 `Install-`/`Uninstall-`/`Detect-ClaudeDesktop-Intune.ps1` voer je nooit handmatig uit — `Deploy-ClaudeDesktopIntune.ps1` verpakt ze automatisch in de `.intunewin` (of uploadt het detectiescript als onderdeel van de detectieregel).
 
-## Wat `Deploy-ClaudeDesktopIntune.ps1` doet
+## Deploy-ClaudeDesktopIntune.ps1
+
+Wat het doet:
 
 1. Downloadt de nieuwste x64-MSIX van Claude Desktop via de officiële "latest"-redirect-URL van Anthropic.
 2. Leest de versie uit `AppxManifest.xml` in de MSIX.
@@ -93,6 +95,14 @@ Standaard zijn Claude Desktop en Cowork Prerequisites onafhankelijk — er is ge
 
 Dit zoekt de app Cowork Prerequisites op (rol die **eerst** uit — `Deploy-CoworkPrerequisitesIntune.ps1`) en roept `Add-IntuneWin32AppDependency` aan met `DependencyType 'Detect'` (niet `'AutoInstall'`): de vereistenapp moet nog steeds zelfstandig als Required zijn toegewezen en al op het apparaat zijn gedetecteerd — deze afhankelijkheid installeert hem niet automatisch namens Claude Desktop, maar laat Intune er alleen op wachten. De afweging ten opzichte van de standaard: een apparaat dat vastzit op de Cowork-vereisten (bijv. midden in een herstart, of omdat het echt faalt) krijgt dan ook geen Claude Desktop tot dat is opgelost, in plaats van direct Claude Desktop en later Cowork.
 
+## Install- / Uninstall- / Detect-ClaudeDesktop-Intune.ps1
+
+De contentscripts van de Win32-app. `Deploy-ClaudeDesktopIntune.ps1` verpakt en uploadt ze; je voert ze nooit handmatig uit.
+
+- **`Install-ClaudeDesktop-Intune.ps1`** (installatieopdracht): verwijdert elke bestaande Claude Desktop volledig, provisioneert de MSIX machinebreed met `Add-AppxProvisionedPackage` en schakelt de eigen auto-updater van Claude uit — zie de secties hieronder. Parameter `-MsixFileName` (standaard `Claude.msix`): bestandsnaam van de MSIX naast het script. Logt naar `%ProgramData%\ClaudeDeploy\install.log`.
+- **`Uninstall-ClaudeDesktop-Intune.ps1`** (verwijderopdracht): verwijdert het machinebreed geprovisioneerde pakket en, als terugvaloptie, per-user Appx-installaties van profielen die al hebben aangemeld. Laat de Windows-vereisten van Cowork ongemoeid. Logt naar `%ProgramData%\ClaudeDeploy\uninstall.log`.
+- **`Detect-ClaudeDesktop-Intune.ps1`** (aangepast detectiescript, 64-bit): meldt "installed" als het machinebreed geprovisioneerde pakket aanwezig is. Bewust versie-onafhankelijk, en probeert alleen opnieuw bij een tijdelijke DISM-exception.
+
 ### Beleid voor automatische updates
 
 Het installatiescript zet `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` (DWord). De eigen updater van Claude is uitgeschakeld, zodat het versiebeheer volledig bij deze maandelijkse Intune-run blijft in plaats van per apparaat uit de pas te lopen.
@@ -114,7 +124,7 @@ Beide contentscripts zijn zo geschreven dat een apparaat waarop Claude nooit hee
 - **Installatiescript**: elke verwijderronde (proces stoppen, Appx, klassieke verwijdering per gebruiker) controleert eerst op een leeg/`$null`-resultaat, zodat een volledig schone machine bij elke stap alleen "none found" logt in plaats van een fout te geven.
 - **Detectiescript**: een leeg/negatief resultaat van `Get-AppxProvisionedPackage` (de verwachte uitkomst op een apparaat waar het nooit geïnstalleerd was) meldt direct "not installed" (exit 1), zonder nieuwe poging — nieuwe pogingen starten alleen bij een echte **exception** (bijv. een tijdelijke DISM-vergrendeling, aannemelijk vlak na de zware Appx-activiteit van het installatiescript zelf op hetzelfde apparaat), zodat een echt schone machine nooit wordt opgehouden door nieuwe pogingen die de uitkomst toch niet kunnen veranderen.
 
-### Vereisten
+## Vereisten
 
 - De PowerShell-modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` en `IntuneWin32App` — installeer ze met `.\scripts\Startup\Install-Modules.ps1`
 - Uitvoeren vanaf Windows (de verpakkingstool en de MSIX-/AppX-cmdlets werken alleen op Windows)

@@ -13,7 +13,7 @@ Verzamelen van Windows Autopilot-hardwarehashes — voor enrollment via USB/OOBE
 | Bestand | Omschrijving |
 |------|-------------|
 | [`Get-WindowsAutoPilotInfo.ps1`](Get-WindowsAutoPilotInfo.ps1) ([docs](#get-windowsautopilotinfops1)) | Communityscript (Michael Niehaus) — haalt de Autopilot-hardwarehash op |
-| [`GetAutoPilot.CMD`](#getautopilotcmd) | Wrapper om te dubbelklikken — schakelt WinRM in en voert het script uit, met opslag naar `compHash.csv` |
+| [`GetAutoPilot.CMD`](GetAutoPilot.CMD) ([docs](#getautopilotcmd)) | Wrapper om te dubbelklikken — schakelt WinRM in en voert het script uit, met opslag naar `compHash.csv` |
 
 ---
 

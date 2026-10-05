@@ -6,7 +6,7 @@
 
 Autopilot enrollment, compliance policy automation, configuration drift detection, and customer desktop deployment (wallpaper, lockscreen, taskbar lock shortcut).
 
-> Office theme/color deployment lives in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.md) — those scripts hardcode their download URL to that path.
+> Office theme/color deployment lives in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.md) — they take the theme's download URL as a parameter.
 
 ---
 

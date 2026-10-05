@@ -16,9 +16,9 @@ Scripts pour détecter et désactiver le microphone interne des ordinateurs port
 
 | Fichier | Description |
 |------|-------------|
-| [`detect-audiodevices.ps1`](detect-audiodevices.ps1) | Phase 1 — inventorie tous les périphériques audio et les classe comme internes ou casques |
-| [`Disable-internalmic.ps1`](Disable-internalmic.ps1) | Phase 2 — désactive le microphone interne d'après les motifs de détection |
-| [`Rollback-InternalMic.ps1`](Rollback-InternalMic.ps1) | Urgence — réactive le microphone en cas de problème |
+| [`detect-audiodevices.ps1`](detect-audiodevices.ps1) ([docs](#detect-audiodevicesps1)) | Phase 1 — inventorie tous les périphériques audio et les classe comme internes ou casques |
+| [`Disable-internalmic.ps1`](Disable-internalmic.ps1) ([docs](#disable-internalmicps1)) | Phase 2 — désactive le microphone interne d'après les motifs de détection |
+| [`Rollback-InternalMic.ps1`](Rollback-InternalMic.ps1) ([docs](#rollback-internalmicps1)) | Urgence — réactive le microphone en cas de problème |
 
 ---
 

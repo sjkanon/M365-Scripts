@@ -6,9 +6,15 @@
 
 Mappe des bibliothèques de documents SharePoint Online / OneDrive sur des lettres de lecteur fixes via le redirecteur WebDAV — à utiliser comme script d'ouverture de session par utilisateur (application Win32 Intune ou tâche planifiée à l'ouverture de session), et non via [`menu.ps1`](../../../menu.ps1).
 
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`New-CloudDriveMapping.ps1`](New-CloudDriveMapping.ps1) ([docs](#new-clouddrivemappingps1)) | Mapper des bibliothèques de documents SharePoint Online / OneDrive sur des lettres de lecteur via WebDAV — essai à blanc sauf avec `-Apply` |
+
 ---
 
-## New-CloudDriveMapping.ps1
+### New-CloudDriveMapping.ps1
 
 Convertit chaque URL `https://` de bibliothèque de documents en sa forme UNC WebDAV (`\\<host>@SSL\DavWWWRoot\<path>`) et la mappe avec `net use`. S'exécute par défaut en mode essai à blanc — aucun lecteur n'est mappé sans `-Apply`.
 

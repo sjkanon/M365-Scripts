@@ -6,9 +6,15 @@
 
 Maps SharePoint Online / OneDrive document libraries to persistent drive letters via the WebDAV redirector — for use as a per-user logon script (Intune Win32 app or a scheduled task at logon), not via [`menu.ps1`](../../../menu.ps1).
 
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`New-CloudDriveMapping.ps1`](New-CloudDriveMapping.ps1) ([docs](#new-clouddrivemappingps1)) | Map SharePoint Online / OneDrive document libraries to drive letters over WebDAV — dry-run unless `-Apply` |
+
 ---
 
-## New-CloudDriveMapping.ps1
+### New-CloudDriveMapping.ps1
 
 Converts each `https://` document library URL into its WebDAV UNC form (`\\<host>@SSL\DavWWWRoot\<path>`) and maps it with `net use`. Runs as a dry-run by default — no drive is mapped without `-Apply`.
 

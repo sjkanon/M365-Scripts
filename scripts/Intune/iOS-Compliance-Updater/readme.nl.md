@@ -19,9 +19,9 @@ Houdt de vereiste minimale iOS-versie in een Intune-compliancebeleid automatisch
 
 | Bestand | Omschrijving |
 |------|-------------|
-| [`Update-iOSCompliancePolicy.ps1`](Update-iOSCompliancePolicy.ps1) | Hoofdscript — handmatig of via een geplande taak uit te voeren |
-| [`Setup.ps1`](Setup.ps1) | Eenmalige setup — maakt de App Registration aan en schrijft config.json |
-| [`Install-ScheduledTask.ps1`](Install-ScheduledTask.ps1) | Registreert de geplande taak in Windows |
+| [`Update-iOSCompliancePolicy.ps1`](Update-iOSCompliancePolicy.ps1) ([docs](#gebruik)) | Hoofdscript — handmatig of via een geplande taak uit te voeren |
+| [`Setup.ps1`](Setup.ps1) ([docs](#optie-a--automatisch-aanbevolen)) | Eenmalige setup — maakt de App Registration aan en schrijft config.json |
+| [`Install-ScheduledTask.ps1`](Install-ScheduledTask.ps1) ([docs](#de-geplande-taak-registreren)) | Registreert de geplande taak in Windows |
 | `config.example.json` | Voorbeeldconfiguratiebestand |
 
 ---

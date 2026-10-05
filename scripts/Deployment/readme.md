@@ -10,6 +10,17 @@ A USB toolkit for Windows setup and Autopilot enrollment. Designed to be used du
 
 ---
 
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`start.bat`](start.bat) ([docs](#startbat)) | Main menu of the toolkit — self-elevates and offers Autopilot enrollment, Windows Update, rename, domain join and the customer install browser |
+| [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Interactive customer/script browser behind menu options `D` and `E` — browse customer folders and launch `.ps1` / `.bat` / `.cmd` files |
+
+Also in this folder: [`autorun.inf`](autorun.inf) — USB drive label only ([details](#autoruninf)).
+
+---
+
 ## USB folder structure
 
 All files must be in the **same folder** on the USB drive:
@@ -48,7 +59,9 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 
 ---
 
-## Menu options
+## start.bat
+
+The main menu of the toolkit. It switches to its own folder (`cd /d %~dp0`), requests administrator privileges, and shows these options:
 
 | Option | Action | Works in OOBE |
 |---|---|---|
@@ -68,7 +81,19 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | `E` | **Customer install scripts (network share)** — open customer menu from `\\10.222.3.94\Software` | ✅ (needs network access) |
 | `0` | Exit | ✅ |
 
-### Customer install browser (options D and E)
+### Browse-InstallScripts.ps1
+
+Customer install browser behind menu options `D` and `E`. Shows the first-level customer folders under `-RootPath` as a menu, then lets you browse into them and launch `.ps1`, `.bat` and `.cmd` files (`AppDeployToolkit` folders are hidden).
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-RootPath` | Yes | Folder whose subfolders are the customers (local `Install` folder or a network share) |
+| `-SourceLabel` | No | Title shown above the customer menu (default `Install Scripts`) |
+
+```powershell
+# What option D runs
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 -RootPath .\Install -SourceLabel "Local Install"
+```
 
 - Option `D` needs local files: `Browse-InstallScripts.ps1` and the complete `Install` folder next to `start.bat`.
 - Option `E` reads customer folders from `\\10.222.3.94\Software` and needs network access.

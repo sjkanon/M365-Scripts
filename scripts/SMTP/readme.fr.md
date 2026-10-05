@@ -14,8 +14,8 @@ Scripts de test de la connectivité et de l'authentification SMTP vers Office 36
 
 | Fichier | Description |
 |---|---|
-| [`testsmtp.ps1`](testsmtp.ps1) | Test SMTP ponctuel — demande le mot de passe de manière interactive |
-| [`testsmtp_5min.ps1`](testsmtp_5min.ps1) | Test récurrent — envoie un message toutes les 5 minutes à l'aide d'un mot de passe enregistré |
+| [`testsmtp.ps1`](testsmtp.ps1) ([docs](#testsmtpps1)) | Test SMTP ponctuel — demande le mot de passe de manière interactive |
+| [`testsmtp_5min.ps1`](testsmtp_5min.ps1) ([docs](#testsmtp_5minps1)) | Test récurrent — envoie un message toutes les 5 minutes à l'aide d'un mot de passe enregistré |
 
 ---
 

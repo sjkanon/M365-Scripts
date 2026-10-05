@@ -20,14 +20,16 @@ Intune installs LOB MSIX apps per-user. That fails for standard users without ad
 
 | Script | Role in Intune |
 |---|---|
-| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) | **The one you run.** Orchestrates everything below — see "Monthly run" section. |
-| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) | Install command content script |
-| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) | Uninstall command content script |
-| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) | Custom detection script |
+| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) ([docs](#deploy-claudedesktopintuneps1)) | **The one you run.** Orchestrates everything below — see "Monthly run" section. |
+| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Install command content script |
+| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Uninstall command content script |
+| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Custom detection script |
 
 `Install-`/`Uninstall-`/`Detect-ClaudeDesktop-Intune.ps1` are never run manually — `Deploy-ClaudeDesktopIntune.ps1` packages them into the `.intunewin` (or, for the detection script, uploads it as part of the detection rule) automatically.
 
-## What `Deploy-ClaudeDesktopIntune.ps1` does
+## Deploy-ClaudeDesktopIntune.ps1
+
+What it does:
 
 1. Downloads the latest Claude Desktop x64 MSIX from Anthropic's official "latest" redirect URL.
 2. Reads the version out of `AppxManifest.xml` inside the MSIX.
@@ -93,6 +95,14 @@ By default, Claude Desktop and Cowork Prerequisites are independent — no Intun
 
 This looks up the Cowork Prerequisites app (deploy that one **first** — `Deploy-CoworkPrerequisitesIntune.ps1`) and calls `Add-IntuneWin32AppDependency` with `DependencyType 'Detect'` (not `'AutoInstall'`): the prerequisites app must still be independently assigned Required and already detected on the device — this dependency doesn't auto-install it on Claude Desktop's behalf, it only makes Intune wait for it. The tradeoff versus the default: a device stuck on Cowork prerequisites (e.g. mid-reboot, or genuinely failing) will also not get Claude Desktop until that's resolved, instead of getting Claude Desktop immediately and Cowork later.
 
+## Install- / Uninstall- / Detect-ClaudeDesktop-Intune.ps1
+
+The Win32-app content scripts. `Deploy-ClaudeDesktopIntune.ps1` packages and uploads them; they are never run by hand.
+
+- **`Install-ClaudeDesktop-Intune.ps1`** (install command): fully removes any existing Claude Desktop, provisions the MSIX machine-wide with `Add-AppxProvisionedPackage` and disables Claude's own auto-updater — see the sections below. Parameter `-MsixFileName` (default `Claude.msix`): file name of the MSIX next to the script. Logs to `%ProgramData%\ClaudeDeploy\install.log`.
+- **`Uninstall-ClaudeDesktop-Intune.ps1`** (uninstall command): removes the machine-wide provisioned package and, as a fallback, per-user Appx installations of profiles that have already signed in. Leaves Cowork's Windows prerequisites alone. Logs to `%ProgramData%\ClaudeDeploy\uninstall.log`.
+- **`Detect-ClaudeDesktop-Intune.ps1`** (custom detection script, 64-bit): reports "installed" when the machine-wide provisioned package is present. Deliberately version-agnostic, and retries only on a transient DISM exception.
+
 ### Auto-update policy
 
 The install script sets `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` (DWord). Claude's own updater is disabled so version control stays entirely with this monthly Intune run instead of drifting per-device.
@@ -114,7 +124,7 @@ Both content scripts are written so a device where Claude has never been present
 - **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring.
 - **Detection script**: an empty/negative result from `Get-AppxProvisionedPackage` (the expected outcome on a never-installed device) reports "not installed" (exit 1) immediately, with no retry — retries only kick in on an actual **exception** (e.g. a transient DISM lock, plausible right after the install script's own heavy Appx activity on the same device), so a genuinely clean machine is never slowed down waiting on retries that can't change the outcome.
 
-### Prerequisites
+## Prerequisites
 
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
 - Run from Windows (the packaging tool and MSIX/AppX cmdlets are Windows-only)

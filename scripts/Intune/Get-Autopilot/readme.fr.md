@@ -13,7 +13,7 @@ Collecte des hachages matériels Windows Autopilot — pour l'inscription via US
 | Fichier | Description |
 |------|-------------|
 | [`Get-WindowsAutoPilotInfo.ps1`](Get-WindowsAutoPilotInfo.ps1) ([docs](#get-windowsautopilotinfops1)) | Script communautaire (Michael Niehaus) — récupère le hachage matériel Autopilot |
-| [`GetAutoPilot.CMD`](#getautopilotcmd) | Wrapper à double-cliquer — active WinRM et exécute le script, avec enregistrement dans `compHash.csv` |
+| [`GetAutoPilot.CMD`](GetAutoPilot.CMD) ([docs](#getautopilotcmd)) | Wrapper à double-cliquer — active WinRM et exécute le script, avec enregistrement dans `compHash.csv` |
 
 ---
 

@@ -10,8 +10,33 @@ Intune Win32-app deployment that runs [`Invoke-WindowsCleanup.ps1`](../../Device
 
 | Script | Role in Intune |
 |---|---|
-| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) | Install command content script — calls the shared `Invoke-WindowsCleanup.ps1 -Apply`, then `Restart-Computer -Force` |
-| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) | Custom detection script |
+| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) ([docs](#invoke-diskcleanupintuneps1)) | Install command content script — calls the shared `Invoke-WindowsCleanup.ps1 -Apply`, then `Restart-Computer -Force` |
+| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) ([docs](#detect-diskcleanupintuneps1)) | Custom detection script |
+
+### Invoke-DiskCleanupIntune.ps1
+
+Win32-app install command. Runs `Invoke-WindowsCleanup.ps1 -Apply` from the same content folder, stamps `HKLM:\SOFTWARE\DiskCleanupDeploy\LastRunUtc` on success and then forces a restart.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-SkipDism` | No | Skip the DISM component store cleanup (`/StartComponentCleanup /ResetBase`) for a shorter, predictable runtime |
+| `-NoRestart` | No | Clean up but do not restart — for manual testing outside Intune only, leave it out of the real install command |
+
+**Examples**
+
+```powershell
+# Intune install command
+%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Invoke-DiskCleanupIntune.ps1
+
+# Manual test run without DISM and without the reboot
+.\Invoke-DiskCleanupIntune.ps1 -SkipDism -NoRestart
+```
+
+### Detect-DiskCleanupIntune.ps1
+
+Win32-app custom detection script. Reports "installed" (exit 0) while the `LastRunUtc` stamp is at most `$MaxAgeDays` (30) days old, and "not installed" (exit 1) once it is older or missing, so Intune runs the cleanup again. Intune passes no parameters to detection scripts: edit `$MaxAgeDays` in the script before packaging to change the cycle.
 
 ## Behavior
 

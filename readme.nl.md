@@ -918,6 +918,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (10)
+| Wijziging |
+|--------|
+| Elke map-readme volgt nu het patroon van `scripts/Intune/`: elk script in de tabel `## Scripts` linkt naar het bestand **en** naar zijn sectie (`([docs](#…))`). 19 mappen deden dat niet, in alle drie de talen: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph en Intune/Desktop/Background/Desktop en /Lockscreen hadden helemaal geen scripttabel, en Reporting/Licensing alleen een boom; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (geen bestandslink voor `GetAutoPilot.CMD`), UniFi, SAS, SMTP, Startup en één rij in SharePoint/Provisioning hadden rijen zonder docs-link |
+| Waar een script onder een beschrijvende kop stond, draagt die kop nu de bestandsnaam, zodat de anchor in elke taal gelijk is (eerst gecontroleerd dat niets naar de oude anchor linkte). Scripts zonder sectie kregen een korte sectie op basis van hun eigen headercommentaar: `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `Test-SASWorkDirectory.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, en een gedeelde sectie voor de install/uninstall/detect-scripts van ClaudeDesktop. De opmerkingen bij `Remove-CorporateWallpaper.ps1` vermelden dat het niet alles terugdraait wat `Set-CorporateWallpaper.ps1` 2.3+ schrijft |
+| Ook gecorrigeerd: de Intune-readme zei nog dat de Office-themascripts hun URL hardcoden, en de Provisioning-opmerkingen zeiden dat de gedeelde module door "alle vier" de scripts wordt gedot-sourcet — alle tien in de map gebruiken hem |
+| Geverifieerd: elk script in elke map-readme heeft een bestandslink en een docs-link waarvan de anchor bestaat (gescripte controle over alle 57 map-readmes), en de linkcontrole slaagt over 4562 interne links. Er is niets gedraaid |
+
 ### 2026-10-05 (9)
 | Wijziging |
 |--------|

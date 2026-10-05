@@ -19,9 +19,9 @@ Automatically keeps the minimum iOS version requirement in an Intune compliance 
 
 | File | Description |
 |------|-------------|
-| [`Update-iOSCompliancePolicy.ps1`](Update-iOSCompliancePolicy.ps1) | Main script — run manually or via scheduled task |
-| [`Setup.ps1`](Setup.ps1) | One-time setup — creates App Registration and writes config.json |
-| [`Install-ScheduledTask.ps1`](Install-ScheduledTask.ps1) | Registers the Windows scheduled task |
+| [`Update-iOSCompliancePolicy.ps1`](Update-iOSCompliancePolicy.ps1) ([docs](#usage)) | Main script — run manually or via scheduled task |
+| [`Setup.ps1`](Setup.ps1) ([docs](#option-a--automatic-recommended)) | One-time setup — creates App Registration and writes config.json |
+| [`Install-ScheduledTask.ps1`](Install-ScheduledTask.ps1) ([docs](#register-the-scheduled-task)) | Registers the Windows scheduled task |
 | `config.example.json` | Example configuration file |
 
 ---

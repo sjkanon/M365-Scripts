@@ -2,7 +2,20 @@
 
 [M365-Scripts](../../../../../readme.md) › [scripts](../../../../readme.md) › [Intune](../../../readme.md) › [Desktop](../../readme.md) › [Background](../readme.md) › **Desktop**
 
-# Set-CorporateWallpaper.ps1
+# Desktop
+
+Corporate desktop wallpaper via Intune — set it, and take it off again.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Set-CorporateWallpaper.ps1`](Set-CorporateWallpaper.ps1) ([docs](#set-corporatewallpaperps1)) | Download the corporate wallpaper and enforce it for all users (PersonalizationCSP, current user, Default User) |
+| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | Revert the corporate wallpaper: remove the PersonalizationCSP keys and wallpaper files, reset the wallpaper settings |
+
+---
+
+## Set-CorporateWallpaper.ps1
 
 > Author: Sjoerd Kanon
 
@@ -125,3 +138,26 @@ Packaging as a Win32 app allows re-run control and detection rules.
 | 2026-04-14 | 2.5 | Added `explorer.exe` restart step so wallpaper/theme changes become visible immediately for logged-on users |
 | 2026-04-14 | 2.6 | Restored generic default configuration values (`$ImageUrl`, `$ClientName`) for reusable customer deployments |
 | 2026-04-14 | 2.7 | Added fail-safe backup of current wallpaper and changed replacement order so previous wallpaper stays available if update fails |
+
+---
+
+## Remove-CorporateWallpaper.ps1
+
+Reverts what `Set-CorporateWallpaper.ps1` put in place. No parameters. Run as SYSTEM (Intune platform script, or the uninstall command of the Win32 app).
+
+1. Deletes the `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\PersonalizationCSP` key (the MDM-enforced wallpaper)
+2. Resets `HKCU\Control Panel\Desktop` (`Wallpaper` empty, `WallpaperStyle` `10`, `TileWallpaper` `0`)
+3. Deletes `C:\ProgramData\Wallpapers`
+4. Removes the wallpaper values from the Default User hive (`C:\Users\Default\NTUSER.DAT`), so new accounts no longer get it
+5. Restarts `explorer.exe` so the change shows immediately
+
+**Example**
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File Remove-CorporateWallpaper.ps1
+```
+
+**Notes**
+
+- It does not clear the `Wallpaper` value under `HKLM\...\Policies\System` or the wallpaper values in other loaded user hives that `Set-CorporateWallpaper.ps1` (2.3+) also writes — check those by hand if the wallpaper stays enforced.
+- Run as SYSTEM, step 2 resets the SYSTEM profile rather than the signed-in user's.

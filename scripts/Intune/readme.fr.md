@@ -6,7 +6,7 @@
 
 Inscription Autopilot, automatisation des stratégies de conformité, détection des dérives de configuration et déploiement du poste de travail chez les clients (fond d'écran, écran de verrouillage, raccourci de verrouillage dans la barre des tâches).
 
-> Le déploiement des thèmes et couleurs Office se trouve dans [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.fr.md) — ces scripts ont leur URL de téléchargement codée en dur vers ce chemin.
+> Le déploiement des thèmes et couleurs Office se trouve dans [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.fr.md) — ces scripts reçoivent l'URL de téléchargement du thème en paramètre.
 
 ---
 

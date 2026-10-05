@@ -14,7 +14,7 @@ Outillage pour un UniFi Network Controller ou une console UniFi OS (UDM/UDM-Pro/
 |--------|-------------|
 | [`Get-UnifiNetworkReport.ps1`](Get-UnifiNetworkReport.ps1) ([docs](#get-unifinetworkreportps1)) | Générer un rapport HTML de documentation réseau (équipements, firmware, uptime) |
 | [`Update-UnifiFirmware.ps1`](Update-UnifiFirmware.ps1) ([docs](#update-unififirmwareps1)) | Lister et éventuellement déclencher les mises à niveau du firmware sur l'ensemble des sites |
-| [`UnifiApi.ps1`](UnifiApi.ps1) | Utilitaire partagé de connexion/session, chargé automatiquement (dot-sourced) par les deux scripts ci-dessus — n'est pas destiné à être exécuté directement |
+| [`UnifiApi.ps1`](UnifiApi.ps1) ([docs](#unifiapips1)) | Utilitaire partagé de connexion/session, chargé automatiquement (dot-sourced) par les deux scripts ci-dessus — n'est pas destiné à être exécuté directement |
 
 ---
 
@@ -74,3 +74,11 @@ Liste par site les équipements pour lesquels une mise à niveau du firmware est
 - Les deux scripts prennent en charge le UniFi Network Controller classique auto-hébergé (`/api/login`) et les consoles UniFi OS (`/api/auth/login` + `/proxy/network/...`) — la connexion détecte automatiquement lequel des deux se trouve en face.
 - `-SkipCertificateCheck` est implémenté à la fois pour PowerShell 7+ (paramètre natif) et Windows PowerShell 5.1 (callback temporaire de validation des certificats, réinitialisé immédiatement après la requête).
 - Un rapport CSV/HTML est toujours écrit après chaque exécution, même en essai à blanc.
+
+---
+
+### UnifiApi.ps1
+
+Fonctions d'aide partagées par les deux scripts ci-dessus, chargées automatiquement par dot-sourcing — ce fichier n'est pas destiné à être exécuté seul et n'a pas de paramètres. Il gère la connexion (contrôleur classique auto-hébergé et consoles UniFi OS comme UDM/UDM-Pro/UDR, qui utilisent un autre point de terminaison d'authentification, un en-tête CSRF et le chemin `/proxy/network/...`), les cookies de session et la gestion des certificats auto-signés pour Windows PowerShell 5.1 comme pour PowerShell 7+. Fonctions : `Connect-UnifiController`, `Disconnect-UnifiController`, `Invoke-UnifiApi`, `Invoke-UnifiRestMethod`, `Get-UnifiSite`, `Get-UnifiDevice`.
+
+Les identifiants proviennent toujours de `Get-Credential` (de manière interactive ou par le script appelant) — jamais codés en dur.

@@ -16,9 +16,9 @@ Scripts om de interne microfoon te detecteren en uit te schakelen op Windows-lap
 
 | Bestand | Omschrijving |
 |------|-------------|
-| [`detect-audiodevices.ps1`](detect-audiodevices.ps1) | Fase 1 — inventariseert alle audioapparaten en classificeert ze als intern of headset |
-| [`Disable-internalmic.ps1`](Disable-internalmic.ps1) | Fase 2 — schakelt de interne microfoon uit op basis van de detectiepatronen |
-| [`Rollback-InternalMic.ps1`](Rollback-InternalMic.ps1) | Noodgeval — schakelt de microfoon weer in als er iets misgaat |
+| [`detect-audiodevices.ps1`](detect-audiodevices.ps1) ([docs](#detect-audiodevicesps1)) | Fase 1 — inventariseert alle audioapparaten en classificeert ze als intern of headset |
+| [`Disable-internalmic.ps1`](Disable-internalmic.ps1) ([docs](#disable-internalmicps1)) | Fase 2 — schakelt de interne microfoon uit op basis van de detectiepatronen |
+| [`Rollback-InternalMic.ps1`](Rollback-InternalMic.ps1) ([docs](#rollback-internalmicps1)) | Noodgeval — schakelt de microfoon weer in als er iets misgaat |
 
 ---
 

@@ -918,6 +918,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (10)
+| Modification |
+|--------|
+| Chaque readme de dossier suit désormais le modèle de `scripts/Intune/` : chaque script de la table `## Scripts` pointe vers le fichier **et** vers sa section (`([docs](#…))`). 19 dossiers ne le faisaient pas, dans les trois langues : Azure/VM, DNS, Deployment, Device/DriveMapping, Graph et Intune/Desktop/Background/Desktop et /Lockscreen n'avaient aucune table de scripts, et Reporting/Licensing seulement une arborescence ; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (pas de lien vers `GetAutoPilot.CMD`), UniFi, SAS, SMTP, Startup et une ligne de SharePoint/Provisioning avaient des lignes sans lien docs |
+| Lorsqu'un script était documenté sous un titre descriptif, ce titre porte désormais le nom du fichier, pour que l'ancre soit identique dans chaque langue (après avoir vérifié qu'aucun lien ne visait l'ancienne ancre). Les scripts sans section en ont reçu une courte, tirée de leur propre commentaire d'en-tête : `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `Test-SASWorkDirectory.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, et une section commune pour les scripts install/uninstall/detect de ClaudeDesktop. Les remarques de `Remove-CorporateWallpaper.ps1` notent qu'il n'annule pas tout ce qu'écrit `Set-CorporateWallpaper.ps1` 2.3+ |
+| Également corrigé : le readme Intune disait encore que les scripts de thème Office codent leur URL en dur, et les remarques de Provisioning indiquaient que le module partagé est chargé par « les quatre » scripts — les dix scripts du dossier l'utilisent |
+| Vérifié : chaque script de chaque readme de dossier a un lien vers le fichier et un lien docs dont l'ancre existe (contrôle scripté sur les 57 readmes de dossier), et le contrôle des liens réussit sur 4562 liens internes. Rien n'a été exécuté |
+
 ### 2026-10-05 (9)
 | Modification |
 |--------|
