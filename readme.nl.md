@@ -918,6 +918,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (9)
+| Wijziging |
+|--------|
+| `Test-MarkdownLinks.ps1` liet elke underscore vallen bij het omzetten van een kop naar een anchor, waardoor `## testsmtp_5min.ps1` `#testsmtp5minps1` werd terwijl GitHub er `#testsmtp_5minps1` van maakt. Een correcte link werd als kapot gemeld (en een kapotte zou zijn doorgelaten). Underscores worden nu alleen aan een woordrand verwijderd, waar ze nadruk betekenen; binnen een woord blijven ze staan, zoals bij GitHub |
+| Geverifieerd: syntaxcontrole, en de linkcontrole over alle 204 markdownbestanden waarbij de nieuwe `[docs]`-link naar `#testsmtp_5minps1` klopt. `testsmtp_5min.ps1` is de enige kop in de repo met een underscore binnen een woord, dus geen ander resultaat verandert |
+
 ### 2026-10-05 (8)
 | Wijziging |
 |--------|

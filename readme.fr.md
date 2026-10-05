@@ -918,6 +918,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (9)
+| Modification |
+|--------|
+| `Test-MarkdownLinks.ps1` supprimait chaque trait de soulignement en transformant un titre en ancre, si bien que `## testsmtp_5min.ps1` devenait `#testsmtp5minps1` alors que GitHub en fait `#testsmtp_5minps1`. Un lien correct était signalé comme cassé (et un lien cassé serait passé). Les traits de soulignement ne sont désormais retirés qu'en bord de mot, où ils marquent l'emphase ; à l'intérieur d'un mot ils sont conservés, comme sur GitHub |
+| Vérifié : contrôle de syntaxe, et contrôle des liens sur les 204 fichiers markdown, le nouveau lien `[docs]` vers `#testsmtp_5minps1` étant résolu. `testsmtp_5min.ps1` est le seul titre du dépôt avec un trait de soulignement à l'intérieur d'un mot, aucun autre résultat ne change |
+
 ### 2026-10-05 (8)
 | Modification |
 |--------|

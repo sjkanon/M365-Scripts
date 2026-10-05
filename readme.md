@@ -918,6 +918,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (9)
+| Change |
+|--------|
+| `Test-MarkdownLinks.ps1` dropped every underscore when it turned a heading into an anchor, so `## testsmtp_5min.ps1` became `#testsmtp5minps1` while GitHub makes it `#testsmtp_5minps1`. A correct link was reported broken (and a broken one would have passed). Underscores are now removed only at a word edge, where they mean emphasis; inside a word they are kept, as GitHub does |
+| Verified: syntax check, and the link check over all 204 markdown files with the new `[docs]` link to `#testsmtp_5minps1` resolving. `testsmtp_5min.ps1` is the only heading in the repo with an underscore inside a word, so no other result changes |
+
 ### 2026-10-05 (8)
 | Change |
 |--------|
