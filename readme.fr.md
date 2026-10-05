@@ -920,6 +920,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (3)
+| Modification |
+|--------|
+| `Init-TempDisk.ps1` mémorisait son dernier redémarrage déclenché sous une clé de registre au nom d'une entreprise. La clé est désormais le paramètre `-RestartMarkerPath`, par défaut `HKLM:\SOFTWARE\M365-Scripts\InitTempDisk`, validé comme chemin `HKLM:` ou `HKCU:` |
+| **Sur les machines où il a déjà tourné, l'ancienne clé n'est plus lue** : le délai de carence repart donc une fois de zéro — au plus un redémarrage supplémentaire par machine, et seulement si toutes les autres conditions sont réunies. Passez l'ancienne clé via `-RestartMarkerPath` pour la conserver |
+| Vérifié : contrôle de syntaxe, et le motif du paramètre accepte la valeur par défaut et refuse un chemin de fichier. Non exécuté sur un appareil |
+
 ### 2026-10-05 (2)
 | Modification |
 |--------|

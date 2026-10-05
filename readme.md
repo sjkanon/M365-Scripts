@@ -920,6 +920,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (3)
+| Change |
+|--------|
+| `Init-TempDisk.ps1` remembered its last self-triggered restart under a registry key named after one company. The key is now the `-RestartMarkerPath` parameter, default `HKLM:\SOFTWARE\M365-Scripts\InitTempDisk`, validated to be an `HKLM:` or `HKCU:` path |
+| **On machines that already ran it, the old key is no longer read**, so the restart cooldown starts afresh once: at most one extra restart per machine, and only when every other restart condition holds. Pass the old key as `-RestartMarkerPath` to keep it |
+| Verified: syntax check, and the parameter's pattern accepts the default and rejects a file path. Not run on a device |
+
 ### 2026-10-05 (2)
 | Change |
 |--------|

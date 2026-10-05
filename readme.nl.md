@@ -920,6 +920,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (3)
+| Wijziging |
+|--------|
+| `Init-TempDisk.ps1` hield de laatste herstart die het zelf veroorzaakte bij onder een registersleutel met de naam van één bedrijf. De sleutel is nu de parameter `-RestartMarkerPath`, standaard `HKLM:\SOFTWARE\M365-Scripts\InitTempDisk`, gevalideerd als `HKLM:`- of `HKCU:`-pad |
+| **Op machines waar het al draaide, wordt de oude sleutel niet meer gelezen**, dus de herstart-cooldown begint één keer opnieuw: hoogstens één extra herstart per machine, en alleen als alle andere herstartvoorwaarden kloppen. Geef de oude sleutel mee als `-RestartMarkerPath` om hem te houden |
+| Geverifieerd: syntaxcontrole, en het patroon van de parameter accepteert de standaard en weigert een bestandspad. Niet op een toestel gedraaid |
+
 ### 2026-10-05 (2)
 | Wijziging |
 |--------|
