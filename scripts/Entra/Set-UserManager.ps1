@@ -49,23 +49,23 @@
 
 .EXAMPLE
     # Bulk-set manager for a group
-    .\Set-UserManager.ps1 -GroupName "Sales Team" -NewManager "jane.doe@aslgroup.eu"
+    .\Set-UserManager.ps1 -GroupName "Sales Team" -NewManager "jane.doe@contoso.com"
 
 .EXAMPLE
     # Bulk-set manager for a department
-    .\Set-UserManager.ps1 -Department "Logistics" -NewManager "jane.doe@aslgroup.eu" -OutputPath C:\Temp\ManagerReport.csv
+    .\Set-UserManager.ps1 -Department "Logistics" -NewManager "jane.doe@contoso.com" -OutputPath C:\Temp\ManagerReport.csv
 
 .EXAMPLE
     # Find and show all direct reports of a manager
-    .\Set-UserManager.ps1 -CurrentManager "old.boss@aslgroup.eu"
+    .\Set-UserManager.ps1 -CurrentManager "old.boss@contoso.com"
 
 .EXAMPLE
     # Re-assign all direct reports of one manager to another
-    .\Set-UserManager.ps1 -CurrentManager "old.boss@aslgroup.eu" -NewManager "new.boss@aslgroup.eu"
+    .\Set-UserManager.ps1 -CurrentManager "old.boss@contoso.com" -NewManager "new.boss@contoso.com"
 
 .EXAMPLE
     # Explicit UPN list
-    .\Set-UserManager.ps1 -UserList "john@aslgroup.eu","pete@aslgroup.eu" -NewManager "jane.doe@aslgroup.eu"
+    .\Set-UserManager.ps1 -UserList "john@contoso.com","pete@contoso.com" -NewManager "jane.doe@contoso.com"
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'ByGroup', SupportsShouldProcess)]

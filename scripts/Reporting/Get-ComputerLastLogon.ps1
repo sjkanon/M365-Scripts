@@ -39,25 +39,25 @@
     Folder where the CSV file is saved. Default: C:\Temp\.
 
 .EXAMPLE
-    # Vias Institute — Laptops OU
+    # Laptops OU
     .\Get-ComputerLastLogon.ps1 `
-        -SearchBase "OU=Laptops,OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be"
+        -SearchBase "OU=Laptops,OU=Computers,OU=Contoso,DC=ad,DC=contoso,DC=com"
 
 .EXAMPLE
-    # Vias Institute — alle computers (Laptops + rest van de Computers OU)
+    # Alle computers (Laptops + rest van de Computers OU)
     .\Get-ComputerLastLogon.ps1 `
-        -SearchBase "OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be"
+        -SearchBase "OU=Computers,OU=Contoso,DC=ad,DC=contoso,DC=com"
 
 .EXAMPLE
     # Nauwkeurigste modus — bevraagt alle DC's
     .\Get-ComputerLastLogon.ps1 `
-        -SearchBase "OU=Laptops,OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be" `
+        -SearchBase "OU=Laptops,OU=Computers,OU=Contoso,DC=ad,DC=contoso,DC=com" `
         -AllDCs
 
 .EXAMPLE
     # Inclusief uitgeschakelde computers, drempel op 60 dagen
     .\Get-ComputerLastLogon.ps1 `
-        -SearchBase "OU=Computers,OU=Vias Institute,DC=ad,DC=vias,DC=be" `
+        -SearchBase "OU=Computers,OU=Contoso,DC=ad,DC=contoso,DC=com" `
         -IncludeDisabled -InactiveDays 60
 #>
 [CmdletBinding()]
