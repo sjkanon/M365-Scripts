@@ -61,7 +61,7 @@
         it is drained, not while someone is in a meeting. -RestartEvenIfUsersSignedIn
         overrides that for a fleet where the countdown is warning enough;
       - at most one restart per -RestartCooldownMinutes, remembered in the registry
-        under HKLM:\SOFTWARE\ICTKanon\InitTempDisk. A second restart for the same
+        under -RestartMarkerPath. A second restart for the same
         thing means the first one did not help, and repeating it forever is worse
         than saying so.
 
@@ -121,6 +121,11 @@
 .PARAMETER RestartCooldownMinutes
     Shortest interval between two restarts triggered by this script (default: 60).
     A second restart for the same thing means the first one did not help.
+
+.PARAMETER RestartMarkerPath
+    Registry key where the last self-triggered restart is remembered
+    (default: HKLM:\SOFTWARE\M365-Scripts\InitTempDisk). In the registry rather
+    than next to the log, because it has to survive the restart it records.
 
 .PARAMETER RestartEvenIfUsersSignedIn
     Restart even when someone is signed in. Only sensible where the countdown is
@@ -198,6 +203,8 @@ param (
     [int]    $RestartDelaySeconds = 60,
     [ValidateRange(0, 10080)]
     [int]    $RestartCooldownMinutes = 60,
+    [ValidatePattern('^HK(LM|CU):\\')]
+    [string] $RestartMarkerPath = 'HKLM:\SOFTWARE\M365-Scripts\InitTempDisk',
     [switch] $RestartEvenIfUsersSignedIn,
     [switch] $CheckOnly,
     [switch] $Quiet,
@@ -216,10 +223,6 @@ $exitCode         = 0
 $changed          = $false
 $rebootPending    = $false
 $restartTriggered = $false
-
-# Where the last self-triggered restart is remembered. In the registry rather than
-# next to the log, because the whole point is to survive the restart it records.
-$RestartMarkerPath = 'HKLM:\SOFTWARE\ICTKanon\InitTempDisk'
 
 function Test-Elevated {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
