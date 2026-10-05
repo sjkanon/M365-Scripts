@@ -14,7 +14,20 @@
       - Site collection totals: one row per root site collection — sub-sites/channels and
                                  the recycle bin rolled up together, comparable 1:1 with the
                                  SharePoint admin center's per-site storage figure (-Apply)
+      - Long paths CSV        : every file/folder whose path is long enough to cause trouble
+                                 on Windows, longest first (-Apply, also with -FastMode)
       - All saved to C:\Temp\ (Windows) or ~/Downloads/ (macOS)
+
+    Path lengths:
+      Every scanned file and folder is measured twice. The SharePoint path (server-relative,
+      decoded: /sites/<site>/<library>/<folders>/<file>) is checked against SharePoint's own
+      limit of 400 characters. The local path the OneDrive sync client would create, e.g.
+      C:\Users\<user>\<Organisation>\<Site> - <Library>\<folders>\<file>, is checked
+      against Windows MAX_PATH (260 including the terminating null, so 259 usable) and, for
+      Excel workbooks, Excel's limit of 218. The local path is an estimate: its length
+      depends on the user's profile folder and the organisation name. By default the profile
+      folder is that of the user with the longest UPN in the tenant, so a path that fits for
+      them fits for everyone; -SyncProfilePath and -OrganizationName override both.
 
     Run without -Apply for a fast summary (site quota data only, no file enumeration).
     Run with -Apply to perform the full recursive scan including version history.
@@ -101,6 +114,23 @@
     explicitly only to force a lower ceiling (e.g. for a quick partial run) or a higher one
     than the auto-scaled value.
 
+.PARAMETER SyncProfilePath
+    The user profile folder the OneDrive sync client syncs under, used to estimate local
+    path lengths. Default: C:\Users\<prefix> for the enabled member account with the
+    longest UPN prefix (the part before the @) in the tenant, so the estimate holds for
+    every user. Falls back to C:\Users\firstname.lastname when users cannot be read
+    (needs User.Read.All; with -ClientId the app must have it).
+
+.PARAMETER OrganizationName
+    The organisation name OneDrive uses for the sync folder (C:\Users\<user>\<name>).
+    Default: the tenant's display name from Graph, or the SharePoint tenant name
+    (contoso from contoso.sharepoint.com) when that cannot be read.
+
+.PARAMETER LongPathThreshold
+    Local path length from which a file or folder goes into the long paths CSV, as an
+    early warning before Windows' limit (default: 200). Anything over a limit is always
+    listed.
+
 .EXAMPLE
     # Auto mode — creates and deletes a temporary App Registration automatically
     .\Get-SharePointStorageReport.ps1 -Apply
@@ -120,6 +150,10 @@
 .EXAMPLE
     # Full scan — skip version history (faster)
     .\Get-SharePointStorageReport.ps1 -Apply -SkipVersions
+
+.EXAMPLE
+    # Fast scan for long paths only, measured against a real user's sync folder
+    .\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 #>
 [CmdletBinding()]
 param (
@@ -142,7 +176,11 @@ param (
     [ValidateRange(1, 8)]
     [int] $VersionBatchConcurrency = 4,
     [ValidateRange(0, 5000)]
-    [int] $MaxVersionRetryPasses = 0
+    [int] $MaxVersionRetryPasses = 0,
+    [string] $SyncProfilePath,
+    [string] $OrganizationName,
+    [ValidateRange(1, 1000)]
+    [int] $LongPathThreshold = 200
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -156,6 +194,7 @@ $summaryCsv  = Join-Path $outputDir "SharePoint_Summary_$ts.csv"
 $reportCsv   = Join-Path $outputDir "SharePoint_StorageRanked_$ts.csv"
 $reportMd    = Join-Path $outputDir "SharePoint_VersionReport_$ts.md"
 $collectionCsv = Join-Path $outputDir "SharePoint_SiteCollectionTotals_$ts.csv"
+$longPathCsv = Join-Path $outputDir "SharePoint_LongPaths_$ts.csv"
 
 # ── Cleanup tracking ───────────────────────────────────────────────────────────
 $script:TempAppObjectId  = $null
@@ -529,6 +568,7 @@ try {
                 'AppRoleAssignment.ReadWrite.All'
                 'Sites.Read.All'
                 'Files.Read.All'
+                'User.Read.All'
                 )
                 NoWelcome = $true
             }
@@ -588,6 +628,7 @@ try {
                 Scopes    = @(
                 'Sites.Read.All'
                 'Files.Read.All'
+                'User.Read.All'
                 )
                 NoWelcome = $true
             }
@@ -920,6 +961,69 @@ function Get-SiteCollectionKey {
         return $Matches[1].TrimEnd('/')
     }
     return $WebUrl.TrimEnd('/')
+}
+
+# Limits a path runs into once a library is synced to, or opened from, a Windows machine.
+$script:SharePointMaxPath = 400   # decoded server-relative path, including the file name
+$script:WindowsMaxPath    = 259   # MAX_PATH is 260 including the terminating null
+$script:ExcelMaxPath      = 218   # Excel refuses to open or save a workbook beyond this
+
+function Get-LongPathRows {
+    # Measures every file and folder of one library twice: the SharePoint path against
+    # SharePoint's 400, and the local path the OneDrive sync client would create against
+    # Windows' 259 (and Excel's 218 for workbooks). Returns only the items at or above
+    # -LongPathThreshold locally or over any limit, so a large tenant does not keep every
+    # path in memory just to report the long ones.
+    param(
+        [object[]]$Items,
+        [object]$Site,
+        [object]$Drive,
+        [string]$SiteName,
+        [string]$OrgName
+    )
+
+    $libraryServerPath = ''
+    try { $libraryServerPath = [Uri]::UnescapeDataString(([Uri]$Drive.webUrl).AbsolutePath).TrimEnd('/') } catch {}
+
+    # A SharePoint library syncs to <profile>\<organisation>\<site> - <library>; a OneDrive
+    # personal site to <profile>\OneDrive - <organisation>.
+    $syncFolder = if ($Site.webUrl -match '-my\.sharepoint\.com/personal/') {
+        "OneDrive - $OrgName"
+    } else {
+        "$OrgName\$SiteName - $($Drive.name)"
+    }
+    $localRoot = '{0}\{1}' -f $script:SyncProfileRoot.TrimEnd('\'), $syncFolder
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in $Items) {
+        if ([string]::IsNullOrWhiteSpace([string]$item.Path)) { continue }
+        $localPath  = '{0}\{1}' -f $localRoot, ($item.Path -replace '/', '\')
+        $serverPath = '{0}/{1}' -f $libraryServerPath, $item.Path
+        $localLen   = $localPath.Length
+        $serverLen  = $serverPath.Length
+        $isExcel    = ($item.ItemType -eq 'File') -and ($item.Path -match '\.xl[st][xmb]?$')
+
+        $limit = if ($serverLen -gt $script:SharePointMaxPath) { "SharePoint ($script:SharePointMaxPath)" }
+                 elseif ($localLen -gt $script:WindowsMaxPath)  { "Windows ($($script:WindowsMaxPath + 1))" }
+                 elseif ($isExcel -and $localLen -gt $script:ExcelMaxPath) { "Excel ($script:ExcelMaxPath)" }
+                 else { '' }
+
+        if (-not $limit -and $localLen -lt $LongPathThreshold) { continue }
+
+        $rows.Add([PSCustomObject]@{
+            SiteName             = $SiteName
+            SiteUrl              = $Site.webUrl
+            Library              = $Drive.name
+            ItemType             = $item.ItemType
+            Path                 = $item.Path
+            LocalPathLength      = $localLen
+            SharePointPathLength = $serverLen
+            OverLimit            = $limit
+            Level                = $item.Level
+            LocalPath            = $localPath
+        }) | Out-Null
+    }
+    return $rows
 }
 
 function Get-SiteDrives {
@@ -1830,16 +1934,20 @@ $CertificateThumbprint
 $GraphTimeoutSec
 $MaxGraphRetry
 $VersionBatchConcurrency
+$SyncProfilePath
+$OrganizationName
+$LongPathThreshold
 "@)
 $script:CheckpointStatePath   = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.state.json"
 $script:CheckpointSummaryPath = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.summary.partial.csv"
 $script:CheckpointDetailPath  = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.detail.partial.csv"
+$script:CheckpointLongPathPath = Join-Path $outputDir "SharePoint_StorageReport_$checkpointSignature.longpaths.partial.csv"
 $script:CompletedLibraryKeys  = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $script:LoadedCheckpoint      = $false
 
 if ($Restart) {
     $discardedCheckpoint = $false
-    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath)) {
+    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath, $script:CheckpointLongPathPath)) {
         if (Test-Path $path) {
             try { Remove-Item -Path $path -Force -ErrorAction Stop; $discardedCheckpoint = $true } catch {}
         }
@@ -1879,7 +1987,7 @@ function Save-CheckpointState {
 }
 
 function Finalize-CheckpointFiles {
-    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath)) {
+    foreach ($path in @($script:CheckpointStatePath, $script:CheckpointSummaryPath, $script:CheckpointDetailPath, $script:CheckpointLongPathPath)) {
         if (Test-Path $path) {
             try { Remove-Item -Path $path -Force -ErrorAction Stop } catch {}
         }
@@ -1946,7 +2054,8 @@ function Convert-CheckpointCsvRows {
     $numericColumns = @(
         'UsedGB', 'TotalGB', 'RemainingGB',
         'FileCount', 'FolderCount', 'VersionCount', 'Level',
-        'SizeMB', 'VersionSizeMB', 'TotalSizeMB'
+        'SizeMB', 'VersionSizeMB', 'TotalSizeMB',
+        'LocalPathLength', 'SharePointPathLength'
     )
 
     return @(
@@ -1974,7 +2083,8 @@ function Complete-CheckpointUnit {
     param(
         [string]$CheckpointKey,
         [object[]]$SummaryRows,
-        [object[]]$DetailRows
+        [object[]]$DetailRows,
+        [object[]]$LongPathRows = @()
     )
 
     if ($SummaryRows.Count -gt 0) {
@@ -1982,6 +2092,9 @@ function Complete-CheckpointUnit {
     }
     if ($DetailRows.Count -gt 0) {
         Append-CheckpointRows -Path $script:CheckpointDetailPath -Rows $DetailRows
+    }
+    if ($LongPathRows.Count -gt 0) {
+        Append-CheckpointRows -Path $script:CheckpointLongPathPath -Rows $LongPathRows
     }
 
     if (-not [string]::IsNullOrWhiteSpace($CheckpointKey)) {
@@ -1992,6 +2105,7 @@ function Complete-CheckpointUnit {
 
 $summaryRows = [System.Collections.Generic.List[PSCustomObject]]::new()
 $detailRows  = [System.Collections.Generic.List[PSCustomObject]]::new()
+$longPathRows = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 if ($script:LoadedCheckpoint) {
     foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointSummaryPath)) {
@@ -1999,6 +2113,9 @@ if ($script:LoadedCheckpoint) {
     }
     foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointDetailPath)) {
         $detailRows.Add($row) | Out-Null
+    }
+    foreach ($row in (Convert-CheckpointCsvRows -Path $script:CheckpointLongPathPath)) {
+        $longPathRows.Add($row) | Out-Null
     }
     Write-ProgressHost -Message ("Resuming with {0} completed library checkpoint(s)." -f $script:CompletedLibraryKeys.Count) -ForegroundColor DarkGray
 }
@@ -2241,6 +2358,55 @@ Write-ProgressHost -Message ("Found {0} document libraries across {1} site(s)" -
     $siteLibraries.Count, $sites.Count) -ForegroundColor Green
 Write-Host ""
 
+# ── Profile folder and organisation name for the local sync path ─────────────
+# The local path starts with the user's profile folder, named after the UPN prefix (the part
+# before the @), so the user with the longest UPN gets the longest paths: measure for them.
+# OneDrive names the sync folder after the organisation's display name, which is usually
+# longer than the tenant name in the URL - so try Graph first and fall back to the URL.
+$script:SyncProfileRoot = $SyncProfilePath
+$syncOrgName = $OrganizationName
+if ($Apply -and -not $script:SyncProfileRoot) {
+    $longestPrefix = ''
+    $longestUpn    = ''
+    try {
+        $usersUri = 'https://graph.microsoft.com/v1.0/users?$select=userPrincipalName&$filter=accountEnabled eq true and userType eq ''Member''&$top=999'
+        do {
+            $usersResp = Invoke-MgGraphRequest -Method GET -Uri $usersUri -OutputType PSObject -ErrorAction Stop
+            foreach ($user in @($usersResp.value)) {
+                $upn = [string]$user.userPrincipalName
+                # Synced on-premises guests/external accounts (#EXT#) never get a profile here.
+                if (-not $upn -or $upn -match '#EXT#') { continue }
+                $prefix = ($upn -split '@')[0]
+                if ($prefix.Length -gt $longestPrefix.Length) { $longestPrefix = $prefix; $longestUpn = $upn }
+            }
+            $usersUri = $usersResp.'@odata.nextLink'
+        } while ($usersUri)
+    } catch {
+        Write-ProgressHost -Message ("[INFO] Users not readable ({0}); local path lengths assume C:\Users\firstname.lastname. Pass -SyncProfilePath for an exact figure." -f $_.Exception.Message) -ForegroundColor DarkGray
+    }
+    if ($longestPrefix) {
+        $script:SyncProfileRoot = "C:\Users\$longestPrefix"
+        Write-ProgressHost -Message ("Longest UPN: {0} ({1} characters before the @)" -f $longestUpn, $longestPrefix.Length) -ForegroundColor DarkGray
+    } else {
+        $script:SyncProfileRoot = 'C:\Users\firstname.lastname'
+    }
+}
+if ($Apply -and -not $syncOrgName) {
+    try {
+        $orgResp = Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/organization?$select=displayName' -OutputType PSObject -ErrorAction Stop
+        $syncOrgName = [string](@($orgResp.value)[0].displayName)
+    } catch {}
+    if ([string]::IsNullOrWhiteSpace($syncOrgName)) {
+        $firstSiteUrl = @($sites | Where-Object { $_.webUrl } | Select-Object -First 1).webUrl
+        $syncOrgName  = if ($firstSiteUrl) { ([Uri]$firstSiteUrl).Host -replace '(-my)?\.sharepoint\.com$', '' } else { 'Organisation' }
+        Write-ProgressHost -Message ("[INFO] Organisation display name not readable; local path lengths assume '{0}'. Pass -OrganizationName for an exact figure." -f $syncOrgName) -ForegroundColor DarkGray
+    }
+}
+if ($Apply) {
+    Write-ProgressHost -Message ("Local paths measured as {0}\{1}\<site> - <library>\..." -f $script:SyncProfileRoot.TrimEnd('\'), $syncOrgName) -ForegroundColor DarkGray
+    Write-Host ""
+}
+
 # ── Phase 2: Retrieve storage data ────────────────────────────────────────────
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-ProgressHost -Message "Phase 2: Retrieving storage data" -ForegroundColor Cyan
@@ -2408,6 +2574,14 @@ foreach ($entry in $siteLibraries) {
         (Format-SizeAuto -MB ($versionSize / 1MB)),
         (Format-SizeAuto -MB ($totalSize   / 1MB))) -ForegroundColor DarkGray
 
+    $libraryLongPathRows = @(Get-LongPathRows -Items $items -Site $site -Drive $drive -SiteName $siteName -OrgName $syncOrgName)
+    $libraryOverLimit    = @($libraryLongPathRows | Where-Object { $_.OverLimit }).Count
+    if ($libraryLongPathRows.Count -gt 0) {
+        $longestLocal = ($libraryLongPathRows | Measure-Object -Property LocalPathLength -Maximum).Maximum
+        Write-Host ("        long paths: {0} at {1}+ characters, {2} over a limit (longest local: {3})" -f
+            $libraryLongPathRows.Count, $LongPathThreshold, $libraryOverLimit, $longestLocal) -ForegroundColor $(if ($libraryOverLimit) { 'Yellow' } else { 'DarkGray' })
+    }
+
     $librarySummaryRows.Add([PSCustomObject]@{
         SiteName          = $siteName
         SiteUrl           = $site.webUrl
@@ -2469,7 +2643,8 @@ foreach ($entry in $siteLibraries) {
 
     foreach ($row in $librarySummaryRows) { $summaryRows.Add($row) | Out-Null }
     foreach ($row in $libraryDetailRows) { $detailRows.Add($row) | Out-Null }
-    Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @($libraryDetailRows)
+    foreach ($row in $libraryLongPathRows) { $longPathRows.Add($row) | Out-Null }
+    Complete-CheckpointUnit -CheckpointKey $libraryKey -SummaryRows @($librarySummaryRows) -DetailRows @($libraryDetailRows) -LongPathRows $libraryLongPathRows
 }
 Complete-ScanProgress -Id 3 -ParentId 2
 Complete-ScanProgress -Id 2
@@ -2764,9 +2939,42 @@ if ($Apply -and $detailRows.Count -gt 0) {
         }
         $mdLines.Add('')
 
+        if ($longPathRows.Count -gt 0) {
+            $mdLines.Add('---')
+            $mdLines.Add('')
+            $mdLines.Add('## Top 10 langste paden')
+            $mdLines.Add('')
+            $mdLines.Add(("Lokaal pad gemeten als ``{0}\{1}\<site> - <library>\...``. Limieten: SharePoint {2}, Windows {3}, Excel {4} tekens." -f
+                $script:SyncProfileRoot.TrimEnd('\'), $syncOrgName, $script:SharePointMaxPath, ($script:WindowsMaxPath + 1), $script:ExcelMaxPath))
+            $mdLines.Add('')
+            $mdLines.Add('| # | Lokaal | SharePoint | Over limiet | Library | Pad | Site |')
+            $mdLines.Add('|---|-------:|-----------:|-------------|---------|-----|------|')
+            $i = 0
+            foreach ($p in ($longPathRows | Sort-Object { [int]$_.LocalPathLength } -Descending | Select-Object -First 10)) {
+                $i++
+                $mdLines.Add(("| {0} | {1} | {2} | {3} | {4} | {5} | {6} |" -f
+                    $i, $p.LocalPathLength, $p.SharePointPathLength,
+                    $(if ($p.OverLimit) { $p.OverLimit } else { '—' }),
+                    $p.Library, $p.Path, $p.SiteName))
+            }
+            $mdLines.Add('')
+        }
+
         $mdLines | Set-Content -Path $reportMd -Encoding UTF8
         Write-ProgressHost -Message ("Rapport  : {0}" -f $reportMd) -ForegroundColor Green
     }
+}
+
+if ($Apply -and $longPathRows.Count -gt 0) {
+    $longPathRows = @(
+        $longPathRows | Sort-Object `
+            @{ Expression = { [int]$_.LocalPathLength }; Descending = $true },
+            SiteName,
+            Library,
+            Path
+    )
+    $longPathRows | Export-Csv -Path $longPathCsv -NoTypeInformation -Encoding UTF8
+    Write-ProgressHost -Message ("Paths    : {0}" -f $longPathCsv) -ForegroundColor Green
 }
 
 1, 2, 3, 4 | ForEach-Object { Complete-ScanProgress -Id $_ }
@@ -2827,6 +3035,29 @@ if ($Apply) {
                     $_.Path) -ForegroundColor Yellow
                 Write-ProgressHost -Message ("Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
             }
+    }
+
+    # ── Longest paths ─────────────────────────────────────────────────────────
+    Write-Host ""
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-ProgressHost -Message "Top 10 longest paths (local OneDrive sync path)" -ForegroundColor Cyan
+    Write-Host "  ================================================" -ForegroundColor Cyan
+    Write-ProgressHost -Message ("Measured as {0}\{1}\<site> - <library>\..." -f $script:SyncProfileRoot.TrimEnd('\'), $syncOrgName) -ForegroundColor DarkGray
+    if ($longPathRows.Count -eq 0) {
+        Write-ProgressHost -Message ("No paths of {0}+ characters." -f $LongPathThreshold) -ForegroundColor Green
+    } else {
+        foreach ($limitName in "SharePoint ($script:SharePointMaxPath)", "Windows ($($script:WindowsMaxPath + 1))", "Excel ($script:ExcelMaxPath)") {
+            $overCount = @($longPathRows | Where-Object { $_.OverLimit -eq $limitName }).Count
+            Write-ProgressHost -Message ("Over {0,-17}: {1}" -f $limitName, $overCount) -ForegroundColor $(if ($overCount) { 'Yellow' } else { 'Green' })
+        }
+        Write-ProgressHost -Message ("{0}+ characters    : {1}" -f $LongPathThreshold, $longPathRows.Count) -ForegroundColor DarkGray
+        $longPathRows | Select-Object -First 10 | ForEach-Object {
+            Write-ProgressHost -Message ("{0,3} / {1,3}  {2}{3} > {4}" -f
+                $_.LocalPathLength, $_.SharePointPathLength,
+                $(if ($_.OverLimit) { "[$($_.OverLimit)] " } else { '' }),
+                $_.Library, $_.Path) -ForegroundColor $(if ($_.OverLimit) { 'Yellow' } else { 'White' })
+            Write-ProgressHost -Message ("Site: {0}" -f $_.SiteName) -ForegroundColor DarkGray
+        }
     }
 }
 Write-Host ""
