@@ -15,6 +15,7 @@ A USB toolkit for Windows setup and Autopilot enrollment. Designed to be used du
 | Script | Description |
 |--------|-------------|
 | [`start.bat`](start.bat) ([docs](#startbat)) | Main menu of the toolkit — self-elevates and offers Autopilot enrollment, Windows Update, rename, domain join and the customer install browser |
+| [`start.local.example.cmd`](start.local.example.cmd) ([docs](#startlocalcmd)) | Template for `start.local.cmd` — the site's LocalAdmin password and install share, kept out of the repo |
 | [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Interactive customer/script browser behind menu options `D` and `E` — browse customer folders and launch `.ps1` / `.bat` / `.cmd` files |
 
 Also in this folder: [`autorun.inf`](autorun.inf) — USB drive label only ([details](#autoruninf)).
@@ -28,6 +29,7 @@ All files must be in the **same folder** on the USB drive:
 ```
 USB:\
 ├── start.bat                      ← Main menu — run this
+├── start.local.cmd                ← Site settings: LocalAdmin password, install share (not in the repo)
 ├── GetAutoPilot.CMD               ← Autopilot enrollment script
 ├── Get-WindowsAutoPilotInfo.ps1   ← PowerShell module for hardware hash
 ├── Browse-InstallScripts.ps1       ← Customer install browser for option D/E
@@ -78,7 +80,7 @@ The main menu of the toolkit. It switches to its own folder (`cd /d %~dp0`), req
 | `B` | **Rename device** — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`) | ✅ |
 | `C` | **Do it all — AD** — Rename + Domain join + Windows Update + restart | ✅ (needs domain connectivity) |
 | `D` | **Customer install scripts (local)** — open customer menu from local `Install` folder | ✅ |
-| `E` | **Customer install scripts (network share)** — open customer menu from `\\10.222.3.94\Software` | ✅ (needs network access) |
+| `E` | **Customer install scripts (network share)** — open customer menu from the share in `INSTALL_SHARE` (asked when not set) | ✅ (needs network access) |
 | `0` | Exit | ✅ |
 
 ### Browse-InstallScripts.ps1
@@ -96,12 +98,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 
 ```
 
 - Option `D` needs local files: `Browse-InstallScripts.ps1` and the complete `Install` folder next to `start.bat`.
-- Option `E` reads customer folders from `\\10.222.3.94\Software` and needs network access.
+- Option `E` reads customer folders from the share in `INSTALL_SHARE` (from [`start.local.cmd`](#startlocalcmd), otherwise asked) and needs network access.
 - Before option `D` or `E` opens the deploy browser, `start.bat` prepares the device for deployment:
    - Creates or updates local admin user `LocalAdmin`
-   - Password: `Er@smus_Roter0`
+   - Password: `LOCALADMIN_PASSWORD` from [`start.local.cmd`](#startlocalcmd), otherwise asked with hidden input. No password, no account: the option stops and the menu returns
    - Adds `LocalAdmin` to the local `Administrators` group
    - Sets OOBE skip registry flags so the remaining OOBE flow can be skipped more easily
+
+### start.local.cmd
+
+Site-specific settings that do not belong in the repo. `start.bat` loads it from its own folder when it exists; copy [`start.local.example.cmd`](start.local.example.cmd) to `start.local.cmd` on the USB stick and fill it in. `start.local.cmd` is git-ignored.
+
+| Variable | Description |
+|----------|-------------|
+| `LOCALADMIN_PASSWORD` | Password for the `LocalAdmin` account options `D` and `E` create. Empty or missing: asked with hidden input. Avoid `%` — batch expands it |
+| `INSTALL_SHARE` | UNC path of the customer install share for option `E`, e.g. `\\server\Software`. Empty or missing: asked when option `E` is chosen |
 
 ### Autopilot online (option 4)
 
@@ -142,7 +153,8 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
-| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens `\\10.222.3.94\Software`; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts; documented that option `D` requires copying both `Browse-InstallScripts.ps1` and the full `Install` folder; options `D` and `E` now create/update local admin `LocalAdmin` (`Er@smus_Roter0`) and set OOBE skip flags before deployment starts |
+| 2026-10-05 | 3.0 | The LocalAdmin password and the install share's address are no longer in `start.bat`: they come from `start.local.cmd` (git-ignored), and are asked when it is missing — the password with hidden input. With no password, options `D`/`E` stop instead of creating an account. Added `start.local.example.cmd` |
+| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens a network share; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts; documented that option `D` requires copying both `Browse-InstallScripts.ps1` and the full `Install` folder; options `D` and `E` now create/update local admin `LocalAdmin` and set OOBE skip flags before deployment starts |
 
 | Date | Version | Change |
 |---|---|---|
