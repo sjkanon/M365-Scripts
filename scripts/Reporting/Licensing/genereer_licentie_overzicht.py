@@ -723,8 +723,10 @@ def write_summary_sheet(wb, summary_rows, period):
 def main():
     """
     Usage:
-        python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv>
-        python genereer_licentie_overzicht.py --ingram <ingram.xlsx> --pax8 <pax8.csv> --output report.xlsx
+        python genereer_licentie_overzicht.py --export-dir <folder>
+        python genereer_licentie_overzicht.py --export-dir <folder> --ingram <ingram.xlsx> --pax8 <pax8.csv> --output report.xlsx
+
+    --export-dir may be left out when LICENSING_EXPORT_DIR is set.
 
     If --ingram / --pax8 are omitted, files are auto-detected from the INGRAM_DIR / PAX8_DIR folders.
     Output defaults to: Licensing_Report_YYYY-MM.xlsx in EXPORT_DIR.
@@ -734,16 +736,27 @@ def main():
     import shutil
     from pathlib import Path
 
+    import os
+
+    # ── Arguments ─────────────────────────────────────────────────────────────
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--export-dir", required=False, help="Folder holding Import/ and Archive/, where the report is written (default: %%LICENSING_EXPORT_DIR%%)")
+    parser.add_argument("--ingram", required=False, help="Ingram billing Excel (.xlsx) — auto-detected if omitted")
+    parser.add_argument("--pax8",   required=False, help="Pax8 billing CSV — auto-detected if omitted")
+    parser.add_argument("--output", required=False, help="Output file path (default: Licensing_Report_YYYY-MM.xlsx)")
+    args = parser.parse_args()
+
     # ── Paths ────────────────────────────────────────────────────────────────
-    # Update EXPORT_DIR to the folder where input files are placed and output is written.
-    # The PowerShell launcher (genereer_rapport.ps1) passes --ingram/--pax8/--output
-    # explicitly, so EXPORT_DIR is only used when running this script directly.
+    # EXPORT_DIR is the folder where input files are placed and output is written:
+    # --export-dir, else the LICENSING_EXPORT_DIR environment variable. There is no
+    # built-in default - a guessed folder would only fail later and less clearly.
     SCRIPT_DIR  = Path(__file__).parent.resolve()
-    EXPORT_DIR  = Path(r"C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload")
-    IMPORT_DIR  = EXPORT_DIR / "Import"
-    INGRAM_DIR  = IMPORT_DIR / "Ingram"
-    PAX8_DIR    = IMPORT_DIR / "Pax8"
-    ARCHIVE_DIR = EXPORT_DIR / "Archive"
+    export_dir  = args.export_dir or os.environ.get("LICENSING_EXPORT_DIR", "")
+    EXPORT_DIR  = Path(export_dir) if export_dir else None
+    IMPORT_DIR  = EXPORT_DIR / "Import" if EXPORT_DIR else None
+    INGRAM_DIR  = IMPORT_DIR / "Ingram" if IMPORT_DIR else None
+    PAX8_DIR    = IMPORT_DIR / "Pax8" if IMPORT_DIR else None
+    ARCHIVE_DIR = EXPORT_DIR / "Archive" if EXPORT_DIR else None
     LOG_DIR     = SCRIPT_DIR / "Log"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     LOG_FILE    = LOG_DIR / "licensing_report.log"
@@ -760,20 +773,18 @@ def main():
     )
     log = logging.getLogger(__name__)
 
-    # ── Arguments ─────────────────────────────────────────────────────────────
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--ingram", required=False, help="Ingram billing Excel (.xlsx) — auto-detected if omitted")
-    parser.add_argument("--pax8",   required=False, help="Pax8 billing CSV — auto-detected if omitted")
-    parser.add_argument("--output", required=False, help="Output file path (default: Licensing_Report_YYYY-MM.xlsx)")
-    args = parser.parse_args()
-
     log.info("========================================")
     log.info("Starting licensing report generation")
 
     # ── Validate export directory ─────────────────────────────────────────────
+    if EXPORT_DIR is None:
+        log.error("No export directory given.")
+        log.error("Pass --export-dir or set the LICENSING_EXPORT_DIR environment variable.")
+        _pause_if_interactive("Press Enter to exit...")
+        sys.exit(2)
     if not EXPORT_DIR.exists():
         log.error(f"Export directory not found: {EXPORT_DIR}")
-        log.error("Update the EXPORT_DIR variable in this script.")
+        log.error("Pass --export-dir or set the LICENSING_EXPORT_DIR environment variable.")
         _pause_if_interactive("Press Enter to exit...")
         sys.exit(2)
     log.info("Export directory: OK")

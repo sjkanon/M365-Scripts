@@ -10,7 +10,13 @@ Outillage d'export et d'archivage Microsoft Teams / SharePoint.
 
 ## Scripts
 
-### vias_archiver.ps1
+| Script | Description |
+|--------|-------------|
+| [`Invoke-TeamsArchive.ps1`](Invoke-TeamsArchive.ps1) ([docs](#invoke-teamsarchiveps1)) | Exécute un flux d'export et d'archivage Teams/SharePoint pour une liste d'équipes et de canaux lue dans Excel |
+
+---
+
+### Invoke-TeamsArchive.ps1
 
 Archiveur Teams avec un flux d'export Graph, Teams et SharePoint. PowerShell 7+ requis, à exécuter en tant que Global Admin.
 
@@ -24,6 +30,9 @@ Archiveur Teams avec un flux d'export Graph, Teams et SharePoint. PowerShell 7+ 
 | `-ChannelArchiveTag` | Texte de marqueur utilisé pour le repli par renommage (par défaut : `[ARCHIEF]`) |
 | `-ChannelFallbackToRename` | Se rabattre sur un marqueur de renommage si l'appel à l'API Graph d'archivage/désarchivage échoue |
 | `-DryRun` | Simulation — conserve toute l'authentification/l'amorçage et valide les étapes 6 à 9 en sondant les comptages, sans écrire d'exports ni modifier l'état d'archivage |
+| `-WorksheetName` | Feuille contenant la liste des équipes. Par défaut : la première feuille du fichier Excel |
+
+Le fichier Excel doit contenir les colonnes `TeamName`, `ChannelName` et `Archive` (les lignes avec `Archive` = `Archive` sont traitées). Rien dans le script n'est lié à un client : l'ID du tenant, l'URL SharePoint, le fichier Excel et le dossier d'archive sont demandés par l'assistant de configuration (par défaut `C:\Temp\Teams_Channels.xlsx` et `C:\Temp\Teams_Archive`).
 
 Comportement actuel (v8.19) :
 - Crée une inscription d'application Entra temporaire unique pour l'exécution.
@@ -49,3 +58,4 @@ Comportement actuel (v8.19) :
 - Le mode dry-run conserve toute l'authentification/l'amorçage et valide les étapes 6 à 9 en sondant l'existence et les comptages dans Teams/SharePoint/Graph, sans écrire sur disque les exports de membres/conversations/fichiers.
 - En dry-run, le rapport de l'étape 11 utilise les comptages sondés (fichiers/messages détectés) au lieu des fichiers exportés localement.
 - Les modifications d'archivage/désarchivage de l'étape 10 restent simulées, avec une sortie `[DRYRUN]`.
+- Le redémarrage dans une session propre après le nettoyage des modules transmet tous les paramètres (y compris `-DryRun`) et renvoie le code de sortie de l'exécution redémarrée.

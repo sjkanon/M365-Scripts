@@ -1,5 +1,5 @@
 # ============================================================
-# Vias Teams Archivering - Volledig Automatisch Script v8.19
+# Teams Archivering - Volledig Automatisch Script v8.19
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
 
@@ -11,7 +11,9 @@ param(
     [string]$ChannelAction = "none",
     [string]$ChannelArchiveTag = "[ARCHIEF]",
     [switch]$ChannelFallbackToRename,
-    [switch]$DryRun
+    [switch]$DryRun,
+    # Werkblad met de Teams-lijst. Leeg = het eerste werkblad van het Excel-bestand.
+    [string]$WorksheetName
 )
 
 #region ZELFHERSTART - Modules opkuisen en sessie hernieuwen
@@ -19,7 +21,7 @@ param(
 # nadat conflicterende modules zijn verwijderd. Zonder herstart blijven
 # oude module-versies actief in het geheugen en crashen alle Graph-calls.
 
-$herstart = $env:VIAS_ARCHIVER_HERSTART
+$herstart = $env:TEAMS_ARCHIVER_HERSTART
 
 if ($herstart -ne "1") {
 
@@ -63,17 +65,26 @@ if ($herstart -ne "1") {
 
     Write-Host "`n  Modules geinstalleerd. Script herstart in schone sessie...`n" -ForegroundColor Cyan
 
-    # Herstart het script in een nieuwe pwsh-sessie met de herstart-vlag
-    # Alle configuratievariabelen worden via omgevingsvariabelen doorgegeven
-    $env:VIAS_ARCHIVER_HERSTART = "1"
+    # Herstart het script in een nieuwe pwsh-sessie met de herstart-vlag.
+    # De parameters gaan mee: zonder dat viel o.a. -DryRun bij elke eerste run weg
+    # en archiveerde de herstarte sessie echt.
+    $env:TEAMS_ARCHIVER_HERSTART = "1"
     $pwshPath = (Get-Command pwsh).Source
     $restartArgs = if ($IsWindows) {
         @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MyInvocation.MyCommand.Path)
     } else {
         @("-NoProfile", "-File", $MyInvocation.MyCommand.Path)
     }
+    foreach ($param in $PSBoundParameters.GetEnumerator()) {
+        if ($param.Value -is [switch]) {
+            if ($param.Value.IsPresent) { $restartArgs += "-$($param.Key)" }
+        } else {
+            $restartArgs += "-$($param.Key)"
+            $restartArgs += [string]$param.Value
+        }
+    }
     & $pwshPath @restartArgs
-    exit
+    exit $LASTEXITCODE
 }
 
 # Vanaf hier: we zitten in de hergestarte schone sessie
@@ -87,7 +98,7 @@ Write-Host "  Graph modules geladen." -ForegroundColor Green
 
 # Cross-platform tijdelijke map
 $tempDir = [System.IO.Path]::GetTempPath()
-$cleanupEventName = "ViasArchiverCleanup"
+$cleanupEventName = "TeamsArchiverCleanup"
 
 # Tijdelijke app-tracking
 $isTempApp = $false
@@ -144,12 +155,12 @@ function Register-TempAppCleanupEvent {
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Vias Teams Archivering - Setup Wizard v8.19" -ForegroundColor Cyan
+Write-Host "  Teams Archivering - Setup Wizard v8.19" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
 Write-Host "Stap 1/5 - Excel-bestand met de Teams-lijst" -ForegroundColor Yellow
-$xlStandaard = if ($IsWindows) { "C:\Temp\Vias_Teams_Channels_JFG.xlsx" } else { Join-Path $HOME "Downloads" "Vias_Teams_Channels_JFG.xlsx" }
+$xlStandaard = if ($IsWindows) { "C:\Temp\Teams_Channels.xlsx" } else { Join-Path $HOME "Downloads" "Teams_Channels.xlsx" }
 Write-Host "  Standaard: $xlStandaard"
 Write-Host "  Druk Enter voor standaard, of typ een ander pad.`n"
 $xlInput = Read-Host "  Pad naar Excel-bestand"
@@ -161,7 +172,7 @@ Write-Host "  OK: $xlPath`n" -ForegroundColor Green
 
 # Archief-map
 Write-Host "Stap 2/5 - Archief-map" -ForegroundColor Yellow
-$archiveStandaard = if ($IsWindows) { "N:\Archives\Teams" } else { Join-Path $HOME "Documents" "Vias_Teams_Archive" }
+$archiveStandaard = if ($IsWindows) { "C:\Temp\Teams_Archive" } else { Join-Path $HOME "Documents" "Teams_Archive" }
 Write-Host "  Standaard: $archiveStandaard"
 Write-Host "  Druk Enter voor standaard, of typ een ander pad.`n"
 $archiveInput = Read-Host "  Archief-map"
@@ -174,7 +185,7 @@ New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null
 Write-Host "  OK: $archiveRoot`n" -ForegroundColor Green
 
 # Tenant ID
-Write-Host "Stap 3/5 - Tenant ID van de Vias Microsoft 365 omgeving" -ForegroundColor Yellow
+Write-Host "Stap 3/5 - Tenant ID van de Microsoft 365-omgeving van de klant" -ForegroundColor Yellow
 Write-Host "  Vind je via: https://entra.microsoft.com > Microsoft Entra ID > Overview"
 Write-Host "  Formaat: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`n"
 do {
@@ -186,12 +197,12 @@ do {
 Write-Host "  OK: $tenantId`n" -ForegroundColor Green
 
 # SharePoint URL
-Write-Host "Stap 4/5 - SharePoint URL van de Vias tenant" -ForegroundColor Yellow
+Write-Host "Stap 4/5 - SharePoint URL van de tenant van de klant" -ForegroundColor Yellow
 Write-Host "  Formaat: https://naam.sharepoint.com  (geen slash aan het einde)`n"
 do {
     $tenantUrl = (Read-Host "  SharePoint URL").Trim().TrimEnd('/')
     if ($tenantUrl -notmatch '^https://[a-zA-Z0-9-]+\.sharepoint\.com$') {
-        Write-Host "  Ongeldig formaat. Voorbeeld: https://bivv.sharepoint.com`n" -ForegroundColor Red
+        Write-Host "  Ongeldig formaat. Voorbeeld: https://contoso.sharepoint.com`n" -ForegroundColor Red
     }
 } while ($tenantUrl -notmatch '^https://[a-zA-Z0-9-]+\.sharepoint\.com$')
 Write-Host "  OK: $tenantUrl`n" -ForegroundColor Green
@@ -221,7 +232,7 @@ if ($bevestig -ne "j") { Write-Host "Geannuleerd." -ForegroundColor Yellow; exit
 #region STAP 1 - Login Global Admin
 Write-Host "`n[1/12] Inloggen als Global Admin..." -ForegroundColor Cyan
 Write-Host "  Je krijgt een code + link." -ForegroundColor Yellow
-Write-Host "  Log in met het VIAS GLOBAL ADMIN account.`n" -ForegroundColor Yellow
+Write-Host "  Log in met het GLOBAL ADMIN account van de klant.`n" -ForegroundColor Yellow
 
 Disconnect-MgGraph -ErrorAction SilentlyContinue
 
@@ -235,7 +246,7 @@ try {
     Write-Host "`n  FOUT bij inloggen: $_" -ForegroundColor Red
     Write-Host "  Controleer:" -ForegroundColor Yellow
     Write-Host "   - Tenant ID correct? ($tenantId)"
-    Write-Host "   - Log je in met het VIAS admin account (niet BraveHub)?"
+    Write-Host "   - Log je in met het admin-account van de klant (niet je eigen of partner-account)?"
     Write-Host "   - Is MFA ingesteld op dit account?"
     exit
 }
@@ -250,7 +261,7 @@ Write-Host "  Ingelogd als: $account" -ForegroundColor Green
 #region STAP 2 - Entra App aanmaken of hergebruiken
 Write-Host "`n[2/12] Tijdelijke Entra app registreren..." -ForegroundColor Cyan
 
-$appName = "Temp-Vias-Teams-Archiver-$(Get-Date -Format 'yyyyMMddHHmmss')"
+$appName = "Temp-Teams-Archiver-$(Get-Date -Format 'yyyyMMddHHmmss')"
 $isTempApp = $true
 
 try {
@@ -279,7 +290,7 @@ if ([string]::IsNullOrWhiteSpace($clientId)) {
 }
 
 # Opslaan als fallback
-$clientId | Out-File (Join-Path $tempDir "vias_archiver_clientid.txt") -Force
+$clientId | Out-File (Join-Path $tempDir "teams_archiver_clientid.txt") -Force
 Write-Host "  Client ID: $clientId" -ForegroundColor Green
 #endregion
 
@@ -364,7 +375,7 @@ try {
 
 #region STAP 4 - Opnieuw inloggen met volledige permissies
 Write-Host "`n[4/12] Opnieuw inloggen met volledige permissies..." -ForegroundColor Cyan
-Write-Host "  Gebruik opnieuw het VIAS ADMIN account.`n" -ForegroundColor Yellow
+Write-Host "  Gebruik opnieuw het admin-account van de klant.`n" -ForegroundColor Yellow
 
 if ($DryRun) {
     Write-Host "  DRY RUN: login wordt normaal uitgevoerd; alleen mutaties worden gesimuleerd." -ForegroundColor DarkYellow
@@ -404,7 +415,9 @@ Write-Host "`n[5/12] Excel inlezen en Teams-IDs ophalen..." -ForegroundColor Cya
 
 Import-Module ImportExcel -ErrorAction Stop
 
-$data      = Import-Excel -Path $xlPath -WorksheetName "Teams channels Vias"
+$excelArgs = @{ Path = $xlPath }
+if ($WorksheetName) { $excelArgs['WorksheetName'] = $WorksheetName }
+$data      = Import-Excel @excelArgs
 $toArchive = $data | Where-Object { $_.Archive -eq "Archive" }
 
 # Normaliseer Excel-waarden om lookup-missers (bv. trailing spaces) te vermijden.
@@ -431,7 +444,7 @@ foreach ($teamName in $archiveTeams) {
 if ($DryRun) {
     Write-Host "  [DRYRUN] Team mapping file wordt niet weggeschreven." -ForegroundColor Cyan
 } else {
-    $teamMapping | ConvertTo-Json | Out-File (Join-Path $tempDir "vias_team_mapping.json") -Force
+    $teamMapping | ConvertTo-Json | Out-File (Join-Path $tempDir "teams_archiver_team_mapping.json") -Force
 }
 Write-Host "  $($teamMapping.Count) van de $($archiveTeams.Count) Teams gevonden." -ForegroundColor Green
 #endregion
@@ -677,7 +690,7 @@ $teamChannelCache    = @{}
 
 # Laatste check op ClientId voor gebruik in PnP
 if ([string]::IsNullOrWhiteSpace($clientId)) {
-    $clientId = (Get-Content (Join-Path $tempDir "vias_archiver_clientid.txt") -Raw -ErrorAction SilentlyContinue).Trim()
+    $clientId = (Get-Content (Join-Path $tempDir "teams_archiver_clientid.txt") -Raw -ErrorAction SilentlyContinue).Trim()
     if ([string]::IsNullOrWhiteSpace($clientId)) {
         Write-Host "  FOUT: ClientId is null. Herstart het script volledig." -ForegroundColor Red; exit
     }
@@ -913,7 +926,7 @@ if ($chatMethode -eq "a") {
     }
     Write-Host "  1. Ga naar https://compliance.microsoft.com"
     Write-Host "  2. eDiscovery > Standard > + Create a case"
-    Write-Host "     Naam: Vias Teams Archivering $(Get-Date -Format 'yyyy')"
+    Write-Host "     Naam: Teams Archivering $(Get-Date -Format 'yyyy')"
     Write-Host "  3. Searches > + New search > Teams chats & channels"
     Write-Host "     Selecteer deze Teams:"
     $archiveTeams | ForEach-Object { Write-Host "       - $_" -ForegroundColor Gray }
@@ -1317,11 +1330,11 @@ foreach ($row in $toArchive) {
     })
 }
 
-$rapportPad = [System.IO.Path]::Combine($archiveRoot, "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx")
+$rapportPad = [System.IO.Path]::Combine($archiveRoot, "Teams_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx")
 if (-not (Test-Path $archiveRoot -ErrorAction SilentlyContinue)) {
     $rapportPad = [System.IO.Path]::Combine(
         [System.IO.Path]::GetTempPath(),
-        "Vias_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
+        "Teams_Archivering_Rapport_$(Get-Date -Format 'yyyyMMdd_HHmm').xlsx"
     )
     Write-Warning "  Archief-locatie niet bereikbaar. Rapport wordt opgeslagen in: $rapportPad"
 }
@@ -1345,11 +1358,11 @@ if ($isTempApp) {
     Write-Host "  Niet-tijdelijke app behouden. Client ID: $clientId" -ForegroundColor Gray
 }
 Unregister-Event -SourceIdentifier $cleanupEventName -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $tempDir "vias_archiver_clientid.txt") -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $tempDir "teams_archiver_clientid.txt") -ErrorAction SilentlyContinue
 Write-Host "  Tijdelijke bestanden verwijderd." -ForegroundColor Yellow
 
 # Omgevingsvariabele opruimen
-$env:VIAS_ARCHIVER_HERSTART = $null
+$env:TEAMS_ARCHIVER_HERSTART = $null
 
 Write-Host "`n===== ARCHIVERING VOLTOOID =====" -ForegroundColor Cyan
 Write-Host "  Rapport : $rapportPad"            -ForegroundColor Green

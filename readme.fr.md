@@ -48,7 +48,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`Reporting/`](scripts/Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
 | [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
-| [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access et surveillance des sessions en direct |
+| [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix |
 | [`SMTP/`](scripts/SMTP/readme.fr.md) | Tests de connectivité d'un relais SMTP (ponctuels et récurrents) |
 | [`Deployment/`](scripts/Deployment/readme.fr.md) | Boîte à outils USB pour l'installation de Windows et l'inscription Autopilot pendant l'OOBE |
 | [`DNS/`](scripts/DNS/readme.fr.md) | Résoudre des enregistrements DNS et les importer dans des zones DNS intégrées à AD |
@@ -189,6 +189,7 @@ Le lanceur (`menu.ps1`) couvre tous les outils de ce dépôt. Appuyez sur une to
 | `I` | Device | Remove-OemBloatware — supprimer les bloatwares OEM + génériques du Store |
 | `T` | Device | Update-TeamsClient — mettre à jour le nouveau Teams + le complément de réunion Outlook s'ils sont obsolètes |
 | `R` | Device | Repair-AppxPackageStore — réparer les paquets AppX qui échouent avec 0x80070490 (Teams, nouvel Outlook, FSLogix) |
+| `K` | Device | FSLogix-Shrink — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
 | `9` / `F9` | Startup | Install-Modules |
 | `X` | Startup | Update-ScriptIndex — reconstruire [`scripts/INDEX.md`](scripts/INDEX.md), la liste A–Z de tous les scripts |
 | `L` | Startup | Test-MarkdownLinks — vérifier chaque lien des readmes : fichiers et ancres internes à la page |
@@ -368,8 +369,8 @@ Provisionner et maintenir toute une structure SharePoint — modèle de métadon
 - `Update-SharePointShareStatus.ps1` — déduit une colonne Deelstatus des autorisations réellement présentes sur chaque fichier (lien Anyone, invité, lien d'organisation ou rien) et signale tout élément étiqueté Intern/Vertrouwelijk exposé derrière un lien externe ; code de sortie 2 pour une tâche RMM planifiée
 - `Test-SharePointStructure.ps1` — contrôle de dérive en lecture seule qui classe chaque écart comme Missing / Different / Extra ; le code de sortie 2 signifie que quelqu'un a modifié quelque chose
 - Les quatre sont idempotents et prennent en charge `-WhatIf` ; en interactif ou en app-only avec un certificat
-- Les affichages transversaux par marque (`Scope = RecursiveAll`) rendent concrète l'idée de « la marque comme étiquette » : *Alles - Butterstone* est une liste à plat couvrant tous les dossiers de piliers, y compris tout ce qui est étiqueté **Beide** — un fichier, deux marques, aucune copie. Plus *Nog te taggen*, *Extern gedeeld* et *Te archiveren*
-- [`Petsolutions-SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/Petsolutions-SharePoint-Handleiding.md) — documentation utilisateur en néerlandais à remettre au client : les trois façons d'ajouter un fichier et pourquoi elles se comportent différemment, ce que signifie chaque étiquette, et ce qui se passe dès que vous étiquetez quelque chose
+- Les affichages transversaux par marque (`Scope = RecursiveAll`) rendent concrète l'idée de « la marque comme étiquette » : *Alles - Northwind* est une liste à plat couvrant tous les dossiers de piliers, y compris tout ce qui est étiqueté **Beide** — un fichier, deux marques, aucune copie. Plus *Nog te taggen*, *Extern gedeeld* et *Te archiveren*
+- [`SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/SharePoint-Handleiding.md) — documentation utilisateur en néerlandais à remettre au client : les trois façons d'ajouter un fichier et pourquoi elles se comportent différemment, ce que signifie chaque étiquette, et ce qui se passe dès que vous étiquetez quelque chose
 - Documenté plutôt que caché : des autorisations uniques sur un dossier de canal **standard**, c'est ce que ce modèle demande et ce que Microsoft ne prend pas en charge — les membres continuent de voir le canal et obtiennent une erreur dans l'onglet Fichiers. `-SkipChannelFolderPermissions` est l'alternative prudente
 
 ---
@@ -428,6 +429,13 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Licences : événements `TerminalServices-Licensing/Admin` + fournisseur `TermServLicensing` du journal Système
   - Ligne de pulsation à chaque interrogation, avec le nombre de sessions actives et de nouveaux événements
   - À exécuter directement sur chaque serveur RDS/RDWeb ; `-IntervalSeconds` (20 par défaut), `-NoLogFile` pour ne pas écrire de fichier
+
+- Diagnostic des profils FSLogix (`Get-FSlogix-errors.ps1`) — rassemble la version, la configuration, les conteneurs attachés, l'état SMB/Azure Files et les événements FSLogix/disque d'un hôte de session AVD dans une seule transcription
+
+- Réduction des disques FSLogix (`Invoke-FSLogixShrink.ps1`) — récupère l'espace que conservent les fichiers VHDX dynamiques de profil/ODFC :
+  - Télécharge Invoke-FslShrinkDisk (équipe FSLogix) à un commit épinglé et vérifie son SHA-256
+  - `-ReportOnly` liste chaque conteneur du partage, du plus grand au plus petit ; sinon les réduit et résume les Go récupérés et les disques non traités (en cours d'utilisation)
+  - `-CheckHost` vérifie si la compaction intégrée de FSLogix à la déconnexion peut s'exécuter (version, `VHDCompactDisk`, `defragsvc`, disques dynamiques)
 
 ---
 
@@ -762,6 +770,8 @@ M365-Scripts/
     │       └── Update-UnifiFirmware.ps1       ← lister/déclencher les mises à niveau du firmware sur plusieurs sites
     ├── RDS/
     │   ├── readme.md
+    │   ├── Get-FSlogix-errors.ps1            ← diagnostic des profils FSLogix / Azure Files
+    │   ├── Invoke-FSLogixShrink.ps1          ← réduire les disques FSLogix, vérifier la compaction
     │   ├── Test-RDSDiagnostics.ps1           ← diagnostic des échecs de connexion RDP/RDWeb
     │   └── Watch-RDSLive.ps1                 ← surveillance en temps réel des sessions + licences
     ├── SMTP/
@@ -794,8 +804,8 @@ M365-Scripts/
     │   ├── Test-SharePointAccessScripts.ps1 ← vérifier les deux scripts d'accès sans tenant (bloc d'authentification partagé + entonnoir de révocation)
     │   └── Provisioning/                ← provisionner toute une structure à partir d'une seule config JSON (PnP + Graph)
     │       ├── readme.md
-    │       ├── Petsolutions-SharePoint-Handleiding.md ← guide utilisateur (NL) à remettre au client
-    │       ├── petsolutions.config.json     ← le modèle : colonnes, types de contenu, groupes, bibliothèques, affichages, autorisations
+    │       ├── SharePoint-Handleiding.md      ← guide utilisateur (NL) à remettre au client (gabarit)
+    │       ├── example.config.json          ← modèle d'exemple (`CHANGEME`) — les configurations client à côté sont ignorées par git
     │       ├── Install-SharePointStructure.ps1 ← tout construire en une exécution, y compris l'inscription d'application (temporaire)
     │       ├── SharePointStructure.Common.ps1 ← fonctions d'aide partagées (chargées en dot-source par les quatre)
     │       ├── New-SharePointMetadata.ps1   ← ensemble de termes, colonnes de site, types de contenu (chaque site de la config)
@@ -804,7 +814,7 @@ M365-Scripts/
     │       └── Test-SharePointStructure.ps1 ← contrôle de dérive en lecture seule par rapport à la config (exit 2)
     ├── Teams/
     │   ├── readme.md
-    │   └── vias_archiver.ps1        ← export + archivage Teams/SharePoint (Graph, PS7+, Global Admin)
+    │   └── Invoke-TeamsArchive.ps1  ← export + archivage Teams/SharePoint (Graph, PS7+, Global Admin)
     ├── Reporting/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← dernière connexion par ordinateur dans une ou plusieurs OU, export CSV
@@ -832,12 +842,10 @@ M365-Scripts/
     │       ├── readme.md
     │       └── Desktop/
     │           ├── readme.md
-    │           ├── Deploy-OfficeTheme.ps1        ← installe le thème Office VIAS complet (.thmx)
-    │           ├── 2026 Vias institute colours (2).thmx
+    │           ├── Deploy-OfficeTheme.ps1        ← installe un thème Office (.thmx) depuis une URL
     │           └── Office Themes/
     │               ├── readme.md
-    │               ├── Deploy-Officecolors.ps1   ← installe uniquement le jeu de couleurs
-    │               └── Test VIAS.xml
+    │               └── Deploy-Officecolors.ps1   ← installe uniquement un jeu de couleurs depuis une URL
     ├── TenantOnboarding/                ← modernisé à partir d'une boîte à outils interne de mise en place de tenants retirée, hors menu
     │   ├── readme.md
     │   ├── Provisioning/         (3 scripts)  ← administrateur break-glass, groupes de référence, attribution des stratégies Intune
@@ -869,7 +877,7 @@ M365-Scripts/
         └── Workspace365/         (2 scripts)  ← provisionnement/suppression d'environnements
 ```
 
-`Deploy-OfficeTheme.ps1` et `Deploy-Officecolors.ps1` ont leur URL de téléchargement codée en dur sur ce chemin exact du dépôt (branche `main`) — ils restent ici plutôt que sous `Intune/Desktop/` pour que l'URL continue de fonctionner.
+`Deploy-OfficeTheme.ps1` et `Deploy-Officecolors.ps1` reçoivent l'URL de téléchargement du thème en paramètre ; les fichiers de thème ne sont pas conservés dans le dépôt.
 
 ---
 
@@ -909,6 +917,137 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-05 (8)
+| Modification |
+|--------|
+| `Install-SharePointStructure.ps1` terminait une construction réussie en demandant de remplir les groupes de sécurité d'un client, par préfixe de nom, quelle que soit la configuration construite. Il indique désormais le nombre de groupes et la configuration dont ils proviennent, lus via `Get-ConfigValue` pour qu'une configuration sans groupes ne bute pas sur le mode strict. L'exemple de sortie de `Update-TeamsClient.md` montrait un vrai compte de domaine ; il affiche désormais `CONTOSO\admin` |
+| Vérifié : contrôle de syntaxe, et le message rendu avec la configuration d'exemple (13 groupes) et une configuration sans groupes (0) en mode strict. Une recherche dans tout le dépôt hors historique des versions ne trouve plus aucun nom de client |
+
+### 2026-10-05 (7)
+| Modification |
+|--------|
+| **`Invoke-TeamsArchive.ps1 -DryRun` ne faisait pas de simulation lors d'une première exécution.** Le script supprime les modules Graph en conflit et se relance dans une session `pwsh` propre, mais le redémarrage ne transmettait que le chemin du script — tous les paramètres étaient perdus. La session redémarrée tournait avec les valeurs par défaut : pas de `-DryRun`, pas de `-Step10Only`, pas de `-ChannelAction`, de sorte qu'une exécution prévue comme simulation effectuait le véritable export et l'étape 10 interactive. Seule une exécution dans une session où l'indicateur de redémarrage était déjà défini conservait ses paramètres |
+| Le redémarrage transmet désormais chaque paramètre fourni (les switchs uniquement s'ils sont activés, les valeurs telles quelles) et se termine avec le code de sortie de l'exécution redémarrée au lieu de toujours 0 |
+| Vérifié avec un script de substitution construit à partir du véritable bloc de paramètres et du code de transmission : `-DryRun -Step10Only -Step10Action undo` et des valeurs contenant des espaces arrivent intacts dans la session redémarrée, les valeurs par défaut restent par défaut, et le code de sortie de l'enfant est renvoyé. L'archiveur lui-même n'a pas été exécuté |
+
+### 2026-10-05 (6)
+| Modification |
+|--------|
+| `scripts/Teams/vias_archiver.ps1` renommé en `Invoke-TeamsArchive.ps1`, et débarrassé d'un client : les titres de l'assistant, les invites pour le tenant et le compte admin, l'URL SharePoint d'exemple, le nom de l'application temporaire, les fichiers temporaires, le nom du dossier eDiscovery et le nom du rapport citaient tous ce client, et le fichier Excel et le dossier d'archive par défaut pointaient vers son propre fichier et son lecteur réseau. Les valeurs par défaut sont désormais `C:\Temp\Teams_Channels.xlsx` et `C:\Temp\Teams_Archive` |
+| La feuille Excel était lue via un nom de feuille codé en dur au nom du client. Nouveau `-WorksheetName` ; sans lui, la première feuille est lue. La variable d'environnement de redémarrage est renommée avec le script |
+| Le readme Teams a reçu la table `## Scripts` qui lui manquait, le nouveau paramètre et les colonnes requises dans le fichier Excel. Absent de `menu.ps1`, donc rien à renommer là |
+| Vérifié : contrôle de syntaxe et recherche des noms de client restants. Non exécuté sur un tenant |
+
+### 2026-10-05 (5)
+| Modification |
+|--------|
+| `SharePoint/Provisioning/` se disait neutre vis-à-vis des clients, mais livrait la configuration complète d'un client (tenant, propriétaire, URL de sites, groupes), un guide utilisateur écrit pour un autre, et cinq scripts dont le `-ConfigPath` par défaut était un fichier de configuration au nom d'un client, inexistant — sans `-ConfigPath`, ils échouaient donc sur un fichier manquant |
+| La configuration client est remplacée par `example.config.json` : le même modèle avec des noms Contoso et `CHANGEME` dans le tenant, le propriétaire et les URL des sites. Les configurations client (`<client>.config.json`) restent à côté mais sont ignorées par git : une configuration existante continue de fonctionner localement et n'est plus publiée |
+| Nouvelle fonction `Resolve-StructureConfigPath` dans `SharePointStructure.Common.ps1` : sans `-ConfigPath`, les cinq scripts prennent désormais l'unique `*.config.json` qui ne contient plus `CHANGEME` — la règle que suivaient déjà `Install-SharePointStructure.ps1`, `Remove-SharePointStructure.ps1` et `Sync-SharePointChannelMember.ps1`. `menu.ps1` l'indique dans sa question au lieu de nommer un fichier |
+| Le guide utilisateur renommé en `SharePoint-Handleiding.md` et transformé en gabarit (Contoso NV, marques Northwind et Fabrikam, avec une note invitant à les remplacer). `New-StructureConfig.ps1` ne propose plus le nom et les marques d'un client comme valeurs par défaut ; exemples et readmes utilisent Contoso. Les noms internes des colonnes (`PsMerk`, …) sont inchangés — ils figurent dans chaque configuration et dans les sites déjà construits |
+| Vérifié : contrôle de syntaxe du dossier et de `menu.ps1` ; l'exemple se charge sans erreur une fois `CHANGEME` renseigné et est refusé tel que livré ; le résolveur choisit l'unique configuration renseignée et ignore l'exemple. Aucune exécution sur un tenant |
+
+### 2026-10-05 (4)
+| Modification |
+|--------|
+| `Deploy-OfficeTheme.ps1` et `Deploy-Officecolors.ps1` avaient été conçus pour un seul client : l'URL de téléchargement et le nom de fichier du thème étaient codés en dur et pointaient vers le `.thmx` et le XML de couleurs de ce client dans un dépôt GitHub. Ils reçoivent désormais `-ThemeUrl`/`-ThemeName` et `-ColorsUrl`/`-ColorsName` ; le nom est par défaut le dernier segment de l'URL et doit se terminer par `.thmx` ou `.xml`. Sans URL, ils s'arrêtent avec le code de sortie 1 au lieu de demander, car personne ne répond sous Intune |
+| Suppression des fichiers de thème du client (`.thmx` et `.xml` du jeu de couleurs) du dépôt. Les readmes ne disent plus que les scripts sont liés à ce chemin, et expliquent comment passer des paramètres sous Intune (commande d'installation d'une application Win32, ou copie avec valeurs par défaut renseignées) |
+| **Les déploiements Intune existants contiennent leur propre copie de l'ancien script et continuent de télécharger depuis l'URL qu'elle contient** — cette URL pointe vers un autre dépôt GitHub, et si celui-ci est synchronisé depuis ce dépôt, ces déploiements perdent le fichier dès que cette modification atteint `main` |
+| Vérifié : contrôle de syntaxe, les chemins sans URL et avec mauvaise extension s'arrêtent avec le code 1 et leur message, et une URL encodée en pourcentage donne le nom de fichier attendu. Aucun téléchargement ni déploiement Intune n'a été exécuté |
+
+### 2026-10-05 (3)
+| Modification |
+|--------|
+| `Init-TempDisk.ps1` mémorisait son dernier redémarrage déclenché sous une clé de registre au nom d'une entreprise. La clé est désormais le paramètre `-RestartMarkerPath`, par défaut `HKLM:\SOFTWARE\M365-Scripts\InitTempDisk`, validé comme chemin `HKLM:` ou `HKCU:` |
+| **Sur les machines où il a déjà tourné, l'ancienne clé n'est plus lue** : le délai de carence repart donc une fois de zéro — au plus un redémarrage supplémentaire par machine, et seulement si toutes les autres conditions sont réunies. Passez l'ancienne clé via `-RestartMarkerPath` pour la conserver |
+| Vérifié : contrôle de syntaxe, et le motif du paramètre accepte la valeur par défaut et refuse un chemin de fichier. Non exécuté sur un appareil |
+
+### 2026-10-05 (2)
+| Modification |
+|--------|
+| Remplacement des données client dans les exemples par des valeurs Contoso : `Set-UserManager.ps1` (un domaine de messagerie client), `Import-DnsRecords.ps1` (zone DNS et DC d’un client), `Get-ComputerLastLogon.ps1` (le chemin d’OU d’un client) et `Get-SharePointStorageReport.ps1`, dont l'aide citait la boîte aux lettres d'une personne réelle |
+| Le rapport de licences avait un chemin OneDrive d'entreprise (`C:\OneDrive\<Company>\...`) codé en dur dans `genereer_rapport.ps1` et `genereer_licentie_overzicht.py`, et le readme demandait de modifier les scripts. Le dossier provient désormais de `-ExportDir` / `--export-dir`, sinon de la variable d'environnement `LICENSING_EXPORT_DIR` ; sans l'un ni l'autre, les deux s'arrêtent avec le code 2 au lieu de deviner. Le lanceur le vérifie avant `Join-Path`, qui échouerait sinon sur un chemin vide |
+| `create_scheduled_task.ps1` lisait ses réglages dans des variables à modifier, dont un compte de service fixe. `-ExportDir` et `-RunAsUser` sont désormais des paramètres obligatoires, `-RunDay`/`-RunTime` facultatifs, et la tâche transmet `--export-dir` à Python. `-RunTime` était en outre ignoré pour calculer la première exécution (toujours 08:00) ; il est maintenant utilisé. **Une tâche enregistrée auparavant s'exécute sans `--export-dir` et s'arrête désormais immédiatement — réenregistrez-la** |
+| Vérifié : contrôle de syntaxe du PowerShell modifié, `py_compile` sur le moteur Python, et le lanceur sans dossier d'export s'arrête avec le code 2 et le message. Le moteur Python lui-même n'a pas été exécuté (pas de `pandas` sur cette machine) et la tâche planifiée n'a pas été réenregistrée |
+
+### 2026-10-05
+| Modification |
+|--------|
+| Suppression de `scripts/djm` et `scripts/djm.pub` — une clé privée OpenSSH (`djm-portaal`) et sa moitié publique, commitées dans le dépôt. Rien dans le dépôt ne les utilisait. `.gitignore` exclut désormais `id_*`, `*.pem`, `*.key` et `*.pub`. **La clé reste dans l'historique git et doit être considérée comme compromise : faites-la tourner sur chaque hôte qui lui fait confiance** |
+
+### 2026-10-02 (5)
+| Modification |
+|--------------|
+| Une exécution réelle de `Revoke-SharePointUserAccess.ps1` indiquait `Sites with access: 15` et `Grants found: 0`, sans aucune erreur. Le rapport de permissions recensait 30 attributions pour le même utilisateur sur les mêmes sites : les deux se contredisaient, et cest la révocation qui avait tort |
+| **Les attributions de rôle étaient lues à la mauvaise URL.** `Get-ScopeRoleAssignments` recevait la base de portée (`/_api/web`) et linterrogeait telle quelle au lieu de `/_api/web/roleassignments`. SharePoint répondait par lobjet web, dépourvu de tableau `value` : lassistant de pagination navait rien à parcourir et renvoyait une collection vide. Rien néchouait, rien nétait trouvé. La fonction ajoute désormais `/roleassignments` elle-même, ce qui correspond aussi à la base de lURL de suppression |
+| **`\24384` est une variable automatique en lecture seule.** `\24384 = [int]\.PrincipalId` lève `Cannot overwrite variable PID`. Masquée par le bug dURL, elle nest jamais apparue, mais aurait transformé chaque évaluation de portée en exception rattrapée. Renommée, et un contrôle parcourt désormais les deux scripts à la recherche daffectations à une automatique en lecture seule |
+| Ajout du garde-fou général pour la moitié silencieuse : un point de terminaison de collection répond toujours par `value` (ou `d.results`), même vide. Une réponse sans lun ni lautre est donc la mauvaise URL, pas un résultat vide. Lassistant de pagination lève désormais au lieu de ne rien renvoyer, dans les deux scripts |
+| Vérifié par 126 contrôles (6 nouveaux) et une reproduction fondée sur les formes réellement renvoyées par ce locataire : une attribution directe `Beperkte toegang` est désormais trouvée, tout comme les liens de partage, les groupes Entra rejoints et `Everyone`, tandis quune autre personne et un groupe non rejoint ne correspondent pas. **La lecture corrigée nest pas encore vérifiée sur un locataire réel** |
+
+### 2026-10-02 (4)
+| Modification |
+|--------------|
+| Les deux scripts daccès SharePoint sont désormais couplés par la sortie même du rapport. `Revoke-SharePointUserAccess.ps1` reçoit `-FromReport` : il prend les sites à visiter dans une exécution de `Get-SharePointPermissionsReport.ps1` au lieu de reparcourir le locataire. Le rapport dit qui peut atteindre quoi, vous le lisez et décidez, et la révocation agit exactement sur ce que vous regardiez — sur un locataire où un balayage complet prend un quart dheure, un utilisateur ayant accès à quelques sites est révoqué en quelques secondes |
+| Il lit de préférence le fichier daccès par site plutôt que la liste brute des attributions. Ce fichier a déjà résolu chaque groupe en personnes : un site nest visité que si lutilisateur appartient réellement au groupe qui accorde laccès. La première version utilisait la liste des attributions, qui nomme le groupe mais pas ses membres — sur un locataire où la plupart des sites accordent via `Site Members`, cela revenait à visiter presque tous les sites, annulant tout lintérêt. Un test prouve désormais que la voie privilégiée visite moins de sites que le repli |
+| Le rapport décide où chercher, jamais quoi supprimer : chaque site nommé est tout de même lu en direct, donc une attribution disparue entre-temps revient en `AlreadyGone` plutôt quen échec, et une suppression manuelle nest pas annulée. Linverse est signalé plutôt que supposé — tout ce qui a été accordé après le rapport, et tout ce que le rapport na pas pu lire, figure dans le résumé, et un rapport de plus dun jour le signale |
+| `-FromReport` accepte le CSV de détail, un fichier frère de la même exécution, ou le dossier ; sans `-TenantUrl`, le locataire est aussi tiré du rapport, car répéter une URL déjà contenue dans le fichier est une façon de se tromper |
+| Vérifié par 120 contrôles (22 nouveaux), dont 20 exécutent les vraies fonctions sur de vrais fichiers de rapport : résolution du CSV de détail depuis un dossier, un fichier frère ou le classeur ; les voies privilégiée et de repli ; un invité retrouvé par son adresse ou son UPN de locataire ; les lignes dune autre personne ignorées ; une ligne derreur najoutant aucun site ; et une sous-chaîne dun UPN réel ne correspondant à rien. **Pas encore vérifié sur un locataire réel** |
+
+### 2026-10-02 (3)
+| Modification |
+|--------------|
+| `-RemoveFromEntraGroups` ne pouvait agir que sur les groupes trouvés par le scan de l''exécution elle-même, et rien ne le disait. Une exécution sur un seul site, un `-Scope` restreint, OneDrive ou les listes masquées exclues, ou des portées illisibles réduisent cette liste — et « tous les groupes accordant l''accès ont été retirés » se lit alors comme complet alors que ce ne l''est pas. C''est ainsi qu''un départ est validé à moitié |
+| L''exécution détermine désormais ce qu''elle n''a **pas** couvert et le dit deux fois : avant tout retrait, puis de nouveau dans le résumé, en nommant chaque limite. Un groupe accordant l''accès à un endroit jamais fouillé est explicitement signalé comme absent de la liste |
+| À dire clairement, car la question était légitime : le script de révocation effectue son propre scan. `Get-SharePointPermissionsReport.ps1` n''est pas un prérequis — découverte, révocation et phase Entra se déroulent dans une seule exécution, dans cet ordre |
+| `$scanLimits` est déclaré à côté de `$stats` plutôt que dans le scan, afin qu''une exécution interrompue tôt laisse au résumé une liste vide au lieu d''une variable inexistante |
+| Vérifié par 83 contrôles (7 nouveaux) : chaque limite est collectée, l''avertissement apparaît avant les retraits et de nouveau à la fin, et la liste survit à une sortie précoce |
+
+### 2026-10-02 (2)
+| Modification |
+|--------------|
+| Ajout de `-RemoveFromEntraGroups` à `scripts/SharePoint/Revoke-SharePointUserAccess.ps1`, qui termine la seconde moitié d'un départ au lieu de se contenter de la signaler. Jusqu'ici le script retirait chaque attribution SharePoint puis vous renvoyait traiter les groupes Entra vous-même |
+| **Seuls les groupes que cette exécution a réellement vus détenir une attribution de rôle sur une portée dans le périmètre sont touchés** — jamais tous les groupes auxquels l'utilisateur appartient. Un partant peut être dans cinquante groupes, et élargir reviendrait à confondre révoquer un accès et détacher quelqu'un de l'organisation |
+| Un groupe Entra n'est pas un objet SharePoint : la même appartenance porte souvent une équipe Teams, une boîte aux lettres, des licences et des attributions d'applications que ce rapport ne voit pas. Le commutateur est désactivé par défaut, la bannière et le résumé disent ce qu'il atteint, et l'entrée de menu répond non par défaut |
+| Quatre cas sont signalés plutôt que forcés, car les forcer échouerait ou ferait la mauvaise chose : un groupe dynamique (l'appartenance suit une règle, rien n'est stocké à retirer), un groupe synchronisé depuis AD on-premises (en lecture seule dans le cloud), une appartenance héritée d'un groupe imbriqué (l'utilisateur n'est pas membre direct, la coupure doit se faire au groupe qui le contient), et un utilisateur introuvable dans Entra |
+| La permission d'écriture suit le commutateur : `GroupMember.ReadWrite.All` n'est demandée que si `-RemoveFromEntraGroups` est fourni, de sorte qu'une exécution en lecture seule ne détient rien qui puisse modifier une appartenance à l'échelle du locataire. Les retraits passent par le même entonnoir que toute autre modification : `-Apply`, `-WhatIf`, la confirmation et le CSV d'audit se comportent à l'identique |
+| Vérifié par 76 contrôles (11 nouveaux) : le commutateur existe et conditionne le rôle d'écriture, la phase Entra parcourt les groupes vus accordant l'accès et jamais `$userGroupIds`, les quatre refus sont présents, le retrait passe par l'entonnoir, et la passe par portée se contente toujours d'enregistrer une attribution Entra sans agir dessus |
+
+### 2026-10-02
+| Modification |
+|--------|
+| Ajout de `scripts/RDS/Invoke-FSLogixShrink.ps1` : les fichiers VHDX dynamiques de profil/ODFC FSLogix grandissent mais ne rendent jamais d'espace, et la réduction se faisait à la main à partir de commandes collées qui téléchargeaient ce qui se trouvait à ce moment sur la branche master d'Invoke-FslShrinkDisk, écrivaient le journal dans un `C:\Temp` qui n'existe peut-être pas (son `Export-Csv` échoue alors) et nommaient le partage d'un client. Le script télécharge Invoke-FslShrinkDisk à un commit épinglé (`bfe0504`, 2025-06-19) et le refuse si le SHA-256 ne correspond pas, liste chaque conteneur du partage du plus grand au plus petit (`-ReportOnly`), réduit avec les mêmes valeurs par défaut (≥ 5 Go, ≥ 10 % libre, 4 à la fois), crée le dossier du journal, et résume les Go récupérés et les disques qui n'ont pas pu être traités — généralement attachés parce que l'utilisateur est connecté |
+| Recherche sur GitHub d'une meilleure solution : Invoke-FslShrinkDisk est toujours maintenu par l'équipe FSLogix et reste l'outil ; les forks et ShrinkVHD font la même chose avec moins de garanties. La vraie amélioration est la VHD Disk Compaction propre à FSLogix à chaque déconnexion (2210 et ultérieur, activée par défaut) ; `-CheckHost` indique donc si elle peut s'exécuter sur un hôte : version, `VHDCompactDisk`, `defragsvc` non désactivé, disques dynamiques. S'il réussit, une réduction manuelle ne fait que rattraper |
+| Ajout de l'entrée de menu `K` (FSLogix-Shrink), et de `Get-FSlogix-errors.ps1` dans la catégorie RDS et l'arborescence du readme racine, où il manquait |
+| Vérifié dans Windows PowerShell 5.1 sur un poste de travail : le téléchargement du commit épinglé et le contrôle du hachage, la deuxième exécution qui le réutilise, une copie altérée refusée, `-ReportOnly` sur un dossier de test avec deux fichiers VHDX (6 Go et 1 Go, plus un fichier non VHD ignoré), `-CheckHost` signalant que FSLogix n'est pas installé (code 1), et le résumé CSV sur un journal d'exemple (4,75 Go récupérés, un disque en cours d'utilisation nommé, code 1). La réduction réelle n'a pas été exécutée sur un partage — cela demande une session élevée sur un hôte ayant accès au partage de profils |
+
+### 2026-10-01 (4)
+| Modification |
+|--------|
+| Pour un paquet qui continue d'échouer alors que la bonne build est provisionnée, `Repair-AppxPackageStore.ps1` répond maintenant à la question qui détermine si cela compte : chaque utilisateur connecté a-t-il l'application ? lem-avd-4 avait Outlook 915 provisionné et FSLogix journalisait encore cet après-midi-là `Deployment Register ... from:  (AppxManifest.xml) failed with error 0x80070490` — FSLogix enregistrant avec un chemin vide. L'erreur ne permettait pas de savoir si des utilisateurs étaient privés d'Outlook ou si seul le journal se remplissait |
+| L'exécution compare les ruches utilisateur chargées avec les utilisateurs pour lesquels le paquet est enregistré (Installed), et nomme la build la plus récente de chacun. Tous couverts : les échecs sont la propre relecture de FSLogix, l'exécution le dit, indique `InstallAppxPackages = 0` comme méthode documentée par Microsoft pour le faire taire sans le modifier, et se termine par 0. S'il manque à quelqu'un : la personne est nommée et l'exécution échoue |
+| Vérifié de bout en bout dans Windows PowerShell 5.1 avec un état AppX simulé : lem-avd-4 avec Outlook enregistré pour l'utilisateur connecté → « all 1 signed-in user(s) have it (1.2026.915.300) », code 0 ; lem-avd-5 avec l'application enregistrée pour quelqu'un d'autre → l'utilisateur est nommé, code 2 ; un hôte vide → code 0. Pas encore exécuté sur les hôtes |
+
+### 2026-10-01 (3)
+| Modification |
+|--------|
+| `Repair-AppxPackageStore.ps1` s'est arrêté lors de la première exécution réelle sur le pool avec `The property 'Name' cannot be found on this object` (lem-avd-4). `@($exactTargets.Name)` lève une erreur sous `Set-StrictMode` dans Windows PowerShell 5.1 lorsque la liste est vide — ce qui est le cas sur un hôte qui a déjà la build la plus récente. Désormais construit à partir des éléments eux-mêmes |
+| Trouvé grâce à l'exécution de bout en bout qui aurait dû exister plus tôt : avec `-Name teams,outlook -Provision`, les programmes d'installation de Microsoft s'exécutaient aussi pour des paquets déjà provisionnés, et ils livrent une build plus ancienne (« last known good ») — Outlook 818 par-dessus une 915 provisionnée, une rétrogradation. Les programmes d'installation ne s'exécutent plus que pour un paquet qui n'est pas provisionné du tout ; les builds plus récentes passent par la voie build exacte / `-Latest` |
+| Vérifié en exécutant le script **entier** dans Windows PowerShell 5.1 avec les cmdlets AppX, les journaux d'événements, les téléchargements et les signatures simulés, dans le scénario de lem-avd-4 (915 provisionnée, FSLogix échouant sur 902/915), celui de lem-avd-5 (profils demandant 922) et un hôte vide, avec `-Name teams,outlook -Latest -Provision -RemoveOld` et avec `-CheckOnly` : aucun arrêt, aucun programme d'installation par-dessus un paquet provisionné, 922 provisionnée exactement dans le scénario lem-avd-5, codes de sortie 0/1/2 comme attendu. Pas encore réexécuté sur les hôtes |
+
+### 2026-10-01 (2)
+| Modification |
+|--------|
+| `Repair-AppxPackageStore.ps1 -RemoveOld` supprime toute référence qu'un hôte garde à une build plus ancienne des paquets nommés, une fois la plus récente provisionnée : copies provisionnées plus anciennes, builds plus anciennes enregistrées pour un utilisateur (pour tous les utilisateurs, ou par utilisateur quand cela échoue), et ce que `AppxAllUserStore` en retient encore dans les entrées utilisateur, fin de vie, suppression différée et machine — chaque clé sauvegardée en `.reg` d'abord. Sur l'hôte qui continuait d'échouer, Outlook 818 était encore provisionné à côté de 915 et 902 encore enregistré, ce qui laissait d'anciennes builds à portée d'une ouverture de session |
+| Volontairement limité : uniquement les paquets nommés un par un (`-Name teams,outlook` ; ignoré avec un caractère générique), et rien du tout si la build conservée n'est pas provisionnée, afin qu'aucun utilisateur ne se retrouve sans l'application. Les dossiers `WindowsApps` sont laissés à Windows, qui en est propriétaire et les supprime dès que plus rien n'y fait référence, et la liste de chaque conteneur de profil à FSLogix, qui la réécrit à la prochaine déconnexion — les deux sont signalés. Le menu `R` le propose après le provisionnement, avec `-Latest` |
+| Vérifié dans PowerShell 5.1 avec les cmdlets simulées et un `AppxAllUserStore` de test : en conservant 915, la 818 provisionnée, la 902 enregistrée et les trois entrées du magasin pour 902/818 ont été supprimées (trois sauvegardes `.reg`), 915 est restée partout et les deux anciens dossiers `WindowsApps` ont été nommés ; sans build provisionnée, rien n'a été supprimé. Pas exécuté sur un hôte de session |
+
+### 2026-10-01
+| Modification |
+|--------|
+| `Repair-AppxPackageStore.ps1 -Latest` provisionne la build Teams / Outlook la plus récente qui existe, pas seulement celle sur laquelle FSLogix a échoué. Teams provient du service de configuration de Microsoft, le flux qu'utilise le client lui-même (26246 aujourd'hui, avec son lien MSIX). Outlook n'a pas de tel flux — le catalogue du Store indiquait 1.2026.818.0 alors que 915.300 était déjà sur le CDN et dans les profils des utilisateurs — on utilise donc la build la plus récente dont l'existence est prouvée (demandée par FSLogix, enregistrée pour un utilisateur sur l'hôte, ou présente dans `WindowsApps`), et l'exécution indique la source utilisée |
+| L'exécution n'affiche plus « Nothing to repair » lorsqu'un paquet continue d'échouer alors que la bonne build est provisionnée. Une exécution réelle après le correctif de build exacte montrait Outlook 1.2026.915.300 provisionné, FSLogix 26.01, des profils demandant 902 et 915 — et FSLogix échouant encore le même après-midi, plus 55× `0x80073CF9`. L'étape 1b indique désormais qu'il ne s'agit pas d'un écart de version (là où elle supposait « une ancienne version enregistrée qui disparaît à la prochaine déconnexion »), l'exécution se termine par 1, et l'étape 1c affiche les preuves : la dernière erreur de déploiement AppX avec le texte d'erreur spécifique de Windows et son `Get-AppPackageLog -ActivityID`, ainsi que les lignes du paquet dans le journal de profil de FSLogix |
+| Vérifié dans PowerShell 5.1 : `-Latest` contre le **vrai** service de configuration Teams (26246 trouvée plus récente qu'une 26225 provisionnée, avec la bonne URL MSIX) et avec Outlook déduit de ce qui a été vu (915 au-dessus de 818) ; les preuves contre le **vrai** journal AppX de cette machine, qui a affiché le texte d'erreur spécifique et un ActivityId. Pas encore exécuté sur les hôtes de session |
 
 ### 2026-09-30 (12)
 | Modification |

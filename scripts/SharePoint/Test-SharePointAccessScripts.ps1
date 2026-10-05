@@ -102,6 +102,35 @@ Check 'a 403 on the user lookup is fatal'          ($revokeText -match 'entraLoo
 Check 'and names the missing permission'           ($revokeText -match 'missing Graph User\.Read\.All')
 Check 'a real absence still only warns'            ($revokeText -match 'No such account in Entra ID')
 
+# ── Never assign to a read-only automatic variable ──────────────────────────
+# $pid is the process id and cannot be assigned to. Doing so throws at runtime, inside a loop
+# whose catch turned it into nothing at all: a live run reported access on fifteen sites and
+# found zero grants. The parser is happy with it, so it is checked here.
+$readOnlyAutomatics = @('PID', 'HOME', 'PSHOME', 'PSVersionTable', 'PSCulture', 'PSUICulture',
+                        'PSEdition', 'ExecutionContext', 'Host', 'MyInvocation', 'PSScriptRoot',
+                        'PSCommandPath', 'ShellId', 'true', 'false', 'null')
+foreach ($f in @($report, $revoke)) {
+    $fileAst = [System.Management.Automation.Language.Parser]::ParseFile($f, [ref]$null, [ref]$null)
+    $bad = @()
+    foreach ($a in $fileAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+        if ($a.Left -is [System.Management.Automation.Language.VariableExpressionAst]) {
+            $name = $a.Left.VariablePath.UserPath
+            if ($readOnlyAutomatics -contains $name) { $bad += ("line {0}: `${1}" -f $a.Extent.StartLineNumber, $name) }
+        }
+    }
+    Check ("{0}: assigns to no read-only automatic" -f (Split-Path $f -Leaf)) ($bad.Count -eq 0)
+    foreach ($b in $bad) { Write-Host "        $b" -ForegroundColor DarkYellow }
+}
+
+# ── Role assignments are read from the collection, not the scope object ─────
+# /_api/web answers with the web; /_api/web/roleassignments answers with its assignments. Asking
+# for the first returns an object with no value array, which reads as "no grants here" and is
+# how a revocation silently finds nothing.
+Check 'role assignments append /roleassignments' ($revokeText -match "roleassignments' \+ \`$query")
+Check 'and the removal URL agrees with it'       ($revokeText -match "roleassignments/removeroleassignment\(principalid=")
+Check 'a non-collection response is refused'     ($revokeText -match 'did not return a collection')
+Check 'the report has the same guard'            ((Get-Content $report -Raw) -match 'did not return a collection')
+
 # ── Checkpoint kinds must agree with themselves ─────────────────────────────
 # A kind that is written but missing from the ValidateSet throws on every site, and a kind that
 # is written but never read back silently loses its resume state. Both are invisible until a
@@ -145,9 +174,62 @@ Check 'an already-gone removal is not a failure' ($revokeText -match "AlreadyGon
 Check 'the audit row is written as it happens' ($revokeText -match 'Append-CheckpointRows -Path \$script:ActionCsvPath')
 
 # ── Safety: the things it must refuse to remove ─────────────────────────────
-Check 'an Entra group grant is not revoked'   ($revokeText -match "hit\.Kind -eq 'EntraGroup'[\s\S]{0,200}CannotRevoke")
+# The per-scope pass never removes an Entra grant: it records it and moves on. Removal, when
+# asked for, happens in its own phase after the scan, so the group is judged once rather than
+# once per scope it happens to grant.
+$entraBranch = [regex]::Match($revokeText, "(?s)if \(\`$hit\.Kind -eq 'EntraGroup'\) \{.*?continue")
+Check 'an Entra group grant is not revoked'   ($entraBranch.Success -and $entraBranch.Value -match 'CannotRevoke' -and $entraBranch.Value -notmatch 'Invoke-GraphDelete|Invoke-Revocation')
 Check 'an Everyone grant is not revoked'      ($revokeText -match "hit\.Kind -eq 'Everyone'[\s\S]{0,200}CannotRevoke")
-Check 'it never touches Entra membership'     ($revokeText -notmatch 'removeMemberFromGroup|/members/\$ref|Remove-MgGroupMember')
+# Entra membership may only be changed behind the switch, and only for groups the scan saw.
+Check 'Entra removal is behind a switch'      ($params -contains 'RemoveFromEntraGroups')
+Check 'the write role is asked for only then' ($revokeText -match 'if \(\$RemoveFromEntraGroups\)[\s\S]{0,300}GroupMember\.ReadWrite\.All')
+Check 'it acts on the groups it saw granting' ($revokeText -match '\$script:GrantingEntraGroups\[\[string\]\$hit\.DirectoryId\]')
+Check 'and never on every group the user has' ($revokeText -notmatch 'foreach \(\$groupId in \$userGroupIds')
+Check 'the Entra phase iterates only those'   ($revokeText -match 'foreach \(\$groupId in \$script:GrantingEntraGroups\.Keys\)')
+# The four cases that must be reported rather than attempted.
+Check 'a dynamic group is refused'            ($revokeText -match "DynamicMembership[\s\S]{0,200}CannotRevoke")
+Check 'an on-prem synced group is refused'    ($revokeText -match "onPremisesSyncEnabled[\s\S]{0,200}CannotRevoke")
+Check 'a nested membership is refused'        ($revokeText -match "Not a direct member")
+Check 'an unresolved user is refused'         ($revokeText -match "not resolved in Entra ID")
+Check 'the removal goes through the funnel'   ($revokeText -match "Invoke-Revocation -Target .*Entra ID.*-Operation 'Remove from Entra ID group'")
+
+# The Entra phase can only act on what the scan found, so a narrowed or partly failed scan must
+# not read as "every group that grants access has been removed".
+Check 'scan limits are collected'             ($revokeText -match '\$scanLimits = @\(\)')
+Check 'a single site counts as a limit'       ($revokeText -match 'if \(\$SiteUrl\)\s+\{ \$scanLimits')
+Check 'a narrowed scope counts as a limit'    (($revokeText -match 'Scope -eq ''Site''\s*\)\s*\{ \$scanLimits') -and ($revokeText -match 'Scope -eq ''List''\s*\)\s*\{ \$scanLimits'))
+Check 'unread scopes count as a limit'        ($revokeText -match 'stats\.Failed -gt 0\s*\)\s*\{ \$scanLimits')
+Check 'the limits are warned before removing' ($revokeText -match 'This list is only as complete as the scan behind it')
+Check 'and repeated in the summary'           ($revokeText -match 'the ones this scan found')
+Check 'the limit list survives an early exit' ($revokeText -match '(?s)\$stats = \[PSCustomObject\].{0,400}\$scanLimits = @\(\)')
+
+# ── Reusing the permissions report ──────────────────────────────────────────
+# The two scripts are paired through the report's own output, so the formats have to agree and
+# the report must stay advisory: it says where to look, never what to remove.
+Check 'the revoke script takes -FromReport'   ($params -contains 'FromReport')
+Check 'it reads the report detail CSV'        ($revokeText -match 'SharePoint_Permissions_Detail_\*\.csv')
+Check 'the report names the sites to visit'   ($revokeText -match 'Get-ReportSitesForUser')
+Check 'every site is still read live'         ($revokeText -match 'the report only decides which ones to visit')
+Check 'a stale report is called out'          ($revokeText -match 'Access granted since then is not in it')
+Check "the report's own blind spots carry over" ($revokeText -match 'those are blind spots here too')
+Check 'inherited coverage is a scan limit'    ($revokeText -match 'inherits whatever that report did not cover')
+Check 'the tenant can come from the report'   ($revokeText -match 'Tenant taken from the report')
+
+# The columns the revoke script reads have to be the ones the report actually writes.
+$reportAst = [System.Management.Automation.Language.Parser]::ParseFile($report, [ref]$null, [ref]$null)
+$detailProps = @()
+$accessProps = @()
+foreach ($h in $reportAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.HashtableAst] }, $true)) {
+    $keys = @($h.KeyValuePairs | ForEach-Object { $_.Item1.Extent.Text })
+    if ($keys -contains 'ScannedUtc' -and $detailProps.Count -eq 0) { $detailProps = $keys }
+    if ($keys -contains 'UserPrincipalName' -and $keys -contains 'ViaName') { $accessProps = $keys }
+}
+foreach ($needed in 'SiteUrl', 'WebUrl', 'PrincipalLogin', 'PrincipalEmail', 'PrincipalType', 'DirectoryObjectId', 'ItemType') {
+    Check ("the detail CSV carries {0}" -f $needed) ($detailProps -contains $needed)
+}
+foreach ($needed in 'SiteUrl', 'UserPrincipalName', 'UserEmail') {
+    Check ("the site-access CSV carries {0}" -f $needed) ($accessProps -contains $needed)
+}
 Check 'it warns that group access survives'   ($revokeText -match 'The group is the grant')
 
 # ── Identifying the right user ──────────────────────────────────────────────
@@ -249,6 +331,86 @@ function Test-AlreadyGone {
 Check 'a 404 is recorded as already gone'     ($script:ActionRows[-1].Action -eq 'AlreadyGone')
 
 Remove-Item -Path $auditDir -Recurse -Force -ErrorAction SilentlyContinue
+
+# ── Reading a real report ───────────────────────────────────────────────────
+# The handover happens through files on disk, so it is exercised against real ones rather than
+# asserted about.
+foreach ($fn in $revokeAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+    if ($fn.Name -in @('Resolve-ReportFile', 'Get-ReportSitesForUser')) { . ([scriptblock]::Create($fn.Extent.Text)) }
+}
+$rtmp  = Join-Path $env:TEMP "sp-fromreport-$PID"
+New-Item -ItemType Directory -Path $rtmp -Force | Out-Null
+$stamp = '20261002_090000'
+
+function DetailRow($site, $ptype, $login, $mail, $dirId, $itemType) {
+    [PSCustomObject]@{
+        UnitKey='u'; SiteUrl=$site; WebUrl=$site; WebTitle='W'; ScopeType='Web'; ScopeTitle='W'; ScopeUrl=$site
+        ItemType=$itemType; ListTitle=''; ListTemplate=''; HasUniquePerms=$true; InheritsFrom=''
+        PrincipalType=$ptype; PrincipalName='x'; PrincipalLogin=$login; PrincipalEmail=$mail
+        DirectoryObjectId=$dirId; PermissionLevels='Read'; IsSharingLink=$false; SharingLinkType=''
+        IsExternal=$false; MemberCount=1; ExternalMembers=0; MemberPreview=''; LastModified=''
+        ScannedUtc='2026-10-02T09:00:00'; Error=''
+    }
+}
+$detail = Join-Path $rtmp "SharePoint_Permissions_Detail_$stamp.csv"
+@(
+    DetailRow 'https://c/sites/Finance' 'User'            'i:0#.f|membership|koen@bakkerij.be' 'koen@bakkerij.be' '' 'File'
+    DetailRow 'https://c/sites/HR'      'SharePointGroup' 'HR Owners'                          ''                 '' 'List'
+    DetailRow 'https://c/sites/Legal'   'SecurityGroup'   'c:0t.c|tenant|grp-1111'             ''                 'grp-1111' 'Web'
+    DetailRow 'https://c/sites/Other'   'User'            'i:0#.f|membership|ann@bakkerij.be'  'ann@bakkerij.be'  '' 'File'
+    DetailRow 'https://c/sites/NotMine' 'SecurityGroup'   'c:0t.c|tenant|grp-9999'             ''                 'grp-9999' 'Web'
+    DetailRow 'https://c/sites/Guest'   'User'            'i:0#.f|membership|jan_partner.com#ext#@c.onmicrosoft.com' '' '' 'File'
+    DetailRow 'https://c/sites/Broken'  'User'            ''                                   ''                 '' 'Error'
+) | Export-Csv -LiteralPath $detail -NoTypeInformation -Encoding UTF8
+'x' | Set-Content (Join-Path $rtmp "SharePoint_Permissions_$stamp.xlsx")
+
+$expected = (Get-Item -LiteralPath $detail).FullName
+Check 'the detail CSV itself resolves'          ((Resolve-ReportFile -Path $detail) -eq $expected)
+Check 'the folder resolves to it'               ((Resolve-ReportFile -Path $rtmp) -eq $expected)
+Check 'the workbook resolves to it'             ((Resolve-ReportFile -Path (Join-Path $rtmp "SharePoint_Permissions_$stamp.xlsx")) -eq $expected)
+$threw = $false; try { Resolve-ReportFile -Path (Join-Path $rtmp 'nope.csv') } catch { $threw = $true }
+Check 'a missing path is refused'               $threw
+$rempty = Join-Path $rtmp 'empty'; New-Item -ItemType Directory -Path $rempty -Force | Out-Null
+$threw = $false; try { Resolve-ReportFile -Path $rempty } catch { $threw = $true }
+Check 'a folder with no report is refused'      $threw
+
+# Fallback: no site-access file, so a SharePoint group has to be taken on trust.
+$UserPrincipalName = 'koen@bakkerij.be'
+$userGroupIds = @{ 'grp-1111' = 'GRP-Legal' }
+$fb = @(Get-ReportSitesForUser -ReportPath $detail)
+Check 'fallback: a direct grant is picked up'   ($fb -contains 'https://c/sites/Finance')
+Check 'fallback: an Entra group counts'         ($fb -contains 'https://c/sites/Legal')
+Check 'fallback: another person is skipped'     ($fb -notcontains 'https://c/sites/Other')
+Check 'fallback: a group not joined is skipped' ($fb -notcontains 'https://c/sites/NotMine')
+Check 'fallback: an error row adds no site'     ($fb -notcontains 'https://c/sites/Broken')
+Check 'fallback: SharePoint groups are trusted' ($fb -contains 'https://c/sites/HR')
+
+# Preferred: the site-access file already resolved groups to people, so the guesswork goes.
+$siteAccess = Join-Path $rtmp "SharePoint_Permissions_SiteAccess_$stamp.csv"
+@(
+    [PSCustomObject]@{ SiteTitle='Finance'; SiteUrl='https://c/sites/Finance'; UserDisplayName='Koen'; UserPrincipalName='koen@bakkerij.be'; UserEmail='koen@bakkerij.be'; IsExternal=$false; AccountEnabled=$true; ViaType='Direct';        ViaName='(direct toegekend)'; ViaId=''; PermissionLevels='Read' }
+    [PSCustomObject]@{ SiteTitle='Legal';   SiteUrl='https://c/sites/Legal';   UserDisplayName='Koen'; UserPrincipalName='koen@bakkerij.be'; UserEmail='koen@bakkerij.be'; IsExternal=$false; AccountEnabled=$true; ViaType='SecurityGroup'; ViaName='GRP-Legal'; ViaId='grp-1111'; PermissionLevels='Read' }
+    [PSCustomObject]@{ SiteTitle='HR';      SiteUrl='https://c/sites/HR';      UserDisplayName='Ann';  UserPrincipalName='ann@bakkerij.be';  UserEmail='ann@bakkerij.be';  IsExternal=$false; AccountEnabled=$true; ViaType='SharePointGroup'; ViaName='HR Owners'; ViaId='3'; PermissionLevels='Full Control' }
+    [PSCustomObject]@{ SiteTitle='Guest';   SiteUrl='https://c/sites/Guest';   UserDisplayName='Jan';  UserPrincipalName='jan_partner.com#ext#@c.onmicrosoft.com'; UserEmail='jan@partner.com'; IsExternal=$true; AccountEnabled=$true; ViaType='Direct'; ViaName='(direct toegekend)'; ViaId=''; PermissionLevels='Read' }
+) | Export-Csv -LiteralPath $siteAccess -NoTypeInformation -Encoding UTF8
+
+$sa = @(Get-ReportSitesForUser -ReportPath $detail)
+Check 'the site-access file is preferred'       ($sa -contains 'https://c/sites/Finance' -and $sa -contains 'https://c/sites/Legal')
+Check 'a group the user is NOT in is dropped'   ($sa -notcontains 'https://c/sites/HR')
+Check 'which is the point: fewer sites visited' ($sa.Count -lt $fb.Count)
+
+$UserPrincipalName = 'jan@partner.com'
+$guestSites = @(Get-ReportSitesForUser -ReportPath $detail)
+Check 'a guest matches on their mail'           ($guestSites -contains 'https://c/sites/Guest')
+Check 'and brings only their own sites'         ($guestSites -notcontains 'https://c/sites/Finance')
+$UserPrincipalName = 'jan_partner.com#ext#@c.onmicrosoft.com'
+Check 'a guest matches on their tenant UPN'     ((@(Get-ReportSitesForUser -ReportPath $detail)) -contains 'https://c/sites/Guest')
+$UserPrincipalName = 'niemand@bakkerij.be'
+Check 'an unknown user yields no sites'         ((@(Get-ReportSitesForUser -ReportPath $detail)).Count -eq 0)
+$UserPrincipalName = 'oen@bakkerij.be'
+Check 'a substring of a real UPN misses'        ((@(Get-ReportSitesForUser -ReportPath $detail)).Count -eq 0)
+
+Remove-Item -LiteralPath $rtmp -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ''
 if ($fail) { Write-Host "$fail check(s) FAILED" -ForegroundColor Red; exit 1 }

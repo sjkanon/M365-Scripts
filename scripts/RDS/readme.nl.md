@@ -15,6 +15,7 @@ Diagnose- en monitoringscripts voor RDP- / RD Web Access-infrastructuur. Voer ze
 | [`Test-RDSDiagnostics.ps1`](Test-RDSDiagnostics.ps1) ([docs](#test-rdsdiagnosticsps1)) | Eenmalige gezondheidscontrole — services, configuratie, certificaten, gebruikersaccount, eventlogs |
 | [`Watch-RDSLive.ps1`](Watch-RDSLive.ps1) ([docs](#watch-rdsliveps1)) | Realtime monitor van sessie- en licentie-events |
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | Diagnose van FSLogix- / Azure Files-profielen op een AVD-sessiehost |
+| [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | FSLogix-profielschijven op een share verkleinen (Invoke-FslShrinkDisk), of controleren of FSLogix ze zelf comprimeert bij afmelden |
 
 ---
 
@@ -132,3 +133,64 @@ SMB/Azure Files of schijffouten. Alleen-lezen: het verzamelt en rapporteert, het
 > containers, SMB en events bestaan alleen daar. De hele run wordt geschreven naar
 > `FSLogixDiag_<host>_<timestamp>.log` in de uitvoermap; dat is het bestand dat je
 > aan een ticket toevoegt.
+
+---
+
+### Invoke-FSLogixShrink.ps1
+
+Geeft de ruimte terug die FSLogix-profiel- en ODFC-containers vasthouden nadat er data in
+is verwijderd: een dynamische VHDX groeit, maar krimpt nooit vanzelf. Het is een schil om
+[Invoke-FslShrinkDisk](https://github.com/FSLogix/Invoke-FslShrinkDisk), het eigen
+verkleinscript van het FSLogix-team — nog steeds het beste gereedschap hiervoor; de forks en
+alternatieven op GitHub doen hetzelfde met minder erachter.
+
+**Wat het doet**
+
+| Stap | Details |
+|------|---------|
+| Downloaden | Haalt Invoke-FslShrinkDisk op een **vastgezette commit** op naar `C:\Scripts\Invoke-FslShrinkDisk`, deblokkeert het en controleert de SHA-256 van het script. Een gewijzigde upstream-versie draait nooit ongezien; een aangepaste lokale kopie wordt geweigerd |
+| Rapport | Elke `.vhd`/`.vhdx` op de share, grootste eerst, met map, grootte en laatste schrijfdatum, en het totaal |
+| Verkleinen | Draait Invoke-FslShrinkDisk recursief en vat daarna het CSV-log samen: verkleinde schijven, teruggewonnen GB, en de schijven die niet verwerkt konden worden |
+| `-CheckHost` | Op een sessiehost: kan de **ingebouwde compressie van FSLogix bij afmelden** draaien? FSLogix-versie (2210 / 2.9.8361 of later), `VHDCompactDisk`, de service Optimize Drives (`defragsvc` niet Disabled) en dynamische schijven |
+
+**Parameters**
+
+| Parameter | Omschrijving |
+|-----------|-------------|
+| `-Path` | De share met de containers, bijv. `\\<storageaccount>.file.core.windows.net\<share>\Profiles`. Wordt recursief doorzocht |
+| `-ReportOnly` | Alleen de schijven en hun grootte tonen; niets verkleinen |
+| `-IgnoreLessThanGB` | Schijven kleiner dan dit overslaan (standaard: `5`) |
+| `-RatioFreeSpace` | Alleen een schijf verkleinen met minstens dit deel vrij erbinnen (standaard: `0.1` = 10%) |
+| `-ThrottleLimit` | Aantal schijven tegelijk (standaard: `4`; hooguit twee keer het aantal CPU-cores) |
+| `-LogFilePath` | CSV-log (standaard: `C:\Temp\FslShrink_<timestamp>.csv`); de map wordt aangemaakt als die ontbreekt |
+| `-ToolPath` | Waar Invoke-FslShrinkDisk staat (standaard: `C:\Scripts\Invoke-FslShrinkDisk`) |
+| `-Force` | Invoke-FslShrinkDisk opnieuw downloaden |
+| `-CheckHost` | In plaats daarvan de eigen compressie van FSLogix op deze host controleren; geen `-Path` nodig |
+
+**Voorbeelden**
+
+```powershell
+# Eerst kijken: elke container op de share, grootste eerst
+.\Invoke-FSLogixShrink.ps1 -Path \\sa.file.core.windows.net\profiles\Profiles -ReportOnly
+
+# Alles van 5 GB of meer verkleinen met minstens 10% vrij erbinnen
+.\Invoke-FSLogixShrink.ps1 -Path \\sa.file.core.windows.net\profiles\Profiles
+
+# Comprimeert FSLogix de schijven zelf op deze host?
+.\Invoke-FSLogixShrink.ps1 -CheckHost
+```
+
+**Opmerkingen**
+
+- FSLogix 2210 en later comprimeert een container zelf bij elke afmelding, als de schijf
+  groter is dan 1 GB en er minstens 20% te winnen valt ([Microsoft Learn](https://learn.microsoft.com/en-us/fslogix/concepts-vhd-disk-compaction)).
+  Draai eerst `-CheckHost`: slaagt die, dan haalt een handmatige verkleining alleen de
+  schijven in van gebruikers die zelden afmelden, of die onder de drempel van 20% blijven.
+- Een schijf die gekoppeld is — de gebruiker is aangemeld — kan niet verkleind worden; die
+  staat in de samenvatting als niet verwerkt en de run eindigt met exitcode 1. Draai het
+  buiten kantooruren of met de hosts leeggemaakt.
+- Verhoogd uitvoeren (elke schijf wordt gekoppeld), met toegang tot de share: op Azure Files
+  via Kerberos of de sleutel van het opslagaccount. Hyper-V is niet nodig.
+- Naar een nieuwere Invoke-FslShrinkDisk: zet de nieuwe commit en de SHA-256 van zijn
+  `Invoke-FslShrinkDisk.ps1` in `$ToolCommit` / `$ToolHash` bovenin het script, nadat je de
+  diff hebt gelezen.

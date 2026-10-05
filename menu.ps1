@@ -670,7 +670,27 @@ $menu = @(
                     $a['Provision'] = $true
                     $wg = Read-Host "  Take them from winget instead of Microsoft's installer? [y/N]"
                     if ($wg -match '^[Yy]') { $a['UseWinget'] = $true }
+                    $lt = Read-Host "  The very newest build (not only what FSLogix asks for)? [y/N]"
+                    if ($lt -match '^[Yy]') { $a['Latest'] = $true }
+                    $ro = Read-Host "  Remove every older build afterwards? [y/N]"
+                    if ($ro -match '^[Yy]') { $a['RemoveOld'] = $true }
                 }
+            }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='K'; FKey=$null; Category='Device'
+        Label='FSLogix-Shrink      — shrink FSLogix profile disks on a share, or check compaction at sign-out'
+        Script="$ROOT\scripts\RDS\Invoke-FSLogixShrink.ps1"
+        Params={
+            $share = Read-Host "  Profile share, e.g. \\sa.file.core.windows.net\profiles\Profiles (empty = check this host)"
+            if (-not $share) { return @{ CheckHost = $true } }
+            $a = @{ Path = $share }
+            $apply = Read-Host "  Shrink now (not just list the disks)? [y/N]"
+            if ($apply -notmatch '^[Yy]') { $a['ReportOnly'] = $true }
+            else {
+                $min = Read-Host "  Skip disks smaller than GB [5]"
+                if ($min) { $a['IgnoreLessThanGB'] = [int]$min }
             }
             return $a
         }
@@ -763,6 +783,9 @@ $menu = @(
             }
             $grp = Read-Host '  Also list the Entra groups that grant access? [Y/n]'
             if ($grp -notmatch '^[Nn]') { $a['IncludeGroupAccess'] = $true }
+            # Default no: this one reaches past SharePoint into Teams, mailboxes and licences.
+            $rmg = Read-Host '  Also REMOVE the user from the Entra groups seen granting access? [y/N]'
+            if ($rmg -match '^[Yy]') { $a['RemoveFromEntraGroups'] = $true }
             # Report first, on purpose: -Apply is a deliberate second run against a list you have read.
             $apply = Read-Host '  Actually revoke now? Answering no only reports [y/N]'
             if ($apply -match '^[Yy]') { $a['Apply'] = $true; $a['Confirm'] = $false }
@@ -801,7 +824,7 @@ $menu = @(
             Write-Host '  6  Cleanup       — remove what was built (reports only unless you confirm)' -ForegroundColor DarkYellow
             Write-Host ''
             $step   = Read-Host '  Step [0-6]'
-            $config = Read-Host '  Config file [petsolutions.config.json]'
+            $config = Read-Host '  Config file [Enter = the one filled-in *.config.json]'
 
             $script = switch ($step) {
                 '0'     { 'Install-SharePointStructure.ps1' }

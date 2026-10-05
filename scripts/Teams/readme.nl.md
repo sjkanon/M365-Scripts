@@ -10,7 +10,13 @@ Tooling voor export en archivering van Microsoft Teams / SharePoint.
 
 ## Scripts
 
-### vias_archiver.ps1
+| Script | Omschrijving |
+|--------|-------------|
+| [`Invoke-TeamsArchive.ps1`](Invoke-TeamsArchive.ps1) ([docs](#invoke-teamsarchiveps1)) | Voert een export- en archiveringsflow voor Teams/SharePoint uit voor een lijst teams en kanalen uit Excel |
+
+---
+
+### Invoke-TeamsArchive.ps1
 
 Teams-archiver met een exportflow voor Graph, Teams en SharePoint. Vereist PowerShell 7+, uitvoeren als Global Admin.
 
@@ -24,6 +30,9 @@ Teams-archiver met een exportflow voor Graph, Teams en SharePoint. Vereist Power
 | `-ChannelArchiveTag` | Markeringstekst voor de terugval via hernoemen (standaard: `[ARCHIEF]`) |
 | `-ChannelFallbackToRename` | Terugvallen op een hernoemmarkering als de Graph-API-aanroep voor archiveren/dearchiveren mislukt |
 | `-DryRun` | Simuleren — behoudt de volledige authenticatie/bootstrap en valideert Stap 6-9 door aantallen op te vragen, zonder exports te schrijven of de archiefstatus te wijzigen |
+| `-WorksheetName` | Werkblad met de teamlijst. Standaard: het eerste werkblad van het Excel-bestand |
+
+Het Excel-bestand heeft de kolommen `TeamName`, `ChannelName` en `Archive` nodig (rijen met `Archive` = `Archive` worden verwerkt). Niets in het script is aan één klant gebonden: tenant-ID, SharePoint-URL, Excel-bestand en archiefmap vraagt de setupwizard (standaard `C:\Temp\Teams_Channels.xlsx` en `C:\Temp\Teams_Archive`).
 
 Huidig gedrag (v8.19):
 - Maakt voor de run een unieke tijdelijke Entra-app-registratie aan.
@@ -49,3 +58,4 @@ Huidig gedrag (v8.19):
 - De dry-runmodus behoudt de volledige authenticatie/bootstrap en valideert Stap 6-9 door het bestaan en de aantallen in Teams/SharePoint/Graph op te vragen, zonder export van leden/chats/bestanden naar schijf te schrijven.
 - Het rapport van Stap 11 gebruikt in dry-run de opgevraagde aantallen (gedetecteerde bestanden/berichten) in plaats van lokaal geëxporteerde bestanden.
 - Mutaties voor archiveren/dearchiveren in Stap 10 blijven gesimuleerd, met `[DRYRUN]`-uitvoer.
+- De herstart in een schone sessie na het opkuisen van de modules geeft alle parameters door (ook `-DryRun`) en geeft de exitcode van de herstarte run terug.

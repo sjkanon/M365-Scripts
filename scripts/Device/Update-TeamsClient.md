@@ -221,7 +221,7 @@ A production `-Force` run on a session host ended like this:
 6. Uninstall current Teams
 [WARN] Uninstall of Microsoft Teams Meeting Add-in for Microsoft Office failed (exit code 1612)
 [ OK ] Removed the add-in copy for all users (machine-wide)
-[ OK ] Removed the add-in copy for ETNO\itceadmin
+[ OK ] Removed the add-in copy for CONTOSO\admin
 8. Teams Meeting Add-in (install)
 [FAIL] Aborted: Teams Meeting Add-in install failed (exit code 1638)
 ```

@@ -59,7 +59,7 @@
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER Container
     Only audit these containers (keys from the containers section). Default: all.
@@ -114,7 +114,7 @@
 .EXAMPLE
     # Just the external customer library, reporting only
     .\Update-SharePointShareStatus.ps1 -Interactive -ClientId <app-id> `
-        -Container FUTECH -ReportOnly
+        -Container KlantBibliotheek -ReportOnly
 
 .NOTES
     Author  : Sjoerd Kanon
@@ -152,7 +152,7 @@ Set-StrictMode -Version Latest
 
 Assert-PnPModule
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'petsolutions.config.json' }
+if (-not $ConfigPath) { $ConfigPath = Resolve-StructureConfigPath }
 $config = Import-StructureConfig -Path $ConfigPath
 if (-not $Tenant) { $Tenant = $config.tenant }
 

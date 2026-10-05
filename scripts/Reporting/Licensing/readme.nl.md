@@ -29,7 +29,7 @@ Licensing/
 | Python | 3.8 of hoger |
 | pandas | `pip install pandas` |
 | openpyxl | `pip install openpyxl` |
-| OneDrive | Gesynchroniseerd en aangemeld |
+| Exportmap | Bereikbaar voor het account dat het rapport draait (een gesynchroniseerde OneDrive-map volstaat) |
 
 Afhankelijkheden installeren:
 
@@ -44,7 +44,7 @@ pip install pandas openpyxl
 Zet de invoerbestanden vóór het uitvoeren in de juiste submappen onder de exportmap:
 
 ```
-C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload\
+<ExportDir>\
 ├── Import\
 │   ├── Ingram\     ← zet hier precies 1 .xlsx-bestand (factuurexport van Ingram)
 │   └── Pax8\       ← zet hier precies 1 .csv-bestand (factuurexport van Pax8)
@@ -52,7 +52,7 @@ C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload\
 └── Licentie_Overzicht_YYYY-MM.xlsx   ← uitvoer wordt hier geschreven
 ```
 
-> Het script stopt met een duidelijke foutmelding als: de OneDrive-map niet bereikbaar is, er geen bestand gevonden wordt, of er meer dan één bestand in een map staat.
+> Het script stopt met een duidelijke foutmelding als: er geen exportmap is opgegeven, de exportmap niet bereikbaar is, er geen bestand gevonden wordt, of er meer dan één bestand in een map staat.
 
 ---
 
@@ -63,18 +63,18 @@ C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload\
 Controleert de omgeving voordat het wordt uitgevoerd. Toont duidelijke foutmeldingen als er iets ontbreekt.
 
 ```powershell
-.\genereer_rapport.ps1
+.\genereer_rapport.ps1 -ExportDir "D:\Finance\Licensing"
 ```
 
 ### Optie 2 — Dubbelklikken
 
-Voer `genereer_rapport.bat` rechtstreeks uit. Geen controles vooraf — vertrouwt op de eigen foutafhandeling van het Python-script.
+Voer `genereer_rapport.bat` rechtstreeks uit — vereist de omgevingsvariabele `LICENSING_EXPORT_DIR`. Geen controles vooraf — vertrouwt op de eigen foutafhandeling van het Python-script.
 
 ### Optie 3 — CLI met expliciete paden
 
 ```bash
-python genereer_licentie_overzicht.py --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv"
-python genereer_licentie_overzicht.py --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv" --output "C:\output\rapport.xlsx"
+python genereer_licentie_overzicht.py --export-dir "D:\Finance\Licensing" --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv"
+python genereer_licentie_overzicht.py --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv" --export-dir "D:\Finance\Licensing" --output "C:\output\rapport.xlsx"
 ```
 
 ---
@@ -105,16 +105,16 @@ Elke rij toont: omschrijving, categorie, aantal, inkoopprijs per stuk, verkooppr
 
 ## Geplande taak
 
-`create_scheduled_task.ps1` registreert een geplande Windows-taak die het Python-script automatisch uitvoert op de **6e van elke maand om 08:00**.
+`create_scheduled_task.ps1` registreert een geplande Windows-taak die het Python-script automatisch uitvoert standaard op de **6e van elke maand om 08:00**.
 
-### Configuratie (aanpassen vóór het uitvoeren)
+### Parameters
 
-| Variabele | Standaard | Omschrijving |
+| Parameter | Standaard | Omschrijving |
 |---|---|---|
-| `$TaskName` | `"Licensing Report Generator"` | Naam van de taak in Taakplanner |
-| `$RunAsUser` | `"$env:USERDOMAIN\sa-halo"` | Serviceaccount dat de taak uitvoert — **aanpassen voor jouw domein** |
-| `$RunDay` | `6` | Dag van de maand waarop de taak draait |
-| `$RunTime` | `"08:00"` | Tijdstip |
+| `-ExportDir` | *(verplicht)* | Map met `Import\` en `Archive\`, waar het rapport wordt weggeschreven; wordt als `--export-dir` aan het Python-script doorgegeven |
+| `-RunAsUser` | *(verplicht)* | Serviceaccount dat de taak uitvoert, bv. `CONTOSO\svc-licensing` |
+| `-RunDay` | `6` | Dag van de maand waarop de taak draait (1–28) |
+| `-RunTime` | `"08:00"` | Tijdstip |
 
 Het script detecteert `python.exe` automatisch via PATH en gangbare installatielocaties. `$ScriptPath` wordt automatisch bepaald ten opzichte van de scriptmap.
 
@@ -122,7 +122,7 @@ Het script detecteert `python.exe` automatisch via PATH en gangbare installatiel
 
 ```powershell
 # Uitvoeren als Administrator
-.\create_scheduled_task.ps1
+.\create_scheduled_task.ps1 -ExportDir "D:\Finance\Licensing" -RunAsUser "CONTOSO\svc-licensing"
 ```
 
 ### Na registratie handmatig testen:
@@ -131,7 +131,7 @@ Het script detecteert `python.exe` automatisch via PATH en gangbare installatiel
 Start-ScheduledTask -TaskName "... Licentie Overzicht Generator"
 ```
 
-> **Let op:** Het serviceaccount (`$RunAsUser`) moet leestoegang hebben tot de importmappen van Ingram/Pax8 en schrijftoegang tot de exportmap in OneDrive.
+> **Let op:** Het serviceaccount (`-RunAsUser`) moet leestoegang hebben tot de importmappen van Ingram/Pax8 en schrijftoegang tot de exportmap. Een taak die vóór 2026-10-05 is geregistreerd, start het Python-script zonder `--export-dir` en stopt nu meteen — voer `create_scheduled_task.ps1` opnieuw uit met `-ExportDir`.
 
 ---
 
@@ -163,15 +163,14 @@ ACRONIS_ENDCUSTOMER_ALIASES = {
 }
 ```
 
-### OneDrive-pad
+### Exportmap
 
-Het basispad is hardcoded in zowel `genereer_rapport.ps1` als `genereer_licentie_overzicht.py`:
+Er is niets hardcoded. De exportmap komt, in deze volgorde, uit:
 
-```
-C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload
-```
+1. `-ExportDir` (`genereer_rapport.ps1`) of `--export-dir` (`genereer_licentie_overzicht.py`)
+2. de omgevingsvariabele `LICENSING_EXPORT_DIR`
 
-Pas `$ExportDir` in `genereer_rapport.ps1` en `EXPORT_DIR` in `genereer_licentie_overzicht.py` aan zodat ze overeenkomen met de naam van jouw OneDrive-map.
+Zonder een van beide stoppen beide scripts met exitcode 2. Een gesynchroniseerde OneDrive- of SharePoint-map werkt prima als exportmap.
 
 ---
 
@@ -179,7 +178,8 @@ Pas `$ExportDir` in `genereer_rapport.ps1` en `EXPORT_DIR` in `genereer_licentie
 
 | Fout | Oorzaak | Oplossing |
 |---|---|---|
-| `OneDrive map niet bereikbaar` | OneDrive niet gesynchroniseerd of niet aangemeld | Meld je aan bij OneDrive en wacht tot de synchronisatie klaar is |
+| `No export directory given` | `-ExportDir`/`--export-dir` en `LICENSING_EXPORT_DIR` zijn geen van beide gezet | Geef de map mee, of zet de omgevingsvariabele |
+| `Export directory not found` | Verkeerd pad, of een gesynchroniseerde map die nog niet gesynchroniseerd is | Controleer het pad; meld je bij OneDrive aan en wacht tot de synchronisatie klaar is |
 | `Geen Excel bestand gevonden in Import\Ingram\` | Ingram-bestand niet geplaatst | Zet precies 1 `.xlsx` in de map `Ingram` |
 | `Meerdere bestanden gevonden` | Meer dan 1 bestand in een map | Verwijder of archiveer het extra bestand |
 | `Python niet gevonden` | Python staat niet in PATH | Installeer Python en voeg het toe aan PATH, of gebruik het volledige pad in de taak |

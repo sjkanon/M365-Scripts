@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-186 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+187 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -37,8 +37,8 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Deploy-AllIntune.ps1`](Intune/Desktop/Deploy-AllIntune.ps1) | [`Intune/Desktop/`](Intune/Desktop/readme.md) | Draait Deploy-CoworkPrerequisitesIntune.ps1 en Deploy-ClaudeDesktopIntune.ps1 na elkaar, in één aanroep. |
 | [`Deploy-ClaudeDesktopIntune.ps1`](Intune/Desktop/ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1) | [`Intune/Desktop/ClaudeDesktop/`](Intune/Desktop/ClaudeDesktop/readme.md) | Eén-op-de-maand deploy-script: haalt de nieuwste Claude Desktop MSIX op, pakt hem in als Intune Win32-app en maakt/update de app in Intune — volledig automatis… |
 | [`Deploy-CoworkPrerequisitesIntune.ps1`](Intune/Desktop/CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1) | [`Intune/Desktop/CoworkPrerequisites/`](Intune/Desktop/CoworkPrerequisites/readme.md) | Deploy-script voor de Cowork Windows-vereisten (VirtualMachinePlatform + Fast Startup) als eigen, onafhankelijke Intune Win32-app — los van Claude Desktop zelf. |
-| [`Deploy-Officecolors.ps1`](Custom%20Scripts/Intune/Desktop/Office%20Themes/Deploy-Officecolors.ps1) | [`Custom Scripts/Intune/Desktop/Office Themes/`](Custom%20Scripts/Intune/Desktop/Office%20Themes/readme.md) | Office Theme Colors Deployment |
-| [`Deploy-OfficeTheme.ps1`](Custom%20Scripts/Intune/Desktop/Deploy-OfficeTheme.ps1) | [`Custom Scripts/Intune/Desktop/`](Custom%20Scripts/Intune/Desktop/readme.md) | Download the corporate Office theme (.thmx) and apply it for the signed-in user. |
+| [`Deploy-Officecolors.ps1`](Custom%20Scripts/Intune/Desktop/Office%20Themes/Deploy-Officecolors.ps1) | [`Custom Scripts/Intune/Desktop/Office Themes/`](Custom%20Scripts/Intune/Desktop/Office%20Themes/readme.md) | Download an Office color scheme (.xml) and install it for the signed-in user. |
+| [`Deploy-OfficeTheme.ps1`](Custom%20Scripts/Intune/Desktop/Deploy-OfficeTheme.ps1) | [`Custom Scripts/Intune/Desktop/`](Custom%20Scripts/Intune/Desktop/readme.md) | Download an Office theme (.thmx) and install it for the signed-in user. |
 | [`detect-audiodevices.ps1`](Device/audio/detect-audiodevices.ps1) | [`Device/audio/`](Device/audio/readme.md) | Audio Device Detection Script |
 | [`Detect-ClaudeDesktop-Intune.ps1`](Intune/Desktop/ClaudeDesktop/Detect-ClaudeDesktop-Intune.ps1) | [`Intune/Desktop/ClaudeDesktop/`](Intune/Desktop/ClaudeDesktop/readme.md) | Intune Win32-app custom detection script voor Claude Desktop. |
 | [`Detect-CoworkPrerequisites-Intune.ps1`](Intune/Desktop/CoworkPrerequisites/Detect-CoworkPrerequisites-Intune.ps1) | [`Intune/Desktop/CoworkPrerequisites/`](Intune/Desktop/CoworkPrerequisites/readme.md) | Intune Win32-app custom detection script voor de Cowork Windows-vereisten (VirtualMachinePlatform + onderliggende HCS-services), los van Claude Desktop zelf. |
@@ -87,6 +87,8 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Install-SharePointStructure.ps1`](SharePoint/Provisioning/Install-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Build the whole SharePoint structure in one run: app registration, metadata model, libraries, permissions, views and a verification pass. Supports -WhatIf. |
 | [`Install-Win32AppPackage.ps1`](TenantOnboarding/AppDeployment/Install-Win32AppPackage.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Download a zipped PSAppDeployToolkit (or similar) package and run its silent install. |
 | [`Invoke-DiskCleanupIntune.ps1`](Intune/DiskCleanup/Invoke-DiskCleanupIntune.ps1) | [`Intune/DiskCleanup/`](Intune/DiskCleanup/readme.md) | Intune Win32-app install command: schoont C:\ op en herstart het apparaat. |
+| [`Invoke-FSLogixShrink.ps1`](RDS/Invoke-FSLogixShrink.ps1) | [`RDS/`](RDS/readme.md) | Shrinks FSLogix profile / ODFC containers on a share with Invoke-FslShrinkDisk, and checks whether FSLogix's own compaction at sign-out is doing that job. |
+| [`Invoke-TeamsArchive.ps1`](Teams/Invoke-TeamsArchive.ps1) | [`Teams/`](Teams/readme.md) | Teams Archivering - Volledig Automatisch Script v8.19 |
 | [`Invoke-WindowsActivation.ps1`](Device/Invoke-WindowsActivation.ps1) | [`Device/`](Device/readme.md) | Activate Windows or manage product key and KMS settings. |
 | [`Invoke-WindowsCleanup.ps1`](Device/Invoke-WindowsCleanup.ps1) | [`Device/`](Device/readme.md) | Clean up temporary files, caches, and reclaimable disk space on Windows. |
 | [`logic-permissies.ps1`](Graph/logic-permissies.ps1) | [`Graph/`](Graph/readme.md) | Grant a Microsoft Graph application permission to a Logic App's managed identity. Supports -WhatIf. |
@@ -197,7 +199,6 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Update-SharePointShareStatus.ps1`](SharePoint/Provisioning/Update-SharePointShareStatus.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Work out how every document is actually shared and write that back to the Deelstatus column. Reports files shared wider than their Vertrouwelijkheid tag allows… |
 | [`Update-TeamsClient.ps1`](Device/Update-TeamsClient.ps1) | [`Device/`](Device/readme.md) | Update the new Microsoft Teams client, including the Teams Meeting Add-in for Outlook, only when Microsoft publishes a newer build. Supports -WhatIf. |
 | [`Update-UnifiFirmware.ps1`](Network/UniFi/Update-UnifiFirmware.ps1) | [`Network/UniFi/`](Network/UniFi/readme.md) | List and optionally trigger firmware upgrades for UniFi devices across one or all sites. |
-| [`vias_archiver.ps1`](Teams/vias_archiver.ps1) | [`Teams/`](Teams/readme.md) | Vias Teams Archivering - Volledig Automatisch Script v8.19 |
 | [`Watch-ADAccountLockouts.ps1`](ActiveDirectory/Watch-ADAccountLockouts.ps1) | [`ActiveDirectory/`](ActiveDirectory/readme.md) | Monitor on-prem Active Directory for locked-out user accounts and log new lockouts. |
 | [`Watch-RDSLive.ps1`](RDS/Watch-RDSLive.ps1) | [`RDS/`](RDS/readme.md) | Real-time RDS session and licensing monitor. |
 
