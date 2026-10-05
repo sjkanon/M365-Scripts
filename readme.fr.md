@@ -842,12 +842,10 @@ M365-Scripts/
     │       ├── readme.md
     │       └── Desktop/
     │           ├── readme.md
-    │           ├── Deploy-OfficeTheme.ps1        ← installe le thème Office VIAS complet (.thmx)
-    │           ├── 2026 Vias institute colours (2).thmx
+    │           ├── Deploy-OfficeTheme.ps1        ← installe un thème Office (.thmx) depuis une URL
     │           └── Office Themes/
     │               ├── readme.md
-    │               ├── Deploy-Officecolors.ps1   ← installe uniquement le jeu de couleurs
-    │               └── Test VIAS.xml
+    │               └── Deploy-Officecolors.ps1   ← installe uniquement un jeu de couleurs depuis une URL
     ├── TenantOnboarding/                ← modernisé à partir d'une boîte à outils interne de mise en place de tenants retirée, hors menu
     │   ├── readme.md
     │   ├── Provisioning/         (3 scripts)  ← administrateur break-glass, groupes de référence, attribution des stratégies Intune
@@ -879,7 +877,7 @@ M365-Scripts/
         └── Workspace365/         (2 scripts)  ← provisionnement/suppression d'environnements
 ```
 
-`Deploy-OfficeTheme.ps1` et `Deploy-Officecolors.ps1` ont leur URL de téléchargement codée en dur sur ce chemin exact du dépôt (branche `main`) — ils restent ici plutôt que sous `Intune/Desktop/` pour que l'URL continue de fonctionner.
+`Deploy-OfficeTheme.ps1` et `Deploy-Officecolors.ps1` reçoivent l'URL de téléchargement du thème en paramètre ; les fichiers de thème ne sont pas conservés dans le dépôt.
 
 ---
 
@@ -919,6 +917,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-05 (4)
+| Modification |
+|--------|
+| `Deploy-OfficeTheme.ps1` et `Deploy-Officecolors.ps1` avaient été conçus pour un seul client : l'URL de téléchargement et le nom de fichier du thème étaient codés en dur et pointaient vers le `.thmx` et le XML de couleurs de ce client dans un dépôt GitHub. Ils reçoivent désormais `-ThemeUrl`/`-ThemeName` et `-ColorsUrl`/`-ColorsName` ; le nom est par défaut le dernier segment de l'URL et doit se terminer par `.thmx` ou `.xml`. Sans URL, ils s'arrêtent avec le code de sortie 1 au lieu de demander, car personne ne répond sous Intune |
+| Suppression des fichiers de thème du client (`.thmx` et `.xml` du jeu de couleurs) du dépôt. Les readmes ne disent plus que les scripts sont liés à ce chemin, et expliquent comment passer des paramètres sous Intune (commande d'installation d'une application Win32, ou copie avec valeurs par défaut renseignées) |
+| **Les déploiements Intune existants contiennent leur propre copie de l'ancien script et continuent de télécharger depuis l'URL qu'elle contient** — cette URL pointe vers un autre dépôt GitHub, et si celui-ci est synchronisé depuis ce dépôt, ces déploiements perdent le fichier dès que cette modification atteint `main` |
+| Vérifié : contrôle de syntaxe, les chemins sans URL et avec mauvaise extension s'arrêtent avec le code 1 et leur message, et une URL encodée en pourcentage donne le nom de fichier attendu. Aucun téléchargement ni déploiement Intune n'a été exécuté |
 
 ### 2026-10-05 (3)
 | Modification |

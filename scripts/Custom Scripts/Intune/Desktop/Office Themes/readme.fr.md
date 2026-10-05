@@ -4,7 +4,7 @@
 
 # Couleurs du thème Office
 
-Déploie la palette de couleurs Office de VIAS Institute (uniquement les couleurs du thème, pas le thème `.thmx` complet — pour cela, voir [`Deploy-OfficeTheme.ps1`](../readme.fr.md#deploy-officethemeps1) dans le dossier parent).
+Déploie une palette de couleurs Office (uniquement les couleurs du thème, pas un thème `.thmx` complet — pour cela, voir [`Deploy-OfficeTheme.ps1`](../readme.fr.md#deploy-officethemeps1) dans le dossier parent).
 
 ---
 
@@ -12,17 +12,28 @@ Déploie la palette de couleurs Office de VIAS Institute (uniquement les couleur
 
 | Fichier | Description |
 |------|-------------|
-| [`Deploy-Officecolors.ps1`](Deploy-Officecolors.ps1) ([docs](#deploy-officecolorsps1)) | Télécharge le XML du jeu de couleurs et l'installe dans le dossier Theme Colors d'Office |
-| `Test VIAS.xml` | La définition du jeu de couleurs (`<a:clrScheme>`) — couleurs sombres/claires/d'accentuation du thème VIAS Institute |
+| [`Deploy-Officecolors.ps1`](Deploy-Officecolors.ps1) ([docs](#deploy-officecolorsps1)) | Télécharge un XML de jeu de couleurs depuis une URL et l'installe dans le dossier Theme Colors d'Office |
 
 ---
 
 ### Deploy-Officecolors.ps1
 
-Télécharge `Test VIAS.xml` depuis la branche `main` de ce dépôt sur GitHub et le copie dans `%APPDATA%\Microsoft\Templates\Document Themes\Theme Colors\`, en créant le dossier si nécessaire. Une fois déployé, « Test VIAS » apparaît comme jeu de couleurs sélectionnable dans le sélecteur **Création > Couleurs** (**Design > Colors**) d'Office.
+Télécharge la définition du jeu de couleurs (`<a:clrScheme>`) depuis `-ColorsUrl` dans `%APPDATA%\Microsoft\Templates\Document Themes\Theme Colors\`, en créant le dossier si nécessaire. Une fois déployé, le jeu apparaît dans le sélecteur **Création > Couleurs** (**Design > Colors**) d'Office.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-ColorsUrl` | URL de téléchargement direct du jeu de couleurs `.xml`. Obligatoire |
+| `-ColorsName` | Nom de fichier sous lequel l'enregistrer, se terminant par `.xml`. Par défaut : le dernier segment de l'URL |
+
+**Exemples**
 
 ```powershell
-.\Deploy-Officecolors.ps1
+.\Deploy-Officecolors.ps1 -ColorsUrl 'https://contoso.blob.core.windows.net/branding/Contoso.xml'
 ```
 
-> Aucun paramètre — l'URL source et le nom de fichier sont codés en dur en haut du script. Déployez-le via Intune en tant qu'utilisateur connecté (il écrit dans `%APPDATA%`).
+**Remarques**
+
+- À exécuter en tant qu'utilisateur connecté (écrit dans `%APPDATA%`). Sous Intune, déployez-le comme application Win32 avec les paramètres dans la commande d'installation, ou chargez une copie dont les valeurs par défaut sont renseignées.
+- Sans `-ColorsUrl`, ou avec un nom qui ne se termine pas par `.xml`, il s'arrête avec le code de sortie 1.

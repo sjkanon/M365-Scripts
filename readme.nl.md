@@ -842,12 +842,10 @@ M365-Scripts/
     │       ├── readme.md
     │       └── Desktop/
     │           ├── readme.md
-    │           ├── Deploy-OfficeTheme.ps1        ← installeert het volledige VIAS-Office-thema (.thmx)
-    │           ├── 2026 Vias institute colours (2).thmx
+    │           ├── Deploy-OfficeTheme.ps1        ← installeert een Office-thema (.thmx) van een URL
     │           └── Office Themes/
     │               ├── readme.md
-    │               ├── Deploy-Officecolors.ps1   ← installeert alleen het kleurenschema
-    │               └── Test VIAS.xml
+    │               └── Deploy-Officecolors.ps1   ← installeert alleen een kleurenschema van een URL
     ├── TenantOnboarding/                ← gemoderniseerd vanuit een uitgefaseerde interne toolkit voor tenantinrichting, niet in het menu
     │   ├── readme.md
     │   ├── Provisioning/         (3 scripts)  ← break-glass-beheerder, baselinegroepen, toewijzing van Intune-beleid
@@ -879,7 +877,7 @@ M365-Scripts/
         └── Workspace365/         (2 scripts)  ← omgevingen inrichten/verwijderen
 ```
 
-`Deploy-OfficeTheme.ps1` en `Deploy-Officecolors.ps1` hebben hun download-URL hard vastgezet op exact dit pad in de repo (branch `main`) — ze blijven hier staan in plaats van onder `Intune/Desktop/`, zodat de URL blijft werken.
+`Deploy-OfficeTheme.ps1` en `Deploy-Officecolors.ps1` krijgen de download-URL van het thema als parameter; de themabestanden staan niet in de repo.
 
 ---
 
@@ -919,6 +917,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-05 (4)
+| Wijziging |
+|--------|
+| `Deploy-OfficeTheme.ps1` en `Deploy-Officecolors.ps1` waren voor één klant gebouwd: de download-URL en bestandsnaam van het thema stonden hardcoded en wezen naar de `.thmx` en kleuren-XML van die klant in een GitHub-repo. Ze krijgen nu `-ThemeUrl`/`-ThemeName` en `-ColorsUrl`/`-ColorsName`; de naam is standaard het laatste deel van de URL en moet op `.thmx` of `.xml` eindigen. Zonder URL stoppen ze met exitcode 1 in plaats van te vragen, want onder Intune beantwoordt niemand die vraag |
+| De themabestanden van de klant (`.thmx` en kleurenschema-`.xml`) uit de repo verwijderd. De readmes zeggen niet langer dat de scripts aan dit pad vastzitten, en leggen uit hoe je onder Intune parameters meegeeft (installatieopdracht van een Win32-app, of een kopie met ingevulde standaardwaarden) |
+| **Bestaande Intune-uitrollen hebben hun eigen kopie van het oude script en blijven downloaden van de URL daarin** — die URL wijst naar een andere GitHub-repository, en als die vanuit deze wordt gesynchroniseerd, verliezen die uitrollen het bestand zodra dit op `main` staat |
+| Geverifieerd: syntaxcontrole, de paden zonder URL en met verkeerde extensie stoppen met exitcode 1 en hun melding, en een procent-gecodeerde URL levert de verwachte bestandsnaam op. Er is geen download of Intune-uitrol gedraaid |
 
 ### 2026-10-05 (3)
 | Wijziging |

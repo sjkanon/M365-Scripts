@@ -842,12 +842,10 @@ M365-Scripts/
     │       ├── readme.md
     │       └── Desktop/
     │           ├── readme.md
-    │           ├── Deploy-OfficeTheme.ps1        ← installs the full VIAS .thmx Office theme
-    │           ├── 2026 Vias institute colours (2).thmx
+    │           ├── Deploy-OfficeTheme.ps1        ← installs an Office .thmx theme from a URL
     │           └── Office Themes/
     │               ├── readme.md
-    │               ├── Deploy-Officecolors.ps1   ← installs just the color scheme
-    │               └── Test VIAS.xml
+    │               └── Deploy-Officecolors.ps1   ← installs just a color scheme from a URL
     ├── TenantOnboarding/                ← modernized from a retired internal tenant-setup toolkit, not menu-wired
     │   ├── readme.md
     │   ├── Provisioning/         (3 scripts)  ← break-glass admin, baseline groups, Intune policy assignment
@@ -879,7 +877,7 @@ M365-Scripts/
         └── Workspace365/         (2 scripts)  ← environment provisioning/removal
 ```
 
-`Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` hardcode their download URL to this exact repo path (`main` branch) — they stay here rather than under `Intune/Desktop/` so the URL keeps resolving.
+`Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` take the theme's download URL as a parameter; the theme files are not kept in the repo.
 
 ---
 
@@ -919,6 +917,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-05 (4)
+| Change |
+|--------|
+| `Deploy-OfficeTheme.ps1` and `Deploy-Officecolors.ps1` were built for one customer: the theme's download URL and file name were hardcoded, pointing at that customer's `.thmx` and colour XML inside a GitHub repo. They now take `-ThemeUrl`/`-ThemeName` and `-ColorsUrl`/`-ColorsName`; the name defaults to the last segment of the URL and must end in `.thmx` or `.xml`. Without a URL they stop with exit code 1 instead of prompting, since nobody answers a prompt under Intune |
+| Removed the customer's theme files (`.thmx` and colour-scheme `.xml`) from the repo. The readmes no longer say the scripts are pinned to this path, and explain how to pass parameters under Intune (Win32 app command line, or a copy with defaults filled in) |
+| **Existing Intune deployments carry their own copy of the old script and keep downloading from the URL inside it** — that URL points at a different GitHub repository, and if that repository is synced from this one, those deployments lose the file once this reaches `main` |
+| Verified: syntax check, the missing-URL and wrong-extension paths exit 1 with their message, and a percent-encoded URL yields the expected file name. No download or Intune deployment was run |
 
 ### 2026-10-05 (3)
 | Change |
