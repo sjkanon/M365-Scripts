@@ -4,7 +4,7 @@
 
 # Intune (Custom Scripts)
 
-Uitrol van Office-thema's/-kleuren — apart gehouden van [`scripts/Intune/`](../../Intune/readme.nl.md) omdat `Deploy-OfficeTheme.ps1` en `Deploy-Officecolors.ps1` hun download-URL hard naar dit repopad hebben gecodeerd.
+Uitrol van Office-thema's/-kleuren — om historische redenen apart gehouden van [`scripts/Intune/`](../../Intune/readme.nl.md): `Deploy-OfficeTheme.ps1` en `Deploy-Officecolors.ps1` hadden hun download-URL vroeger hard naar dit repopad gecodeerd. Ze krijgen de URL nu als parameter, dus niets bindt ze nog aan deze plek.
 
 ---
 

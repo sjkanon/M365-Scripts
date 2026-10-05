@@ -4,9 +4,9 @@
 
 # Desktop (thème Office)
 
-Déploiement du thème et de la palette de couleurs Office via Intune. Conservé volontairement à cet emplacement — les deux scripts ont leur URL de téléchargement codée en dur vers cet emplacement exact du dépôt (branche `main`) ; les déplacer casserait donc le téléchargement jusqu'à ce que les scripts soient mis à jour et redéployés dans Intune.
+Déploiement du thème et de la palette de couleurs Office via Intune. Les deux scripts reçoivent l'URL de téléchargement du thème en paramètre, si bien qu'un seul script sert pour chaque client ; les fichiers de thème eux-mêmes ne sont pas conservés dans ce dépôt.
 
-Pour le déploiement du fond d'écran, de l'écran de verrouillage et du raccourci de la barre des tâches, voir [`scripts/Intune/Desktop/`](../../../Intune/Desktop/readme.fr.md).
+Pour le déploiement du fond d'écran, de l'écran de verrouillage et des raccourcis de la barre des tâches, voir [`scripts/Intune/Desktop/`](../../../Intune/Desktop/readme.fr.md).
 
 ---
 
@@ -14,23 +14,38 @@ Pour le déploiement du fond d'écran, de l'écran de verrouillage et du raccour
 
 | Dossier | Description |
 |--------|-------------|
-| [`Office Themes/`](Office%20Themes/readme.fr.md) | `Deploy-Officecolors.ps1` — installe uniquement le jeu de couleurs |
+| [`Office Themes/`](Office%20Themes/readme.fr.md) | `Deploy-Officecolors.ps1` — installe uniquement un jeu de couleurs |
 
 ## Scripts
 
 | Script | Description |
 |--------|-------------|
-| [`Deploy-OfficeTheme.ps1`](Deploy-OfficeTheme.ps1) ([docs](#deploy-officethemeps1)) | Installe le thème Office `.thmx` complet de VIAS Institute |
-| `2026 Vias institute colours (2).thmx` | Le fichier de thème Office téléchargé par `Deploy-OfficeTheme.ps1` |
+| [`Deploy-OfficeTheme.ps1`](Deploy-OfficeTheme.ps1) ([docs](#deploy-officethemeps1)) | Télécharge un thème Office `.thmx` depuis une URL et l'installe pour l'utilisateur connecté |
 
 ---
 
 ### Deploy-OfficeTheme.ps1
 
-Télécharge `2026 Vias institute colours (2).thmx` depuis la branche `main` de ce dépôt sur GitHub et le copie dans `%APPDATA%\Microsoft\Templates\Document Themes\`, afin qu'il apparaisse dans le sélecteur **Création > Thèmes** (**Design > Themes**) d'Office.
+Télécharge le `.thmx` depuis `-ThemeUrl` dans `%ProgramData%\OfficeThemes` et le copie dans `%APPDATA%\Microsoft\Templates\Document Themes\`, afin qu'il apparaisse dans le sélecteur **Création > Thèmes** (**Design > Themes**) d'Office.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-ThemeUrl` | URL de téléchargement direct du fichier `.thmx`. Obligatoire |
+| `-ThemeName` | Nom de fichier sous lequel l'enregistrer, se terminant par `.thmx` — le nom affiché par Office. Par défaut : le dernier segment de l'URL |
+
+**Exemples**
 
 ```powershell
-.\Deploy-OfficeTheme.ps1
+.\Deploy-OfficeTheme.ps1 -ThemeUrl 'https://contoso.blob.core.windows.net/branding/Contoso.thmx'
+
+# Commande d'installation d'une application Win32
+powershell.exe -ExecutionPolicy Bypass -File .\Deploy-OfficeTheme.ps1 -ThemeUrl 'https://example.com/theme.thmx' -ThemeName 'Contoso 2026.thmx'
 ```
 
-> Aucun paramètre — l'URL source et le nom de fichier sont codés en dur en haut du script. Déployez-le via Intune en tant qu'utilisateur connecté (il écrit dans `%APPDATA%`).
+**Remarques**
+
+- À exécuter en tant qu'utilisateur connecté (écrit dans `%APPDATA%`).
+- Les scripts de plateforme Intune ne peuvent pas transmettre de paramètres : déployez-le comme application Win32 avec les paramètres dans la commande d'installation, ou chargez une copie dont les valeurs par défaut sont renseignées.
+- Sans `-ThemeUrl`, ou avec un nom qui ne se termine pas par `.thmx`, il s'arrête avec le code de sortie 1 au lieu de demander — sous Intune, personne ne répondrait.
