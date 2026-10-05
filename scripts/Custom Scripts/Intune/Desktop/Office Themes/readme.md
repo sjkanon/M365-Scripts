@@ -4,7 +4,7 @@
 
 # Office Theme Colors
 
-Deploys the VIAS Institute Office color palette (theme colors only, not the full `.thmx` theme — see [`Deploy-OfficeTheme.ps1`](../readme.md#deploy-officethemeps1) in the parent folder for that).
+Deploys an Office color palette (theme colors only, not a full `.thmx` theme — see [`Deploy-OfficeTheme.ps1`](../readme.md#deploy-officethemeps1) in the parent folder for that).
 
 ---
 
@@ -12,17 +12,28 @@ Deploys the VIAS Institute Office color palette (theme colors only, not the full
 
 | File | Description |
 |------|-------------|
-| [`Deploy-Officecolors.ps1`](Deploy-Officecolors.ps1) ([docs](#deploy-officecolorsps1)) | Downloads and installs the color scheme XML into Office's Theme Colors folder |
-| `Test VIAS.xml` | The color scheme definition (`<a:clrScheme>`) — dark/light/accent colors for the VIAS Institute theme |
+| [`Deploy-Officecolors.ps1`](Deploy-Officecolors.ps1) ([docs](#deploy-officecolorsps1)) | Downloads a color scheme XML from a URL and installs it into Office's Theme Colors folder |
 
 ---
 
 ### Deploy-Officecolors.ps1
 
-Downloads `Test VIAS.xml` from this repo's `main` branch on GitHub and copies it to `%APPDATA%\Microsoft\Templates\Document Themes\Theme Colors\`, creating the folder if needed. Once deployed, "Test VIAS" appears as a selectable color scheme under Office's **Design > Colors** picker.
+Downloads the color scheme definition (`<a:clrScheme>`) from `-ColorsUrl` to `%APPDATA%\Microsoft\Templates\Document Themes\Theme Colors\`, creating the folder if needed. Once deployed, the scheme appears under Office's **Design > Colors** picker.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-ColorsUrl` | Direct download URL of the color scheme `.xml`. Required |
+| `-ColorsName` | File name to save it as, ending in `.xml`. Default: the last segment of the URL |
+
+**Examples**
 
 ```powershell
-.\Deploy-Officecolors.ps1
+.\Deploy-Officecolors.ps1 -ColorsUrl 'https://contoso.blob.core.windows.net/branding/Contoso.xml'
 ```
 
-> No parameters — source URL and filename are hardcoded at the top of the script. Deploy via Intune as the logged-on user (writes to `%APPDATA%`).
+**Notes**
+
+- Run as the logged-on user (writes to `%APPDATA%`). Under Intune, deploy as a Win32 app with the parameters on the install command line, or upload a copy with the defaults filled in.
+- Without `-ColorsUrl`, or with a name not ending in `.xml`, it stops with exit code 1.

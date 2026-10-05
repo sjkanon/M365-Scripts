@@ -8,9 +8,9 @@ Provision and maintain a SharePoint structure — metadata model, libraries, con
 types and group permissions — from one configuration file, with PnP PowerShell and
 Microsoft Graph.
 
-Built for Petsolutions NV (brands Butterstone and Laseto), but nothing in the scripts
-is client-specific: the model lives in the JSON, so a second client is a second config
-file, not a second fork.
+Nothing in the scripts is client-specific: the model lives in the JSON, so a second
+client is a second config file, not a second fork. The examples below use a fictional
+Contoso NV with the brands Northwind and Fabrikam.
 
 ---
 
@@ -35,15 +35,15 @@ carried by **metadata and group permissions** rather than by a sprawl of sites.
 | | |
 |---|---|
 | **Pillars** | MGMT (private channel), Leveranciers, Verkopers, Klanten, Marketing, TD |
-| **Extra library** | FUTECH Images and videos — read-only for external customers |
-| **Brand** | Butterstone / Laseto / Beide — a tag on every file, never a separate site or group |
-| **Groups** | one Entra ID security group per pillar per access level (`SG-PETSOL-<Pijler>-RW` / `-RO`), plus `SG-PETSOL-FUTECH-Klanten` |
+| **Extra library** | Beeldmateriaal voor klanten — read-only for external customers |
+| **Brand** | Northwind / Fabrikam / Beide — a tag on every file, never a separate site or group |
+| **Groups** | one Entra ID security group per pillar per access level (`SG-CONTOSO-<Pijler>-RW` / `-RO`), plus `SG-CONTOSO-Klanten-Extern` |
 
 The metadata model, reusable across every library:
 
 | Column | Internal name | Type | Values |
 |---|---|---|---|
-| Merk | `PsMerk` | Choice | Butterstone / Laseto / Beide |
+| Merk | `PsMerk` | Choice | Northwind / Fabrikam / Beide |
 | Pijler | `PsPijler` | Choice | MGMT / Leveranciers / Verkopers / Klanten / Marketing / TD |
 | Regio | `PsRegio` | Choice | Benelux / Duitsland / Frankrijk / Export — only required on Verkoopdocument |
 | Leverancier | `PsLeverancier` | Managed metadata | term set, extendable from the term store |
@@ -79,8 +79,8 @@ without Regio.
 | [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#handing-it-over-to-the-customer)) | Writes the end-user explanation onto the team site, generated from the config | yes |
 | [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#undoing-it)) | Removes what was built — reports only unless you pass `-Apply` | yes, on purpose |
 | [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Shared helpers — dot-sourced, not run on its own | — |
-| [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
-| `petsolutions.config.json` | The model | — |
+| [`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) | **End-user guide, in Dutch** — hand this to the customer: uploading, tagging, finding things back | — |
+| [`example.config.json`](example.config.json) | The model, as an example to copy — still on `CHANGEME`. Client configs (`<client>.config.json`) live next to it and are git-ignored | — |
 
 Every writing script supports `-WhatIf` and is idempotent: a second run reports `[ OK ]`
 across the board and changes nothing.
@@ -119,15 +119,17 @@ Two extra requirements that are easy to miss:
 
 ### 3. Fill in the config
 
-`petsolutions.config.json` ships with `CHANGEME` in the tenant and site URLs. Every
-script refuses to run until those are replaced — better a clear error than a sign-in
+`example.config.json` ships with `CHANGEME` in the tenant and site URLs. Copy it to
+`<client>.config.json` and fill it in, or let `New-StructureConfig.ps1` write one. With
+no `-ConfigPath`, every script takes the one `*.config.json` here that no longer
+contains `CHANGEME`, and refuses to run on the example itself — better a clear error than a sign-in
 that fails five minutes into a run.
 
 ```jsonc
-"tenant": "petsolutions.onmicrosoft.com",
+"tenant": "contoso.onmicrosoft.com",
 "sites": {
-  "team": "https://petsolutions.sharepoint.com/sites/Petsolutions",
-  "mgmt": "https://petsolutions.sharepoint.com/sites/Petsolutions-MGMT"
+  "team": "https://contoso.sharepoint.com/sites/Contoso",
+  "mgmt": "https://contoso.sharepoint.com/sites/Contoso-MGMT"
 }
 ```
 
@@ -164,10 +166,10 @@ brackets, so a standard build is mostly Enters and two real answers:
 |---|---|
 | Client, tenant | — |
 | Team name, alias (decides the site URL), owner | derived from the client name |
-| Brands, and what "belongs to all of them" is called | Butterstone, Laseto, Beide |
+| Brands, and what "belongs to all of them" is called | Northwind, Fabrikam, Beide |
 | Pillars, and which are a private channel | MGMT, Leveranciers, Verkopers, Klanten, Marketing, TD — MGMT private |
 | Which pillar handles suppliers / sales | decides where Leverancier and Regio become required |
-| Customer library | FUTECH Images and videos |
+| Customer library | Beeldmateriaal voor klanten |
 | Group prefix and the edit/read suffixes | `SG-<CLIENT>` · RW · RO |
 | Languages, regions, document kinds, confidentiality levels, statuses, starting suppliers | the Dutch defaults |
 | **Maintain the share-status column?** | no — this is the only answer that costs you a nightly script |
@@ -306,7 +308,7 @@ default column values, a grouped view, and the role assignments.
 ```powershell
 # The external library, and strip anything the config does not list
 .\Set-SharePointLibraries.ps1 -Interactive -ClientId <app-id> `
-    -Container FUTECH -RemoveOtherPermissions
+    -Container KlantBibliotheek -RemoveOtherPermissions
 
 # Everything except the unsupported standard-channel folder permissions
 .\Set-SharePointLibraries.ps1 -Interactive -ClientId <app-id> `
@@ -331,8 +333,8 @@ folder in one flat list:
 
 | View | Shows |
 |---|---|
-| `Alles - Butterstone` | every file tagged Butterstone **or Beide**, across all pillars, grouped by pillar |
-| `Alles - Laseto` | the same for Laseto |
+| `Alles - Northwind` | every file tagged Northwind **or Beide**, across all pillars, grouped by pillar |
+| `Alles - Fabrikam` | the same for Fabrikam |
 | `Nog te taggen` | files with no Merk — what drag-and-drop and OneDrive sync leave behind |
 | `Extern gedeeld` | everything the audit found sitting outside the organisation |
 | `Te archiveren` | Status is Te archiveren or Verouderd |
@@ -345,10 +347,10 @@ own invention:
 
 ```jsonc
 {
-  "title": "Alles - Butterstone",
+  "title": "Alles - Northwind",
   "recursive": true,
   "groupBy": "PsPijler",
-  "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Butterstone</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
+  "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Northwind</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
   "fields": [ "DocIcon", "LinkFilename", "PsPijler", "PsContenttype", "PsTaal", "..." ]
 }
 ```
@@ -424,8 +426,8 @@ A container:
   "keepExistingPermissions": true,  // copy the inherited rights when breaking inheritance
   "view": { "title": "Op leverancier", "fields": [ ... ], "groupBy": "PsLeverancier" },
   "permissions": [
-    { "group": "SG-PETSOL-Leveranciers-RW", "role": "Contribute" },
-    { "group": "SG-PETSOL-Leveranciers-RO", "role": "Read" }
+    { "group": "SG-CONTOSO-Leveranciers-RW", "role": "Contribute" },
+    { "group": "SG-CONTOSO-Leveranciers-RO", "role": "Read" }
   ]
 }
 ```
@@ -456,7 +458,7 @@ The supported ways to close a pillar off:
 |---|---|
 | **Private channel** | own site collection, own membership — what MGMT already uses. Cleanest, but the channel does not appear for non-members at all |
 | **Shared channel** | own site collection, own membership, can include people outside the team |
-| **Own library** (`kind: Library`) | outside the channel structure, unique permissions are entirely supported — what FUTECH uses |
+| **Own library** (`kind: Library`) | outside the channel structure, unique permissions are entirely supported — what the customer library uses |
 
 If you move a pillar to a private or shared channel, set `uniquePermissions` to `false`
 for its container and add its new site to the `sites` section.
@@ -598,7 +600,7 @@ something a user can act on, and explaining it only invites the question of why 
 cannot.
 
 
-[`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) is
+[`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) is
 written for the people who will actually upload files — in Dutch, no jargon, five minutes
 to read. It covers the three ways of adding a file and why they behave differently, what
 each label means, and what happens the moment you tag something.

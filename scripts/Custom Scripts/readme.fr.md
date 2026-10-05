@@ -12,4 +12,4 @@ Scripts figés à leur emplacement actuel parce qu'autre chose dépend de ce che
 
 | Dossier | Description |
 |--------|-------------|
-| [`Intune/`](Intune/readme.fr.md) | Déploiement des thèmes/couleurs Office (`Deploy-OfficeTheme.ps1`, `Deploy-Officecolors.ps1`) — lié à son chemin ; voir [`scripts/Intune/`](../Intune/readme.fr.md) pour le reste des outils Intune |
+| [`Intune/`](Intune/readme.fr.md) | Déploiement des thèmes/couleurs Office (`Deploy-OfficeTheme.ps1`, `Deploy-Officecolors.ps1`) — URL du thème en paramètre ; voir [`scripts/Intune/`](../Intune/readme.fr.md) pour le reste des outils Intune |

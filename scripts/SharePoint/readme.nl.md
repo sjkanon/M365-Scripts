@@ -548,7 +548,7 @@ Rapporteren is de standaard. Er verandert niets zonder `-Apply`, en elke run sch
 
 | | Waarom |
 |---|---|
-| Entra ID-groepslidmaatschap wijzigen | Wie via een security- of M365-groep binnenkomt, houdt die toegang — de groep *is* de toekenning. Dit script raakt Entra niet aan, maar meldt die routes wel nadrukkelijk, mét groepsnaam. Anders denk je dat het dicht is terwijl het openstaat |
+| Entra ID-groepslidmaatschap wijzigen | **Tenzij je `-RemoveFromEntraGroups` meegeeft.** Standaard houdt wie via een security- of M365-groep binnenkomt die toegang — de groep *is* de toekenning — en worden die routes nadrukkelijk gemeld, mét groepsnaam, zodat je niet denkt dat het dicht is terwijl het openstaat |
 | `Everyone` / `Everyone except external users` verwijderen | Dat ontneemt de hele tenant toegang, niet deze persoon. Wordt gemeld, niet aangeraakt |
 | Eigenaarschap en metadata opschonen | Een ingetrokken gebruiker blijft de auteur van wat die gemaakt heeft |
 
@@ -581,6 +581,8 @@ Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: 
 | `-Scope` | `Site`/`List`/`Item` | `Item` | Hoe diep naar directe toekenningen wordt gezocht |
 | `-IncludeGroupAccess` | switch | uit | Meldt ook de sites die de gebruiker via Entra-groepen bereikt, óók waar die verder niets heeft. Alleen rapporteren |
 | `-KeepSharingLinks` | switch | uit | Deellinks met rust laten; alle andere routes worden wel ingetrokken |
+| `-FromReport` | string | — | Haalt de te bezoeken sites uit een run van het rechtenrapport in plaats van de tenant opnieuw af te lopen. De detail-CSV, een ander bestand uit dezelfde run, of de map. Zonder `-TenantUrl` komt de tenant ook uit het rapport. Zie hieronder |
+| `-RemoveFromEntraGroups` | switch | uit | **Verwijdert de gebruiker ook uit de Entra ID-groepen die toegang bleken te geven** — alleen die, nooit elke groep waar iemand in zit. Vereist Graph `GroupMember.ReadWrite.All`, die de tijdelijke app alleen met deze schakelaar vraagt. Zie hieronder |
 | `-RemoveFromSite` | switch | uit | Verwijdert de gebruiker daarna ook uit de gebruikerslijst van elke site collection. Vangt wat de scope-voor-scope-ronde niet zag, maar de naam rendert daarna als verwijderd account in oudere metadata |
 | `-IncludeOneDriveSites` | switch | uit | Ook persoonlijke OneDrive-sites doorzoeken |
 | `-IncludeHiddenLists` | switch | uit | Ook verborgen en systeemlijsten |
@@ -591,6 +593,43 @@ Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: 
 
 Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseerde app-registratie met SharePoint `Sites.FullControl.All`, die na afloop weer wordt verwijderd.
 
+#### Ook de Entra ID-groepen verwijderen
+
+`-RemoveFromEntraGroups` maakt de tweede helft van een offboarding af in plaats van hem alleen te melden. **Alleen de groepen die deze run daadwerkelijk een roltoewijzing zag houden op een scope binnen bereik worden aangeraakt** — nooit elke groep waar de gebruiker in zit. Iemand die vertrekt zit vaak in vijftig groepen; alleen die SharePoint-toegang geven zijn hier in scope.
+
+> **Dit reikt verder dan SharePoint.** Een Entra-groep is geen SharePoint-object. Datzelfde lidmaatschap draagt vaak een Teams-team, een mailbox, licenties en app-toewijzingen — niets daarvan ziet dit rapport. Lees eerst het rapport van een run zónder `-Apply`, draai daarna pas met de schakelaar.
+
+> **De lijst is net zo volledig als de scan.** Een run op één site, een versmalde `-Scope`, uitgesloten OneDrive- of verborgen lijsten en onleesbare scopes maken hem kleiner — een groep die toegang geeft op een plek die nooit doorzocht is, staat er niet in. De run noemt elke beperking vóór er iets verwijderd wordt en opnieuw in de samenvatting. Het revoke-script draait zijn eigen scan, dus het rechtenrapport is geen voorwaarde.
+
+Vier gevallen worden gemeld in plaats van afgedwongen, omdat afdwingen óf zou falen óf het verkeerde zou doen:
+
+| Geval | Waarom het blijft staan |
+|---|---|
+| Dynamische groep | Lidmaatschap volgt een regel en wordt niet opgeslagen, dus er valt niets te verwijderen. Pas de regel aan, of de gebruikerskenmerken waarop die matcht |
+| Gesynchroniseerd uit on-premises AD | Alleen-lezen in de cloud. Het lidmaatschap moet in Active Directory weg |
+| Lid via een geneste groep | De gebruiker is geen direct lid, dus verwijderen zou hier mislukken. De toegang moet worden afgesneden bij de groep die hem écht bevat — het rapport noemt die |
+| Gebruiker niet gevonden in Entra | Er is niets om hem uit te verwijderen; de SharePoint-kant draait gewoon door |
+
+De verwijdering loopt door dezelfde trechter als elke andere wijziging, dus `-Apply`, `-WhatIf`, de bevestigingsvraag en de audit-CSV gedragen zich identiek. Vereist Graph `GroupMember.ReadWrite.All`, die de tijdelijke app **alleen** vraagt als de schakelaar is meegegeven — een rapportage-run houdt geen permissie die groepslidmaatschap kan wijzigen.
+
+
+#### Werken vanuit het rechtenrapport
+
+`-FromReport` haalt de te bezoeken sites uit een run van [`Get-SharePointPermissionsReport.ps1`](../Reporting/readme.nl.md#get-sharepointpermissionsreportps1) in plaats van de tenant opnieuw af te lopen. Zo haken de twee scripts in elkaar: het rapport beantwoordt wie waar bij kan, jij leest het en beslist, en de revoke werkt op precies datgene waar je naar keek.
+
+```powershell
+# 1. Alles oplijsten, tenantbreed, als één werkmap
+.\..\Reporting\Get-SharePointPermissionsReport.ps1 -TenantUrl "https://contoso.sharepoint.com" -IncludeEffectiveAccess -Excel
+
+# 2. Lezen, beslissen, en dan één persoon intrekken op diezelfde gegevens
+.\Revoke-SharePointUserAccess.ps1 -UserPrincipalName jan@contoso.com -FromReport C:\Temp
+```
+
+Wijs het aan op de detail-CSV, op een ander bestand uit dezelfde run, of gewoon op de map. Zonder `-TenantUrl` wordt de tenant ook uit het rapport gehaald.
+
+Het gebruikt bij voorkeur het site-access bestand (`..._SiteAccess_...csv`), waarin elke groep al naar personen is herleid — een site wordt dan alleen bezocht als die gebruiker daadwerkelijk in de groep zit die toegang geeft. Terugvallen op de ruwe grant-lijst betekent dat een SharePoint-groep op goed vertrouwen wordt genomen en elke site mét zo'n groep bezocht wordt; de run meldt welke bron is gebruikt.
+
+> **Het rapport bepaalt waar gekeken wordt, nooit wat er weg moet.** Elke genoemde site wordt alsnog live gelezen, dus een toekenning die er tussentijds al af was komt als `AlreadyGone` terug in plaats van als fout, en iets dat met de hand is verwijderd wordt niet teruggezet. Omgekeerd geldt dat niet: alles wat ná het rapport is toegekend is hier onzichtbaar, net als wat het rapport zelf niet kon lezen. Beide staan in de samenvatting, en een rapport ouder dan een dag meldt dat.
 #### Uitvoer
 
 `SharePoint_Revoke_<user>_<ts>.csv`, één regel per gevonden toekenning, met kolom `Action`:

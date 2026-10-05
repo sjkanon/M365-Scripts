@@ -62,15 +62,15 @@
 
     Nothing is removed unless -RemoveOtherPermissions is given. That switch strips
     role assignments the config does not mention, which is what you want on the
-    external FUTECH library and almost never want on an internal one.
+    external customer library and almost never want on an internal one.
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER Container
     Only handle these containers (keys from the containers section, e.g. Leveranciers,
-    FUTECH). Default: all of them.
+    KlantBibliotheek). Default: all of them.
 
 .PARAMETER EnsureGroups
     Create the Entra ID security groups from the configuration that do not exist yet.
@@ -125,7 +125,7 @@
 .EXAMPLE
     # Only the external customer library, and strip anything the config does not list
     .\Set-SharePointLibraries.ps1 -Interactive -ClientId <app-id> `
-        -Container FUTECH -RemoveOtherPermissions
+        -Container KlantBibliotheek -RemoveOtherPermissions
 
 .EXAMPLE
     # Everything except the unsupported standard-channel folder permissions
@@ -173,7 +173,7 @@ trap {
 
 Assert-PnPModule
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'petsolutions.config.json' }
+if (-not $ConfigPath) { $ConfigPath = Resolve-StructureConfigPath }
 $config = Import-StructureConfig -Path $ConfigPath
 if (-not $Tenant) { $Tenant = $config.tenant }
 

@@ -8,9 +8,10 @@ Provisionnez et maintenez une structure SharePoint — modèle de métadonnées,
 types de contenu et autorisations de groupe — à partir d'un seul fichier de configuration,
 avec PnP PowerShell et Microsoft Graph.
 
-Conçu pour Petsolutions NV (marques Butterstone et Laseto), mais rien dans les scripts
-n'est propre à ce client : le modèle réside dans le JSON, donc un deuxième client
-correspond à un deuxième fichier de configuration, pas à un deuxième fork.
+Rien dans les scripts n'est propre à un client : le modèle réside dans le JSON, donc un
+deuxième client correspond à un deuxième fichier de configuration, pas à un deuxième fork.
+Les exemples ci-dessous utilisent une société fictive, Contoso NV, avec les marques
+Northwind et Fabrikam.
 
 ---
 
@@ -36,15 +37,15 @@ prolifération de sites.
 | | |
 |---|---|
 | **Piliers** | MGMT (canal privé), Leveranciers, Verkopers, Klanten, Marketing, TD |
-| **Bibliothèque supplémentaire** | FUTECH Images and videos — en lecture seule pour les clients externes |
-| **Marque** | Butterstone / Laseto / Beide — une étiquette sur chaque fichier, jamais un site ou un groupe distinct |
-| **Groupes** | un groupe de sécurité Entra ID par pilier et par niveau d'accès (`SG-PETSOL-<Pijler>-RW` / `-RO`), plus `SG-PETSOL-FUTECH-Klanten` |
+| **Bibliothèque supplémentaire** | Beeldmateriaal voor klanten — en lecture seule pour les clients externes |
+| **Marque** | Northwind / Fabrikam / Beide — une étiquette sur chaque fichier, jamais un site ou un groupe distinct |
+| **Groupes** | un groupe de sécurité Entra ID par pilier et par niveau d'accès (`SG-CONTOSO-<Pijler>-RW` / `-RO`), plus `SG-CONTOSO-Klanten-Extern` |
 
 Le modèle de métadonnées, réutilisable dans toutes les bibliothèques :
 
 | Colonne | Nom interne | Type | Valeurs |
 |---|---|---|---|
-| Merk | `PsMerk` | Choix | Butterstone / Laseto / Beide |
+| Merk | `PsMerk` | Choix | Northwind / Fabrikam / Beide |
 | Pijler | `PsPijler` | Choix | MGMT / Leveranciers / Verkopers / Klanten / Marketing / TD |
 | Regio | `PsRegio` | Choix | Benelux / Duitsland / Frankrijk / Export — obligatoire uniquement sur Verkoopdocument |
 | Leverancier | `PsLeverancier` | Métadonnées gérées | ensemble de termes, extensible depuis le magasin de termes |
@@ -80,8 +81,8 @@ enregistré sans Regio.
 | [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#remise-au-client)) | Écrit l'explication destinée aux utilisateurs finaux sur le site d'équipe, générée à partir de la configuration | oui |
 | [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#revenir-en-arrière)) | Supprime ce qui a été construit — se contente d'un rapport tant que vous ne passez pas `-Apply` | oui, volontairement |
 | [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Fonctions d'aide partagées — chargées par dot-sourcing, pas exécutées seules | — |
-| [`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) | **Guide utilisateur, en néerlandais** — à remettre au client : téléverser, étiqueter, retrouver les documents | — |
-| `petsolutions.config.json` | Le modèle | — |
+| [`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) | **Guide utilisateur, en néerlandais** — à remettre au client : téléverser, étiqueter, retrouver les documents | — |
+| [`example.config.json`](example.config.json) | Le modèle, comme exemple à copier — encore sur `CHANGEME`. Les configurations client (`<client>.config.json`) se trouvent à côté et sont ignorées par git | — |
 
 Chaque script qui écrit prend en charge `-WhatIf` et est idempotent : une deuxième
 exécution affiche `[ OK ]` partout et ne modifie rien.
@@ -120,15 +121,18 @@ Deux exigences supplémentaires faciles à manquer :
 
 ### 3. Compléter la configuration
 
-`petsolutions.config.json` est livré avec `CHANGEME` dans les URL du tenant et des sites.
-Chaque script refuse de s'exécuter tant qu'elles n'ont pas été remplacées — mieux vaut une
+`example.config.json` est livré avec `CHANGEME` dans les URL du tenant et des sites.
+Copiez-le en `<client>.config.json` et complétez-le, ou laissez `New-StructureConfig.ps1`
+en écrire un. Sans `-ConfigPath`, chaque script prend l'unique `*.config.json` d'ici qui
+ne contient plus `CHANGEME`, et refuse de s'exécuter sur l'exemple lui-même.
+Un fichier encore sur `CHANGEME` est toujours refusé — mieux vaut une
 erreur claire qu'une connexion qui échoue cinq minutes après le début d'une exécution.
 
 ```jsonc
-"tenant": "petsolutions.onmicrosoft.com",
+"tenant": "contoso.onmicrosoft.com",
 "sites": {
-  "team": "https://petsolutions.sharepoint.com/sites/Petsolutions",
-  "mgmt": "https://petsolutions.sharepoint.com/sites/Petsolutions-MGMT"
+  "team": "https://contoso.sharepoint.com/sites/Contoso",
+  "mgmt": "https://contoso.sharepoint.com/sites/Contoso-MGMT"
 }
 ```
 
@@ -167,10 +171,10 @@ et à deux vraies réponses :
 |---|---|
 | Client, tenant | — |
 | Nom d'équipe, alias (détermine l'URL du site), propriétaire | dérivé du nom du client |
-| Marques, et comment s'appelle « appartient à toutes » | Butterstone, Laseto, Beide |
+| Marques, et comment s'appelle « appartient à toutes » | Northwind, Fabrikam, Beide |
 | Piliers, et lesquels sont un canal privé | MGMT, Leveranciers, Verkopers, Klanten, Marketing, TD — MGMT privé |
 | Quel pilier gère les fournisseurs / les ventes | détermine où Leverancier et Regio deviennent obligatoires |
-| Bibliothèque client | FUTECH Images and videos |
+| Bibliothèque client | Beeldmateriaal voor klanten |
 | Préfixe de groupe et suffixes modification/lecture | `SG-<CLIENT>` · RW · RO |
 | Langues, régions, types de documents, niveaux de confidentialité, statuts, fournisseurs de départ | les valeurs par défaut néerlandaises |
 | **Tenir à jour la colonne de statut de partage ?** | non — c'est la seule réponse qui vous coûte un script nocturne |
@@ -316,7 +320,7 @@ rôles.
 ```powershell
 # La bibliothèque externe, en retirant tout ce que la configuration ne mentionne pas
 .\Set-SharePointLibraries.ps1 -Interactive -ClientId <app-id> `
-    -Container FUTECH -RemoveOtherPermissions
+    -Container KlantBibliotheek -RemoveOtherPermissions
 
 # Tout sauf les autorisations non prises en charge sur les dossiers des canaux standard
 .\Set-SharePointLibraries.ps1 -Interactive -ClientId <app-id> `
@@ -342,8 +346,8 @@ seule liste à plat :
 
 | Vue | Affiche |
 |---|---|
-| `Alles - Butterstone` | chaque fichier étiqueté Butterstone **ou Beide**, sur tous les piliers, groupé par pilier |
-| `Alles - Laseto` | la même chose pour Laseto |
+| `Alles - Northwind` | chaque fichier étiqueté Northwind **ou Beide**, sur tous les piliers, groupé par pilier |
+| `Alles - Fabrikam` | la même chose pour Fabrikam |
 | `Nog te taggen` | les fichiers sans Merk — ce que laissent le glisser-déposer et la synchronisation OneDrive |
 | `Extern gedeeld` | tout ce que l'audit a trouvé exposé hors de l'organisation |
 | `Te archiveren` | Status vaut Te archiveren ou Verouderd |
@@ -356,10 +360,10 @@ inventé par ce script :
 
 ```jsonc
 {
-  "title": "Alles - Butterstone",
+  "title": "Alles - Northwind",
   "recursive": true,
   "groupBy": "PsPijler",
-  "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Butterstone</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
+  "where": "<Or><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Northwind</Value></Eq><Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Beide</Value></Eq></Or>",
   "fields": [ "DocIcon", "LinkFilename", "PsPijler", "PsContenttype", "PsTaal", "..." ]
 }
 ```
@@ -436,8 +440,8 @@ Un conteneur :
   "keepExistingPermissions": true,  // copier les droits hérités lors de la rupture de l'héritage
   "view": { "title": "Op leverancier", "fields": [ ... ], "groupBy": "PsLeverancier" },
   "permissions": [
-    { "group": "SG-PETSOL-Leveranciers-RW", "role": "Contribute" },
-    { "group": "SG-PETSOL-Leveranciers-RO", "role": "Read" }
+    { "group": "SG-CONTOSO-Leveranciers-RW", "role": "Contribute" },
+    { "group": "SG-CONTOSO-Leveranciers-RO", "role": "Read" }
   ]
 }
 ```
@@ -470,7 +474,7 @@ Les manières prises en charge de fermer un pilier :
 |---|---|
 | **Canal privé** | collection de sites propre, appartenance propre — ce que MGMT utilise déjà. Le plus propre, mais le canal n'apparaît pas du tout pour les non-membres |
 | **Canal partagé** | collection de sites propre, appartenance propre, peut inclure des personnes extérieures à l'équipe |
-| **Bibliothèque propre** (`kind: Library`) | en dehors de la structure des canaux, les autorisations uniques sont entièrement prises en charge — ce qu'utilise FUTECH |
+| **Bibliothèque propre** (`kind: Library`) | en dehors de la structure des canaux, les autorisations uniques sont entièrement prises en charge — ce qu'utilise la bibliothèque client |
 
 Si vous déplacez un pilier vers un canal privé ou partagé, mettez `uniquePermissions` à
 `false` pour son conteneur et ajoutez son nouveau site à la section `sites`.
@@ -617,7 +621,7 @@ utilisateur peut agir, et l'expliquer ne fait qu'inviter la question de savoir p
 ne le peut pas.
 
 
-[`Petsolutions-SharePoint-Handleiding.md`](Petsolutions-SharePoint-Handleiding.md) est
+[`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) est
 écrit pour les personnes qui vont réellement téléverser des fichiers — en néerlandais, sans
 jargon, cinq minutes de lecture. Il couvre les trois façons d'ajouter un fichier et pourquoi
 elles se comportent différemment, ce que signifie chaque étiquette, et ce qui se passe dès

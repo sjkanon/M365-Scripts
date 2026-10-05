@@ -29,7 +29,7 @@ Licensing/
 | Python | 3.8 or later |
 | pandas | `pip install pandas` |
 | openpyxl | `pip install openpyxl` |
-| OneDrive | Synced and signed in |
+| Export directory | Reachable for the account that runs the report (a synced OneDrive folder is fine) |
 
 Install dependencies:
 
@@ -44,7 +44,7 @@ pip install pandas openpyxl
 Place input files in the correct subfolders under the export directory before running:
 
 ```
-C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload\
+<ExportDir>\
 ├── Import\
 │   ├── Ingram\     ← place exactly 1 .xlsx file here (Ingram billing export)
 │   └── Pax8\       ← place exactly 1 .csv file here (Pax8 invoice export)
@@ -52,7 +52,7 @@ C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload\
 └── Licentie_Overzicht_YYYY-MM.xlsx   ← output written here
 ```
 
-> The script fails with a clear error message if: the OneDrive folder is not reachable, no file is found, or more than one file is present in a folder.
+> The script fails with a clear error message if: no export directory is given, the export directory is not reachable, no file is found, or more than one file is present in a folder.
 
 ---
 
@@ -63,18 +63,18 @@ C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload\
 Validates the environment before running. Shows clear error messages if something is missing.
 
 ```powershell
-.\genereer_rapport.ps1
+.\genereer_rapport.ps1 -ExportDir "D:\Finance\Licensing"
 ```
 
 ### Option 2 — Double-click
 
-Run `genereer_rapport.bat` directly. No pre-flight checks — relies on the Python script's own error handling.
+Run `genereer_rapport.bat` directly — requires the `LICENSING_EXPORT_DIR` environment variable. No pre-flight checks — relies on the Python script's own error handling.
 
 ### Option 3 — CLI with explicit paths
 
 ```bash
-python genereer_licentie_overzicht.py --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv"
-python genereer_licentie_overzicht.py --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv" --output "C:\output\rapport.xlsx"
+python genereer_licentie_overzicht.py --export-dir "D:\Finance\Licensing" --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv"
+python genereer_licentie_overzicht.py --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv" --export-dir "D:\Finance\Licensing" --output "C:\output\rapport.xlsx"
 ```
 
 ---
@@ -105,16 +105,16 @@ Each row shows: description, category, quantity, unit purchase price, unit sales
 
 ## Scheduled task
 
-`create_scheduled_task.ps1` registers a Windows scheduled task that runs the Python script automatically on the **6th of every month at 08:00**.
+`create_scheduled_task.ps1` registers a Windows scheduled task that runs the Python script automatically on the **6th of every month at 08:00** by default.
 
-### Configuration (edit before running)
+### Parameters
 
-| Variable | Default | Description |
+| Parameter | Default | Description |
 |---|---|---|
-| `$TaskName` | `"Licensing Report Generator"` | Task name in Task Scheduler |
-| `$RunAsUser` | `"$env:USERDOMAIN\sa-halo"` | Service account that runs the task — **update for your domain** |
-| `$RunDay` | `6` | Day of month to run |
-| `$RunTime` | `"08:00"` | Time of day |
+| `-ExportDir` | *(required)* | Folder holding `Import\` and `Archive\`, where the report is written; passed to the Python script as `--export-dir` |
+| `-RunAsUser` | *(required)* | Service account that runs the task, e.g. `CONTOSO\svc-licensing` |
+| `-RunDay` | `6` | Day of month to run (1–28) |
+| `-RunTime` | `"08:00"` | Time of day |
 
 The script auto-detects `python.exe` from PATH and common install locations. `$ScriptPath` is resolved automatically relative to the script folder.
 
@@ -122,7 +122,7 @@ The script auto-detects `python.exe` from PATH and common install locations. `$S
 
 ```powershell
 # Run as Administrator
-.\create_scheduled_task.ps1
+.\create_scheduled_task.ps1 -ExportDir "D:\Finance\Licensing" -RunAsUser "CONTOSO\svc-licensing"
 ```
 
 ### Test manually after registration:
@@ -131,7 +131,7 @@ The script auto-detects `python.exe` from PATH and common install locations. `$S
 Start-ScheduledTask -TaskName "... Licentie Overzicht Generator"
 ```
 
-> **Note:** The service account (`$RunAsUser`) must have read access to the Ingram/Pax8 import folders and write access to the OneDrive export folder.
+> **Note:** The service account (`-RunAsUser`) must have read access to the Ingram/Pax8 import folders and write access to the export folder. A task registered before 2026-10-05 runs the Python script without `--export-dir` and now stops at once — re-run `create_scheduled_task.ps1` with `-ExportDir`.
 
 ---
 
@@ -163,15 +163,14 @@ ACRONIS_ENDCUSTOMER_ALIASES = {
 }
 ```
 
-### OneDrive path
+### Export directory
 
-The base path is hardcoded in both `genereer_rapport.ps1` and `genereer_licentie_overzicht.py`:
+Nothing is hardcoded. The export directory is taken from, in order:
 
-```
-C:\OneDrive\<Company>\<Company> - Finance - Licenses_facturatie_upload
-```
+1. `-ExportDir` (`genereer_rapport.ps1`) or `--export-dir` (`genereer_licentie_overzicht.py`)
+2. the `LICENSING_EXPORT_DIR` environment variable
 
-Update `$ExportDir` in `genereer_rapport.ps1` and `EXPORT_DIR` in `genereer_licentie_overzicht.py` to match your OneDrive folder name.
+With neither, both scripts stop with exit code 2. A synced OneDrive or SharePoint folder works fine as the export directory.
 
 ---
 
@@ -179,7 +178,8 @@ Update `$ExportDir` in `genereer_rapport.ps1` and `EXPORT_DIR` in `genereer_lice
 
 | Error | Cause | Fix |
 |---|---|---|
-| `OneDrive map niet bereikbaar` | OneDrive not synced or not signed in | Sign in to OneDrive and wait for sync |
+| `No export directory given` | Neither `-ExportDir`/`--export-dir` nor `LICENSING_EXPORT_DIR` is set | Pass the folder, or set the environment variable |
+| `Export directory not found` | Wrong path, or a synced folder that is not synced yet | Check the path; for OneDrive, sign in and wait for sync |
 | `Geen Excel bestand gevonden in Import\Ingram\` | Ingram file not placed | Place exactly 1 `.xlsx` in the `Ingram` folder |
 | `Meerdere bestanden gevonden` | More than 1 file in a folder | Remove or archive the extra file |
 | `Python niet gevonden` | Python not in PATH | Install Python and add to PATH, or use full path in the task |

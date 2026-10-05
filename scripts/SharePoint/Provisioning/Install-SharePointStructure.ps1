@@ -79,7 +79,7 @@
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER AllNames
     Passed to the wizard when it runs: ask for every name, including the channel,
@@ -420,7 +420,7 @@ try {
         Write-Ok 'Structure built and verified.'
         Write-Host ''
         Write-Host '    Next:' -ForegroundColor Cyan
-        Write-Host '      1. Put people in the SG-PETSOL-* security groups (Entra ID portal)' -ForegroundColor Gray
+        Write-Host "      1. Put people in the $(@(Get-ConfigValue $config 'groups' @()).Count) security groups from $(Split-Path -Leaf $ConfigPath) (Entra ID portal)" -ForegroundColor Gray
         Write-Host '      2. Point people at the explanation page in the site navigation' -ForegroundColor Gray
         Write-Host '      3. Schedule Update-SharePointShareStatus.ps1 nightly and' -ForegroundColor Gray
         Write-Host '         Test-SharePointStructure.ps1 weekly' -ForegroundColor Gray

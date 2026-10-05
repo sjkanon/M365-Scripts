@@ -13,7 +13,7 @@
     Use -Apply to automatically write the resolved records into Active Directory DNS.
 
     Required CSV column:
-      FQDN    Fully qualified domain name to resolve (e.g. briefings.vias.be)
+      FQDN    Fully qualified domain name to resolve (e.g. intranet.contoso.com)
 
     Resolution logic per FQDN:
       1. Check for CNAME  → if found, records type CNAME + target
@@ -24,7 +24,7 @@
     Path to the CSV file with a FQDN column.
 
 .PARAMETER ZoneName
-    The AD DNS zone (e.g. vias.be). Only required when using -Apply.
+    The AD DNS zone (e.g. contoso.com). Only required when using -Apply.
 
 .PARAMETER ExportCsv
     Export resolved records to a CSV file for manual review or import.
@@ -44,19 +44,19 @@
 
 .EXAMPLE
     # Resolve and show on screen only
-    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName contoso.com
 
 .EXAMPLE
     # Resolve and export to CSV for manual review
-    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -ExportCsv
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName contoso.com -ExportCsv
 
 .EXAMPLE
     # Resolve and import directly into AD DNS
-    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -Apply
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName contoso.com -Apply
 
 .EXAMPLE
     # Remote DNS server
-    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName vias.be -DnsServer dc01.vias.be -Apply
+    .\Import-DnsRecords.ps1 -CsvPath .\records.csv -ZoneName contoso.com -DnsServer dc01.contoso.com -Apply
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param (

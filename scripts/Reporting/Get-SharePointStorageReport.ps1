@@ -84,7 +84,7 @@
 
 .PARAMETER IncludeOneDriveUsers
     One or more user principal names whose OneDrive personal site should be included
-    in the scan alongside SharePoint sites (e.g. dilara.beerten@d-build.be).
+    in the scan alongside SharePoint sites (e.g. jane.doe@contoso.com).
     OneDrive personal sites are excluded by default.
 
 .PARAMETER MaxVersionRetryPasses

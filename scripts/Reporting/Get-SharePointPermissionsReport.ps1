@@ -757,6 +757,12 @@ function Invoke-SPCollectionPaged {
         $values = $null
         if ($null -ne $resp.value) { $values = $resp.value }
         elseif ($resp.d -and $null -ne $resp.d.results) { $values = $resp.d.results }
+        elseif ($page -eq 1) {
+            # A collection endpoint always answers with value (or d.results), even when empty.
+            # An object carrying neither is not an empty collection, it is the wrong URL - and
+            # reading it as empty is a silent zero instead of a visible mistake.
+            throw ("{0} did not return a collection - a scope object was asked for where its collection was meant." -f $next)
+        }
         if ($values) { & $OnPage @($values) }
 
         $next = $null

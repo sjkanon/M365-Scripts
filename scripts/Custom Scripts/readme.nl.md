@@ -12,4 +12,4 @@ Scripts die vastzitten aan hun huidige pad omdat iets anders van precies die loc
 
 | Map | Omschrijving |
 |--------|-------------|
-| [`Intune/`](Intune/readme.nl.md) | Uitrol van Office-thema's/-kleuren (`Deploy-OfficeTheme.ps1`, `Deploy-Officecolors.ps1`) — gebonden aan het pad; zie [`scripts/Intune/`](../Intune/readme.nl.md) voor de rest van de Intune-tools |
+| [`Intune/`](Intune/readme.nl.md) | Uitrol van Office-thema's/-kleuren (`Deploy-OfficeTheme.ps1`, `Deploy-Officecolors.ps1`) — thema-URL als parameter; zie [`scripts/Intune/`](../Intune/readme.nl.md) voor de rest van de Intune-tools |

@@ -4,3 +4,17 @@ config.json
 pnp.appid.json
 .f-index.json
 graph.appid.json
+
+# SSH keys never belong in the repo
+id_*
+*.pem
+*.key
+*.pub
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Customer structure configs stay out of the repo; only the example is shipped
+scripts/SharePoint/Provisioning/*.config.json
+!scripts/SharePoint/Provisioning/example.config.json
