@@ -62,7 +62,7 @@
 .EXAMPLE
     # Answer the questions, get a configuration, then build
     .\New-StructureConfig.ps1
-    .\Install-SharePointStructure.ps1 -ConfigPath .\petsolutions-nv.config.json
+    .\Install-SharePointStructure.ps1 -ConfigPath .\contoso-nv.config.json
 
 .EXAMPLE
     # Decide every name yourself, nothing derived
@@ -193,8 +193,8 @@ Write-Host ''
 
 # -- 1. Client and tenant ------------------------------------------------------
 Write-Host '  ── De klant ──────────────────────────────────────────────' -ForegroundColor DarkGray
-$client = Read-Value -Question 'Naam van de klant' -Default 'Petsolutions NV'
-$tenant = Read-Value -Question 'Tenant (bv. petsolutions.onmicrosoft.com)'
+$client = Read-Value -Question 'Naam van de klant'
+$tenant = Read-Value -Question 'Tenant (bv. contoso.onmicrosoft.com)'
 if ($tenant -notmatch '\.') { $tenant = "$tenant.onmicrosoft.com" }
 
 $shortName = Get-Slug ($client -split '\s')[0]
@@ -211,7 +211,7 @@ Write-Host ''
 Write-Host '  ── De merken ─────────────────────────────────────────────' -ForegroundColor DarkGray
 Write-Host '  Merken worden een label, geen aparte site. Er komt automatisch' -ForegroundColor DarkGray
 Write-Host '  een keuze "Beide" bij, plus een overzicht per merk.' -ForegroundColor DarkGray
-$brands   = Read-List -Question 'Merken' -Default @('Butterstone', 'Laseto')
+$brands   = Read-List -Question 'Merken'
 $bothName = if ($brands.Count -gt 1) { Read-Value -Question 'Hoe heet "hoort bij allemaal"' -Default 'Beide' } else { $null }
 
 # -- 4. Pillars ----------------------------------------------------------------
@@ -245,7 +245,7 @@ $salesPillar    = Read-OneOf -Question 'Welke pijler gaat over verkoop, met regi
 # -- 5. External library -------------------------------------------------------
 Write-Host ''
 Write-Host '  ── Bibliotheek voor klanten ──────────────────────────────' -ForegroundColor DarkGray
-$extLibrary = Read-Value -Question 'Naam van de aparte bibliotheek voor klanten' -Default 'FUTECH Images and videos' -AllowEmpty
+$extLibrary = Read-Value -Question 'Naam van de aparte bibliotheek voor klanten' -Default 'Beeldmateriaal voor klanten' -AllowEmpty
 
 # -- 6. Groups -----------------------------------------------------------------
 Write-Host ''

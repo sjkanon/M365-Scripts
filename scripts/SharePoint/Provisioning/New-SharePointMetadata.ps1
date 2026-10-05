@@ -44,7 +44,7 @@
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER Site
     Only provision these sites (keys from the configuration's sites section, e.g.
@@ -134,7 +134,7 @@ trap {
 
 Assert-PnPModule
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'petsolutions.config.json' }
+if (-not $ConfigPath) { $ConfigPath = Resolve-StructureConfigPath }
 $config = Import-StructureConfig -Path $ConfigPath -AllowPlaceholders:$AllowPlaceholders
 if (-not $Tenant) { $Tenant = $config.tenant }
 

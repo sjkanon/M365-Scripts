@@ -118,6 +118,19 @@ function Get-ValueShape {
 }
 
 # -- Configuration -------------------------------------------------------------
+function Resolve-StructureConfigPath {
+    <#
+        The configuration to use when none was named: the one *.config.json next to
+        the scripts that is filled in. The shipped example still carries CHANGEME and
+        is skipped; two real ones is a choice only the operator can make.
+    #>
+    $candidates = @(Get-ChildItem -Path $PSScriptRoot -Filter '*.config.json' -ErrorAction SilentlyContinue |
+                    Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'CHANGEME' })
+    if ($candidates.Count -eq 1) { return $candidates[0].FullName }
+    if ($candidates.Count -eq 0) { throw 'No configuration found - run New-StructureConfig.ps1 first, or pass -ConfigPath.' }
+    throw ("More than one configuration here - pass -ConfigPath. Found: {0}" -f (($candidates | ForEach-Object { $_.Name }) -join ', '))
+}
+
 function Import-StructureConfig {
     <#
         Read the JSON model and refuse to hand back anything that would only fail
@@ -544,7 +557,7 @@ function Add-StructureView {
         Handles the three things the config can ask for beyond a column list:
           groupBy    a GroupBy clause - never on a multi-value column, SharePoint
                      refuses to group on those
-          where      raw CAML, so a brand view can say "Butterstone OR Beide" without
+          where      raw CAML, so a brand view can say "Northwind OR Beide" without
                      this script growing a query language of its own
           recursive  Scope = RecursiveAll: show every file in the library regardless
                      of which pillar folder it sits in. This is what makes "everything

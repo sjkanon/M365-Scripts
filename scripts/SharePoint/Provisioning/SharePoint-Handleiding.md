@@ -1,6 +1,8 @@
 # Werken met bestanden in Teams en SharePoint
 
-**Handleiding voor medewerkers van Petsolutions NV.** Je hoeft niets te installeren en
+<!-- Sjabloon: vervang Contoso NV, de merken Northwind en Fabrikam en de naam van de klantenbibliotheek door die uit de configuratie van de klant voor je dit uitdeelt. -->
+
+**Handleiding voor medewerkers van Contoso NV.** Je hoeft niets te installeren en
 niets te onthouden — deze uitleg duurt vijf minuten en daarna weet je genoeg.
 
 ---
@@ -10,7 +12,7 @@ niets te onthouden — deze uitleg duurt vijf minuten en daarna weet je genoeg.
 | Vraag | Antwoord |
 |---|---|
 | Wat verandert er? | Geen mappenbomen meer. Je zet een bestand in het juiste kanaal en beantwoordt twee tot vier vragen |
-| Waarom? | Zodat "alle prijslijsten van Butterstone in het Frans" één klik is in plaats van tien mappen doorzoeken |
+| Waarom? | Zodat "alle prijslijsten van Northwind in het Frans" één klik is in plaats van tien mappen doorzoeken |
 | Moet ik bestanden verplaatsen? | Nee. Een label geven is genoeg — het bestand blijft staan waar het staat |
 | Wat als een bestand bij twee merken hoort? | Kies **Beide**. Eén bestand, en het verschijnt in allebei de merkoverzichten. Geen kopieën meer |
 | Kan ik iets stukmaken? | Nee. Een label veranderen raakt de inhoud van het bestand niet aan |
@@ -27,14 +29,14 @@ bestandsnaam — zoals Merk, Taal of Contenttype. Je ziet ze als kolommen naast 
 ```
  Naam                      Merk         Leverancier  Contenttype  Taal     Vertrouwelijkheid
  ────────────────────────────────────────────────────────────────────────────────────────────
- 📄 Catalogus 2026.pdf      Butterstone  Lev. 1       Catalogus    NL, FR   Intern
+ 📄 Catalogus 2026.pdf      Northwind    Lev. 1       Catalogus    NL, FR   Intern
  📄 Prijslijst Q1.xlsx      Beide        Lev. 1       Prijslijst   NL       Deelbaar met klant
- 📄 Certificaat CE.pdf      Laseto       Lev. 2       Afb.+cert.   EN       Intern
+ 📄 Certificaat CE.pdf      Fabrikam     Lev. 2       Afb.+cert.   EN       Intern
 ```
 
 Het grote voordeel: **één bestand kan in meerdere overzichten opduiken.** Een prijslijst
-voor beide merken staat één keer opgeslagen en verschijnt zowel bij Butterstone als bij
-Laseto. Geen twee kopieën die uit elkaar gaan lopen.
+voor beide merken staat één keer opgeslagen en verschijnt zowel bij Northwind als bij
+Fabrikam. Geen twee kopieën die uit elkaar gaan lopen.
 
 ---
 
@@ -50,7 +52,7 @@ Elk kanaal in Teams is één pijler. Je kiest het kanaal, verder niets:
 | **Klanten** | Klantdossiers |
 | **Marketing** | Marketingmateriaal |
 | **TD** | Technische dienst: handleidingen, schema's, fiches |
-| **FUTECH Images and videos** | Beeld en video die met klanten gedeeld wordt |
+| **Beeldmateriaal voor klanten** | Beeld en video die met klanten gedeeld wordt |
 
 > **Maak geen submappen aan.** Dat hoeft niet meer, en het maakt terugvinden juist
 > moeilijker. Gebruik de labels — daar zijn ze voor.
@@ -76,7 +78,7 @@ zien en je bent klaar.
  Leveranciersdocument
  ─────────────────────────────────────────────
   Naam                Catalogus 2026.pdf
-  Merk             *  [ Butterstone        ▾ ]
+  Merk             *  [ Northwind          ▾ ]
   Leverancier      *  [ Lev. 1             ⌕ ]   ← typ de eerste letters
   Contenttype      *  [ Catalogus          ▾ ]
   Taal             *  [☑ NL] [☑ FR] [☐ DE] [☐ EN]
@@ -117,8 +119,8 @@ Dit is de vraag die het vaakst gesteld wordt. Het antwoord is geruststellend:
 |---|---|
 | **Het bestand verhuist niet** | Het blijft staan waar het staat. Links die je gedeeld hebt, blijven werken |
 | **De inhoud verandert niet** | Een label staat *naast* het bestand, niet erin |
-| **Overzichten passen zich meteen aan** | Zet je Merk op Butterstone, dan staat het bestand direct in het Butterstone-overzicht |
-| **Kies je Beide** | Dan verschijnt het in het Butterstone- én het Laseto-overzicht. Eén bestand, twee plekken waar je het ziet |
+| **Overzichten passen zich meteen aan** | Zet je Merk op Northwind, dan staat het bestand direct in het Northwind-overzicht |
+| **Kies je Beide** | Dan verschijnt het in het Northwind- én het Fabrikam-overzicht. Eén bestand, twee plekken waar je het ziet |
 | **Zoeken loopt iets achter** | De overzichten en filters zijn direct bij. De zoekbalk kan een paar minuten tot een uur nodig hebben voor hij het nieuwe label kent |
 | **Je kunt het altijd aanpassen** | Verkeerd gelabeld? Verander het gewoon. Er gaat niets verloren |
 | **Rechten veranderen niet** | ⚠ Zie hieronder — dit is belangrijk |
@@ -141,7 +143,7 @@ Dit is de vraag die het vaakst gesteld wordt. Het antwoord is geruststellend:
 
 | Label | Wat je invult | Tip |
 |---|---|---|
-| **Merk** | Butterstone, Laseto of **Beide** | Twijfel je? Beide. Beter te ruim dan een kopie maken |
+| **Merk** | Northwind, Fabrikam of **Beide** | Twijfel je? Beide. Beter te ruim dan een kopie maken |
 | **Leverancier** | De leverancier, uit de lijst | Typ de eerste letters, hij vult aan. Staat hij er niet bij? Vraag IT om hem toe te voegen |
 | **Contenttype** | Catalogus / Prijslijst / Schrijfrichtlijn / Afbeelding+certificaat / Marketingslag | Dit is *wat voor soort document* het is |
 | **Taal** | NL / FR / DE / EN / Geen taal | **Meerdere mag.** Een tweetalige folder krijgt NL én FR. Een foto zonder tekst: Geen taal |
@@ -172,8 +174,8 @@ En over alle kanalen heen, in de hoofdbibliotheek:
 
 | Weergave | Wat je ziet |
 |---|---|
-| **Alles - Butterstone** | Elk bestand van Butterstone (en Beide), uit alle pijlers, als één lijst |
-| **Alles - Laseto** | Idem voor Laseto |
+| **Alles - Northwind** | Elk bestand van Northwind (en Beide), uit alle pijlers, als één lijst |
+| **Alles - Fabrikam** | Idem voor Fabrikam |
 | **Nog te taggen** | Alles zonder merk — het opruimlijstje |
 | **Extern gedeeld** | Alles wat buiten de organisatie open staat |
 | **Te archiveren** | Alles met Status "Te archiveren" of "Verouderd" |
@@ -181,7 +183,7 @@ En over alle kanalen heen, in de hoofdbibliotheek:
 ### Filteren — voor een specifieke vraag
 
 Klik rechtsboven op het filterpictogram. Je kunt meerdere labels tegelijk aanvinken:
-Merk = Butterstone **én** Contenttype = Prijslijst **én** Taal = FR. Het aantal
+Merk = Northwind **én** Contenttype = Prijslijst **én** Taal = FR. Het aantal
 resultaten telt live mee.
 
 ### Zoeken — als je niet weet waar het staat
@@ -201,7 +203,7 @@ staat, en zet dat in de kolom **Deelstatus**:
 | Deelstatus | Betekenis |
 |---|---|
 | Niet gedeeld | Alleen wie bij het kanaal mag, kan erbij |
-| Intern gedeeld | Er is een link of een persoon binnen Petsolutions toegevoegd |
+| Intern gedeeld | Er is een link of een persoon binnen Contoso toegevoegd |
 | Extern - alleen bekijken | Iemand van buiten kan het bekijken |
 | Extern - bewerken | Iemand van buiten kan het wijzigen |
 

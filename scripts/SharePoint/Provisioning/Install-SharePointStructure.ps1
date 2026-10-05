@@ -79,7 +79,7 @@
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER AllNames
     Passed to the wizard when it runs: ask for every name, including the channel,

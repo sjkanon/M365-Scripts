@@ -40,7 +40,7 @@
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER Site
     Only check these sites (keys from the sites section). Default: all.
@@ -86,7 +86,7 @@
 
 .EXAMPLE
     # One library, including who holds which role on it
-    .\Test-SharePointStructure.ps1 -Interactive -ClientId <app-id> -Container FUTECH
+    .\Test-SharePointStructure.ps1 -Interactive -ClientId <app-id> -Container KlantBibliotheek
 
 .EXAMPLE
     # Scheduled: exit code 2 means somebody changed something
@@ -123,7 +123,7 @@ Set-StrictMode -Version Latest
 
 Assert-PnPModule
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'petsolutions.config.json' }
+if (-not $ConfigPath) { $ConfigPath = Resolve-StructureConfigPath }
 $config = Import-StructureConfig -Path $ConfigPath
 if (-not $Tenant) { $Tenant = $config.tenant }
 

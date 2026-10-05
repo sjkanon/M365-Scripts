@@ -49,7 +49,7 @@
 
 .PARAMETER ConfigPath
     Path to the structure configuration JSON.
-    Default: petsolutions.config.json next to this script.
+    Default: the one filled-in *.config.json next to this script.
 
 .PARAMETER Owner
     UPN of the team owner, and the owner of the private channel. Defaults to the first
@@ -81,7 +81,7 @@
 
 .EXAMPLE
     # Create the team, the six channels and the private MGMT channel
-    .\New-SharePointTeam.ps1 -Interactive -ClientId <app-id> -Owner jan@petsolutions.be
+    .\New-SharePointTeam.ps1 -Interactive -ClientId <app-id> -Owner jan@contoso.com
 
 .NOTES
     Author  : Sjoerd Kanon
@@ -119,7 +119,7 @@ trap {
 
 Assert-PnPModule
 
-if (-not $ConfigPath) { $ConfigPath = Join-Path $PSScriptRoot 'petsolutions.config.json' }
+if (-not $ConfigPath) { $ConfigPath = Resolve-StructureConfigPath }
 # The site URLs are what this script discovers, so placeholders there are expected.
 $config = Import-StructureConfig -Path $ConfigPath -AllowPlaceholders
 if (-not $Tenant) { $Tenant = $config.tenant }
@@ -207,7 +207,7 @@ function Wait-ChannelSite {
             $folder = Invoke-StructureGraph -Url "v1.0/teams/$TeamId/channels/$ChannelId/filesFolder"
             $webUrl = [string] (Get-ConfigValue $folder 'webUrl')
             if ($webUrl) {
-                # .../sites/Petsolutions-MGMT/Shared%20Documents -> .../sites/Petsolutions-MGMT
+                # .../sites/Contoso-MGMT/Shared%20Documents -> .../sites/Contoso-MGMT
                 if ($webUrl -match '^(https://[^/]+/sites/[^/]+)') { return $Matches[1] }
                 return $webUrl
             }
