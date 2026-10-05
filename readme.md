@@ -918,6 +918,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (7)
+| Change |
+|--------|
+| **`Invoke-TeamsArchive.ps1 -DryRun` did not dry-run on a first run.** The script removes conflicting Graph modules and restarts itself in a clean `pwsh` session, but the restart passed only the script path — every parameter was dropped. The restarted session ran with defaults: no `-DryRun`, no `-Step10Only`, no `-ChannelAction`, so a run meant as a simulation went through the real export and the interactive Step 10. Only a run in a session where the restart flag was already set kept its parameters |
+| The restart now passes every bound parameter on (switches only when set, values as they were given) and exits with the restarted run's exit code instead of always 0 |
+| Verified with a stand-in script built from the real parameter block and forwarding code: `-DryRun -Step10Only -Step10Action undo` and values containing spaces arrive intact in the restarted session, defaults stay defaults, and the child's exit code comes back. The archiver itself was not run |
+
 ### 2026-10-05 (6)
 | Change |
 |--------|

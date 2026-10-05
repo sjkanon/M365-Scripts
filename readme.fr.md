@@ -918,6 +918,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (7)
+| Modification |
+|--------|
+| **`Invoke-TeamsArchive.ps1 -DryRun` ne faisait pas de simulation lors d'une première exécution.** Le script supprime les modules Graph en conflit et se relance dans une session `pwsh` propre, mais le redémarrage ne transmettait que le chemin du script — tous les paramètres étaient perdus. La session redémarrée tournait avec les valeurs par défaut : pas de `-DryRun`, pas de `-Step10Only`, pas de `-ChannelAction`, de sorte qu'une exécution prévue comme simulation effectuait le véritable export et l'étape 10 interactive. Seule une exécution dans une session où l'indicateur de redémarrage était déjà défini conservait ses paramètres |
+| Le redémarrage transmet désormais chaque paramètre fourni (les switchs uniquement s'ils sont activés, les valeurs telles quelles) et se termine avec le code de sortie de l'exécution redémarrée au lieu de toujours 0 |
+| Vérifié avec un script de substitution construit à partir du véritable bloc de paramètres et du code de transmission : `-DryRun -Step10Only -Step10Action undo` et des valeurs contenant des espaces arrivent intacts dans la session redémarrée, les valeurs par défaut restent par défaut, et le code de sortie de l'enfant est renvoyé. L'archiveur lui-même n'a pas été exécuté |
+
 ### 2026-10-05 (6)
 | Modification |
 |--------|

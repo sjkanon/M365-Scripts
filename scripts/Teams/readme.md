@@ -58,3 +58,4 @@ Current behavior (v8.19):
 - Dry-run mode keeps full authentication/bootstrap and validates Steps 6-9 by probing Teams/SharePoint/Graph existence and counts, without writing member/chat/file exports to disk.
 - Step 11 report in dry-run uses probe counts (detected files/messages) instead of local exported files.
 - Step 10 archive/unarchive mutations remain simulated with `[DRYRUN]` output.
+- The clean-session restart after the module cleanup passes every parameter on (including `-DryRun`) and returns the restarted run's exit code.

@@ -918,6 +918,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (7)
+| Wijziging |
+|--------|
+| **`Invoke-TeamsArchive.ps1 -DryRun` deed bij een eerste run geen dry-run.** Het script verwijdert conflicterende Graph-modules en herstart zichzelf in een schone `pwsh`-sessie, maar de herstart gaf alleen het scriptpad door — elke parameter viel weg. De herstarte sessie draaide met de standaardwaarden: geen `-DryRun`, geen `-Step10Only`, geen `-ChannelAction`, dus een run die als simulatie bedoeld was, deed de echte export en de interactieve Stap 10. Alleen een run in een sessie waarin de herstartvlag al gezet was, hield zijn parameters |
+| De herstart geeft nu elke opgegeven parameter door (switches alleen als ze gezet zijn, waarden zoals ze gegeven zijn) en stopt met de exitcode van de herstarte run in plaats van altijd 0 |
+| Geverifieerd met een nagebouwd script op basis van het echte param-blok en de doorgeefcode: `-DryRun -Step10Only -Step10Action undo` en waarden met spaties komen ongewijzigd aan in de herstarte sessie, standaardwaarden blijven standaard, en de exitcode van het kind komt terug. De archiver zelf is niet gedraaid |
+
 ### 2026-10-05 (6)
 | Wijziging |
 |--------|
