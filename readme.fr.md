@@ -489,7 +489,7 @@ Rapporter la date de dernière connexion de tous les objets ordinateur d'une ou 
 
 #### Rapport de stockage SharePoint
 
-**[Get-SharePointStorageReport.ps1](scripts/Reporting/Get-SharePointStorageReport.ps1)** — stockage à l'échelle du tenant par site, bibliothèque, historique des versions et corbeille, avec des totaux par collection de sites comparables à ceux du centre d'administration.
+**[Get-SharePointStorageReport.ps1](scripts/Reporting/Get-SharePointStorageReport.ps1)** — stockage à l'échelle du tenant par site, bibliothèque, historique des versions et corbeille, les chemins les plus longs comparés aux limites de SharePoint et de Windows, avec des totaux par collection de sites comparables à ceux du centre d'administration.
 
 #### Nettoyage des versions SharePoint
 
@@ -965,6 +965,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-05 (14)
+| Modification |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) signale désormais les chemins les plus longs et les compare aux limites de Windows.** Une bibliothèque sans problème dans SharePoint peut quand même échouer une fois synchronisée avec OneDrive : le chemin local `C:\Users\<utilisateur>\<Organisation>\<Site> - <Bibliothèque>\...` est plus long que le chemin SharePoint, et rien dans le rapport ne le montrait. Avec `-Apply` (y compris `-FastMode`), chaque fichier et dossier est maintenant mesuré par rapport aux 400 caractères de SharePoint, au `MAX_PATH` de Windows (260) et, pour les classeurs, aux 218 d'Excel. Résultat dans `SharePoint_LongPaths_<timestamp>.csv`, du plus long au plus court, plus un top 10 dans la console et le rapport Markdown ; il survit à une reprise depuis un checkpoint |
+| Le chemin local est mesuré pour le compte membre activé dont l'**UPN est le plus long** dans le tenant, car le dossier de profil porte le nom du préfixe de l'UPN — un chemin qui convient à cet utilisateur convient à tous. Cela ajoute `User.Read.All` à la connexion interactive. Les nouveaux paramètres `-SyncProfilePath`, `-OrganizationName` et `-LongPathThreshold` (défaut 200) remplacent l'estimation. Documenté dans le [readme Reporting](scripts/Reporting/readme.fr.md#chemins-longs-limites-windows) |
+| Vérifié : contrôle de syntaxe ; la fonction de mesure exécutée sur des chemins d'exemple — un fichier Excel de 205 caractères locaux reste sous 218, un chemin profond de 282 est signalé `Windows (260)`, un chemin de 441 caractères SharePoint `SharePoint (400)`, et un site personnel OneDrive est mesuré comme `OneDrive - <Organisation>`. Pas encore exécuté sur un tenant réel, donc la recherche de l'UPN et de l'organisation via Graph n'est pas testée |
 
 ### 2026-10-05 (13)
 | Modification |

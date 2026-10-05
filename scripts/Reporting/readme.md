@@ -19,7 +19,7 @@ Scripts that generate reports on Active Directory, SharePoint Online and licensi
 | Script | Description |
 |--------|-------------|
 | [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Last logon date of computer objects in one or more OUs, exported to CSV |
-| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenant-wide storage report: sites, libraries, version history and recycle bin |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenant-wide storage report: sites, libraries, version history, recycle bin and long paths |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Who has access where, through which group and at what level — every site, list, folder and file with its own permissions. Read-only, to CSV and a single Excel workbook |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Deletes file versions older than a date; the current version is always kept. Reports only by default |
 
@@ -146,7 +146,7 @@ The recycle bin (stage 1 + stage 2) counts towards the tenant storage quota, so 
 
 ### Resuming after an interruption (checkpoints) and progress
 
-With `-Apply` (or `-RecycleBinOnly`) a checkpoint is written to the output folder after every completed library (or site recycle bin): `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. The `<hash>` is derived from all scan parameters (site, mode, output folder, etc.), so:
+With `-Apply` (or `-RecycleBinOnly`) a checkpoint is written to the output folder after every completed library (or site recycle bin): `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv` + `.longpaths.partial.csv`. The `<hash>` is derived from all scan parameters (site, mode, output folder, etc.), so:
 
 - **Starting again with the same parameters** resumes automatically from the last completed library — libraries already done are skipped (`[SKIP] Already completed in a previous run.`).
 - **`-Restart`** discards an existing checkpoint and starts the scan from scratch, even when the parameters are the same.
@@ -175,6 +175,22 @@ If `GrandTotalGB` for a site still differs from the admin portal figure, the mos
 - **Silently skipped folders** — an `[ERROR] Cannot read folder` message in the console means that subfolder tree (permission problem) was not counted
 - **Failed version lookups** — fall back to "0 versions" after repeated Graph errors (rare, only after 3 failed retries)
 - Compare without `-Apply` first (quick mode) — that uses the same official `quota.used` figure as the admin portal, so if that already differs, the difference is not in the `-Apply` count itself
+
+### Long paths (Windows limits)
+
+A library that is fine in SharePoint can still fail once it is synced with the OneDrive client or opened from Windows: the local path is longer than the SharePoint path, because the profile folder and the sync folder come in front of it. With `-Apply` (also with `-FastMode`) every file and folder is therefore measured twice:
+
+| Path | Example | Limit |
+|---|---|---|
+| SharePoint (server-relative, decoded) | `/sites/Finance/Shared Documents/<folders>/<file>` | **400** characters — SharePoint refuses anything longer |
+| Local OneDrive sync path | `C:\Users\<user>\<Organisation>\<Site> - <Library>\<folders>\<file>` | **260** (Windows `MAX_PATH`, 259 usable) — Explorer, many applications and older tools fail beyond it |
+| Same, for Excel workbooks (`.xls*`, `.xlt*`) | | **218** — Excel will not open or save the workbook |
+
+The local path is an estimate, because its length depends on who syncs it. By default the script measures for the **enabled member account with the longest UPN** in the tenant: the profile folder is named after the UPN prefix (the part before the `@`), so a path that fits for that user fits for everyone. That needs `User.Read.All` (added to the interactive sign-in); when the users cannot be read it falls back to `C:\Users\firstname.lastname`. The organisation name is the tenant's display name from Graph, or the tenant name from the SharePoint URL when that cannot be read. `-SyncProfilePath` and `-OrganizationName` override both. A OneDrive personal site (`-IncludeOneDriveUsers`) is measured as `C:\Users\<user>\OneDrive - <Organisation>\...`.
+
+Output: `SharePoint_LongPaths_<timestamp>.csv`, longest first, with every item whose local path is `-LongPathThreshold` (default `200`) characters or more, or that is over a limit — columns `LocalPathLength`, `SharePointPathLength`, `OverLimit` (`SharePoint (400)`, `Windows (260)`, `Excel (218)` or empty) and the estimated `LocalPath`. The console shows per library how many long paths it has, and at the end the count per limit and the 10 longest paths; the Markdown report gets the same top 10.
+
+> Windows may shorten the profile folder name (for example to 20 characters for an on-premises account, or with a suffix when the name already exists). Measuring with the full UPN prefix is the cautious side: it can report a path as too long that just fits, never the other way round.
 
 ### Performance (version history lookups)
 
@@ -212,6 +228,9 @@ For full-site scans under GDAP the script uses the same customer-tenant context 
 | `-VersionBatchConcurrency` | Number of parallel `$batch` workers for fetching version history, 1-8 (default: `4`) |
 | `-MaxVersionRetryPasses` | Maximum number of retry passes for version history under sustained throttling. `0` (default) scales automatically with the number of files — SharePoint enforces a hard activity ceiling of ~1500-2500 resolved version lookups per pass, so on tenants with hundreds of thousands of files a fixed low value (previously hardcoded at 8) gave up early for most of the scan. Set it higher/lower explicitly to override the auto-scaling |
 | `-Restart` | Discards an existing checkpoint for this parameter combination and starts the scan from scratch |
+| `-SyncProfilePath` | Profile folder used for the local path estimate (default: `C:\Users\<prefix>` of the enabled member account with the longest UPN; fallback `C:\Users\firstname.lastname`) |
+| `-OrganizationName` | Organisation name in the OneDrive sync folder (default: the tenant's display name, fallback the tenant name from the URL) |
+| `-LongPathThreshold` | Local path length from which an item goes into the long paths CSV, 1-1000 (default: `200`). Anything over a limit is always listed |
 
 ### Examples
 
@@ -233,6 +252,9 @@ For full-site scans under GDAP the script uses the same customer-tenant context 
 
 # Ignore an interrupted run and start over from scratch
 .\Get-SharePointStorageReport.ps1 -Apply -Restart
+
+# Long paths only, fast (no versions, no detail CSV), measured for a specific user
+.\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 ```
 
 ---

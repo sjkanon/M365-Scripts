@@ -19,7 +19,7 @@ Scripts qui génèrent des rapports sur Active Directory, SharePoint Online et l
 | Script | Description |
 |--------|-------------|
 | [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Date de dernière connexion des objets ordinateur d'une ou plusieurs OU, avec export CSV |
-| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Rapport de stockage à l'échelle du tenant : sites, bibliothèques, historique des versions et corbeille |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Rapport de stockage à l'échelle du tenant : sites, bibliothèques, historique des versions, corbeille et chemins longs |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Qui a accès à quoi, via quel groupe et à quel niveau — chaque site, liste, dossier et fichier doté de ses propres autorisations. Lecture seule, vers CSV et un unique classeur Excel |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Supprime les versions de fichiers antérieures à une date ; la version actuelle est toujours conservée. Rapport uniquement par défaut |
 
@@ -146,7 +146,7 @@ La corbeille (stage 1 + stage 2) compte dans le quota de stockage du tenant ; el
 
 ### Reprise après interruption (checkpoints) et progression
 
-Avec `-Apply` (ou `-RecycleBinOnly`), un checkpoint est écrit dans le dossier de sortie après chaque bibliothèque (ou corbeille de site) terminée : `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. Le `<hash>` est dérivé de tous les paramètres d'analyse (site, mode, dossier de sortie, etc.), donc :
+Avec `-Apply` (ou `-RecycleBinOnly`), un checkpoint est écrit dans le dossier de sortie après chaque bibliothèque (ou corbeille de site) terminée : `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv` + `.longpaths.partial.csv`. Le `<hash>` est dérivé de tous les paramètres d'analyse (site, mode, dossier de sortie, etc.), donc :
 
 - **Relancer avec les mêmes paramètres** reprend automatiquement à partir de la dernière bibliothèque terminée — les bibliothèques déjà traitées sont ignorées (`[SKIP] Already completed in a previous run.`).
 - **`-Restart`** supprime un checkpoint existant et relance l'analyse depuis le début, même si les paramètres sont identiques.
@@ -175,6 +175,22 @@ Si `GrandTotalGB` pour un site diffère encore du chiffre du portail d'administr
 - **Dossiers ignorés silencieusement** — un message `[ERROR] Cannot read folder` dans la console signifie que cette arborescence de sous-dossiers (problème d'autorisation) n'a pas été comptée
 - **Recherches de versions échouées** — elles se rabattent sur « 0 version » après des erreurs Graph répétées (rare, seulement après 3 tentatives échouées)
 - Comparez d'abord sans `-Apply` (mode rapide) — il utilise le même chiffre officiel `quota.used` que le portail d'administration ; si celui-ci diffère déjà, l'écart ne vient pas du comptage de `-Apply` lui-même
+
+### Chemins longs (limites Windows)
+
+Une bibliothèque sans problème dans SharePoint peut quand même échouer une fois synchronisée avec le client OneDrive ou ouverte depuis Windows : le chemin local est plus long que le chemin SharePoint, car le dossier de profil et le dossier de synchronisation le précèdent. Avec `-Apply` (y compris avec `-FastMode`), chaque fichier et dossier est donc mesuré deux fois :
+
+| Chemin | Exemple | Limite |
+|---|---|---|
+| SharePoint (relatif au serveur, décodé) | `/sites/Finance/Shared Documents/<dossiers>/<fichier>` | **400** caractères — SharePoint refuse tout chemin plus long |
+| Chemin local de synchronisation OneDrive | `C:\Users\<utilisateur>\<Organisation>\<Site> - <Bibliothèque>\<dossiers>\<fichier>` | **260** (`MAX_PATH` de Windows, 259 utilisables) — l'Explorateur, de nombreuses applications et les outils plus anciens échouent au-delà |
+| Idem, pour les classeurs Excel (`.xls*`, `.xlt*`) | | **218** — Excel n'ouvre ni n'enregistre le classeur |
+
+Le chemin local est une estimation, car sa longueur dépend de la personne qui synchronise. Par défaut, le script mesure pour le **compte membre activé dont l'UPN est le plus long** dans le tenant : le dossier de profil porte le nom du préfixe de l'UPN (la partie avant le `@`), donc un chemin qui convient à cet utilisateur convient à tous. Cela nécessite `User.Read.All` (ajouté à la connexion interactive) ; si les utilisateurs ne peuvent pas être lus, le script se rabat sur `C:\Users\firstname.lastname`. Le nom de l'organisation est le nom d'affichage du tenant issu de Graph, ou le nom du tenant tiré de l'URL SharePoint s'il ne peut pas être lu. `-SyncProfilePath` et `-OrganizationName` remplacent les deux. Un site personnel OneDrive (`-IncludeOneDriveUsers`) est mesuré comme `C:\Users\<utilisateur>\OneDrive - <Organisation>\...`.
+
+Sortie : `SharePoint_LongPaths_<timestamp>.csv`, du plus long au plus court, avec chaque élément dont le chemin local compte `-LongPathThreshold` (défaut `200`) caractères ou plus, ou qui dépasse une limite — colonnes `LocalPathLength`, `SharePointPathLength`, `OverLimit` (`SharePoint (400)`, `Windows (260)`, `Excel (218)` ou vide) et le `LocalPath` estimé. La console indique par bibliothèque le nombre de chemins longs, puis à la fin le nombre par limite et les 10 chemins les plus longs ; le rapport Markdown reprend ce même top 10.
+
+> Windows peut raccourcir le nom du dossier de profil (par exemple à 20 caractères pour un compte Active Directory local, ou avec un suffixe si le nom existe déjà). Mesurer avec le préfixe complet de l'UPN est le choix prudent : un chemin qui tient tout juste peut être signalé comme trop long, jamais l'inverse.
 
 ### Performances (recherches d'historique des versions)
 
@@ -212,6 +228,9 @@ Pour les analyses complètes sous GDAP, le script utilise le même contexte de t
 | `-VersionBatchConcurrency` | Nombre de workers `$batch` parallèles pour récupérer l'historique des versions, 1-8 (défaut : `4`) |
 | `-MaxVersionRetryPasses` | Nombre maximal de passes de nouvelles tentatives pour l'historique des versions en cas de throttling persistant. `0` (défaut) s'adapte automatiquement au nombre de fichiers — SharePoint applique un plafond d'activité strict d'environ 1500-2500 recherches de versions résolues par passe, de sorte que sur des tenants comptant des centaines de milliers de fichiers, une valeur basse fixe (auparavant codée en dur à 8) abandonnait prématurément pour la majeure partie de l'analyse. Indiquez explicitement une valeur plus haute/basse pour remplacer l'ajustement automatique |
 | `-Restart` | Supprime un checkpoint existant pour cette combinaison de paramètres et relance l'analyse depuis le début |
+| `-SyncProfilePath` | Dossier de profil utilisé pour estimer le chemin local (défaut : `C:\Users\<préfixe>` du compte membre activé dont l'UPN est le plus long ; repli `C:\Users\firstname.lastname`) |
+| `-OrganizationName` | Nom de l'organisation dans le dossier de synchronisation OneDrive (défaut : le nom d'affichage du tenant, repli le nom du tenant tiré de l'URL) |
+| `-LongPathThreshold` | Longueur du chemin local à partir de laquelle un élément figure dans le CSV des chemins longs, 1-1000 (défaut : `200`). Tout dépassement de limite y figure toujours |
 
 ### Exemples
 
@@ -233,6 +252,9 @@ Pour les analyses complètes sous GDAP, le script utilise le même contexte de t
 
 # Ignorer une exécution interrompue et recommencer depuis le début
 .\Get-SharePointStorageReport.ps1 -Apply -Restart
+
+# Chemins longs uniquement, rapide (sans versions ni CSV de détail), mesurés pour un utilisateur donné
+.\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 ```
 
 ---

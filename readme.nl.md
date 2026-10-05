@@ -489,7 +489,7 @@ De datum van de laatste aanmelding rapporteren voor alle computerobjecten in een
 
 #### SharePoint-opslagrapport
 
-**[Get-SharePointStorageReport.ps1](scripts/Reporting/Get-SharePointStorageReport.ps1)** — tenantbrede opslag per site, bibliotheek, versiegeschiedenis en prullenbak, met totalen per sitecollectie die vergelijkbaar zijn met het beheercentrum.
+**[Get-SharePointStorageReport.ps1](scripts/Reporting/Get-SharePointStorageReport.ps1)** — tenantbrede opslag per site, bibliotheek, versiegeschiedenis en prullenbak, de langste paden getoetst aan de limieten van SharePoint en Windows, met totalen per sitecollectie die vergelijkbaar zijn met het beheercentrum.
 
 #### SharePoint-versies opschonen
 
@@ -965,6 +965,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-05 (14)
+| Wijziging |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) rapporteert nu de langste paden en toetst ze aan de Windows-limieten.** Een bibliotheek die in SharePoint in orde is, kan alsnog stuklopen zodra hij met OneDrive gesynchroniseerd wordt: het lokale pad `C:\Users\<gebruiker>\<Organisatie>\<Site> - <Bibliotheek>\...` is langer dan het SharePoint-pad, en niets in het rapport liet dat zien. Met `-Apply` (ook `-FastMode`) wordt nu elk bestand en elke map gemeten tegen de 400 tekens van SharePoint, Windows `MAX_PATH` (260) en, voor werkmappen, de 218 van Excel. Resultaat in `SharePoint_LongPaths_<timestamp>.csv`, langste eerst, plus een top 10 in de console en het Markdown-rapport; het overleeft hervatten vanaf een checkpoint |
+| Het lokale pad wordt gemeten voor het ingeschakelde member-account met de **langste UPN** in de tenant, omdat de profielmap naar het UPN-voorvoegsel heet — een pad dat voor die gebruiker past, past voor iedereen. Daarvoor komt `User.Read.All` bij de interactieve aanmelding. De nieuwe parameters `-SyncProfilePath`, `-OrganizationName` en `-LongPathThreshold` (standaard 200) overschrijven de schatting. Beschreven in de [Reporting-readme](scripts/Reporting/readme.nl.md#lange-paden-windows-limieten) |
+| Geverifieerd: syntaxcontrole; de meetfunctie gedraaid op voorbeeldpaden — een Excel-bestand van 205 lokale tekens blijft onder 218, een diep pad van 282 wordt gemarkeerd als `Windows (260)`, een pad van 441 SharePoint-tekens als `SharePoint (400)`, en een persoonlijke OneDrive-site wordt gemeten als `OneDrive - <Organisatie>`. Nog niet tegen een live tenant gedraaid, dus het opzoeken van UPN en organisatie via Graph is ongetest |
 
 ### 2026-10-05 (13)
 | Wijziging |

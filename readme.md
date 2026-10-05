@@ -489,7 +489,7 @@ Report last logon date for all computer objects in one or more OUs and export to
 
 #### SharePoint Storage Report
 
-**[Get-SharePointStorageReport.ps1](scripts/Reporting/Get-SharePointStorageReport.ps1)** — tenant-wide storage per site, library, version history and recycle bin, with site collection totals comparable to the admin centre.
+**[Get-SharePointStorageReport.ps1](scripts/Reporting/Get-SharePointStorageReport.ps1)** — tenant-wide storage per site, library, version history and recycle bin, the longest paths measured against SharePoint's and Windows' limits, with site collection totals comparable to the admin centre.
 
 #### SharePoint Version Cleanup
 
@@ -965,6 +965,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-05 (14)
+| Change |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) now reports the longest paths and checks them against Windows' limits.** A library that is fine in SharePoint can still break once it is synced with OneDrive: the local path `C:\Users\<user>\<Organisation>\<Site> - <Library>\...` is longer than the SharePoint path, and nothing in the report showed that. With `-Apply` (also `-FastMode`) every file and folder is now measured against SharePoint's 400 characters, Windows `MAX_PATH` (260) and, for workbooks, Excel's 218. Result in `SharePoint_LongPaths_<timestamp>.csv`, longest first, plus a top 10 in the console and the Markdown report; it survives a resume from a checkpoint |
+| The local path is measured for the enabled member account with the **longest UPN** in the tenant, because the profile folder is named after the UPN prefix — a path that fits for that user fits for everyone. This adds `User.Read.All` to the interactive sign-in. New parameters `-SyncProfilePath`, `-OrganizationName` and `-LongPathThreshold` (default 200) override the estimate. Documented in the [Reporting readme](scripts/Reporting/readme.md#long-paths-windows-limits) |
+| Verified: syntax check; the measuring function run against sample paths — an Excel file at 205 local characters stays under 218, a deep path at 282 is flagged `Windows (260)`, a path of 441 SharePoint characters `SharePoint (400)`, and a OneDrive personal site is measured as `OneDrive - <Organisation>`. Not yet run against a live tenant, so the UPN and organisation lookups through Graph are untested |
 
 ### 2026-10-05 (13)
 | Change |

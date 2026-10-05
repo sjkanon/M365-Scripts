@@ -19,7 +19,7 @@ Scripts voor het genereren van rapporten over Active Directory, SharePoint Onlin
 | Script | Omschrijving |
 |--------|-------------|
 | [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Laatste inlogdatum van computerobjecten in één of meerdere OUs, met export naar CSV |
-| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis en prullenbak |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis, prullenbak en lange paden |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Wie heeft waar toegang, via welke groep en met welk niveau — elke site, lijst, map en bestand met eigen rechten. Alleen-lezen, naar CSV en één Excel-werkmap |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Verwijdert bestandsversies ouder dan een datum; de huidige versie blijft altijd staan. Standaard alleen rapporteren |
 
@@ -146,7 +146,7 @@ De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt d
 
 ### Hervatten na onderbreking (checkpoints) en voortgang
 
-Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-prullenbak) een checkpoint weggeschreven in de outputmap: `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. De `<hash>` is afgeleid van alle scanparameters (site, mode, outputmap, enz.), dus:
+Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-prullenbak) een checkpoint weggeschreven in de outputmap: `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv` + `.longpaths.partial.csv`. De `<hash>` is afgeleid van alle scanparameters (site, mode, outputmap, enz.), dus:
 
 - **Opnieuw starten met dezelfde parameters** hervat automatisch vanaf de laatst voltooide library — al afgeronde libraries worden overgeslagen (`[SKIP] Already completed in a previous run.`).
 - **`-Restart`** gooit een bestaand checkpoint weg en start de scan volledig opnieuw, ook als de parameters hetzelfde zijn.
@@ -175,6 +175,22 @@ Wijkt `GrandTotalGB` voor een site nog steeds af van het adminportaal-cijfer, da
 - **Stil overgeslagen mappen** — een `[ERROR] Cannot read folder`-melding in de console betekent dat die submap-boom (permissieprobleem) niet is meegeteld
 - **Mislukte version-lookups** — vallen terug op "0 versies" bij herhaalde Graph-fouten (zeldzaam, alleen na 3 mislukte retries)
 - Vergelijk eerst zonder `-Apply` (quick mode) — dat gebruikt hetzelfde officiële `quota.used`-cijfer als het adminportaal, dus wijkt dat ook al af, dan zit het verschil niet in de `-Apply`-telling zelf
+
+### Lange paden (Windows-limieten)
+
+Een bibliotheek die in SharePoint in orde is, kan alsnog stuklopen zodra hij met de OneDrive-client gesynchroniseerd of vanuit Windows geopend wordt: het lokale pad is langer dan het SharePoint-pad, omdat de profielmap en de syncmap ervoor komen. Met `-Apply` (ook met `-FastMode`) wordt daarom elk bestand en elke map twee keer gemeten:
+
+| Pad | Voorbeeld | Limiet |
+|---|---|---|
+| SharePoint (server-relatief, gedecodeerd) | `/sites/Finance/Shared Documents/<mappen>/<bestand>` | **400** tekens — SharePoint weigert alles wat langer is |
+| Lokaal OneDrive-syncpad | `C:\Users\<gebruiker>\<Organisatie>\<Site> - <Bibliotheek>\<mappen>\<bestand>` | **260** (Windows `MAX_PATH`, 259 bruikbaar) — Verkenner, veel applicaties en oudere tools lopen daarboven vast |
+| Idem, voor Excel-werkmappen (`.xls*`, `.xlt*`) | | **218** — Excel opent of bewaart de werkmap niet |
+
+Het lokale pad is een schatting, want de lengte hangt af van wie synchroniseert. Standaard meet het script voor het **ingeschakelde member-account met de langste UPN** in de tenant: de profielmap krijgt de naam van het UPN-voorvoegsel (het deel vóór de `@`), dus een pad dat voor die gebruiker past, past voor iedereen. Daarvoor is `User.Read.All` nodig (toegevoegd aan de interactieve aanmelding); als de gebruikers niet te lezen zijn, valt het terug op `C:\Users\firstname.lastname`. De organisatienaam is de weergavenaam van de tenant uit Graph, of de tenantnaam uit de SharePoint-URL als die niet te lezen is. `-SyncProfilePath` en `-OrganizationName` overschrijven beide. Een persoonlijke OneDrive-site (`-IncludeOneDriveUsers`) wordt gemeten als `C:\Users\<gebruiker>\OneDrive - <Organisatie>\...`.
+
+Uitvoer: `SharePoint_LongPaths_<timestamp>.csv`, langste eerst, met elk item waarvan het lokale pad `-LongPathThreshold` (standaard `200`) tekens of meer is, of dat over een limiet gaat — kolommen `LocalPathLength`, `SharePointPathLength`, `OverLimit` (`SharePoint (400)`, `Windows (260)`, `Excel (218)` of leeg) en het geschatte `LocalPath`. De console toont per bibliotheek hoeveel lange paden er zijn, en aan het eind het aantal per limiet en de 10 langste paden; het Markdown-rapport krijgt dezelfde top 10.
+
+> Windows kan de naam van de profielmap inkorten (bijvoorbeeld tot 20 tekens bij een on-premises account, of met een achtervoegsel als de naam al bestaat). Meten met het volledige UPN-voorvoegsel is de voorzichtige kant: het kan een pad als te lang melden dat net past, nooit andersom.
 
 ### Performance (version history lookups)
 
@@ -212,6 +228,9 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-contex
 | `-VersionBatchConcurrency` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis, 1-8 (standaard: `4`) |
 | `-MaxVersionRetryPasses` | Max. aantal retry-passes voor versiegeschiedenis onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — SharePoint hanteert een harde activity-ceiling van ~1500-2500 opgeloste versie-lookups per pass, dus bij tenants met honderdduizenden bestanden gaf een vaste lage waarde (voorheen hardcoded op 8) vroegtijdig op voor het gros van de scan. Zet expliciet hoger/lager om de auto-schaling te overschrijven |
 | `-Restart` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
+| `-SyncProfilePath` | Profielmap voor de schatting van het lokale pad (standaard: `C:\Users\<voorvoegsel>` van het ingeschakelde member-account met de langste UPN; terugval `C:\Users\firstname.lastname`) |
+| `-OrganizationName` | Organisatienaam in de OneDrive-syncmap (standaard: de weergavenaam van de tenant, terugval de tenantnaam uit de URL) |
+| `-LongPathThreshold` | Lengte van het lokale pad vanaf welke een item in de CSV met lange paden komt, 1-1000 (standaard: `200`). Alles boven een limiet staat er altijd in |
 
 ### Voorbeelden
 
@@ -233,6 +252,9 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-contex
 
 # Onderbroken run negeren en volledig opnieuw beginnen
 .\Get-SharePointStorageReport.ps1 -Apply -Restart
+
+# Alleen lange paden, snel (geen versies, geen detail-CSV), gemeten voor een bepaalde gebruiker
+.\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 ```
 
 ---
