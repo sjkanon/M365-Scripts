@@ -918,6 +918,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (8)
+| Change |
+|--------|
+| `Install-SharePointStructure.ps1` ended a successful build by telling you to fill one client's security groups by name prefix, whatever config had just been built. It now names the number of groups and the config they come from, read through `Get-ConfigValue` so a config without groups does not trip strict mode. Sample output in `Update-TeamsClient.md` showed a real domain account; it shows `CONTOSO\admin` now |
+| Verified: syntax check, and the message rendered against the example config (13 groups) and a config without groups (0) under strict mode. A repo-wide search outside the version history finds no remaining customer names |
+
 ### 2026-10-05 (7)
 | Change |
 |--------|

@@ -918,6 +918,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (8)
+| Modification |
+|--------|
+| `Install-SharePointStructure.ps1` terminait une construction réussie en demandant de remplir les groupes de sécurité d'un client, par préfixe de nom, quelle que soit la configuration construite. Il indique désormais le nombre de groupes et la configuration dont ils proviennent, lus via `Get-ConfigValue` pour qu'une configuration sans groupes ne bute pas sur le mode strict. L'exemple de sortie de `Update-TeamsClient.md` montrait un vrai compte de domaine ; il affiche désormais `CONTOSO\admin` |
+| Vérifié : contrôle de syntaxe, et le message rendu avec la configuration d'exemple (13 groupes) et une configuration sans groupes (0) en mode strict. Une recherche dans tout le dépôt hors historique des versions ne trouve plus aucun nom de client |
+
 ### 2026-10-05 (7)
 | Modification |
 |--------|

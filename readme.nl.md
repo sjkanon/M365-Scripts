@@ -918,6 +918,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (8)
+| Wijziging |
+|--------|
+| `Install-SharePointStructure.ps1` sloot een geslaagde opbouw af met de opdracht om de beveiligingsgroepen van één klant te vullen, op naamprefix, welke config er ook net was opgebouwd. Het noemt nu het aantal groepen en de config waar ze vandaan komen, gelezen via `Get-ConfigValue` zodat een config zonder groepen niet over strict mode struikelt. Voorbeelduitvoer in `Update-TeamsClient.md` toonde een echt domeinaccount; nu `CONTOSO\admin` |
+| Geverifieerd: syntaxcontrole, en de melding weergegeven met de voorbeeldconfig (13 groepen) en een config zonder groepen (0) onder strict mode. Een zoektocht door de hele repo buiten de versiegeschiedenis vindt geen klantnamen meer |
+
 ### 2026-10-05 (7)
 | Wijziging |
 |--------|
