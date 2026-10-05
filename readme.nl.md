@@ -920,6 +920,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05
+| Wijziging |
+|--------|
+| `scripts/djm` en `scripts/djm.pub` verwijderd — een OpenSSH private key (`djm-portaal`) en de publieke helft, die in de repo gecommit waren. Niets in de repo gebruikte ze. `.gitignore` sluit nu `id_*`, `*.pem`, `*.key` en `*.pub` uit. **De sleutel staat nog in de git-geschiedenis en moet als gelekt worden beschouwd: roteer hem op elke host die hem vertrouwt** |
+
 ### 2026-10-02 (5)
 | Wijziging |
 |-----------|

@@ -920,6 +920,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05
+| Change |
+|--------|
+| Removed `scripts/djm` and `scripts/djm.pub` — an OpenSSH private key (`djm-portaal`) and its public half that were committed to the repo. Nothing in the repo used them. `.gitignore` now excludes `id_*`, `*.pem`, `*.key` and `*.pub`. **The key is still in the git history and must be considered compromised: rotate it on every host that trusts it** |
+
 ### 2026-10-02 (5)
 | Change |
 |--------|

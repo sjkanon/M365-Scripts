@@ -920,6 +920,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05
+| Modification |
+|--------|
+| Suppression de `scripts/djm` et `scripts/djm.pub` — une clé privée OpenSSH (`djm-portaal`) et sa moitié publique, commitées dans le dépôt. Rien dans le dépôt ne les utilisait. `.gitignore` exclut désormais `id_*`, `*.pem`, `*.key` et `*.pub`. **La clé reste dans l'historique git et doit être considérée comme compromise : faites-la tourner sur chaque hôte qui lui fait confiance** |
+
 ### 2026-10-02 (5)
 | Modification |
 |--------------|

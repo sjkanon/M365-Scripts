@@ -4,3 +4,9 @@ config.json
 pnp.appid.json
 .f-index.json
 graph.appid.json
+
+# SSH keys never belong in the repo
+id_*
+*.pem
+*.key
+*.pub
