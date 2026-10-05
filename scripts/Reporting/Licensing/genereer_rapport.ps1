@@ -2,13 +2,13 @@
 # ================================================
 # Generate-LicensingReport.ps1
 # PowerShell launcher for the licensing report generator.
+# Usage: .\genereer_rapport.ps1 -ExportDir "D:\Finance\Licensing"
 # Validates the environment, then calls the Python engine.
 # ================================================
 
-$ErrorActionPreference = "Stop"
-
 # ── Configuration ────────────────────────────────────────────────────────────
-# Set ExportDir to the folder where input files are placed and output is written.
+# ExportDir is the folder where input files are placed and output is written:
+# -ExportDir, else the LICENSING_EXPORT_DIR environment variable.
 # Create the folder structure below manually, or let this script create it on first run.
 #
 # Expected structure:
@@ -18,8 +18,21 @@ $ErrorActionPreference = "Stop"
 #   │   └── Pax8\      ← place exactly 1 .csv here before running
 #   ├── Archive\       ← input files are moved here automatically
 #   └── Licensing_Report_YYYY-MM.xlsx
-$ExportDir = "C:\OneDrive\BraveHub\BraveHub - Finance - Licenses_facturatie_upload"
+param(
+    [string]$ExportDir = $env:LICENSING_EXPORT_DIR
+)
 # ─────────────────────────────────────────────────────────────────────────────
+
+$ErrorActionPreference = "Stop"
+
+# Checked before anything is derived from it: Join-Path throws on an empty path.
+if (-not $ExportDir) {
+    Write-Host ""
+    Write-Host "[ERROR] No export directory given." -ForegroundColor Red
+    Write-Host "Pass -ExportDir or set the LICENSING_EXPORT_DIR environment variable."
+    if ([Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') { Read-Host "Press Enter to exit" | Out-Null }
+    exit 2
+}
 
 $ImportDir   = Join-Path $ExportDir "Import"
 $IngramDir   = Join-Path $ImportDir "Ingram"
@@ -60,7 +73,7 @@ if (-not (Test-Path $ExportDir)) {
     Write-Host "[ERROR] Export directory not found:" -ForegroundColor Red
     Write-Host "  $ExportDir"
     Write-Host ""
-    Write-Host "Update the ExportDir variable at the top of this script."
+    Write-Host "Pass -ExportDir or set the LICENSING_EXPORT_DIR environment variable."
     Write-Host "See log: $LogFile"
     Pause-IfInteractive
     exit 2
@@ -186,7 +199,7 @@ try {
         throw "Python script not found: $PythonScript"
     }
 
-    $pythonArgs = @("$PythonScript", "--output", "$OutFile")
+    $pythonArgs = @("$PythonScript", "--export-dir", "$ExportDir", "--output", "$OutFile")
     if ($IngramFile) { $pythonArgs += @("--ingram", "$IngramFile") }
     if ($Pax8File)   { $pythonArgs += @("--pax8", "$Pax8File") }
 

@@ -2,19 +2,26 @@
 # ================================================
 # Create-LicensingReportTask.ps1
 # Registers a monthly scheduled task that runs the
-# licensing report generator on the 6th of each month.
+# licensing report generator on day -RunDay (default 6) of each month.
 #
-# Run once as Administrator on the target machine.
+# Run once as Administrator on the target machine:
+#   .\create_scheduled_task.ps1 -ExportDir "D:\Finance\Licensing" -RunAsUser "CONTOSO\svc-licensing"
 # ================================================
+
+param(
+    # Folder holding Import\ and Archive\, where the report is written.
+    [Parameter(Mandatory)][string]$ExportDir,
+    # Account that runs the task, e.g. CONTOSO\svc-licensing.
+    [Parameter(Mandatory)][string]$RunAsUser,
+    [ValidateRange(1, 28)][int]$RunDay = 6,
+    [string]$RunTime = "08:00"
+)
 
 $ErrorActionPreference = "Stop"
 
 # ── Configuration ────────────────────────────────────────────────────────────
 $TaskName  = "Licensing Report Generator"
 $TaskDesc  = "Generates the monthly licensing and Azure cost report from Pax8 and Ingram billing data."
-$RunAsUser = "$env:USERDOMAIN\sa-halo"   # Change to the service account that should run the task
-$RunDay    = 6                            # Day of month to run
-$RunTime   = "08:00"
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Self-elevation check ──────────────────────────────────────────────────────
@@ -62,7 +69,8 @@ Write-Host "Python found: $PythonExe" -ForegroundColor DarkGray
 
 # ── Calculate next trigger date ───────────────────────────────────────────────
 $now   = Get-Date
-$next  = Get-Date -Year $now.Year -Month $now.Month -Day $RunDay -Hour 8 -Minute 0 -Second 0
+$runAt = [TimeSpan]::Parse($RunTime)
+$next  = Get-Date -Year $now.Year -Month $now.Month -Day $RunDay -Hour $runAt.Hours -Minute $runAt.Minutes -Second 0
 if ($next -le $now) {
     $next = $next.AddMonths(1)
 }
@@ -85,7 +93,7 @@ if ($existingTask) {
 # ── Build task components ─────────────────────────────────────────────────────
 $Action = New-ScheduledTaskAction `
     -Execute  $PythonExe `
-    -Argument "`"$ScriptPath`"" `
+    -Argument "`"$ScriptPath`" --export-dir `"$ExportDir`"" `
     -WorkingDirectory $PSScriptRoot
 
 $Settings = New-ScheduledTaskSettingsSet `
@@ -159,6 +167,7 @@ Write-Host "  Schedule   : Day $RunDay of every month at $RunTime"
 Write-Host "  Next run   : $($next.ToString('dd-MM-yyyy HH:mm'))"
 Write-Host "  Python     : $PythonExe"
 Write-Host "  Script     : $ScriptPath"
+Write-Host "  Export dir : $ExportDir"
 Write-Host ""
 Write-Host "To test immediately:" -ForegroundColor Yellow
 Write-Host "  Start-ScheduledTask -TaskName '$TaskName'"

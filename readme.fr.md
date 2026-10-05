@@ -920,6 +920,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (2)
+| Modification |
+|--------|
+| Remplacement des données client dans les exemples par des valeurs Contoso : `Set-UserManager.ps1` (un domaine de messagerie client), `Import-DnsRecords.ps1` (zone DNS et DC d’un client), `Get-ComputerLastLogon.ps1` (le chemin d’OU d’un client) et `Get-SharePointStorageReport.ps1`, dont l'aide citait la boîte aux lettres d'une personne réelle |
+| Le rapport de licences avait un chemin OneDrive d'entreprise (`C:\OneDrive\<Company>\...`) codé en dur dans `genereer_rapport.ps1` et `genereer_licentie_overzicht.py`, et le readme demandait de modifier les scripts. Le dossier provient désormais de `-ExportDir` / `--export-dir`, sinon de la variable d'environnement `LICENSING_EXPORT_DIR` ; sans l'un ni l'autre, les deux s'arrêtent avec le code 2 au lieu de deviner. Le lanceur le vérifie avant `Join-Path`, qui échouerait sinon sur un chemin vide |
+| `create_scheduled_task.ps1` lisait ses réglages dans des variables à modifier, dont un compte de service fixe. `-ExportDir` et `-RunAsUser` sont désormais des paramètres obligatoires, `-RunDay`/`-RunTime` facultatifs, et la tâche transmet `--export-dir` à Python. `-RunTime` était en outre ignoré pour calculer la première exécution (toujours 08:00) ; il est maintenant utilisé. **Une tâche enregistrée auparavant s'exécute sans `--export-dir` et s'arrête désormais immédiatement — réenregistrez-la** |
+| Vérifié : contrôle de syntaxe du PowerShell modifié, `py_compile` sur le moteur Python, et le lanceur sans dossier d'export s'arrête avec le code 2 et le message. Le moteur Python lui-même n'a pas été exécuté (pas de `pandas` sur cette machine) et la tâche planifiée n'a pas été réenregistrée |
+
 ### 2026-10-05
 | Modification |
 |--------|

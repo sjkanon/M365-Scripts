@@ -920,6 +920,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (2)
+| Change |
+|--------|
+| Replaced customer data in examples with Contoso placeholders: `Set-UserManager.ps1` (a customer mail domain), `Import-DnsRecords.ps1` (a customer DNS zone and DC), `Get-ComputerLastLogon.ps1` (a customer OU path) and `Get-SharePointStorageReport.ps1`, whose help text named a real person's mailbox |
+| The licensing report had a company OneDrive path (`C:\OneDrive\<Company>\...`) hardcoded in both `genereer_rapport.ps1` and `genereer_licentie_overzicht.py`, and the readme told you to edit the scripts. The folder now comes from `-ExportDir` / `--export-dir`, else the `LICENSING_EXPORT_DIR` environment variable; with neither, both stop with exit code 2 instead of guessing. The launcher checks this before `Join-Path` is reached, which would otherwise throw on an empty path |
+| `create_scheduled_task.ps1` took its settings from variables to edit, including a fixed service account. `-ExportDir` and `-RunAsUser` are now required parameters, `-RunDay`/`-RunTime` optional, and the task passes `--export-dir` to Python. `-RunTime` was also ignored when computing the first run (always 08:00); it is used now. **A task registered earlier runs without `--export-dir` and now stops at once — re-register it** |
+| Verified: syntax check on the touched PowerShell, `py_compile` on the Python engine, and the launcher without an export directory exits 2 with the message. The Python engine itself was not run (no `pandas` on this machine) and the scheduled task was not re-registered |
+
 ### 2026-10-05
 | Change |
 |--------|

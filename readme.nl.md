@@ -920,6 +920,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (2)
+| Wijziging |
+|--------|
+| Klantgegevens in voorbeelden vervangen door Contoso-placeholders: `Set-UserManager.ps1` (een maildomein van een klant), `Import-DnsRecords.ps1` (DNS-zone en DC van een klant), `Get-ComputerLastLogon.ps1` (het OU-pad van een klant) en `Get-SharePointStorageReport.ps1`, waarvan de help de mailbox van een echte persoon noemde |
+| Het licentierapport had een OneDrive-pad van een bedrijf (`C:\OneDrive\<Company>\...`) hardcoded in zowel `genereer_rapport.ps1` als `genereer_licentie_overzicht.py`, en de readme zei dat je de scripts moest aanpassen. De map komt nu uit `-ExportDir` / `--export-dir`, anders uit de omgevingsvariabele `LICENSING_EXPORT_DIR`; zonder een van beide stoppen ze met exitcode 2 in plaats van te gokken. De launcher controleert dat vóór `Join-Path`, dat anders op een leeg pad zou crashen |
+| `create_scheduled_task.ps1` haalde zijn instellingen uit aan te passen variabelen, met een vast serviceaccount. `-ExportDir` en `-RunAsUser` zijn nu verplichte parameters, `-RunDay`/`-RunTime` optioneel, en de taak geeft `--export-dir` aan Python mee. `-RunTime` werd bovendien genegeerd bij het berekenen van de eerste run (altijd 08:00); nu niet meer. **Een eerder geregistreerde taak draait zonder `--export-dir` en stopt nu meteen — registreer hem opnieuw** |
+| Geverifieerd: syntaxcontrole op de gewijzigde PowerShell, `py_compile` op de Python-engine, en de launcher zonder exportmap stopt met exitcode 2 en de melding. De Python-engine zelf is niet gedraaid (geen `pandas` op deze machine) en de geplande taak is niet opnieuw geregistreerd |
+
 ### 2026-10-05
 | Wijziging |
 |--------|
