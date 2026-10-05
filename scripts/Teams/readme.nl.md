@@ -58,3 +58,4 @@ Huidig gedrag (v8.19):
 - De dry-runmodus behoudt de volledige authenticatie/bootstrap en valideert Stap 6-9 door het bestaan en de aantallen in Teams/SharePoint/Graph op te vragen, zonder export van leden/chats/bestanden naar schijf te schrijven.
 - Het rapport van Stap 11 gebruikt in dry-run de opgevraagde aantallen (gedetecteerde bestanden/berichten) in plaats van lokaal geëxporteerde bestanden.
 - Mutaties voor archiveren/dearchiveren in Stap 10 blijven gesimuleerd, met `[DRYRUN]`-uitvoer.
+- De herstart in een schone sessie na het opkuisen van de modules geeft alle parameters door (ook `-DryRun`) en geeft de exitcode van de herstarte run terug.

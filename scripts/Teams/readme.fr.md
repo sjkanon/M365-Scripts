@@ -58,3 +58,4 @@ Comportement actuel (v8.19) :
 - Le mode dry-run conserve toute l'authentification/l'amorçage et valide les étapes 6 à 9 en sondant l'existence et les comptages dans Teams/SharePoint/Graph, sans écrire sur disque les exports de membres/conversations/fichiers.
 - En dry-run, le rapport de l'étape 11 utilise les comptages sondés (fichiers/messages détectés) au lieu des fichiers exportés localement.
 - Les modifications d'archivage/désarchivage de l'étape 10 restent simulées, avec une sortie `[DRYRUN]`.
+- Le redémarrage dans une session propre après le nettoyage des modules transmet tous les paramètres (y compris `-DryRun`) et renvoie le code de sortie de l'exécution redémarrée.

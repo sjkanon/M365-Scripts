@@ -65,8 +65,9 @@ if ($herstart -ne "1") {
 
     Write-Host "`n  Modules geinstalleerd. Script herstart in schone sessie...`n" -ForegroundColor Cyan
 
-    # Herstart het script in een nieuwe pwsh-sessie met de herstart-vlag
-    # Alle configuratievariabelen worden via omgevingsvariabelen doorgegeven
+    # Herstart het script in een nieuwe pwsh-sessie met de herstart-vlag.
+    # De parameters gaan mee: zonder dat viel o.a. -DryRun bij elke eerste run weg
+    # en archiveerde de herstarte sessie echt.
     $env:TEAMS_ARCHIVER_HERSTART = "1"
     $pwshPath = (Get-Command pwsh).Source
     $restartArgs = if ($IsWindows) {
@@ -74,8 +75,16 @@ if ($herstart -ne "1") {
     } else {
         @("-NoProfile", "-File", $MyInvocation.MyCommand.Path)
     }
+    foreach ($param in $PSBoundParameters.GetEnumerator()) {
+        if ($param.Value -is [switch]) {
+            if ($param.Value.IsPresent) { $restartArgs += "-$($param.Key)" }
+        } else {
+            $restartArgs += "-$($param.Key)"
+            $restartArgs += [string]$param.Value
+        }
+    }
     & $pwshPath @restartArgs
-    exit
+    exit $LASTEXITCODE
 }
 
 # Vanaf hier: we zitten in de hergestarte schone sessie
