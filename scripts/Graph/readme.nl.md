@@ -10,6 +10,12 @@ Scripts voor het beheren van Microsoft Graph-applicatiemachtigingen en service p
 
 ## Scripts
 
+| Script | Omschrijving |
+|--------|--------------|
+| [`logic-permissies.ps1`](logic-permissies.ps1) ([docs](#logic-permissiesps1)) | Een Microsoft Graph-applicatiemachtiging (app role) toekennen aan de managed identity van een Azure Logic App — idempotent |
+
+---
+
 ### logic-permissies.ps1
 
 Kent een Microsoft Graph-applicatiemachtiging (app role) toe aan de managed identity van een Azure Logic App — oftewel: wijst een app role met applicatiemachtiging toe aan de service principal van de Logic App. Idempotent: slaat over als de toewijzing al bestaat.

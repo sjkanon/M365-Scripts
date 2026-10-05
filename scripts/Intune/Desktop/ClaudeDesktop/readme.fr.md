@@ -20,14 +20,16 @@ Intune installe les applications MSIX métier par utilisateur. Cela échoue pour
 
 | Script | Rôle dans Intune |
 |---|---|
-| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) | **Celui que vous exécutez.** Orchestre tout ce qui suit — voir la section « Exécution mensuelle ». |
-| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) | Script de contenu de la commande d'installation |
-| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) | Script de contenu de la commande de désinstallation |
-| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) | Script de détection personnalisé |
+| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) ([docs](#deploy-claudedesktopintuneps1)) | **Celui que vous exécutez.** Orchestre tout ce qui suit — voir la section « Exécution mensuelle ». |
+| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Script de contenu de la commande d'installation |
+| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Script de contenu de la commande de désinstallation |
+| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Script de détection personnalisé |
 
 `Install-`/`Uninstall-`/`Detect-ClaudeDesktop-Intune.ps1` ne sont jamais exécutés manuellement — `Deploy-ClaudeDesktopIntune.ps1` les empaquette automatiquement dans le `.intunewin` (ou, pour le script de détection, le charge dans le cadre de la règle de détection).
 
-## Ce que fait `Deploy-ClaudeDesktopIntune.ps1`
+## Deploy-ClaudeDesktopIntune.ps1
+
+Ce qu'il fait :
 
 1. Télécharge le dernier MSIX x64 de Claude Desktop depuis l'URL de redirection « latest » officielle d'Anthropic.
 2. Lit la version dans le fichier `AppxManifest.xml` contenu dans le MSIX.
@@ -93,6 +95,14 @@ Par défaut, Claude Desktop et Cowork Prerequisites sont indépendants — aucun
 
 Le script recherche l'application Cowork Prerequisites (déployez-la **d'abord** — `Deploy-CoworkPrerequisitesIntune.ps1`) et appelle `Add-IntuneWin32AppDependency` avec `DependencyType 'Detect'` (et non `'AutoInstall'`) : l'application de prérequis doit toujours être attribuée indépendamment en Required et déjà détectée sur l'appareil — cette dépendance ne l'installe pas automatiquement pour le compte de Claude Desktop, elle fait seulement attendre Intune. Le compromis par rapport au comportement par défaut : un appareil bloqué sur les prérequis Cowork (par ex. en plein redémarrage, ou en échec réel) ne recevra pas non plus Claude Desktop tant que le problème n'est pas résolu, au lieu de recevoir Claude Desktop immédiatement et Cowork plus tard.
 
+## Install- / Uninstall- / Detect-ClaudeDesktop-Intune.ps1
+
+Les scripts de contenu de l'application Win32. `Deploy-ClaudeDesktopIntune.ps1` les empaquette et les charge ; ils ne sont jamais exécutés manuellement.
+
+- **`Install-ClaudeDesktop-Intune.ps1`** (commande d'installation) : supprime entièrement toute installation existante de Claude Desktop, provisionne le MSIX à l'échelle de la machine avec `Add-AppxProvisionedPackage` et désactive la mise à jour automatique propre à Claude — voir les sections ci-dessous. Paramètre `-MsixFileName` (par défaut `Claude.msix`) : nom du fichier MSIX à côté du script. Journalise dans `%ProgramData%\ClaudeDeploy\install.log`.
+- **`Uninstall-ClaudeDesktop-Intune.ps1`** (commande de désinstallation) : supprime le package provisionné à l'échelle de la machine et, en solution de repli, les installations Appx par utilisateur des profils déjà connectés. Ne touche pas aux prérequis Windows de Cowork. Journalise dans `%ProgramData%\ClaudeDeploy\uninstall.log`.
+- **`Detect-ClaudeDesktop-Intune.ps1`** (script de détection personnalisé, 64 bits) : signale « installed » lorsque le package provisionné à l'échelle de la machine est présent. Volontairement indépendant de la version, et ne réessaie qu'en cas d'exception DISM transitoire.
+
 ### Stratégie de mise à jour automatique
 
 Le script d'installation définit `HKLM:\SOFTWARE\Policies\Claude\disableAutoUpdates = 1` (DWord). Le programme de mise à jour propre à Claude est désactivé afin que le contrôle des versions reste entièrement entre les mains de cette exécution Intune mensuelle, au lieu de dériver appareil par appareil.
@@ -114,7 +124,7 @@ Les deux scripts de contenu sont écrits de sorte qu'un appareil sur lequel Clau
 - **Script d'installation** : chaque passe de suppression (arrêt du processus, Appx, désinstallation classique par utilisateur) vérifie d'abord si le résultat est vide/`$null` avant d'agir, de sorte qu'une machine totalement propre se contente de journaliser « none found » à chaque étape au lieu de produire une erreur.
 - **Script de détection** : un résultat vide/négatif de `Get-AppxProvisionedPackage` (le résultat attendu sur un appareil où il n'a jamais été installé) renvoie immédiatement « not installed » (exit 1), sans nouvelle tentative — les nouvelles tentatives n'interviennent que sur une véritable **exception** (par ex. un verrou DISM transitoire, plausible juste après l'intense activité Appx du script d'installation lui-même sur le même appareil), si bien qu'une machine réellement propre n'est jamais ralentie par des tentatives qui ne peuvent pas changer le résultat.
 
-### Prérequis
+## Prérequis
 
 - Les modules PowerShell `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` et `IntuneWin32App` — à installer avec `.\scripts\Startup\Install-Modules.ps1`
 - Exécution depuis Windows (l'outil d'empaquetage et les cmdlets MSIX/AppX n'existent que sous Windows)

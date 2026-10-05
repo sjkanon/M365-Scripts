@@ -19,9 +19,9 @@ Maintient automatiquement à jour l'exigence de version iOS minimale d'une strat
 
 | Fichier | Description |
 |------|-------------|
-| [`Update-iOSCompliancePolicy.ps1`](Update-iOSCompliancePolicy.ps1) | Script principal — à exécuter manuellement ou via une tâche planifiée |
-| [`Setup.ps1`](Setup.ps1) | Configuration initiale unique — crée l'App Registration et écrit config.json |
-| [`Install-ScheduledTask.ps1`](Install-ScheduledTask.ps1) | Enregistre la tâche planifiée Windows |
+| [`Update-iOSCompliancePolicy.ps1`](Update-iOSCompliancePolicy.ps1) ([docs](#utilisation)) | Script principal — à exécuter manuellement ou via une tâche planifiée |
+| [`Setup.ps1`](Setup.ps1) ([docs](#option-a--automatique-recommandée)) | Configuration initiale unique — crée l'App Registration et écrit config.json |
+| [`Install-ScheduledTask.ps1`](Install-ScheduledTask.ps1) ([docs](#enregistrer-la-tâche-planifiée)) | Enregistre la tâche planifiée Windows |
 | `config.example.json` | Exemple de fichier de configuration |
 
 ---

@@ -10,6 +10,17 @@ Un kit USB pour l'installation de Windows et l'inscription Autopilot. Conçu pou
 
 ---
 
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`start.bat`](start.bat) ([docs](#startbat)) | Menu principal du kit — demande lui-même les privilèges d'administrateur et propose l'inscription Autopilot, Windows Update, le renommage, la jonction au domaine et le navigateur d'installations client |
+| [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Navigateur interactif de clients et de scripts derrière les options de menu `D` et `E` — parcourir les dossiers clients et lancer des fichiers `.ps1` / `.bat` / `.cmd` |
+
+Également dans ce dossier : [`autorun.inf`](autorun.inf) — uniquement le nom de volume de la clé USB ([détails](#autoruninf)).
+
+---
+
 ## Arborescence de la clé USB
 
 Tous les fichiers doivent se trouver dans le **même dossier** de la clé USB :
@@ -48,7 +59,9 @@ Windows n'exécute **pas** automatiquement les scripts d'une clé USB (bloqué d
 
 ---
 
-## Options du menu
+## start.bat
+
+Le menu principal du kit. Il se place dans son propre dossier (`cd /d %~dp0`), demande les privilèges d'administrateur et affiche ces options :
 
 | Option | Action | Fonctionne en OOBE |
 |---|---|---|
@@ -68,7 +81,19 @@ Windows n'exécute **pas** automatiquement les scripts d'une clé USB (bloqué d
 | `E` | **Scripts d'installation client (partage réseau)** — ouvrir le menu client depuis `\\10.222.3.94\Software` | ✅ (nécessite un accès réseau) |
 | `0` | Quitter | ✅ |
 
-### Navigateur d'installations client (options D et E)
+### Browse-InstallScripts.ps1
+
+Navigateur d'installations client derrière les options de menu `D` et `E`. Affiche les dossiers clients de premier niveau sous `-RootPath` sous forme de menu, puis permet de les parcourir et de lancer des fichiers `.ps1`, `.bat` et `.cmd` (les dossiers `AppDeployToolkit` sont masqués).
+
+| Paramètre | Obligatoire | Description |
+|-----------|-------------|-------------|
+| `-RootPath` | Oui | Dossier dont les sous-dossiers sont les clients (dossier local `Install` ou partage réseau) |
+| `-SourceLabel` | Non | Titre affiché au-dessus du menu client (par défaut `Install Scripts`) |
+
+```powershell
+# Ce que lance l'option D
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 -RootPath .\Install -SourceLabel "Local Install"
+```
 
 - L'option `D` nécessite des fichiers locaux : `Browse-InstallScripts.ps1` et le dossier `Install` complet à côté de `start.bat`.
 - L'option `E` lit les dossiers clients depuis `\\10.222.3.94\Software` et nécessite un accès réseau.

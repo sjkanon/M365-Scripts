@@ -10,15 +10,14 @@ Generates a monthly licensing and Azure cost overview per customer as a formatte
 
 ---
 
-## Folder structure
+## Scripts
 
-```
-Licensing/
-├── genereer_licentie_overzicht.py   ← Python engine — reads Pax8 + Ingram, writes Excel
-├── genereer_rapport.ps1             ← PowerShell launcher — validates env, calls Python
-├── genereer_rapport.bat             ← Simple double-click launcher (no validation)
-└── create_scheduled_task.ps1        ← Registers a monthly scheduled task (run once)
-```
+| Script | Description |
+|--------|-------------|
+| [`genereer_rapport.ps1`](genereer_rapport.ps1) ([docs](#genereer_rapportps1)) | PowerShell launcher — validates the environment, then calls the Python engine (recommended) |
+| [`genereer_rapport.bat`](genereer_rapport.bat) ([docs](#genereer_rapportbat)) | Simple double-click launcher, no validation — needs `LICENSING_EXPORT_DIR` |
+| [`genereer_licentie_overzicht.py`](genereer_licentie_overzicht.py) ([docs](#genereer_licentie_overzichtpy)) | Python engine — reads the Pax8 CSV and Ingram Excel, writes the per-customer Excel report |
+| [`create_scheduled_task.ps1`](create_scheduled_task.ps1) ([docs](#create_scheduled_taskps1)) | Registers a monthly scheduled task that runs the Python engine (run once, as Administrator) |
 
 ---
 
@@ -58,19 +57,21 @@ Place input files in the correct subfolders under the export directory before ru
 
 ## Usage
 
-### Option 1 — PowerShell launcher (recommended)
+### genereer_rapport.ps1
 
-Validates the environment before running. Shows clear error messages if something is missing.
+Option 1 — PowerShell launcher (recommended). Validates the environment before running. Shows clear error messages if something is missing.
 
 ```powershell
 .\genereer_rapport.ps1 -ExportDir "D:\Finance\Licensing"
 ```
 
-### Option 2 — Double-click
+### genereer_rapport.bat
 
-Run `genereer_rapport.bat` directly — requires the `LICENSING_EXPORT_DIR` environment variable. No pre-flight checks — relies on the Python script's own error handling.
+Option 2 — double-click. Run `genereer_rapport.bat` directly — requires the `LICENSING_EXPORT_DIR` environment variable. No pre-flight checks — relies on the Python script's own error handling.
 
-### Option 3 — CLI with explicit paths
+### genereer_licentie_overzicht.py
+
+Option 3 — call the Python engine directly with explicit paths:
 
 ```bash
 python genereer_licentie_overzicht.py --export-dir "D:\Finance\Licensing" --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv"
@@ -103,9 +104,9 @@ Each row shows: description, category, quantity, unit purchase price, unit sales
 
 ---
 
-## Scheduled task
+## create_scheduled_task.ps1
 
-`create_scheduled_task.ps1` registers a Windows scheduled task that runs the Python script automatically on the **6th of every month at 08:00** by default.
+Scheduled task. `create_scheduled_task.ps1` registers a Windows scheduled task that runs the Python script automatically on the **6th of every month at 08:00** by default.
 
 ### Parameters
 

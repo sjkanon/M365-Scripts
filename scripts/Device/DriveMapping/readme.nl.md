@@ -6,9 +6,15 @@
 
 Koppelt SharePoint Online- / OneDrive-documentbibliotheken via de WebDAV-redirector aan vaste stationsletters — bedoeld als aanmeldscript per gebruiker (Intune Win32-app of een geplande taak bij aanmelden), niet via [`menu.ps1`](../../../menu.ps1).
 
+## Scripts
+
+| Script | Omschrijving |
+|--------|--------------|
+| [`New-CloudDriveMapping.ps1`](New-CloudDriveMapping.ps1) ([docs](#new-clouddrivemappingps1)) | SharePoint Online- / OneDrive-documentbibliotheken via WebDAV aan stationsletters koppelen — proefdraai tenzij `-Apply` |
+
 ---
 
-## New-CloudDriveMapping.ps1
+### New-CloudDriveMapping.ps1
 
 Zet elke `https://`-URL van een documentbibliotheek om naar de WebDAV-UNC-vorm (`\\<host>@SSL\DavWWWRoot\<path>`) en koppelt die met `net use`. Draait standaard als proefdraai — zonder `-Apply` wordt er geen station gekoppeld.
 

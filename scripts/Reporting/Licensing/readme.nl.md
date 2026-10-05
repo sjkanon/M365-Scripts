@@ -10,15 +10,14 @@ Genereert per klant een maandelijks overzicht van licenties en Azure-kosten als 
 
 ---
 
-## Mapstructuur
+## Scripts
 
-```
-Licensing/
-├── genereer_licentie_overzicht.py   ← Python-engine — leest Pax8 + Ingram, schrijft Excel
-├── genereer_rapport.ps1             ← PowerShell-launcher — controleert de omgeving, roept Python aan
-├── genereer_rapport.bat             ← Eenvoudige launcher om op te dubbelklikken (geen controles)
-└── create_scheduled_task.ps1        ← Registreert een maandelijkse geplande taak (eenmalig uitvoeren)
-```
+| Script | Omschrijving |
+|--------|--------------|
+| [`genereer_rapport.ps1`](genereer_rapport.ps1) ([docs](#genereer_rapportps1)) | PowerShell-launcher — controleert de omgeving en roept daarna de Python-engine aan (aanbevolen) |
+| [`genereer_rapport.bat`](genereer_rapport.bat) ([docs](#genereer_rapportbat)) | Eenvoudige launcher om te dubbelklikken, zonder controles — vereist `LICENSING_EXPORT_DIR` |
+| [`genereer_licentie_overzicht.py`](genereer_licentie_overzicht.py) ([docs](#genereer_licentie_overzichtpy)) | Python-engine — leest de Pax8-CSV en de Ingram-Excel, schrijft het Excel-rapport per klant |
+| [`create_scheduled_task.ps1`](create_scheduled_task.ps1) ([docs](#create_scheduled_taskps1)) | Registreert een maandelijkse geplande taak die de Python-engine uitvoert (eenmalig, als Administrator) |
 
 ---
 
@@ -58,19 +57,21 @@ Zet de invoerbestanden vóór het uitvoeren in de juiste submappen onder de expo
 
 ## Gebruik
 
-### Optie 1 — PowerShell-launcher (aanbevolen)
+### genereer_rapport.ps1
 
-Controleert de omgeving voordat het wordt uitgevoerd. Toont duidelijke foutmeldingen als er iets ontbreekt.
+Optie 1 — PowerShell-launcher (aanbevolen). Controleert de omgeving voordat het wordt uitgevoerd. Toont duidelijke foutmeldingen als er iets ontbreekt.
 
 ```powershell
 .\genereer_rapport.ps1 -ExportDir "D:\Finance\Licensing"
 ```
 
-### Optie 2 — Dubbelklikken
+### genereer_rapport.bat
 
-Voer `genereer_rapport.bat` rechtstreeks uit — vereist de omgevingsvariabele `LICENSING_EXPORT_DIR`. Geen controles vooraf — vertrouwt op de eigen foutafhandeling van het Python-script.
+Optie 2 — dubbelklikken. Voer `genereer_rapport.bat` rechtstreeks uit — vereist de omgevingsvariabele `LICENSING_EXPORT_DIR`. Geen controles vooraf — vertrouwt op de eigen foutafhandeling van het Python-script.
 
-### Optie 3 — CLI met expliciete paden
+### genereer_licentie_overzicht.py
+
+Optie 3 — de Python-engine rechtstreeks aanroepen met expliciete paden:
 
 ```bash
 python genereer_licentie_overzicht.py --export-dir "D:\Finance\Licensing" --ingram "path\to\ingram.xlsx" --pax8 "path\to\pax8.csv"
@@ -103,9 +104,9 @@ Elke rij toont: omschrijving, categorie, aantal, inkoopprijs per stuk, verkooppr
 
 ---
 
-## Geplande taak
+## create_scheduled_task.ps1
 
-`create_scheduled_task.ps1` registreert een geplande Windows-taak die het Python-script automatisch uitvoert standaard op de **6e van elke maand om 08:00**.
+Geplande taak. `create_scheduled_task.ps1` registreert een geplande Windows-taak die het Python-script automatisch uitvoert standaard op de **6e van elke maand om 08:00**.
 
 ### Parameters
 

@@ -78,7 +78,7 @@ Regio.
 | [`Sync-SharePointChannelMember.ps1`](Sync-SharePointChannelMember.ps1) ([docs](#privékanalen-en-groepen)) | Maakt een beveiligingsgroep de bron van waarheid voor wie er in een privékanaal zit | kanaalledenlijst |
 | [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#overdracht-aan-de-klant)) | Zet de uitleg voor eindgebruikers op de teamsite, gegenereerd uit de configuratie | ja |
 | [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#terugdraaien)) | Verwijdert wat gebouwd is — rapporteert alleen, tenzij je `-Apply` meegeeft | ja, met opzet |
-| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Gedeelde hulpfuncties — wordt gedot-sourcet, niet los gedraaid | — |
+| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) ([docs](#sharepointstructurecommonps1)) | Gedeelde hulpfuncties — wordt gedot-sourcet, niet los gedraaid | — |
 | [`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) | **Handleiding voor eindgebruikers, in het Nederlands** — geef deze aan de klant: uploaden, labelen, dingen terugvinden | — |
 | [`example.config.json`](example.config.json) | Het model, als voorbeeld om te kopiëren — nog op `CHANGEME`. Klantconfigs (`<klant>.config.json`) staan ernaast en worden door git genegeerd | — |
 
@@ -400,6 +400,17 @@ Exitcode 2 betekent drift, dus het past direct in een monitor. De controle die z
 vaakst terugbetaalt is de **verplicht-vlag op een veld van een inhoudstype** — iemand
 vinkt hem uit in de browser en niets lijkt mis tot de halve bibliotheek geen Taal heeft.
 
+### SharePointStructure.Common.ps1
+
+Gedeelde hulpfuncties, gedot-sourcet door elk script in deze map — nooit los gedraaid,
+geen parameters. Het bevat wat ze allemaal nodig hebben: het laden en valideren van de
+configuratie (`Import-StructureConfig`), de PnP- en Graph-verbindingen die zowel
+interactief als app-only werken (`Connect-Structure`, `Connect-StructureGraph`), de
+app-registratie (`New-StructureApp`, `Remove-StructureApp`), de CSOM-bouwstenen die PnP
+niet rechtstreeks aanbiedt (verplicht-vlag op een veldkoppeling, overerving verbreken en
+rollen zetten op een beveiligbaar object) en de gedeelde uitvoerwoorden `[ OK ]` /
+`[ >> ]` / `[DIFF]`.
+
 ---
 
 ## Het configuratiebestand
@@ -693,9 +704,9 @@ Bewuste weglatingen, elk met een reden:
 ## Opmerkingen
 
 - Auteur: Sjoerd Kanon
-- `SharePointStructure.Common.ps1` wordt door alle vier de scripts gedot-sourcet. Dat is
+- `SharePointStructure.Common.ps1` wordt door elk script in deze map gedot-sourcet. Dat is
   een bewuste uitzondering op de regel "elk script staat op zichzelf" elders in deze repo:
-  deze vier delen één configuratieschema, en drie kopieën van de machtigingscode zouden
-  binnen een maand uit elkaar lopen.
+  ze delen allemaal één configuratieschema, en een kopie van de machtigingscode in elk
+  script zou binnen een maand uit elkaar lopen.
 - Test eerst tegen een niet-productietenant. De inrichtingsscripts wijzigen machtigingen
   op een live team.

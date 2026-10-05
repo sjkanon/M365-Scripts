@@ -6,7 +6,7 @@
 
 Autopilot-enrollment, automatisering van compliancebeleid, detectie van configuratiedrift en desktopuitrol bij klanten (achtergrond, vergrendelscherm, snelkoppeling om te vergrendelen via de taakbalk).
 
-> De uitrol van Office-thema's en -kleuren staat in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.nl.md) — die scripts hebben hun download-URL hard naar dat pad gecodeerd.
+> De uitrol van Office-thema's en -kleuren staat in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.nl.md) — die scripts krijgen de download-URL van het thema als parameter.
 
 ---
 

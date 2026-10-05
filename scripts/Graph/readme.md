@@ -10,6 +10,12 @@ Scripts for managing Microsoft Graph application permissions and service princip
 
 ## Scripts
 
+| Script | Description |
+|--------|-------------|
+| [`logic-permissies.ps1`](logic-permissies.ps1) ([docs](#logic-permissiesps1)) | Grant a Microsoft Graph application permission (app role) to an Azure Logic App's managed identity — idempotent |
+
+---
+
 ### logic-permissies.ps1
 
 Grants a Microsoft Graph application permission (app role) to an Azure Logic App's managed identity — i.e. assigns an application-permission app role to the Logic App's service principal. Idempotent: skips if the assignment already exists.

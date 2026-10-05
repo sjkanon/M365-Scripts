@@ -2,7 +2,19 @@
 
 [M365-Scripts](../../../readme.fr.md) › [scripts](../../readme.fr.md) › [Azure](../readme.fr.md) › **VM**
 
-# Azure-NVMe-Conversion.ps1
+# VM
+
+Maintenance des machines virtuelles Azure.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Azure-NVMe-Conversion.ps1`](Azure-NVMe-Conversion.ps1) ([docs](#azure-nvme-conversionps1)) | Convertir le type de contrôleur de disque d'une VM Azure entre SCSI et NVMe, y compris la préparation des pilotes dans le système invité (script Microsoft intégré tel quel) |
+
+---
+
+### Azure-NVMe-Conversion.ps1
 
 > **Script tiers intégré tel quel.** Il s'agit de l'outil de Microsoft lui-même, issu de [`Azure/SAP-on-Azure-Scripts-and-Utilities`](https://github.com/Azure/SAP-on-Azure-Scripts-and-Utilities) (licence MIT) — conservé en l'état plutôt que réécrit, puisqu'il est déjà maintenu en amont. Vérifiez le `.LINK` dans l'en-tête du script pour obtenir la dernière version avant de vous y fier pour une opération critique.
 

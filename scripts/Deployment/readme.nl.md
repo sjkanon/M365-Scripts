@@ -10,6 +10,17 @@ Een USB-toolkit voor Windows-installatie en Autopilot-inschrijving. Ontworpen om
 
 ---
 
+## Scripts
+
+| Script | Omschrijving |
+|--------|--------------|
+| [`start.bat`](start.bat) ([docs](#startbat)) | Hoofdmenu van de toolkit — vraagt zelf om beheerdersrechten en biedt Autopilot-inschrijving, Windows Update, hernoemen, domeinlidmaatschap en de browser voor klantinstallaties |
+| [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Interactieve browser voor klanten en scripts achter menuopties `D` en `E` — door klantmappen bladeren en `.ps1`- / `.bat`- / `.cmd`-bestanden starten |
+
+Ook in deze map: [`autorun.inf`](autorun.inf) — alleen het label van de USB-stick ([details](#autoruninf)).
+
+---
+
 ## Mapstructuur op de USB
 
 Alle bestanden moeten in **dezelfde map** op de USB-stick staan:
@@ -48,7 +59,9 @@ Windows voert USB-scripts **niet** automatisch uit (geblokkeerd sinds Vista). Ha
 
 ---
 
-## Menuopties
+## start.bat
+
+Het hoofdmenu van de toolkit. Het wisselt naar de eigen map (`cd /d %~dp0`), vraagt om beheerdersrechten en toont deze opties:
 
 | Optie | Actie | Werkt in OOBE |
 |---|---|---|
@@ -68,7 +81,19 @@ Windows voert USB-scripts **niet** automatisch uit (geblokkeerd sinds Vista). Ha
 | `E` | **Installatiescripts per klant (netwerkshare)** — klantmenu openen vanuit `\\10.222.3.94\Software` | ✅ (netwerktoegang nodig) |
 | `0` | Afsluiten | ✅ |
 
-### Browser voor klantinstallaties (opties D en E)
+### Browse-InstallScripts.ps1
+
+Browser voor klantinstallaties achter menuopties `D` en `E`. Toont de klantmappen op het eerste niveau onder `-RootPath` als menu, en laat je daarna erin bladeren en `.ps1`-, `.bat`- en `.cmd`-bestanden starten (mappen `AppDeployToolkit` worden verborgen).
+
+| Parameter | Verplicht | Omschrijving |
+|-----------|-----------|--------------|
+| `-RootPath` | Ja | Map waarvan de submappen de klanten zijn (lokale map `Install` of een netwerkshare) |
+| `-SourceLabel` | Nee | Titel boven het klantmenu (standaard `Install Scripts`) |
+
+```powershell
+# Wat optie D uitvoert
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 -RootPath .\Install -SourceLabel "Local Install"
+```
 
 - Optie `D` heeft lokale bestanden nodig: `Browse-InstallScripts.ps1` en de volledige map `Install` naast `start.bat`.
 - Optie `E` leest klantmappen uit `\\10.222.3.94\Software` en heeft netwerktoegang nodig.

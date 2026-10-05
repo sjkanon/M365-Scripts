@@ -80,7 +80,7 @@ enregistré sans Regio.
 | [`Sync-SharePointChannelMember.ps1`](Sync-SharePointChannelMember.ps1) ([docs](#canaux-privés-et-groupes)) | Fait d'un groupe de sécurité la source de vérité pour les membres d'un canal privé | liste des membres du canal |
 | [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#remise-au-client)) | Écrit l'explication destinée aux utilisateurs finaux sur le site d'équipe, générée à partir de la configuration | oui |
 | [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#revenir-en-arrière)) | Supprime ce qui a été construit — se contente d'un rapport tant que vous ne passez pas `-Apply` | oui, volontairement |
-| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Fonctions d'aide partagées — chargées par dot-sourcing, pas exécutées seules | — |
+| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) ([docs](#sharepointstructurecommonps1)) | Fonctions d'aide partagées — chargées par dot-sourcing, pas exécutées seules | — |
 | [`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) | **Guide utilisateur, en néerlandais** — à remettre au client : téléverser, étiqueter, retrouver les documents | — |
 | [`example.config.json`](example.config.json) | Le modèle, comme exemple à copier — encore sur `CHANGEME`. Les configurations client (`<client>.config.json`) se trouvent à côté et sont ignorées par git | — |
 
@@ -411,6 +411,17 @@ supervision. Le contrôle qui se rentabilise le plus souvent est l'**indicateur 
 sur un champ de type de contenu** — quelqu'un le décoche dans le navigateur et rien ne
 semble anormal jusqu'à ce que la moitié d'une bibliothèque n'ait plus de Taal.
 
+### SharePointStructure.Common.ps1
+
+Fonctions d'aide partagées, chargées par dot-sourcing par chaque script de ce dossier —
+jamais exécutées seules, sans paramètres. Elles contiennent ce dont tous ont besoin : le
+chargement et la validation de la configuration (`Import-StructureConfig`), les connexions
+PnP et Graph qui fonctionnent en interactif comme en app-only (`Connect-Structure`,
+`Connect-StructureGraph`), l'inscription d'application (`New-StructureApp`,
+`Remove-StructureApp`), les primitives CSOM que PnP n'expose pas directement (indicateur
+obligatoire sur un lien de champ, rupture d'héritage et attribution de rôles sur un objet
+sécurisable) et le vocabulaire de sortie commun `[ OK ]` / `[ >> ]` / `[DIFF]`.
+
 ---
 
 ## Le fichier de configuration
@@ -707,9 +718,9 @@ Des omissions délibérées, chacune pour une raison :
 ## Remarques
 
 - Auteur : Sjoerd Kanon
-- `SharePointStructure.Common.ps1` est chargé par dot-sourcing par les quatre scripts.
+- `SharePointStructure.Common.ps1` est chargé par dot-sourcing par chaque script de ce dossier.
   C'est une exception délibérée à la règle « chaque script est autonome » appliquée
-  ailleurs dans ce dépôt : ces quatre scripts partagent un même schéma de configuration, et
-  trois copies du code d'autorisations divergeraient en moins d'un mois.
+  ailleurs dans ce dépôt : ils partagent tous un même schéma de configuration, et
+  une copie du code d'autorisations dans chacun divergerait en moins d'un mois.
 - Testez d'abord sur un tenant hors production. Les scripts de provisionnement modifient
   les autorisations d'une équipe en production.

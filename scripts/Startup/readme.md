@@ -12,14 +12,14 @@ Entry-point scripts and the core M365 function library.
 
 | File | Description |
 |------|-------------|
-| [`functies.ps1`](functies.ps1) | M365 function library — dot-sourced by `menu.ps1` on first use |
-| [`Install-Modules.ps1`](Install-Modules.ps1) | Bootstrap script — installs and imports all required PowerShell modules |
-| [`Update-Modules.ps1`](Update-Modules.ps1) | Updates every installed PowerShell module to its latest version |
-| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
-| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
-| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Checks every link in every readme — files that must exist, anchors that must match a heading |
-| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Builds a self-contained, styled HTML page from a markdown document — for pasting into IT Glue or printing |
-| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) | Writes the language switcher and breadcrumb at the top of every readme, in English, Dutch and French |
+| [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365 function library — dot-sourced by `menu.ps1` on first use |
+| [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrap script — installs and imports all required PowerShell modules |
+| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Updates every installed PowerShell module to its latest version |
+| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
+| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) ([docs](#update-scriptindexps1)) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
+| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) ([docs](#test-markdownlinksps1)) | Checks every link in every readme — files that must exist, anchors that must match a heading |
+| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) ([docs](#convert-markdowntohtmlps1)) | Builds a self-contained, styled HTML page from a markdown document — for pasting into IT Glue or printing |
+| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) ([docs](#update-readmeheaderps1)) | Writes the language switcher and breadcrumb at the top of every readme, in English, Dutch and French |
 
 ---
 
