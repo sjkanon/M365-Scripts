@@ -1,22 +1,22 @@
 {
-  "client": "Laseto",
-  "description": "SharePoint-structuur, metadata en groepsrechten voor Laseto.",
-  "tenant": "futpetlas.onmicrosoft.com",
+  "client": "Contoso",
+  "description": "SharePoint-structuur, metadata en groepsrechten voor Contoso.",
+  "tenant": "CHANGEME.onmicrosoft.com",
   "team": {
-    "displayName": "Laseto-NewTeams",
-    "mailNickname": "lasetonewteams",
-    "description": "Documentbeheer Laseto.",
+    "displayName": "Contoso",
+    "mailNickname": "contoso",
+    "description": "Documentbeheer Contoso.",
     "visibility": "Private",
     "owners": [
-      "itceadmin@futpetlas.onmicrosoft.com"
+      "admin@CHANGEME.onmicrosoft.com"
     ]
   },
   "sites": {
-    "team": "https://futpetlas.sharepoint.com/sites/lasetonewteams",
-    "mgmt": "https://futpetlas.sharepoint.com/sites/Laseto-NewTeams-MGMT"
+    "team": "https://CHANGEME.sharepoint.com/sites/contoso",
+    "mgmt": "https://CHANGEME.sharepoint.com/sites/Contoso-MGMT"
   },
-  "columnGroup": "Laseto-NewTeams",
-  "contentTypeGroup": "Laseto-NewTeams",
+  "columnGroup": "Contoso",
+  "contentTypeGroup": "Contoso",
   "fieldRoles": {
     "brand": "PsMerk",
     "pillar": "PsPijler",
@@ -24,9 +24,9 @@
     "lifecycle": "PsStatus"
   },
   "termStore": {
-    "group": "Laseto-NewTeams",
+    "group": "Contoso",
     "termSet": "Leveranciers",
-    "description": "Leveranciers van Laseto - uitbreidbaar vanuit de term store.",
+    "description": "Leveranciers van Contoso - uitbreidbaar vanuit de term store.",
     "terms": [
       "Lev. 1",
       "Lev. 2",
@@ -40,7 +40,7 @@
       "type": "Choice",
       "description": "Voor welk merk is dit?",
       "choices": [
-        "Laseto"
+        "Contoso"
       ]
     },
     {
@@ -107,7 +107,7 @@
       "internalName": "PsVertrouwelijkheid",
       "displayName": "Vertrouwelijkheid",
       "type": "Choice",
-      "description": "Mag dit naar buiten? Intern blijft binnen Laseto-NewTeams.",
+      "description": "Mag dit naar buiten? Intern blijft binnen Contoso.",
       "choices": [
         "Intern",
         "Deelbaar met klant",
@@ -353,69 +353,69 @@
   ],
   "groups": [
     {
-      "displayName": "SG-LASETO-MGMT-RW",
-      "mailNickname": "sglasetomgmtrw",
-      "description": "Laseto - MGMT - bewerken"
+      "displayName": "SG-CONTOSO-MGMT-RW",
+      "mailNickname": "sgcontosomgmtrw",
+      "description": "Contoso - MGMT - bewerken"
     },
     {
-      "displayName": "SG-LASETO-MGMT-RO",
-      "mailNickname": "sglasetomgmtro",
-      "description": "Laseto - MGMT - alleen lezen"
+      "displayName": "SG-CONTOSO-MGMT-RO",
+      "mailNickname": "sgcontosomgmtro",
+      "description": "Contoso - MGMT - alleen lezen"
     },
     {
-      "displayName": "SG-LASETO-Leveranciers-RW",
-      "mailNickname": "sglasetoleveranciersrw",
-      "description": "Laseto - Leveranciers - bewerken"
+      "displayName": "SG-CONTOSO-Leveranciers-RW",
+      "mailNickname": "sgcontosoleveranciersrw",
+      "description": "Contoso - Leveranciers - bewerken"
     },
     {
-      "displayName": "SG-LASETO-Leveranciers-RO",
-      "mailNickname": "sglasetoleveranciersro",
-      "description": "Laseto - Leveranciers - alleen lezen"
+      "displayName": "SG-CONTOSO-Leveranciers-RO",
+      "mailNickname": "sgcontosoleveranciersro",
+      "description": "Contoso - Leveranciers - alleen lezen"
     },
     {
-      "displayName": "SG-LASETO-Verkopers-RW",
-      "mailNickname": "sglasetoverkopersrw",
-      "description": "Laseto - Verkopers - bewerken"
+      "displayName": "SG-CONTOSO-Verkopers-RW",
+      "mailNickname": "sgcontosoverkopersrw",
+      "description": "Contoso - Verkopers - bewerken"
     },
     {
-      "displayName": "SG-LASETO-Verkopers-RO",
-      "mailNickname": "sglasetoverkopersro",
-      "description": "Laseto - Verkopers - alleen lezen"
+      "displayName": "SG-CONTOSO-Verkopers-RO",
+      "mailNickname": "sgcontosoverkopersro",
+      "description": "Contoso - Verkopers - alleen lezen"
     },
     {
-      "displayName": "SG-LASETO-Klanten-RW",
-      "mailNickname": "sglasetoklantenrw",
-      "description": "Laseto - Klanten - bewerken"
+      "displayName": "SG-CONTOSO-Klanten-RW",
+      "mailNickname": "sgcontosoklantenrw",
+      "description": "Contoso - Klanten - bewerken"
     },
     {
-      "displayName": "SG-LASETO-Klanten-RO",
-      "mailNickname": "sglasetoklantenro",
-      "description": "Laseto - Klanten - alleen lezen"
+      "displayName": "SG-CONTOSO-Klanten-RO",
+      "mailNickname": "sgcontosoklantenro",
+      "description": "Contoso - Klanten - alleen lezen"
     },
     {
-      "displayName": "SG-LASETO-Marketing-RW",
-      "mailNickname": "sglasetomarketingrw",
-      "description": "Laseto - Marketing - bewerken"
+      "displayName": "SG-CONTOSO-Marketing-RW",
+      "mailNickname": "sgcontosomarketingrw",
+      "description": "Contoso - Marketing - bewerken"
     },
     {
-      "displayName": "SG-LASETO-Marketing-RO",
-      "mailNickname": "sglasetomarketingro",
-      "description": "Laseto - Marketing - alleen lezen"
+      "displayName": "SG-CONTOSO-Marketing-RO",
+      "mailNickname": "sgcontosomarketingro",
+      "description": "Contoso - Marketing - alleen lezen"
     },
     {
-      "displayName": "SG-LASETO-TD-RW",
-      "mailNickname": "sglasetotdrw",
-      "description": "Laseto - TD - bewerken"
+      "displayName": "SG-CONTOSO-TD-RW",
+      "mailNickname": "sgcontosotdrw",
+      "description": "Contoso - TD - bewerken"
     },
     {
-      "displayName": "SG-LASETO-TD-RO",
-      "mailNickname": "sglasetotdro",
-      "description": "Laseto - TD - alleen lezen"
+      "displayName": "SG-CONTOSO-TD-RO",
+      "mailNickname": "sgcontosotdro",
+      "description": "Contoso - TD - alleen lezen"
     },
     {
-      "displayName": "SG-LASETO-Klanten-Extern",
-      "mailNickname": "sglasetoklantenextern",
-      "description": "Laseto - externe klanten met leestoegang tot FUTECH Images and videos"
+      "displayName": "SG-CONTOSO-Klanten-Extern",
+      "mailNickname": "sgcontosoklantenextern",
+      "description": "Contoso - externe klanten met leestoegang tot Beeldmateriaal voor klanten"
     }
   ],
   "libraryViews": [
@@ -424,11 +424,11 @@
       "list": "Documents",
       "views": [
         {
-          "title": "Alles - Laseto",
-          "description": "Elk bestand van Laseto, dwars door alle pijlers heen.",
+          "title": "Alles - Contoso",
+          "description": "Elk bestand van Contoso, dwars door alle pijlers heen.",
           "recursive": true,
           "groupBy": "PsPijler",
-          "where": "<Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Laseto</Value></Eq>",
+          "where": "<Eq><FieldRef Name='PsMerk' /><Value Type='Text'>Contoso</Value></Eq>",
           "fields": [
             "DocIcon",
             "LinkFilename",
@@ -541,11 +541,11 @@
       },
       "permissions": [
         {
-          "group": "SG-LASETO-Leveranciers-RW",
+          "group": "SG-CONTOSO-Leveranciers-RW",
           "role": "Contribute"
         },
         {
-          "group": "SG-LASETO-Leveranciers-RO",
+          "group": "SG-CONTOSO-Leveranciers-RO",
           "role": "Read"
         }
       ]
@@ -584,11 +584,11 @@
       },
       "permissions": [
         {
-          "group": "SG-LASETO-Verkopers-RW",
+          "group": "SG-CONTOSO-Verkopers-RW",
           "role": "Contribute"
         },
         {
-          "group": "SG-LASETO-Verkopers-RO",
+          "group": "SG-CONTOSO-Verkopers-RO",
           "role": "Read"
         }
       ]
@@ -627,11 +627,11 @@
       },
       "permissions": [
         {
-          "group": "SG-LASETO-Klanten-RW",
+          "group": "SG-CONTOSO-Klanten-RW",
           "role": "Contribute"
         },
         {
-          "group": "SG-LASETO-Klanten-RO",
+          "group": "SG-CONTOSO-Klanten-RO",
           "role": "Read"
         }
       ]
@@ -670,11 +670,11 @@
       },
       "permissions": [
         {
-          "group": "SG-LASETO-Marketing-RW",
+          "group": "SG-CONTOSO-Marketing-RW",
           "role": "Contribute"
         },
         {
-          "group": "SG-LASETO-Marketing-RO",
+          "group": "SG-CONTOSO-Marketing-RO",
           "role": "Read"
         }
       ]
@@ -713,21 +713,21 @@
       },
       "permissions": [
         {
-          "group": "SG-LASETO-TD-RW",
+          "group": "SG-CONTOSO-TD-RW",
           "role": "Contribute"
         },
         {
-          "group": "SG-LASETO-TD-RO",
+          "group": "SG-CONTOSO-TD-RO",
           "role": "Read"
         }
       ]
     },
     {
       "key": "KlantBibliotheek",
-      "title": "FUTECH Images and videos",
+      "title": "Beeldmateriaal voor klanten",
       "kind": "Library",
       "site": "team",
-      "list": "FUTECH Images and videos",
+      "list": "Beeldmateriaal voor klanten",
       "defaultColumnValues": {
         "PsStatus": "Actief",
         "PsVertrouwelijkheid": "Deelbaar met klant"
@@ -753,11 +753,11 @@
       },
       "permissions": [
         {
-          "group": "SG-LASETO-Marketing-RW",
+          "group": "SG-CONTOSO-Marketing-RW",
           "role": "Contribute"
         },
         {
-          "group": "SG-LASETO-Klanten-Extern",
+          "group": "SG-CONTOSO-Klanten-Extern",
           "role": "Read"
         }
       ]

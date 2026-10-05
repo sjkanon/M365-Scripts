@@ -369,8 +369,8 @@ Een complete SharePoint-structuur inrichten en onderhouden — metadatamodel, in
 - `Update-SharePointShareStatus.ps1` — leidt een kolom Deelstatus af uit de rechten die werkelijk op elk bestand staan (Anyone-link, gast, organisatielink of niets) en markeert alles met de tag Intern/Vertrouwelijk dat achter een externe link staat; exitcode 2 voor een geplande RMM-taak
 - `Test-SharePointStructure.ps1` — alleen-lezen driftcontrole die elk verschil indeelt als Missing / Different / Extra; exitcode 2 betekent dat iemand iets heeft gewijzigd
 - Alle vier zijn idempotent en ondersteunen `-WhatIf`; interactief of app-only met een certificaat
-- Merkoverstijgende weergaven (`Scope = RecursiveAll`) maken "merk als tag" echt: *Alles - Butterstone* is één platte lijst over elke pijlermap heen, inclusief alles met de tag **Beide** — één bestand, twee merken, geen kopieën. Plus *Nog te taggen*, *Extern gedeeld* en *Te archiveren*
-- [`Petsolutions-SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/Petsolutions-SharePoint-Handleiding.md) — Nederlandstalige eindgebruikersdocumentatie om aan de klant te geven: de drie manieren om een bestand toe te voegen en waarom ze zich anders gedragen, wat elk label betekent, en wat er gebeurt op het moment dat je iets tagt
+- Merkoverstijgende weergaven (`Scope = RecursiveAll`) maken "merk als tag" echt: *Alles - Northwind* is één platte lijst over elke pijlermap heen, inclusief alles met de tag **Beide** — één bestand, twee merken, geen kopieën. Plus *Nog te taggen*, *Extern gedeeld* en *Te archiveren*
+- [`SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/SharePoint-Handleiding.md) — Nederlandstalige eindgebruikersdocumentatie om aan de klant te geven: de drie manieren om een bestand toe te voegen en waarom ze zich anders gedragen, wat elk label betekent, en wat er gebeurt op het moment dat je iets tagt
 - Gedocumenteerd in plaats van verstopt: unieke rechten op een map van een **standaard**kanaal zijn wat dit model vraagt en wat Microsoft niet ondersteunt — leden blijven het kanaal zien en krijgen een fout op het tabblad Bestanden. `-SkipChannelFolderPermissions` is het voorzichtige alternatief
 
 ---
@@ -804,8 +804,8 @@ M365-Scripts/
     │   ├── Test-SharePointAccessScripts.ps1 ← de twee toegangsscripts verifiëren zonder tenant (gedeeld auth-blok + intrekkingstrechter)
     │   └── Provisioning/                ← een complete structuur inrichten vanuit één JSON-config (PnP + Graph)
     │       ├── readme.md
-    │       ├── Petsolutions-SharePoint-Handleiding.md ← eindgebruikershandleiding (NL) om aan de klant te geven
-    │       ├── petsolutions.config.json     ← het model: kolommen, inhoudstypen, groepen, bibliotheken, weergaven, rechten
+    │       ├── SharePoint-Handleiding.md      ← eindgebruikershandleiding (NL) om aan de klant te geven (sjabloon)
+    │       ├── example.config.json          ← voorbeeldmodel (`CHANGEME`) — klantconfigs ernaast worden door git genegeerd
     │       ├── Install-SharePointStructure.ps1 ← alles in één run opbouwen, incl. (tijdelijke) app-registratie
     │       ├── SharePointStructure.Common.ps1 ← gedeelde helpers (gedot-sourcet door alle vier)
     │       ├── New-SharePointMetadata.ps1   ← termenset, sitekolommen, inhoudstypen (elke site in de config)
@@ -917,6 +917,15 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-05 (5)
+| Wijziging |
+|--------|
+| `SharePoint/Provisioning/` noemde zich klantneutraal, maar leverde de volledige configuratie van één klant mee (tenant, eigenaar, site-URL's, groepen), een handleiding die voor een andere geschreven was, en vijf scripts waarvan de standaard `-ConfigPath` een configbestand met een klantnaam was dat niet bestond — zonder `-ConfigPath` faalden ze dus op een ontbrekend bestand |
+| De klantconfig is vervangen door `example.config.json`: hetzelfde model met Contoso-namen en `CHANGEME` in de tenant, de eigenaar en de site-URL's. Klantconfigs (`<klant>.config.json`) staan ernaast maar worden door git genegeerd, dus een bestaande blijft lokaal werken en wordt niet meer gepubliceerd |
+| Nieuwe `Resolve-StructureConfigPath` in `SharePointStructure.Common.ps1`: zonder `-ConfigPath` nemen de vijf scripts nu de ene `*.config.json` waarin geen `CHANGEME` meer staat — de regel die `Install-SharePointStructure.ps1`, `Remove-SharePointStructure.ps1` en `Sync-SharePointChannelMember.ps1` al volgden. `menu.ps1` zegt dat in de vraag in plaats van een bestand te noemen |
+| De handleiding hernoemd naar `SharePoint-Handleiding.md` en omgezet naar een sjabloon (Contoso NV, merken Northwind en Fabrikam, met een notitie om ze te vervangen). `New-StructureConfig.ps1` stelt niet langer de naam en merken van één klant als standaard voor; voorbeelden en readmes gebruiken Contoso. Interne kolomnamen (`PsMerk`, …) zijn ongewijzigd — die staan in elke config en in sites die al gebouwd zijn |
+| Geverifieerd: syntaxcontrole op de map en `menu.ps1`; het voorbeeld laadt foutloos zodra `CHANGEME` is ingevuld en wordt zoals geleverd geweigerd; de resolver kiest de ene ingevulde config en slaat het voorbeeld over. Niet tegen een tenant gedraaid |
 
 ### 2026-10-05 (4)
 | Wijziging |

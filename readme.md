@@ -369,8 +369,8 @@ Provision and maintain a whole SharePoint structure — metadata model, content 
 - `Update-SharePointShareStatus.ps1` — derives a Deelstatus column from the permissions actually on each file (Anyone link, guest, organisation link, or nothing) and flags anything tagged Intern/Vertrouwelijk sitting behind an external link; exit code 2 for a scheduled RMM job
 - `Test-SharePointStructure.ps1` — read-only drift check classifying every difference as Missing / Different / Extra; exit code 2 means somebody changed something
 - All four are idempotent and support `-WhatIf`; interactive or app-only with a certificate
-- Cross-cutting brand views (`Scope = RecursiveAll`) make "brand as a tag" real: *Alles - Butterstone* is one flat list across every pillar folder, including everything tagged **Beide** — one file, two brands, no copies. Plus *Nog te taggen*, *Extern gedeeld* and *Te archiveren*
-- [`Petsolutions-SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/Petsolutions-SharePoint-Handleiding.md) — end-user documentation in Dutch to hand to the customer: the three ways of adding a file and why they behave differently, what each label means, and what happens the moment you tag something
+- Cross-cutting brand views (`Scope = RecursiveAll`) make "brand as a tag" real: *Alles - Northwind* is one flat list across every pillar folder, including everything tagged **Beide** — one file, two brands, no copies. Plus *Nog te taggen*, *Extern gedeeld* and *Te archiveren*
+- [`SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/SharePoint-Handleiding.md) — end-user documentation in Dutch to hand to the customer: the three ways of adding a file and why they behave differently, what each label means, and what happens the moment you tag something
 - Documented rather than hidden: unique permissions on a **standard**-channel folder are what this model asks for and what Microsoft does not support — members keep seeing the channel and get an error on the Files tab. `-SkipChannelFolderPermissions` is the conservative alternative
 
 ---
@@ -804,8 +804,8 @@ M365-Scripts/
     │   ├── Test-SharePointAccessScripts.ps1 ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── Provisioning/                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── readme.md
-    │       ├── Petsolutions-SharePoint-Handleiding.md ← end-user guide (NL) to hand to the customer
-    │       ├── petsolutions.config.json     ← the model: columns, content types, groups, libraries, views, permissions
+    │       ├── SharePoint-Handleiding.md      ← end-user guide (NL) to hand to the customer (template)
+    │       ├── example.config.json          ← example model (`CHANGEME`) — client configs next to it are git-ignored
     │       ├── Install-SharePointStructure.ps1 ← build it all in one run, incl. (temporary) app registration
     │       ├── SharePointStructure.Common.ps1 ← shared helpers (dot-sourced by all four)
     │       ├── New-SharePointMetadata.ps1   ← term set, site columns, content types (every site in the config)
@@ -917,6 +917,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-05 (5)
+| Change |
+|--------|
+| `SharePoint/Provisioning/` said it was client-neutral but shipped one client's complete configuration (tenant, owner, site URLs, groups), a user guide written for another, and five scripts whose default `-ConfigPath` was a client-named config file that did not exist — so running them without `-ConfigPath` failed on a missing file |
+| The client config is replaced by `example.config.json`: the same model with Contoso names and `CHANGEME` in the tenant, owner and site URLs. Client configs (`<client>.config.json`) stay next to it but are git-ignored, so an existing one keeps working locally and is no longer published |
+| New `Resolve-StructureConfigPath` in `SharePointStructure.Common.ps1`: with no `-ConfigPath` the five scripts now take the one `*.config.json` there that no longer contains `CHANGEME` — the rule `Install-SharePointStructure.ps1`, `Remove-SharePointStructure.ps1` and `Sync-SharePointChannelMember.ps1` already used. `menu.ps1` says so in its prompt instead of naming a file |
+| The user guide renamed to `SharePoint-Handleiding.md` and turned into a template (Contoso NV, brands Northwind and Fabrikam, with a note to replace them). `New-StructureConfig.ps1` no longer suggests one client's name and brands as defaults; examples and readmes use Contoso. Internal column names (`PsMerk`, …) are unchanged — they live in each config and in sites already built |
+| Verified: syntax check on the folder and `menu.ps1`; the example imports cleanly once `CHANGEME` is filled in and is refused as shipped; the resolver picks the one filled-in config and skips the example. No run against a tenant |
 
 ### 2026-10-05 (4)
 | Change |

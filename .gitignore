@@ -14,3 +14,7 @@ id_*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Customer structure configs stay out of the repo; only the example is shipped
+scripts/SharePoint/Provisioning/*.config.json
+!scripts/SharePoint/Provisioning/example.config.json

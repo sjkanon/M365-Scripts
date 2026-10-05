@@ -824,7 +824,7 @@ $menu = @(
             Write-Host '  6  Cleanup       — remove what was built (reports only unless you confirm)' -ForegroundColor DarkYellow
             Write-Host ''
             $step   = Read-Host '  Step [0-6]'
-            $config = Read-Host '  Config file [petsolutions.config.json]'
+            $config = Read-Host '  Config file [Enter = the one filled-in *.config.json]'
 
             $script = switch ($step) {
                 '0'     { 'Install-SharePointStructure.ps1' }

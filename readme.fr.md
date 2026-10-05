@@ -369,8 +369,8 @@ Provisionner et maintenir toute une structure SharePoint — modèle de métadon
 - `Update-SharePointShareStatus.ps1` — déduit une colonne Deelstatus des autorisations réellement présentes sur chaque fichier (lien Anyone, invité, lien d'organisation ou rien) et signale tout élément étiqueté Intern/Vertrouwelijk exposé derrière un lien externe ; code de sortie 2 pour une tâche RMM planifiée
 - `Test-SharePointStructure.ps1` — contrôle de dérive en lecture seule qui classe chaque écart comme Missing / Different / Extra ; le code de sortie 2 signifie que quelqu'un a modifié quelque chose
 - Les quatre sont idempotents et prennent en charge `-WhatIf` ; en interactif ou en app-only avec un certificat
-- Les affichages transversaux par marque (`Scope = RecursiveAll`) rendent concrète l'idée de « la marque comme étiquette » : *Alles - Butterstone* est une liste à plat couvrant tous les dossiers de piliers, y compris tout ce qui est étiqueté **Beide** — un fichier, deux marques, aucune copie. Plus *Nog te taggen*, *Extern gedeeld* et *Te archiveren*
-- [`Petsolutions-SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/Petsolutions-SharePoint-Handleiding.md) — documentation utilisateur en néerlandais à remettre au client : les trois façons d'ajouter un fichier et pourquoi elles se comportent différemment, ce que signifie chaque étiquette, et ce qui se passe dès que vous étiquetez quelque chose
+- Les affichages transversaux par marque (`Scope = RecursiveAll`) rendent concrète l'idée de « la marque comme étiquette » : *Alles - Northwind* est une liste à plat couvrant tous les dossiers de piliers, y compris tout ce qui est étiqueté **Beide** — un fichier, deux marques, aucune copie. Plus *Nog te taggen*, *Extern gedeeld* et *Te archiveren*
+- [`SharePoint-Handleiding.md`](scripts/SharePoint/Provisioning/SharePoint-Handleiding.md) — documentation utilisateur en néerlandais à remettre au client : les trois façons d'ajouter un fichier et pourquoi elles se comportent différemment, ce que signifie chaque étiquette, et ce qui se passe dès que vous étiquetez quelque chose
 - Documenté plutôt que caché : des autorisations uniques sur un dossier de canal **standard**, c'est ce que ce modèle demande et ce que Microsoft ne prend pas en charge — les membres continuent de voir le canal et obtiennent une erreur dans l'onglet Fichiers. `-SkipChannelFolderPermissions` est l'alternative prudente
 
 ---
@@ -804,8 +804,8 @@ M365-Scripts/
     │   ├── Test-SharePointAccessScripts.ps1 ← vérifier les deux scripts d'accès sans tenant (bloc d'authentification partagé + entonnoir de révocation)
     │   └── Provisioning/                ← provisionner toute une structure à partir d'une seule config JSON (PnP + Graph)
     │       ├── readme.md
-    │       ├── Petsolutions-SharePoint-Handleiding.md ← guide utilisateur (NL) à remettre au client
-    │       ├── petsolutions.config.json     ← le modèle : colonnes, types de contenu, groupes, bibliothèques, affichages, autorisations
+    │       ├── SharePoint-Handleiding.md      ← guide utilisateur (NL) à remettre au client (gabarit)
+    │       ├── example.config.json          ← modèle d'exemple (`CHANGEME`) — les configurations client à côté sont ignorées par git
     │       ├── Install-SharePointStructure.ps1 ← tout construire en une exécution, y compris l'inscription d'application (temporaire)
     │       ├── SharePointStructure.Common.ps1 ← fonctions d'aide partagées (chargées en dot-source par les quatre)
     │       ├── New-SharePointMetadata.ps1   ← ensemble de termes, colonnes de site, types de contenu (chaque site de la config)
@@ -917,6 +917,15 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-05 (5)
+| Modification |
+|--------|
+| `SharePoint/Provisioning/` se disait neutre vis-à-vis des clients, mais livrait la configuration complète d'un client (tenant, propriétaire, URL de sites, groupes), un guide utilisateur écrit pour un autre, et cinq scripts dont le `-ConfigPath` par défaut était un fichier de configuration au nom d'un client, inexistant — sans `-ConfigPath`, ils échouaient donc sur un fichier manquant |
+| La configuration client est remplacée par `example.config.json` : le même modèle avec des noms Contoso et `CHANGEME` dans le tenant, le propriétaire et les URL des sites. Les configurations client (`<client>.config.json`) restent à côté mais sont ignorées par git : une configuration existante continue de fonctionner localement et n'est plus publiée |
+| Nouvelle fonction `Resolve-StructureConfigPath` dans `SharePointStructure.Common.ps1` : sans `-ConfigPath`, les cinq scripts prennent désormais l'unique `*.config.json` qui ne contient plus `CHANGEME` — la règle que suivaient déjà `Install-SharePointStructure.ps1`, `Remove-SharePointStructure.ps1` et `Sync-SharePointChannelMember.ps1`. `menu.ps1` l'indique dans sa question au lieu de nommer un fichier |
+| Le guide utilisateur renommé en `SharePoint-Handleiding.md` et transformé en gabarit (Contoso NV, marques Northwind et Fabrikam, avec une note invitant à les remplacer). `New-StructureConfig.ps1` ne propose plus le nom et les marques d'un client comme valeurs par défaut ; exemples et readmes utilisent Contoso. Les noms internes des colonnes (`PsMerk`, …) sont inchangés — ils figurent dans chaque configuration et dans les sites déjà construits |
+| Vérifié : contrôle de syntaxe du dossier et de `menu.ps1` ; l'exemple se charge sans erreur une fois `CHANGEME` renseigné et est refusé tel que livré ; le résolveur choisit l'unique configuration renseignée et ignore l'exemple. Aucune exécution sur un tenant |
 
 ### 2026-10-05 (4)
 | Modification |
