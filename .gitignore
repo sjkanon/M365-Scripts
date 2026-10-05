@@ -10,3 +10,7 @@ id_*
 *.pem
 *.key
 *.pub
+
+# Python bytecode
+__pycache__/
+*.pyc
