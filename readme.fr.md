@@ -814,7 +814,7 @@ M365-Scripts/
     │       └── Test-SharePointStructure.ps1 ← contrôle de dérive en lecture seule par rapport à la config (exit 2)
     ├── Teams/
     │   ├── readme.md
-    │   └── vias_archiver.ps1        ← export + archivage Teams/SharePoint (Graph, PS7+, Global Admin)
+    │   └── Invoke-TeamsArchive.ps1  ← export + archivage Teams/SharePoint (Graph, PS7+, Global Admin)
     ├── Reporting/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← dernière connexion par ordinateur dans une ou plusieurs OU, export CSV
@@ -917,6 +917,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que `Custom Scripts/` et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-05 (6)
+| Modification |
+|--------|
+| `scripts/Teams/vias_archiver.ps1` renommé en `Invoke-TeamsArchive.ps1`, et débarrassé d'un client : les titres de l'assistant, les invites pour le tenant et le compte admin, l'URL SharePoint d'exemple, le nom de l'application temporaire, les fichiers temporaires, le nom du dossier eDiscovery et le nom du rapport citaient tous ce client, et le fichier Excel et le dossier d'archive par défaut pointaient vers son propre fichier et son lecteur réseau. Les valeurs par défaut sont désormais `C:\Temp\Teams_Channels.xlsx` et `C:\Temp\Teams_Archive` |
+| La feuille Excel était lue via un nom de feuille codé en dur au nom du client. Nouveau `-WorksheetName` ; sans lui, la première feuille est lue. La variable d'environnement de redémarrage est renommée avec le script |
+| Le readme Teams a reçu la table `## Scripts` qui lui manquait, le nouveau paramètre et les colonnes requises dans le fichier Excel. Absent de `menu.ps1`, donc rien à renommer là |
+| Vérifié : contrôle de syntaxe et recherche des noms de client restants. Non exécuté sur un tenant |
 
 ### 2026-10-05 (5)
 | Modification |

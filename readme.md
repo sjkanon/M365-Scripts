@@ -814,7 +814,7 @@ M365-Scripts/
     │       └── Test-SharePointStructure.ps1 ← read-only drift check vs the config (exit 2)
     ├── Teams/
     │   ├── readme.md
-    │   └── vias_archiver.ps1        ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
+    │   └── Invoke-TeamsArchive.ps1  ← Teams/SharePoint export + archiving (Graph, PS7+, Global Admin)
     ├── Reporting/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← last logon per computer in OU(s), export to CSV
@@ -917,6 +917,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as `Custom Scripts/` and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-05 (6)
+| Change |
+|--------|
+| Renamed `scripts/Teams/vias_archiver.ps1` to `Invoke-TeamsArchive.ps1` and took one customer out of it: the wizard titles, the prompts for tenant and admin account, the example SharePoint URL, the temporary app name, the temp files, the eDiscovery case name and the report file name all named that customer, and the default Excel file and archive folder pointed at its own file and network drive. The defaults are now `C:\Temp\Teams_Channels.xlsx` and `C:\Temp\Teams_Archive` |
+| The Excel worksheet was read by a hardcoded, customer-named sheet. New `-WorksheetName`; without it the first worksheet is read. The restart marker environment variable is renamed with the script |
+| The Teams readme gained the `## Scripts` table it lacked, the new parameter, and the columns the Excel file needs. Not in `menu.ps1`, so nothing to rename there |
+| Verified: syntax check and a search for remaining customer names. Not run against a tenant |
 
 ### 2026-10-05 (5)
 | Change |

@@ -814,7 +814,7 @@ M365-Scripts/
     │       └── Test-SharePointStructure.ps1 ← alleen-lezen driftcontrole t.o.v. de config (exit 2)
     ├── Teams/
     │   ├── readme.md
-    │   └── vias_archiver.ps1        ← export + archivering van Teams/SharePoint (Graph, PS7+, Global Admin)
+    │   └── Invoke-TeamsArchive.ps1  ← export + archivering van Teams/SharePoint (Graph, PS7+, Global Admin)
     ├── Reporting/
     │   ├── readme.md
     │   ├── Get-ComputerLastLogon.ps1        ← laatste aanmelding per computer in OU('s), export naar CSV
@@ -917,6 +917,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals `Custom Scripts/` en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-05 (6)
+| Wijziging |
+|--------|
+| `scripts/Teams/vias_archiver.ps1` hernoemd naar `Invoke-TeamsArchive.ps1` en er één klant uit gehaald: de wizardtitels, de vragen naar tenant en admin-account, de voorbeeld-SharePoint-URL, de naam van de tijdelijke app, de tijdelijke bestanden, de naam van de eDiscovery-case en de bestandsnaam van het rapport noemden allemaal die klant, en het standaard-Excel-bestand en de archiefmap wezen naar diens eigen bestand en netwerkschijf. De standaardwaarden zijn nu `C:\Temp\Teams_Channels.xlsx` en `C:\Temp\Teams_Archive` |
+| Het Excel-werkblad werd gelezen via een hardcoded werkblad met de klantnaam. Nieuwe `-WorksheetName`; zonder wordt het eerste werkblad gelezen. De omgevingsvariabele voor de herstart is mee hernoemd |
+| De Teams-readme kreeg de `## Scripts`-tabel die ontbrak, de nieuwe parameter en de kolommen die het Excel-bestand nodig heeft. Staat niet in `menu.ps1`, dus daar valt niets te hernoemen |
+| Geverifieerd: syntaxcontrole en een zoektocht naar resterende klantnamen. Niet tegen een tenant gedraaid |
 
 ### 2026-10-05 (5)
 | Wijziging |

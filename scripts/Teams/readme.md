@@ -10,7 +10,13 @@ Microsoft Teams / SharePoint export and archiving tooling.
 
 ## Scripts
 
-### vias_archiver.ps1
+| Script | Description |
+|--------|-------------|
+| [`Invoke-TeamsArchive.ps1`](Invoke-TeamsArchive.ps1) ([docs](#invoke-teamsarchiveps1)) | Runs a Teams/SharePoint export and archiving flow for a list of teams and channels read from Excel |
+
+---
+
+### Invoke-TeamsArchive.ps1
 
 Teams archiver with Graph, Teams and SharePoint export flow. PowerShell 7+ required, run as Global Admin.
 
@@ -24,6 +30,9 @@ Teams archiver with Graph, Teams and SharePoint export flow. PowerShell 7+ requi
 | `-ChannelArchiveTag` | Marker text used for the rename fallback (default: `[ARCHIEF]`) |
 | `-ChannelFallbackToRename` | Fall back to a rename marker if the Graph archive/unarchive API call fails |
 | `-DryRun` | Simulate — keeps full auth/bootstrap and validates Steps 6-9 by probing counts, without writing exports or mutating archive state |
+| `-WorksheetName` | Worksheet holding the team list. Default: the first worksheet of the Excel file |
+
+The Excel file needs the columns `TeamName`, `ChannelName` and `Archive` (rows with `Archive` = `Archive` are processed). Nothing in the script is tied to one customer: the tenant ID, SharePoint URL, Excel file and archive folder are asked by the setup wizard (defaults `C:\Temp\Teams_Channels.xlsx` and `C:\Temp\Teams_Archive`).
 
 Current behavior (v8.19):
 - Creates a unique temporary Entra app registration for the run.
