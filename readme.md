@@ -966,6 +966,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-05 (15)
+| Change |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) also checks PDFs against Adobe's limit.** Acrobat and Reader cannot open a PDF whose path is longer than 255 characters — notably from a synced or network folder, where Adobe's 2021 fix does not always help — so a PDF between 256 and 259 local characters passed the Windows check yet would not open. Such a file is now marked `Adobe (255)` in the long paths CSV, the console and the Markdown report. Documented in the [Reporting readme](scripts/Reporting/readme.md#long-paths-windows-limits) |
+| Verified: syntax check; the measuring function run on PDFs of 255, 256, 259 and 260 local characters — nothing, `Adobe (255)`, `Adobe (255)` and `Windows (260)`. Not run against a live tenant |
+
 ### 2026-10-05 (14)
 | Change |
 |--------|

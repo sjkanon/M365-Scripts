@@ -24,7 +24,8 @@
       limit of 400 characters. The local path the OneDrive sync client would create, e.g.
       C:\Users\<user>\<Organisation>\<Site> - <Library>\<folders>\<file>, is checked
       against Windows MAX_PATH (260 including the terminating null, so 259 usable) and, for
-      Excel workbooks, Excel's limit of 218. The local path is an estimate: its length
+      Excel workbooks, Excel's limit of 218 and, for PDFs, Adobe Acrobat/Reader's 255.
+      The local path is an estimate: its length
       depends on the user's profile folder and the organisation name. By default the profile
       folder is that of the user with the longest UPN in the tenant, so a path that fits for
       them fits for everyone; -SyncProfilePath and -OrganizationName override both.
@@ -967,11 +968,12 @@ function Get-SiteCollectionKey {
 $script:SharePointMaxPath = 400   # decoded server-relative path, including the file name
 $script:WindowsMaxPath    = 259   # MAX_PATH is 260 including the terminating null
 $script:ExcelMaxPath      = 218   # Excel refuses to open or save a workbook beyond this
+$script:AdobeMaxPath      = 255   # Acrobat/Reader cannot open a PDF beyond this, notably from a synced/network folder
 
 function Get-LongPathRows {
     # Measures every file and folder of one library twice: the SharePoint path against
     # SharePoint's 400, and the local path the OneDrive sync client would create against
-    # Windows' 259 (and Excel's 218 for workbooks). Returns only the items at or above
+    # Windows' 259 (and Excel's 218 for workbooks, Adobe's 255 for PDFs). Returns only the items at or above
     # -LongPathThreshold locally or over any limit, so a large tenant does not keep every
     # path in memory just to report the long ones.
     param(
@@ -1002,10 +1004,12 @@ function Get-LongPathRows {
         $localLen   = $localPath.Length
         $serverLen  = $serverPath.Length
         $isExcel    = ($item.ItemType -eq 'File') -and ($item.Path -match '\.xl[st][xmb]?$')
+        $isPdf      = ($item.ItemType -eq 'File') -and ($item.Path -match '\.pdf$')
 
         $limit = if ($serverLen -gt $script:SharePointMaxPath) { "SharePoint ($script:SharePointMaxPath)" }
                  elseif ($localLen -gt $script:WindowsMaxPath)  { "Windows ($($script:WindowsMaxPath + 1))" }
                  elseif ($isExcel -and $localLen -gt $script:ExcelMaxPath) { "Excel ($script:ExcelMaxPath)" }
+                 elseif ($isPdf -and $localLen -gt $script:AdobeMaxPath)   { "Adobe ($script:AdobeMaxPath)" }
                  else { '' }
 
         if (-not $limit -and $localLen -lt $LongPathThreshold) { continue }
@@ -2944,8 +2948,8 @@ if ($Apply -and $detailRows.Count -gt 0) {
             $mdLines.Add('')
             $mdLines.Add('## Top 10 langste paden')
             $mdLines.Add('')
-            $mdLines.Add(("Lokaal pad gemeten als ``{0}\{1}\<site> - <library>\...``. Limieten: SharePoint {2}, Windows {3}, Excel {4} tekens." -f
-                $script:SyncProfileRoot.TrimEnd('\'), $syncOrgName, $script:SharePointMaxPath, ($script:WindowsMaxPath + 1), $script:ExcelMaxPath))
+            $mdLines.Add(("Lokaal pad gemeten als ``{0}\{1}\<site> - <library>\...``. Limieten: SharePoint {2}, Windows {3}, Excel {4}, Adobe (PDF) {5} tekens." -f
+                $script:SyncProfileRoot.TrimEnd('\'), $syncOrgName, $script:SharePointMaxPath, ($script:WindowsMaxPath + 1), $script:ExcelMaxPath, $script:AdobeMaxPath))
             $mdLines.Add('')
             $mdLines.Add('| # | Lokaal | SharePoint | Over limiet | Library | Pad | Site |')
             $mdLines.Add('|---|-------:|-----------:|-------------|---------|-----|------|')
@@ -3046,7 +3050,7 @@ if ($Apply) {
     if ($longPathRows.Count -eq 0) {
         Write-ProgressHost -Message ("No paths of {0}+ characters." -f $LongPathThreshold) -ForegroundColor Green
     } else {
-        foreach ($limitName in "SharePoint ($script:SharePointMaxPath)", "Windows ($($script:WindowsMaxPath + 1))", "Excel ($script:ExcelMaxPath)") {
+        foreach ($limitName in "SharePoint ($script:SharePointMaxPath)", "Windows ($($script:WindowsMaxPath + 1))", "Excel ($script:ExcelMaxPath)", "Adobe ($script:AdobeMaxPath)") {
             $overCount = @($longPathRows | Where-Object { $_.OverLimit -eq $limitName }).Count
             Write-ProgressHost -Message ("Over {0,-17}: {1}" -f $limitName, $overCount) -ForegroundColor $(if ($overCount) { 'Yellow' } else { 'Green' })
         }

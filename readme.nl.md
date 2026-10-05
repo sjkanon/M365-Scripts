@@ -966,6 +966,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-05 (15)
+| Wijziging |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) toetst pdf's nu ook aan de limiet van Adobe.** Acrobat en Reader openen geen pdf waarvan het pad langer is dan 255 tekens — vooral vanuit een gesynchroniseerde of netwerkmap, waar de fix van Adobe uit 2021 niet altijd helpt — dus een pdf van 256 tot 259 lokale tekens kwam door de Windows-controle maar ging niet open. Zo'n bestand wordt nu gemarkeerd als `Adobe (255)` in de CSV met lange paden, de console en het Markdown-rapport. Beschreven in de [Reporting-readme](scripts/Reporting/readme.nl.md#lange-paden-windows-limieten) |
+| Geverifieerd: syntaxcontrole; de meetfunctie gedraaid op pdf's van 255, 256, 259 en 260 lokale tekens — niets, `Adobe (255)`, `Adobe (255)` en `Windows (260)`. Niet tegen een live tenant gedraaid |
+
 ### 2026-10-05 (14)
 | Wijziging |
 |--------|

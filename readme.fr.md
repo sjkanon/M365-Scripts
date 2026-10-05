@@ -966,6 +966,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-05 (15)
+| Modification |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) compare désormais aussi les PDF à la limite d'Adobe.** Acrobat et Reader n'ouvrent pas un PDF dont le chemin dépasse 255 caractères — notamment depuis un dossier synchronisé ou réseau, où le correctif d'Adobe de 2021 n'aide pas toujours — de sorte qu'un PDF de 256 à 259 caractères locaux passait le contrôle Windows sans pouvoir être ouvert. Un tel fichier est maintenant signalé `Adobe (255)` dans le CSV des chemins longs, la console et le rapport Markdown. Documenté dans le [readme Reporting](scripts/Reporting/readme.fr.md#chemins-longs-limites-windows) |
+| Vérifié : contrôle de syntaxe ; la fonction de mesure exécutée sur des PDF de 255, 256, 259 et 260 caractères locaux — rien, `Adobe (255)`, `Adobe (255)` et `Windows (260)`. Pas exécuté sur un tenant réel |
+
 ### 2026-10-05 (14)
 | Modification |
 |--------|
