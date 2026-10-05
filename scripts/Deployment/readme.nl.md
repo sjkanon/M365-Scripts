@@ -15,6 +15,7 @@ Een USB-toolkit voor Windows-installatie en Autopilot-inschrijving. Ontworpen om
 | Script | Omschrijving |
 |--------|--------------|
 | [`start.bat`](start.bat) ([docs](#startbat)) | Hoofdmenu van de toolkit — vraagt zelf om beheerdersrechten en biedt Autopilot-inschrijving, Windows Update, hernoemen, domeinlidmaatschap en de browser voor klantinstallaties |
+| [`start.local.example.cmd`](start.local.example.cmd) ([docs](#startlocalcmd)) | Sjabloon voor `start.local.cmd` — het LocalAdmin-wachtwoord en de install-share van de site, buiten de repo gehouden |
 | [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Interactieve browser voor klanten en scripts achter menuopties `D` en `E` — door klantmappen bladeren en `.ps1`- / `.bat`- / `.cmd`-bestanden starten |
 
 Ook in deze map: [`autorun.inf`](autorun.inf) — alleen het label van de USB-stick ([details](#autoruninf)).
@@ -28,6 +29,7 @@ Alle bestanden moeten in **dezelfde map** op de USB-stick staan:
 ```
 USB:\
 ├── start.bat                      ← Hoofdmenu — voer dit uit
+├── start.local.cmd                ← Instellingen van de site: LocalAdmin-wachtwoord, install-share (niet in de repo)
 ├── GetAutoPilot.CMD               ← Script voor Autopilot-inschrijving
 ├── Get-WindowsAutoPilotInfo.ps1   ← PowerShell-module voor de hardwarehash
 ├── Browse-InstallScripts.ps1       ← Browser voor klantinstallaties voor optie D/E
@@ -78,7 +80,7 @@ Het hoofdmenu van de toolkit. Het wisselt naar de eigen map (`cd /d %~dp0`), vra
 | `B` | **Apparaat hernoemen** — vraagt om een prefix en voegt het serienummer toe (`PREFIX-SERIALNUMBER`) | ✅ |
 | `C` | **Alles in één — AD** — Hernoemen + domeinlidmaatschap + Windows Update + herstarten | ✅ (domeinconnectiviteit nodig) |
 | `D` | **Installatiescripts per klant (lokaal)** — klantmenu openen vanuit de lokale map `Install` | ✅ |
-| `E` | **Installatiescripts per klant (netwerkshare)** — klantmenu openen vanuit `\\10.222.3.94\Software` | ✅ (netwerktoegang nodig) |
+| `E` | **Installatiescripts per klant (netwerkshare)** — klantmenu openen vanuit de share in `INSTALL_SHARE` (gevraagd als die niet is ingesteld) | ✅ (netwerktoegang nodig) |
 | `0` | Afsluiten | ✅ |
 
 ### Browse-InstallScripts.ps1
@@ -96,12 +98,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 
 ```
 
 - Optie `D` heeft lokale bestanden nodig: `Browse-InstallScripts.ps1` en de volledige map `Install` naast `start.bat`.
-- Optie `E` leest klantmappen uit `\\10.222.3.94\Software` en heeft netwerktoegang nodig.
+- Optie `E` leest klantmappen uit de share in `INSTALL_SHARE` (uit [`start.local.cmd`](#startlocalcmd), anders gevraagd) en heeft netwerktoegang nodig.
 - Voordat optie `D` of `E` de deploybrowser opent, bereidt `start.bat` het apparaat voor op de uitrol:
    - Maakt de lokale admingebruiker `LocalAdmin` aan of werkt die bij
-   - Wachtwoord: `<wachtwoord weggelaten>`
+   - Wachtwoord: `LOCALADMIN_PASSWORD` uit [`start.local.cmd`](#startlocalcmd), anders verborgen gevraagd. Geen wachtwoord, geen account: de optie stopt en het menu komt terug
    - Voegt `LocalAdmin` toe aan de lokale groep `Administrators`
    - Zet registervlaggen om OOBE over te slaan, zodat de rest van de OOBE-flow makkelijker kan worden overgeslagen
+
+### start.local.cmd
+
+Instellingen die bij de site horen en niet in de repo thuishoren. `start.bat` laadt het uit zijn eigen map als het bestaat; kopieer [`start.local.example.cmd`](start.local.example.cmd) naar `start.local.cmd` op de USB-stick en vul het in. `start.local.cmd` wordt door git genegeerd.
+
+| Variabele | Omschrijving |
+|-----------|-------------|
+| `LOCALADMIN_PASSWORD` | Wachtwoord voor het `LocalAdmin`-account dat optie `D` en `E` aanmaken. Leeg of ontbrekend: verborgen gevraagd. Vermijd `%` — batch vervangt dat |
+| `INSTALL_SHARE` | UNC-pad van de install-share voor klanten bij optie `E`, bv. `\\server\Software`. Leeg of ontbrekend: gevraagd wanneer optie `E` gekozen wordt |
 
 ### Autopilot online (optie 4)
 
@@ -142,7 +153,8 @@ Zet het label van de USB-stick op `Setup Toolkit` wanneer die wordt ingestoken. 
 
 | Datum | Versie | Wijziging |
 |---|---|---|
-| 2026-04-17 | 2.9 | Browser voor installaties per klant toegevoegd aan `start.bat`: optie `D` opent de lokale klantmappen in `Install` en optie `E` opent `\\10.222.3.94\Software`; `Browse-InstallScripts.ps1` toegevoegd om door klantmappen te bladeren en `.ps1`- / `.bat`- / `.cmd`-scripts uit te voeren; gedocumenteerd dat voor optie `D` zowel `Browse-InstallScripts.ps1` als de volledige map `Install` gekopieerd moeten worden; opties `D` en `E` maken nu de lokale admin `LocalAdmin` (`<wachtwoord weggelaten>`) aan of werken die bij, en zetten OOBE-overslaanvlaggen voordat de uitrol begint |
+| 2026-10-05 | 3.0 | Het LocalAdmin-wachtwoord en het adres van de install-share staan niet meer in `start.bat`: ze komen uit `start.local.cmd` (door git genegeerd) en worden gevraagd als dat ontbreekt — het wachtwoord verborgen. Zonder wachtwoord stoppen optie `D`/`E` in plaats van een account aan te maken. `start.local.example.cmd` toegevoegd |
+| 2026-04-17 | 2.9 | Browser voor installaties per klant toegevoegd aan `start.bat`: optie `D` opent de lokale klantmappen in `Install` en optie `E` opent een netwerkshare; `Browse-InstallScripts.ps1` toegevoegd om door klantmappen te bladeren en `.ps1`- / `.bat`- / `.cmd`-scripts uit te voeren; gedocumenteerd dat voor optie `D` zowel `Browse-InstallScripts.ps1` als de volledige map `Install` gekopieerd moeten worden; opties `D` en `E` maken nu de lokale admin `LocalAdmin` (`<wachtwoord weggelaten>`) aan of werken die bij, en zetten OOBE-overslaanvlaggen voordat de uitrol begint |
 
 | Datum | Versie | Wijziging |
 |---|---|---|

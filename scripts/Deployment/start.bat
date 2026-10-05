@@ -22,6 +22,11 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+:: Site-specific settings (LocalAdmin password, install share) live in
+:: start.local.cmd next to this script - never in the repo. See start.local.example.cmd.
+:: Loaded after elevation, so the elevated instance is the one that has them.
+IF EXIST "%~dp0start.local.cmd" CALL "%~dp0start.local.cmd"
+
 :MENU
 CLS
 ECHO.
@@ -43,7 +48,7 @@ ECHO   A  - DO IT ALL - Intune (Rename + Autopilot online + Update + Restart)
 ECHO   B  - Rename this device (NAME-SERIALNUMBER)
 ECHO   C  - DO IT ALL - AD (Rename + Domain join + Update + Restart)
 ECHO   D  - Klant install scripts (lokale Install map)
-ECHO   E  - Klant install scripts (network share \\10.222.3.94\Software)
+IF DEFINED INSTALL_SHARE (ECHO   E  - Klant install scripts ^(network share %INSTALL_SHARE%^)) ELSE (ECHO   E  - Klant install scripts ^(network share - pad wordt gevraagd^))
 ECHO.
 ECHO   0  - Exit
 ECHO.
@@ -275,9 +280,19 @@ ECHO   - Gebruiker wordt toegevoegd aan lokale Administrators
 ECHO   - OOBE skip instellingen worden klaargezet
 ECHO.
 
-net user LocalAdmin "Er@smus_Roter0" /add >nul 2>&1
+:: No password in this file: from start.local.cmd, otherwise asked (hidden input).
+IF NOT DEFINED LOCALADMIN_PASSWORD (
+    FOR /F "usebackq delims=" %%P IN (`powershell -NoProfile -Command "$s = Read-Host '  Wachtwoord voor LocalAdmin' -AsSecureString; [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))"`) DO SET "LOCALADMIN_PASSWORD=%%P"
+)
+IF NOT DEFINED LOCALADMIN_PASSWORD (
+    ECHO   Geen wachtwoord opgegeven - LocalAdmin wordt niet aangemaakt.
+    ECHO.
+    EXIT /B 1
+)
+
+net user LocalAdmin "%LOCALADMIN_PASSWORD%" /add >nul 2>&1
 if %errorlevel% neq 0 (
-    net user LocalAdmin "Er@smus_Roter0" >nul 2>&1
+    net user LocalAdmin "%LOCALADMIN_PASSWORD%" >nul 2>&1
 )
 
 net user LocalAdmin /active:yes >nul 2>&1
@@ -292,7 +307,7 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v SetupDisplayedE
 reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v PrivacyConsentStatus /t REG_DWORD /d 1 /f >nul 2>&1
 
 ECHO   Voorbereiding voltooid.
-ECHO   LocalAdmin / Er@smus_Roter0 is klaar voor lokale aanmelding.
+ECHO   LocalAdmin is klaar voor lokale aanmelding.
 ECHO   OOBE skip flags zijn gezet voor de volgende fase.
 ECHO.
 GOTO :EOF
@@ -302,6 +317,7 @@ GOTO :EOF
 :CUSTOMER_INSTALL_LOCAL
 ECHO.
 CALL :PREPARE_DEPLOY_ENV
+IF ERRORLEVEL 1 GOTO MENU
 ECHO   Opening klantmenu voor lokale Install map...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "%~dp0Install" -SourceLabel "Local Install"
 GOTO MENU
@@ -310,9 +326,12 @@ GOTO MENU
 
 :CUSTOMER_INSTALL_SHARE
 ECHO.
+IF NOT DEFINED INSTALL_SHARE SET /P INSTALL_SHARE=  Pad van de install share (bv. \\server\Software):
+IF NOT DEFINED INSTALL_SHARE GOTO MENU
 CALL :PREPARE_DEPLOY_ENV
-ECHO   Opening klantmenu voor network share \\10.222.3.94\Software...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "\\10.222.3.94\Software" -SourceLabel "Network Share"
+IF ERRORLEVEL 1 GOTO MENU
+ECHO   Opening klantmenu voor network share %INSTALL_SHARE%...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Browse-InstallScripts.ps1" -RootPath "%INSTALL_SHARE%" -SourceLabel "Network Share"
 GOTO MENU
 
 :: ============================================================

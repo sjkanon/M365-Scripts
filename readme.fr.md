@@ -520,9 +520,9 @@ Boîte à outils USB pour l'installation de Windows et l'inscription Autopilot p
 - Menu interactif (Gestionnaire de périphériques, Autopilot, jonction AD, renommage de l'appareil, clé de produit, Windows Update, redémarrage)
 - Navigateur d'installations client depuis le menu de la boîte à outils USB :
   - Dossier local `Install` par client (`D`)
-  - Partage réseau `\\10.222.3.94\Software` par client (`E`)
+  - Partage réseau de `INSTALL_SHARE` dans `start.local.cmd` par client (`E`)
 - Pour l'option locale `D`, copiez à la fois [`Browse-InstallScripts.ps1`](scripts/Deployment/Browse-InstallScripts.ps1) et le dossier `Install` complet à côté de [`start.bat`](scripts/Deployment/start.bat)
-- Avant les options `D` et `E`, la boîte à outils crée ou met à jour l'administrateur local `LocalAdmin` avec le mot de passe `<mot de passe omis>`, l'ajoute à `Administrators` et définit les indicateurs de saut de l'OOBE
+- Avant les options `D` et `E`, la boîte à outils crée ou met à jour l'administrateur local `LocalAdmin` avec le mot de passe de `start.local.cmd` (demandé en saisie masquée s'il manque), l'ajoute à `Administrators` et définit les indicateurs de saut de l'OOBE
 - S'élève automatiquement, compatible OOBE via Maj+F10
 - « Tout faire » scindé : `A` = Intune (Renommer + Autopilot + Mise à jour), `C` = AD (Renommer + Jonction au domaine + Mise à jour)
 
@@ -965,6 +965,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-05 (12)
+| Modification |
+|--------|
+| **Le mot de passe `LocalAdmin` de la boîte à outils USB était codé en dur dans `scripts/Deployment/start.bat`**, affiché à l'écran après chaque exécution et écrit en clair dans les readmes anglais — avec l'adresse IP interne du partage d'installation. `start.bat` lit désormais les deux dans `start.local.cmd` à côté de lui (ignoré par git ; modèle `start.local.example.cmd`). Si ce fichier ou une valeur manque, il les demande : le mot de passe en saisie masquée, le chemin du partage au choix de l'option `E`. Sans mot de passe, les options `D`/`E` s'arrêtent au lieu de créer un compte, et le mot de passe n'est plus affiché |
+| **Le mot de passe reste dans l'historique git et sur chaque appareil préparé par la boîte à outils — changez-le.** Copiez `start.local.example.cmd` en `start.local.cmd` sur la clé USB avec le nouveau mot de passe et le partage |
+| Vérifié avec une copie de `start.bat` où `net`, `wmic` et `reg` affichent seulement ce qu'ils feraient : avec `start.local.cmd`, le compte est créé avec le mot de passe du fichier (y compris `$`, `&` et `!`) et le menu affiche le partage ; sans lui et avec une réponse vide, rien n'est créé et l'option `E` demande le chemin. La saisie masquée elle-même nécessite une console et a été vérifiée séparément (SecureString reconverti en texte dans Windows PowerShell). Non exécuté en OOBE |
 
 ### 2026-10-05 (11)
 | Modification |
@@ -2059,7 +2066,7 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ### 2026-04-17
 | Modification |
 |--------|
-| Mise à jour de `scripts/Custom Scripts/Save install time/start.bat` — ajout de l'option `D` (scripts d'installation client depuis le dossier local `Install`) et de l'option `E` (scripts d'installation client depuis `\\10.222.3.94\Software`) ; avant le début du déploiement, crée/met à jour l'administrateur local `LocalAdmin` (`<mot de passe omis>`), l'ajoute à `Administrators` et définit les indicateurs de saut de l'OOBE |
+| Mise à jour de `scripts/Custom Scripts/Save install time/start.bat` — ajout de l'option `D` (scripts d'installation client depuis le dossier local `Install`) et de l'option `E` (scripts d'installation client depuis un partage réseau) ; avant le début du déploiement, crée/met à jour l'administrateur local `LocalAdmin` (`<mot de passe omis>`), l'ajoute à `Administrators` et définit les indicateurs de saut de l'OOBE |
 | Ajout de `scripts/Custom Scripts/Save install time/Browse-InstallScripts.ps1` — navigateur axé sur les clients qui affiche les dossiers clients comme éléments de menu et lance les scripts `.ps1`, `.bat` et `.cmd` |
 | Mise à jour de `scripts/Custom Scripts/Save install time/readme.md` — documentation des nouvelles options de menu `D`/`E`, en précisant que l'option `D` nécessite de copier à la fois [`Browse-InstallScripts.ps1`](scripts/Deployment/Browse-InstallScripts.ps1) et l'intégralité du dossier `Install`, et que les options de déploiement client préparent `LocalAdmin` ainsi que les indicateurs de saut de l'OOBE |
 

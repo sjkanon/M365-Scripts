@@ -520,9 +520,9 @@ USB-toolkit voor Windows-installatie en Autopilot-inschrijving tijdens OOBE.
 - Interactief menu (Apparaatbeheer, Autopilot, AD-join, apparaat hernoemen, productcode, Windows Update, herstarten)
 - Browser voor klantinstallaties vanuit het menu van de USB-toolkit:
   - Lokale map `Install` per klant (`D`)
-  - Netwerkshare `\\10.222.3.94\Software` per klant (`E`)
+  - Netwerkshare uit `INSTALL_SHARE` in `start.local.cmd` per klant (`E`)
 - Kopieer voor de lokale optie `D` zowel [`Browse-InstallScripts.ps1`](scripts/Deployment/Browse-InstallScripts.ps1) als de volledige map `Install` naast [`start.bat`](scripts/Deployment/start.bat)
-- Vóór de opties `D` en `E` maakt of werkt de toolkit de lokale beheerder `LocalAdmin` bij met wachtwoord `<wachtwoord weggelaten>`, voegt die toe aan `Administrators`, en zet de OOBE-overslaanvlaggen
+- Vóór de opties `D` en `E` maakt of werkt de toolkit de lokale beheerder `LocalAdmin` bij met het wachtwoord uit `start.local.cmd` (verborgen gevraagd als het ontbreekt), voegt die toe aan `Administrators`, en zet de OOBE-overslaanvlaggen
 - Verhoogt zichzelf, OOBE-compatibel via Shift+F10
 - Gesplitste "Alles in één": `A` = Intune (Hernoemen + Autopilot + Update), `C` = AD (Hernoemen + Domein-join + Update)
 
@@ -965,6 +965,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-05 (12)
+| Wijziging |
+|--------|
+| **Het `LocalAdmin`-wachtwoord van de USB-toolkit stond hardcoded in `scripts/Deployment/start.bat`**, werd na elke run op het scherm getoond en stond uitgeschreven in de Engelse readmes — samen met het interne IP-adres van de install-share. `start.bat` leest beide nu uit `start.local.cmd` ernaast (door git genegeerd; sjabloon `start.local.example.cmd`). Ontbreekt dat bestand of een waarde, dan vraagt het erom: het wachtwoord verborgen, het share-pad wanneer optie `E` gekozen wordt. Zonder wachtwoord stoppen optie `D`/`E` in plaats van een account aan te maken, en het wachtwoord wordt niet meer getoond |
+| **Het wachtwoord staat nog in de git-geschiedenis en op elk toestel dat de toolkit heeft voorbereid — wijzig het.** Kopieer `start.local.example.cmd` naar `start.local.cmd` op de USB-stick met het nieuwe wachtwoord en de share |
+| Geverifieerd met een kopie van `start.bat` waarin `net`, `wmic` en `reg` alleen tonen wat ze zouden doen: met `start.local.cmd` wordt het account aangemaakt met het wachtwoord uit het bestand (ook met `$`, `&` en `!`) en toont het menu de share; zonder en met een leeg antwoord wordt niets aangemaakt en vraagt optie `E` om het pad. De verborgen invoer zelf heeft een console nodig en is apart gecontroleerd (SecureString terug naar tekst in Windows PowerShell). Niet in OOBE gedraaid |
 
 ### 2026-10-05 (11)
 | Wijziging |
@@ -2059,7 +2066,7 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ### 2026-04-17
 | Wijziging |
 |--------|
-| `scripts/Custom Scripts/Save install time/start.bat` bijgewerkt — optie `D` (installatiescripts van klanten uit de lokale map `Install`) en optie `E` (installatiescripts van klanten uit `\\10.222.3.94\Software`) toegevoegd; voordat de uitrol begint, wordt de lokale admin `LocalAdmin` (`<wachtwoord weggelaten>`) aangemaakt/bijgewerkt, aan `Administrators` toegevoegd en worden de OOBE-skipvlaggen gezet |
+| `scripts/Custom Scripts/Save install time/start.bat` bijgewerkt — optie `D` (installatiescripts van klanten uit de lokale map `Install`) en optie `E` (installatiescripts van klanten uit een netwerkshare) toegevoegd; voordat de uitrol begint, wordt de lokale admin `LocalAdmin` (`<wachtwoord weggelaten>`) aangemaakt/bijgewerkt, aan `Administrators` toegevoegd en worden de OOBE-skipvlaggen gezet |
 | `scripts/Custom Scripts/Save install time/Browse-InstallScripts.ps1` toegevoegd — een browser die bij de klant begint, klantmappen als menu-items toont en `.ps1`-, `.bat`- en `.cmd`-scripts start |
 | `scripts/Custom Scripts/Save install time/readme.md` bijgewerkt — de nieuwe menuopties `D`/`E` gedocumenteerd, inclusief dat je voor optie `D` zowel [`Browse-InstallScripts.ps1`](scripts/Deployment/Browse-InstallScripts.ps1) als de volledige map `Install` moet kopiëren, en dat de uitrolopties voor klanten `LocalAdmin` plus de OOBE-skipvlaggen voorbereiden |
 

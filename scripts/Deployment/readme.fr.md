@@ -15,6 +15,7 @@ Un kit USB pour l'installation de Windows et l'inscription Autopilot. Conçu pou
 | Script | Description |
 |--------|-------------|
 | [`start.bat`](start.bat) ([docs](#startbat)) | Menu principal du kit — demande lui-même les privilèges d'administrateur et propose l'inscription Autopilot, Windows Update, le renommage, la jonction au domaine et le navigateur d'installations client |
+| [`start.local.example.cmd`](start.local.example.cmd) ([docs](#startlocalcmd)) | Modèle pour `start.local.cmd` — le mot de passe LocalAdmin et le partage d'installation du site, tenus hors du dépôt |
 | [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Navigateur interactif de clients et de scripts derrière les options de menu `D` et `E` — parcourir les dossiers clients et lancer des fichiers `.ps1` / `.bat` / `.cmd` |
 
 Également dans ce dossier : [`autorun.inf`](autorun.inf) — uniquement le nom de volume de la clé USB ([détails](#autoruninf)).
@@ -28,6 +29,7 @@ Tous les fichiers doivent se trouver dans le **même dossier** de la clé USB :
 ```
 USB:\
 ├── start.bat                      ← Menu principal — à exécuter
+├── start.local.cmd                ← Réglages du site : mot de passe LocalAdmin, partage d'installation (hors dépôt)
 ├── GetAutoPilot.CMD               ← Script d'inscription Autopilot
 ├── Get-WindowsAutoPilotInfo.ps1   ← Module PowerShell pour le hachage matériel
 ├── Browse-InstallScripts.ps1       ← Navigateur d'installations client pour les options D/E
@@ -78,7 +80,7 @@ Le menu principal du kit. Il se place dans son propre dossier (`cd /d %~dp0`), d
 | `B` | **Renommer l'appareil** — demande un préfixe, ajoute le numéro de série (`PREFIX-SERIALNUMBER`) | ✅ |
 | `C` | **Tout en un — AD** — Renommage + jonction au domaine + Windows Update + redémarrage | ✅ (nécessite la connectivité au domaine) |
 | `D` | **Scripts d'installation client (local)** — ouvrir le menu client depuis le dossier local `Install` | ✅ |
-| `E` | **Scripts d'installation client (partage réseau)** — ouvrir le menu client depuis `\\10.222.3.94\Software` | ✅ (nécessite un accès réseau) |
+| `E` | **Scripts d'installation client (partage réseau)** — ouvrir le menu client depuis le partage de `INSTALL_SHARE` (demandé s'il n'est pas défini) | ✅ (nécessite un accès réseau) |
 | `0` | Quitter | ✅ |
 
 ### Browse-InstallScripts.ps1
@@ -96,12 +98,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 
 ```
 
 - L'option `D` nécessite des fichiers locaux : `Browse-InstallScripts.ps1` et le dossier `Install` complet à côté de `start.bat`.
-- L'option `E` lit les dossiers clients depuis `\\10.222.3.94\Software` et nécessite un accès réseau.
+- L'option `E` lit les dossiers clients depuis le partage de `INSTALL_SHARE` (de [`start.local.cmd`](#startlocalcmd), sinon demandé) et nécessite un accès réseau.
 - Avant que l'option `D` ou `E` n'ouvre le navigateur de déploiement, `start.bat` prépare l'appareil au déploiement :
    - Crée ou met à jour l'utilisateur administrateur local `LocalAdmin`
-   - Mot de passe : `<mot de passe omis>`
+   - Mot de passe : `LOCALADMIN_PASSWORD` de [`start.local.cmd`](#startlocalcmd), sinon demandé en saisie masquée. Sans mot de passe, pas de compte : l'option s'arrête et le menu revient
    - Ajoute `LocalAdmin` au groupe local `Administrators`
    - Définit les indicateurs de registre de saut de l'OOBE afin que le reste du parcours OOBE puisse être ignoré plus facilement
+
+### start.local.cmd
+
+Réglages propres au site qui n'ont pas leur place dans le dépôt. `start.bat` le charge depuis son propre dossier s'il existe ; copiez [`start.local.example.cmd`](start.local.example.cmd) en `start.local.cmd` sur la clé USB et complétez-le. `start.local.cmd` est ignoré par git.
+
+| Variable | Description |
+|----------|-------------|
+| `LOCALADMIN_PASSWORD` | Mot de passe du compte `LocalAdmin` créé par les options `D` et `E`. Vide ou absent : demandé en saisie masquée. Évitez `%` — batch le remplace |
+| `INSTALL_SHARE` | Chemin UNC du partage d'installation client pour l'option `E`, p. ex. `\\server\Software`. Vide ou absent : demandé au choix de l'option `E` |
 
 ### Autopilot en ligne (option 4)
 
@@ -142,7 +153,8 @@ Définit le nom de volume de la clé USB sur `Setup Toolkit` lorsqu'elle est bra
 
 | Date | Version | Modification |
 |---|---|---|
-| 2026-04-17 | 2.9 | Ajout d'un navigateur d'installations par client dans `start.bat` : l'option `D` ouvre les dossiers clients locaux de `Install` et l'option `E` ouvre `\\10.222.3.94\Software` ; ajout de `Browse-InstallScripts.ps1` pour parcourir les dossiers clients et exécuter des scripts `.ps1` / `.bat` / `.cmd` ; documentation du fait que l'option `D` exige de copier à la fois `Browse-InstallScripts.ps1` et le dossier `Install` complet ; les options `D` et `E` créent/mettent désormais à jour l'administrateur local `LocalAdmin` (`<mot de passe omis>`) et définissent les indicateurs de saut de l'OOBE avant le début du déploiement |
+| 2026-10-05 | 3.0 | Le mot de passe LocalAdmin et l'adresse du partage d'installation ne figurent plus dans `start.bat` : ils proviennent de `start.local.cmd` (ignoré par git) et sont demandés s'il est absent — le mot de passe en saisie masquée. Sans mot de passe, les options `D`/`E` s'arrêtent au lieu de créer un compte. Ajout de `start.local.example.cmd` |
+| 2026-04-17 | 2.9 | Ajout d'un navigateur d'installations par client dans `start.bat` : l'option `D` ouvre les dossiers clients locaux de `Install` et l'option `E` ouvre un partage réseau ; ajout de `Browse-InstallScripts.ps1` pour parcourir les dossiers clients et exécuter des scripts `.ps1` / `.bat` / `.cmd` ; documentation du fait que l'option `D` exige de copier à la fois `Browse-InstallScripts.ps1` et le dossier `Install` complet ; les options `D` et `E` créent/mettent désormais à jour l'administrateur local `LocalAdmin` (`<mot de passe omis>`) et définissent les indicateurs de saut de l'OOBE avant le début du déploiement |
 
 | Date | Version | Modification |
 |---|---|---|

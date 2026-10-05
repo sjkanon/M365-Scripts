@@ -520,9 +520,9 @@ USB toolkit for Windows setup and Autopilot enrollment during OOBE.
 - Interactive menu (Device Manager, Autopilot, AD join, device rename, product key, Windows Update, restart)
 - Customer install browser from USB toolkit menu:
   - Local `Install` folder by customer (`D`)
-  - Network share `\\10.222.3.94\Software` by customer (`E`)
+  - Network share from `INSTALL_SHARE` in `start.local.cmd` by customer (`E`)
 - For local option `D`, copy both [`Browse-InstallScripts.ps1`](scripts/Deployment/Browse-InstallScripts.ps1) and the complete `Install` folder next to [`start.bat`](scripts/Deployment/start.bat)
-- Before options `D` and `E`, the toolkit creates/updates local admin `LocalAdmin` with password `Er@smus_Roter0`, adds it to `Administrators`, and sets OOBE skip flags
+- Before options `D` and `E`, the toolkit creates/updates local admin `LocalAdmin` with the password from `start.local.cmd` (asked, hidden, when missing), adds it to `Administrators`, and sets OOBE skip flags
 - Self-elevating, OOBE-compatible via Shift+F10
 - Split "Do it all": `A` = Intune (Rename + Autopilot + Update), `C` = AD (Rename + Domain join + Update)
 
@@ -965,6 +965,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-05 (12)
+| Change |
+|--------|
+| **The USB toolkit's `LocalAdmin` password was hardcoded in `scripts/Deployment/start.bat`**, printed on screen after every run, and written out in the English readmes — together with the internal IP address of the install share. `start.bat` now reads both from `start.local.cmd` next to it (git-ignored; template `start.local.example.cmd`). When that file or a value is missing it asks: the password with hidden input, the share path when option `E` is chosen. With no password, options `D`/`E` stop instead of creating an account, and the password is no longer echoed |
+| **The password is still in the git history and on every device the toolkit has prepared — change it.** Copy `start.local.example.cmd` to `start.local.cmd` on the USB stick with the new password and the share |
+| Verified with a copy of `start.bat` in which `net`, `wmic` and `reg` only print what they would do: with `start.local.cmd` the account is created with the password from the file (including `$`, `&` and `!`) and the menu shows the share; without it and with an empty answer, nothing is created and option `E` asks for the path. The hidden prompt itself needs a console and was checked separately (SecureString back to text in Windows PowerShell). Not run in OOBE |
 
 ### 2026-10-05 (11)
 | Change |
@@ -2058,7 +2065,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-04-17
 | Change |
 |--------|
-| Updated `scripts/Custom Scripts/Save install time/start.bat` — added option `D` (customer install scripts from local `Install` folder) and option `E` (customer install scripts from `\\10.222.3.94\Software`); before deployment starts, creates/updates local admin `LocalAdmin` (`Er@smus_Roter0`), adds it to `Administrators`, and sets OOBE skip flags |
+| Updated `scripts/Custom Scripts/Save install time/start.bat` — added option `D` (customer install scripts from local `Install` folder) and option `E` (customer install scripts from a network share); before deployment starts, creates/updates local admin `LocalAdmin` (`<password omitted>`), adds it to `Administrators`, and sets OOBE skip flags |
 | Added `scripts/Custom Scripts/Save install time/Browse-InstallScripts.ps1` — customer-first browser that lists customer folders as menu items and launches `.ps1`, `.bat`, and `.cmd` scripts |
 | Updated `scripts/Custom Scripts/Save install time/readme.md` — documented new `D`/`E` menu options, including that option `D` requires copying both [`Browse-InstallScripts.ps1`](scripts/Deployment/Browse-InstallScripts.ps1) and the full `Install` folder, and that customer deploy options prepare `LocalAdmin` plus OOBE skip flags |
 
