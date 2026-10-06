@@ -1,4 +1,4 @@
-[English](readme.md) · **Nederlands** · [Français](readme.fr.md)
+﻿[English](readme.md) · **Nederlands** · [Français](readme.fr.md)
 
 # M365-Scripts
 
@@ -965,6 +965,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-06
+| Wijziging |
+|-----------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) spreekt zichzelf niet langer tegen over versiehistorie.** Versiehistorie overslaan doet `-SkipVersions` al, en `-FastMode` impliceert dat — maar die implicatie werd pas toegepast *nadat* de modusregel geschreven was, waardoor een `-FastMode`-run eerst `Full scan including version history` meldde en twee regels verder `Fast scan (no version history, no detail rows)`. Bij een run van enkele uren is dat het verschil tussen de uitvoer vertrouwen of niet. `-FastMode` zet `-SkipVersions` nu vóór de modusregel en heeft daarin een eigen regel |
+| Geverifieerd: syntaxcontrole; de modusregel doorlopen voor alle vier de combinaties — `-Apply` geeft `Full scan including version history`, `-Apply -SkipVersions` geeft `Full scan (version history skipped)`, `-Apply -FastMode` en `-Apply -FastMode -SkipVersions` geven allebei precies één regel, `Fast scan (no version history, no detail rows)`. Aan wat er gescand wordt is niets veranderd |
 
 ### 2026-10-05 (15)
 | Wijziging |

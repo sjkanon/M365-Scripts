@@ -1,4 +1,4 @@
-[English](readme.md) · [Nederlands](readme.nl.md) · **Français**
+﻿[English](readme.md) · [Nederlands](readme.nl.md) · **Français**
 
 # M365-Scripts
 
@@ -965,6 +965,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-06
+| Modification |
+|--------------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) ne se contredit plus au sujet de l'historique des versions.** Ignorer l'historique des versions, c'est ce que fait `-SkipVersions` depuis toujours, et `-FastMode` l'implique — mais cette implication n'était appliquée qu'*après* l'affichage de la ligne de mode : une exécution avec `-FastMode` annonçait donc d'abord `Full scan including version history`, puis, deux lignes plus bas, `Fast scan (no version history, no detail rows)`. Sur une exécution de plusieurs heures, c'est la différence entre se fier au résultat ou non. `-FastMode` définit désormais `-SkipVersions` avant la ligne de mode et y dispose de sa propre ligne |
+| Vérifié : contrôle de syntaxe ; la logique de la ligne de mode parcourue pour les quatre combinaisons — `-Apply` donne `Full scan including version history`, `-Apply -SkipVersions` donne `Full scan (version history skipped)`, `-Apply -FastMode` et `-Apply -FastMode -SkipVersions` donnent tous deux exactement une ligne, `Fast scan (no version history, no detail rows)`. Rien n'a changé dans ce qui est analysé |
 
 ### 2026-10-05 (15)
 | Modification |

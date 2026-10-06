@@ -1,4 +1,4 @@
-**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+﻿**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
 
 # M365-Scripts
 
@@ -965,6 +965,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-06
+| Change |
+|--------|
+| **[`Get-SharePointStorageReport.ps1`](scripts/Reporting/Get-SharePointStorageReport.ps1) no longer contradicts itself about version history.** Skipping version history is what `-SkipVersions` has always done, and `-FastMode` implies it — but that implication was applied *after* the mode banner was printed, so a `-FastMode` run first announced `Full scan including version history` and then, two lines further down, `Fast scan (no version history, no detail rows)`. On a run of several hours that is the difference between trusting the output and not. `-FastMode` now sets `-SkipVersions` before the banner and has its own line in it |
+| Verified: syntax check; the banner logic run through for all four combinations — `-Apply` gives `Full scan including version history`, `-Apply -SkipVersions` gives `Full scan (version history skipped)`, `-Apply -FastMode` and `-Apply -FastMode -SkipVersions` both give exactly one line, `Fast scan (no version history, no detail rows)`. Nothing changed about what is scanned |
 
 ### 2026-10-05 (15)
 | Change |
