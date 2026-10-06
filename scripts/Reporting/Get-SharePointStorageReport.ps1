@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Report SharePoint storage usage across all sites in a tenant, including version history.
@@ -422,6 +422,11 @@ Write-Host "   Get-SharePointStorageReport" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
+# -FastMode is the broadest of the three and implies -SkipVersions. Settled before the
+# banner is printed: decided after it, a -FastMode run first announced "Full scan including
+# version history" and contradicted itself two lines further down.
+if ($FastMode) { $SkipVersions = $true }
+
 if ($RecycleBinOnly) {
     Write-Host "  Mode      : Recycle bin only" -ForegroundColor Cyan
     Write-Host "  Scope     : Site collection recycle bins (stage 1 + 2)" -ForegroundColor DarkGray
@@ -431,6 +436,8 @@ if ($RecycleBinOnly) {
     Write-Host "   Add -Apply for a full recursive scan." -ForegroundColor Yellow
     Write-Host "  ================================================" -ForegroundColor Yellow
     Write-Host ""
+} elseif ($FastMode) {
+    Write-Host "  Mode      : Fast scan (no version history, no detail rows)" -ForegroundColor Cyan
 } elseif ($SkipVersions) {
     Write-Host "  Mode      : Full scan (version history skipped)" -ForegroundColor Cyan
 } else {
@@ -441,11 +448,6 @@ if ($UseHighPrivilege) {
     Write-Host "  Privilege : High (Sites.FullControl.All for temporary app)" -ForegroundColor Yellow
 } else {
     Write-Host "  Privilege : Standard (Sites.Read.All for temporary app)" -ForegroundColor DarkGray
-}
-
-if ($FastMode) {
-    Write-Host "  Mode      : Fast scan (no version history, no detail rows)" -ForegroundColor Cyan
-    $SkipVersions = $true
 }
 
 # ── Module preflight ─────────────────────────────────────────────────────────
