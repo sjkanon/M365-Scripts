@@ -966,6 +966,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-07
+| Wijziging |
+|-----------|
+| **[`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1) installeert de build waartegen het heeft vergeleken.** De versiecontrole vraagt de Teams-configservice welke build actueel is, maar de installatie liet `teamsbootstrapper.exe -p` downloaden wat zijn eigen gefaseerde uitrol uitdeelde — en die twee liepen wekenlang uiteen. Een run eindigde met `Installed build 26246.1604.5133.838 is still older than the published 26260.1701.5139.3736`, drie weken nadat die build was gepubliceerd, en de volgende geplande run zou de host weer verouderd noemen en opnieuw installeren. De configservice geeft ook een `buildLink` naar precies die MSIX, die het script wel las maar nooit gebruikte. Stap 5 downloadt dat pakket nu en controleert grootte en Microsoft-handtekening voordat er iets wordt verwijderd, en stap 7 provisiont het met `-p -o`. Mislukt de download of de controle, dan waarschuwt de run en valt terug op de keuze van de bootstrapper zelf, want er is dan nog niets verwijderd |
+| Nieuwe `-UseBootstrapperBuild` (NinjaOne: `useBootstrapperBuild`) zet het oude gedrag terug, waarbij Microsofts gefaseerde uitrol beslist. Niet te combineren met `-UseWinget`. Beschreven in de [Device-readme](scripts/Device/readme.nl.md#update-teamsclientps1), [Update-TeamsClient.md](scripts/Device/Update-TeamsClient.md) en de IT Glue-versie (md + opnieuw gegenereerde html) |
+| Geverifieerd: syntaxcontrole; de live configservice publiceert `26260.1701.5139.3736` met een `buildLink` op `teamsinstaller.public.onecdn.static.microsoft`; de eigen `Get-LatestTeamsBuild` en `Save-VerifiedDownload` van het script met de logica van stap 5 downloadden onder Windows PowerShell 5.1 het pakket van 274 MB en accepteerden de handtekening (`Valid`, `O=Microsoft Corporation`, ook onder PowerShell 7); een link die 404 antwoordt gaf de terugvalwaarschuwing en liet geen bestand achter; `-UseWinget -UseBootstrapperBuild` samen wordt op beide runtimes met exitcode `1` geweigerd. **Niet** geverifieerd: een volledige run met adminrechten die vanuit het gedownloade pakket provisiont — er is nog geen host met deze versie bijgewerkt |
 ### 2026-10-06
 | Wijziging |
 |-----------|

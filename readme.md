@@ -966,6 +966,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-07
+| Change |
+|--------|
+| **[`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1) installs the build it checked against.** The version check asks the Teams config service which build is current, but the install let `teamsbootstrapper.exe -p` download whatever its own staged rollout handed out — and the two disagreed for weeks. A run ended with `Installed build 26246.1604.5133.838 is still older than the published 26260.1701.5139.3736`, three weeks after that build went up, and the next scheduled run would call the host outdated and reinstall it again. The config service also returns a `buildLink` to the exact MSIX, which the script read and never used. Step 5 now downloads that package and checks its size and Microsoft signature before anything is uninstalled, and step 7 provisions it with `-p -o`. If the download or the check fails, the run warns and falls back to the bootstrapper's own choice, since nothing has been removed yet |
+| New `-UseBootstrapperBuild` (NinjaOne: `useBootstrapperBuild`) restores the old behaviour, leaving Microsoft's staged rollout in charge. It cannot be combined with `-UseWinget`. Documented in the [Device readme](scripts/Device/readme.md#update-teamsclientps1), [Update-TeamsClient.md](scripts/Device/Update-TeamsClient.md) and the IT Glue version (md + regenerated html) |
+| Verified: syntax check; the live config service publishes `26260.1701.5139.3736` with a `buildLink` on `teamsinstaller.public.onecdn.static.microsoft`; the script's own `Get-LatestTeamsBuild` and `Save-VerifiedDownload` with the step 5 logic, under Windows PowerShell 5.1, downloaded the 274 MB package and accepted its signature (`Valid`, `O=Microsoft Corporation`, also under PowerShell 7); a link answering 404 gave the fallback warning and left no file behind; `-UseWinget -UseBootstrapperBuild` is refused with exit `1` on both runtimes. **Not** verified: a full elevated run that provisions from the downloaded package — no host was updated with this version yet |
 ### 2026-10-06
 | Change |
 |--------|
