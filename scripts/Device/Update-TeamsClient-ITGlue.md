@@ -48,7 +48,7 @@ In gewone taal:
 1. Het kijkt welke Teams-versie op de werkplek staat.
 2. Het vraagt bij Microsoft op welke versie op dit moment de nieuwste is.
 3. **Is de werkplek al bij?** Dan gebeurt er niets. Het script stopt zonder iets aan te raken.
-4. **Loopt de werkplek achter?** Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug. De oude kopieën van de add-in gaan er pas uit als de vervanger klaarstaat én er ook in kan — anders blijft staan wat werkt.
+4. **Loopt de werkplek achter?** Dan haalt het de installer en precies die nieuwste versie op, controleert of beide echt van Microsoft komen, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug. De oude kopieën van de add-in gaan er pas uit als de vervanger klaarstaat én er ook in kan — anders blijft staan wat werkt.
 5. Daarna controleert het of alles er ook echt staat, en meldt of het gelukt is.
 
 ### Wat het script **niet** doet
@@ -317,9 +317,10 @@ Twee dingen tegelijk, en ze vullen elkaar aan:
   staan — dat herbouwt de administratie uit het pakket zelf, en meestal laat het zich
   daarna gewoon verwijderen. Wat dan nog overblijft gaat sleutel voor sleutel weg, elk
   met naam en volledig pad in het log.
-- `-UseWinget` haalt de MSIX zelf op en geeft die aan de bootstrapper mee. De installatie
-  krijgt dan een concreet bestand als bron in plaats van een verwijzing die Windows zelf
-  moet zien op te lossen — precies het ding dat hier stuk is.
+- Het script haalt de MSIX zelf op — standaard bij Microsoft, met `-UseWinget` via
+  winget — en geeft die aan de bootstrapper mee. De installatie krijgt dan een concreet
+  bestand als bron in plaats van een verwijzing die Windows zelf moet zien op te lossen —
+  precies het ding dat hier stuk is. Laat `-UseBootstrapperBuild` hier dus weg.
 
 Na afloop vraagt het script om een herstart. Doe die: de deployment-engine leest de
 administratie opnieuw in en begint schoon.
@@ -527,7 +528,8 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `-RemoveWebRtcRedirector` | Verwijdert de oude WebRTC-optimalisatie. Alleen als élk lokaal apparaat SlimCore aankan. Gaat niet samen met `-AvdOptimizations` |
 | `-ClearOrphanedAddInRegistration` | **Laatste redmiddel, L3.** Laat Windows Installer een add-in vergeten die hij zelf niet meer kan verwijderen (`1612` én de gecachte MSI weg), zodat herinstalleren weer kan. Raakt alleen dat ene product |
 | `-RepairAppxStore` | **Laatste redmiddel, L3.** Repareert de pakketadministratie van Windows waar die Teams is kwijtgeraakt: herregistreert een pakket waarvan de bestanden er nog staan, en verwijdert daarna de vermeldingen onder `AppxAllUserStore` die nergens meer op slaan. Alleen MSTeams, elke sleutel met naam en pad in het log |
-| `-UseWinget` | Haalt de Teams-MSIX op met winget en installeert precies dat bestand (`teamsbootstrapper.exe -p -o`), in plaats van de bootstrapper zelf iets te laten downloaden. Handig bij een beschadigde pakketadministratie, en de run weet dan welke build erop staat |
+| `-UseWinget` | Haalt de Teams-MSIX op met winget in plaats van rechtstreeks bij Microsoft, en installeert precies dat bestand (`teamsbootstrapper.exe -p -o`). winget controleert het bestand nog een keer extra, maar loopt een build of twee achter |
+| `-UseBootstrapperBuild` | Laat de bootstrapper zelf kiezen welke versie erop komt, zoals vroeger. Microsoft rolt nieuwe versies gefaseerd uit, dus dan kan de werkplek wekenlang een versie achter blijven — en elke run meldt dat dan opnieuw. Gaat niet samen met `-UseWinget` |
 | `-RemoveClassicTeams` | Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel |
 | `-RepairOutlookAddIn` | Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen |
 | `-WebRtcUrl` | Andere downloadlocatie voor de WebRTC-redirector |
@@ -553,6 +555,7 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 |-----|-----|
 | Logbestand (alleen bij een run die iets wijzigt) | `C:\Temp\Update-TeamsClient_<datum-tijd>.log` |
 | Gedownloade installer | `C:\IT\AVD\Teams\teamsbootstrapper.exe` |
+| Gedownloade Teams-versie | `C:\IT\AVD\Teams\MSTeams-x64.msix` (ongeveer 275 MB) |
 | Geïnstalleerde Outlook-add-in | `C:\Program Files (x86)\Microsoft\TeamsMeetingAddin\<versie>\` |
 | Versiebron van Microsoft | `config.teams.microsoft.com` |
 
@@ -593,6 +596,8 @@ Laat de gebruiker in de virtuele sessie Teams openen → **... → Instellingen 
 | `Package store orphan - ... : ...` | Het script noemt precies welke vermelding in `AppxAllUserStore` nergens meer op slaat, met het registerpad erbij | Alleen melden; `-CheckOnly` geeft de volledige lijst. Opruimen doet `-RepairAppxStore` | L2 |
 | `N orphaned MSTeams entries in the package store` | Er zijn wezen gevonden maar de schakelaar stond niet aan | Opnieuw draaien met `-RepairAppxStore`. Dat herregistreert eerst wat nog bestanden op schijf heeft en ruimt daarna de registervermeldingen op, per stuk met naam en pad in het log | L3 |
 | `winget publishes X while the config service publishes Y` | Normaal. Het winget-manifest wordt los onderhouden en loopt een build of twee achter | Geen actie. Wil je per se de allernieuwste build, laat `-UseWinget` dan weg | L1 |
+| `Installed build X is still older than the published Y` | Teams is bijgewerkt, maar niet naar de allernieuwste versie | Met `-UseWinget` of `-UseBootstrapperBuild` is dat normaal. Zonder die twee: kijk of er bij stap 5 een `falling back`-regel staat (zie hieronder); zo niet, log doorzetten | L2 |
+| `... - falling back to the build the bootstrapper picks` | De nieuwste versie kon niet bij Microsoft worden opgehaald, of was niet goed ondertekend. Er was nog niets verwijderd; de bootstrapper haalt nu zelf een (mogelijk iets oudere) versie | Meestal een proxy of firewall die `teamsinstaller.public.onecdn.static.microsoft` blokkeert. Teams werkt gewoon; de volgende run probeert het opnieuw | L2 |
 | `Teams installation failed` | De installatie is niet doorgekomen | Log in `C:\Temp` lezen en doorzetten | L3 |
 | `A reboot is required` | Windows wil herstarten om af te ronden | Herstart inplannen met de gebruiker | L1 |
 
@@ -663,6 +668,7 @@ Met script variables krijgt de collega die het script draait vinkjes in plaats v
 | `removeWebRtcRedirector` | Checkbox | Oude WebRTC-optimalisatie verwijderen (niet samen met `avdOptimizations`) |
 | `clearOrphanedAddInRegistration` | Checkbox | **Laatste redmiddel:** add-in-registratie opruimen die Windows Installer niet meer kan verwijderen |
 | `skipMeetingAddIn` | Checkbox | Outlook-add-in met rust laten |
+| `useBootstrapperBuild` | Checkbox | De bootstrapper zelf de versie laten kiezen (Microsofts gefaseerde uitrol) in plaats van de nieuwste |
 | `workingDir` | Text | Andere downloadmap |
 | `logPath` | Text | Andere logmap |
 | `ring` | Text | Andere update-ring |

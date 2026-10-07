@@ -324,7 +324,7 @@ Results are printed to screen with a summary of all issues at the end.
 >
 > Service desk version for IT Glue (Dutch, per support level): [Update-TeamsClient-ITGlue.md](Update-TeamsClient-ITGlue.md).
 
-Keeps the new Teams client and the Outlook meeting add-in current on an endpoint or AVD session host. It asks the Teams config service which build Microsoft publishes for this architecture and **only acts when that build is newer than what is installed** — an up-to-date device is left completely alone. When an update is due it downloads and signature-checks `teamsbootstrapper.exe`, uninstalls the meeting add-in, removes and deprovisions the `MSTeams` AppX package, provisions the new build for all users and reinstalls the add-in MSI that ships inside it.
+Keeps the new Teams client and the Outlook meeting add-in current on an endpoint or AVD session host. It asks the Teams config service which build Microsoft publishes for this architecture and **only acts when that build is newer than what is installed** — an up-to-date device is left completely alone. When an update is due it downloads and signature-checks `teamsbootstrapper.exe` and the MSIX of exactly that published build, uninstalls the meeting add-in, removes and deprovisions the `MSTeams` AppX package, provisions that package for all users and reinstalls the add-in MSI that ships inside it.
 
 "Add-in present" means its files are present, not that a registry key mentions it: a machine-wide registration pointing at a loader DLL that is gone counts as missing, and `-CheckOnly` says so (`the machine-wide add-in registration points at files that are gone`). Trusting the key alone is how a device whose add-in was deleted gets told there is nothing to do.
 
@@ -338,9 +338,9 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 | 2 | Version check — published build vs installed build | read-only |
 | 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector. Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
 | 4 | Classic Teams only (`-RemoveClassicTeams`): uninstall machine-wide installer + per-profile installs | yes |
-| 5 | Create working folder, download bootstrapper, verify Microsoft signature | yes |
+| 5 | Create working folder, download the bootstrapper and the published build's MSIX (the config service's `buildLink`), verify both Microsoft signatures. A package that fails falls back to the bootstrapper's own choice | yes |
 | 6 | Remove `MSTeams` AppX for all users and deprovision it; a package the AppX stack refuses to remove is reported, not fatal. The add-in is left alone here | yes |
-| 7 | Provision new Teams (`teamsbootstrapper.exe -p`) | yes |
+| 7 | Provision that package (`teamsbootstrapper.exe -p -o`); plain `-p` with `-UseBootstrapperBuild` or when no package could be fetched | yes |
 | 8 | The whole add-in replacement, once the MSI is in hand: uninstall the registered one (`1612` retried from the cached copy), verify nothing survived, clear every other copy, install it (`ALLUSERS=1`) | yes |
 | 9 | Verify add-in registration (machine-wide + per signed-in user in Outlook), classic removal, provisioned package and AVD components | reported as skipped under `-WhatIf` |
 
@@ -389,16 +389,17 @@ On an endpoint, preflight also checks the three policies that stop the staging: 
 | `-RemoveWebRtcRedirector` | Remove the old WebRTC media optimization, retired 1 October 2026. Cannot be combined with `-AvdOptimizations`; leaves `IsWVDEnvironment` set, because SlimCore needs it too |
 | `-ClearOrphanedAddInRegistration` | Last resort: make Windows Installer forget a meeting add-in it can no longer uninstall (`1612` with its cached MSI gone), which is what keeps refusing a reinstall with `1638` |
 | `-RepairAppxStore` | Last resort for the AppX side: re-register a package whose files are still there, then clear the `AppxAllUserStore` entries Windows can no longer resolve — registrations for SIDs with no profile, a machine-wide entry whose manifest is gone, and the `Deprovisioned` marker. Scoped to MSTeams; preflight names them whether or not the switch is given |
-| `-UseWinget` | Fetch the Teams MSIX with winget and provision that exact file (`teamsbootstrapper.exe -p -o`) instead of letting the bootstrapper download one at run time |
+| `-UseWinget` | Take the Teams MSIX from winget instead of the config service's `buildLink` and provision that file (`teamsbootstrapper.exe -p -o`). winget adds its own SHA256 check, but its manifest lags a build or two |
+| `-UseBootstrapperBuild` | Let `teamsbootstrapper.exe -p` pick the build itself, as before: Microsoft's staged rollout decides, and the result can trail the version check by weeks. Cannot be combined with `-UseWinget` |
 | `-RepairOutlookAddIn` | Clear a per-user Outlook registration pointing at an add-in DLL that no longer exists, so the machine-wide one takes over again |
 | `-Confirm:$false` | Never ask for confirmation (use this for unattended runs) |
 | `-Ring` | Update ring queried at the config service (default: `general`) |
-| `-WorkingDir` | Bootstrapper download folder (default: `C:\IT\AVD\Teams`) |
+| `-WorkingDir` | Download folder for the bootstrapper and the Teams MSIX (default: `C:\IT\AVD\Teams`) |
 | `-LogPath` | Transcript folder (default: `C:\Temp`) |
 | `-BootstrapperUrl` | Override the `teamsbootstrapper.exe` download URL (https only) |
 | `-WebRtcUrl` | Override the WebRTC redirector MSI URL (https only) |
 | `-SkipMeetingAddIn` | Leave the meeting add-in alone, and do not treat a missing add-in as work. Defensible on ordinary endpoints, where the Teams client keeps the add-in current per user by itself |
-| `-SkipSignatureCheck` | Accept an installer not signed by Microsoft (internal mirror) |
+| `-SkipSignatureCheck` | Accept an installer or package not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | Per-process timeout for msiexec/bootstrapper (default: `900`) |
 | `-Force` | Reinstall even when Teams is current, and continue without Teams or version info |
 

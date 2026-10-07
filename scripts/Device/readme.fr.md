@@ -324,7 +324,7 @@ Les résultats sont affichés à l'écran, avec à la fin un récapitulatif de t
 >
 > Version service desk pour IT Glue (en néerlandais, par niveau de support) : [Update-TeamsClient-ITGlue.md](Update-TeamsClient-ITGlue.md).
 
-Maintient à jour le nouveau client Teams et le complément de réunion Outlook sur un poste ou un hôte de session AVD. Il demande au service de configuration Teams quel build Microsoft publie pour cette architecture et **n'agit que si ce build est plus récent que celui installé** — un appareil à jour est laissé totalement intact. Lorsqu'une mise à jour est nécessaire, il télécharge `teamsbootstrapper.exe` et en vérifie la signature, désinstalle le complément de réunion, supprime et déprovisionne le paquet AppX `MSTeams`, provisionne le nouveau build pour tous les utilisateurs et réinstalle le MSI du complément qui l'accompagne.
+Maintient à jour le nouveau client Teams et le complément de réunion Outlook sur un poste ou un hôte de session AVD. Il demande au service de configuration Teams quel build Microsoft publie pour cette architecture et **n'agit que si ce build est plus récent que celui installé** — un appareil à jour est laissé totalement intact. Lorsqu'une mise à jour est nécessaire, il télécharge `teamsbootstrapper.exe` et le MSIX de ce build publié précisément, en vérifie les deux signatures, désinstalle le complément de réunion, supprime et déprovisionne le paquet AppX `MSTeams`, provisionne ce paquet pour tous les utilisateurs et réinstalle le MSI du complément qui l'accompagne.
 
 « Complément présent » signifie que ses fichiers sont présents, et non qu'une clé de registre le mentionne : un enregistrement à l'échelle de la machine qui pointe vers une DLL de chargement disparue compte comme manquant, et `-CheckOnly` le signale (`the machine-wide add-in registration points at files that are gone`). Se fier uniquement à la clé, c'est ainsi qu'un appareil dont le complément a été supprimé s'entend dire qu'il n'y a rien à faire.
 
@@ -338,9 +338,9 @@ Chaque étape qui modifie l'état passe par `ShouldProcess`, donc `-WhatIf` parc
 | 2 | Vérification de version — build publié contre build installé | lecture seule |
 | 3 | AVD uniquement (`-AvdOptimizations`) : indicateur `IsWVDEnvironment` + redirecteur WebRTC. Ou (`-RemoveWebRtcRedirector`) : désinstallation de ce redirecteur | oui |
 | 4 | Teams classique uniquement (`-RemoveClassicTeams`) : désinstallation du programme d'installation à l'échelle de la machine + des installations par profil | oui |
-| 5 | Création du dossier de travail, téléchargement du bootstrapper, vérification de la signature Microsoft | oui |
+| 5 | Création du dossier de travail, téléchargement du bootstrapper et du MSIX du build publié (le `buildLink` du service de configuration), vérification des deux signatures Microsoft. Si le paquet échoue, le bootstrapper choisit lui-même | oui |
 | 6 | Suppression de l'AppX `MSTeams` pour tous les utilisateurs et déprovisionnement ; un paquet que la pile AppX refuse de supprimer est signalé, sans être bloquant. Le complément n'est pas touché ici | oui |
-| 7 | Provisionnement du nouveau Teams (`teamsbootstrapper.exe -p`) | oui |
+| 7 | Provisionnement de ce paquet (`teamsbootstrapper.exe -p -o`) ; `-p` seul avec `-UseBootstrapperBuild` ou si aucun paquet n'a pu être récupéré | oui |
 | 8 | Remplacement complet du complément, une fois le MSI disponible : désinstallation de celui enregistré (`1612` retenté depuis la copie en cache), vérification que rien ne subsiste, suppression de toute autre copie, installation (`ALLUSERS=1`) | oui |
 | 9 | Vérification de l'enregistrement du complément (à l'échelle de la machine + par utilisateur connecté dans Outlook), de la suppression du classique, du paquet provisionné et des composants AVD | signalée comme ignorée sous `-WhatIf` |
 
@@ -389,16 +389,17 @@ Sur un poste, le contrôle préalable vérifie aussi les trois stratégies qui e
 | `-RemoveWebRtcRedirector` | Supprime l'ancienne optimisation multimédia WebRTC, retirée le 1er octobre 2026. Ne peut pas être combiné avec `-AvdOptimizations` ; laisse `IsWVDEnvironment` en place, car SlimCore en a aussi besoin |
 | `-ClearOrphanedAddInRegistration` | Dernier recours : faire oublier à Windows Installer un complément de réunion qu'il ne peut plus désinstaller (`1612` avec son MSI en cache disparu), ce qui lui fait refuser toute réinstallation avec `1638` |
 | `-RepairAppxStore` | Dernier recours côté AppX : réenregistre un paquet dont les fichiers sont encore présents, puis efface les entrées `AppxAllUserStore` que Windows ne peut plus résoudre — enregistrements pour des SID sans profil, entrée à l'échelle de la machine dont le manifeste a disparu, et le marqueur `Deprovisioned`. Limité à MSTeams ; le contrôle préalable les nomme, que le commutateur soit fourni ou non |
-| `-UseWinget` | Récupère le MSIX de Teams avec winget et provisionne exactement ce fichier (`teamsbootstrapper.exe -p -o`) au lieu de laisser le bootstrapper en télécharger un pendant l'exécution |
+| `-UseWinget` | Prend le MSIX de Teams dans winget au lieu du `buildLink` du service de configuration, et provisionne ce fichier (`teamsbootstrapper.exe -p -o`). winget vérifie en plus le SHA256, mais son manifeste a un ou deux builds de retard |
+| `-UseBootstrapperBuild` | Laisse `teamsbootstrapper.exe -p` choisir le build lui-même, comme avant : le déploiement progressif de Microsoft décide, et le résultat peut avoir des semaines de retard sur la vérification de version. Incompatible avec `-UseWinget` |
 | `-RepairOutlookAddIn` | Efface un enregistrement Outlook par utilisateur qui pointe vers une DLL de complément qui n'existe plus, afin que celui à l'échelle de la machine reprenne la main |
 | `-Confirm:$false` | Ne jamais demander de confirmation (à utiliser pour les exécutions sans surveillance) |
 | `-Ring` | Anneau de mise à jour interrogé auprès du service de configuration (par défaut : `general`) |
-| `-WorkingDir` | Dossier de téléchargement du bootstrapper (par défaut : `C:\IT\AVD\Teams`) |
+| `-WorkingDir` | Dossier de téléchargement du bootstrapper et du MSIX de Teams (par défaut : `C:\IT\AVD\Teams`) |
 | `-LogPath` | Dossier de transcription (par défaut : `C:\Temp`) |
 | `-BootstrapperUrl` | Remplace l'URL de téléchargement de `teamsbootstrapper.exe` (https uniquement) |
 | `-WebRtcUrl` | Remplace l'URL du MSI du redirecteur WebRTC (https uniquement) |
 | `-SkipMeetingAddIn` | Ne touche pas au complément de réunion, et ne considère pas un complément manquant comme du travail. Défendable sur les postes ordinaires, où le client Teams maintient lui-même le complément à jour par utilisateur |
-| `-SkipSignatureCheck` | Accepte un programme d'installation non signé par Microsoft (miroir interne) |
+| `-SkipSignatureCheck` | Accepte un programme d'installation ou un paquet non signé par Microsoft (miroir interne) |
 | `-TimeoutSeconds` | Délai d'expiration par processus pour msiexec/bootstrapper (par défaut : `900`) |
 | `-Force` | Réinstalle même si Teams est à jour, et continue sans informations sur Teams ou la version |
 
