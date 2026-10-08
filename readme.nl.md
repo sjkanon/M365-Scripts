@@ -1008,6 +1008,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (10)
+| Wijziging |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.nl.md#connect-m365ps1): Exchange-sessies gesloten op connection id, en wat de eerste scripts erop nodig hadden.** `Disconnect-M365Exchange` draaide `Disconnect-ExchangeOnline` zonder `-ConnectionId`, waardoor een script dat alleen een Security & Compliance-sessie toevoegde - of een script dat door een ander werd aangeroepen - ook de Exchange-sessie van de aanroeper sloot. `Connect-M365Exchange` geeft nu de ids terug van de sessies die het opende, en alleen die worden gesloten. Een delegated Exchange-aanmelding geeft `-DelegatedOrganization` alleen nog onder GDAP mee; daarbuiten meldde het een beheerder in zijn eigen tenant aan als "partner" van die tenant. Nieuw: `-EnableSearchOnlySession` (Content Search-purges), `Disconnect-M365Teams`, `Connect-M365PnP -AppOnly` (de certificaat-app uit `graph.appid.json`) en `Invoke-M365GraphPaged` (volgt `@odata.nextLink`), dat twee scripts elk voor zichzelf hadden geschreven |
+| Geverifieerd: syntaxcheck; met gemockte Exchange-cmdlets: Direct met `-TenantId` meldt aan zonder `-DelegatedOrganization`, een tweede aanroep hergebruikt de sessie, een kind dat alleen IPPS toevoegt sluit alleen die sessie en die van de ouder blijft open, GDAP gebruikt het klantdomein en een andere klant opent een nieuwe sessie; `Invoke-M365GraphPaged` met een gemockte collectie van twee pagina's en een lege. **Niet** geverifieerd: tegen een tenant |
+
 ### 2026-10-08 (9)
 | Wijziging |
 |--------|

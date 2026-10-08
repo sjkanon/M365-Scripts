@@ -46,7 +46,9 @@
         Disconnect-M365Graph     Disconnects only when Connect-M365Graph connected.
         Connect-M365Exchange     Exchange Online (ExchangeOnlineManagement 3.x).
         Disconnect-M365Exchange  Disconnects only when Connect-M365Exchange connected.
+        Invoke-M365GraphPaged    GET a Graph collection, following @odata.nextLink.
         Connect-M365Teams        Microsoft Teams (MicrosoftTeams 5.x).
+        Disconnect-M365Teams     Disconnects only when Connect-M365Teams connected.
         Connect-M365PnP          PnP.PowerShell; returns the connection object.
 #>
 
@@ -223,6 +225,24 @@ function Disconnect-M365Graph {
     }
 }
 
+function Invoke-M365GraphPaged {
+    <#
+    .SYNOPSIS
+        GET a Graph collection and follow @odata.nextLink until the end; returns the items.
+        -Uri is relative ('/v1.0/users?$select=id') or absolute.
+    #>
+    param(
+        [Parameter(Mandatory, Position = 0)] [string] $Uri,
+        [hashtable] $Headers = @{}
+    )
+    $next = $Uri
+    while ($next) {
+        $page = Invoke-MgGraphRequest -Method GET -Uri $next -Headers $Headers -OutputType PSObject -ErrorAction Stop
+        if ($null -ne $page.value) { $page.value } elseif ($page -and -not $page.PSObject.Properties['@odata.nextLink']) { $page }
+        $next = $page.'@odata.nextLink'
+    }
+}
+
 #endregion
 
 #region Exchange Online
@@ -231,14 +251,23 @@ function Connect-M365Exchange {
     <#
     .SYNOPSIS
         Connect to Exchange Online, for the work Graph has no API for.
-        Delegated by default (GDAP via -DelegatedOrganization), app-only with -ClientId
-        and -CertificateThumbprint, or -AppOnly from graph.appid.json.
+        Delegated by default (a GDAP customer via -DelegatedOrganization), app-only with
+        -ClientId and -CertificateThumbprint, or -AppOnly from graph.appid.json.
 
     .PARAMETER IncludeCompliance
         Also connect to Security & Compliance PowerShell (Connect-IPPSSession).
 
+    .PARAMETER EnableSearchOnlySession
+        Passed to Connect-IPPSSession (with -IncludeCompliance): needed by Content Search
+        actions such as New-ComplianceSearchAction -Purge.
+
+    .NOTES
+        Delegated: outside GDAP you land in the tenant of the account you sign in with;
+        -TenantId then only matters for app-only. Under GDAP the customer is reached with
+        -DelegatedOrganization (-Organization only applies to app-only sign-in).
+
     .OUTPUTS
-        [pscustomobject] ConnectedHere, AuthType, Organization.
+        [pscustomobject] ConnectedHere, ConnectionIds, AuthType, Organization.
     #>
     [CmdletBinding()]
     param(
@@ -248,7 +277,8 @@ function Connect-M365Exchange {
         [switch] $AppOnly,
         [switch] $DeviceCode,
         [switch] $Interactive,
-        [switch] $IncludeCompliance
+        [switch] $IncludeCompliance,
+        [switch] $EnableSearchOnlySession
     )
 
     if (-not (Get-Command Connect-ExchangeOnline -ErrorAction SilentlyContinue)) {
@@ -263,58 +293,66 @@ function Connect-M365Exchange {
     }
     $wantAppOnly = [bool]$ClientId
     $org = Resolve-M365CustomerDomain -TenantId $tenant
+    $delegatedOrg = if (-not $wantAppOnly -and $org -and (Test-M365Gdap)) { $org }
 
-    $existing = @(Get-ConnectionInformation -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -eq 'Connected' -and -not $_.IsEopSession })
-    $fits = $existing | Where-Object {
-        (-not $org -or $_.TenantID -eq $tenant -or $_.Organization -eq $org -or $_.DelegatedOrganization -eq $org) -and
-        ((-not $wantAppOnly) -or $_.AppId -eq $ClientId)
-    } | Select-Object -First 1
+    $connected = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Where-Object State -eq 'Connected')
+    $before = @($connected | ForEach-Object ConnectionId)
 
-    $connected = $false
-    if (-not $fits) {
-        $p = @{ ShowBanner = $false; ErrorAction = 'Stop' }
-        if ($wantAppOnly) {
-            if (-not $org -or $org -match '^[0-9a-fA-F-]{36}$') { throw 'App-only Exchange sign-in needs -TenantId as a domain (contoso.onmicrosoft.com).' }
-            if (-not $CertificateThumbprint) { throw '-ClientId needs -CertificateThumbprint for Exchange Online.' }
-            $p['AppId'] = $ClientId; $p['CertificateThumbprint'] = $CertificateThumbprint; $p['Organization'] = $org
-            Write-Host "  Connecting to Exchange Online (app-only, $org)..." -ForegroundColor DarkGray
+    $fitsSession = {
+        param($c)
+        $orgOk = if ($wantAppOnly) {
+            $c.TenantID -eq $tenant -or $c.Organization -eq $org
+        } elseif ($delegatedOrg) {
+            $c.DelegatedOrganization -eq $delegatedOrg -or $c.TenantID -eq $tenant
         } else {
-            # -Organization only applies to app-only sign-in; a partner reaches a customer
-            # with -DelegatedOrganization. Without GDAP (or -TenantId) you land in your own tenant.
-            if ($org -and ($TenantId -or (Test-M365Gdap))) { $p['DelegatedOrganization'] = $org }
-            if ($global:upn) { $p['UserPrincipalName'] = [string]$global:upn }
-            $device = Test-M365DeviceCode -DeviceCode:$DeviceCode -Interactive:$Interactive
-            if ($device) { $p['Device'] = $true; $p.Remove('UserPrincipalName') }
-            Write-Host "  Connecting to Exchange Online (delegated$(if ($device) { ', device code' })$(if ($p['DelegatedOrganization']) { ", $org" }))..." -ForegroundColor DarkGray
+            -not $c.DelegatedOrganization -and (-not $c.AppId -or -not $tenant -or $c.TenantID -eq $tenant -or $c.Organization -eq $org)
         }
+        $orgOk -and ((-not $wantAppOnly) -or $c.AppId -eq $ClientId)
+    }
+
+    # Parameters shared by Connect-ExchangeOnline and Connect-IPPSSession.
+    $common = @{ ShowBanner = $false; ErrorAction = 'Stop' }
+    if ($wantAppOnly) {
+        if (-not $org -or $org -match '^[0-9a-fA-F-]{36}$') { throw 'App-only Exchange sign-in needs -TenantId as a domain (contoso.onmicrosoft.com).' }
+        if (-not $CertificateThumbprint) { throw '-ClientId needs -CertificateThumbprint for Exchange Online.' }
+        $common['AppId'] = $ClientId; $common['CertificateThumbprint'] = $CertificateThumbprint; $common['Organization'] = $org
+    } else {
+        if ($delegatedOrg) { $common['DelegatedOrganization'] = $delegatedOrg }
+        if ($global:upn)   { $common['UserPrincipalName'] = [string]$global:upn }
+    }
+
+    if (-not ($connected | Where-Object { -not $_.IsEopSession -and (& $fitsSession $_) })) {
+        $p = $common.Clone()
+        $device = -not $wantAppOnly -and (Test-M365DeviceCode -DeviceCode:$DeviceCode -Interactive:$Interactive)
+        if ($device) { $p['Device'] = $true; $p.Remove('UserPrincipalName') }
+        $how = if ($wantAppOnly) { "app-only, $org" } else { "delegated$(if ($device) { ', device code' })$(if ($delegatedOrg) { ", $delegatedOrg" })" }
+        Write-Host "  Connecting to Exchange Online ($how)..." -ForegroundColor DarkGray
         Connect-ExchangeOnline @p
-        $connected = $true
     }
 
-    if ($IncludeCompliance) {
-        $ipps = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Connected' -and $_.IsEopSession })
-        if (-not $ipps) {
-            $p = @{ ShowBanner = $false; ErrorAction = 'Stop' }
-            if ($wantAppOnly) {
-                $p['AppId'] = $ClientId; $p['CertificateThumbprint'] = $CertificateThumbprint; $p['Organization'] = $org
-            } else {
-                if ($org -and ($TenantId -or (Test-M365Gdap))) { $p['DelegatedOrganization'] = $org }
-                if ($global:upn) { $p['UserPrincipalName'] = [string]$global:upn }
-            }
-            Write-Host '  Connecting to Security & Compliance PowerShell...' -ForegroundColor DarkGray
-            Connect-IPPSSession @p
-            $connected = $true
-        }
+    if ($IncludeCompliance -and -not ($connected | Where-Object { $_.IsEopSession -and (& $fitsSession $_) })) {
+        $p = $common.Clone()
+        if ($EnableSearchOnlySession) { $p['EnableSearchOnlySession'] = $true }
+        Write-Host '  Connecting to Security & Compliance PowerShell...' -ForegroundColor DarkGray
+        Connect-IPPSSession @p
     }
 
-    [pscustomobject]@{ ConnectedHere = $connected; AuthType = $(if ($wantAppOnly) { 'AppOnly' } else { 'Delegated' }); Organization = $org }
+    $opened = @(Get-ConnectionInformation -ErrorAction SilentlyContinue |
+        Where-Object { $_.State -eq 'Connected' -and $_.ConnectionId -notin $before } | ForEach-Object ConnectionId)
+    [pscustomobject]@{
+        ConnectedHere = $opened.Count -gt 0
+        ConnectionIds = $opened
+        AuthType      = $(if ($wantAppOnly) { 'AppOnly' } else { 'Delegated' })
+        Organization  = $org
+    }
 }
 
 function Disconnect-M365Exchange {
+    # Closes only the sessions Connect-M365Exchange opened, so a script called from
+    # another script does not take its caller's Exchange session down with it.
     param([Parameter(Position = 0)] $Connection)
-    if ($Connection -and $Connection.ConnectedHere) {
-        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+    if ($Connection -and $Connection.ConnectedHere -and $Connection.ConnectionIds) {
+        Disconnect-ExchangeOnline -ConnectionId $Connection.ConnectionIds -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
     }
 }
 
@@ -368,6 +406,13 @@ function Connect-M365Teams {
     [pscustomobject]@{ ConnectedHere = $true; TenantId = [string]$r.TenantId }
 }
 
+function Disconnect-M365Teams {
+    param([Parameter(Position = 0)] $Connection)
+    if ($Connection -and $Connection.ConnectedHere) {
+        Disconnect-MicrosoftTeams -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+
 #endregion
 
 #region PnP.PowerShell
@@ -379,7 +424,8 @@ function Connect-M365PnP {
         for (role assignments, SharePoint groups, recycle bin, provisioning).
         PnP needs an app registration of your own since September 2024: -ClientId, else
         the tenant's entry in pnp.appid.json (repo root). Delegated by default
-        (device code per load.config.ps1), app-only with -CertificateThumbprint.
+        (device code per load.config.ps1), app-only with -CertificateThumbprint, or
+        -AppOnly to take the certificate app from graph.appid.json.
 
     .OUTPUTS
         The PnP connection (pass it on with -Connection).
@@ -390,6 +436,7 @@ function Connect-M365PnP {
         [string] $TenantId,
         [string] $ClientId,
         [string] $CertificateThumbprint,
+        [switch] $AppOnly,
         [switch] $DeviceCode,
         [switch] $Interactive
     )
@@ -399,6 +446,15 @@ function Connect-M365PnP {
     }
     $tenant = Resolve-M365TenantId -TenantId $TenantId
     if (-not $tenant -and $Url -match '^https://([^./]+?)(-admin)?\.sharepoint\.com') { $tenant = "$($Matches[1]).onmicrosoft.com" }
+
+    # -AppOnly: the certificate app from graph.appid.json (it needs SharePoint application
+    # permissions, e.g. Sites.FullControl.All, for this to work).
+    if ($AppOnly -and -not $CertificateThumbprint) {
+        $reg = Get-M365AppRegistration -TenantId $tenant
+        if (-not $ClientId) { $ClientId = $reg.ClientId }
+        $CertificateThumbprint = $reg.CertificateThumbprint
+        if (-not $tenant) { $tenant = $reg.Tenant }
+    }
 
     if (-not $ClientId) {
         $file = Join-Path $PSScriptRoot '..\..\pnp.appid.json'

@@ -79,8 +79,17 @@ $script:MspAdminDisplayName = 'MSP - Admin Account'
 ```powershell
 Connect-Tenant -Domain "customer.com"
 # Définit $global:cid et $global:connectmsoldomain
-# Toutes les fonctions suivantes ciblent automatiquement le tenant sélectionné
+# Sous GDAP, toutes les fonctions suivantes ciblent le tenant sélectionné
 ```
+
+### Connexion
+
+Chaque fonction se connecte via [`Connect-M365.ps1`](#connect-m365ps1), que `functies.ps1` charge par dot-sourcing : Microsoft Graph, en délégué, avec un code d'appareil quand `useDeviceCodeAuth` est activé dans `load.config.ps1`, sinon dans le navigateur. Une session qui possède déjà les étendues (scopes) d'une fonction est réutilisée.
+
+- **GDAP** (`authMode = 'GDAP'`) : après `Connect-Tenant`, chaque fonction Graph et Exchange se connecte à ce client (`$cid`, Exchange via `-DelegatedOrganization`).
+- **Direct** : les fonctions restent dans votre propre tenant ; `$cid` n'est pas utilisé.
+- La session partenaire dont `Connect-Tenant` et `Test-GdapConnection` ont besoin pour `Get-MgContract` est ouverte par `Connect-PartnerGraph`, qui retient votre propre tenant (`$global:partnerTenantId`) au premier démarrage : choisir un autre client fonctionne donc encore après qu'une fonction est passée au client actuel.
+- Teams (option 3 d'`Invoke-Menu`) passe par `Connect-M365Teams`, Exchange par `Connect-M365Exchange`.
 
 ### Fonctions
 
@@ -89,8 +98,9 @@ Connect-Tenant -Domain "customer.com"
 | Fonction | Description |
 |----------|-------------|
 | `Connect-Tenant` | Sélectionne un client CSP par domaine, renseigne `$cid` et `$connectmsoldomain` |
-| `Test-GdapConnection` | Valide le contrat GDAP/CSP délégué + tente une connexion Exchange déléguée |
-| `Test-ExoConnection` | Vérifie / rétablit la connexion Exchange Online |
+| `Test-GdapConnection` | Valide le contrat GDAP/CSP délégué, puis tente une connexion Graph déléguée au client (`Get-MgOrganization`) et une connexion Exchange déléguée |
+| `Test-ExoConnection` | Se connecte à Exchange Online, ou réutilise une session vers la bonne organisation |
+| `Connect-PartnerGraph` | Graph dans votre propre tenant (partenaire), pour `Get-MgContract` |
 
 **Exchange Online**
 
@@ -203,10 +213,11 @@ Disconnect-M365Graph $graph    # ne déconnecte que ce que cet appel a connecté
 |----------|-----------------|
 | `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
 | `Disconnect-M365Graph` | Ne déconnecte que si `Connect-M365Graph` a ouvert la session |
-| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` ajoute Security & Compliance (`Connect-IPPSSession`) |
-| `Disconnect-M365Exchange` | Ne déconnecte que si `Connect-M365Exchange` a ouvert la session |
-| `Connect-M365Teams` | Microsoft Teams PowerShell |
-| `Connect-M365PnP` | PnP.PowerShell vers un site ; renvoie la connexion. ClientId depuis `-ClientId` ou `pnp.appid.json` |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` ajoute Security & Compliance (`Connect-IPPSSession`), `-EnableSearchOnlySession` pour Content Search |
+| `Disconnect-M365Exchange` | Ne ferme que les sessions ouvertes par `Connect-M365Exchange` (par identifiant de connexion), jamais celle de l'appelant |
+| `Connect-M365Teams` / `Disconnect-M365Teams` | Microsoft Teams PowerShell, pour les stratégies `Cs*` |
+| `Connect-M365PnP` | PnP.PowerShell vers un site ; renvoie la connexion. ClientId depuis `-ClientId` ou `pnp.appid.json` ; `-AppOnly` utilise l'application à certificat de `graph.appid.json` |
+| `Invoke-M365GraphPaged` | Lire une collection Graph en suivant `@odata.nextLink` jusqu'au bout |
 | `Resolve-M365TenantId` | Le tenant : `-TenantId`, sinon le client GDAP, sinon votre propre tenant |
 
 **Comment il se connecte**
@@ -216,7 +227,8 @@ Disconnect-M365Graph $graph    # ne déconnecte que ce que cet appel a connecté
   sinon dans le navigateur avec votre `upn` prérempli. Sous GDAP (`authMode = 'GDAP'`), le
   tenant client est `$global:cid` / `$global:connectmsoldomain` issu de `Connect-Tenant`, ou
   `$env:M365_CUSTOMER_TENANTID`. Exchange atteint le client avec `-DelegatedOrganization` ;
-  `-Organization` ne fonctionne qu'en connexion app-only.
+  `-Organization` ne fonctionne qu'en connexion app-only. Hors GDAP, une connexion Exchange
+  déléguée aboutit dans le tenant du compte avec lequel vous vous connectez.
 - **App-only, sur demande.** `-ClientId` avec `-CertificateThumbprint` (ou `-ClientSecret`,
   Graph uniquement), ou `-AppOnly` pour lire ClientId et empreinte du tenant dans
   `graph.appid.json` à la racine du dépôt (gitignored). L'application doit être consentie dans

@@ -79,8 +79,17 @@ $script:MspAdminDisplayName = 'MSP - Admin Account'
 ```powershell
 Connect-Tenant -Domain "customer.com"
 # Zet $global:cid en $global:connectmsoldomain
-# Alle volgende functies richten zich automatisch op de geselecteerde tenant
+# Onder GDAP richten alle volgende functies zich op de geselecteerde tenant
 ```
+
+### Aanmelden
+
+Elke functie meldt zich aan via [`Connect-M365.ps1`](#connect-m365ps1), dat `functies.ps1` dot-sourcet: Microsoft Graph, gedelegeerd, met een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, anders in de browser. Een sessie die de scopes van een functie al heeft, wordt hergebruikt.
+
+- **GDAP** (`authMode = 'GDAP'`): na `Connect-Tenant` verbindt elke Graph- en Exchange-functie met die klant (`$cid`, Exchange via `-DelegatedOrganization`).
+- **Direct**: de functies blijven in je eigen tenant; `$cid` wordt niet gebruikt.
+- De partnersessie die `Connect-Tenant` en `Test-GdapConnection` nodig hebben voor `Get-MgContract`, opent `Connect-PartnerGraph`. Die onthoudt bij de eerste start je eigen tenant (`$global:partnerTenantId`), zodat een andere klant kiezen ook nog werkt nadat een functie naar de huidige klant is overgeschakeld.
+- Teams (`Invoke-Menu` optie 3) loopt via `Connect-M365Teams`, Exchange via `Connect-M365Exchange`.
 
 ### Functies
 
@@ -89,8 +98,9 @@ Connect-Tenant -Domain "customer.com"
 | Functie | Omschrijving |
 |----------|-------------|
 | `Connect-Tenant` | Selecteert een CSP-klant op domein, vult `$cid` en `$connectmsoldomain` |
-| `Test-GdapConnection` | Valideert het gedelegeerde GDAP/CSP-contract + probeert een gedelegeerde Exchange-verbinding |
-| `Test-ExoConnection` | Controleert / herstelt de Exchange Online-verbinding |
+| `Test-GdapConnection` | Valideert het gedelegeerde GDAP/CSP-contract en probeert daarna een gedelegeerde Graph-verbinding met de klant (`Get-MgOrganization`) en een gedelegeerde Exchange-verbinding |
+| `Test-ExoConnection` | Verbindt met Exchange Online, of hergebruikt een sessie met de juiste organisatie |
+| `Connect-PartnerGraph` | Graph in je eigen (partner)tenant, voor `Get-MgContract` |
 
 **Exchange Online**
 
@@ -202,10 +212,11 @@ Disconnect-M365Graph $graph    # verbreekt alleen wat deze aanroep verbond
 |---------|--------------|
 | `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
 | `Disconnect-M365Graph` | Verbreekt alleen als `Connect-M365Graph` de sessie opende |
-| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` voegt Security & Compliance toe (`Connect-IPPSSession`) |
-| `Disconnect-M365Exchange` | Verbreekt alleen als `Connect-M365Exchange` de sessie opende |
-| `Connect-M365Teams` | Microsoft Teams PowerShell |
-| `Connect-M365PnP` | PnP.PowerShell naar een site; geeft de verbinding terug. ClientId uit `-ClientId` of `pnp.appid.json` |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` voegt Security & Compliance toe (`Connect-IPPSSession`), `-EnableSearchOnlySession` voor Content Search |
+| `Disconnect-M365Exchange` | Sluit alleen de sessies die `Connect-M365Exchange` opende (op connection id), nooit die van de aanroeper |
+| `Connect-M365Teams` / `Disconnect-M365Teams` | Microsoft Teams PowerShell, voor het `Cs*`-beleid |
+| `Connect-M365PnP` | PnP.PowerShell naar een site; geeft de verbinding terug. ClientId uit `-ClientId` of `pnp.appid.json`; `-AppOnly` gebruikt de certificaat-app uit `graph.appid.json` |
+| `Invoke-M365GraphPaged` | Een Graph-collectie ophalen en `@odata.nextLink` tot het einde volgen |
 | `Resolve-M365TenantId` | De tenant: `-TenantId`, anders de GDAP-klant, anders je eigen tenant |
 
 **Hoe het aanmeldt**
@@ -215,7 +226,8 @@ Disconnect-M365Graph $graph    # verbreekt alleen wat deze aanroep verbond
   in de browser met je `upn` al ingevuld. Onder GDAP (`authMode = 'GDAP'`) is de klanttenant
   `$global:cid` / `$global:connectmsoldomain` uit `Connect-Tenant`, of
   `$env:M365_CUSTOMER_TENANTID`. Exchange bereikt de klant met `-DelegatedOrganization`;
-  `-Organization` werkt alleen bij app-only aanmelden.
+  `-Organization` werkt alleen bij app-only aanmelden. Buiten GDAP komt een delegated
+  Exchange-aanmelding uit in de tenant van het account waarmee je aanmeldt.
 - **App-only, op verzoek.** `-ClientId` met `-CertificateThumbprint` (of `-ClientSecret`,
   alleen Graph), of `-AppOnly` om ClientId en thumbprint voor de tenant uit `graph.appid.json`
   in de root van de repo te lezen (gitignored). De app moet in die tenant toestemming hebben:

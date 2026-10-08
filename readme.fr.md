@@ -1008,6 +1008,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (10)
+| Modification |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.fr.md#connect-m365ps1) : sessions Exchange fermées par identifiant de connexion, et ce dont les premiers scripts avaient besoin.** `Disconnect-M365Exchange` lançait `Disconnect-ExchangeOnline` sans `-ConnectionId`, si bien qu'un script qui n'ajoutait qu'une session Security & Compliance - ou un script appelé par un autre - fermait aussi la session Exchange de l'appelant. `Connect-M365Exchange` renvoie maintenant les identifiants des sessions qu'il a ouvertes, et seules celles-ci sont fermées. Une connexion Exchange déléguée ne passe plus `-DelegatedOrganization` que sous GDAP ; hors GDAP, elle connectait un administrateur à son propre tenant comme « partenaire ». Nouveau : `-EnableSearchOnlySession` (purges Content Search), `Disconnect-M365Teams`, `Connect-M365PnP -AppOnly` (l'application à certificat de `graph.appid.json`) et `Invoke-M365GraphPaged` (suit `@odata.nextLink`), que deux scripts avaient chacun écrit pour eux-mêmes |
+| Vérifié : contrôle de syntaxe ; avec des cmdlets Exchange simulées : Direct avec `-TenantId` se connecte sans `-DelegatedOrganization`, un second appel réutilise la session, un enfant qui n'ajoute qu'IPPS ne ferme que cette session et celle du parent reste ouverte, GDAP utilise le domaine du client et un autre client ouvre une nouvelle session ; `Invoke-M365GraphPaged` avec une collection simulée de deux pages et une vide. **Non** vérifié : sur un tenant |
+
 ### 2026-10-08 (9)
 | Modification |
 |--------|

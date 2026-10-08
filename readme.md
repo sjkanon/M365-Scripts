@@ -1008,6 +1008,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (10)
+| Change |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.md#connect-m365ps1): Exchange sessions closed by connection id, and what the first scripts on it asked for.** `Disconnect-M365Exchange` ran `Disconnect-ExchangeOnline` without `-ConnectionId`, so a script that only added a Security & Compliance session - or a child script called by another - closed its caller's Exchange session too. `Connect-M365Exchange` now returns the ids of the sessions it opened and only those are closed. A delegated Exchange sign-in only passes `-DelegatedOrganization` under GDAP; outside GDAP it signed a home-tenant admin in as a "partner" of their own tenant. New: `-EnableSearchOnlySession` (Content Search purges), `Disconnect-M365Teams`, `Connect-M365PnP -AppOnly` (the certificate app from `graph.appid.json`) and `Invoke-M365GraphPaged` (follows `@odata.nextLink`), which two scripts had each written for themselves |
+| Verified: syntax check; with mocked Exchange cmdlets: Direct with `-TenantId` signs in without `-DelegatedOrganization`, a second call reuses the session, a child that adds only IPPS closes only that session and the parent's stays open, GDAP uses the customer domain and a different customer opens a new session; `Invoke-M365GraphPaged` with a mocked two-page and an empty collection. **Not** verified: against a tenant |
+
 ### 2026-10-08 (9)
 | Change |
 |--------|
