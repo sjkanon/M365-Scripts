@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Push a shared contact list (e.g. a company phone list) into one or more
@@ -15,8 +15,15 @@
     (-GroupId). Defaults to a safe preview — pass -Apply to actually write
     contacts.
 
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected.
+    Sign-in: APP-ONLY BY DEFAULT - the one script in this repo that does not default
+    to delegated. Writing contacts into OTHER users' mailboxes needs the
+    Contacts.ReadWrite application permission; a delegated token (even a Global
+    Administrator's) only reaches the signed-in user's own contacts. The app comes
+    from -ClientId + -CertificateThumbprint, or else from graph.appid.json in the repo
+    root (as -AppOnly). With -Delegated you sign in as yourself (device code / GDAP
+    per load.config.ps1) and can only target your own mailbox. Sign-in goes through
+    scripts\Startup\Connect-M365.ps1; a fitting Graph session is reused and left
+    connected, and only a session this script opened is disconnected.
 
 .PARAMETER CsvPath
     Path to a CSV with columns: DisplayName, GivenName, Surname, CompanyName,
@@ -49,7 +56,23 @@
     (`~/Downloads` on Linux/macOS).
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP;
+    selects the tenant's entry in graph.appid.json.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Needs the
+    application permissions Contacts.ReadWrite (and GroupMember.Read.All for -GroupId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint from graph.appid.json. This is
+    already the default; the switch is accepted for consistency with other scripts.
+
+.PARAMETER Delegated
+    Sign in as yourself instead of app-only. Delegated Contacts.ReadWrite only covers
+    your own mailbox, so every target user must be you; the script stops otherwise.
 
 .EXAMPLE
     # Preview for an explicit user list
@@ -59,12 +82,20 @@
     # Push to every member of a group, refreshing previously-synced contacts first
     .\Sync-UserContacts.ps1 -CsvPath .\companycontacts.csv -GroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -RemoveExisting -Apply
 
+.EXAMPLE
+    # App registration passed explicitly
+    .\Sync-UserContacts.ps1 -CsvPath .\companycontacts.csv -UserList "user1@contoso.com" -TenantId contoso.onmicrosoft.com -ClientId <appId> -CertificateThumbprint <thumbprint> -Apply
+
+.EXAMPLE
+    # Only your own Contacts folder, signed in as yourself
+    .\Sync-UserContacts.ps1 -CsvPath .\companycontacts.csv -UserList "me@contoso.com" -Delegated -Apply
+
 .NOTES
     CSV example:
         DisplayName,GivenName,Surname,CompanyName,BusinessPhone,MobilePhone,EmailAddress
         "Jane Doe",Jane,Doe,"Contoso Ltd","+1 555 0100","+1 555 0101",jane.doe@example.com
 
-    Required modules: Microsoft.Graph.Authentication, Microsoft.Graph.PersonalContacts, Microsoft.Graph.Groups
+    Required modules: Microsoft.Graph.Authentication, Microsoft.Graph.PersonalContacts
 #>
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'UserList')]
 param(
@@ -82,8 +113,18 @@ param(
     [switch] $RemoveExisting,
     [switch] $Apply,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly,
+    [switch] $Delegated
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
+if ($Delegated -and ($AppOnly -or $ClientId)) {
+    throw '-Delegated cannot be combined with -AppOnly or -ClientId: pick one sign-in.'
+}
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -91,21 +132,29 @@ if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir
 if (-not $OutputPath) { $OutputPath = Join-Path $outputDir "SyncUserContacts_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" }
 
 $rows = Import-Csv -Path $CsvPath
-if (-not $rows -or -not $rows[0].PSObject.Properties.Name -contains 'DisplayName' -or -not $rows[0].PSObject.Properties.Name -contains 'EmailAddress') {
+# -notcontains: the old "-not $names -contains 'X'" negated the list first, so the
+# check never fired and a CSV without these columns was processed silently.
+if (-not $rows -or $rows[0].PSObject.Properties.Name -notcontains 'DisplayName' -or $rows[0].PSObject.Properties.Name -notcontains 'EmailAddress') {
     Write-Error "CSV must have at least 'DisplayName' and 'EmailAddress' columns. Found: $($rows[0].PSObject.Properties.Name -join ', ')"
     exit 1
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Contacts.ReadWrite', 'GroupMember.Read.All'); NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
+if ($Delegated) {
+    $scopes = @('Contacts.ReadWrite', 'User.Read')
+    if ($PSCmdlet.ParameterSetName -eq 'Group') { $scopes += 'GroupMember.Read.All' }
+    $graph = Connect-M365Graph -Scopes $scopes -TenantId $TenantId
+} else {
+    # App-only by default: delegated Contacts.ReadWrite cannot write other users'
+    # contacts, which is the whole point of this script.
+    try {
+        $graph = Connect-M365Graph -TenantId $TenantId -ClientId $ClientId `
+            -CertificateThumbprint $CertificateThumbprint -AppOnly:(-not $ClientId)
+    } catch {
+        throw ("This script signs in app-only by default, because a delegated token can only write the signed-in user's own contacts. " +
+               "Pass -ClientId and -CertificateThumbprint (app with the Contacts.ReadWrite application permission), add the tenant to graph.appid.json, " +
+               "or use -Delegated to target only your own mailbox. Sign-in error: $($_.Exception.Message)")
+    }
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -121,13 +170,28 @@ Write-Host ""
 $targetUsers = [System.Collections.Generic.List[string]]::new()
 if ($PSCmdlet.ParameterSetName -eq 'Group') {
     Write-Host "  Resolving group members..." -ForegroundColor DarkGray
-    (Get-MgGroupMember -GroupId $GroupId -All).Id | ForEach-Object { $targetUsers.Add($_) }
+    # Only users have a Contacts folder; the cast skips nested groups, devices, etc.
+    $next = "v1.0/groups/$GroupId/members/microsoft.graph.user?`$select=id&`$top=999"
+    while ($next) {
+        $page = Invoke-MgGraphRequest -Method GET -Uri $next -OutputType Hashtable -ErrorAction Stop
+        foreach ($m in $page['value']) { $targetUsers.Add($m['id']) }
+        $next = $page['@odata.nextLink']
+    }
 } else {
     $UserList | ForEach-Object { $targetUsers.Add($_) }
 }
 
 Write-Host "  Target user(s): $($targetUsers.Count)" -ForegroundColor DarkGray
 Write-Host ""
+
+if ($Delegated) {
+    $me = Invoke-MgGraphRequest -Method GET -Uri 'v1.0/me?$select=id,userPrincipalName' -OutputType Hashtable -ErrorAction Stop
+    $others = @($targetUsers | Where-Object { $_ -ne $me['id'] -and $_ -ne $me['userPrincipalName'] })
+    if ($others.Count -gt 0) {
+        Disconnect-M365Graph $graph
+        throw "-Delegated can only write your own contacts ($($me['userPrincipalName'])); these targets are other users: $($others -join ', '). Run without -Delegated (app-only, Contacts.ReadWrite application permission)."
+    }
+}
 
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
@@ -196,4 +260,4 @@ if (-not $Apply) { Write-Host "  Re-run with -Apply to write contacts." -Foregro
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

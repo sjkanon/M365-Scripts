@@ -4,9 +4,9 @@
 
 # Legacy Utilities — Exchange
 
-Scripts de gestion des boîtes aux lettres et des contacts, modernisés à partir d'un ensemble
-d'anciens scripts ad hoc. Ils se connectent automatiquement à Exchange Online / Microsoft Graph
-si aucune session n'est active, et réutilisent la session existante si vous êtes déjà connecté.
+Scripts de gestion des boîtes aux lettres et des contacts, modernisés à partir d'un ensemble d'anciens scripts ad hoc. Ils se connectent via [`Connect-M365.ps1`](../../Startup/readme.fr.md) : en délégué en tant qu'administrateur par défaut (navigateur, ou code d'appareil / client GDAP selon `load.config.ps1`), en app-only avec `-ClientId` + `-CertificateThumbprint` ou `-AppOnly` (application de `graph.appid.json`). Une session adaptée pour le bon tenant est réutilisée et reste connectée ; seule une session ouverte par le script est fermée. Chaque script accepte `-TenantId`, `-ClientId`, `-CertificateThumbprint` et `-AppOnly`.
+
+Graph est la valeur par défaut. Cinq scripts restent sur Exchange Online PowerShell, car Graph n'a pas d'API pour ce qu'ils font (voir chaque section) ; sous GDAP, ils atteignent désormais le client avec `-DelegatedOrganization` — auparavant, `-TenantId` était passé comme `-Organization`, qui ne s'applique qu'à la connexion app-only. `Sync-UserContacts.ps1` est le seul script qui se connecte **en app-only par défaut**, car un jeton délégué ne peut pas écrire les contacts d'autres utilisateurs.
 
 ---
 
@@ -39,11 +39,16 @@ ne convient pas. Essai à blanc par défaut.
 | `-User` | Oui | Utilisateur à qui accorder l'accès |
 | `-AccessRights` | Oui | Niveau d'autorisation du dossier (Owner, Editor, Reviewer, ...) |
 | `-Apply` | Non | Accorder réellement l'autorisation (par défaut : aperçu) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | Domaine ou ID du tenant (par défaut : le client GDAP si `authMode` vaut GDAP) ; l'app-only exige le domaine |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 ```powershell
 .\Set-MailboxFolderPermission.ps1 -Mailbox "shared@contoso.com" -User "j.doe@contoso.com" -AccessRights Editor -Apply
 ```
+
+**Remarques**
+- Reste sur Exchange Online : Graph n'a pas d'API pour les autorisations de dossiers de boîte aux lettres (seul le calendrier dispose de `calendarPermission`)
 
 ---
 
@@ -65,7 +70,9 @@ global sur toutes les boîtes de l'organisation). Essai à blanc par défaut.
 | `-AutoMapping` | Non | Activer le mappage automatique dans Outlook (par défaut : désactivé) |
 | `-Apply` | Non | Accorder réellement l'accès (par défaut : aperçu) |
 | `-OutputPath` | Non | Chemin du rapport CSV |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | Domaine ou ID du tenant (par défaut : le client GDAP si `authMode` vaut GDAP) ; l'app-only exige le domaine |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 *Un seul paramètre parmi `-Mailbox` / `-CsvPath` / `-AllMailboxes` définit la portée.
 
@@ -73,6 +80,9 @@ global sur toutes les boîtes de l'organisation). Essai à blanc par défaut.
 .\Add-MailboxDelegateAccess.ps1 -Mailbox "sales@contoso.com" -User "j.doe@contoso.com" -Apply
 .\Add-MailboxDelegateAccess.ps1 -AllMailboxes -User "helpdesk@contoso.com"   # vérifier d'abord la portée
 ```
+
+**Remarques**
+- Reste sur Exchange Online : Full Access et Send As sont des autorisations Exchange sans API Graph
 
 ---
 
@@ -85,6 +95,9 @@ Crée des boîtes aux lettres partagées à partir d'un CSV (`Name`, `PrimarySmt
 .\New-BulkSharedMailboxes.ps1 -CsvPath .\sharedmailboxes.csv -Apply
 ```
 
+**Remarques**
+- Reste sur Exchange Online : Graph ne peut pas créer de boîtes aux lettres partagées
+
 ---
 
 ### New-BulkMailContacts.ps1
@@ -95,6 +108,9 @@ Crée des Mail Contacts à partir d'un CSV (`Name`, `ExternalEmailAddress`), en 
 ```powershell
 .\New-BulkMailContacts.ps1 -CsvPath .\contacts.csv -DistributionGroup "everyone@contoso.com" -Apply
 ```
+
+**Remarques**
+- Reste sur Exchange Online : les contacts de messagerie et l'appartenance aux groupes de distribution sont des objets Exchange ; `orgContact` dans Graph est en lecture seule et Graph ne peut pas modifier les membres des groupes de distribution
 
 ---
 
@@ -115,10 +131,20 @@ défaut.
 | `-Tag` | Non | Marqueur écrit dans PersonalNotes (par défaut : `Synced-by-Sync-UserContacts`) |
 | `-RemoveExisting` | Non | Supprimer les contacts synchronisés précédemment avant de réimporter |
 | `-Apply` | Non | Écrire réellement les contacts (par défaut : aperçu) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Inscription d'application avec l'autorisation d'application `Contacts.ReadWrite` (plus `GroupMember.Read.All` pour `-GroupId`) |
+| `-AppOnly` | Non | L'application de `graph.appid.json` — déjà la valeur par défaut |
+| `-Delegated` | Non | Se connecter en son propre nom ; seule votre propre boîte aux lettres peut être une cible |
+| `-TenantId` | Non | Tenant (par défaut : le client GDAP) ; choisit aussi l'entrée dans `graph.appid.json` |
 
 ```powershell
 .\Sync-UserContacts.ps1 -CsvPath .\companycontacts.csv -GroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -RemoveExisting -Apply
 ```
+
+**Remarques**
+- **App-only par défaut** : un jeton délégué, même celui d'un Global Administrator, ne peut écrire que les propres contacts de l'utilisateur connecté. Sans `-ClientId`/`-CertificateThumbprint`, l'application provient de `graph.appid.json` ; s'il n'y en a pas, le script s'arrête et explique pourquoi
+- Avec `-Delegated`, chaque cible doit être vous-même ; le script s'arrête si un autre utilisateur figure dans la liste ou le groupe
+- Seuls les utilisateurs membres de `-GroupId` sont ciblés (les groupes imbriqués et appareils sont ignorés)
+- Un CSV sans `DisplayName` ou `EmailAddress` est refusé (ce contrôle ne se déclenchait jamais auparavant)
 
 ---
 
@@ -133,6 +159,9 @@ MSOnline pour constituer la liste des boîtes aux lettres.
 ```powershell
 .\Start-MailboxMessageTraceReport.ps1 -NotifyAddress "admin@contoso.com" -AllMailboxes -Apply
 ```
+
+**Remarques**
+- Reste sur Exchange Online : `Start-HistoricalSearch` (suivi historique des messages) n'existe que dans Exchange Online PowerShell
 
 ---
 
@@ -155,3 +184,8 @@ supprime les autres. Essai à blanc par défaut.
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
 Install-Module Microsoft.Graph -Scope CurrentUser
 ```
+
+**Remarques**
+- En délégué, Graph n'atteint la boîte aux lettres d'un autre utilisateur que si elle est partagée avec vous : le script demande `Mail.ReadWrite` + `Mail.ReadWrite.Shared`, et l'administrateur connecté a besoin de **Full Access** sur la boîte cible (par ex. `Add-MailboxDelegateAccess.ps1 -AccessRights FullAccess`)
+- Sans Full Access, exécutez en app-only (`-ClientId`/`-CertificateThumbprint` ou `-AppOnly`) avec l'autorisation d'application `Mail.ReadWrite`, de préférence limitée avec RBAC for Applications
+- `-IncludeSubfolders` fonctionne à nouveau : le parcours des dossiers échouait sur le premier dossier sans sous-dossiers

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Create a new Microsoft 365 user via Microsoft Graph.
@@ -9,7 +9,14 @@
     before a license can be assigned.
 
     The new account is enabled by default with ForceChangePasswordNextSignIn set
-    unless -NoPasswordReset is specified.
+    unless -NoPasswordReset is specified. The mail nickname (required by Graph) is
+    the part of the UPN before the @.
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused and left
+    connected; only a session this script opened is disconnected.
+    Delegated scopes: User.ReadWrite.All, Organization.Read.All.
 
 .PARAMETER UserPrincipalName
     UPN for the new user (e.g. j.doe@contoso.com).
@@ -46,7 +53,16 @@
     Do not force a password change on first sign-in.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\New-M365User.ps1 -UserPrincipalName "j.doe@contoso.com" -DisplayName "Jane Doe"
@@ -73,8 +89,13 @@ param (
     [string] $MobilePhone,
     [string] $LicenseSkuId,
     [switch] $NoPasswordReset,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # ── Password generator ────────────────────────────────────────────────────────
 function New-RandomPassword {
@@ -99,17 +120,10 @@ function New-RandomPassword {
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-$ctx = Get-MgContext -ErrorAction SilentlyContinue
-if (-not $ctx) {
-    $connectParams = @{
-        Scopes    = @('User.ReadWrite.All', 'Directory.ReadWrite.All')
-        NoWelcome = $true
-    }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+# Reuses a session for the right tenant that has the scopes; connects otherwise.
+# Organization.Read.All is for the SKU lookup (Get-MgSubscribedSku).
+$graph = Connect-M365Graph -Scopes 'User.ReadWrite.All', 'Organization.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Resolve password ──────────────────────────────────────────────────────────
 $generated = $false
@@ -139,6 +153,8 @@ Write-Host ""
 $userParams = @{
     UserPrincipalName         = $UserPrincipalName
     DisplayName               = $DisplayName
+    # mailNickname is a required property of POST /users (Graph docs).
+    MailNickname              = (($UserPrincipalName -split '@')[0] -replace '[^A-Za-z0-9._-]', '')
     AccountEnabled            = $true
     UsageLocation             = $UsageLocation
     PasswordProfile           = @{
@@ -163,7 +179,7 @@ try {
     }
 } catch {
     Write-Host "  [ERROR] Failed to create user: $($_.Exception.Message)" -ForegroundColor Red
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
@@ -198,4 +214,4 @@ Write-Host "   Done" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

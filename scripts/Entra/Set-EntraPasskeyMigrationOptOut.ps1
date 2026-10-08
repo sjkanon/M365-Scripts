@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Sets (or clears) the temporary opt-out from Entra ID's automatic passkey
@@ -23,7 +23,18 @@
 .PARAMETER TenantId
     One or more tenant IDs (or domain names). Accepts an array so you can walk a
     list of GDAP customer tenants in one run. Omit to use the currently connected
-    context / your default tenant.
+    context / the GDAP customer (authMode GDAP) / your default tenant.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). With
+    several tenants the same app must be consented in each of them.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json
+    (looked up per tenant).
 
 .PARAMETER Revert
     Sets passkeyDynamicMigration back to $false (re-opting the tenant IN to the
@@ -49,6 +60,10 @@
     .\Set-EntraPasskeyMigrationOptOut.ps1 -TenantId contoso.onmicrosoft.com -Revert
 
 .NOTES
+    Sign-in  : scripts\Startup\Connect-M365.ps1 - delegated as the admin by default
+               (device code / GDAP per load.config.ps1), app-only on request. A
+               fitting session is reused and left connected; a session this script
+               opened for a tenant is disconnected before the next tenant.
     Requires : Microsoft.Graph.Authentication
     Scope    : Policy.ReadWrite.AuthenticationMethod (Policy.Read.All for -ReportOnly)
     Role     : Authentication Policy Administrator (or Global Administrator)
@@ -63,17 +78,20 @@ param(
     [switch]   $Revert,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'Report')]
-    [switch]   $ReportOnly
+    [switch]   $ReportOnly,
+
+    [string]   $ClientId,
+
+    [string]   $CertificateThumbprint,
+
+    [switch]   $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 $ErrorActionPreference = 'Stop'
 $PolicyUri  = 'https://graph.microsoft.com/beta/policies/authenticationmethodspolicy'
 $TargetVal  = -not $Revert.IsPresent   # $true normally, $false when reverting
-
-if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
-    throw "Microsoft.Graph.Authentication is not installed. Run: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser"
-}
-Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 
 $Scopes = if ($ReportOnly) { 'Policy.Read.All' } else { 'Policy.ReadWrite.AuthenticationMethod' }
 
@@ -120,30 +138,32 @@ function Invoke-TenantOptOut {
     }
 
     # ---- Connect ----------------------------------------------------------
-    # Reuse an existing session when no explicit tenant was asked for:
-    # Connect-MgGraph would otherwise force a fresh interactive prompt.
-    $ctx = try { Get-MgContext } catch { $null }
-    $needConnect = $true
-    if (-not $Tenant -and $ctx -and $ctx.Scopes -contains $Scopes) { $needConnect = $false }
-
-    if ($needConnect) {
-        $connectArgs = @{ Scopes = $Scopes; NoWelcome = $true }
-        if ($Tenant) { $connectArgs['TenantId'] = $Tenant }
-
-        try {
-            Connect-MgGraph @connectArgs
-            $ctx = Get-MgContext
-        }
-        catch {
-            Write-Warning "[$Tenant] Connect-MgGraph failed: $($_.Exception.Message)"
-            $result.Status  = 'ConnectFailed'
-            $result.Message = $_.Exception.Message
-            return $result
-        }
+    # The helper reuses a session that already fits (tenant, scope) and tells us
+    # whether it connected, so only a session opened here is disconnected.
+    try {
+        $conn = Connect-M365Graph -Scopes $Scopes -TenantId $Tenant -ClientId $ClientId `
+            -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+    }
+    catch {
+        Write-Warning "[$Tenant] Connect to Microsoft Graph failed: $($_.Exception.Message)"
+        $result.Status  = 'ConnectFailed'
+        $result.Message = $_.Exception.Message
+        return $result
     }
 
-    $label = if ($ctx -and $ctx.TenantId) { $ctx.TenantId } else { $Tenant }
-    $result.Tenant = $label
+    try {
+        $label = if ($conn.TenantId) { $conn.TenantId } else { $Tenant }
+        $result.Tenant = $label
+        return (Invoke-TenantPolicyChange -Label $label -Result $result)
+    }
+    finally {
+        Disconnect-M365Graph $conn
+    }
+}
+
+function Invoke-TenantPolicyChange {
+    # Variable names are case-insensitive: $label / $result below are these parameters.
+    param([string] $Label, $Result)
 
     # ---- Read current state ----------------------------------------------
     try {
@@ -240,9 +260,8 @@ if ($TenantId) {
                 Status = 'Failed'; Message = $_.Exception.Message
             }
         }
-        finally {
-            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        }
+        # Invoke-TenantOptOut disconnects what it connected itself; a session the
+        # caller already had for this tenant is left alone.
     }
 }
 else {

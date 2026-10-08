@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Check assigned M365 licenses for a list of users.
@@ -12,6 +12,12 @@
     - -CsvPath .\users.csv  (column: UserPrincipalName, UPN, or Mail)
     - -CsvPath .\users.txt  (one UPN/mail per line)
 
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused and left
+    connected; only a session this script opened is disconnected.
+    Delegated scopes: User.Read.All, Organization.Read.All.
+
 .PARAMETER UserList
     Array of UPNs or primary email addresses.
 
@@ -23,7 +29,16 @@
     Default: C:\Temp\UserLicenseReport_<timestamp>.csv
 
 .PARAMETER TenantId
-    Optional tenant ID or domain for Connect-MgGraph.
+    Optional tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-M365UserLicenses.ps1 -UserList "user1@contoso.com","user2@contoso.com"
@@ -46,11 +61,18 @@ param (
 
     [string] $OutputPath,
 
-    [string] $TenantId
+    [string] $TenantId,
+
+    [string] $ClientId,
+
+    [string] $CertificateThumbprint,
+
+    [switch] $AppOnly
 )
 
 begin {
     $ErrorActionPreference = 'Stop'
+    . (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
     function Resolve-UserFromInput {
         param(
@@ -70,13 +92,15 @@ begin {
 
         $escaped = $InputValue.Replace("'", "''")
         $filter = "userPrincipalName eq '$escaped' or mail eq '$escaped'"
-        $matches = Get-MgUser -Filter $filter -Property $props -Top 2 -ConsistencyLevel eventual -ErrorAction Stop
+        # A plain eq/or filter needs no ConsistencyLevel (which would also need
+        # -CountVariable); and not $matches, that is an automatic variable.
+        $found = Get-MgUser -Filter $filter -Property $props -Top 2 -ErrorAction Stop
 
-        if (-not $matches) {
+        if (-not $found) {
             return $null
         }
 
-        return @($matches)[0]
+        return @($found)[0]
     }
 
     # Output defaults to a location that exists on most Windows endpoints.
@@ -84,31 +108,10 @@ begin {
     if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
     if (-not $OutputPath) { $OutputPath = Join-Path $outputDir "UserLicenseReport_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" }
 
-    $script:ConnectedHere = $false
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
-    $needsConnect = (-not $ctx)
-
-    if ($ctx -and $TenantId -and $ctx.TenantId -ne $TenantId) {
-        try { Disconnect-MgGraph | Out-Null } catch {}
-        $needsConnect = $true
-    }
-
-    if ($needsConnect) {
-        Write-Host ''
-        Write-Host '  Connecting to Microsoft Graph...' -ForegroundColor Cyan
-        $connectParams = @{
-            Scopes    = @('User.Read.All', 'Organization.Read.All')
-            NoWelcome = $true
-        }
-        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-        Connect-MgGraph @connectParams
-        $script:ConnectedHere = $true
-        $ctx = Get-MgContext -ErrorAction SilentlyContinue
-    }
-
-    if ($ctx) {
-        Write-Host "  Graph context      : $($ctx.Account) | Tenant: $($ctx.TenantId)" -ForegroundColor DarkCyan
-    }
+    # Reuses a session for the right tenant with the scopes; connects otherwise.
+    $script:Graph = Connect-M365Graph -Scopes 'User.Read.All', 'Organization.Read.All' -TenantId $TenantId `
+        -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+    Write-Host "  Graph context      : $($script:Graph.Account) | Tenant: $($script:Graph.TenantId)" -ForegroundColor DarkCyan
 
     $allUsers = [System.Collections.Generic.List[string]]::new()
 
@@ -280,8 +283,6 @@ end {
         Write-Host "  Report saved to: $OutputPath" -ForegroundColor Cyan
         Write-Host ''
     } finally {
-        if ($script:ConnectedHere) {
-            Disconnect-MgGraph | Out-Null
-        }
+        Disconnect-M365Graph $script:Graph
     }
 }
