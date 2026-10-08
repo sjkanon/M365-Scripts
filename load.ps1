@@ -8,12 +8,26 @@
 .DESCRIPTION
     Configuration is stored in load.config.ps1 (gitignored).
     Delete that file to re-enter your credentials.
+
+    Before the menu opens, every module in scripts\Startup\RequiredModules.psd1 is checked
+    with Update-Modules.ps1 — missing, older than its minimum, or behind the PowerShell
+    Gallery (asked at most once every 24 hours) — and it offers to install or update them.
+
+.PARAMETER SetupStartup
+    Create a shortcut that starts this launcher at Windows sign-in.
+
+.PARAMETER RemoveStartup
+    Remove that shortcut again.
+
+.PARAMETER SkipModuleCheck
+    Skip the module check for this start (offline, or in a hurry).
 #>
 
 [CmdletBinding()]
 param(
     [switch]$SetupStartup,
-    [switch]$RemoveStartup
+    [switch]$RemoveStartup,
+    [switch]$SkipModuleCheck
 )
 
 function Set-StartupLauncher {
@@ -101,32 +115,22 @@ if (-not (Test-Path $configFile)) {
 }
 
 # ── Check and import required modules ────────────────────────────────────────
-$requiredModules = @(
-    'ExchangeOnlineManagement'
-    'Microsoft.Graph.Authentication'
-    'Microsoft.Graph.Sites'
-    'Microsoft.Graph.Identity.DirectoryManagement'
-    'Microsoft.Graph.Users'
-    'Microsoft.Graph.Groups'
-    'Microsoft.Graph.Applications'
-)
+# The list lives in scripts\Startup\RequiredModules.psd1; Update-Modules.ps1 checks each
+# module for missing / older than its minimum / behind the PowerShell Gallery and asks
+# before changing anything. The gallery is asked at most once a day (cached), so a normal
+# start stays quick. The same line works in a PowerShell profile.
+$moduleScript = Join-Path $PSScriptRoot 'scripts\Startup\Update-Modules.ps1'
+$moduleList   = Join-Path $PSScriptRoot 'scripts\Startup\RequiredModules.psd1'
 
-$missing = $requiredModules | Where-Object { -not (Get-Module -ListAvailable -Name $_ ) }
-
-if ($missing) {
+if (-not $SkipModuleCheck) {
     Write-Host ""
-    Write-Host "  Missing modules: $($missing -join ', ')" -ForegroundColor Yellow
-    $install = Read-Host "  Run Install-Modules.ps1 now? [Y/n]"
-    if ($install -notmatch '^[Nn]') {
-        & "$PSScriptRoot\scripts\Startup\Install-Modules.ps1"
-    } else {
-        Write-Host "  M365 functions may not work until modules are installed." -ForegroundColor DarkYellow
-    }
-} else {
-    Write-Host ""
-    Write-Host "  Loading modules..." -ForegroundColor DarkGray
-    $requiredModules | ForEach-Object { Import-Module $_ -ErrorAction SilentlyContinue }
+    & $moduleScript -RequiredOnly -Prompt -MaxAgeHours 24
 }
+
+Write-Host "  Loading modules..." -ForegroundColor DarkGray
+(Import-PowerShellDataFile -Path $moduleList).Modules |
+    Where-Object { $_.ImportAtStartup } |
+    ForEach-Object { Import-Module $_.Name -ErrorAction SilentlyContinue }
 
 # ── Load config and launch menu ───────────────────────────────────────────────
 . $configFile

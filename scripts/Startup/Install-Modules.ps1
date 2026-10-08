@@ -4,9 +4,11 @@
     Bootstrap script to install and import all required modules for M365-Scripts.
 
 .DESCRIPTION
-    Installs and imports all PowerShell modules used across the M365-Scripts repository.
-    Runs cross-platform (Windows, macOS, Linux). Windows-only modules (AzureAD,
-    WindowsAutopilotIntune) are skipped automatically on non-Windows platforms.
+    Installs and imports all PowerShell modules used across the M365-Scripts repository,
+    as listed in RequiredModules.psd1 (the same list load.ps1 checks at startup).
+    Runs cross-platform (Windows, macOS, Linux). Windows-only modules (WindowsAutopilotIntune,
+    IntuneWin32App) are skipped on other platforms, and PnP.PowerShell below PowerShell 7.4.
+    Already installed modules are left alone; Update-Modules.ps1 updates them.
 
 .PARAMETER Force
     Reinstall modules even if already present.
@@ -140,30 +142,22 @@ if ($gallery.InstallationPolicy -ne 'Trusted') {
 #endregion
 
 #region Module definitions
-# Format: Name, MinimumVersion (optional), WindowsOnly
-$modules = @(
-    @{ Name = 'ExchangeOnlineManagement';   MinimumVersion = '3.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Authentication'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Sites'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Identity.DirectoryManagement'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Identity.SignIns'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Identity.Governance'; MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Applications';   MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Calendar';       MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Groups';         MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'Microsoft.Graph.Users';          MinimumVersion = '2.0.0'; WindowsOnly = $false }
-    @{ Name = 'WindowsAutopilotIntune';         MinimumVersion = $null;   WindowsOnly = $true  }
-    @{ Name = 'AzureAD';                        MinimumVersion = $null;   WindowsOnly = $true  }
-    @{ Name = 'IntuneWin32App';                 MinimumVersion = $null;   WindowsOnly = $true  }
-    @{ Name = 'ImportExcel';                    MinimumVersion = '7.0.0'; WindowsOnly = $false }
-)
+# One list for Install-Modules.ps1, Update-Modules.ps1 and load.ps1 — add new modules there
+$modules = @((Import-PowerShellDataFile -Path (Join-Path $PSScriptRoot 'RequiredModules.psd1')).Modules |
+    Where-Object {
+        if ($_.MinimumPSVersion -and $PSVersionTable.PSVersion -lt [version]$_.MinimumPSVersion) {
+            Write-Skip "$($_.Name) (needs PowerShell $($_.MinimumPSVersion)+)"
+            return $false
+        }
+        $true
+    })
 #endregion
 
 #region Install
 
 Write-Step "Installing modules"
 foreach ($mod in $modules) {
-    Install-RequiredModule -Name $mod.Name -MinimumVersion $mod.MinimumVersion -WindowsOnly $mod.WindowsOnly
+    Install-RequiredModule -Name $mod.Name -MinimumVersion $mod.MinimumVersion -WindowsOnly ([bool]$mod.WindowsOnly)
 }
 
 #endregion
@@ -172,7 +166,7 @@ foreach ($mod in $modules) {
 
 Write-Step "Importing modules"
 foreach ($mod in $modules) {
-    Import-RequiredModule -Name $mod.Name -WindowsOnly $mod.WindowsOnly
+    Import-RequiredModule -Name $mod.Name -WindowsOnly ([bool]$mod.WindowsOnly)
 }
 
 #endregion

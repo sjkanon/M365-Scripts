@@ -13,8 +13,9 @@ Entry-point scripts and the core M365 function library.
 | File | Description |
 |------|-------------|
 | [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365 function library — dot-sourced by `menu.ps1` on first use |
+| [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | The one list of modules this repo needs — read by `load.ps1`, `Install-Modules.ps1` and `Update-Modules.ps1` |
 | [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrap script — installs and imports all required PowerShell modules |
-| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Updates every installed PowerShell module to its latest version |
+| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Checks the required modules (missing, too old, update available) and installs/updates them; optionally updates every other installed module too |
 | [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
 | [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) ([docs](#update-scriptindexps1)) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
 | [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) ([docs](#test-markdownlinksps1)) | Checks every link in every readme — files that must exist, anchors that must match a heading |
@@ -43,6 +44,12 @@ To remove it:
 
 ```powershell
 .\load.ps1 -RemoveStartup
+```
+
+At every start, before the menu opens, `load.ps1` checks the modules in [`RequiredModules.psd1`](#requiredmodulespsd1) with [`Update-Modules.ps1`](#update-modulesps1): it lists what is missing, older than its minimum, or behind the PowerShell Gallery, and asks `Deze n module(s) nu installeren/updaten? [J/n]`. The gallery is asked at most once every 24 hours, so a normal start costs under a second. Skip the check once with:
+
+```powershell
+.\load.ps1 -SkipModuleCheck
 ```
 
 You can also toggle startup from the launcher menu:
@@ -118,30 +125,102 @@ Connect-Tenant -Domain "customer.com"
 
 ---
 
+## RequiredModules.psd1
+
+The modules this repository depends on, in one PowerShell data file. `load.ps1`,
+`Install-Modules.ps1` and `Update-Modules.ps1` all read it, so they can no longer disagree
+— before, each had its own list, and `load.ps1` only checked seven modules.
+
+**To add a module:** add a line here. The next start of `load.ps1` on every machine sees it
+as missing and offers to install it. Raising a `MinimumVersion` works the same way.
+
+| Key | Meaning |
+|-----|---------|
+| `Name` | Module name on the PowerShell Gallery |
+| `MinimumVersion` | Older than this counts as *too old* (not just *update available*) |
+| `WindowsOnly` | Skipped on macOS and Linux |
+| `MinimumPSVersion` | Skipped on an older PowerShell — `PnP.PowerShell` 3 needs 7.4 |
+| `ImportAtStartup` | Imported by `load.ps1` before the menu opens |
+
+Current list: `ExchangeOnlineManagement`, the Graph submodules `Authentication`, `Sites`,
+`Identity.DirectoryManagement`, `Identity.SignIns`, `Identity.Governance`, `Applications`,
+`Calendar`, `Groups`, `Users`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`, and
+on Windows `WindowsAutopilotIntune` and `IntuneWin32App`.
+
+---
+
 ## Install-Modules.ps1
 
-Installs and imports all PowerShell modules required by this repository. Run once on a new machine or after a clean PowerShell install.
+Installs and imports every module in [`RequiredModules.psd1`](#requiredmodulespsd1). Run once on a new machine or after a clean PowerShell install. Modules that are already installed are left alone — updating is [`Update-Modules.ps1`](#update-modulesps1)'s job.
 
 ```powershell
 .\scripts\Startup\Install-Modules.ps1
 ```
 
-Core modules installed include `ExchangeOnlineManagement` and required Microsoft Graph submodules (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Identity.Governance`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Users`, `Microsoft.Graph.Calendar`).
-Windows-only compatibility modules are also included when applicable (`WindowsAutopilotIntune`, `AzureAD`).
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Force` | Reinstall modules even if already present |
+| `-Scope` | `CurrentUser` (default) or `AllUsers` (elevated) |
 
 ---
 
 ## Update-Modules.ps1
 
-Updates every installed PowerShell module to its latest version. Run as administrator for system-wide modules.
+Checks every module in [`RequiredModules.psd1`](#requiredmodulespsd1) and gives each a status:
 
-Also ensures a minimum version for the specific Graph submodules this repo depends on (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Identity.SignIns`, `Identity.Governance`, `Applications`, `Groups`) before updating everything else installed on the machine.
+| Status | Meaning | Without `-CheckOnly` |
+|--------|---------|----------------------|
+| `Missing` | Not installed | Installed |
+| `BelowMinimum` | Older than its `MinimumVersion` | Updated |
+| `UpdateAvailable` | A newer version is on the PowerShell Gallery | Updated |
+| `OK` | Current | — |
+| `Unknown` | Gallery unreachable, or the module is no longer on it | — |
+| `Skipped` | Not for this platform or PowerShell version | — |
+
+Then, unless `-RequiredOnly`, it updates every other module installed through PowerShellGet, as it always did. `load.ps1` runs it at startup as `-RequiredOnly -Prompt -MaxAgeHours 24`.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-CheckOnly` | Report only; install or update nothing |
+| `-RequiredOnly` | Only the modules in `RequiredModules.psd1`, not everything else installed |
+| `-MaxAgeHours` | Reuse gallery versions cached within this many hours (default `0` = always ask the gallery) |
+| `-Scope` | Scope for newly installed modules: `CurrentUser` (default) or `AllUsers` |
+| `-Quiet` | No line per module, only errors |
+| `-PassThru` | Return a status object per required module (`Name`, `Installed`, `Minimum`, `Latest`, `Status`, `Reason`) |
+| `-Prompt` | For startup: show only what is missing or outdated, then ask before installing/updating. All in order gives one line, `Modules OK` |
+
+**Examples**
 
 ```powershell
+# What is missing or outdated? Changes nothing
+.\scripts\Startup\Update-Modules.ps1 -RequiredOnly -CheckOnly
+
+# Install what is missing and update what is behind, only the repo's modules
+.\scripts\Startup\Update-Modules.ps1 -RequiredOnly
+
+# The above, then update every other installed module as well
 .\scripts\Startup\Update-Modules.ps1
 ```
 
-> No parameters. Iterates every module returned by `Get-InstalledModule`, so it can take a while on a machine with many modules installed.
+**In your PowerShell profile.** If you start PowerShell with your own profile (`$PROFILE`) instead of `load.ps1`, add the line `load.ps1` uses, so the check runs at every PowerShell start:
+
+```powershell
+& "C:\path\to\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Prompt -MaxAgeHours 24
+```
+
+With everything current it prints one line and costs well under a second; the gallery is asked at most once a day.
+
+**Notes**
+
+- The installed version is read with `Get-Module -ListAvailable`, so a module that was not installed through PowerShellGet (a manual copy, an MSI) still counts as installed. Such a module gets the new version side by side through `Install-Module`, because `Update-Module` refuses modules it did not install.
+- Gallery versions come from `Find-PSResource` when PSResourceGet is present (about 3 s for the whole list), otherwise `Find-Module` (about 9 s). They are cached in `%LOCALAPPDATA%\M365-Scripts\module-gallery-cache.json`; `-MaxAgeHours` decides how old that cache may be.
+- Offline, the gallery lookup fails quietly: missing and too-old modules are still reported, *update available* is not.
+- PowerShell 7 and Windows PowerShell 5.1 have separate module folders, so the two can report different results on the same machine. That is correct, not a bug.
+- Old versions are not removed. Run as administrator to update modules installed for all users.
 
 ---
 
