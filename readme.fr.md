@@ -47,6 +47,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`SharePoint/`](scripts/SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique), et où est passé un fichier : renommé, déplacé ou supprimé (journal d'audit) |
 | [`Reporting/`](scripts/Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
 | [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD, pilotes d'imprimante + imprimantes depuis un fichier JSON |
+| [`Linux/`](scripts/Linux/readme.fr.md) | Serveurs Linux (Debian/Ubuntu, 3CX Phone System) — nettoyage du disque en bash : paquets, journal, journaux, fichiers temporaires, caches utilisateur, Docker, journaux et sauvegardes 3CX |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
 | [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix |
 | [`SMTP/`](scripts/SMTP/readme.fr.md) | Tests de connectivité d'un relais SMTP (ponctuels et récurrents) |
@@ -76,11 +77,11 @@ Au premier lancement, [`load.ps1`](load.ps1) va :
 1. Demander votre UPN d'administrateur et votre nom d'affichage — enregistrés dans un `load.config.ps1` ignoré par git
 2. Demander si vous voulez le mode GDAP délégué par défaut, et enregistrer éventuellement un domaine client par défaut
 3. Demander si Graph doit utiliser par défaut la connexion par code d'appareil
-4. Détecter les modules manquants et proposer de les installer automatiquement
-5. Importer tous les modules nécessaires
+4. Vérifier les modules requis — manquants, plus anciens que leur minimum, ou avec une mise à jour sur la PowerShell Gallery — et proposer de les installer ou de les mettre à jour
+5. Importer les modules principaux
 6. Ouvrir le menu interactif
 
-Par la suite, il démarre directement, sans aucune question.
+Par la suite, il saute les questions. La vérification des modules (étape 4) s'exécute à chaque démarrage ; elle interroge la galerie au plus une fois toutes les 24 heures et ne demande quelque chose que si un module manque ou est obsolète. `.\load.ps1 -SkipModuleCheck` la saute une fois.
 
 Pour lancer le lanceur automatiquement à l'ouverture de session Windows :
 
@@ -95,7 +96,7 @@ Pour supprimer plus tard le raccourci de démarrage :
 ```
 
 > Vous pouvez aussi lancer [`.\menu.ps1`](menu.ps1) directement — il vous demandera alors votre UPN en solution de repli.
-> Pour réinstaller ou mettre à jour les modules manuellement : [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1)
+> Pour réinstaller ou mettre à jour les modules manuellement : [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) ou [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). La liste des modules est [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — ajoutez-y un module et chaque machine se le voit proposer au prochain démarrage.
 
 ---
 
@@ -672,6 +673,12 @@ Paramètres de script NinjaOne courants :
 - Journaux d'applications et système : analyse dynamique de tout C:\ à la recherche de dossiers `logs`/`log`/`logging`
 - Essai à blanc par défaut ; utilisez `-Apply` pour supprimer. Résumé par catégorie avec l'espace libéré
 
+**[Invoke-LinuxCleanup.sh](scripts/Linux/Invoke-LinuxCleanup.sh)** — la même chose pour un serveur Debian/Ubuntu, 3CX Phone System compris (bash, exécuté en root sur le serveur ; 📂 [`Linux/`](scripts/Linux/readme.fr.md)) :
+- Cache APT, `autoremove` (anciens noyaux), configuration résiduelle des paquets, révisions snap désactivées
+- Journal systemd, journaux ayant subi une rotation dans `/var/log`, vidages après plantage, `/tmp`, caches et corbeilles des utilisateurs, Docker en option (`--docker`)
+- Avec 3CX installé : journaux 3CX et sauvegardes au-delà des N plus récentes (`--keep-backups`) ; les enregistrements sont seulement signalés, jamais supprimés
+- Essai à blanc par défaut, `--apply` pour supprimer, `--check-only` pour la supervision (code de sortie `2` s'il y a du travail)
+
 **[Repair-AppxPackageStore.ps1](scripts/Device/Repair-AppxPackageStore.ps1)** — réparer les paquets AppX (Teams, nouvel Outlook, ou tout autre) qui échouent avec `0x80070490` / "Deployment Register operation ... from:  (AppxManifest.xml)" :
 - Diagnostique les inscriptions dont les fichiers ont disparu, les copies provisionnées sans fichiers et les entrées orphelines de `AppxAllUserStore` (pas de profil, pas de fichiers, pas de manifeste)
 - Sur les hôtes FSLogix, lit les erreurs `Microsoft-FSLogix-Apps` : la version exacte demandée par les profils face à ce que cet hôte provisionne, le build FSLogix, `InstallAppxPackages`, ODFC `IncludeTeams` et les stratégies d'installation AppX
@@ -824,6 +831,9 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   └── <a href="scripts/Device/Time%20sync/readme.fr.md">Time sync/</a>
     │       ├── <a href="scripts/Device/Time%20sync/readme.fr.md">readme.md</a>
     │       └── <a href="scripts/Device/Time%20sync/Restart-Time-Sync.ps1">Restart-Time-Sync.ps1</a>
+    ├── <a href="scripts/Linux/readme.fr.md">Linux/</a>
+    │   ├── <a href="scripts/Linux/readme.fr.md">readme.md</a>
+    │   └── <a href="scripts/Linux/Invoke-LinuxCleanup.sh">Invoke-LinuxCleanup.sh</a>        ← bash : nettoyage du disque pour Debian/Ubuntu, 3CX compris
     ├── <a href="scripts/Network/readme.fr.md">Network/</a>
     │   ├── <a href="scripts/Network/readme.fr.md">readme.md</a>
     │   ├── <a href="scripts/Network/Test-Ports.ps1">Test-Ports.ps1</a>
@@ -896,8 +906,9 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     ├── <a href="scripts/Startup/readme.fr.md">Startup/</a>
     │   ├── <a href="scripts/Startup/readme.fr.md">readme.md</a>
     │   ├── <a href="scripts/Startup/functies.ps1">functies.ps1</a>             ← bibliothèque de fonctions M365 (chargée en dot-source par le menu)
+    │   ├── <a href="scripts/Startup/RequiredModules.psd1">RequiredModules.psd1</a>     ← La liste unique des modules requis
     │   ├── <a href="scripts/Startup/Install-Modules.ps1">Install-Modules.ps1</a>      ← Amorçage : installer et importer tous les modules
-    │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Mettre à jour chaque module PowerShell installé
+    │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Vérifier/mettre à jour les modules requis (load.ps1 l'exécute au démarrage), puis le reste
     │   ├── <a href="scripts/Startup/Test-PowerShellSyntax.ps1">Test-PowerShellSyntax.ps1</a>
     │   ├── <a href="scripts/Startup/Update-ScriptIndex.ps1">Update-ScriptIndex.ps1</a>   ← Régénère scripts/INDEX.md à partir des en-têtes .SYNOPSIS
     │   ├── <a href="scripts/Startup/Test-MarkdownLinks.ps1">Test-MarkdownLinks.ps1</a>   ← Vérifie chaque lien des readmes : fichiers et ancres internes à la page
@@ -983,6 +994,21 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-08 (3)
+| Modification |
+|--------|
+| **Nouveau : [`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) dans le nouveau dossier [`Linux/`](scripts/Linux/readme.fr.md)** — l'équivalent Linux de `Invoke-WindowsCleanup.ps1`, pour un serveur Debian/Ubuntu et en particulier un serveur qui exécute 3CX Phone System. Un script bash, car un tel serveur n'a pas PowerShell. Nettoie le cache APT, `autoremove` (anciens noyaux ; refusé lorsque la liste contient un paquet 3CX, ignoré pendant qu'apt/dpkg s'exécute), la configuration résiduelle des paquets, les révisions snap désactivées, le journal systemd, les journaux ayant subi une rotation, les vidages après plantage, `/tmp`, les caches et corbeilles des utilisateurs, Docker en option (`--docker`, jamais les volumes) et, lorsque 3CX est détecté, les journaux 3CX et les sauvegardes au-delà des N plus récentes (`--keep-backups`). Les enregistrements d'appels, la base de données et la configuration sont seulement signalés. Essai à blanc par défaut, `--apply` pour nettoyer, `--check-only` pour la supervision avec le code de sortie `2` s'il y a du travail |
+| Nouveau : [`.gitattributes`](.gitattributes) : `*.sh` est extrait avec des fins de ligne LF, même sous Windows — avec CRLF, bash échoue sur le serveur dès la première ligne |
+| Vérifié : `bash -n` et ShellCheck (aucun avertissement) ; dans un conteneur Debian 12 avec une arborescence 3CX reconstituée, des fichiers anciens, 7 sauvegardes, un enregistrement, un candidat à autoremove et un paquet avec configuration résiduelle : l'essai à blanc et `--check-only` ne modifient rien (sortie `0` / `2`), `--apply` supprime exactement les fichiers anciens (journaux actifs, fichiers récents, l'enregistrement, le fichier de verrou de PostgreSQL et `systemd-private-*` restent), conserve les 3 sauvegardes les plus récentes, un second `--apply` ne trouve rien, sans 3CX les sections 3CX sont omises, et les totaux au-delà de 2 Go sont justes (le `mawk` de Debian débordait avec `printf "%d"` à 2 Gio, désormais `%.0f`). **Non** vérifié : un vrai serveur 3CX (les chemins des journaux et sauvegardes proviennent de l'organisation Linux de 3CX), le journal (le conteneur n'a pas systemd), snap et `--docker` |
+
+### 2026-10-08 (2)
+| Modification |
+|--------|
+| **[`load.ps1`](load.ps1) vérifie les modules à chaque démarrage : manquants, trop anciens, ou avec une mise à jour.** Auparavant, il regardait seulement si sept modules codés en dur existaient — un module obsolète, ou un module dont un script plus récent avait besoin, passait inaperçu jusqu'à ce qu'une commande échoue. Il exécute maintenant [`Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1) `-RequiredOnly -Prompt`, liste ce qui manque, est sous la version minimale ou en retard sur la PowerShell Gallery, et demande `Deze n module(s) nu installeren/updaten? [J/n]`. Les versions de la galerie sont mises en cache 24 heures (`%LOCALAPPDATA%\M365-Scripts\module-gallery-cache.json`), un démarrage normal coûte donc moins d'une seconde au lieu de six. `-SkipModuleCheck` la saute une fois. Le même appel, `-RequiredOnly -Prompt -MaxAgeHours 24`, peut aller dans un profil PowerShell pour qui démarre via `$PROFILE` plutôt que via `load.ps1` |
+| **Une seule liste de modules : nouveau [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1).** `load.ps1`, [`Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) et `Update-Modules.ps1` avaient chacun leur propre liste (7, 14 et 7 modules) et elles ne concordaient pas. Les trois lisent maintenant ce fichier ; y ajouter un module suffit pour que chaque machine se le voie proposer au prochain démarrage. Ajoutés : `PnP.PowerShell` (utilisé par 10 scripts SharePoint/Teams, ignoré sous PowerShell 7.4) et `MicrosoftTeams`, que des scripts utilisaient mais qu'aucune liste n'installait. Retiré : `AzureAD` — Microsoft l'a retiré de la PowerShell Gallery, `Install-Modules.ps1` échouait donc dessus à chaque exécution |
+| `Update-Modules.ps1` réécrit : statut par module (`Missing`, `BelowMinimum`, `UpdateAvailable`, `OK`, `Unknown`, `Skipped`), nouveaux `-CheckOnly`, `-RequiredOnly`, `-MaxAgeHours`, `-Scope`, `-Quiet`, `-PassThru`, `-Prompt`. Il lit la version installée avec `Get-Module -ListAvailable` (voit aussi les modules non installés via PowerShellGet), interroge la galerie avec `Find-PSResource` si disponible (3 s au lieu de 9 s avec `Find-Module`), et installe côte à côte là où `Update-Module` refuserait. Sans paramètres, il met ensuite toujours à jour tous les autres modules installés, comme avant |
+| Vérifié : contrôle de syntaxe ; sous PowerShell 7.6, `-RequiredOnly -CheckOnly` contre la galerie en ligne signale les 15 modules `OK` sur cette machine (6 s), et depuis le cache en 1,7 s démarrage de pwsh compris (0,8 s dans une session ouverte) ; `-Prompt` affiche une seule ligne `Modules OK`, et sur un hôte non interactif ne modifie rien ; avec une liste de test et un cache modifié, il signale correctement `Missing`, `BelowMinimum`, `UpdateAvailable`, `OK` et `Skipped`, dans l'ordre de la liste, et `-PassThru` renvoie les objets que lit `load.ps1` ; le même test sous Windows PowerShell 5.1 fonctionne et voit les dossiers de modules propres à ce runtime. **Non** vérifié : une véritable exécution d'installation ou de mise à jour (rien n'a été installé sur cette machine), et `load.ps1` en interactif du démarrage au menu |
 
 ### 2026-10-08
 | Modification |

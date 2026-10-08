@@ -47,6 +47,7 @@ Every workload has its own folder under [`scripts/`](scripts/readme.md), and eve
 | [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration), and where a file went: renamed, moved or deleted (audit log) |
 | [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
 | [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile, printer drivers + printers from a JSON file |
+| [`Linux/`](scripts/Linux/readme.md) | Linux servers (Debian/Ubuntu, 3CX Phone System) — bash disk cleanup: packages, journal, logs, temp, user caches, Docker, 3CX logs and backups |
 | [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
 | [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking |
 | [`SMTP/`](scripts/SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
@@ -76,11 +77,11 @@ On first run, [`load.ps1`](load.ps1) will:
 1. Ask for your admin UPN and display name — saved to a gitignored `load.config.ps1`
 2. Ask whether you want delegated GDAP mode as default and optionally store a default customer domain
 3. Ask whether Graph should use device code sign-in by default
-4. Detect missing modules and offer to install them automatically
-5. Import all required modules
+4. Check the required modules — missing, older than their minimum, or with an update on the PowerShell Gallery — and offer to install or update them
+5. Import the core modules
 6. Open the interactive menu
 
-From then on it starts directly without any prompts.
+From then on it skips the questions. The module check (step 4) runs at every start; it asks the gallery at most once every 24 hours and only prompts when something is missing or outdated. `.\load.ps1 -SkipModuleCheck` skips it once.
 
 To run the launcher automatically at Windows sign-in:
 
@@ -95,7 +96,7 @@ To remove the startup shortcut later:
 ```
 
 > You can also run [`.\menu.ps1`](menu.ps1) directly — it will ask for your UPN as a fallback.
-> To reinstall or update modules manually: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1)
+> To reinstall or update modules manually: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) or [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). The list of modules is [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — add a module there and every machine is offered it at its next start.
 
 ---
 
@@ -672,6 +673,12 @@ Veelgebruikte NinjaOne script parameters:
 - Application & system logs: dynamic scan of entire C:\ for `logs`/`log`/`logging` folders
 - Dry-run by default; use `-Apply` to delete. Per-category summary with space freed
 
+**[Invoke-LinuxCleanup.sh](scripts/Linux/Invoke-LinuxCleanup.sh)** — the same for a Debian/Ubuntu server, 3CX Phone System included (bash, run as root on the server; 📂 [`Linux/`](scripts/Linux/readme.md)):
+- APT cache, `autoremove` (old kernels), leftover package configuration, disabled snap revisions
+- systemd journal, rotated logs in `/var/log`, crash dumps, `/tmp`, user caches and trash, optionally Docker (`--docker`)
+- With 3CX installed: 3CX logs, and backups beyond the newest N (`--keep-backups`); recordings are only reported, never deleted
+- Dry run by default, `--apply` to delete, `--check-only` for monitoring (exit code `2` when there is work)
+
 **[Repair-AppxPackageStore.ps1](scripts/Device/Repair-AppxPackageStore.ps1)** — Repair AppX packages (Teams, new Outlook, any other) that fail with `0x80070490` / "Deployment Register operation ... from:  (AppxManifest.xml)":
 - Diagnoses registrations whose files are gone, provisioned copies without files, and orphaned `AppxAllUserStore` entries (no profile, no files, no manifest)
 - On FSLogix hosts reads the `Microsoft-FSLogix-Apps` errors: which exact version the profiles ask for against what this host provisions, the FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, and AppX install policies
@@ -824,6 +831,9 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   └── <a href="scripts/Device/Time%20sync/readme.md">Time sync/</a>
     │       ├── <a href="scripts/Device/Time%20sync/readme.md">readme.md</a>
     │       └── <a href="scripts/Device/Time%20sync/Restart-Time-Sync.ps1">Restart-Time-Sync.ps1</a>
+    ├── <a href="scripts/Linux/readme.md">Linux/</a>
+    │   ├── <a href="scripts/Linux/readme.md">readme.md</a>
+    │   └── <a href="scripts/Linux/Invoke-LinuxCleanup.sh">Invoke-LinuxCleanup.sh</a>        ← bash: disk cleanup for Debian/Ubuntu, 3CX included
     ├── <a href="scripts/Network/readme.md">Network/</a>
     │   ├── <a href="scripts/Network/readme.md">readme.md</a>
     │   ├── <a href="scripts/Network/Test-Ports.ps1">Test-Ports.ps1</a>
@@ -896,8 +906,9 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     ├── <a href="scripts/Startup/readme.md">Startup/</a>
     │   ├── <a href="scripts/Startup/readme.md">readme.md</a>
     │   ├── <a href="scripts/Startup/functies.ps1">functies.ps1</a>             ← M365 function library (dot-sourced by menu)
+    │   ├── <a href="scripts/Startup/RequiredModules.psd1">RequiredModules.psd1</a>     ← The one list of required modules
     │   ├── <a href="scripts/Startup/Install-Modules.ps1">Install-Modules.ps1</a>      ← Bootstrap: install &amp; import all modules
-    │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Update every installed PowerShell module
+    │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Check/update the required modules (load.ps1 runs it at startup), then the rest
     │   ├── <a href="scripts/Startup/Test-PowerShellSyntax.ps1">Test-PowerShellSyntax.ps1</a>
     │   ├── <a href="scripts/Startup/Update-ScriptIndex.ps1">Update-ScriptIndex.ps1</a>   ← Regenerates scripts/INDEX.md from the .SYNOPSIS headers
     │   ├── <a href="scripts/Startup/Test-MarkdownLinks.ps1">Test-MarkdownLinks.ps1</a>   ← Checks every readme link: files and in-page anchors
@@ -983,6 +994,21 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-08 (3)
+| Change |
+|--------|
+| **[`load.ps1`](load.ps1) checks the modules at every start: missing, too old, or with an update.** Before, it only looked whether seven hardcoded modules existed — an outdated module, or a module a newer script needed, went unnoticed until a command failed. Now it runs [`Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1) `-RequiredOnly -Prompt`, lists what is missing, below its minimum version or behind the PowerShell Gallery, and asks `Deze n module(s) nu installeren/updaten? [J/n]`. The gallery versions are cached for 24 hours (`%LOCALAPPDATA%\M365-Scripts\module-gallery-cache.json`), so a normal start costs under a second instead of six. `-SkipModuleCheck` skips it once. The same call, `-RequiredOnly -Prompt -MaxAgeHours 24`, can go in a PowerShell profile for anyone who starts through `$PROFILE` instead of `load.ps1` |
+| **One module list: new [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1).** `load.ps1`, [`Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) and `Update-Modules.ps1` each had their own list (7, 14 and 7 modules) and they did not agree. All three now read this file, so adding a module there is enough for every machine to be offered it at its next start. Added: `PnP.PowerShell` (used by 10 SharePoint/Teams scripts, skipped below PowerShell 7.4) and `MicrosoftTeams`, which scripts used but no list installed. Removed: `AzureAD` — Microsoft took it off the PowerShell Gallery, so `Install-Modules.ps1` failed on it on every run |
+| `Update-Modules.ps1` rewritten: per-module status (`Missing`, `BelowMinimum`, `UpdateAvailable`, `OK`, `Unknown`, `Skipped`), new `-CheckOnly`, `-RequiredOnly`, `-MaxAgeHours`, `-Scope`, `-Quiet`, `-PassThru`, `-Prompt`. It reads the installed version with `Get-Module -ListAvailable` (also sees modules not installed through PowerShellGet), asks the gallery with `Find-PSResource` when available (3 s instead of 9 s for `Find-Module`), and installs side by side where `Update-Module` would refuse. Without parameters it still updates every other installed module afterwards, as before |
+| Verified: syntax check; on PowerShell 7.6 `-RequiredOnly -CheckOnly` against the live gallery reports all 15 modules `OK` on this machine (6 s), and from the cache in 1.7 s including the pwsh start (0.8 s inside a running session); `-Prompt` prints a single `Modules OK` line, and on a non-interactive host falls back to changing nothing; with a test list and a doctored cache it reports `Missing`, `BelowMinimum`, `UpdateAvailable`, `OK` and `Skipped` correctly, in list order, and `-PassThru` returns the objects `load.ps1` reads; the same test under Windows PowerShell 5.1 works and sees that runtime's own module folders. **Not** verified: an actual install or update run (nothing was installed on this machine), and `load.ps1` interactively from start to menu |
+
+### 2026-10-08 (2)
+| Change |
+|--------|
+| **New [`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) in the new folder [`Linux/`](scripts/Linux/readme.md)** — the Linux counterpart of `Invoke-WindowsCleanup.ps1`, for a Debian/Ubuntu server and in particular one that runs 3CX Phone System. A bash script, because such a server has no PowerShell. Cleans the APT cache, `autoremove` (old kernels; refused when the list holds a 3CX package, skipped while apt/dpkg is running), leftover package configuration, disabled snap revisions, the systemd journal, rotated logs, crash dumps, `/tmp`, user caches and trash, optionally Docker (`--docker`, volumes never), and, when 3CX is detected, 3CX's logs and backups beyond the newest N (`--keep-backups`). Call recordings, the database and configuration are only reported. Dry run by default, `--apply` to clean up, `--check-only` for monitoring with exit code `2` when there is work |
+| New [`.gitattributes`](.gitattributes): `*.sh` is checked out with LF line endings, also on Windows — with CRLF, bash on the server fails on the first line |
+| Verified: `bash -n` and ShellCheck (no warnings); in a Debian 12 container with a recreated 3CX folder layout, aged files, 7 backups, a recording, an autoremove candidate and a package with leftover config: dry run and `--check-only` change nothing (exit `0` / `2`), `--apply` removes exactly the old files (active logs, recent files, the recording, PostgreSQL's lock file and `systemd-private-*` stay), keeps the 3 newest backups, a second `--apply` finds nothing, without 3CX the 3CX sections are left out, and totals above 2 GB add up (Debian's `mawk` overflowed `printf "%d"` at 2 GiB, now `%.0f`). **Not** verified: a live 3CX server (its log and backup paths come from 3CX's Linux layout), the journal (the container has no systemd), snap and `--docker` |
 
 ### 2026-10-08
 | Change |

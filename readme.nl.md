@@ -47,6 +47,7 @@ Elke workload heeft een eigen map onder [`scripts/`](scripts/readme.nl.md), en e
 | [`SharePoint/`](scripts/SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak terugzetten per site of tenantbreed (PnP PowerShell, automatische app-registratie), en waar een bestand gebleven is: hernoemd, verplaatst of verwijderd (auditlog) |
 | [`Reporting/`](scripts/Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
 | [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD, printerdrivers + printers vanuit een JSON-bestand |
+| [`Linux/`](scripts/Linux/readme.nl.md) | Linux-servers (Debian/Ubuntu, 3CX Phone System) — schijfopschoning in bash: pakketten, journal, logs, temp, gebruikerscaches, Docker, 3CX-logs en -back-ups |
 | [`Network/`](scripts/Network/readme.nl.md) | Controle van TCP-poorten, diagnose van authenticatie/netwerk, stresstest van bestands-I/O |
 | [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access, live monitoring van sessies, diagnose en verkleining van FSLogix-profielschijven |
 | [`SMTP/`](scripts/SMTP/readme.nl.md) | Connectiviteitstests voor een SMTP-relay (eenmalig en terugkerend) |
@@ -76,11 +77,11 @@ Bij de eerste keer starten doet [`load.ps1`](load.ps1) het volgende:
 1. Het vraagt je admin-UPN en weergavenaam — die worden opgeslagen in een `load.config.ps1` die door git wordt genegeerd
 2. Het vraagt of je standaard de gedelegeerde GDAP-modus wilt gebruiken, en slaat eventueel een standaard klantdomein op
 3. Het vraagt of Graph standaard met device code moet aanmelden
-4. Het detecteert ontbrekende modules en biedt aan ze automatisch te installeren
-5. Het importeert alle benodigde modules
+4. Het controleert de vereiste modules — ontbrekend, ouder dan het minimum, of met een update op de PowerShell Gallery — en biedt aan ze te installeren of bij te werken
+5. Het importeert de kernmodules
 6. Het opent het interactieve menu
 
-Daarna start het direct, zonder vragen.
+Daarna slaat het de vragen over. De modulecontrole (stap 4) draait bij elke start; die bevraagt de gallery hooguit eens per 24 uur en vraagt alleen iets als er een module ontbreekt of verouderd is. `.\load.ps1 -SkipModuleCheck` slaat hem één keer over.
 
 Om de launcher automatisch te starten bij het aanmelden in Windows:
 
@@ -95,7 +96,7 @@ Om de opstartsnelkoppeling later weer te verwijderen:
 ```
 
 > Je kunt [`.\menu.ps1`](menu.ps1) ook rechtstreeks starten — dan vraagt het als terugvaloptie om je UPN.
-> Modules handmatig opnieuw installeren of bijwerken: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1)
+> Modules handmatig opnieuw installeren of bijwerken: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) of [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). De lijst met modules staat in [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — voeg daar een module toe en elke machine krijgt hem bij de volgende start aangeboden.
 
 ---
 
@@ -672,6 +673,12 @@ Veelgebruikte NinjaOne-scriptparameters:
 - Applicatie- en systeemlogs: dynamische scan van heel C:\ op mappen `logs`/`log`/`logging`
 - Standaard een proefdraai; gebruik `-Apply` om te verwijderen. Samenvatting per categorie met de vrijgemaakte ruimte
 
+**[Invoke-LinuxCleanup.sh](scripts/Linux/Invoke-LinuxCleanup.sh)** — hetzelfde voor een Debian/Ubuntu-server, 3CX Phone System inbegrepen (bash, als root op de server; 📂 [`Linux/`](scripts/Linux/readme.nl.md)):
+- APT-cache, `autoremove` (oude kernels), achtergebleven pakketconfiguratie, uitgeschakelde snap-revisies
+- systemd-journal, geroteerde logs in `/var/log`, crashdumps, `/tmp`, gebruikerscaches en prullenbakken, optioneel Docker (`--docker`)
+- Met 3CX geïnstalleerd: 3CX-logs, en back-ups voorbij de nieuwste N (`--keep-backups`); opnames worden alleen gerapporteerd, nooit verwijderd
+- Standaard een proefdraai, `--apply` om te verwijderen, `--check-only` voor monitoring (exitcode `2` als er werk is)
+
 **[Repair-AppxPackageStore.ps1](scripts/Device/Repair-AppxPackageStore.ps1)** — AppX-pakketten repareren (Teams, nieuwe Outlook, elk ander pakket) die falen met `0x80070490` / "Deployment Register operation ... from:  (AppxManifest.xml)":
 - Stelt registraties vast waarvan de bestanden weg zijn, geprovisioneerde kopieën zonder bestanden, en verweesde vermeldingen in `AppxAllUserStore` (geen profiel, geen bestanden, geen manifest)
 - Leest op FSLogix-hosts de fouten van `Microsoft-FSLogix-Apps`: welke exacte versie de profielen vragen tegenover wat deze host provisioneert, de FSLogix-build, `InstallAppxPackages`, ODFC `IncludeTeams`, en het AppX-installatiebeleid
@@ -824,6 +831,9 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   └── <a href="scripts/Device/Time%20sync/readme.nl.md">Time sync/</a>
     │       ├── <a href="scripts/Device/Time%20sync/readme.nl.md">readme.md</a>
     │       └── <a href="scripts/Device/Time%20sync/Restart-Time-Sync.ps1">Restart-Time-Sync.ps1</a>
+    ├── <a href="scripts/Linux/readme.nl.md">Linux/</a>
+    │   ├── <a href="scripts/Linux/readme.nl.md">readme.md</a>
+    │   └── <a href="scripts/Linux/Invoke-LinuxCleanup.sh">Invoke-LinuxCleanup.sh</a>        ← bash: schijfopschoning voor Debian/Ubuntu, 3CX inbegrepen
     ├── <a href="scripts/Network/readme.nl.md">Network/</a>
     │   ├── <a href="scripts/Network/readme.nl.md">readme.md</a>
     │   ├── <a href="scripts/Network/Test-Ports.ps1">Test-Ports.ps1</a>
@@ -896,8 +906,9 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     ├── <a href="scripts/Startup/readme.nl.md">Startup/</a>
     │   ├── <a href="scripts/Startup/readme.nl.md">readme.md</a>
     │   ├── <a href="scripts/Startup/functies.ps1">functies.ps1</a>             ← M365-functiebibliotheek (gedot-sourcet door het menu)
+    │   ├── <a href="scripts/Startup/RequiredModules.psd1">RequiredModules.psd1</a>     ← De ene lijst met vereiste modules
     │   ├── <a href="scripts/Startup/Install-Modules.ps1">Install-Modules.ps1</a>      ← Bootstrap: alle modules installeren en importeren
-    │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Elke geïnstalleerde PowerShell-module bijwerken
+    │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Vereiste modules controleren/bijwerken (load.ps1 draait het bij de start), daarna de rest
     │   ├── <a href="scripts/Startup/Test-PowerShellSyntax.ps1">Test-PowerShellSyntax.ps1</a>
     │   ├── <a href="scripts/Startup/Update-ScriptIndex.ps1">Update-ScriptIndex.ps1</a>   ← Genereert scripts/INDEX.md opnieuw uit de .SYNOPSIS-headers
     │   ├── <a href="scripts/Startup/Test-MarkdownLinks.ps1">Test-MarkdownLinks.ps1</a>   ← Controleert elke readme-link: bestanden en ankers binnen de pagina
@@ -983,6 +994,21 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-08 (3)
+| Wijziging |
+|--------|
+| **Nieuw: [`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) in de nieuwe map [`Linux/`](scripts/Linux/readme.nl.md)** — de Linux-tegenhanger van `Invoke-WindowsCleanup.ps1`, voor een Debian/Ubuntu-server en vooral een server waarop 3CX Phone System draait. Een bash-script, omdat zo'n server geen PowerShell heeft. Ruimt de APT-cache op, `autoremove` (oude kernels; geweigerd als de lijst een 3CX-pakket bevat, overgeslagen terwijl apt/dpkg draait), achtergebleven pakketconfiguratie, uitgeschakelde snap-revisies, de systemd-journal, geroteerde logs, crashdumps, `/tmp`, gebruikerscaches en prullenbakken, optioneel Docker (`--docker`, nooit volumes), en als 3CX gevonden wordt de 3CX-logs en back-ups voorbij de nieuwste N (`--keep-backups`). Gespreksopnames, de database en de configuratie worden alleen gerapporteerd. Standaard een proefdraai, `--apply` om op te ruimen, `--check-only` voor monitoring met exitcode `2` als er werk is |
+| Nieuw: [`.gitattributes`](.gitattributes): `*.sh` wordt met LF-regeleinden uitgecheckt, ook op Windows — met CRLF faalt bash op de server al op de eerste regel |
+| Geverifieerd: `bash -n` en ShellCheck (geen waarschuwingen); in een Debian 12-container met een nagebootste 3CX-mapindeling, verouderde bestanden, 7 back-ups, een opname, een autoremove-kandidaat en een pakket met achtergebleven configuratie: proefdraai en `--check-only` wijzigen niets (exit `0` / `2`), `--apply` verwijdert precies de oude bestanden (actieve logs, recente bestanden, de opname, het lockbestand van PostgreSQL en `systemd-private-*` blijven), houdt de 3 nieuwste back-ups, een tweede `--apply` vindt niets, zonder 3CX vallen de 3CX-onderdelen weg, en totalen boven 2 GB kloppen (Debians `mawk` liep met `printf "%d"` over bij 2 GiB, nu `%.0f`). **Niet** geverifieerd: een echte 3CX-server (de log- en back-uppaden komen uit de Linux-indeling van 3CX), de journal (de container heeft geen systemd), snap en `--docker` |
+
+### 2026-10-08 (2)
+| Wijziging |
+|--------|
+| **[`load.ps1`](load.ps1) controleert de modules bij elke start: ontbrekend, te oud, of met een update.** Voorheen keek het alleen of zeven vaste modules bestonden — een verouderde module, of een module die een nieuwer script nodig had, viel pas op als een commando faalde. Nu draait het [`Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1) `-RequiredOnly -Prompt`, toont wat ontbreekt, onder de minimumversie zit of achterloopt op de PowerShell Gallery, en vraagt `Deze n module(s) nu installeren/updaten? [J/n]`. De gallery-versies worden 24 uur gecachet (`%LOCALAPPDATA%\M365-Scripts\module-gallery-cache.json`), dus een normale start kost minder dan een seconde in plaats van zes. `-SkipModuleCheck` slaat het één keer over. Dezelfde aanroep, `-RequiredOnly -Prompt -MaxAgeHours 24`, kan in een PowerShell-profiel voor wie via `$PROFILE` start in plaats van via `load.ps1` |
+| **Eén modulelijst: nieuw [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1).** `load.ps1`, [`Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) en `Update-Modules.ps1` hadden elk een eigen lijst (7, 14 en 7 modules) en die kwamen niet overeen. Alle drie lezen nu dit bestand, dus een module daar toevoegen is genoeg om hem op elke machine bij de volgende start aangeboden te krijgen. Toegevoegd: `PnP.PowerShell` (gebruikt door 10 SharePoint/Teams-scripts, overgeslagen onder PowerShell 7.4) en `MicrosoftTeams`, die scripts gebruikten maar geen lijst installeerde. Verwijderd: `AzureAD` — Microsoft heeft die van de PowerShell Gallery gehaald, waardoor `Install-Modules.ps1` er bij elke run op faalde |
+| `Update-Modules.ps1` herschreven: status per module (`Missing`, `BelowMinimum`, `UpdateAvailable`, `OK`, `Unknown`, `Skipped`), nieuw `-CheckOnly`, `-RequiredOnly`, `-MaxAgeHours`, `-Scope`, `-Quiet`, `-PassThru`, `-Prompt`. Het leest de geïnstalleerde versie met `Get-Module -ListAvailable` (ziet ook modules die niet via PowerShellGet zijn geïnstalleerd), bevraagt de gallery met `Find-PSResource` waar beschikbaar (3 s in plaats van 9 s met `Find-Module`), en installeert ernaast waar `Update-Module` zou weigeren. Zonder parameters werkt het daarna nog steeds alle andere geïnstalleerde modules bij, zoals voorheen |
+| Geverifieerd: syntaxcontrole; op PowerShell 7.6 meldt `-RequiredOnly -CheckOnly` tegen de live gallery alle 15 modules `OK` op deze machine (6 s), en uit de cache in 1,7 s inclusief het starten van pwsh (0,8 s in een draaiende sessie); `-Prompt` geeft één regel `Modules OK`, en valt op een niet-interactieve host terug op niets wijzigen; met een testlijst en een aangepaste cache meldt het `Missing`, `BelowMinimum`, `UpdateAvailable`, `OK` en `Skipped` correct, in lijstvolgorde, en `-PassThru` geeft de objecten terug die `load.ps1` leest; dezelfde test onder Windows PowerShell 5.1 werkt en ziet de eigen modulemappen van die runtime. **Niet** geverifieerd: een echte installatie- of updaterun (er is niets geïnstalleerd op deze machine), en `load.ps1` interactief van start tot menu |
 
 ### 2026-10-08
 | Wijziging |

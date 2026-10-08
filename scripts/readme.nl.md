@@ -29,6 +29,7 @@ De tabel hieronder werkt andersom: waar elke categorie *voor* is.
 | [`SharePoint/`](SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak herstellen per site of tenantbreed (PnP PowerShell, automatische app-registratie), en waar een bestand gebleven is: hernoemd, verplaatst of verwijderd (auditlog) |
 | [`Reporting/`](Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
 | [`Device/`](Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschoning, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile voor Azure/AVD |
+| [`Linux/`](Linux/readme.nl.md) | Linux-servers (Debian/Ubuntu, 3CX Phone System) — schijfopschoning in bash: pakketten, journal, logs, temp, gebruikerscaches, Docker, 3CX-logs en -back-ups |
 | [`Network/`](Network/readme.nl.md) | TCP-poortcontroles, authenticatie-/netwerkdiagnose, stresstests voor bestands-I/O |
 | [`RDS/`](RDS/readme.nl.md) | Diagnose van RDP-/RD Web Access-aanmeldingen, live sessiemonitoring, diagnose en verkleining van FSLogix-profielschijven |
 | [`SMTP/`](SMTP/readme.nl.md) | Connectiviteitstests voor SMTP-relay (eenmalig en terugkerend) |
