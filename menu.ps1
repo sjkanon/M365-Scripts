@@ -905,7 +905,7 @@ $menu = @(
             } elseif ($step -eq '6') {
                 # Reports unless -Apply, so the question here is the one that matters.
                 $a['Interactive'] = $true
-                $client = Read-Host '  ClientId of the PnP app registration'
+                $client = Read-Host '  ClientId of the PnP app registration [Enter = pnp.appid.json]'
                 if ($client) { $a['ClientId'] = $client }
                 Write-Host ''
                 Write-Host '  Without confirmation this only reports what it would remove.' -ForegroundColor DarkGray
@@ -919,7 +919,7 @@ $menu = @(
                 }
             } else {
                 $a['Interactive'] = $true
-                $client = Read-Host '  ClientId of the PnP app registration'
+                $client = Read-Host '  ClientId of the PnP app registration [Enter = pnp.appid.json]'
                 if ($client) { $a['ClientId'] = $client }
             }
 

@@ -4,8 +4,12 @@
 
 # SharePoint Scripts
 
-Contentbewerkingen op SharePoint Online en OneDrive via PnP PowerShell, met interactieve
-admin-aanmelding op elke (klant)tenant.
+Contentbewerkingen op SharePoint Online en OneDrive, standaard met een gedelegeerde
+admin-aanmelding op elke (klant)tenant — apparaatcode en GDAP-klant volgens
+`load.config.ps1`, via [`Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1).
+Microsoft Graph waar het een API heeft; PnP / SharePoint REST voor rolassignments,
+SharePoint-groepen, sitecollectiebeheerders en de prullenbak, waar Graph geen API voor heeft;
+Exchange Online voor het auditlogboek.
 
 ---
 
@@ -20,7 +24,7 @@ admin-aanmelding op elke (klant)tenant.
 | Script | Omschrijving |
 |--------|-------------|
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Doorzoek een hele site (naam, pad, type, grootte, datum of volledige tekst) en rapporteer de rechten op elke treffer — PnP/CSOM, meldt zich aan als jou |
-| [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | Dezelfde vraag tenantbreed via Microsoft Graph, app-only, zonder interactieve login — bestanden en mappen |
+| [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | Dezelfde vraag via Microsoft Graph, één site of tenantbreed — aangemeld als jij, of app-only (`-AppOnly`) om alles te zien — bestanden en mappen |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Verwijderde bestanden/mappen terugzetten uit de prullenbak van een site of OneDrive (standaard een proefdraai) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Waar is een bestand gebleven? Hernoemingen, verplaatsingen, kopieën en verwijderingen uit het auditlog, ook via een map — in Brusselse tijd, over een periode naar keuze |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Neem één gebruiker overal de toegang af: site collection-beheerder, directe toekenningen op elk niveau, SharePoint-groepen en deellinks. Rapporteert standaard, verwijdert met `-Apply` |
@@ -35,7 +39,7 @@ CSV. Ze verschillen in wat ze kunnen zien en in wat ze van jou nodig hebben.
 
 | | `Find-SiteContent.ps1` (PnP) | `Search-SharePointContent.ps1` (Graph) |
 |---|---|---|
-| Aanmelden | Interactief, als jij | App-only, onbeheerd — prima in een geplande taak |
+| Aanmelden | Gedelegeerd, als jij (apparaatcode volgens `load.config.ps1`) | Standaard gedelegeerd als jij — ziet alleen wat jij kunt bereiken; `-AppOnly` voor alles, onbeheerd, prima in een geplande taak |
 | Benodigde rechten | Toegang tot de site, of `-GrantSiteAdmin` per site | Eén admin consent, één keer, voor de hele tenant |
 | Bereik | Eén site collection (+ subsites) | Eén site, of **elke site in de tenant**, OneDrive inbegrepen |
 | Bestanden en mappen | Ja | Ja, en sneller — `delta` leest een bibliotheek in pagina's van duizend en rechten komen per 20 in een `$batch` |
@@ -106,11 +110,16 @@ doorloopt.
 
 **Aanmelden**
 
-Hetzelfde als `Restore-RecycleBinItems.ps1`: de eerste run tegen een tenant registreert een
-public-client Entra-app (delegated `AllSites.FullControl`, met admin consent) en cachet de
-client ID per tenant in `pnp.appid.json` in de root van de repo (gitignored). Een client ID
-die het andere script al heeft gecachet wordt hergebruikt, dus meestal kost dit niets. Geef
-`-ClientId` mee om de app-registratie helemaal over te slaan.
+Hetzelfde als `Restore-RecycleBinItems.ps1`: gedelegeerd, als jij, via `Connect-M365PnP` —
+een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, anders de browser.
+De eerste run tegen een tenant registreert een public-client Entra-app (delegated
+`AllSites.FullControl`, met admin consent; de eenmalige Graph-admin-aanmelding loopt via
+`Connect-M365Graph`) en cachet de client ID per tenant in `pnp.appid.json` in de root van de
+repo (gitignored). Een client ID die het andere script al heeft gecachet wordt hergebruikt,
+dus meestal kost dit niets. Geef `-ClientId` mee om de app-registratie helemaal over te slaan.
+Het blijft PnP/CSOM omdat SharePoint-rolassignments, SharePoint-groepen en items in gewone
+lijsten geen Graph-API hebben. Met `-Disconnect` worden ook de gecachete verbindingen per web
+losgelaten.
 
 Rechten uitlezen vereist toegang tot de site. `-GrantSiteAdmin` maakt de aangemelde admin
 site collection-beheerder voor de duur van de run en haalt die rechten daarna weer weg
@@ -187,7 +196,8 @@ een site waar je geen lid van bent.
 
 ### Search-SharePointContent.ps1
 
-De Graph-tegenhanger van `Find-SiteContent.ps1`: dezelfde vraag, app-only, en het bereikt
+De Graph-tegenhanger van `Find-SiteContent.ps1`: dezelfde vraag, alleen via Microsoft Graph.
+Standaard aangemeld als jij ziet het wat jouw account kan bereiken; met `-AppOnly` bereikt het
 elke site en elke OneDrive in de tenant zonder dat jij op één daarvan rechten hebt.
 Alleen-lezen.
 
@@ -223,9 +233,18 @@ en "Everyone except external users" krijgen ook hun eigen tellers.
 - **Alleen bibliotheken.** Rechten bestaan voor driveItems, niet voor items in gewone lijsten.
 - Geen roldefinities, en geen "Limited Access"-nuance.
 
-**Aanmelden — app-only, voor je aangemaakt**
+**Aanmelden — standaard gedelegeerd, app-only op aanvraag**
 
-De eerste run tegen een tenant zet de app op:
+Standaard meld je je aan als jezelf via `Connect-M365Graph` (apparaatcode en GDAP-klant
+volgens `load.config.ps1`) met `Sites.Read.All` en `Files.Read.All` (plus
+`GroupMember.Read.All` voor `-ExpandGroups`). Graph toont dan alleen wat **jouw** account kan
+bereiken: sites waar je geen lid of beheerder van bent blijven verborgen, `-AllSites` lijst
+de sites op via de zoekindex (`/sites?search=*`, omdat `/sites/getAllSites` alleen
+application-rechten kent) en een `-Content`-zoekopdracht heeft geen regio nodig. Gebruik
+`-AppOnly` voor een volledige tenantscan.
+
+`-AppOnly` (of `-ClientId`) gebruikt application-rechten. De eerste `-AppOnly`-run tegen een
+tenant zet de app op:
 
 1. Meld je (één keer) aan bij Graph als Global Administrator
 2. Maak een app aan, of hergebruik die, met de naam uit `-AppName`
@@ -236,7 +255,7 @@ De eerste run tegen een tenant zet de app op:
 5. Cache de client ID en thumbprint per tenant in `graph.appid.json` in de root van de repo
    (gitignored)
 
-Latere runs verbinden app-only zonder enige prompt, en dat maakt deze bruikbaar vanuit een
+Latere `-AppOnly`-runs verbinden zonder enige prompt, en dat maakt deze bruikbaar vanuit een
 geplande taak. Gebruik je eigen app met `-ClientId` plus `-CertificateThumbprint` of
 `-ClientSecret`. Het certificaat is niet exporteerbaar en staat in de store van de gebruiker
 die het aanmaakte, dus een geplande taak moet onder datzelfde account draaien.
@@ -266,8 +285,9 @@ die het aanmaakte, dus een geplande taak moet onder datzelfde account draaien.
 | `-Everything` | Nee | Subsites, persoonlijke sites en geen limieten |
 | `-MaxItems` | Nee | Stop na zoveel treffers (standaard 5000, `0` = geen limiet) |
 | `-MaxPermissionLookups` | Nee | Limiet op het aantal rechten-lookups (standaard 2000, `0` = geen limiet) |
-| `-TenantId` | * | Verplicht met `-AllSites`; anders afgeleid van `-SiteUrl` |
-| `-ClientId` / `-CertificateThumbprint` / `-ClientSecret` / `-AppName` | Nee | Gebruik je eigen app-registratie |
+| `-TenantId` | * | Afgeleid van `-SiteUrl`; met `-AllSites` de GDAP-klant of je eigen tenant, verplicht voor `-AllSites -AppOnly` |
+| `-AppOnly` | Nee | App-only met de app die voor de tenant in `graph.appid.json` gecachet is (aangemaakt bij de eerste run) — ziet elke site |
+| `-ClientId` / `-CertificateThumbprint` / `-ClientSecret` / `-AppName` | Nee | Gebruik je eigen app-registratie (impliceert app-only) |
 | `-OutputPath` | Nee | CSV-pad (standaard: `C:\Temp\GraphSharePointFind_<timestamp>.csv`) |
 | `-MaxRetries` | Nee | Retries bij throttling (429), standaard 5 |
 
@@ -278,13 +298,13 @@ die het aanmaakte, dus een geplande taak moet onder datzelfde account draaien.
 .\Search-SharePointContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
     -Name "*veiligheid*" -IncludeSubsites
 
-# Tenantbreed op volledige tekst: welke documenten noemen "salarisschaal"?
+# Tenantbreed op volledige tekst, app-only zodat niets verborgen blijft: welke documenten noemen "salarisschaal"?
 .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
-    -Content "salarisschaal"
+    -Content "salarisschaal" -AppOnly
 
 # Alles in de tenant met eigen rechten — begin met 25 sites
 .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
-    -Permissions Unique -MaxSites 25
+    -Permissions Unique -MaxSites 25 -AppOnly
 
 # Onbeheerd, met een app die je al hebt
 .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
@@ -305,7 +325,7 @@ die het aanmaakte, dus een geplande taak moet onder datzelfde account draaien.
 **Benodigde modules**
 ```powershell
 Install-Module Microsoft.Graph.Authentication -Scope CurrentUser  # om te draaien
-Install-Module Microsoft.Graph.Applications  -Scope CurrentUser   # alleen voor de eenmalige app-registratie
+Install-Module Microsoft.Graph.Applications  -Scope CurrentUser   # alleen voor de eenmalige -AppOnly-app-registratie
 ```
 
 ---
@@ -386,9 +406,12 @@ vereist. De eerste run tegen een tenant maakt er automatisch een aan:
 3. Het kent de delegated SharePoint-scope `AllSites.FullControl` toe, met admin consent
 4. De client ID wordt per tenant gecachet in `pnp.appid.json` in de root van de repo (gitignored)
 
-Latere runs lezen de gecachete client ID en gaan meteen naar de interactieve SharePoint-login —
-de Graph-admin-aanmelding gebeurt maar één keer per tenant. Geef een bestaande `-ClientId` mee
-om het aanmaken van de app helemaal over te slaan.
+Latere runs lezen de gecachete client ID en gaan meteen naar de gedelegeerde
+SharePoint-aanmelding (`Connect-M365PnP`: een apparaatcode als `useDeviceCodeAuth` in
+`load.config.ps1` aan staat, anders de browser) — de Graph-admin-aanmelding
+(`Connect-M365Graph`) gebeurt maar één keer per tenant. Geef een bestaande `-ClientId` mee
+om het aanmaken van de app helemaal over te slaan. Het script blijft op PnP omdat Graph geen
+API heeft voor de SharePoint-prullenbak of voor sitecollectiebeheerders.
 
 **Parameters**
 
@@ -504,7 +527,9 @@ Per item krijg je de tijdlijn, de **laatst bekende locatie** en een status: `Pre
 | `-FollowCopies` | switch | uit | Ook kopieën volgen. Standaard wordt een kopie gemeld maar niet gevolgd — het origineel blijft waar het was |
 | `-IncludeActivity` | switch | uit | Ook openen, bewerken, downloaden, synchronisatie en in-/uitchecken: wie er het laatst in werkte. Veel meer records, dus trager |
 | `-OutputPath` | string | `C:\Temp\FileTrail_<naam>_<ts>.csv` | CSV-pad; de ruwe auditrecords van het spoor gaan naar dezelfde naam met `.json` |
-| `-TenantId` | string | — | Tenantdomein voor `Connect-ExchangeOnline`; niet nodig als je al verbonden bent |
+| `-TenantId` | string | — | Tenantdomein om te lezen. Gedelegeerd bereikt een partner er een klant mee (`-DelegatedOrganization`); standaard de GDAP-klant uit `Connect-Tenant`, anders je eigen tenant. Niet nodig als je al met de juiste organisatie verbonden bent |
+| `-ClientId` / `-CertificateThumbprint` | string | — | App-only in plaats van gedelegeerd: een app met `Exchange.ManageAsApp` en een Exchange-rol met View-Only Audit Logs. Vereist `-TenantId` (domein) |
+| `-AppOnly` | switch | uit | App-only met de app voor de tenant uit `graph.appid.json` |
 | `-PassThru` | switch | uit | Geeft de tijdlijnrijen ook als objecten terug |
 
 **Voorbeelden**
@@ -525,6 +550,8 @@ Per item krijg je de tijdlijn, de **laatst bekende locatie** en een status: `Pre
 **Opmerkingen**
 
 - Vereist de rol **View-Only Audit Logs** of **Audit Logs** in Exchange Online, en de module `ExchangeOnlineManagement`. Draait in Windows PowerShell 5.1 en PowerShell 7
+- Aanmelden: standaard gedelegeerd via `Connect-M365Exchange` (apparaatcode volgens `load.config.ps1`; een GDAP-klant via `-DelegatedOrganization` — de vroegere `-Organization` geldt alleen voor app-only aanmelden, dus een partner kwam in zijn eigen tenant terecht), app-only met `-ClientId`/`-CertificateThumbprint` of `-AppOnly`. Windows PowerShell 5.1 kan die PowerShell 7-helper niet laden en verbindt met dezelfde regels inline. Een Exchange-sessie die het script niet zelf opende, blijft open
+- Waarom Exchange Online en niet Graph: de auditlog-query-API van Graph (`/security/auditLog/queries`) is asynchroon — een query wordt aangemaakt, draait minutenlang en daarna haal je de records op — met een andere recordvorm. De logica hier voor opdelen, splitsen en opnieuw proberen is gebouwd op `Search-UnifiedAuditLog`, dus het script houdt die
 - Het auditlog loopt 30–90 minuten (soms 24 uur) achter. Audit Standard bewaart **180 dagen**; het script waarschuwt als de periode vroeger begint
 - Alleen wat **binnen** de periode gebeurde, kan gevolgd worden. Een map die vóór `-StartDate` hernoemd werd, is onzichtbaar; lijkt het spoor halverwege te beginnen, maak de periode dan groter
 - Hernoemingen door de OneDrive-synchronisatieclient (in Verkenner) worden net als die in de browser geaudit; de kolom `UserAgent` onderscheidt ze
@@ -587,11 +614,12 @@ Dit script verwijdert rechten, dus de faalmodi zijn andere dan bij een rapport: 
 | `-IncludeOneDriveSites` | switch | uit | Ook persoonlijke OneDrive-sites doorzoeken |
 | `-IncludeHiddenLists` | switch | uit | Ook verborgen en systeemlijsten |
 | `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Eigen app-registratie in plaats van de tijdelijke. Die heeft SharePoint `Sites.FullControl.All` nodig plus Graph `Sites.Read.All`, `User.Read.All` en `GroupMember.Read.All`. Zonder `User.Read.All` geeft de gebruikerslookup `403` en stopt de run, in plaats van dat aan te zien voor een niet-bestaand account |
+| `-AppOnly` | switch | uit | Hetzelfde, met ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` (PowerShell 7) |
 | `-ClientSecret` | string | — | Werkt voor Graph maar **niet** voor SharePoint (zie authenticatie bij het rapport) |
 | `-OutputPath` | string | `C:\Temp` | Outputmap |
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout en retries |
 
-Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseerde app-registratie met SharePoint `Sites.FullControl.All`, die na afloop weer wordt verwijderd.
+Authenticatie is identiek aan het rapport: een kortlevende, certificaat-gebaseerde app-registratie met SharePoint `Sites.FullControl.All`, die na afloop weer wordt verwijderd. De enige interactieve stap — die app aanmaken — is een gedelegeerde aanmelding via `Connect-M365Graph` (PowerShell 7): apparaatcode volgens `load.config.ps1`, de GDAP-klant uit `Connect-Tenant`, en een Graph-sessie die de scopes al heeft wordt hergebruikt en blijft open. Het werk zelf blijft bewust app-only: rolassignments, SharePoint-groepen en sitecollectiebeheerders bestaan alleen in SharePoint REST, en dat aanvaardt noch een gedelegeerd Graph-token (verkeerde audience) noch een app-only token op basis van een secret.
 
 #### Ook de Entra ID-groepen verwijderen
 

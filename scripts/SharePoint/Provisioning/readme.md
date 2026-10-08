@@ -104,7 +104,7 @@ in `pnp.appid.json`, or register one:
 
 | Sign-in | Needs | Use it for |
 |---|---|---|
-| **Interactive** (`-Interactive -ClientId <app-id>`) | delegated `AllSites.FullControl`, signed in as an admin who may edit the site | provisioning, one-off runs |
+| **Delegated** (`-Interactive`, with `-ClientId <app-id>` or the tenant's app in `pnp.appid.json`) | delegated `AllSites.FullControl`, signed in as an admin who may edit the site — with a device code when `useDeviceCodeAuth` is set in `load.config.ps1`, otherwise in the browser | provisioning, one-off runs |
 | **App-only** (`-ClientId <app-id> -Thumbprint <thumb>`) | application `Sites.FullControl.All`, certificate uploaded to the app | the scheduled share-status audit |
 
 Two extra requirements that are easy to miss:
@@ -116,6 +116,17 @@ Two extra requirements that are easy to miss:
   app-only.
 - **Groups.** `-EnsureGroups` needs `Group.ReadWrite.All`; the drift check's
   `-IncludeGroups` gets by with `Group.Read.All`.
+
+Delegated sign-in goes through [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1)
+(`Connect-M365PnP`, `Connect-M365Graph`): device code or browser per `load.config.ps1`, and
+`-ClientId` may be left out when `pnp.appid.json` has the tenant — the launcher's
+"ClientId of the PnP app registration" question can then be answered with Enter. The Graph
+sign-ins (groups, team, channels) reuse a session that already holds the scopes. Graph has no
+API for what most of this set does — term sets, content types and their field links, views,
+default column values, navigation, breaking inheritance on lists and folders — so that stays
+PnP/CSOM. `New-SharePointTeam.ps1` creates its channel folders through PnP as well: the
+library is named in the configuration by title, and resolving that title to a Graph drive the
+way `Get-PnPList` does (title, URL or id) is not a one-to-one swap.
 
 ### 3. Fill in the config
 
@@ -401,8 +412,10 @@ in the browser and nothing looks wrong until half a library has no Taal on it.
 
 Shared helpers, dot-sourced by every script in this folder — never run on its own, no
 parameters. It holds what they all need: loading and validating the configuration
-(`Import-StructureConfig`), the PnP and Graph connections that work both interactively and
-app-only (`Connect-Structure`, `Connect-StructureGraph`), the app registration
+(`Import-StructureConfig`), the PnP and Graph connections that work both delegated (through
+`Connect-M365PnP` / `Connect-M365Graph`, called with StrictMode off by `Invoke-M365Helper`)
+and app-only (`Connect-Structure`, `Connect-StructureGraph`),
+the app registration
 (`New-StructureApp`, `Remove-StructureApp`), the CSOM primitives PnP does not expose
 directly (required flag on a field link, breaking inheritance and setting roles on a
 securable object), and the shared `[ OK ]` / `[ >> ]` / `[DIFF]` output vocabulary.

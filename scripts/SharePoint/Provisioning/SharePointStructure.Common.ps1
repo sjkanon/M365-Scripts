@@ -27,6 +27,19 @@ Set-StrictMode -Version Latest
 # "if (-not $script:X) { $script:X = @{} }" throws instead of initialising it.
 $script:StructureConnections = @{}
 
+# One sign-in for the whole repo: Connect-M365PnP / Connect-M365Graph decide between a
+# device code and the browser (load.config.ps1), know the GDAP customer and reuse a
+# fitting Graph session. They are called through Invoke-M365Helper, which runs them with
+# StrictMode off: this set runs under StrictMode Latest, and a helper that is shared by the
+# whole repo should not be able to break it over a variable it reads.
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
+function Invoke-M365Helper {
+    <# Runs a Connect-M365.ps1 call without StrictMode (see above). #>
+    param([Parameter(Mandatory)] [scriptblock] $Script)
+    & { Set-StrictMode -Off; & $Script }
+}
+
 # -- Output --------------------------------------------------------------------
 # Same vocabulary in all four scripts, so a run reads the same whichever one you
 # started: [ OK ] nothing to do, [ >> ] something changed, [DIFF] drift found.
@@ -221,9 +234,16 @@ function Get-StructureSiteUrl {
 # -- Connection ----------------------------------------------------------------
 function Connect-Structure {
     <#
-        One connection per site URL, cached for the run. Interactive by default;
-        app-only when a certificate thumbprint or a client secret is supplied, which
-        is what the scheduled share-status audit uses.
+        One connection per site URL, cached for the run. Delegated by default
+        (-Interactive): through Connect-M365PnP, so with a device code when
+        $global:useDeviceCodeAuth is set in load.config.ps1 and otherwise in the
+        browser, and with the PnP app from pnp.appid.json when no -ClientId is
+        given. App-only when a certificate is supplied, which is what the
+        scheduled share-status audit uses.
+
+        Everything this set does through PnP stays PnP on purpose: term sets,
+        content types and their field links, views, default column values and
+        breaking inheritance on lists and folders have no Graph API.
 
         Returns a PnP connection object - every call below passes it explicitly, so
         two site collections (team site and private-channel site) can be worked on in
@@ -247,7 +267,7 @@ function Connect-Structure {
         throw 'App-only sign-in needs -ClientId together with the certificate.'
     }
     if (-not $appOnly -and -not $Interactive -and -not $ClientId) {
-        throw 'Pass -Interactive (with -ClientId of your PnP app) or a certificate for app-only sign-in.'
+        throw 'Pass -Interactive (with -ClientId of your PnP app, or one in pnp.appid.json) or a certificate for app-only sign-in.'
     }
 
     $splat = @{ Url = $Url; ReturnConnection = $true; ErrorAction = 'Stop' }
@@ -260,18 +280,21 @@ function Connect-Structure {
             $splat['CertificatePath'] = $CertificatePath
             if ($CertificatePassword) { $splat['CertificatePassword'] = $CertificatePassword }
         }
-    } else {
-        $splat['Interactive'] = $true
-        if ($ClientId) { $splat['ClientId'] = $ClientId }
     }
 
     # A freshly created app registration is not replicated everywhere yet, so the
     # first sign-in against a new tenant can fail with "application not found".
     for ($attempt = 1; $attempt -le 4; $attempt++) {
         try {
-            $connection = Connect-PnPOnline @splat
+            $connection = if ($appOnly) {
+                Connect-PnPOnline @splat
+            } else {
+                # Delegated: device code or browser per load.config.ps1; without -ClientId
+                # the tenant's PnP app from pnp.appid.json.
+                Invoke-M365Helper { Connect-M365PnP -Url $Url -TenantId $Tenant -ClientId $ClientId }
+            }
             $script:StructureConnections[$key] = $connection
-            Write-Ok ("Connected to $Url ({0})" -f $(if ($appOnly) { 'app-only' } else { 'interactive' }))
+            Write-Ok ("Connected to $Url ({0})" -f $(if ($appOnly) { 'app-only' } else { 'delegated' }))
             return $connection
         } catch {
             if ($attempt -eq 4) { throw "Could not connect to ${Url}: $($_.Exception.Message)" }
@@ -640,6 +663,9 @@ function Connect-StructureGraph {
     <#
         Graph sign-in for the group work. Uses the same certificate as PnP when one
         is given, so an unattended run needs one app registration, not two.
+        Delegated otherwise, with a device code when load.config.ps1 says so; the
+        sign-ins without an app of this set go through Connect-M365Graph, which
+        also reuses a session that already holds the scopes.
     #>
     param(
         [Parameter(Mandatory)] [string] $Tenant,
@@ -684,19 +710,25 @@ function Connect-StructureGraph {
         Write-Step "Signing in to Graph on $Tenant..."
 
         if ($Thumbprint -and $ClientId) {
-            Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint -NoWelcome
+            Invoke-M365Helper { Connect-M365Graph -TenantId $Tenant -ClientId $ClientId -CertificateThumbprint $Thumbprint }
         } elseif ($ClientId -and -not $scopesGiven) {
             # An app this set provisioned already carries the Graph scopes, so signing
             # in with it keeps the whole run on one app registration. An app that came
             # from somewhere else may not, hence the fallback to the SDK's own app.
+            # Delegated with an app of our own is not something Connect-M365Graph does
+            # (its -ClientId means app-only), so the device-code choice is made here.
+            $appSignIn = @{ TenantId = $Tenant; ClientId = $ClientId; NoWelcome = $true; ContextScope = 'Process'; ErrorAction = 'Stop' }
+            if ((Get-Variable -Name useDeviceCodeAuth -Scope Global -ValueOnly -ErrorAction SilentlyContinue) -eq $true) {
+                $appSignIn['UseDeviceCode'] = $true
+            }
             try {
-                Connect-MgGraph -TenantId $Tenant -ClientId $ClientId -NoWelcome -ContextScope Process -ErrorAction Stop
+                Connect-MgGraph @appSignIn
             } catch {
                 Write-Warn "App $ClientId could not be used for Graph ($($_.Exception.Message.Trim())) - falling back to the Microsoft Graph PowerShell app."
-                Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process
+                Invoke-M365Helper { Connect-M365Graph -TenantId $Tenant -Scopes $Scopes }
             }
         } else {
-            Connect-MgGraph -TenantId $Tenant -Scopes $Scopes -NoWelcome -ContextScope Process
+            Invoke-M365Helper { Connect-M365Graph -TenantId $Tenant -Scopes $Scopes }
         }
 
         # Get-MgContext comes back $null when the sign-in silently did not take, and
@@ -867,11 +899,13 @@ function New-StructureApp {
     Import-Module Microsoft.Graph.Applications -ErrorAction Stop
 
     Write-Step "Signing in as a Global Administrator of $Tenant to register the app..."
-    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @(
-        'Application.ReadWrite.All'
-        'DelegatedPermissionGrant.ReadWrite.All'
-        'Directory.Read.All'
-    ) | Out-Null
+    $bootstrap = Invoke-M365Helper {
+        Connect-M365Graph -TenantId $Tenant -Scopes @(
+            'Application.ReadWrite.All'
+            'DelegatedPermissionGrant.ReadWrite.All'
+            'Directory.Read.All'
+        )
+    }
     Write-Ok "Signed in as $((Get-MgContext).Account)"
 
     $escaped = $DisplayName -replace "'", "''"
@@ -963,7 +997,7 @@ function New-StructureApp {
         Write-Change "$($resource.Name): consented $($missing -join ', ')"
     }
 
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Invoke-M365Helper { Disconnect-M365Graph $bootstrap }
 
     return [PSCustomObject]@{
         AppId    = $app.AppId
@@ -986,9 +1020,9 @@ function Remove-StructureApp {
     )
 
     Import-Module Microsoft.Graph.Applications -ErrorAction Stop
-    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @('Application.ReadWrite.All') | Out-Null
+    $bootstrap = Invoke-M365Helper { Connect-M365Graph -TenantId $Tenant -Scopes @('Application.ReadWrite.All') }
     Remove-MgApplication -ApplicationId $ObjectId -ErrorAction Stop
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Invoke-M365Helper { Disconnect-M365Graph $bootstrap }
     Write-Change "Temporary app registration '$DisplayName' removed."
 
     # The cache must not keep pointing at an app that no longer exists.

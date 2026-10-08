@@ -32,14 +32,19 @@
     app registration is required. This script creates one automatically the first
     time it runs against a tenant:
 
-      1. Signs in to Microsoft Graph as an admin (Application.ReadWrite.All)
+      1. Signs in to Microsoft Graph as an admin (Application.ReadWrite.All),
+         through Connect-M365Graph: device code / GDAP customer per load.config.ps1
       2. Creates (or reuses) a public-client app named after -AppName
       3. Grants and admin-consents the delegated SharePoint scope AllSites.FullControl
       4. Caches the resulting client ID per tenant in pnp.appid.json (gitignored)
 
-    Later runs read the cached client ID and go straight to the interactive login,
-    so the Graph admin sign-in only happens once per tenant. Pass an existing
-    -ClientId to skip app creation entirely.
+    Later runs read the cached client ID and go straight to the delegated PnP
+    sign-in (Connect-M365PnP: a device code when $global:useDeviceCodeAuth is set in
+    load.config.ps1, otherwise the browser), so the Graph admin sign-in only
+    happens once per tenant. Pass an existing -ClientId to skip app creation entirely.
+
+    Why PnP and not Graph: Graph has no API for the SharePoint recycle bin (list
+    and restore) or for site collection admins, so this script stays on PnP.
 
     Reading a site's recycle bin requires being site collection administrator
     there. -GrantSiteAdmin arranges that per site via the tenant admin site and
@@ -215,6 +220,7 @@ if (-not (Get-Module -ListAvailable -Name 'PnP.PowerShell')) {
     throw "Module 'PnP.PowerShell' is not installed. Run: Install-Module PnP.PowerShell -Scope CurrentUser"
 }
 Import-Module PnP.PowerShell -ErrorAction Stop
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # -- Output folder -------------------------------------------------------------
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -315,11 +321,11 @@ function New-RestoreApp {
     Write-Host '  No app registration known for this tenant - creating one.' -ForegroundColor Yellow
     Write-Host "  Sign in as a Global Administrator of $Tenant." -ForegroundColor Yellow
 
-    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @(
+    $bootstrap = Connect-M365Graph -TenantId $Tenant -Scopes @(
         'Application.ReadWrite.All'
         'DelegatedPermissionGrant.ReadWrite.All'
         'Directory.Read.All'
-    ) | Out-Null
+    )
 
     Write-Host "  Signed in as $((Get-MgContext).Account)" -ForegroundColor Green
 
@@ -378,7 +384,7 @@ function New-RestoreApp {
         Write-Host "    $($resource.Name): consented $($missing -join ', ')" -ForegroundColor Green
     }
 
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Disconnect-M365Graph $bootstrap
     return $app.AppId
 }
 
@@ -408,7 +414,8 @@ function Connect-Site {
 
     for ($attempt = 1; $attempt -le $Retries; $attempt++) {
         try {
-            return Connect-PnPOnline -Url $Url -Interactive -ClientId $ClientId -ReturnConnection -ErrorAction Stop
+            # Device code or browser per load.config.ps1 - see Connect-M365PnP.
+            return Connect-M365PnP -Url $Url -ClientId $ClientId -TenantId $TenantId
         } catch {
             if ($attempt -eq $Retries) { throw }
             Write-Host "  Sign-in attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying in 10s..." -ForegroundColor DarkYellow

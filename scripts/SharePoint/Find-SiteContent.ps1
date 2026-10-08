@@ -47,10 +47,18 @@
 
     Nothing is changed - this script only reads.
 
-    Sign-in: PnP.PowerShell no longer ships a shared multi-tenant app, so an Entra
-    app registration is required. The first run against a tenant creates one and
-    caches the client ID in pnp.appid.json (gitignored) - a cached ID from another
-    script in this repo is reused. Pass -ClientId to skip app creation entirely.
+    Sign-in: delegated - you sign in as the admin, with a device code when
+    $global:useDeviceCodeAuth is set in load.config.ps1 (Connect-M365PnP in
+    scripts\Startup\Connect-M365.ps1), otherwise in the browser. PnP.PowerShell no
+    longer ships a shared multi-tenant app, so an Entra app registration is
+    required. The first run against a tenant creates one (after a one-time Graph
+    admin sign-in through Connect-M365Graph) and caches the client ID in
+    pnp.appid.json (gitignored) - a cached ID from another script in this repo is
+    reused. Pass -ClientId to skip app creation entirely.
+
+    Why PnP and not Graph: SharePoint role assignments, SharePoint groups, list
+    items outside libraries and site collection admins have no Graph API. For a
+    Graph-only search of libraries, see Search-SharePointContent.ps1.
 
 .PARAMETER SiteUrl
     Full URL of the site collection to search, e.g.
@@ -277,6 +285,7 @@ if (-not (Get-Module -ListAvailable -Name 'PnP.PowerShell')) {
     throw "Module 'PnP.PowerShell' is not installed. Run: Install-Module PnP.PowerShell -Scope CurrentUser"
 }
 Import-Module PnP.PowerShell -ErrorAction Stop
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # -- Output folder -------------------------------------------------------------
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -407,11 +416,11 @@ function New-SearchApp {
     Write-Host '  No app registration known for this tenant - creating one.' -ForegroundColor Yellow
     Write-Host "  Sign in as a Global Administrator of $Tenant." -ForegroundColor Yellow
 
-    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @(
+    $bootstrap = Connect-M365Graph -TenantId $Tenant -Scopes @(
         'Application.ReadWrite.All'
         'DelegatedPermissionGrant.ReadWrite.All'
         'Directory.Read.All'
-    ) | Out-Null
+    )
 
     Write-Host "  Signed in as $((Get-MgContext).Account)" -ForegroundColor Green
 
@@ -470,7 +479,7 @@ function New-SearchApp {
         Write-Host "    $($resource.Name): consented $($missing -join ', ')" -ForegroundColor Green
     }
 
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Disconnect-M365Graph $bootstrap
     return $app.AppId
 }
 
@@ -503,7 +512,8 @@ function Connect-Site {
 
     for ($attempt = 1; $attempt -le $Retries; $attempt++) {
         try {
-            $connection = Connect-PnPOnline -Url $Url -Interactive -ClientId $ClientId -ReturnConnection -ErrorAction Stop
+            # Device code or browser per load.config.ps1 - see Connect-M365PnP.
+            $connection = Connect-M365PnP -Url $Url -ClientId $ClientId -TenantId $TenantId
             $script:Connections[$key] = $connection
             return $connection
         } catch {
@@ -1306,6 +1316,9 @@ try {
         }
     }
     if ($Disconnect) {
+        # The per-web connections were returned objects, never the "current" one, and
+        # Disconnect-PnPOnline (3.x) has no -Connection: dropping them is what ends them.
+        $script:Connections.Clear()
         Disconnect-PnPOnline -ErrorAction SilentlyContinue
         Write-Host '  Disconnected.' -ForegroundColor DarkGray
     }

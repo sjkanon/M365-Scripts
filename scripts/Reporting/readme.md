@@ -112,7 +112,7 @@ See [Licensing/](Licensing/) for the monthly licensing report.
 
 ## Get-SharePointStorageReport.ps1
 
-Reports storage usage across SharePoint Online with a tenant-wide scan. By default the script connects delegated and temporarily creates an App Registration (`Sites.Read.All`) for site enumeration; that app is deleted again afterwards.
+Reports storage usage across SharePoint Online with a tenant-wide scan. By default the script signs in delegated through [`Connect-M365.ps1`](../Startup/readme.md#connect-m365ps1) (device code and GDAP customer per `load.config.ps1`) and temporarily creates an App Registration (`Sites.Read.All`) for site enumeration; that app is deleted again afterwards. `-AppOnly` uses the app for the tenant in `graph.appid.json` instead. Everything is read through Microsoft Graph — sites, libraries (hidden ones such as the Preservation Hold Library included, found through Graph `/lists` with the `system`/`hidden` facets), files and versions. The file walk used to have a SharePoint REST variant for hidden libraries, fed by a client-secret token that SharePoint Online always rejects; it is gone, and a hidden library Graph will not open is now reported instead of silently skipped. Requires PowerShell 7.
 
 
 ### Coverage
@@ -130,7 +130,7 @@ Reports storage usage across SharePoint Online with a tenant-wide scan. By defau
 
 ### Recycle bin
 
-The recycle bin (stage 1 + stage 2) counts towards the tenant storage quota, so it is collected **separately** from the library scan, and only for real SharePoint site collections (not OneDrive):
+The recycle bin (stage 1 + stage 2) counts towards the tenant storage quota, so it is collected **separately** from the library scan, and only for real SharePoint site collections (not OneDrive). Graph has no recycle bin API for SharePoint sites, so this part still uses SharePoint REST with a token minted from the temporary app's client secret (or `-ClientSecret`) — and SharePoint Online rejects secret-based app-only tokens, so expect empty recycle bin figures until that moves to a certificate (not verified on a tenant):
 
 - By default (`-Apply`, as Phase 2b) or on its own with **`-RecycleBinOnly`** (skips the library scan entirely, recycle bin only)
 - Only root site collections have a recycle bin of their own (sub-webs share the root's)
@@ -207,7 +207,7 @@ In addition, `-SiteUrl` (1 specific site) is optimised: in normal mode the scrip
 
 For GDAP reliability the script automatically switches to an app-only bootstrap for single-site scans when `authMode=GDAP` is detected (from `load.config.ps1`/launcher context). To always force that, use `-ForceAppOnlySingleSite`.
 
-For full-site scans under GDAP the script uses the same customer-tenant context (`$global:cid`/`-TenantId`) for both `Connect-MgGraph` and the temporary app bootstrap, so consent and site enumeration always happen in the right tenant.
+For full-site scans under GDAP the script uses the same customer-tenant context (`$global:cid`/`-TenantId`) for both the delegated sign-in (`Connect-M365Graph`) and the temporary app bootstrap, so consent and site enumeration always happen in the right tenant. A Graph session that already holds the scopes is reused, and then left open at the end.
 
 ### Parameters
 
@@ -220,6 +220,7 @@ For full-site scans under GDAP the script uses the same customer-tenant context 
 | `-ClientId` | Existing App Registration client ID — skips auto-create; use together with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
 | `-ClientSecret` | Client secret for an existing app registration |
 | `-CertificateThumbprint` | Certificate thumbprint for an existing app registration |
+| `-AppOnly` | App-only with ClientId and CertificateThumbprint for the tenant from `graph.appid.json` — no sign-in, no temporary app. Needs `Sites.Read.All` (and `User.Read.All` for the profile path) as application permissions |
 | `-Apply` | Full recursive scan of libraries, folders and files. Without this switch, quota summary only |
 | `-UseHighPrivilege` | Auto mode: temporarily grants `Sites.FullControl.All` instead of `Sites.Read.All` when read-only permissions turn out to be insufficient |
 | `-RecycleBinOnly` | Skips storage/library scanning — reads only recycle bin items (stage 1 + stage 2) per site collection |
@@ -281,7 +282,7 @@ Inheritance is followed the way SharePoint models it itself: an item only shows 
 
 ### Authentication
 
-Reading role assignments is **not** possible through Microsoft Graph, and is not covered by SharePoint's Read/Write/Manage roles either: it needs the application role `Sites.FullControl.All`. The script therefore signs you in interactively once and then creates a short-lived App Registration of its own with:
+Reading role assignments is **not** possible through Microsoft Graph, and is not covered by SharePoint's Read/Write/Manage roles either: it needs the application role `Sites.FullControl.All`. The script therefore signs you in once — delegated, through [`Connect-M365Graph`](../Startup/readme.md#connect-m365ps1): a device code when `useDeviceCodeAuth` is set in `load.config.ps1`, the GDAP customer from `Connect-Tenant`, and an existing Graph session with the scopes is reused — and then creates a short-lived App Registration of its own with:
 
 | Resource | Role | Used for |
 |---|---|---|
@@ -289,7 +290,7 @@ Reading role assignments is **not** possible through Microsoft Graph, and is not
 | Graph | `Sites.Read.All` | Tenant-wide site enumeration |
 | Graph | `GroupMember.Read.All` | Resolving Entra group membership |
 
-That app is deleted again afterwards. Despite the Full Control role, the script never writes anything. If you don't want a temporary app, pass `-ClientId` + `-TenantId` + `-CertificateThumbprint` of an existing registration that already has these roles.
+That app is deleted again afterwards. Despite the Full Control role, the script never writes anything. If you don't want a temporary app, pass `-ClientId` + `-TenantId` + `-CertificateThumbprint` of an existing registration that already has these roles, or `-AppOnly` to take them from `graph.appid.json` (PowerShell 7). The scan itself stays app-only on purpose: SharePoint REST accepts neither a delegated Graph token (wrong audience) nor a secret-based app-only token.
 
 > **Certificate, not secret — and that is not a preference.** SharePoint Online rejects every app-only token obtained with a client secret: you get `401` with `x-ms-diagnostics: ... Unsupported app only token`. Only certificate-based app-only authentication works against `_api`. The temporary app therefore gets a certificate that the script creates **in memory** and registers on the app; it never goes into the certificate store or onto disk, so there is nothing to clean up afterwards. If you pass `-ClientSecret` with your own app, the script warns you: the Graph half will work, the SharePoint half will not.
 
@@ -426,6 +427,7 @@ A tenant-wide run takes hours and touches thousands of objects, so the failures 
 | `-ClientId` | string | — | Existing App Registration; skips the temporary app |
 | `-ClientSecret` | string | — | Secret for `-ClientId`. **Does not work against SharePoint** (see Authentication); the script warns you |
 | `-CertificateThumbprint` | string | — | Certificate for `-ClientId`, from `Cert:\CurrentUser\My` or `Cert:\LocalMachine\My`. This is the variant that works |
+| `-AppOnly` | switch | off | ClientId and CertificateThumbprint for the tenant from `graph.appid.json` instead of a temporary app. That app needs the roles above, SharePoint `Sites.FullControl.All` included (PowerShell 7) |
 | `-OutputPath` | string | `C:\Temp` | Output folder |
 | `-IncludeOneDriveSites` | switch | off | Also includes personal OneDrive sites (one site per user) |
 | `-IncludeHiddenLists` | switch | off | Includes hidden and system lists (Form Templates, Style Library, workflow history, …) |
@@ -479,9 +481,9 @@ Reports or deletes **old file versions** in SharePoint Online document libraries
 
 ### Authentication
 
-By default the script connects interactively (delegated) with `Sites.ReadWrite.All` + `Files.ReadWrite.All` through `Connect-MgGraph` — that uses Microsoft's own pre-consented app, so no App Registration or `-ClientId` of your own. Only a **tenant-wide scan** (no `-SiteUrl`) additionally needs a short-lived, read-only temporary App Registration (`Sites.Read.All`) for site/library enumeration *and* fetching version history — Microsoft does not support tenant-wide site enumeration delegated. With `-VersionBatchConcurrency` above `1` (the default) a **second** temporary App Registration is also created, purely to double the throughput of version lookups: SharePoint's "activityLimitReached" throttle applies per app registration, so two apps each get their own throttle budget (same approach as `Get-SharePointStorageReport.ps1`). Both temporary apps are deleted again afterwards. Version **deletes** always go through your own delegated permissions, never through a temporary app.
+By default the script signs in delegated with `Sites.ReadWrite.All` + `Files.ReadWrite.All` through [`Connect-M365Graph`](../Startup/readme.md#connect-m365ps1) — a device code when `useDeviceCodeAuth` is set in `load.config.ps1`, the GDAP customer from `Connect-Tenant`, Microsoft's own pre-consented app, so no App Registration or `-ClientId` of your own; a Graph session that already holds the scopes is reused and left open. Requires PowerShell 7. Only a **tenant-wide scan** (no `-SiteUrl`) additionally needs a short-lived, read-only temporary App Registration (`Sites.Read.All`) for site/library enumeration *and* fetching version history — Microsoft does not support tenant-wide site enumeration delegated. With `-VersionBatchConcurrency` above `1` (the default) a **second** temporary App Registration is also created, purely to double the throughput of version lookups: SharePoint's "activityLimitReached" throttle applies per app registration, so two apps each get their own throttle budget (same approach as `Get-SharePointStorageReport.ps1`). Both temporary apps are deleted again afterwards. Version **deletes** always go through your own delegated permissions, never through a temporary app.
 
-Want to skip the temporary app(s) and use your own existing app registration? Then pass `-ClientId` + `-TenantId` + `-ClientSecret` (or `-CertificateThumbprint`); that app must already have the `Sites.ReadWrite.All` application permission.
+Want to skip the temporary app(s) and use your own existing app registration? Then pass `-ClientId` + `-TenantId` + `-ClientSecret` (or `-CertificateThumbprint`), or `-AppOnly` to take ClientId and CertificateThumbprint from `graph.appid.json`; that app must already have the `Sites.ReadWrite.All` application permission.
 
 > **Note:** deleting a specific version (`DELETE .../versions/{id}`) is not in Microsoft's official Graph API reference, but it is a widely used operation that is confirmed to work (for both OneDrive and SharePoint document libraries). The current/latest version cannot be deleted this way — Graph refuses that, which is exactly the keep-the-current-version guarantee.
 
@@ -508,6 +510,7 @@ During the scan the script shows nested progress bars (sites → libraries → s
 | `-ClientId` | `string` | Existing App Registration client ID — skips the temporary app; use together with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
 | `-ClientSecret` | `string` | Client secret for an existing app registration |
 | `-CertificateThumbprint` | `string` | Certificate thumbprint for an existing app registration |
+| `-AppOnly` | `switch` | App-only with ClientId and CertificateThumbprint for the tenant from `graph.appid.json` (needs `Sites.ReadWrite.All` as application permission) |
 | `-Apply` | `switch` | Actually performs the deletion |
 | `-IncludeOneDriveSites` | `switch` | Includes OneDrive sites in the tenant scan |
 | `-IncludeHiddenLibraries` | `switch` | Includes hidden document libraries |

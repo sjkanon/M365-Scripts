@@ -104,7 +104,7 @@ in `pnp.appid.json` bewaart, of registreer er een:
 
 | Aanmelding | Vereist | Gebruik je voor |
 |---|---|---|
-| **Interactief** (`-Interactive -ClientId <app-id>`) | gedelegeerde `AllSites.FullControl`, aangemeld als beheerder die de site mag bewerken | inrichten, eenmalige runs |
+| **Gedelegeerd** (`-Interactive`, met `-ClientId <app-id>` of de app van de tenant in `pnp.appid.json`) | gedelegeerde `AllSites.FullControl`, aangemeld als beheerder die de site mag bewerken — met een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, anders in de browser | inrichten, eenmalige runs |
 | **App-only** (`-ClientId <app-id> -Thumbprint <thumb>`) | applicatiemachtiging `Sites.FullControl.All`, certificaat geüpload naar de app | de ingeplande deelstatus-audit |
 
 Twee extra vereisten die je makkelijk over het hoofd ziet:
@@ -116,6 +116,17 @@ Twee extra vereisten die je makkelijk over het hoofd ziet:
   app-only over.
 - **Groepen.** `-EnsureGroups` heeft `Group.ReadWrite.All` nodig; voor `-IncludeGroups` van
   de driftcontrole volstaat `Group.Read.All`.
+
+Gedelegeerd aanmelden loopt via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1)
+(`Connect-M365PnP`, `Connect-M365Graph`): apparaatcode of browser volgens `load.config.ps1`, en
+`-ClientId` mag wegblijven als `pnp.appid.json` de tenant kent — de vraag "ClientId of the PnP
+app registration" in de launcher beantwoord je dan met Enter. De Graph-aanmeldingen (groepen,
+team, kanalen) hergebruiken een sessie die de scopes al heeft. Graph heeft geen API voor het
+meeste wat deze set doet — termensets, inhoudstypen en hun veldkoppelingen, weergaven,
+standaardkolomwaarden, navigatie, overerving verbreken op lijsten en mappen — dus dat blijft
+PnP/CSOM. Ook `New-SharePointTeam.ps1` maakt zijn kanaalmappen via PnP aan: de bibliotheek staat
+in de configuratie op titel, en die titel omzetten naar een Graph-drive zoals `Get-PnPList` dat
+doet (titel, URL of id) is geen één-op-één-vervanging.
 
 ### 3. Vul de configuratie in
 
@@ -405,7 +416,9 @@ vinkt hem uit in de browser en niets lijkt mis tot de halve bibliotheek geen Taa
 Gedeelde hulpfuncties, gedot-sourcet door elk script in deze map — nooit los gedraaid,
 geen parameters. Het bevat wat ze allemaal nodig hebben: het laden en valideren van de
 configuratie (`Import-StructureConfig`), de PnP- en Graph-verbindingen die zowel
-interactief als app-only werken (`Connect-Structure`, `Connect-StructureGraph`), de
+gedelegeerd (via `Connect-M365PnP` / `Connect-M365Graph`, door `Invoke-M365Helper` met
+StrictMode uit aangeroepen) als app-only werken
+(`Connect-Structure`, `Connect-StructureGraph`), de
 app-registratie (`New-StructureApp`, `Remove-StructureApp`), de CSOM-bouwstenen die PnP
 niet rechtstreeks aanbiedt (verplicht-vlag op een veldkoppeling, overerving verbreken en
 rollen zetten op een beveiligbaar object) en de gedeelde uitvoerwoorden `[ OK ]` /

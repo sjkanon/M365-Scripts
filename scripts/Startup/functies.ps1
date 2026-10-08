@@ -12,12 +12,19 @@
         $upn      — UPN of the logged-in administrator
         $realname — Display name for greeting (optional)
 
+    Sign-in goes through Connect-M365.ps1 (same folder): Microsoft Graph, delegated,
+    device code when $global:useDeviceCodeAuth is set in load.config.ps1.
+
     CSP/partner operations: use Connect-Tenant to populate $global:cid and
-    $global:connectmsoldomain. Individual functions then connect to the customer
-    tenant via Connect-MgGraph -TenantId $cid.
+    $global:connectmsoldomain. Under GDAP ($global:authMode = 'GDAP') every function
+    then connects to that customer tenant through Connect-M365Graph /
+    Connect-M365Exchange; in Direct mode they stay in your own tenant. The
+    partner session (Get-MgContract) is kept apart in Connect-PartnerGraph.
 
     MSP-specific settings: see #region Configuration below.
 #>
+
+. (Join-Path $PSScriptRoot 'Connect-M365.ps1')
 
 #region Configuration
 # Customise these values for your organisation before dot-sourcing.
@@ -41,17 +48,37 @@ $graphScopes = @(
     'Domain.ReadWrite.All'
 )
 
-$connectParams = @{
-    Scopes       = $graphScopes
-    ContextScope = 'Process'
-    NoWelcome    = $true
+function Connect-PartnerGraph {
+    <#
+    .SYNOPSIS
+        Graph in your own (partner) tenant, for Get-MgContract. Under GDAP the other
+        functions connect to the customer, so this one names the home tenant explicitly
+        once it is known, instead of following $global:cid.
+    #>
+    param([string[]] $Scopes = $graphScopes)
+
+    $saved = @{ cid = $global:cid; domain = $global:connectmsoldomain; env = $env:M365_CUSTOMER_TENANTID }
+    $p = @{ Scopes = $Scopes }
+    if ($global:partnerTenantId) {
+        $p['TenantId'] = [string]$global:partnerTenantId
+    } else {
+        # Not known yet (first start): keep Connect-M365Graph from resolving the customer.
+        $global:cid = $null; $global:connectmsoldomain = $null; $env:M365_CUSTOMER_TENANTID = $null
+    }
+    try {
+        $c = Connect-M365Graph @p
+        if (-not $global:partnerTenantId -and $saved.cid -and $c.TenantId -eq [string]$saved.cid) {
+            # The session it reused is the customer's, not ours: start a fresh one.
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            $c = Connect-M365Graph @p
+        }
+        if (-not $global:partnerTenantId) { $global:partnerTenantId = $c.TenantId }
+    } finally {
+        $global:cid = $saved.cid; $global:connectmsoldomain = $saved.domain; $env:M365_CUSTOMER_TENANTID = $saved.env
+    }
 }
 
-if ($global:useDeviceCodeAuth) {
-    $connectParams['UseDeviceAuthentication'] = $true
-}
-
-Connect-MgGraph @connectParams
+Connect-PartnerGraph
 
 if ($realname) { Write-Host "Hey $realname. Good luck today!" }
 else           { Write-Host "Hey $upn. Good luck today!" }
@@ -92,12 +119,12 @@ function New-SecurePassword {
 }
 
 function Get-DefaultDomain {
-    (Get-MgDomain | Where-Object { $_.IsDefault }).Id
+    (Get-MgDomain -All | Where-Object { $_.IsDefault }).Id
 }
 
 function Add-GlobalAdminRole {
     param ([Parameter(Mandatory)][string]$UserId)
-    $role = Get-MgDirectoryRole | Where-Object { $_.DisplayName -eq 'Global Administrator' }
+    $role = Get-MgDirectoryRole -All | Where-Object { $_.DisplayName -eq 'Global Administrator' }
     New-MgDirectoryRoleMember -DirectoryRoleId $role.Id -BodyParameter @{
         '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$UserId"
     }
@@ -137,26 +164,21 @@ function Invoke-Menu {
     switch ($selection) {
         '1' {
             Write-Host 'Connecting to Exchange Online...'
-            Connect-ExchangeOnline -UserPrincipalName $upn -DelegatedOrganization (Get-DefaultDomain)
+            Connect-M365Exchange | Out-Null
         }
         '2' {
             Write-Host 'Connecting to Microsoft Entra ID...'
-            Connect-MgGraph -TenantId $cid -Scopes `
-                'User.ReadWrite.All', 'Group.ReadWrite.All', `
-                'RoleManagement.ReadWrite.Directory', 'Domain.ReadWrite.All' `
-                -NoWelcome
+            Connect-M365Graph -Scopes 'User.ReadWrite.All', 'Group.ReadWrite.All',
+                'RoleManagement.ReadWrite.Directory', 'Domain.ReadWrite.All' | Out-Null
         }
         '3' {
             Write-Host 'Connecting to Microsoft Teams...'
-            Import-Module MicrosoftTeams
-            Connect-MicrosoftTeams -TenantId $cid
+            Connect-M365Teams | Out-Null
         }
         '4' {
             Write-Host 'Connecting to Intune / Graph...'
-            Connect-MgGraph -TenantId $cid -Scopes `
-                'DeviceManagementConfiguration.ReadWrite.All', `
-                'DeviceManagementManagedDevices.ReadWrite.All' `
-                -NoWelcome
+            Connect-M365Graph -Scopes 'DeviceManagementConfiguration.ReadWrite.All',
+                'DeviceManagementManagedDevices.ReadWrite.All' | Out-Null
         }
         'q' { return }
     }
@@ -167,12 +189,16 @@ function Invoke-Menu {
 #region Connection / tenant selection
 
 function Test-ExoConnection {
-    try {
-        Get-AcceptedDomain -Identity $connectmsoldomain -ErrorAction Stop | Out-Null
-    }
-    catch {
-        Connect-ExchangeOnline -UserPrincipalName $upn -DelegatedOrganization $connectmsoldomain
-    }
+    # Reuses a session to the right organisation; under GDAP that is the customer
+    # (-DelegatedOrganization), in Direct mode your own tenant.
+    Connect-M365Exchange | Out-Null
+}
+
+function Get-CustomerContract {
+    param ([Parameter(Mandatory)][string]$Domain)
+    Connect-PartnerGraph -Scopes 'Directory.Read.All'
+    $safe = $Domain.Replace("'", "''")
+    Get-MgContract -Filter "defaultDomainName eq '$safe'" -ErrorAction Stop | Select-Object -First 1
 }
 
 function Connect-Tenant {
@@ -180,9 +206,9 @@ function Connect-Tenant {
     if (-not $Domain) {
         $Domain = Read-Host 'Enter the domain you want to connect to'
     }
-    $global:connectmsoldomain = $Domain
-    $contract = Get-MgContract -Filter "defaultDomainName eq '$Domain'" -ErrorAction Stop
+    $contract = Get-CustomerContract -Domain $Domain
     if (-not $contract) { throw "No CSP contract found for domain '$Domain'." }
+    $global:connectmsoldomain = $Domain
     $global:cid = $contract.CustomerId
     Write-Host "$($contract.DisplayName) selected. Use `$cid for Graph operations on this customer."
 }
@@ -204,7 +230,7 @@ function Test-GdapConnection {
 
     Write-Host "Testing GDAP delegated access for $Domain..." -ForegroundColor Cyan
 
-    $contract = Get-MgContract -Filter "defaultDomainName eq '$Domain'" -ErrorAction Stop
+    $contract = Get-CustomerContract -Domain $Domain
     if (-not $contract) {
         throw "No GDAP/CSP contract found for domain '$Domain'."
     }
@@ -216,7 +242,15 @@ function Test-GdapConnection {
     Write-Host "  [OK] CustomerId: $($contract.CustomerId)" -ForegroundColor Green
 
     try {
-        Connect-ExchangeOnline -UserPrincipalName $upn -DelegatedOrganization $Domain -ShowBanner:$false -ErrorAction Stop
+        Connect-M365Graph -TenantId ([string]$contract.CustomerId) -Scopes 'Organization.Read.All' | Out-Null
+        $org = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1
+        Write-Host "  [OK] Graph delegated connection succeeded ($($org.DisplayName))." -ForegroundColor Green
+    } catch {
+        Write-Warning "Graph delegated test failed: $($_.Exception.Message)"
+    }
+
+    try {
+        Connect-M365Exchange -TenantId $Domain | Out-Null
         Get-AcceptedDomain -Identity $Domain -ErrorAction Stop | Out-Null
         Write-Host '  [OK] Exchange delegated connection succeeded.' -ForegroundColor Green
     } catch {
@@ -346,13 +380,14 @@ function Set-AutoReply {
 #region Microsoft Entra ID / Graph
 
 function Get-TenantAdmins {
-    Connect-MgGraph -TenantId $cid -Scopes 'RoleManagement.Read.Directory' -NoWelcome
-    $role = Get-MgDirectoryRole | Where-Object { $_.DisplayName -eq 'Global Administrator' }
-    Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id |
+    Connect-M365Graph -Scopes 'RoleManagement.Read.Directory' | Out-Null
+    $role = Get-MgDirectoryRole -All | Where-Object { $_.DisplayName -eq 'Global Administrator' }
+    Get-MgDirectoryRoleMember -DirectoryRoleId $role.Id -All |
         Select-Object Id, DisplayName, AdditionalProperties
 }
 
 function Add-TenantDomain {
+    Connect-M365Graph -Scopes 'Domain.ReadWrite.All' | Out-Null
     $addDomain = Read-Host 'Which domain name do you want to add?'
     New-MgDomain -Id $addDomain
     Start-Sleep -Seconds 5
@@ -372,6 +407,7 @@ function Add-TenantDomain {
 }
 
 function Get-TenantLicenses {
+    Connect-M365Graph -Scopes 'Organization.Read.All' | Out-Null
     Get-MgSubscribedSku | Select-Object SkuPartNumber, ConsumedUnits, @{
         Name       = 'Available'
         Expression = { $_.PrepaidUnits.Enabled - $_.ConsumedUnits }
@@ -379,11 +415,12 @@ function Get-TenantLicenses {
 }
 
 function Get-TenantUsers {
-    Connect-MgGraph -TenantId $cid -Scopes 'User.Read.All' -NoWelcome
+    Connect-M365Graph -Scopes 'User.Read.All' | Out-Null
     Get-MgUser -All | Select-Object UserPrincipalName, DisplayName, AssignedLicenses
 }
 
 function Add-TenantAdmin {
+    Connect-M365Graph -Scopes 'User.Read.All', 'RoleManagement.ReadWrite.Directory' | Out-Null
     $setAsAdmin = Read-Host 'Which user do you want to grant admin rights? (UPN)'
     $user = Get-MgUser -UserId $setAsAdmin
     Add-GlobalAdminRole -UserId $user.Id
@@ -391,15 +428,22 @@ function Add-TenantAdmin {
 
 function Get-EntraApplication {
     $appName = Read-Host 'Name of the Enterprise App?'
-    Get-MgApplication -Filter "displayName eq '$appName'"
+    Connect-M365Graph -Scopes 'Application.Read.All' | Out-Null
+    Get-MgApplication -All -Filter "displayName eq '$($appName.Replace("'", "''"))'"
 }
 
 function Reset-UserPassword {
     $resetAddress = Read-Host 'Enter the email address of the account to reset'
     $domain       = $resetAddress.Split('@')[1]
 
-    $contract = Get-MgContract -Filter "defaultDomainName eq '$domain'" -ErrorAction Stop
-    Connect-MgGraph -TenantId $contract.CustomerId -Scopes 'User.ReadWrite.All' -NoWelcome
+    # Under GDAP the account's domain names the customer; in Direct mode it is your own tenant.
+    $tenant = $null
+    if (Test-M365Gdap) {
+        $contract = Get-CustomerContract -Domain $domain
+        if (-not $contract) { throw "No GDAP/CSP contract found for domain '$domain'." }
+        $tenant = [string]$contract.CustomerId
+    }
+    Connect-M365Graph -TenantId $tenant -Scopes 'User.ReadWrite.All' | Out-Null
 
     $newPassword = New-SecurePassword -Lowercase 8 -Uppercase 2 -Digits 2 -Special 2
 
@@ -422,7 +466,7 @@ function Export-SignInLogs {
         [int]$Days = 30
     )
 
-    Connect-MgGraph -TenantId $cid -Scopes 'AuditLog.Read.All' -NoWelcome
+    Connect-M365Graph -Scopes 'AuditLog.Read.All', 'Directory.Read.All' | Out-Null
 
     $startDate  = (Get-Date).AddDays(-$Days).ToString('yyyy-MM-dd')
     $endDate    = (Get-Date).ToString('yyyy-MM-dd')
@@ -460,7 +504,7 @@ function Export-SignInLogs {
 function New-MspAdmin {
     $password = New-SecurePassword -Lowercase 13 -Uppercase 2 -Digits 1 -Special 2
 
-    Connect-MgGraph -TenantId $cid -Scopes 'User.ReadWrite.All', 'RoleManagement.ReadWrite.Directory' -NoWelcome
+    Connect-M365Graph -Scopes 'User.ReadWrite.All', 'RoleManagement.ReadWrite.Directory', 'Domain.Read.All' | Out-Null
 
     $upnAdmin = "$($script:MspAdminAlias)@$(Get-DefaultDomain)"
     $user = New-MgUser `
@@ -477,10 +521,12 @@ function New-MspAdmin {
 function Set-MspAdminAsGroupOwner {
     $name = Read-Host 'What is the name of the group?'
 
-    Connect-MgGraph -TenantId $cid -Scopes 'Group.ReadWrite.All', 'User.Read.All' -NoWelcome
+    Connect-M365Graph -Scopes 'Group.ReadWrite.All', 'User.Read.All' | Out-Null
 
-    $group    = Get-MgGroup -Filter "displayName eq '$name'" | Select-Object -First 1
-    $mspAdmin = Get-MgUser  -Filter "displayName eq '$($script:MspAdminDisplayName)'" | Select-Object -First 1
+    $group    = Get-MgGroup -Filter "displayName eq '$($name.Replace("'", "''"))'" | Select-Object -First 1
+    $mspAdmin = Get-MgUser  -Filter "displayName eq '$($script:MspAdminDisplayName.Replace("'", "''"))'" | Select-Object -First 1
+    if (-not $group)    { throw "No group named '$name'." }
+    if (-not $mspAdmin) { throw "No user named '$($script:MspAdminDisplayName)'." }
 
     New-MgGroupOwner -GroupId $group.Id -BodyParameter @{
         '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($mspAdmin.Id)"
@@ -490,7 +536,7 @@ function Set-MspAdminAsGroupOwner {
 function Reset-MspAdminPassword {
     $password = New-SecurePassword -Lowercase 4 -Uppercase 2 -Digits 1 -Special 1
 
-    Connect-MgGraph -TenantId $cid -Scopes 'User.ReadWrite.All' -NoWelcome
+    Connect-M365Graph -Scopes 'User.ReadWrite.All', 'Domain.Read.All' | Out-Null
 
     $adminUpn = "$($script:MspAdminAlias)@$(Get-DefaultDomain)"
     Update-MgUser -UserId $adminUpn -PasswordProfile @{

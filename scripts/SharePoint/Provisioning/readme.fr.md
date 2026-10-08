@@ -106,7 +106,7 @@ crée et met en cache dans `pnp.appid.json`, ou inscrivez-en une :
 
 | Connexion | Nécessite | À utiliser pour |
 |---|---|---|
-| **Interactive** (`-Interactive -ClientId <app-id>`) | `AllSites.FullControl` déléguée, connecté en tant qu'administrateur autorisé à modifier le site | le provisionnement, les exécutions ponctuelles |
+| **Déléguée** (`-Interactive`, avec `-ClientId <app-id>` ou l'application du tenant dans `pnp.appid.json`) | `AllSites.FullControl` déléguée, connecté en tant qu'administrateur autorisé à modifier le site — avec un code d'appareil quand `useDeviceCodeAuth` est activé dans `load.config.ps1`, sinon dans le navigateur | le provisionnement, les exécutions ponctuelles |
 | **App-only** (`-ClientId <app-id> -Thumbprint <thumb>`) | `Sites.FullControl.All` d'application, certificat téléversé sur l'application | l'audit planifié du statut de partage |
 
 Deux exigences supplémentaires faciles à manquer :
@@ -118,6 +118,18 @@ Deux exigences supplémentaires faciles à manquer :
   en interactif et laissez le reste à l'app-only.
 - **Groupes.** `-EnsureGroups` nécessite `Group.ReadWrite.All` ; le `-IncludeGroups` du
   contrôle de dérive se contente de `Group.Read.All`.
+
+La connexion déléguée passe par [`Connect-M365.ps1`](../../Startup/readme.fr.md#connect-m365ps1)
+(`Connect-M365PnP`, `Connect-M365Graph`) : code d'appareil ou navigateur selon
+`load.config.ps1`, et `-ClientId` peut être omis quand `pnp.appid.json` connaît le tenant — on
+répond alors par Entrée à la question « ClientId of the PnP app registration » du lanceur. Les
+connexions Graph (groupes, équipe, canaux) réutilisent une session qui possède déjà les
+étendues. Graph n'a pas d'API pour l'essentiel de ce que fait cet ensemble — ensembles de
+termes, types de contenu et leurs liens de champ, affichages, valeurs de colonne par défaut,
+navigation, rupture d'héritage sur les listes et les dossiers — cela reste donc en PnP/CSOM.
+`New-SharePointTeam.ps1` crée lui aussi ses dossiers de canal via PnP : la bibliothèque est
+désignée par son titre dans la configuration, et traduire ce titre en lecteur Graph comme le
+fait `Get-PnPList` (titre, URL ou id) n'est pas un simple remplacement.
 
 ### 3. Compléter la configuration
 
@@ -416,8 +428,10 @@ semble anormal jusqu'à ce que la moitié d'une bibliothèque n'ait plus de Taal
 Fonctions d'aide partagées, chargées par dot-sourcing par chaque script de ce dossier —
 jamais exécutées seules, sans paramètres. Elles contiennent ce dont tous ont besoin : le
 chargement et la validation de la configuration (`Import-StructureConfig`), les connexions
-PnP et Graph qui fonctionnent en interactif comme en app-only (`Connect-Structure`,
-`Connect-StructureGraph`), l'inscription d'application (`New-StructureApp`,
+PnP et Graph qui fonctionnent en délégué (via `Connect-M365PnP` / `Connect-M365Graph`,
+appelés avec StrictMode désactivé par `Invoke-M365Helper`) comme en app-only
+(`Connect-Structure`, `Connect-StructureGraph`),
+l'inscription d'application (`New-StructureApp`,
 `Remove-StructureApp`), les primitives CSOM que PnP n'expose pas directement (indicateur
 obligatoire sur un lien de champ, rupture d'héritage et attribution de rôles sur un objet
 sécurisable) et le vocabulaire de sortie commun `[ OK ]` / `[ >> ]` / `[DIFF]`.

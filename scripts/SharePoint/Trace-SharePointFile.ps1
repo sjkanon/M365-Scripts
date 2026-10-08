@@ -92,8 +92,21 @@
     macOS/Linux). The raw audit records go to the same name with .json.
 
 .PARAMETER TenantId
-    Tenant domain for Connect-ExchangeOnline (e.g. contoso.onmicrosoft.com).
-    Optional when already connected.
+    Tenant domain to read (e.g. contoso.onmicrosoft.com). Delegated, a partner
+    reaches a customer with it (-DelegatedOrganization); left out, the GDAP
+    customer from Connect-Tenant, else your own tenant. Optional when already
+    connected to the right organisation.
+
+.PARAMETER ClientId
+    App-only instead of delegated: an app registration with Exchange.ManageAsApp
+    and an Exchange role that includes View-Only Audit Logs. Needs
+    -CertificateThumbprint and -TenantId (domain).
+
+.PARAMETER CertificateThumbprint
+    Certificate of that app, in CurrentUser\My.
+
+.PARAMETER AppOnly
+    App-only with the app registration for the tenant in graph.appid.json.
 
 .PARAMETER PassThru
     Also return the timeline rows as objects.
@@ -122,6 +135,18 @@
     or Global Reader / Compliance Administrator via Entra ID).
 
     Required module: ExchangeOnlineManagement (v3).
+
+    Sign-in: delegated by default, through Connect-M365Exchange in
+    scripts\Startup\Connect-M365.ps1 (device code per load.config.ps1, the GDAP
+    customer via -DelegatedOrganization); app-only with -ClientId +
+    -CertificateThumbprint or -AppOnly. Under Windows PowerShell 5.1, which cannot
+    load that helper, the script connects delegated on its own with the same rules.
+
+    Why Exchange Online and not Graph: Graph's audit log query API
+    (/security/auditLog/queries) is asynchronous - a query is created, runs for
+    minutes, and its records are fetched afterwards - and returns a different
+    record shape. The slicing, splitting and retry logic below is built and tested
+    on Search-UnifiedAuditLog, so this script keeps it.
 
     The audit log runs 30-90 minutes (occasionally 24 hours) behind; a run on
     the same day can miss the most recent actions.
@@ -161,6 +186,9 @@ param(
     [switch]   $IncludeActivity,
     [string]   $OutputPath,
     [string]   $TenantId,
+    [string]   $ClientId,
+    [string]   $CertificateThumbprint,
+    [switch]   $AppOnly,
     [switch]   $PassThru
 )
 
@@ -295,19 +323,42 @@ if (-not (Get-Command Search-UnifiedAuditLog -ErrorAction SilentlyContinue)) {
     }
 }
 $connectedHere = $false
-$connected = $false
-try {
-    if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
-        $conn = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Connected' })
-        if ($TenantId) { $conn = @($conn | Where-Object { $_.TenantID -eq $TenantId -or $_.UserPrincipalName -like "*@$TenantId" -or "$($_.ConnectionUri)" -match [regex]::Escape($TenantId) }) }
-        $connected = $conn.Count -gt 0
+$exoConnection = $null
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    # Delegated by default (device code / GDAP customer per load.config.ps1), app-only on
+    # request; reuses a session to the right organisation and only closes what it opened.
+    . (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+    $exoArgs = @{}
+    if ($TenantId)              { $exoArgs['TenantId'] = $TenantId }
+    if ($ClientId)              { $exoArgs['ClientId'] = $ClientId }
+    if ($CertificateThumbprint) { $exoArgs['CertificateThumbprint'] = $CertificateThumbprint }
+    if ($AppOnly)               { $exoArgs['AppOnly'] = $true }
+    $exoConnection = Connect-M365Exchange @exoArgs
+} else {
+    # Windows PowerShell 5.1 cannot load Connect-M365.ps1 (PowerShell 7): the same
+    # rules, inline.
+    $connected = $false
+    try {
+        if (Get-Command Get-ConnectionInformation -ErrorAction SilentlyContinue) {
+            $conn = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Connected' })
+            if ($TenantId) { $conn = @($conn | Where-Object { $_.TenantID -eq $TenantId -or $_.DelegatedOrganization -eq $TenantId -or $_.Organization -eq $TenantId -or $_.UserPrincipalName -like "*@$TenantId" }) }
+            $connected = $conn.Count -gt 0
+        }
+    } catch { $connected = $false }
+    if (-not $connected) {
+        $cp = @{ ShowBanner = $false; ErrorAction = 'Stop' }
+        if ($ClientId) {
+            if (-not $TenantId -or -not $CertificateThumbprint) { throw 'App-only needs -TenantId (domain) and -CertificateThumbprint.' }
+            $cp['AppId'] = $ClientId; $cp['CertificateThumbprint'] = $CertificateThumbprint; $cp['Organization'] = $TenantId
+        } else {
+            $org = if ($TenantId) { $TenantId } elseif ("$global:authMode" -eq 'GDAP' -and $global:connectmsoldomain) { [string]$global:connectmsoldomain } else { $null }
+            # -Organization only applies to app-only sign-in; a partner reaches a customer with -DelegatedOrganization.
+            if ($org) { $cp['DelegatedOrganization'] = $org }
+            if ($global:useDeviceCodeAuth) { $cp['Device'] = $true } elseif ($global:upn) { $cp['UserPrincipalName'] = [string]$global:upn }
+        }
+        Connect-ExchangeOnline @cp
+        $connectedHere = $true
     }
-} catch { $connected = $false }
-if (-not $connected) {
-    $cp = @{ ShowBanner = $false }
-    if ($TenantId) { $cp['Organization'] = $TenantId }
-    Connect-ExchangeOnline @cp
-    $connectedHere = $true
 }
 
 try {
@@ -696,5 +747,6 @@ try {
     if ($PassThru) { $rows }
 }
 finally {
-    if ($connectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+    if ($exoConnection) { Disconnect-M365Exchange $exoConnection }
+    elseif ($connectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
 }

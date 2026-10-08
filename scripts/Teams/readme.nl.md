@@ -18,7 +18,7 @@ Tooling voor export en archivering van Microsoft Teams / SharePoint.
 
 ### Invoke-TeamsArchive.ps1
 
-Teams-archiver met een exportflow voor Graph, Teams en SharePoint. Vereist PowerShell 7+, uitvoeren als Global Admin.
+Teams-archiver: exporteert leden, bestanden en chat van de opgegeven kanalen en archiveert daarna (optioneel) teams of kanalen. Alles loopt via Microsoft Graph. Vereist PowerShell 7+, uitvoeren als Global Admin van de klant (of met GDAP-rechten op die klant).
 
 **Parameters**
 
@@ -29,33 +29,44 @@ Teams-archiver met een exportflow voor Graph, Teams en SharePoint. Vereist Power
 | `-ChannelAction` | `none` (standaard), `archive` of `undo` — snelle modus per kanaal |
 | `-ChannelArchiveTag` | Markeringstekst voor de terugval via hernoemen (standaard: `[ARCHIEF]`) |
 | `-ChannelFallbackToRename` | Terugvallen op een hernoemmarkering als de Graph-API-aanroep voor archiveren/dearchiveren mislukt |
-| `-DryRun` | Simuleren — behoudt de volledige authenticatie/bootstrap en valideert Stap 6-9 door aantallen op te vragen, zonder exports te schrijven of de archiefstatus te wijzigen |
+| `-DryRun` | Simuleren — behoudt de volledige aanmelding en valideert Stap 6-9 door aantallen op te vragen, zonder exports te schrijven of de archiefstatus te wijzigen |
 | `-WorksheetName` | Werkblad met de teamlijst. Standaard: het eerste werkblad van het Excel-bestand |
+| `-TenantId` | Tenant-ID van de klant. Standaard voorgesteld in de wizard: de GDAP-klant uit `Connect-Tenant` |
+| `-ClientId` / `-CertificateThumbprint` | App-only in plaats van gedelegeerd, met deze app-registratie en dit certificaat |
+| `-AppOnly` | App-only met de app-registratie voor de tenant uit `graph.appid.json` |
+| `-PnPClientId` | PnP-app voor de site-admin-terugval. Standaard: de regel voor de tenant in `pnp.appid.json` |
+
+**Voorbeelden**
+
+```powershell
+# Gedelegeerd (standaard): apparaatcode volgens load.config.ps1, eerst een dry run
+.\Invoke-TeamsArchive.ps1 -DryRun
+
+# Alleen de opgegeven kanalen archiveren, app-only
+.\Invoke-TeamsArchive.ps1 -Step10Only -ChannelAction archive -AppOnly -TenantId <tenant-guid>
+```
+
+**Opmerkingen**
 
 Het Excel-bestand heeft de kolommen `TeamName`, `ChannelName` en `Archive` nodig (rijen met `Archive` = `Archive` worden verwerkt). Niets in het script is aan één klant gebonden: tenant-ID, SharePoint-URL, Excel-bestand en archiefmap vraagt de setupwizard (standaard `C:\Temp\Teams_Channels.xlsx` en `C:\Temp\Teams_Archive`).
 
-Huidig gedrag (v8.19):
-- Maakt voor de run een unieke tijdelijke Entra-app-registratie aan.
-- Kent tijdens de bootstrap alleen de vereiste gedelegeerde setuprechten toe.
-- Past gedelegeerde toestemming voor Graph/SharePoint toe op die tijdelijke app.
-- Verwijdert de tijdelijke app en service principal bij het opruimen (en bij belangrijke setupfouten).
-- Registreert een opruimhook bij afsluiten, zodat de tijdelijke app ook wordt verwijderd bij het afsluiten van PowerShell/Ctrl+C.
-- Controleert tijdens de bestandsexport eerst de toegang tot Teams-/SharePoint-mappen en kent pas hogere Graph-rechten toe als de toegang geweigerd wordt.
-- Bepaalt de bestandslocaties van kanalen via Graph filesFolder voor alle kanaaltypen (standaard/privé/gedeeld), met caching van kanalen en een terugvalzoekactie.
-- Normaliseert TeamName-/ChannelName-waarden uit Excel (trim) om missers bij het opzoeken door afsluitende spaties te voorkomen.
-- Hergebruikt dezelfde gecachte kanaalresolver met Graph-terugval in de chatexport, wat de consistentie van kanaaldetectie in dry-run en normale runs verbetert.
-- Past genormaliseerde matching van kanaalnamen toe (trim + witruimte samenvoegen + kleine letters) in de gecachte en de Graph-terugvalzoekactie, om onterechte "Kanaal niet gevonden"-gevallen te verminderen.
-- Behandelt SharePoint NotFound tijdens de export als een gecontroleerde overslag in plaats van rumoerige harde fouten.
-- Downloadt bestanden met nieuwe pogingen per bestand, terugval via opnieuw verbinden en controle van het aantal na het downloaden om volledigheid te garanderen.
-- Slaat de uitvoer op in een structuur per kanaal: `Teams > Team > Channel > Files, Chat, Members`.
-- Archiveert Teams niet standaard; archiveren vereist nu expliciete bevestiging tijdens Stap 10.
-- Stap 10 ondersteunt ook het ongedaan maken van archiveren (`unarchive`) met retrylogica.
-- Stap 10 ondersteunt een niet-interactieve snelle modus: `-Step10Only -Step10Action undo|archive|skip`.
-- Belangrijk: archiveren/dearchiveren is in Microsoft Teams een actie op teamniveau, niet op kanaalniveau.
-- Stap 10 ondersteunt echt archiveren/dearchiveren per kanaal via Microsoft Graph (`/channels/{id}/archive|unarchive`).
-- Snelle modus per kanaal: `-Step10Only -ChannelAction archive|undo`.
-- Optionele terugval op een hernoemmarkering bij een API-fout: `-ChannelFallbackToRename` (markering via `-ChannelArchiveTag`).
-- De dry-runmodus behoudt de volledige authenticatie/bootstrap en valideert Stap 6-9 door het bestaan en de aantallen in Teams/SharePoint/Graph op te vragen, zonder export van leden/chats/bestanden naar schijf te schrijven.
-- Het rapport van Stap 11 gebruikt in dry-run de opgevraagde aantallen (gedetecteerde bestanden/berichten) in plaats van lokaal geëxporteerde bestanden.
-- Mutaties voor archiveren/dearchiveren in Stap 10 blijven gesimuleerd, met `[DRYRUN]`-uitvoer.
-- De herstart in een schone sessie na het opkuisen van de modules geeft alle parameters door (ook `-DryRun`) en geeft de exitcode van de herstarte run terug.
+Aanmelden (v9.0):
+- Loopt via [`Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1). **Standaard gedelegeerd**: je meldt je aan als de admin, met een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat (en zonder `load.config.ps1`, zoals vroeger, met een apparaatcode). De herstart in een schone sessie neemt die instellingen en de GDAP-klant mee naar de nieuwe sessie.
+- **Geen tijdelijke app-registratie meer.** Eerdere versies maakten er bij elke run een aan, gaven toestemming en verwijderden ze weer; de gedelegeerde scopes worden nu bij het aanmelden gevraagd op de app Microsoft Graph Command Line Tools.
+- **App-only** met `-ClientId` + `-CertificateThumbprint`, of `-AppOnly`. De app heeft dan de application-rechten `Group.Read.All`, `Sites.Read.All`, `TeamMember.Read.All`, `ChannelMessage.Read.All` (een protected API die Microsoft moet goedkeuren) en `TeamSettings.ReadWrite.All` / `ChannelSettings.ReadWrite.All` voor het archiveren nodig.
+- De Graph-sessie wordt op het einde gesloten; ze is van de herstarte sessie zelf.
+
+Wat waar loopt:
+- **Graph** voor alles wat kan: de teams vinden (`/groups`, gefilterd op `resourceProvisioningOptions` = `Team`), leden (`/teams/{id}/members`), kanalen (`/teams/{id}/channels`), de bestandslocatie van het kanaal (`filesFolder`), het oplijsten en downloaden van bestanden (`/drives/{id}/items/{id}/children` en `/content`), chat (`/messages`, `/replies`) en archiveren (`/teams/{id}/archive`, `/channels/{id}/archive`). De MicrosoftTeams-module wordt niet meer gebruikt of geïnstalleerd.
+- **PnP** alleen voor de site-admin-terugval: als de bestanden van een kanaal bij een gedelegeerde aanmelding "access denied" geven, wordt de aangemelde admin eenmaal per site sitecollectiebeheerder gemaakt (`Set-PnPSite -Owners`) — daar heeft Graph geen API voor. Dat gebruikt de PnP-app uit `pnp.appid.json` (of `-PnPClientId`); zonder app zegt het script hoe je het met de hand doet. App-only heeft het nooit nodig.
+
+Gedrag:
+- Bepaalt de bestandslocaties van kanalen via Graph `filesFolder` voor alle kanaaltypen (standaard/privé/gedeeld), met de kanaallijst gecachet per team.
+- Normaliseert TeamName-/ChannelName-waarden uit Excel (trim) en vergelijkt kanaalnamen genormaliseerd (trim + witruimte samenvoegen + kleine letters) om onterechte "Kanaal niet gevonden"-gevallen te vermijden.
+- Behandelt SharePoint NotFound tijdens de export als een gecontroleerde overslag.
+- Downloadt bestanden met nieuwe pogingen per bestand en een controle van het aantal na het downloaden. De mappenstructuur binnen het kanaal blijft nu behouden onder `Files` (vroeger werd ze platgeslagen, waardoor twee bestanden met dezelfde naam in verschillende submappen elkaar overschreven en de telling mislukte).
+- Slaat de uitvoer op per kanaal: `Teams > Team > Channel > Files, Chat, Members`. `members.csv` houdt de kolommen `Name`, `User`, `Role`.
+- Archiveert Teams niet standaard; archiveren vereist expliciete bevestiging in Stap 10, die ook `unarchive` ondersteunt, een niet-interactieve snelle modus (`-Step10Only -Step10Action undo|archive|skip`) en echt archiveren/dearchiveren per kanaal (`-Step10Only -ChannelAction archive|undo`), met een optionele terugval op een hernoemmarkering (`-ChannelFallbackToRename`, `-ChannelArchiveTag`).
+- Een team archiveren/dearchiveren is in Microsoft Teams een actie op teamniveau.
+- Dry-run behoudt de volledige aanmelding, valideert Stap 6-9 door aantallen op te vragen zonder naar schijf te schrijven, gebruikt die aantallen in het rapport van Stap 11 en simuleert Stap 10 enkel (`[DRYRUN]`).
+- De herstart in een schone sessie na het opkuisen van de modules geeft alle parameters door (ook `-DryRun`), geeft de exitcode van de herstarte run terug en laat haar markeringsvariabele niet meer achter in de aanroepende sessie (een tweede run in dezelfde sessie sloeg vroeger de opkuis over).

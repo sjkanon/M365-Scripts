@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+﻿#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report SharePoint storage usage across all sites in a tenant, including version history.
@@ -34,10 +34,12 @@
     Run with -Apply to perform the full recursive scan including version history.
 
     Authentication:
-      By default the script connects interactively (delegated), creates a temporary App
-      Registration with Sites.Read.All application permission, fetches a short-lived
-      app-only token for site enumeration, and deletes the app when done. File/drive
-      operations use the delegated session throughout.
+      By default the script signs in delegated through scripts\Startup\Connect-M365.ps1 (a
+      device code when $global:useDeviceCodeAuth is set in load.config.ps1, the GDAP customer
+      from Connect-Tenant), creates a temporary App Registration with Sites.Read.All
+      application permission, fetches a short-lived app-only token for site enumeration, and
+      deletes the app when done. File/drive operations use the delegated session throughout.
+      A single site without GDAP needs no temporary app at all.
 
       Enumerating all sites requires app-only auth — delegated is not supported by Microsoft.
 
@@ -49,7 +51,14 @@
       when the run finishes.
 
       To skip auto-create and use your own app, pass -ClientId + -TenantId + -ClientSecret
-      (or -CertificateThumbprint). The script will then connect fully app-only.
+      (or -CertificateThumbprint), or -AppOnly to take ClientId and CertificateThumbprint from
+      graph.appid.json. The script will then connect fully app-only.
+
+      Everything is read through Microsoft Graph - sites, libraries (hidden ones included),
+      files and versions. Only the site recycle bin has no Graph API for SharePoint sites and
+      goes through SharePoint REST, with a token minted from the client secret of the
+      temporary app (or -ClientSecret). SharePoint Online rejects secret-based app-only tokens,
+      so recycle bin figures may come back empty; the scan itself is not affected.
 
 .PARAMETER SiteUrl
     Scan a single site. If omitted, all sites in the tenant are scanned.
@@ -73,6 +82,11 @@
 
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for an existing app registration.
+
+.PARAMETER AppOnly
+    Connect app-only with the app registration for the tenant in graph.appid.json
+    (ClientId + CertificateThumbprint) instead of signing in and creating a temporary app.
+    That app needs Sites.Read.All (application), and User.Read.All for the profile path.
 
 .PARAMETER Apply
     Perform the full recursive file scan. Without this switch, only quota data
@@ -165,6 +179,7 @@ param (
     [string] $ClientId,
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [switch] $Apply,
     [switch] $FastMode,
     [switch] $UseHighPrivilege,
@@ -450,6 +465,11 @@ if ($UseHighPrivilege) {
     Write-Host "  Privilege : Standard (Sites.Read.All for temporary app)" -ForegroundColor DarkGray
 }
 
+# ── Sign-in helper ───────────────────────────────────────────────────────────
+# Delegated by default (device code / GDAP customer per load.config.ps1); -AppOnly takes the app
+# for the tenant from graph.appid.json.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
 # ── Module preflight ─────────────────────────────────────────────────────────
 $requiredGraphModules = @(
     'Microsoft.Graph.Authentication'
@@ -523,6 +543,18 @@ if ($isGdapMode -and $needsAppOnlyEnumeration -and -not $effectiveTenantId) {
     exit 1
 }
 
+if ($AppOnly -and -not $ClientId) {
+    try {
+        $appRegistration = Get-M365AppRegistration -TenantId $(if ($TenantId) { $TenantId } else { $effectiveTenantId })
+    } catch {
+        Write-ProgressHost -Message ("[ERROR] {0}" -f $_.Exception.Message) -ForegroundColor Red
+        exit 1
+    }
+    $ClientId              = $appRegistration.ClientId
+    $CertificateThumbprint = $appRegistration.CertificateThumbprint
+    if (-not $effectiveTenantId) { $effectiveTenantId = $appRegistration.Tenant }
+}
+
 if ($ClientId -and -not $effectiveTenantId) {
     Write-ProgressHost -Message '[ERROR] -ClientId requires -TenantId (or a resolvable GDAP customer tenant context).' -ForegroundColor Red
     exit 1
@@ -535,13 +567,12 @@ try {
 
         # ── Provided app credentials → full app-only SDK connection ──────────
         if ($CertificateThumbprint) {
-            Connect-MgGraph -ClientId $ClientId -TenantId $resolvedTenantId `
-                -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+            $graphConnection = Connect-M365Graph -ClientId $ClientId -TenantId $resolvedTenantId `
+                -CertificateThumbprint $CertificateThumbprint
         } elseif ($ClientSecret) {
             $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-            $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
-            Connect-MgGraph -ClientId $ClientId -TenantId $resolvedTenantId `
-                -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+            $graphConnection = Connect-M365Graph -ClientId $ClientId -TenantId $resolvedTenantId `
+                -ClientSecret $secureSecret
 
             # Keep raw app credentials for non-Graph fallback token requests (for example SPO REST).
             $script:TokenBody = @{
@@ -555,7 +586,7 @@ try {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
         }
-        $script:ConnectedHere = $true
+        $script:ConnectedHere = [bool]$graphConnection.ConnectedHere
         Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
 
     } else {
@@ -563,23 +594,16 @@ try {
         # The delegated session is always used for drive/file operations.
         # For tenant-wide enumeration we temporarily add app-only getAllSites.
         if ($needsAppOnlyEnumeration) {
-            Write-Host "  Connecting interactively..." -ForegroundColor Cyan
+            Write-Host "  Connecting (delegated)..." -ForegroundColor Cyan
             Write-Host "  Required role: Global Administrator or Application Administrator" -ForegroundColor DarkGray
-            $connectParams = @{
-                Scopes    = @(
+            $graphConnection = Connect-M365Graph -TenantId $effectiveTenantId -Scopes @(
                 'Application.ReadWrite.All'
                 'AppRoleAssignment.ReadWrite.All'
                 'Sites.Read.All'
                 'Files.Read.All'
                 'User.Read.All'
-                )
-                NoWelcome = $true
-            }
-            if ($effectiveTenantId) {
-                $connectParams['TenantId'] = $effectiveTenantId
-            }
-            Connect-MgGraph @connectParams -ErrorAction Stop
-            $script:ConnectedHere = $true
+            )
+            $script:ConnectedHere = [bool]$graphConnection.ConnectedHere
 
             $ctx          = Get-MgContext
             $usedTenantId = if ($effectiveTenantId) { $effectiveTenantId } else { $ctx.TenantId }
@@ -626,20 +650,13 @@ try {
                 }
             }
         } else {
-            Write-Host "  Connecting interactively (single-site optimized mode)..." -ForegroundColor Cyan
-            $connectParams = @{
-                Scopes    = @(
+            Write-Host "  Connecting (delegated, single-site optimized mode)..." -ForegroundColor Cyan
+            $graphConnection = Connect-M365Graph -TenantId $effectiveTenantId -Scopes @(
                 'Sites.Read.All'
                 'Files.Read.All'
                 'User.Read.All'
-                )
-                NoWelcome = $true
-            }
-            if ($effectiveTenantId) {
-                $connectParams['TenantId'] = $effectiveTenantId
-            }
-            Connect-MgGraph @connectParams -ErrorAction Stop
-            $script:ConnectedHere = $true
+            )
+            $script:ConnectedHere = [bool]$graphConnection.ConnectedHere
             Write-Host "  [OK]   Connected (delegated single-site mode, no temporary app)." -ForegroundColor DarkGray
         }
     }
@@ -1655,181 +1672,6 @@ function Get-SpoResponseRows {
     return @()
 }
 
-function Get-AllSpoLibraryItems {
-    param(
-        [string]$SiteWebUrl,
-        [string]$RootFolderServerRelativeUrl,
-        [bool]$FetchVersions = $true
-    )
-
-    if ([string]::IsNullOrWhiteSpace($SiteWebUrl)) {
-        throw 'SPO REST scan requires SiteWebUrl.'
-    }
-    if ([string]::IsNullOrWhiteSpace($RootFolderServerRelativeUrl)) {
-        throw 'SPO REST scan requires RootFolderServerRelativeUrl.'
-    }
-
-    $siteUri  = [Uri]$SiteWebUrl
-    $hostName = $siteUri.Host
-    $spoToken = Get-SpoAppOnlyTokenForHost -HostName $hostName
-    if (-not $spoToken) {
-        throw 'Could not obtain SharePoint-scoped token for hidden library scan.'
-    }
-
-    $spoHeaders = @{
-        Authorization = "Bearer $spoToken"
-        Accept        = 'application/json;odata=nometadata'
-    }
-
-    $libraryRoot      = $RootFolderServerRelativeUrl.TrimEnd('/')
-    $results          = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $queue            = [System.Collections.Generic.Queue[PSCustomObject]]::new()
-    $pendingVersions  = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $seenFolders      = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $processedFolders = 0
-    $processedFiles   = 0
-
-    $queue.Enqueue([PSCustomObject]@{ ServerRelativeUrl = $libraryRoot })
-    $seenFolders.Add($libraryRoot) | Out-Null
-
-    while ($queue.Count -gt 0) {
-        $current = $queue.Dequeue()
-        $processedFolders++
-        if ($processedFolders % 25 -eq 0) {
-            Write-ProgressHost -Message (
-                "progress (SPO REST): {0} folders, {1} files scanned..." -f
-                $processedFolders,
-                $processedFiles
-            ) -ForegroundColor DarkGray
-            Set-ScanProgress -Id 3 -ParentId 2 -Activity 'Mappen en bestanden scannen (SPO REST)' -Status (
-                "{0} — {1} mappen, {2} bestanden" -f $script:CurrentScanLabel, $processedFolders, $processedFiles
-            )
-        }
-
-        $encodedFolderUrl = [Uri]::EscapeDataString($current.ServerRelativeUrl)
-
-        $filesUri = "https://$hostName/_api/web/GetFolderByServerRelativeUrl('$encodedFolderUrl')/Files?`$select=Name,ServerRelativeUrl,TimeLastModified,Length&`$top=5000"
-        do {
-            $filesResp = Invoke-RestMethod -Method GET -Uri $filesUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-            foreach ($file in (Get-SpoResponseRows -Response $filesResp)) {
-                $processedFiles++
-                $fileSize = [int64]($file.Length ?? 0)
-                $path = ([string]$file.ServerRelativeUrl).Substring($libraryRoot.Length).TrimStart('/')
-                if ([string]::IsNullOrWhiteSpace($path)) { $path = $file.Name }
-
-                $fileRecord = [PSCustomObject]@{
-                    ItemType         = 'File'
-                    Path             = $path
-                    Level            = (($path -split '/').Count)
-                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
-                    SizeBytes        = $fileSize
-                    SizeMB           = [math]::Round($fileSize / 1MB, 3)
-                    VersionCount     = 0
-                    VersionSizeBytes = [int64]0
-                    VersionSizeMB    = 0.0
-                    TotalSizeBytes   = $fileSize
-                    TotalSizeMB      = [math]::Round($fileSize / 1MB, 3)
-                    Modified         = $file.TimeLastModified
-                }
-                $results.Add($fileRecord) | Out-Null
-
-                if ($FetchVersions) {
-                    $pendingVersions.Add([PSCustomObject]@{
-                        ServerRelativeUrl = [string]$file.ServerRelativeUrl
-                        Record            = $fileRecord
-                    }) | Out-Null
-                }
-            }
-
-            if ($filesResp.'@odata.nextLink') {
-                $filesUri = $filesResp.'@odata.nextLink'
-            } elseif ($filesResp.d -and $filesResp.d.__next) {
-                $filesUri = $filesResp.d.__next
-            } else {
-                $filesUri = $null
-            }
-        } while ($filesUri)
-
-        $foldersUri = "https://$hostName/_api/web/GetFolderByServerRelativeUrl('$encodedFolderUrl')/Folders?`$select=Name,ServerRelativeUrl,TimeLastModified,ItemCount&`$top=5000"
-        do {
-            $foldersResp = Invoke-RestMethod -Method GET -Uri $foldersUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-            foreach ($folder in (Get-SpoResponseRows -Response $foldersResp)) {
-                $folderUrl = [string]$folder.ServerRelativeUrl
-                if ([string]::IsNullOrWhiteSpace($folderUrl) -or $folderUrl -eq $libraryRoot) { continue }
-
-                $path = $folderUrl.Substring($libraryRoot.Length).TrimStart('/')
-                if ([string]::IsNullOrWhiteSpace($path)) { continue }
-
-                $results.Add([PSCustomObject]@{
-                    ItemType         = 'Folder'
-                    Path             = $path
-                    Level            = (($path -split '/').Count)
-                    ParentPath       = $(if ($path -match '/') { ($path -replace '/[^/]+$','') } else { '/' })
-                    SizeBytes        = $null
-                    SizeMB           = $null
-                    VersionCount     = $null
-                    VersionSizeBytes = $null
-                    VersionSizeMB    = $null
-                    TotalSizeBytes   = $null
-                    TotalSizeMB      = $null
-                    Modified         = $folder.TimeLastModified
-                }) | Out-Null
-
-                if ($seenFolders.Add($folderUrl)) {
-                    $queue.Enqueue([PSCustomObject]@{ ServerRelativeUrl = $folderUrl })
-                }
-            }
-
-            if ($foldersResp.'@odata.nextLink') {
-                $foldersUri = $foldersResp.'@odata.nextLink'
-            } elseif ($foldersResp.d -and $foldersResp.d.__next) {
-                $foldersUri = $foldersResp.d.__next
-            } else {
-                $foldersUri = $null
-            }
-        } while ($foldersUri)
-    }
-
-    if ($FetchVersions -and $pendingVersions.Count -gt 0) {
-        Write-ProgressHost -Message ("resolving version history via SPO REST for {0} file(s)..." -f $pendingVersions.Count) -ForegroundColor DarkGray
-        foreach ($pending in $pendingVersions) {
-            try {
-                $encodedFileUrl = [Uri]::EscapeDataString($pending.ServerRelativeUrl)
-                $versionUri = "https://$hostName/_api/web/GetFileByServerRelativeUrl('$encodedFileUrl')/Versions?`$select=Size&`$top=5000"
-                $versionRows = [System.Collections.Generic.List[object]]::new()
-
-                do {
-                    $versionResp = Invoke-RestMethod -Method GET -Uri $versionUri -Headers $spoHeaders -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-                    foreach ($row in (Get-SpoResponseRows -Response $versionResp)) {
-                        $versionRows.Add($row) | Out-Null
-                    }
-
-                    if ($versionResp.'@odata.nextLink') {
-                        $versionUri = $versionResp.'@odata.nextLink'
-                    } elseif ($versionResp.d -and $versionResp.d.__next) {
-                        $versionUri = $versionResp.d.__next
-                    } else {
-                        $versionUri = $null
-                    }
-                } while ($versionUri)
-
-                if ($versionRows.Count -gt 0) {
-                    $verSize = [int64](($versionRows | Where-Object { $_.Size } | Measure-Object -Property Size -Sum).Sum ?? 0)
-                    $pending.Record.VersionCount     = $versionRows.Count
-                    $pending.Record.VersionSizeBytes = $verSize
-                    $pending.Record.VersionSizeMB    = [math]::Round($verSize / 1MB, 3)
-                    $pending.Record.TotalSizeBytes   = $pending.Record.SizeBytes + $verSize
-                    $pending.Record.TotalSizeMB      = [math]::Round($pending.Record.TotalSizeBytes / 1MB, 3)
-                }
-            } catch {
-                # Version lookup failed for this file — keep zeroed version defaults.
-            }
-        }
-    }
-
-    return $results
-}
-
 function Get-SiteRecycleBinItems {
     param(
         [string]$SiteId,
@@ -2280,78 +2122,58 @@ foreach ($site in $sites) {
             Write-ProgressHost -Message ("{0}" -f $drive.name) -ForegroundColor DarkGray
         }
 
-        # ── Hidden library scan via SPO REST ──────────────────────────────────
+        # ── Hidden libraries via Graph ────────────────────────────────────────
         # The Preservation Hold Library (and other hidden document libraries) are
         # created automatically by Microsoft Purview/Compliance retention policies.
         # They count toward the SharePoint storage quota shown in the admin portal,
-        # but are NOT returned by the Graph /lists or /drives endpoints without
-        # Sites.FullControl.All. The SPO REST /_api/web/lists endpoint with a
-        # SharePoint-scoped token is the most reliable way to discover them.
-        # Requires -UseHighPrivilege (Sites.FullControl.All) on the temp app, or a
-        # provided app with FullControl, for the subsequent Graph drive lookup to succeed.
-        if ($site.webUrl -and $script:TokenBody) {
-            try {
-                $hSiteUri  = [Uri]$site.webUrl
-                $hHost     = $hSiteUri.Host
-                $hBasePath = $hSiteUri.AbsolutePath.TrimEnd('/')
-                if ($hBasePath -eq '/') { $hBasePath = '' }
-                $hSpoToken = Get-SpoAppOnlyTokenForHost -HostName $hHost
-                if ($hSpoToken) {
-                    $hSpoHdrs  = @{
-                        Authorization = "Bearer $hSpoToken"
-                        Accept        = 'application/json;odata=nometadata'
-                    }
-                    # Enumerate all hidden document libraries and capture the root folder URL,
-                    # so they can still be scanned via SPO REST when Graph won't expose a drive.
-                    $hListUri  = "https://$hHost$hBasePath/_api/web/lists?`$filter=Hidden eq true and BaseTemplate eq 101&`$select=Id,Title,BaseTemplate,RootFolder/ServerRelativeUrl&`$expand=RootFolder&`$top=500"
-                    $hListResp = Invoke-RestMethod -Method GET -Uri $hListUri -Headers $hSpoHdrs `
-                                    -TimeoutSec $GraphTimeoutSec -ErrorAction Stop
-                    # Build a set of drive IDs already found to avoid duplicates
-                    $hKnownIds = [System.Collections.Generic.HashSet[string]]::new(
-                        [string[]]@($drives | Where-Object { $_.id } | ForEach-Object { $_.id }),
-                        [StringComparer]::OrdinalIgnoreCase
-                    )
-                    foreach ($hList in (Get-SpoResponseRows -Response $hListResp)) {
-                        try {
-                            $hDriveUri = "https://graph.microsoft.com/v1.0/sites/$siteId/lists/$($hList.Id)/drive"
-                            $hDrive    = if ($script:AppOnlyHeaders) {
-                                Invoke-GraphGet -Uri $hDriveUri -Headers $script:AppOnlyHeaders
-                            } else {
-                                Invoke-MgGraphRequest -Method GET -Uri $hDriveUri -OutputType PSObject -ErrorAction Stop
-                            }
-                            if ($hDrive -and $hDrive.id -and $hKnownIds.Add($hDrive.id)) {
-                                $hDrive | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $null -Force -ErrorAction SilentlyContinue
-                                $hDrive | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $null -Force -ErrorAction SilentlyContinue
-                                $siteLibraries.Add([PSCustomObject]@{
-                                    Site  = $site
-                                    Drive = $hDrive
-                                }) | Out-Null
-                                Write-ProgressHost -Message ("[hidden] {0}" -f $hList.Title) -ForegroundColor DarkYellow
-                            }
-                        } catch {
-                            if ($hList.RootFolder -and $hList.RootFolder.ServerRelativeUrl) {
-                                $pseudoDrive = [PSCustomObject]@{
-                                    id                          = "spo-list|$($hList.Id)"
-                                    name                        = $hList.Title
-                                    webUrl                      = "https://$hHost$($hList.RootFolder.ServerRelativeUrl)"
-                                    quota                       = $null
-                                    VersioningEnabled           = $null
-                                    MajorVersionLimit           = $null
-                                    ScanMode                    = 'SpoRest'
-                                    RootFolderServerRelativeUrl = $hList.RootFolder.ServerRelativeUrl
-                                }
-                                $siteLibraries.Add([PSCustomObject]@{
-                                    Site  = $site
-                                    Drive = $pseudoDrive
-                                }) | Out-Null
-                                Write-ProgressHost -Message ("[hidden-rest] {0}" -f $hList.Title) -ForegroundColor DarkYellow
-                            }
-                        }
-                    }
+        # but /drives does not return them. Graph lists them when the hidden and
+        # system facets are selected; their drive is then read like any other.
+        # This used to go through SharePoint REST with a client-secret token, which
+        # SharePoint Online always rejects ("Unsupported app only token"), so it
+        # never found anything.
+        try {
+            $hListUri = "https://graph.microsoft.com/v1.0/sites/$siteId/lists?`$select=id,displayName,list,system&`$top=999"
+            $hLists = [System.Collections.Generic.List[object]]::new()
+            do {
+                $hResp = if ($script:AppOnlyHeaders) {
+                    Invoke-GraphGet -Uri $hListUri -Headers $script:AppOnlyHeaders
+                } else {
+                    Invoke-MgGraphRequest -Method GET -Uri $hListUri -OutputType PSObject -ErrorAction Stop
                 }
-            } catch {
-                # SPO REST hidden library scan failed — non-critical, standard libraries already collected.
+                @($hResp.value) | ForEach-Object { $hLists.Add($_) }
+                $hListUri = $hResp.'@odata.nextLink'
+            } while ($hListUri)
+
+            # Build a set of drive IDs already found to avoid duplicates
+            $hKnownIds = [System.Collections.Generic.HashSet[string]]::new(
+                [string[]]@($drives | Where-Object { $_.id } | ForEach-Object { $_.id }),
+                [StringComparer]::OrdinalIgnoreCase
+            )
+            foreach ($hList in $hLists) {
+                if ("$($hList.list.template)" -ne 'documentLibrary') { continue }
+                if (-not ($hList.list.hidden -eq $true -or $hList.system)) { continue }
+                try {
+                    $hDriveUri = "https://graph.microsoft.com/v1.0/sites/$siteId/lists/$($hList.id)/drive"
+                    $hDrive    = if ($script:AppOnlyHeaders) {
+                        Invoke-GraphGet -Uri $hDriveUri -Headers $script:AppOnlyHeaders
+                    } else {
+                        Invoke-MgGraphRequest -Method GET -Uri $hDriveUri -OutputType PSObject -ErrorAction Stop
+                    }
+                    if ($hDrive -and $hDrive.id -and $hKnownIds.Add($hDrive.id)) {
+                        $hDrive | Add-Member -NotePropertyName 'VersioningEnabled' -NotePropertyValue $null -Force -ErrorAction SilentlyContinue
+                        $hDrive | Add-Member -NotePropertyName 'MajorVersionLimit'  -NotePropertyValue $null -Force -ErrorAction SilentlyContinue
+                        $siteLibraries.Add([PSCustomObject]@{
+                            Site  = $site
+                            Drive = $hDrive
+                        }) | Out-Null
+                        Write-ProgressHost -Message ("[hidden] {0}" -f $hList.displayName) -ForegroundColor DarkYellow
+                    }
+                } catch {
+                    Write-ProgressHost -Message ("[hidden] {0}: not readable through Graph ({1}) — not counted" -f $hList.displayName, $_.Exception.Message) -ForegroundColor DarkYellow
+                }
             }
+        } catch {
+            # Hidden library discovery failed — non-critical, standard libraries already collected.
         }
     } catch {
         Write-ProgressHost -Message ("[ERROR] Cannot enumerate libraries: {0}" -f $_.Exception.Message) -ForegroundColor Red
@@ -2469,18 +2291,14 @@ foreach ($entry in $siteLibraries) {
     # Skip per-file version lookups only when we positively know versioning is off for this
     # library — $drive.VersioningEnabled is $null (unknown) for the Get-MgSiteDrive fallback,
     # in which case we still fetch to avoid silently under-reporting.
-    $isSpoRestLibrary   = ($drive.PSObject.Properties.Name -contains 'ScanMode') -and ($drive.ScanMode -eq 'SpoRest')
+
     $versioningKnownOff = ($null -ne $drive.VersioningEnabled) -and (-not [bool]$drive.VersioningEnabled)
     $fetchVersions      = (-not $SkipVersions) -and (-not $FastMode) -and (-not $versioningKnownOff)
     $includeDetailRows  = -not $FastMode
     if (-not $SkipVersions -and $versioningKnownOff) {
         Write-Host "        versioning disabled on this library — skipping version lookups" -ForegroundColor DarkGray
     }
-    $items = if ($isSpoRestLibrary) {
-        Get-AllSpoLibraryItems -SiteWebUrl $site.webUrl -RootFolderServerRelativeUrl $drive.RootFolderServerRelativeUrl -FetchVersions $fetchVersions
-    } else {
-        Get-AllDriveItems -DriveId $drive.id -FetchVersions $fetchVersions
-    }
+    $items = Get-AllDriveItems -DriveId $drive.id -FetchVersions $fetchVersions
 
     $fileItems   = @($items | Where-Object { $_.ItemType -eq 'File' })
     $folderItems = @($items | Where-Object { $_.ItemType -eq 'Folder' })
