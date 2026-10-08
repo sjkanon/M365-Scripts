@@ -1008,6 +1008,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (21)
+| Wijziging |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) haalt zijn hulpscripts van `main` op `048cf96` (2026-10-08) in plaats van `746541e`. Daartussen veranderde Update-TeamsClient.ps1 in één commit (`8f74ebc`): het installeert nu precies de Teams-build die de Teams-configuratieservice actueel noemt, via de `buildLink` met controle van grootte en Microsoft-handtekening, in plaats van wat de gefaseerde uitrol van teamsbootstrapper uitdeelt - die twee verschilden weken van elkaar, waardoor een host 'verouderd' bleef. Die diff is gelezen voor het vastpinnen. Repair-AppxPackageStore.ps1 is niet veranderd; de hash blijft |
+| Geverifieerd: beide SHA-256-waarden berekend met `git show` op `048cf96` en vergeleken met wat raw.githubusercontent.com voor die commit levert; syntaxcontrole. **Niet** geverifieerd: een run op een sessiehost |
+
 ### 2026-10-08 (20)
 | Wijziging |
 |--------|

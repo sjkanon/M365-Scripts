@@ -1008,6 +1008,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (21)
+| Modification |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) récupère ses scripts auxiliaires sur `main` à `048cf96` (2026-10-08) au lieu de `746541e`. Entre les deux, Update-TeamsClient.ps1 a changé en un commit (`8f74ebc`) : il installe désormais exactement la build Teams que le service de configuration Teams désigne comme actuelle, via son `buildLink` avec contrôle de taille et de signature Microsoft, au lieu de ce que distribue le déploiement progressif de teamsbootstrapper - les deux divergeaient pendant des semaines, si bien qu'un hôte restait « obsolète ». Ce diff a été lu avant l'épinglage. Repair-AppxPackageStore.ps1 n'a pas changé ; son empreinte reste |
+| Vérifié : les deux SHA-256 calculés avec `git show` à `048cf96` et comparés à ce que raw.githubusercontent.com fournit pour ce commit ; contrôle de syntaxe. **Non** vérifié : une exécution sur un hôte de session |
+
 ### 2026-10-08 (20)
 | Modification |
 |--------|

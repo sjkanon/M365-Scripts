@@ -162,9 +162,9 @@ $EdgeReleaseApi = 'https://edgeupdates.microsoft.com/api/products'
 # repo at a pinned commit of main and refused unless the SHA-256 matches. A newer
 # version is never run unseen - to move up, put the new commit and the hashes of
 # both files at that commit here, after reading the diff.
-$HelperCommit = '746541e4b3bb47fd54867dc3b79c40a629c7fea6'   # main, 2026-10-05
+$HelperCommit = '048cf967673f02131ddf4efe8a3a8fe72e55f90c'   # main, 2026-10-08
 $HelperHashes = @{
-    'Update-TeamsClient.ps1'      = 'CC6D97EA9ADBEF12E3614FA482A219CE04E5AB421ECFAF5D11F86AEEC0397E7D'
+    'Update-TeamsClient.ps1'      = '7F675FDFDDAB3639C8CF7F1E01AF8EE2E2BAB56B8941908EE7225E609D4635C8'
     'Repair-AppxPackageStore.ps1' = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C'
 }
 $WebRtcEndOfSupport      = [datetime] '2026-10-01'

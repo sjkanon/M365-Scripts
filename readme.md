@@ -1008,6 +1008,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (21)
+| Change |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) fetches its helpers from `main` at `048cf96` (2026-10-08) instead of `746541e`. In between, Update-TeamsClient.ps1 changed in one commit (`8f74ebc`): it now installs the exact Teams build the Teams config service calls current, from its `buildLink` with a size and Microsoft signature check, instead of whatever teamsbootstrapper's staged rollout hands out - the two disagreed for weeks, so a host stayed "outdated". That diff was read before pinning. Repair-AppxPackageStore.ps1 did not change; its hash stays |
+| Verified: both SHA-256 values computed with `git show` at `048cf96` and matched against what raw.githubusercontent.com serves for that commit; syntax check. **Not** verified: a run on a session host |
+
 ### 2026-10-08 (20)
 | Change |
 |--------|
