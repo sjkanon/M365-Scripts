@@ -31,7 +31,7 @@ Le tableau ci-dessous fonctionne dans l'autre sens : à quoi *sert* chaque caté
 | [`Device/`](Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD |
 | [`Linux/`](Linux/readme.fr.md) | Serveurs Linux (Debian/Ubuntu, 3CX Phone System) — nettoyage du disque en bash : paquets, journal, journaux, fichiers temporaires, caches utilisateur, Docker, journaux et sauvegardes 3CX |
 | [`Network/`](Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, tests de charge des E/S fichiers |
-| [`RDS/`](RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, supervision des sessions en direct, diagnostic et réduction des disques de profil FSLogix |
+| [`RDS/`](RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, supervision des sessions en direct, diagnostic et réduction des disques de profil FSLogix, préparation de l'image des hôtes de session (Teams, Outlook, Copilot) |
 | [`SMTP/`](SMTP/readme.fr.md) | Tests de connectivité du relais SMTP (ponctuels et récurrents) |
 | [`Deployment/`](Deployment/readme.fr.md) | Kit USB pour l'installation de Windows et l'inscription Autopilot pendant l'OOBE |
 | [`DNS/`](DNS/readme.fr.md) | Résolution et import d'enregistrements DNS dans des zones DNS intégrées à AD |

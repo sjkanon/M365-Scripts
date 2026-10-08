@@ -4,7 +4,7 @@
 
 # RDS
 
-Diagnostic and monitoring scripts for RDP / RD Web Access infrastructure. Run directly on the RDS/RDWeb server for full results — remote targets only get connectivity-level checks.
+Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD session hosts. Run directly on the RDS/RDWeb server for full results — remote targets only get connectivity-level checks.
 
 ---
 
@@ -16,6 +16,7 @@ Diagnostic and monitoring scripts for RDP / RD Web Access infrastructure. Run di
 | [`Watch-RDSLive.ps1`](Watch-RDSLive.ps1) ([docs](#watch-rdsliveps1)) | Real-time session + licensing event monitor |
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | FSLogix / Azure Files profile diagnostics on an AVD session host |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
+| [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
 
 ---
 
@@ -194,3 +195,80 @@ alternatives on GitHub do the same with less behind them.
 - To move to a newer Invoke-FslShrinkDisk: put the new commit and the SHA-256 of its
   `Invoke-FslShrinkDisk.ps1` in `$ToolCommit` / `$ToolHash` at the top of the script,
   after reading the diff.
+
+---
+
+### Update-SessionHostImage.ps1
+
+Teams, new Outlook and Copilot are MSIX apps, and on a pooled AVD host with FSLogix they
+break in one recurring way: a user's app updates itself on host A, FSLogix saves that
+exact version in the profile at sign-out, and at the next sign-in on host B — which does
+not have that version — registering it fails with `0x80070490`. FSLogix 2210 HF4 (Teams)
+and 25.06 (Outlook) register by package family instead, but this script deliberately
+leaves FSLogix alone. It makes the image carry everything the apps need at one build,
+and stops the apps from drifting away from it per user.
+
+**What it checks**
+
+| Step | Details |
+|------|---------|
+| Windows | Edition (Enterprise multi-session), build, pending reboot |
+| FSLogix | Build and `InstallAppxPackages` — read only. Below 25.06 Outlook is re-registered at its exact saved version, so the hold-back below is what keeps it working |
+| Hold-back | Microsoft Store `AutoDownload = 2` and Teams `disableAutoUpdate = 1`, so the apps only change with the image. Edge Update policies that block WebView2 or Edge are reported |
+| WebView2 | The Evergreen runtime all three apps render with, against the current Edge Stable build (`edgeupdates.microsoft.com`) |
+| Apps | Teams, new Outlook, the Microsoft 365 Copilot app and the unified Copilot app: provisioned build, and users holding a newer build than the image provisions |
+| Frameworks | Every `PackageDependency` in those apps' manifests (VCLibs, UI.Xaml, WindowsAppRuntime, …) must be on the machine at the `MinVersion` the manifest asks for — typically too old on an image from 2024 |
+| Teams on AVD | `IsWVDEnvironment`, a Teams build new enough for SlimCore (`24193.1805.3040.8975`), the Teams Meeting add-in, and the WebRTC redirector: out of support since **1 October 2026**, stops working **1 April 2027**, kept only as a fallback for endpoints that cannot do SlimCore yet |
+| Office | Shared Computer Activation (required on multi-session) and the update channel |
+| Sign-in | `Microsoft.AAD.BrokerPlugin` present, and no FSLogix `redirections.xml` exclusion of `AppData\Local\Packages` or the app folders |
+| Capture | With `-ForCapture`: packages installed for a user but not provisioned (Sysprep stops on them) and a pending reboot fail the check |
+
+**What it fixes** (without `-CheckOnly`, in this order): the two hold-back policies,
+Shared Computer Activation, WebView2 (Evergreen Standalone installer, signature-checked),
+then the apps through the existing scripts —
+[`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1)
+`-Name teams,outlook -Latest -Provision -RemoveOld` and `-Name copilot -Provision`, and
+[`Update-TeamsClient.ps1`](../Device/readme.md#update-teamsclientps1) `-AvdOptimizations`.
+Everything is read back afterwards.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-CheckOnly` | Report only, change nothing. Exit code `2` means there is work to do |
+| `-ForCapture` | The machine is the image VM about to be sysprepped: also fail on a pending reboot and on per-user packages that are not provisioned |
+| `-SkipApps` | Do not call Repair-AppxPackageStore / Update-TeamsClient; only policies, Shared Computer Activation and WebView2 |
+| `-ComputerName` | Session hosts to run on over PowerShell remoting; ends with one table across the pool and names every column that differs between hosts |
+| `-Credential` | Credential for `-ComputerName` |
+| `-WorkingDir` | Folder for downloads (default: `C:\IT\SessionHostImage`) |
+| `-LogPath` | Folder for the transcript of a run that changes something (default: `C:\Temp`) |
+
+**Examples**
+
+```powershell
+# What does this host or image need? Changes nothing.
+.\Update-SessionHostImage.ps1 -CheckOnly
+
+# All three session hosts side by side, read only
+.\Update-SessionHostImage.ps1 -ComputerName avd-0,avd-1,avd-2 -CheckOnly
+
+# Prepare the image VM, then check it is fit for capture
+.\Update-SessionHostImage.ps1 -Confirm:$false
+.\Update-SessionHostImage.ps1 -CheckOnly -ForCapture
+
+# Bring all three hosts level (drain them first)
+.\Update-SessionHostImage.ps1 -ComputerName avd-0,avd-1,avd-2 -Confirm:$false
+```
+
+**Notes**
+
+- Run elevated or as System. It relaunches itself in 64-bit Windows PowerShell, because
+  the AppX cmdlets need it.
+- With the hold-back on, Teams and Outlook only update when this script (or a new image)
+  updates them: run it monthly, on every host at once, after the Windows update.
+- SlimCore also needs the tenant side: Teams VDI policy `VDI2Optimization` enabled, and
+  Windows App 2.0.352.0 or newer on the endpoints. Neither can be checked from the host;
+  `Update-TeamsClient.ps1 -CheckOnly` reads the session host's Teams VDI events, which do
+  show whether users are really on SlimCore.
+- `-ComputerName` copies this script and the two it calls to `C:\IT\SessionHostImage`
+  on each host.

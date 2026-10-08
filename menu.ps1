@@ -679,6 +679,24 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='J'; FKey=$null; Category='Device'
+        Label='SessionHostImage    — prepare a multi-session image / AVD hosts for Teams, Outlook, Copilot (FSLogix)'
+        Script="$ROOT\scripts\RDS\Update-SessionHostImage.ps1"
+        Params={
+            $hosts = Read-Host "  Session hosts, e.g. avd-0,avd-1,avd-2 (empty = this machine)"
+            $apply = Read-Host "  Fix now (not just check)? [y/N]"
+            $a = @{}
+            if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
+            if ($apply -notmatch '^[Yy]') {
+                $a['CheckOnly'] = $true
+                $cap = Read-Host "  Is this the image VM, about to be captured? [y/N]"
+                if ($cap -match '^[Yy]') { $a['ForCapture'] = $true }
+            } else {
+                $a['Confirm'] = $false   # already answered here, don't ask twice
+            }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='K'; FKey=$null; Category='Device'
         Label='FSLogix-Shrink      — shrink FSLogix profile disks on a share, or check compaction at sign-out'
         Script="$ROOT\scripts\RDS\Invoke-FSLogixShrink.ps1"
