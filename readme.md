@@ -77,11 +77,11 @@ On first run, [`load.ps1`](load.ps1) will:
 1. Ask for your admin UPN and display name — saved to a gitignored `load.config.ps1`
 2. Ask whether you want delegated GDAP mode as default and optionally store a default customer domain
 3. Ask whether Graph should use device code sign-in by default
-4. Check the required modules — missing, older than their minimum, or with an update on the PowerShell Gallery — and offer to install or update them
+4. Check the required modules — missing, older than their minimum, or with an update on the PowerShell Gallery — and install or update them
 5. Import the core modules
 6. Open the interactive menu
 
-From then on it skips the questions. The module check (step 4) runs at every start; it asks the gallery at most once every 24 hours and only prompts when something is missing or outdated. `.\load.ps1 -SkipModuleCheck` skips it once.
+From then on it skips the questions. The module check (step 4) runs at every start without asking; it asks the gallery at most once every 24 hours, and with everything current it prints one line. `.\load.ps1 -SkipModuleCheck` skips it once.
 
 To run the launcher automatically at Windows sign-in:
 
@@ -96,7 +96,7 @@ To remove the startup shortcut later:
 ```
 
 > You can also run [`.\menu.ps1`](menu.ps1) directly — it will ask for your UPN as a fallback.
-> To reinstall or update modules manually: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) or [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). The list of modules is [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — add a module there and every machine is offered it at its next start.
+> To reinstall or update modules manually: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) or [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). The list of modules is [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — add a module there and every machine installs it at its next start. The docs hook reports a module a script loads that is not on the list.
 
 ---
 
@@ -193,6 +193,8 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
+| `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
+| `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules scripts load that `RequiredModules.psd1` does not list |
 | `X` | Startup | [Update-ScriptIndex](scripts/Startup/Update-ScriptIndex.ps1) — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `L` | Startup | [Test-MarkdownLinks](scripts/Startup/Test-MarkdownLinks.ps1) — check every readme link: files and in-page anchors |
 | `M` | Startup | [Convert-MarkdownToHtml](scripts/Startup/Convert-MarkdownToHtml.ps1) — build a styled HTML page from a markdown document, for IT Glue |
@@ -908,6 +910,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/Startup/readme.md">readme.md</a>
     │   ├── <a href="scripts/Startup/functies.ps1">functies.ps1</a>             ← M365 function library (dot-sourced by menu)
     │   ├── <a href="scripts/Startup/RequiredModules.psd1">RequiredModules.psd1</a>     ← The one list of required modules
+    │   ├── <a href="scripts/Startup/Test-RequiredModules.ps1">Test-RequiredModules.ps1</a> ← Report modules scripts load that the list misses
     │   ├── <a href="scripts/Startup/Install-Modules.ps1">Install-Modules.ps1</a>      ← Bootstrap: install &amp; import all modules
     │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Check/update the required modules (load.ps1 runs it at startup), then the rest
     │   ├── <a href="scripts/Startup/Test-PowerShellSyntax.ps1">Test-PowerShellSyntax.ps1</a>
@@ -995,6 +998,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-08 (6)
+| Change |
+|--------|
+| **Modules are installed and updated at startup without asking.** [`load.ps1`](load.ps1) now runs [`Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1) with the new `-Auto` instead of `-Prompt`: what is missing is installed, what is outdated is updated, and only that is shown; with everything current it is one line, `Modules OK`. `-Prompt` stays for whoever wants to be asked. The same `-RequiredOnly -Auto -MaxAgeHours 24` line is what goes into a PowerShell profile |
+| **New [`Test-RequiredModules.ps1`](scripts/Startup/Test-RequiredModules.ps1), run by the docs hook after every edit.** The startup check only installs what [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) lists, and a script that starts using a new module worked on its author's machine and failed everywhere else until someone remembered to add it. The script searches every `.ps1`/`.psm1` for `#Requires -Modules`, `Import-Module` and `Install-Module` with a literal name and reports each one the list lacks. [`sync-docs.ps1`](.claude/hooks/sync-docs.ps1) runs it after every edit of a `.ps1`, `.psd1` or `.md` (waking Claude) and warns with it at pre-commit. Modules deliberately not installed from the gallery go into the new `NotManaged` section with a reason: `ActiveDirectory`, `WebAdministration`, `AzureAD`, `Microsoft.Graph` |
+| The first run of that check found five modules scripts used that no list had: `Microsoft.Graph.Reports` and `Az.OperationalInsights` (in `#Requires` lines), `DCToolbox`, `IntuneBackupAndRestore` and `Az.Accounts`. All five are now in the list. Menu keys `U` (Update-Modules, which had no key yet) and `Z` (Test-RequiredModules) |
+| Verified: syntax check; `Test-RequiredModules.ps1` on the repository is clean under PowerShell 7.6 and 5.1, and a probe file with a `#Requires` list including a module specification and an `Import-Module -Name '...'` gave exactly those three names, while `Import-Module $dynamic` was skipped; the PostEdit hook reported the missing module for a probe file and stayed silent for the clean repository. `-Auto` ran for real on this machine: it installed the missing `DCToolbox` 2.1.6 without asking (about 30 s, once), and the next start printed only `Modules OK (20 vereist, actueel)` in 2 s including the pwsh start. **Not** verified: updating a module installed for all users from a non-elevated session (expected to report an error) |
 
 ### 2026-10-08 (5)
 | Change |

@@ -77,11 +77,11 @@ Bij de eerste keer starten doet [`load.ps1`](load.ps1) het volgende:
 1. Het vraagt je admin-UPN en weergavenaam — die worden opgeslagen in een `load.config.ps1` die door git wordt genegeerd
 2. Het vraagt of je standaard de gedelegeerde GDAP-modus wilt gebruiken, en slaat eventueel een standaard klantdomein op
 3. Het vraagt of Graph standaard met device code moet aanmelden
-4. Het controleert de vereiste modules — ontbrekend, ouder dan het minimum, of met een update op de PowerShell Gallery — en biedt aan ze te installeren of bij te werken
+4. Het controleert de vereiste modules — ontbrekend, ouder dan het minimum, of met een update op de PowerShell Gallery — en installeert of werkt ze bij
 5. Het importeert de kernmodules
 6. Het opent het interactieve menu
 
-Daarna slaat het de vragen over. De modulecontrole (stap 4) draait bij elke start; die bevraagt de gallery hooguit eens per 24 uur en vraagt alleen iets als er een module ontbreekt of verouderd is. `.\load.ps1 -SkipModuleCheck` slaat hem één keer over.
+Daarna slaat het de vragen over. De modulecontrole (stap 4) draait bij elke start zonder te vragen; die bevraagt de gallery hooguit eens per 24 uur, en als alles actueel is geeft het één regel. `.\load.ps1 -SkipModuleCheck` slaat hem één keer over.
 
 Om de launcher automatisch te starten bij het aanmelden in Windows:
 
@@ -96,7 +96,7 @@ Om de opstartsnelkoppeling later weer te verwijderen:
 ```
 
 > Je kunt [`.\menu.ps1`](menu.ps1) ook rechtstreeks starten — dan vraagt het als terugvaloptie om je UPN.
-> Modules handmatig opnieuw installeren of bijwerken: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) of [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). De lijst met modules staat in [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — voeg daar een module toe en elke machine krijgt hem bij de volgende start aangeboden.
+> Modules handmatig opnieuw installeren of bijwerken: [`.\scripts\Startup\Install-Modules.ps1`](scripts/Startup/Install-Modules.ps1) of [`.\scripts\Startup\Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1). De lijst met modules staat in [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) — voeg daar een module toe en elke machine installeert hem bij de volgende start. De docs-hook meldt een module die een script laadt maar die niet in de lijst staat.
 
 ---
 
@@ -193,6 +193,8 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
+| `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
+| `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules die scripts laden maar die niet in `RequiredModules.psd1` staan |
 | `X` | Startup | [Update-ScriptIndex](scripts/Startup/Update-ScriptIndex.ps1) — [`scripts/INDEX.md`](scripts/INDEX.md) opnieuw opbouwen, de A–Z-lijst van alle scripts |
 | `L` | Startup | [Test-MarkdownLinks](scripts/Startup/Test-MarkdownLinks.ps1) — elke readme-link controleren: bestanden en ankers binnen de pagina |
 | `M` | Startup | [Convert-MarkdownToHtml](scripts/Startup/Convert-MarkdownToHtml.ps1) — een opgemaakte HTML-pagina bouwen uit een markdown-document, voor IT Glue |
@@ -908,6 +910,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/Startup/readme.nl.md">readme.md</a>
     │   ├── <a href="scripts/Startup/functies.ps1">functies.ps1</a>             ← M365-functiebibliotheek (gedot-sourcet door het menu)
     │   ├── <a href="scripts/Startup/RequiredModules.psd1">RequiredModules.psd1</a>     ← De ene lijst met vereiste modules
+    │   ├── <a href="scripts/Startup/Test-RequiredModules.ps1">Test-RequiredModules.ps1</a> ← Meldt modules die scripts laden en die in de lijst ontbreken
     │   ├── <a href="scripts/Startup/Install-Modules.ps1">Install-Modules.ps1</a>      ← Bootstrap: alle modules installeren en importeren
     │   ├── <a href="scripts/Startup/Update-Modules.ps1">Update-Modules.ps1</a>       ← Vereiste modules controleren/bijwerken (load.ps1 draait het bij de start), daarna de rest
     │   ├── <a href="scripts/Startup/Test-PowerShellSyntax.ps1">Test-PowerShellSyntax.ps1</a>
@@ -995,6 +998,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-08 (6)
+| Wijziging |
+|--------|
+| **Modules worden bij het starten zonder vraag geïnstalleerd en bijgewerkt.** [`load.ps1`](load.ps1) draait [`Update-Modules.ps1`](scripts/Startup/Update-Modules.ps1) nu met het nieuwe `-Auto` in plaats van `-Prompt`: wat ontbreekt wordt geïnstalleerd, wat verouderd is wordt bijgewerkt, en alleen dat wordt getoond; als alles actueel is is het één regel, `Modules OK`. `-Prompt` blijft voor wie gevraagd wil worden. Dezelfde regel `-RequiredOnly -Auto -MaxAgeHours 24` is wat in een PowerShell-profiel hoort |
+| **Nieuw: [`Test-RequiredModules.ps1`](scripts/Startup/Test-RequiredModules.ps1), door de docs-hook na elke wijziging gedraaid.** De startcontrole installeert alleen wat [`RequiredModules.psd1`](scripts/Startup/RequiredModules.psd1) noemt, en een script dat een nieuwe module ging gebruiken werkte op de machine van de maker en faalde overal anders tot iemand eraan dacht hem toe te voegen. Het script doorzoekt elke `.ps1`/`.psm1` op `#Requires -Modules`, `Import-Module` en `Install-Module` met een letterlijke naam en meldt elke naam die in de lijst ontbreekt. [`sync-docs.ps1`](.claude/hooks/sync-docs.ps1) draait het na elke wijziging van een `.ps1`, `.psd1` of `.md` (en maakt Claude wakker) en waarschuwt ermee bij pre-commit. Modules die bewust niet uit de gallery komen staan in de nieuwe sectie `NotManaged`, met reden: `ActiveDirectory`, `WebAdministration`, `AzureAD`, `Microsoft.Graph` |
+| De eerste run van die controle vond vijf modules die scripts gebruikten maar die in geen lijst stonden: `Microsoft.Graph.Reports` en `Az.OperationalInsights` (in `#Requires`-regels), `DCToolbox`, `IntuneBackupAndRestore` en `Az.Accounts`. Alle vijf staan nu in de lijst. Menutoetsen `U` (Update-Modules, dat nog geen toets had) en `Z` (Test-RequiredModules) |
+| Geverifieerd: syntaxcontrole; `Test-RequiredModules.ps1` op de repository is schoon onder PowerShell 7.6 en 5.1, en een testbestand met een `#Requires`-lijst met een modulespecificatie en een `Import-Module -Name '...'` gaf precies die drie namen, terwijl `Import-Module $dynamic` werd overgeslagen; de PostEdit-hook meldde de ontbrekende module voor een testbestand en bleef stil voor de schone repository. `-Auto` draaide echt op deze machine: het installeerde de ontbrekende `DCToolbox` 2.1.6 zonder vraag (ongeveer 30 s, eenmalig), en de volgende start toonde alleen `Modules OK (20 vereist, actueel)` in 2 s inclusief het starten van pwsh. **Niet** geverifieerd: een module bijwerken die voor alle gebruikers is geïnstalleerd vanuit een sessie zonder adminrechten (verwacht: een foutmelding) |
 
 ### 2026-10-08 (5)
 | Wijziging |

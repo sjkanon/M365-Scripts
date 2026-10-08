@@ -45,6 +45,10 @@
     update heeft, en vraag dan of het nu geinstalleerd/geupdatet moet worden. Alles in orde
     geeft een enkele regel.
 
+.PARAMETER Auto
+    Als -Prompt, maar zonder vraag: ontbrekende modules worden geinstalleerd en verouderde
+    geupdatet, en je ziet alleen wat er gebeurt. Dit draait load.ps1 bij elke start.
+
 .EXAMPLE
     .\Update-Modules.ps1 -RequiredOnly -CheckOnly
     Laat zien welke vereiste modules ontbreken of een update hebben, zonder iets te wijzigen.
@@ -54,9 +58,10 @@
     Installeert ontbrekende en updatet verouderde vereiste modules.
 
 .EXAMPLE
-    .\Update-Modules.ps1 -RequiredOnly -Prompt -MaxAgeHours 24
+    .\Update-Modules.ps1 -RequiredOnly -Auto -MaxAgeHours 24
     Wat load.ps1 bij elke start draait, en wat in je PowerShell-profiel kan: gallery hooguit
-    eens per dag, en alleen een vraag als er iets te doen is.
+    eens per dag, ontbrekende modules en updates gaan vanzelf. Met -Prompt in plaats van
+    -Auto wordt het eerst gevraagd.
 
 .EXAMPLE
     .\Update-Modules.ps1
@@ -76,11 +81,12 @@ param(
     [string]$Scope = 'CurrentUser',
     [switch]$Quiet,
     [switch]$PassThru,
-    [switch]$Prompt
+    [switch]$Prompt,
+    [switch]$Auto
 )
 
-# -Prompt shows only what needs doing, then asks; the per-module list would be noise there
-if ($Prompt) { $Quiet = $true }
+# -Prompt and -Auto show only what needs doing; the per-module list would be noise there
+if ($Prompt -or $Auto) { $Quiet = $true }
 
 $onWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows
 
@@ -242,8 +248,11 @@ foreach ($s in $status) {
 
 $todo = @($status | Where-Object { $_.Status -in 'Missing', 'BelowMinimum', 'UpdateAvailable' })
 
-if ($Prompt -and -not $CheckOnly) {
-    if ($todo.Count) {
+if (($Prompt -or $Auto) -and -not $CheckOnly) {
+    if ($todo.Count -and $Auto) {
+        # The install section below prints each module as it goes; no question, no list first
+        $Quiet = $false
+    } elseif ($todo.Count) {
         foreach ($s in $todo) {
             $line = switch ($s.Status) {
                 'Missing'         { "ontbreekt         $($s.Name)" }

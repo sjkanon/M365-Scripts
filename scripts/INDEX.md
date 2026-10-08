@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-188 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+189 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -180,6 +180,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Test-Ports.ps1`](Network/Test-Ports.ps1) | [`Network/`](Network/readme.md) | Tests TCP connectivity on one or more ports against a target host. |
 | [`Test-PowerShellSyntax.ps1`](Startup/Test-PowerShellSyntax.ps1) | [`Startup/`](Startup/readme.md) | Parse PowerShell files and report syntax errors, without running any of them. |
 | [`Test-RDSDiagnostics.ps1`](RDS/Test-RDSDiagnostics.ps1) | [`RDS/`](RDS/readme.md) | Diagnose why users cannot log in to an RDP server or RD Web Access server. |
+| [`Test-RequiredModules.ps1`](Startup/Test-RequiredModules.ps1) | [`Startup/`](Startup/readme.md) | Reports modules that scripts load but RequiredModules.psd1 does not list. |
 | [`Test-SASWorkDirectory.ps1`](SAS/Test-SASWorkDirectory.ps1) | [`SAS/`](SAS/readme.md) | Test SAS WORK directory health and permissions |
 | [`Test-SharedMailboxSignIn.ps1`](Office365Toolkit/Security/Test-SharedMailboxSignIn.ps1) | [`Office365Toolkit/Security/`](Office365Toolkit/Security/readme.md) | Report (and optionally block) direct interactive sign-in to shared mailboxes. |
 | [`Test-SharePointAccessScripts.ps1`](SharePoint/Test-SharePointAccessScripts.ps1) | [`SharePoint/`](SharePoint/readme.md) | Verify Get-SharePointPermissionsReport.ps1 and Revoke-SharePointUserAccess.ps1 without touching a tenant. |

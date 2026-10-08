@@ -725,6 +725,23 @@ $menu = @(
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"
         Params={ return @{} }
     }
+    [PSCustomObject]@{ Key='U'; FKey=$null; Category='Startup'
+        Label='Update-Modules      — check/update the required modules (and optionally all others)'
+        Script="$ROOT\scripts\Startup\Update-Modules.ps1"
+        Params={
+            $a = @{}
+            $all = Read-Host '  Also update every other installed module? [y/N]'
+            if ($all -notmatch '^[Yy]') { $a['RequiredOnly'] = $true }
+            $check = Read-Host '  Only check, change nothing? [y/N]'
+            if ($check -match '^[Yy]') { $a['CheckOnly'] = $true }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='Z'; FKey=$null; Category='Startup'
+        Label='Test-RequiredModules — modules scripts load that RequiredModules.psd1 misses'
+        Script="$ROOT\scripts\Startup\Test-RequiredModules.ps1"
+        Params={ return @{} }
+    }
     [PSCustomObject]@{ Key='X'; FKey=$null; Category='Startup'
         Label='Update-ScriptIndex  — rebuild scripts/INDEX.md, the A-Z list of every script'
         Script="$ROOT\scripts\Startup\Update-ScriptIndex.ps1"
