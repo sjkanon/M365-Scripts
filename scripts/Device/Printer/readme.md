@@ -94,9 +94,10 @@ A device that is already in order costs one read of the JSON. Nothing is downloa
 | `-ConfigPath` | The JSON: local/UNC path or https URL (e.g. a raw link in the same GitHub repository) |
 | `-Printer` | Only these printers from the JSON (names, wildcards allowed). Default: all |
 | `-GitHubToken` | Token for a private repository (falls back to `$env:GITHUB_TOKEN`). Only sent to GitHub's own hosts, never to a `url` source |
+| `-Proxy` | Proxy for every download, e.g. `http://proxy.contoso.local:8080`. As SYSTEM there is no user proxy to inherit; uses the computer account's credentials |
 | `-WorkingDir` | Download/extract folder (default: `C:\IT\Printers`) |
-| `-LogPath` | Folder for the transcript of a run that changes something (default: `C:\Temp`) |
-| `-WaitSeconds` | How long a freshly provisioned machine gets for the spooler and the network (default: `300`, `0` = no waiting) |
+| `-LogPath` | Folder for `Install-Printer.log` (default: `C:\Temp`), appended by every run that may change something and rotated past 1 MB |
+| `-WaitSeconds` | How long a freshly provisioned machine gets for the spooler, the network and another run of this script to finish (default: `300`, `0` = no waiting) |
 | `-CheckOnly` | Report only, change nothing. Exit code `2` means work is due |
 | `-Quiet` | Print nothing unless there is work or a failure |
 | `-Force` | Reinstall drivers even when the version matches |
@@ -127,15 +128,28 @@ $env:GITHUB_TOKEN = '<fine-grained token, Contents: read>'
 | `1` | Failure (a driver or printer that could not be installed, or an invalid JSON) |
 | `2` | `-CheckOnly` only: work is due |
 
+**What prevents a failed run**
+- **The whole JSON is checked before anything happens**: required fields, unknown fields (a typo such as `adress` or `loaction` is an error, not silently ignored), duplicate names, characters Windows refuses in a printer name, IP/host names, port numbers, `duplex`/`ensure` values, `true`/`false` written as text, and two printers on one port with different addresses. Every problem is listed at once, and nothing is changed
+- **The INF is checked before pnputil sees it**: printer class, a section for this architecture (an x86-only package on an x64 server is named as such), the exact driver name among the models it declares — with the names it *does* declare in the error, closest first — and a signed catalog for this architecture
+- **Downloads are checked for what they are**: a proxy block page, login portal or GitHub error saved as `.zip` is refused, as is a file that is not a zip or cab; there has to be 1 GB free before anything is fetched
+- **One run at a time**: a startup task and an RMM job that overlap wait for each other on a machine-wide lock (up to `-WaitSeconds`) instead of installing the same driver twice. A run that was killed half-way is detected and the next one continues from what it left
+- **The spooler**: on first boot it is started and waited for until it actually answers, not just until it says Running. When it stops or stalls during an install — common right after a vendor driver lands — it is restarted and that one step is tried once more. It is deliberately *not* restarted after every driver, as some published scripts do: on a session host in use that interrupts everyone's printing
+- **The JSON from a URL is cached** in `-WorkingDir`. When the URL cannot be reached, the last good copy is used with a warning, so a host that boots while GitHub is down keeps its printers
+- **Driver vendor code is fenced off**: reading and writing the print defaults run in a job with a timeout, because some universal drivers hang there
+- **One failing driver does not stop the rest**: its printers are skipped and reported, all others are installed, and the exit code is `1`. The downloaded files of the failed driver are kept for inspection; after a successful install they are removed (the driver store keeps its own copy)
+- **A changed address** is applied: with default port names the printer moves to the new `IP_<address>` port and the old one is removed once unused; a named port used only by this printer is rebuilt in place. A port shared with other printers is not changed behind their back
+- **Detection**: a clean run writes `ConfigSha256`, `ConfigPath`, `LastSuccess` and `Printers` under `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter`. An Intune detection rule or RMM condition can compare the hash with the JSON's, which tells "installed with the current configuration" apart from "installed with last month's"
+- **Everything is logged** to `Install-Printer.log` in `-LogPath`, also when the run fails early, so an unattended first boot can be read back
+
 **Notes**
 - **After a golden image:** run it as SYSTEM from the Azure Custom Script Extension, a startup scheduled task baked into the image, `SetupComplete.cmd`, Intune or an RMM. If the Print Spooler has not started yet, the script starts it and waits. Downloads that fail on DNS or a timeout are retried with backoff, both within `-WaitSeconds`. A 401/403/404 fails at once, because waiting does not change it. A spooler that the image *disabled* (PrintNightmare hardening) is reported, not silently enabled
 - Printers are created machine-wide, so on an RDS/AVD session host every user sees them. No per-user Point and Print step is involved, so the `RestrictDriverInstallationToAdministrators` restriction (KB5005652) does not apply — the driver is installed by an administrator/SYSTEM
-- **GitHub:** a release asset is downloaded through the API asset URL, so the same code works with and without a token. A folder is listed once through the git tree API and every file under it is fetched. Unauthenticated, GitHub allows 60 API requests an hour per IP, and a folder costs one request per file, so for many hosts behind one NAT use a release `.zip` or a token. A private repository answers 404 without a token, and the error says so
+- **GitHub:** the release metadata and the folder listing go through the API (one or two requests per driver). The files themselves come from the release's download link and `raw.githubusercontent.com` without a token — neither counts toward the 60 API requests an hour GitHub allows per public IP, so a pool of hosts booting behind one NAT does not run out. With a token everything goes through the API, which is what a private repository needs. A private repository answers 404 without a token, and the error says so. A repository too large for one tree listing, or a file stored through Git LFS, is refused rather than half-downloaded — publish the driver as a release asset instead
 - Only INF-based driver packages are supported. A vendor `.exe` setup is not — extract the package (most vendors offer a "driver only" zip) and put that in the repository. The catalog (`.cat`) must carry a valid signature
 - `pnputil` exit codes `0`, `259` (no device waiting — normal for printers), `3010` and `1641` (reboot) count as success. Anything else points at `C:\Windows\INF\setupapi.dev.log`
 - There is no `Set-PrinterPort`: a port that already exists for another address is reported, not re-created, because other printers may use it. Give the printer its own `portName`
 - `Set-PrintConfiguration` runs the vendor driver's own code and hangs on some universal drivers, so it runs in a job with a 2-minute timeout. A failure there is a warning — the printer is installed all the same
 - Default printer is a per-user setting and is deliberately not handled: as SYSTEM there is no user to set it for
 - Started 32-bit (Intune Management Extension, some RMM agents), the script relaunches itself 64-bit, because `pnputil` does not exist under SysWOW64. Started by hand without elevation, it asks for it
-- NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
+- NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
 - `-CheckOnly` is the health check for an RMM condition or a scheduled detection job: exit `2` means the device does not match the JSON
