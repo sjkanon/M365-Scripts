@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Find and delete a phishing message from one, several, or all mailboxes in a
@@ -168,6 +168,18 @@
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for the app registration given in -ClientId.
 
+.PARAMETER AppOnly
+    App-only Graph with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root (instead of -ClientId).
+
+.PARAMETER Delegated
+    Graph engine as yourself instead of app-only: a device code sign-in with
+    Mail.ReadWrite.Shared (plus Calendars.ReadWrite.Shared with -IncludeCalendar),
+    no app registration. Only reaches mailboxes on which your account already has
+    Full Access, so it suits a handful of known recipients, not -AllMailboxes.
+    Not under GDAP: a partner account cannot be given Full Access on a customer
+    mailbox. The Purview engine is delegated anyway and ignores this switch.
+
 .EXAMPLE
     # What would be removed, tenant-wide? (no deletion - no -Apply)
     .\Remove-PhishingMessage.ps1 -MessageId "<abc123@evil.example>"
@@ -213,6 +225,11 @@
         -IncludeCalendar -Apply -VerifyWithGraph
 
 .EXAMPLE
+    # Two known recipients on which you have Full Access, Graph as yourself
+    .\Remove-PhishingMessage.ps1 -Mailbox "a@contoso.com","b@contoso.com" `
+        -Sender "no-reply@evil.example" -Delegated -Apply
+
+.EXAMPLE
     # HTML attachment campaign
     .\Remove-PhishingMessage.ps1 -AttachmentName "*.html" `
         -Sender "billing@evil.example" -Apply
@@ -234,13 +251,16 @@
                repaired from inside the process - open a new PowerShell window.
 
       Graph    Needs app-only Mail.ReadWrite; delegated Mail.ReadWrite only ever
-               reaches your own mailbox. You do not have to arrange that
+               reaches your own mailbox, and Mail.ReadWrite.Shared only the
+               mailboxes you hold Full Access on. That is why app-only is the
+               default for this engine. You do not have to arrange that
                yourself - the script handles it the same way
                Move-InboxToArchive.ps1 and the SharePoint reporting scripts do:
 
                  1. An app-only Graph session you already established is used
                     as-is.
-                 2. -ClientId with -ClientSecret or -CertificateThumbprint uses
+                 2. -ClientId with -ClientSecret or -CertificateThumbprint (or
+                    -AppOnly, from graph.appid.json) uses
                     your own App Registration (needs Mail.ReadWrite application
                     permission, admin consent granted).
                  3. Otherwise the script signs you in with a device code,
@@ -268,10 +288,23 @@
                Connect-MgGraph session still go through the SDK; both report the
                clash for what it is when they hit it.
 
+               The device code sign-in is used whatever load.config.ps1 says:
+               it is the one interactive sign-in that runs on plain REST.
+
+               -Delegated replaces all three with Graph as yourself
+               (Mail.ReadWrite.Shared over the same REST device code flow,
+               refreshed for long runs). Works only on mailboxes where you
+               already have Full Access.
+
                GDAP-aware: under a GDAP session ($global:authMode -eq 'GDAP', set
                by Connect-Tenant / load.ps1) -TenantId is resolved from the
                selected customer tenant ($global:cid) when not supplied.
                $env:M365_CUSTOMER_TENANTID / $env:M365_AUTH_MODE are honored too.
+
+      Sign-in  Exchange Online and Security & Compliance connect delegated
+               (Connect-M365.ps1 rules): device code per load.config.ps1 for
+               Exchange, and the GDAP customer through -DelegatedOrganization
+               (-Organization only applies to app-only sign-in).
 
     Index lag (Purview only): a message delivered minutes ago may not be
     searchable yet, so a purge run straight after delivery can report 0 hits and
@@ -329,8 +362,26 @@ param(
     [string]   $TenantId,
     [string]   $ClientId,
     [string]   $ClientSecret,
-    [string]   $CertificateThumbprint
+    [string]   $CertificateThumbprint,
+    [switch]   $AppOnly,
+    [switch]   $Delegated
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
+if ($Delegated -and ($ClientId -or $AppOnly)) {
+    throw "Use either -Delegated or -ClientId/-AppOnly, not both."
+}
+if ($Delegated -and (Test-M365Gdap)) {
+    throw "-Delegated does not work under GDAP: a partner account cannot be given Full Access on a customer mailbox. Drop -Delegated."
+}
+# -AppOnly: your own app from graph.appid.json, used like -ClientId -CertificateThumbprint.
+if ($AppOnly -and -not $ClientId) {
+    $reg = Get-M365AppRegistration -TenantId (Resolve-M365TenantId -TenantId $TenantId)
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $reg.Tenant }
+}
 
 # ── Criteria validation ───────────────────────────────────────────────────────
 # Without at least one content selector this would match - and delete - every
@@ -401,7 +452,7 @@ Write-Host ""
 
 $results             = [System.Collections.Generic.List[PSObject]]::new()
 $script:ConnectedIpps    = $false
-$script:ConnectedExo     = $false
+$script:Exo              = $null     # Connect-M365Exchange result
 $script:ReusedIppsSession = $false
 $script:TotalPurged       = 0
 $script:Truncated     = $false
@@ -420,6 +471,7 @@ $script:TokenTenantId   = $null
 $script:TokenExpiry     = [datetime]::MinValue
 $script:AccessToken     = $null
 $script:GraphConnected  = $false
+$script:Graph           = $null     # Connect-M365Graph result; disconnect only what it opened
 
 function Remove-TempApp {
     <#
@@ -570,15 +622,8 @@ function Confirm-AppRole {
 }
 
 function Resolve-EffectiveTenantId {
-    # GDAP-aware, matching Get-SharePointStorageReport.ps1 / Move-InboxToArchive.ps1.
-    if ($TenantId) { return $TenantId }
-    try {
-        $gdap = ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') -or
-                ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP')
-        if ($gdap -and $global:cid)      { return [string]$global:cid }
-        if ($env:M365_CUSTOMER_TENANTID) { return [string]$env:M365_CUSTOMER_TENANTID }
-    } catch {}
-    return $null
+    # GDAP-aware: -TenantId, else the GDAP customer, else $env:M365_CUSTOMER_TENANTID.
+    return Resolve-M365TenantId -TenantId $TenantId
 }
 
 function Test-MsalConflict {
@@ -685,6 +730,7 @@ function Get-DelegatedTokenByDeviceCode {
                         client_id   = $script:GraphCliClientId
                         device_code = $dc.device_code
                     }
+            $script:DeviceCodeToken = $tok
             return @{ Authorization = "Bearer $($tok.access_token)" }
         } catch {
             # authorization_pending is the normal "not signed in yet" answer.
@@ -723,13 +769,43 @@ function Connect-GraphForMail {
     #>
     if ($script:GraphConnected -or $script:AppOnlyHeaders) { return $true }
 
+    # 0. -Delegated: Graph as yourself, over REST like the temporary-app route so
+    #    it does not clash with the Exchange module's MSAL. The token goes where
+    #    the app-only token would; Update-AppOnlyToken renews it with the refresh
+    #    token (TokenBody), so a long run keeps working.
+    if ($Delegated) {
+        $scopes = @('Mail.ReadWrite', 'Mail.ReadWrite.Shared')
+        if ($IncludeCalendar) { $scopes += @('Calendars.ReadWrite', 'Calendars.ReadWrite.Shared') }
+        $tenant = Resolve-EffectiveTenantId
+        if (-not $tenant) { $tenant = 'organizations' }
+        try {
+            Write-Host "  Signing in as yourself for Graph ($($scopes -join ', '))..." -ForegroundColor Cyan
+            $script:AppOnlyHeaders = Get-DelegatedTokenByDeviceCode -Tenant $tenant -Scopes $scopes
+        } catch {
+            Write-Warning "Delegated Graph sign-in failed: $($_.Exception.Message)"
+            return $false
+        }
+        $script:TokenTenantId = $tenant
+        $script:TokenExpiry   = (Get-Date).AddSeconds([int]$script:DeviceCodeToken.expires_in - 300)
+        if ($script:DeviceCodeToken.refresh_token) {
+            $script:TokenBody = @{
+                grant_type    = 'refresh_token'
+                client_id     = $script:GraphCliClientId
+                refresh_token = $script:DeviceCodeToken.refresh_token
+                scope         = ((@($scopes | ForEach-Object { "https://graph.microsoft.com/$_" })) + 'offline_access') -join ' '
+            }
+        }
+        Write-Host "  [OK]   Signed in (delegated). Reaches only mailboxes you have Full Access on." -ForegroundColor DarkGray
+        return $true
+    }
+
     # 1. An app-only session the caller already established. Optional - the other
     #    two routes need no Graph SDK at all.
     $ctx = $null
-    try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {}
+    if (-not $ClientId) { try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {} }
     if ($ctx -and $ctx.AuthType -eq 'AppOnly') {
         Write-Host "  [OK]   Using the existing app-only Graph session." -ForegroundColor DarkGray
-        $script:GraphConnected = $true
+        $script:GraphConnected = $true   # the caller's session: never disconnected here
         return $true
     }
 
@@ -764,7 +840,7 @@ function Connect-GraphForMail {
 
         if ($CertificateThumbprint) {
             try {
-                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+                $script:Graph = Connect-M365Graph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint
             } catch {
                 Write-Warning "Could not connect with the supplied certificate: $($_.Exception.Message)"
                 if (Test-MsalConflict $_) { Write-MsalConflictHelp }
@@ -894,8 +970,16 @@ function Invoke-PurviewPurge {
     # ExchangeOnlineManagement 3.9.0, so it is passed only when supported.
     if (-not (Get-Command New-ComplianceSearch -ErrorAction SilentlyContinue)) {
         Write-Host "  Connecting to Security & Compliance PowerShell..." -ForegroundColor DarkGray
+        # Own Connect-IPPSSession rather than Connect-M365Exchange -IncludeCompliance:
+        # that one does not pass -EnableSearchOnlySession. Same rules otherwise:
+        # -Organization only applies to app-only sign-in, so a GDAP customer (or
+        # -TenantId) is reached with -DelegatedOrganization.
         $ippsParams = @{ ErrorAction = 'Stop' }
-        if ($TenantId) { $ippsParams['Organization'] = $TenantId }
+        $ippsTenant = Resolve-M365TenantId -TenantId $TenantId
+        if ($ippsTenant -and ($TenantId -or (Test-M365Gdap))) {
+            $ippsParams['DelegatedOrganization'] = Resolve-M365CustomerDomain -TenantId $ippsTenant
+        }
+        if ($global:upn) { $ippsParams['UserPrincipalName'] = [string]$global:upn }
         $connectCmd = Get-Command Connect-IPPSSession -ErrorAction Stop
         if ($connectCmd.Parameters.ContainsKey('EnableSearchOnlySession')) {
             $ippsParams['EnableSearchOnlySession'] = $true
@@ -1423,7 +1507,7 @@ function Read-ComplianceSuccessResults {
 function Invoke-GraphPurge {
 
     if (-not (Connect-GraphForMail)) {
-        throw "The Graph engine needs app-only Mail.ReadWrite and none could be established. See .NOTES for the three ways to supply it."
+        throw "The Graph engine needs app-only Mail.ReadWrite (or -Delegated) and none could be established. See .NOTES for the ways to supply it."
     }
 
     # ── Target mailboxes ──────────────────────────────────────────────────────
@@ -1433,12 +1517,8 @@ function Invoke-GraphPurge {
     $targets = @($Mailbox)
     if ($AllMailboxes) {
         Write-Host "  Enumerating mailboxes..." -ForegroundColor DarkGray
-        if (-not (Get-Command Get-EXOMailbox -ErrorAction SilentlyContinue)) {
-            $exoParams = @{ ShowBanner = $false; ErrorAction = 'Stop' }
-            if ($TenantId) { $exoParams['Organization'] = $TenantId }
-            Connect-ExchangeOnline @exoParams
-            $script:ConnectedExo = $true
-        }
+        # Delegated (device code and GDAP customer per load.config.ps1); reused when open.
+        $script:Exo = Connect-M365Exchange -TenantId $TenantId
         $targets = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox,SharedMailbox |
                         ForEach-Object { $_.PrimarySmtpAddress } | Where-Object { $_ })
         Write-Host "  $($targets.Count) mailbox(es) to check." -ForegroundColor DarkGray
@@ -1765,8 +1845,8 @@ try {
 } finally {
     # The temporary app must go before the delegated session that can delete it.
     Remove-TempApp
-    if ($script:GraphConnected) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
-    if ($script:ConnectedIpps -or $script:ConnectedExo) {
+    Disconnect-M365Graph $script:Graph
+    if ($script:ConnectedIpps -or ($script:Exo -and $script:Exo.ConnectedHere)) {
         Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
     }
 }

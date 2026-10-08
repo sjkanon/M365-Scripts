@@ -11,8 +11,10 @@
     2) Exports the resolved member list to CSV.
     3) Creates or updates a regular distribution group and adds those members.
 
-    The script requires an active Exchange Online session.
-    Connect first with: Connect-ExchangeOnline
+    Exchange Online PowerShell, because Graph has no API for dynamic distribution
+    groups or for managing distribution lists. Sign-in is delegated by default
+    (device code and GDAP customer per load.config.ps1); an existing session for
+    the same tenant is reused. App-only with -ClientId/-CertificateThumbprint or -AppOnly.
 
 .PARAMETER DynamicGroupIdentity
     Identity of the dynamic distribution group (name, alias, DN, or SMTP address).
@@ -60,6 +62,21 @@
 .PARAMETER RenameDynamicGroupTo
     Optional new name/display name for the source dynamic distribution group after processing.
 
+.PARAMETER TenantId
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself.
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
+
 .EXAMPLE
     .\Distributionlist.ps1 -DynamicGroupIdentity "All Sales" -TargetGroupIdentity "All Sales Static"
 
@@ -94,17 +111,14 @@ param(
     [switch]$ClearTargetMembers,
     [string]$ExportCsvPath,
     [switch]$SkipMemberAdd,
-    [string]$RenameDynamicGroupTo
+    [string]$RenameDynamicGroupTo,
+    [string]$TenantId,
+    [string]$ClientId,
+    [string]$CertificateThumbprint,
+    [switch]$AppOnly
 )
 
-function Assert-ExchangeConnection {
-    try {
-        Get-OrganizationConfig -ErrorAction Stop | Out-Null
-    }
-    catch {
-        throw "No active Exchange Online session found. Run Connect-ExchangeOnline first."
-    }
-}
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 function Get-RecipientKey {
     param([Parameter(Mandatory)]$Recipient)
@@ -244,7 +258,9 @@ function Assert-TargetGroupCreationInputs {
     }
 }
 
-Assert-ExchangeConnection
+# Delegated by default (device code and GDAP customer per load.config.ps1), app-only
+# with -ClientId/-CertificateThumbprint or -AppOnly. Graph has no API for this.
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 Write-Host "Resolving dynamic distribution group: $DynamicGroupIdentity" -ForegroundColor Cyan
 $dynamicGroup = Get-DynamicDistributionGroup -Identity $DynamicGroupIdentity -ErrorAction Stop
@@ -348,6 +364,7 @@ if ($SkipMemberAdd) {
             Write-Host "Renamed dynamic group to: $RenameDynamicGroupTo" -ForegroundColor Green
         }
     }
+    Disconnect-M365Exchange $exo
     return
 }
 
@@ -516,3 +533,5 @@ Write-Host "Completed." -ForegroundColor Green
 Write-Host "Added   : $added" -ForegroundColor Green
 Write-Host "Skipped : $skipped" -ForegroundColor Yellow
 Write-Host "Failed  : $failed" -ForegroundColor Red
+
+Disconnect-M365Exchange $exo

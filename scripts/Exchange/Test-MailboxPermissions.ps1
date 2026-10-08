@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Audit mailbox access permissions - Full Access, Send As, and Send on Behalf.
@@ -24,7 +24,19 @@
     Path to write the CSV report. Defaults to .\MailboxPermissions_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself (device code per load.config.ps1).
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .EXAMPLE
     .\Test-MailboxPermissions.ps1
@@ -43,7 +55,10 @@ param(
     [string] $Mailbox,
     [string] $User,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
 
 # -- Output folder ------------------------------------------------------------
@@ -233,15 +248,11 @@ function Get-ReverseMailboxPermissions {
 }
 
 # -- Connection ---------------------------------------------------------------
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# Delegated by default (device code and GDAP customer per load.config.ps1),
+# app-only with -ClientId/-CertificateThumbprint or -AppOnly. Exchange Online
+# PowerShell because Graph has no API for FullAccess, SendAs or SendOnBehalf.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # -- Header ------------------------------------------------------------------
 Write-Host ""
@@ -404,4 +415,4 @@ Write-Host "  Checked $($mailboxes.Count) mailbox(es) - $($results.Count) permis
 Write-Host ""
 
 # -- Disconnect if we connected ----------------------------------------------
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo
