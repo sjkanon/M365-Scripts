@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Detect suspicious mailbox inbox rules (a common Business Email Compromise indicator).
@@ -29,7 +29,18 @@
     CSV report path. Defaults to .\SuspiciousInboxRules_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant domain (contoso.onmicrosoft.com) or ID. Defaults to the GDAP customer
+    (load.config.ps1) or your own tenant. App-only sign-in needs the domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-SuspiciousInboxRules.ps1
@@ -52,29 +63,42 @@
 
     Required role: View-Only Recipients (report) / Recipient Management or Organization
     Management (to disable rules with -Apply)
+
+    Sign-in: Exchange Online through scripts\Startup\Connect-M365.ps1 - delegated by
+    default (device code and the GDAP customer via -DelegatedOrganization per
+    load.config.ps1), app-only with -ClientId/-CertificateThumbprint or -AppOnly
+    (Exchange.ManageAsApp plus an Exchange role on the app).
+
+    Why Exchange Online and not Graph: Graph does have messageRules
+    (/users/{id}/mailFolders/inbox/messageRules), but
+      - delegated, it only reaches mailboxes the signed-in admin has been granted
+        access to; an Exchange admin role does not open other users' rules there, so the
+        delegated default could not scan the tenant at all (only app-only
+        MailboxSettings.Read/ReadWrite can);
+      - it does not return hidden rules, which Get-InboxRule -IncludeHidden does - and
+        hiding a rule (MAPI) is a known attacker technique this check exists to find.
+    So one Exchange Online session serves both the delegated default and app-only.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string] $Mailbox,
     [switch] $Apply,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId `
+    -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -98,18 +122,30 @@ function Test-ExternalAddress {
     param([string[]] $Addresses)
     foreach ($addr in $Addresses) {
         if (-not $addr) { continue }
-        $domain = ($addr -split '@')[-1] -replace '[\[\]]', ''
+        # Rule targets look like '"Name" [SMTP:user@domain]' for SMTP addresses and
+        # '"Name" [EX:/o=ExchangeLabs/...]' for internal recipients. Only an SMTP address
+        # can be external; an EX: (legacyExchangeDN) target is always in this tenant.
+        $smtp = if ($addr -match 'SMTP:([^\]\s]+)') { $Matches[1] }
+                elseif ($addr -match '([^\s\[\]"<>]+@[^\s\[\]"<>]+)') { $Matches[1] }
+        if (-not $smtp) { continue }
+        $domain = ($smtp -split '@')[-1].TrimEnd('.')
         if ($domain -and ($acceptedDomains -notcontains $domain)) { return $true }
     }
     return $false
 }
 
 # ── Get mailboxes ─────────────────────────────────────────────────────────────
-if ($Mailbox) {
-    $mailboxes = @(Get-EXOMailbox -Identity $Mailbox -ErrorAction Stop)
-} else {
-    Write-Host "  Retrieving mailboxes..." -ForegroundColor DarkGray
-    $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox, SharedMailbox)
+try {
+    if ($Mailbox) {
+        $mailboxes = @(Get-EXOMailbox -Identity $Mailbox -ErrorAction Stop)
+    } else {
+        Write-Host "  Retrieving mailboxes..." -ForegroundColor DarkGray
+        $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox, SharedMailbox -ErrorAction Stop)
+    }
+} catch {
+    Write-Host "  [ERROR] Could not retrieve mailboxes: $($_.Exception.Message)" -ForegroundColor Red
+    Disconnect-M365Exchange $exo
+    exit 1
 }
 
 Write-Host "  Checking inbox rules for $($mailboxes.Count) mailbox(es)..." -ForegroundColor DarkGray
@@ -129,7 +165,7 @@ foreach ($mbx in $mailboxes) {
         if (-not $rule.Enabled) { continue }
 
         $reasons = [System.Collections.Generic.List[string]]::new()
-        $externalTargets = @($rule.ForwardTo) + @($rule.RedirectTo) + @($rule.ForwardAsAttachmentTo) | Where-Object { $_ }
+        $externalTargets = @(@($rule.ForwardTo) + @($rule.RedirectTo) + @($rule.ForwardAsAttachmentTo) | Where-Object { $_ })
 
         if ($externalTargets.Count -gt 0 -and (Test-ExternalAddress -Addresses $externalTargets)) {
             $reasons.Add('Forwards/redirects to an external address')
@@ -212,4 +248,4 @@ Write-Host ("  {0} mailbox(es) checked — {1} suspicious rule(s) found" -f $mai
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Validate SPF and DMARC DNS records for one or more domains.
@@ -29,7 +29,18 @@
 
 .PARAMETER TenantId
     Entra ID tenant ID or domain, used only for auto-discovering domains via Graph when
-    -Domain is omitted.
+    -Domain is omitted. Defaults to the GDAP customer (load.config.ps1) or your own
+    tenant. Required for app-only sign-in.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you. Only used when -Domain is omitted.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Test-EmailAuthenticationRecords.ps1 -Domain "contoso.com"
@@ -43,13 +54,24 @@
     type for a domain with no interpretation. This script is deliberately narrower and
     opinionated: it only checks the two records that matter for anti-spoofing and reports
     pass/fail against known-good patterns.
+
+    Sign-in: only when -Domain is omitted, to Microsoft Graph through
+    scripts\Startup\Connect-M365.ps1 - delegated by default (scope Domain.Read.All;
+    device code / GDAP customer per load.config.ps1), app-only with
+    -ClientId/-CertificateThumbprint or -AppOnly (application permission Domain.Read.All).
+    An existing fitting Graph session is reused and left connected.
 #>
 [CmdletBinding()]
 param(
     [string[]] $Domain,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 if (-not (Get-Command Resolve-DnsName -ErrorAction SilentlyContinue)) {
     Write-Host "  [ERROR] Resolve-DnsName is not available on this platform (Windows-only). Aborting." -ForegroundColor Red
@@ -68,19 +90,18 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host ""
 
 # ── Domain discovery ──────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
+$graph = $null
 if (-not $Domain) {
-    try {
-        $null = Get-MgContext -ErrorAction Stop
-        if (-not (Get-MgContext)) { throw }
-    } catch {
-        $connectParams = @{ Scopes = @('Domain.Read.All') }
-        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-        Connect-MgGraph @connectParams
-        $script:ConnectedHere = $true
-    }
+    $graph = Connect-M365Graph -Scopes 'Domain.Read.All' -TenantId $TenantId `
+        -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
     Write-Host "  Discovering verified domains via Microsoft Graph..." -ForegroundColor DarkGray
-    $Domain = @(Get-MgDomain -All -ErrorAction Stop | Where-Object { $_.IsVerified } | Select-Object -ExpandProperty Id)
+    try {
+        $Domain = @(Get-MgDomain -All -ErrorAction Stop | Where-Object { $_.IsVerified } | Select-Object -ExpandProperty Id)
+    } catch {
+        Write-Host "  [ERROR] Could not list the tenant's domains: $($_.Exception.Message)" -ForegroundColor Red
+        Disconnect-M365Graph $graph
+        exit 1
+    }
     Write-Host "  Found $($Domain.Count) verified domain(s)." -ForegroundColor DarkGray
     Write-Host ""
 }
@@ -122,7 +143,8 @@ foreach ($d in $Domain) {
         Write-Host "    [FAIL] DMARC record not found" -ForegroundColor Red
         $results.Add([PSCustomObject]@{ Domain = $d; RecordType = 'DMARC'; Found = $false; Value = ''; Flag = 'Fail'; Detail = 'No DMARC TXT record found at _dmarc.' + $d })
     } else {
-        $policy = if ($dmarcRecord -match 'p=(\w+)') { $Matches[1] } else { 'unknown' }
+        # Anchor on the tag boundary, so 'sp=' (subdomain policy) is not read as 'p='.
+        $policy = if ($dmarcRecord -match '(?:^|;)\s*p\s*=\s*(\w+)') { $Matches[1] } else { 'unknown' }
         $hasRua = $dmarcRecord -match 'rua='
         $flag = if ($policy -eq 'none') { 'Warn' } elseif (-not $hasRua) { 'Warn' } else { 'Pass' }
         $detail = if ($policy -eq 'none') { 'Policy is "none" — monitoring only, not enforced' }
@@ -147,4 +169,4 @@ Write-Host ""
 Write-Host ("  {0} domain(s) checked — {1} record(s) failed" -f $Domain.Count, $failCount) -ForegroundColor $(if ($failCount -gt 0) { 'Red' } else { 'Green' })
 Write-Host ""
 
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

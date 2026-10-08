@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report on Exchange Online / Defender for Office 365 email security configuration.
@@ -10,11 +10,10 @@
       - Safe Links / Safe Attachments policies (Defender for Office 365)
       - Anti-malware, anti-spam (inbound + outbound), and connection filter policies
       - Remote domains — whether external auto-forwarding is allowed org-wide
-      - Litigation hold status across mailboxes
       - DLP policy summary (name, mode, workload)
       - Alert policy summary (Security & Compliance activity/protection alerts)
-      - Optionally (with -IncludeMailboxDetail, slower): POP/IMAP/legacy-protocol access
-        per mailbox
+      - Optionally (with -IncludeMailboxDetail, slower): POP/IMAP access and litigation
+        hold across mailboxes
 
     This is a read-only report — it never changes configuration. Findings are written to
     the console with a pass/warn/fail color and exported to a single flat CSV
@@ -22,15 +21,25 @@
     diffing between runs.
 
 .PARAMETER IncludeMailboxDetail
-    Also check POP/IMAP/legacy-protocol enablement per mailbox (Get-CASMailbox) and
-    per-mailbox litigation hold status. Slower on large tenants — omit for a quick
-    org-level-only pass.
+    Also check POP/IMAP enablement (Get-EXOCASMailbox) and litigation hold across user
+    mailboxes. Slower on large tenants — omit for a quick org-level-only pass.
 
 .PARAMETER OutputPath
     CSV report path. Defaults to .\EmailSecurityPosture_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant domain (contoso.onmicrosoft.com) or ID. Defaults to the GDAP customer
+    (load.config.ps1) or your own tenant. App-only sign-in needs the domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Test-EmailSecurityPosture.ps1
@@ -53,30 +62,36 @@
     opinionated "recommended" values with no per-tenant override, which is unsafe to
     reproduce blindly across different customer tenants.
 
-    Required modules: ExchangeOnlineManagement (Connect-ExchangeOnline, Connect-IPPSSession)
+    Required module: ExchangeOnlineManagement
+
+    Sign-in: Exchange Online plus Security & Compliance PowerShell through
+    scripts\Startup\Connect-M365.ps1 (Connect-M365Exchange -IncludeCompliance) -
+    delegated by default (device code and the GDAP customer via -DelegatedOrganization
+    per load.config.ps1), app-only with -ClientId/-CertificateThumbprint or -AppOnly.
+    Stays on Exchange Online / S&C: Microsoft Graph has no API for EOP/Defender for
+    Office 365 policies, remote domains, CAS protocol settings, DLP or alert policies.
 #>
 [CmdletBinding()]
 param(
     [switch] $IncludeMailboxDetail,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-$script:ConnectedIpps = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# -IncludeCompliance also opens Security & Compliance PowerShell (DLP and alert policies)
+# for the same tenant and sign-in; the old bare Connect-IPPSSession ignored -TenantId.
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId `
+    -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly -IncludeCompliance
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -162,10 +177,6 @@ try {
 Write-Host ""
 Write-Host "Data Loss Prevention" -ForegroundColor Cyan
 try {
-    if (-not (Get-Command Get-DlpCompliancePolicy -ErrorAction SilentlyContinue)) {
-        Connect-IPPSSession -ErrorAction Stop
-        $script:ConnectedIpps = $true
-    }
     $dlpPolicies = @(Get-DlpCompliancePolicy -ErrorAction Stop)
     if ($dlpPolicies.Count -eq 0) {
         Add-Finding 'DLP' 'Policies' 'Policy count' '0' 'Warn'
@@ -186,19 +197,22 @@ if ($IncludeMailboxDetail) {
     Write-Host ""
     Write-Host "Mailbox Detail" -ForegroundColor Cyan
     Write-Host "  Retrieving mailboxes..." -ForegroundColor DarkGray
-    $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox -Properties LitigationHoldEnabled)
+    $userMailboxes = $null
+    try {
+        $mailboxes = @(Get-EXOMailbox -ResultSize Unlimited -RecipientTypeDetails UserMailbox -Properties LitigationHoldEnabled -ErrorAction Stop)
+        $userMailboxes = [System.Collections.Generic.HashSet[string]]::new([string[]]@($mailboxes.PrimarySmtpAddress | Where-Object { $_ }), [System.StringComparer]::OrdinalIgnoreCase)
+        $litHoldMailboxes = @($mailboxes | Where-Object { $_.LitigationHoldEnabled }).Count
+        Add-Finding 'Mailbox detail' 'Litigation hold' 'Mailboxes on hold' "$litHoldMailboxes / $($mailboxes.Count)" 'Info'
+    } catch { Add-Finding 'Mailbox detail' 'Litigation hold' 'Availability' "Not available: $($_.Exception.Message)" 'Info' }
 
-    $legacyProtocolMailboxes = 0
-    $litHoldMailboxes = 0
-    foreach ($mbx in $mailboxes) {
-        try {
-            $cas = Get-CASMailbox -Identity $mbx.UserPrincipalName -ErrorAction Stop
-            if ($cas.PopEnabled -or $cas.ImapEnabled) { $legacyProtocolMailboxes++ }
-        } catch {}
-        if ($mbx.LitigationHoldEnabled) { $litHoldMailboxes++ }
-    }
-    Add-Finding 'Mailbox detail' 'POP/IMAP' 'Mailboxes with POP or IMAP enabled' $legacyProtocolMailboxes $(if ($legacyProtocolMailboxes -gt 0) { 'Warn' } else { 'Pass' })
-    Add-Finding 'Mailbox detail' 'Litigation hold' 'Mailboxes on hold' "$litHoldMailboxes / $($mailboxes.Count)" 'Info'
+    # One bulk Get-EXOCASMailbox call instead of one Get-CASMailbox per mailbox. It has no
+    # -RecipientTypeDetails, so narrow it to the user mailboxes found above.
+    try {
+        $cas = @(Get-EXOCASMailbox -ResultSize Unlimited -Properties PopEnabled, ImapEnabled -ErrorAction Stop)
+        if ($null -ne $userMailboxes) { $cas = @($cas | Where-Object { $userMailboxes.Contains([string]$_.PrimarySmtpAddress) }) }
+        $legacyProtocolMailboxes = @($cas | Where-Object { $_.PopEnabled -or $_.ImapEnabled }).Count
+        Add-Finding 'Mailbox detail' 'POP/IMAP' 'Mailboxes with POP or IMAP enabled' $legacyProtocolMailboxes $(if ($legacyProtocolMailboxes -gt 0) { 'Warn' } else { 'Pass' })
+    } catch { Add-Finding 'Mailbox detail' 'POP/IMAP' 'Availability' "Not available: $($_.Exception.Message)" 'Info' }
 }
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -217,4 +231,4 @@ Write-Host ("  {0} finding(s) — {1} warning(s), {2} failure(s)" -f $findings.C
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo
