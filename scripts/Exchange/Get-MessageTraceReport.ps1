@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Trace exactly where mail went: date/time, sender, recipient, status and the
@@ -24,10 +24,15 @@
     ForwardTo / RedirectTo / ForwardAsAttachmentTo), so a forward that has not
     fired yet in the traced window is still visible.
 
-    Uses Get-MessageTraceV2 when available and falls back to the retired
-    Get-MessageTrace on older module versions. Long ranges are split into
-    10-day chunks automatically (the V2 limit) and every chunk is paginated
-    until exhausted.
+    Uses Get-MessageTraceV2 and Get-MessageTraceDetailV2 only (the old
+    Get-MessageTrace / Get-MessageTraceDetail are retired). Long ranges are split
+    into 10-day chunks automatically (the V2 limit) and every chunk is paginated
+    with -StartingRecipientAddress until exhausted.
+
+    Exchange Online PowerShell, not Graph: Graph has no message-trace API, and the
+    forwarding configuration (mailbox forwarding, inbox rules of other mailboxes)
+    is read the same way. Sign-in is delegated by default (device code and GDAP
+    customer per load.config.ps1); app-only with -ClientId or -AppOnly.
 
 .PARAMETER Mailbox
     Trace both directions for this address: everything it sent AND everything it
@@ -94,7 +99,19 @@
     _Details / _ForwardingConfig suffixes.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself (device code per load.config.ps1).
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .EXAMPLE
     # Everything one mailbox sent and received in the last 2 days, incl. forwards
@@ -145,7 +162,10 @@ param(
     [int]      $MaxSiblingLookups = 100,
     [switch]   $SkipForwardingConfig,
     [string]   $OutputPath,
-    [string]   $TenantId
+    [string]   $TenantId,
+    [string]   $ClientId,
+    [string]   $CertificateThumbprint,
+    [switch]   $AppOnly
 )
 
 if (-not $StartDate) { $StartDate = $EndDate.AddDays(-$Days) }
@@ -159,25 +179,23 @@ $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# Delegated by default (device code and GDAP customer per load.config.ps1),
+# app-only with -ClientId/-CertificateThumbprint or -AppOnly. Exchange Online
+# PowerShell because Graph has no message-trace API.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
-# ── Cmdlet selection (V2 preferred, V1 fallback) ──────────────────────────────
-$useV2 = [bool](Get-Command Get-MessageTraceV2 -ErrorAction SilentlyContinue)
-if (-not $useV2 -and -not (Get-Command Get-MessageTrace -ErrorAction SilentlyContinue)) {
-    throw "Neither Get-MessageTraceV2 nor Get-MessageTrace is available. Update the ExchangeOnlineManagement module."
+# ── Cmdlets (V2 only) ─────────────────────────────────────────────────────────
+# Get-MessageTrace / Get-MessageTraceDetail are retired; only the V2 cmdlets are
+# used. They arrive with the Exchange session, so check after connecting.
+foreach ($cmd in 'Get-MessageTraceV2', 'Get-MessageTraceDetailV2') {
+    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
+        Disconnect-M365Exchange $exo
+        throw "$cmd is not available in this session. Update ExchangeOnlineManagement (scripts\Startup\Install-Modules.ps1)."
+    }
 }
-$traceCmd  = if ($useV2) { 'Get-MessageTraceV2' } else { 'Get-MessageTrace' }
-$detailCmd = if (Get-Command Get-MessageTraceDetailV2 -ErrorAction SilentlyContinue) { 'Get-MessageTraceDetailV2' }
-             elseif (Get-Command Get-MessageTraceDetail -ErrorAction SilentlyContinue) { 'Get-MessageTraceDetail' }
-             else { $null }
+$traceCmd  = 'Get-MessageTraceV2'
+$detailCmd = 'Get-MessageTraceDetailV2'
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -315,56 +333,41 @@ function Invoke-Trace {
     $pageSize  = 5000
 
     # V2 caps a single call at a 10-day window; split anything longer.
-    $chunkDays = if ($useV2) { 10 } else { 30 }
+    $chunkDays = 10
     $chunkFrom = $From
 
     while ($chunkFrom -lt $To) {
         $chunkTo = $chunkFrom.AddDays($chunkDays)
         if ($chunkTo -gt $To) { $chunkTo = $To }
 
-        if ($useV2) {
-            # V2 returns newest-first; page backwards using the last row as the
-            # next EndDate + StartingRecipientAddress continuation token.
-            $cursorEnd       = ConvertTo-Utc $chunkTo
-            $cursorRecipient = $null
-            $chunkStartUtc   = ConvertTo-Utc $chunkFrom
+        # V2 returns newest-first; page backwards using the last row as the
+        # next EndDate + StartingRecipientAddress continuation token.
+        $cursorEnd       = ConvertTo-Utc $chunkTo
+        $cursorRecipient = $null
+        $chunkStartUtc   = ConvertTo-Utc $chunkFrom
 
-            do {
-                $p = $Filter.Clone()
-                $p['StartDate']  = $chunkStartUtc
-                $p['EndDate']    = $cursorEnd
-                $p['ResultSize'] = $pageSize
-                if ($cursorRecipient) { $p['StartingRecipientAddress'] = $cursorRecipient }
+        do {
+            $p = $Filter.Clone()
+            $p['StartDate']  = $chunkStartUtc
+            $p['EndDate']    = $cursorEnd
+            $p['ResultSize'] = $pageSize
+            if ($cursorRecipient) { $p['StartingRecipientAddress'] = $cursorRecipient }
 
-                $batch = @(Get-MessageTraceV2 @p -ErrorAction Stop)
-                foreach ($row in $batch) { $collected.Add($row) }
-                if (-not $Quiet) {
-                    Write-Host ("  Retrieved {0,6} row(s)  [{1} -> {2}]" -f $collected.Count,
-                        $chunkFrom.ToString('yyyy-MM-dd'), $chunkTo.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
-                }
+            $batch = @(Get-MessageTraceV2 @p -ErrorAction Stop)
+            foreach ($row in $batch) { $collected.Add($row) }
+            if (-not $Quiet) {
+                Write-Host ("  Retrieved {0,6} row(s)  [{1} -> {2}]" -f $collected.Count,
+                    $chunkFrom.ToString('yyyy-MM-dd'), $chunkTo.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
+            }
 
-                if ($batch.Count -lt $pageSize) { break }
-                $last            = $batch[-1]
-                $cursorEnd       = ConvertTo-Utc ([datetime]$last.Received)
-                $cursorRecipient = $last.RecipientAddress
-            } while ($true)
-        } else {
-            $page = 1
-            do {
-                $p = $Filter.Clone()
-                $p['StartDate'] = ConvertTo-Utc $chunkFrom
-                $p['EndDate']   = ConvertTo-Utc $chunkTo
-                $p['PageSize']  = $pageSize
-                $p['Page']      = $page
-
-                $batch = @(Get-MessageTrace @p -ErrorAction Stop)
-                foreach ($row in $batch) { $collected.Add($row) }
-                if (-not $Quiet) {
-                    Write-Host ("  Retrieved {0,6} row(s)  [page {1}]" -f $collected.Count, $page) -ForegroundColor DarkGray
-                }
-                $page++
-            } while ($batch.Count -eq $pageSize -and $page -le 1000)
-        }
+            if ($batch.Count -lt $pageSize) { break }
+            $last            = $batch[-1]
+            # Received is UTC but may come back untagged; ToUniversalTime() would shift
+            # an untagged value by the local offset and skip or repeat messages.
+            $lastReceived    = [datetime]$last.Received
+            $cursorEnd       = if ($lastReceived.Kind -eq [DateTimeKind]::Unspecified) { [datetime]::SpecifyKind($lastReceived, [DateTimeKind]::Utc) } else { $lastReceived.ToUniversalTime() }
+            $cursorRecipient = $last.RecipientAddress
+        } while ($true)
 
         $chunkFrom = $chunkTo
     }
@@ -469,7 +472,7 @@ Write-Host ""
 if ($rows.Count -eq 0) {
     Write-Host "  Nothing to report." -ForegroundColor Yellow
     Write-Host ""
-    if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Exchange $exo
     return
 }
 
@@ -718,4 +721,4 @@ Write-Host "  $($results.Count) message(s) traced, $forwardedCount with a detect
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+Disconnect-M365Exchange $exo

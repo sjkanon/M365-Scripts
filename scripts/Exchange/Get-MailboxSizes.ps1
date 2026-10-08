@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report mailbox sizes for all or a single mailbox.
@@ -15,7 +15,19 @@
     CSV report path. Defaults to .\MailboxSizes_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself (device code per load.config.ps1).
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .EXAMPLE
     .\Get-MailboxSizes.ps1
@@ -30,7 +42,10 @@
 param(
     [string] $Mailbox,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -38,15 +53,12 @@ $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# Delegated by default (device code and GDAP customer per load.config.ps1),
+# app-only with -ClientId/-CertificateThumbprint or -AppOnly. Exchange Online
+# PowerShell: Graph's reports/getMailboxUsageDetail is aggregated, a day or more
+# behind, and shows concealed names when the tenant hides user details in reports.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -119,4 +131,4 @@ Write-Host ("  {0} mailbox(es) — total storage: {1} GB" -f $results.Count, $to
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo

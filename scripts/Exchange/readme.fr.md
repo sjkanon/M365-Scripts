@@ -8,6 +8,27 @@ Scripts de gestion des calendriers, des boîtes aux lettres et des groupes de di
 
 ---
 
+## Connexion
+
+Chaque script se connecte via [`Connect-M365.ps1`](../Startup/readme.fr.md#connect-m365ps1) : **délégué par défaut** — vous vous connectez en votre nom, avec un code d'appareil si `load.config.ps1` définit `useDeviceCodeAuth`, et sous GDAP le tenant client est atteint avec `-DelegatedOrganization` (`-Organization` ne s'applique qu'à la connexion app-only). App-only sur demande avec `-ClientId` + `-CertificateThumbprint`, ou `-AppOnly` pour prendre les deux dans `graph.appid.json`. Une session existante pour le même tenant est réutilisée, et un script ne déconnecte que ce qu'il a lui-même ouvert. Tous les scripts ici nécessitent PowerShell 7.
+
+Graph est la norme. Là où un script utilise encore Exchange Online PowerShell, ou reste app-only par défaut, voici pourquoi :
+
+| Script | Utilise | Connexion par défaut | Pourquoi |
+|--------|---------|----------------------|----------|
+| `Test-MailboxPermissions`, `Test-DistributionGroupPermissions`, `Set-Distributionlist-dynamic-static` | Exchange Online | Déléguée | Graph n'a pas d'API pour Full Access, Send As, Send on Behalf, `ManagedBy` ou les groupes de distribution dynamiques |
+| `Get-DistributionGroupMembers` | Exchange Online | Déléguée | Graph liste les membres d'un groupe, mais pas les groupes de distribution dynamiques, les propriétaires `ManagedBy` ni les contacts de messagerie comme le rapport les montre |
+| `Test-CalendarPermissions`, `Set-Calendar-rights` | Exchange Online | Déléguée | `calendarPermissions` de Graph n'atteint le calendrier d'un autre utilisateur qu'en app-only ou si vous y avez déjà des droits, et ne connaît pas de rôles comme `PublishingEditor` ; Exchange accepte votre rôle d'administrateur pour chaque boîte aux lettres |
+| `Get-ExternalForwards`, `Test-DkimConfig`, `Get-MessageTraceReport` | Exchange Online | Déléguée | Pas d'API Graph pour le transfert de boîte aux lettres, DKIM ou le suivi des messages |
+| `Get-MailboxSizes` | Exchange Online | Déléguée | Le rapport Graph `getMailboxUsageDetail` est agrégé, a un jour ou plus de retard et affiche des noms masqués si le tenant cache les détails des utilisateurs |
+| `Move-InboxToArchive`, `Restore-MailboxMessages`, `Remove-PhishingMessage` (moteur Graph) | Graph (+ Exchange) | **App-only** (application temporaire) | Un jeton délégué n'atteint la boîte aux lettres d'un autre utilisateur qu'avec Full Access sur celle-ci (`Mail.ReadWrite.Shared`). `-Delegated` prend cette voie si vous avez (ou, dans `Move-InboxToArchive`, recevez) Full Access — pas sous GDAP |
+| `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar` | Graph (+ Exchange) | **App-only** (application temporaire) | Impossible autrement : ils lisent la liste de calendriers de chaque utilisateur ou écrivent dans une boîte aux lettres de ressource, ce qu'aucun jeton délégué n'atteint. Pas de `-Delegated` |
+| `Migrate-Calendar` | Graph + Exchange | Déléguée pour lire, **app-only** pour écrire | Graph ne lit les calendriers de groupe qu'en délégué, et n'écrit dans la nouvelle boîte aux lettres qu'en app-only |
+
+L'application temporaire est créée avec une connexion déléguée (Global Administrator ou Privileged Role Administrator) et supprimée à la fin de l'exécution. Dans `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage` et `Restore-MailboxMessages`, cette connexion est toujours un **code d'appareil en REST pur**, quoi qu'en dise `load.config.ps1` : ces scripts parlent aussi à Exchange Online, dont la MSAL entre en conflit avec celle du SDK Graph, et ne chargent donc pas le SDK pour cela. `Move-InboxToArchive` et `Migrate-Calendar` utilisent `Connect-M365Graph` et suivent `load.config.ps1`.
+
+---
+
 ## Scripts
 
 | Script | Description |
@@ -38,24 +59,29 @@ Migre un calendrier de groupe M365 partagé vers une Room Mailbox. Résout le pr
 
 **Fonctionnement**
 
-1. Crée une App Registration Entra ID (ou en réutilise une existante)
-2. Crée une Room Mailbox comme calendrier de destination
-3. Configure AutoAccept et définit les autorisations Default sur Reviewer
-4. Lit les événements du calendrier du groupe M365 via un accès délégué
-5. Copie les événements vers la Room Mailbox via une authentification d'application
+1. Vous connecte à Graph en votre nom (délégué) et à Exchange Online
+2. Lit les événements du calendrier du groupe M365 — en délégué, la seule façon que Graph autorise
+3. Crée une App Registration **temporaire** avec `Calendars.ReadWrite` (plus `Group.ReadWrite.All` avec `-DeleteSourceGroup`), ou utilise votre propre application
+4. Crée une Room Mailbox comme calendrier de destination, configure AutoAccept et définit les autorisations Default sur Reviewer
+5. Copie les événements vers la Room Mailbox avec le jeton app-only
 6. Supprime éventuellement le groupe M365 source
+7. Supprime l'App Registration temporaire — y compris en cas d'échec
 
-> Le script utilise un double flux d'authentification, car Microsoft exige un accès délégué pour lire les calendriers de groupe, mais des autorisations d'application pour écrire dans d'autres boîtes aux lettres.
+> Deux types d'accès parce que Microsoft l'impose : les calendriers de groupe ne se lisent qu'en délégué, et une boîte aux lettres qui n'est pas la vôtre ne s'écrit qu'en app-only.
+
+Le secret de l'application temporaire vit deux heures, n'est jamais affiché, et l'application est supprimée à la fin. (Avant octobre 2026, le script créait une application permanente `HolidaysCalendarMigration` et affichait son secret.) La connexion déléguée suit `load.config.ps1` : code d'appareil avec `useDeviceCodeAuth`, le client GDAP sous GDAP.
 
 **Paramètres**
 
 | Paramètre | Obligatoire | Par défaut | Description |
 |-----------|----------|---------|-------------|
-| `-TenantId` | Oui | — | ID de tenant Entra ID |
-| `-AdminUPN` | Oui | — | UPN de l'administrateur qui exécute le script (doit être membre du groupe source) |
-| `-ClientId` | Non | — | ID client de l'App Registration. S'il est omis, une nouvelle inscription est créée automatiquement |
-| `-ClientSecret` | Non | — | Secret client. S'il est omis, il est créé automatiquement |
-| `-AppName` | Non | `HolidaysCalendarMigration` | Nom de l'App Registration |
+| `-TenantId` | Non | client GDAP / votre connexion | ID de tenant ou domaine |
+| `-AdminUPN` | Non | — | Administrateur qui l'exécute (doit être membre du groupe source). Sert uniquement à avertir si vous êtes connecté avec un autre compte |
+| `-ClientId` | Non | — | Votre propre App Registration pour l'écriture, avec `-ClientSecret` ou `-CertificateThumbprint`. S'il est omis, une application temporaire est créée puis supprimée |
+| `-ClientSecret` | Non | — | Secret client pour `-ClientId` |
+| `-CertificateThumbprint` | Non | — | Empreinte du certificat pour `-ClientId` |
+| `-AppOnly` | Non | désactivé | Votre propre application avec `ClientId` et `CertificateThumbprint` tirés de `graph.appid.json` |
+| `-AppName` | Non | `CalendarMigration-Temp` | Préfixe du nom de l'App Registration temporaire |
 | `-SourceGroupMail` | Non | — | Adresse e-mail du groupe M365 source |
 | `-SourceGroupDisplayName` | Non | — | Nom d'affichage du groupe source (utilisé comme recherche de secours) |
 | `-DestinationType` | Non | `Room` | Type de boîte aux lettres de destination : `Room` ou `Shared` |
@@ -69,18 +95,16 @@ Migre un calendrier de groupe M365 partagé vers une Room Mailbox. Résout le pr
 **Exemples**
 
 ```powershell
-# Première exécution — créer automatiquement l'App Registration
+# App Registration temporaire, supprimée à la fin
 .\Migrate-Calendar.ps1 `
-    -TenantId     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+    -TenantId     "contoso.onmicrosoft.com" `
     -AdminUPN     "admin@contoso.com" `
     -SourceGroupMail "holidays@contoso.com"
 
-# Exécutions suivantes — réutiliser l'App Registration existante
+# Votre propre App Registration (autorisation d'application Calendars.ReadWrite)
 .\Migrate-Calendar.ps1 `
-    -TenantId     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-    -AdminUPN     "admin@contoso.com" `
-    -ClientId     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-    -ClientSecret "your-client-secret" `
+    -TenantId     "contoso.onmicrosoft.com" `
+    -AppOnly `
     -SourceGroupMail "holidays@contoso.com"
 
 # Essai à blanc — aucune modification
@@ -96,33 +120,29 @@ Migre un calendrier de groupe M365 partagé vers une Room Mailbox. Résout le pr
 | Autorisation | Objectif |
 |-----------|---------|
 | Exchange Admin ou Global Admin | Créer la Room Mailbox |
-| Global Admin | Créer l'App Registration + accorder le consentement administrateur |
+| Global Administrator ou Privileged Role Administrator | Créer l'App Registration temporaire et lui accorder son autorisation (inutile avec votre propre application) |
 | Membre du groupe M365 source | Lire le calendrier du groupe via un accès délégué |
 
-**Modules requis**
-
-```powershell
-Install-Module ExchangeOnlineManagement     -Scope CurrentUser
-Install-Module Microsoft.Graph.Applications  -Scope CurrentUser
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
-Install-Module Microsoft.Graph.Calendar      -Scope CurrentUser
-Install-Module Microsoft.Graph.Groups        -Scope CurrentUser
-Install-Module Microsoft.Graph.Users         -Scope CurrentUser
-```
+**Modules requis :** `ExchangeOnlineManagement`, `Microsoft.Graph.Authentication`, `.Applications`, `.Calendar`, `.Groups` — installés par `scripts\Startup\Install-Modules.ps1`.
 
 ---
 
 ### Set-Calendar-rights.ps1
 
-Accorde à un utilisateur des droits d'accès sur le dossier de calendrier d'un autre utilisateur dans Exchange Online. Prend en charge les boîtes aux lettres en néerlandais, français et anglais.
+Accorde à un utilisateur des droits d'accès sur le calendrier d'un autre utilisateur dans Exchange Online, ou modifie les droits qu'il y a déjà. Le calendrier est trouvé par type de dossier, la langue de la boîte aux lettres n'a donc pas d'importance (`\Agenda`, `\Calendrier`, `\Calendar`, ...). Se connecte lui-même à Exchange Online (délégué par défaut).
+
+Reste sur Exchange Online : `calendarPermissions` de Graph ne peut modifier le calendrier d'un autre utilisateur qu'en app-only ou si vous y avez déjà des droits, et ne connaît pas de rôles comme `PublishingEditor` ou `Contributor`. Le domaine par défaut est toujours lu avec `Get-AcceptedDomain` — la session Exchange est de toute façon ouverte, une connexion Graph rien que pour `/domains` n'apporterait rien.
 
 **Paramètres**
 
 | Paramètre | Obligatoire | Description |
 |-----------|----------|-------------|
-| `-User` | Oui | Nom d'utilisateur (sans domaine) qui reçoit les autorisations |
-| `-TargetMailbox` | Oui | Nom d'utilisateur (sans domaine) de la boîte aux lettres cible |
+| `-User` | Oui | Utilisateur qui reçoit les droits : UPN, ou nom sans domaine (le domaine par défaut est ajouté) |
+| `-TargetMailbox` | Oui | Boîte aux lettres dont le calendrier est partagé : UPN, ou nom sans domaine |
 | `-AccessRights` | Oui | Niveau d'accès (voir le tableau ci-dessous) |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Niveaux d'accès**
 
@@ -142,21 +162,15 @@ Accorde à un utilisateur des droits d'accès sur le dossier de calendrier d'un 
 # Accorder les droits Reviewer
 .\Set-Calendar-rights.ps1 -User j.doe -TargetMailbox a.smith -AccessRights Reviewer
 
-# Essai à blanc
-.\Set-Calendar-rights.ps1 -User j.doe -TargetMailbox a.smith -AccessRights Editor -WhatIf
-```
-
-**Module requis**
-
-```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
+# Essai à blanc, avec les adresses complètes
+.\Set-Calendar-rights.ps1 -User j.doe@contoso.com -TargetMailbox a.smith@contoso.com -AccessRights Editor -WhatIf
 ```
 
 ---
 
 ### Set-Distributionlist-dynamic-static.ps1
 
-Détermine les membres qui correspondent actuellement au filtre d'un groupe de distribution dynamique et les copie dans un groupe de distribution ordinaire (statique) — le groupe cible est créé s'il n'existe pas. Exporte aussi la liste des membres obtenue au format CSV. Nécessite une session Exchange Online active (`Connect-ExchangeOnline`).
+Détermine les membres qui correspondent actuellement au filtre d'un groupe de distribution dynamique et les copie dans un groupe de distribution ordinaire (statique) — le groupe cible est créé s'il n'existe pas. Exporte aussi la liste des membres obtenue au format CSV. Se connecte lui-même à Exchange Online (délégué par défaut) ; une session existante pour le même tenant est réutilisée.
 
 **Paramètres**
 
@@ -175,6 +189,9 @@ Détermine les membres qui correspondent actuellement au filtre d'un groupe de d
 | `-ExportCsvPath` | Non | Chemin d'export CSV des membres obtenus (par défaut : `C:\Temp\DynamicGroupMembers_<timestamp>.csv` sous Windows, `~/Downloads` sous Linux/macOS) |
 | `-SkipMemberAdd` | Non | Uniquement déterminer et exporter les membres, sans modifier le groupe cible |
 | `-RenameDynamicGroupTo` | Non | Renommer le groupe de distribution dynamique source après le traitement |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -196,8 +213,8 @@ Détermine les membres qui correspondent actuellement au filtre d'un groupe de d
 ```
 
 **Remarques**
-- Nécessite le module PowerShell Exchange Online et une session EXO active (`Connect-ExchangeOnline`)
-- Les groupes de distribution dynamiques sont des objets Exchange ; ce script utilise des cmdlets Exchange, pas Graph
+- Nécessite le module ExchangeOnlineManagement ; le script se connecte lui-même
+- Les groupes de distribution dynamiques sont des objets Exchange sans API Graph ; ce script utilise des cmdlets Exchange, pas Graph
 
 ---
 
@@ -207,11 +224,13 @@ Déplace chaque message de la boîte de réception d'une boîte aux lettres vers
 
 **Authentification (par défaut : automatique, sans Full Access)**
 
-Par défaut, le script archive n'importe quelle boîte aux lettres du tenant sans nécessiter de Full Access sur celle-ci. Il se connecte de manière interactive (déléguée, `Application.ReadWrite.All` + `AppRoleAssignment.ReadWrite.All`), crée une App Registration temporaire de courte durée, s'accorde lui-même l'autorisation d'application `Mail.ReadWrite` (pas d'écran de consentement administrateur séparé — le rôle délégué s'en charge), l'utilise pour les opérations sur la boîte aux lettres, puis la supprime à la fin du script. C'est le même modèle d'application temporaire que dans `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. Nécessite Global Administrator ou Privileged Role Administrator pour cette configuration ponctuelle, ainsi que le module `Microsoft.Graph.Applications`.
+App-only est ici le mode par défaut parce qu'un jeton Graph délégué n'atteint la boîte aux lettres d'un autre utilisateur qu'avec Full Access sur celle-ci, ce qu'un rôle d'administrateur Exchange ne donne pas.
 
-- `-Delegated` ignore tout cela et utilise à la place une simple session déléguée `Mail.ReadWrite` — il faut alors Exchange Admin, et non des droits de création d'applications Entra. Pour une boîte aux lettres autre que celle de l'utilisateur connecté, le script se connecte à Exchange Online, accorde temporairement Full Access à ce compte, interroge `Get-MailboxPermission` jusqu'à ce que le droit soit réellement visible (jusqu'à ~3 minutes — les modifications d'autorisations dans Exchange Online ne se propagent pas instantanément), archive, puis retire à nouveau le droit (avec quelques nouvelles tentatives, car le retrait peut lui aussi tomber sur un contrôleur de domaine qui n'est pas encore à jour).
+Par défaut, le script archive n'importe quelle boîte aux lettres du tenant sans nécessiter de Full Access sur celle-ci. Il se connecte en délégué via `Connect-M365Graph` (`Application.ReadWrite.All` + `AppRoleAssignment.ReadWrite.All` ; code d'appareil et client GDAP selon `load.config.ps1`, une session existante avec ces étendues est réutilisée), crée une App Registration temporaire de courte durée, s'accorde lui-même l'autorisation d'application `Mail.ReadWrite` (pas d'écran de consentement administrateur séparé — le rôle délégué s'en charge), l'utilise pour les opérations sur la boîte aux lettres, puis la supprime à la fin du script. C'est le même modèle d'application temporaire que dans `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. Nécessite Global Administrator ou Privileged Role Administrator pour cette configuration ponctuelle, ainsi que le module `Microsoft.Graph.Applications`.
+
+- `-Delegated` ignore tout cela et utilise à la place une simple session déléguée `Mail.ReadWrite` + `Mail.ReadWrite.Shared` (`Mail.ReadWrite.Shared` est ce qui atteint la boîte aux lettres d'un autre utilisateur) — il faut alors Exchange Admin, et non des droits de création d'applications Entra. **Pas sous GDAP** : un compte partenaire n'existe pas dans l'annuaire du client et ne peut donc pas recevoir Full Access ; le script s'arrête avec ce message. Pour une boîte aux lettres autre que celle de l'utilisateur connecté, le script se connecte à Exchange Online (`Connect-M365Exchange`), accorde temporairement Full Access à ce compte, interroge `Get-MailboxPermission` jusqu'à ce que le droit soit réellement visible (jusqu'à ~3 minutes — les modifications d'autorisations dans Exchange Online ne se propagent pas instantanément), archive, puis retire à nouveau le droit (avec quelques nouvelles tentatives, car le retrait peut lui aussi tomber sur un contrôleur de domaine qui n'est pas encore à jour).
   > **Limitation connue :** `Get-MailboxPermission` reflète presque immédiatement l'état propre d'Exchange, mais le cache d'autorisation de Microsoft Graph pour l'accès délégué aux boîtes aux lettres peut avoir jusqu'à **~60 minutes** de retard — c'est une limitation côté Microsoft. Si la lecture de la boîte de réception renvoie toujours 403 après l'interrogation du Full Access, le script continue d'essayer (toutes les 60 s) jusqu'à une échéance fixée par **`-MaxWaitMinutes`** (65 par défaut, ce qui couvre le pire cas documenté par Microsoft) — le droit Full Access reste en place pendant toute l'attente, car le retirer et le réaccorder entre deux tentatives remettrait à zéro le délai de propagation. Augmentez `-MaxWaitMinutes` si 65 ne suffit pas, ou retirez `-Delegated` pour utiliser le mode app-only par défaut, qui n'a pas ce délai.
-- `-ClientId` + `-ClientSecret`/`-CertificateThumbprint` réutilise votre propre App Registration existante au lieu d'en créer une temporaire — cette application doit déjà disposer de l'autorisation d'application `Mail.ReadWrite` (consentement administrateur accordé).
+- `-ClientId` + `-ClientSecret`/`-CertificateThumbprint`, ou `-AppOnly` (depuis `graph.appid.json`), réutilise votre propre App Registration existante au lieu d'en créer une temporaire — cette application doit déjà disposer de l'autorisation d'application `Mail.ReadWrite` (consentement administrateur accordé).
 
 **Paramètres**
 
@@ -224,7 +243,8 @@ Par défaut, le script archive n'importe quelle boîte aux lettres du tenant san
 | `-ClientId` | Non | ID client d'une App Registration existante pour l'authentification app-only — ignore l'application temporaire automatique. À utiliser avec `-TenantId` et `-ClientSecret` ou `-CertificateThumbprint` |
 | `-ClientSecret` | Non | Secret client de l'App Registration indiquée dans `-ClientId` |
 | `-CertificateThumbprint` | Non | Empreinte du certificat de l'App Registration indiquée dans `-ClientId` |
-| `-Delegated` | Non | Ignorer la configuration app-only temporaire automatique et se connecter en mode délégué. Pour les autres boîtes aux lettres, accorde, interroge et retire automatiquement un Full Access temporaire via Exchange Online (nécessite Exchange Admin) |
+| `-AppOnly` | Non | Votre propre application avec `ClientId` et `CertificateThumbprint` tirés de `graph.appid.json` |
+| `-Delegated` | Non | Ignorer la configuration app-only temporaire automatique et se connecter en mode délégué (`Mail.ReadWrite` + `Mail.ReadWrite.Shared`). Pour les autres boîtes aux lettres, accorde, interroge et retire automatiquement un Full Access temporaire via Exchange Online (nécessite Exchange Admin). Pas sous GDAP |
 | `-MaxWaitMinutes` | Non | Uniquement avec `-Delegated`. Durée pendant laquelle le script continue d'essayer en attendant que Graph honore le droit Full Access, avant d'abandonner et de le retirer. `65` par défaut |
 | `-Apply` | Non | Déplacer réellement les messages. Sans ce commutateur, le script indique seulement combien de messages seraient archivés |
 
@@ -258,17 +278,11 @@ Par défaut, le script archive n'importe quelle boîte aux lettres du tenant san
 ```
 
 **Remarques**
-- Les lectures et déplacements dans la boîte aux lettres passent toujours par Microsoft Graph, et non par les cmdlets Exchange Online — nécessite `Microsoft.Graph.Authentication` (ainsi que `Microsoft.Graph.Applications` pour le mode par défaut avec application temporaire automatique, ou `ExchangeOnlineManagement` pour le Full Access temporaire de `-Delegated`)
+- Les lectures et déplacements dans la boîte aux lettres passent toujours par Microsoft Graph, et non par les cmdlets Exchange Online — nécessite `Microsoft.Graph.Authentication` (ainsi que `Microsoft.Graph.Applications` pour le mode par défaut avec application temporaire automatique, ou `ExchangeOnlineManagement` pour le Full Access temporaire de `-Delegated`). À la fin, seules les sessions ouvertes par le script lui-même sont déconnectées
 - Affiche une progression horodatée pendant la pagination des messages de la boîte de réception, pendant le déplacement des lots (`[HH:mm:ss] N / total moved (...%)`) et pendant l'interrogation de la propagation du Full Access en mode `-Delegated`
-- Compatible GDAP : dans une session GDAP (`$global:authMode -eq 'GDAP'`, définie via `Connect-Tenant` / `load.ps1`), `-TenantId` est déduit automatiquement du tenant client sélectionné (`$global:cid`) s'il est omis — même mécanisme de secours que dans `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` sont également pris en compte
+- Compatible GDAP : dans une session GDAP (`$global:authMode -eq 'GDAP'`, définie via `Connect-Tenant` / `load.ps1`), `-TenantId` est déduit automatiquement du tenant client sélectionné (`$global:cid`) s'il est omis — via `Resolve-M365TenantId` dans `Connect-M365.ps1`. `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` sont également pris en compte
 
-**Modules requis**
-
-```powershell
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
-Install-Module Microsoft.Graph.Applications    -Scope CurrentUser
-Install-Module ExchangeOnlineManagement        -Scope CurrentUser
-```
+**Modules requis :** `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `ExchangeOnlineManagement` — installés par `scripts\Startup\Install-Modules.ps1`.
 
 ---
 
@@ -283,7 +297,9 @@ Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 | 3. Déplacer | `Convert-SharedCalendarToResource.ps1` : aperçu, puis trois questions — continuer ? envoyer les invitations ? supprimer l'original ? `-Apply` saute le tour d'aperçu |
 | 4. Informer | Qui avait l'ancien calendrier dans Outlook et qui n'avait que des droits : les personnes qui doivent basculer |
 
-**Une seule connexion.** Une App Registration temporaire avec tout ce dont les deux scripts ont besoin (`Calendars.ReadWrite`, `User.Read.All`, `Group.Read.All`, `MailboxSettings.ReadWrite`) est créée une fois, transmise aux deux, puis supprimée à la fin — y compris en cas d'échec. La connexion à Exchange Online n'est établie qu'une fois, elle aussi. Une session Graph app-only existante ou `-ClientId` / `-ClientSecret` est utilisée à la place si elle est fournie.
+**Une seule connexion.** Une App Registration temporaire avec tout ce dont les deux scripts ont besoin (`Calendars.ReadWrite`, `User.Read.All`, `Group.Read.All`, `MailboxSettings.ReadWrite`) est créée une fois, transmise aux deux, puis supprimée à la fin — y compris en cas d'échec. La connexion à Exchange Online n'est établie qu'une fois, elle aussi — en délégué via `Connect-M365Exchange` (code d'appareil et client GDAP selon `load.config.ps1`), et les deux scripts réutilisent cette session. Une session Graph app-only existante ou `-ClientId` / `-ClientSecret` est utilisée à la place si elle est fournie.
+
+Graph app-only est le mode par défaut parce qu'il ne peut en être autrement : trouver le calendrier lit la liste de calendriers de chaque boîte aux lettres et le déplacement écrit dans une nouvelle boîte aux lettres de ressource, ce qu'aucun jeton délégué n'atteint. La connexion de l'application temporaire est toujours un code d'appareil en REST pur, car Exchange est alors déjà connecté et la MSAL du SDK Graph entre en conflit avec celle d'Exchange — pour la même raison, votre propre application ne fonctionne ici qu'avec `-ClientSecret`, pas avec un certificat ni `-AppOnly`.
 
 Une boîte aux lettres dont le calendrier **principal** correspond (un compte `balie@` qui est lui-même le calendrier partagé) ne peut pas être déplacée ; le script le signale et indique l'alternative sur place, `Set-Mailbox -Type Room`.
 
@@ -371,8 +387,9 @@ Sort un calendrier partagé de la boîte aux lettres d'un utilisateur pour le pl
 | `-PassThru` | Non | Renvoyer un objet résultat (`ResourceAddress`, `Items`, `Verified`, `SourceRemoved`, `BackupPath`) à un script appelant |
 | `-SeriesHorizonDays` | Non | Jusqu'où à l'avance les exceptions des séries sans fin sont comparées (1095 par défaut) |
 | `-BackupPath` | Non | Dossier de sauvegarde (par défaut `C:\Temp\CalendarConvert_<calendar>_<timestamp>`) |
-| `-TenantId` | Non | ID de tenant ou domaine (par défaut : le tenant de la session Exchange) |
+| `-TenantId` | Non | ID de tenant ou domaine (par défaut : le client GDAP, sinon le tenant de la session Exchange) |
 | `-ClientId` / `-ClientSecret` / `-CertificateThumbprint` | Non | Votre propre App Registration pour un accès Graph app-only |
+| `-AppOnly` | Non | Votre propre application avec `ClientId` et `CertificateThumbprint` tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -394,8 +411,9 @@ L'étape 3 relance d'abord la copie : tout ce qui a déjà été copié est igno
 
 | | |
 |--|--|
-| Exchange Online | Exchange Administrator (`New-Mailbox`, autorisations sur les dossiers). Une session existante est réutilisée |
-| Graph | Autorisation d'application `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` pour les couleurs des catégories (facultatif). Les trois mêmes voies que [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)) : session app-only existante, votre propre App Registration, ou une App Registration temporaire supprimée à la fin de l'exécution. Du REST pur, donc pas de conflit MSAL entre Exchange et Graph |
+| Exchange Online | Exchange Administrator (`New-Mailbox`, autorisations sur les dossiers). En délégué via `Connect-M365Exchange` (code d'appareil et client GDAP selon `load.config.ps1`) ; une session existante est réutilisée |
+| Graph | Autorisation d'application `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` pour les couleurs des catégories (facultatif). Les trois mêmes voies que [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)) : session app-only existante, votre propre App Registration (`-ClientId`, ou `-AppOnly`), ou une App Registration temporaire supprimée à la fin de l'exécution. Du REST pur, donc pas de conflit MSAL entre Exchange et Graph — et donc toujours un code d'appareil pour la connexion de l'application temporaire |
+| Pourquoi app-only | Impossible autrement : le script lit le calendrier d'un utilisateur et écrit dans une boîte aux lettres qu'il vient de créer, ce qu'aucun jeton délégué n'atteint sans droits explicites sur les deux — et Graph n'offre aucun moyen délégué de lire les couleurs de catégories d'une autre boîte aux lettres. Pas de `-Delegated` |
 
 **Remarques**
 
@@ -407,7 +425,7 @@ L'étape 3 relance d'abord la copie : tout ce qui a déjà été copié est igno
 
 ## Scripts d'audit
 
-Se connectent automatiquement à Exchange Online si aucune session n'est active ; réutilisent une session existante si vous êtes déjà connecté.
+Se connectent automatiquement à Exchange Online (délégué par défaut, voir [Connexion](#connexion)) ; une session existante pour le même tenant est réutilisée et reste ouverte.
 
 ---
 
@@ -421,7 +439,9 @@ Récupère les autorisations des dossiers de calendrier pour une ou toutes les b
 |-----------|----------|-------------|
 | `-Mailbox` | Non | UPN d'une seule boîte aux lettres. S'il est omis, toutes les boîtes aux lettres utilisateur et partagées sont vérifiées |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -514,7 +534,8 @@ Sans `-Mailbox`, chaque boîte aux lettres du tenant est analysée — le seul m
 | `-TenantId` | Non | ID de tenant ou domaine. Facultatif pour la voie de l'application temporaire — la connexion détermine alors le tenant, qui est affiché |
 | `-ClientId` | Non | Votre propre App Registration pour un accès Graph app-only |
 | `-ClientSecret` | Non | Secret client pour `-ClientId` (REST pur, pas de SDK Graph) |
-| `-CertificateThumbprint` | Non | Empreinte du certificat pour `-ClientId` (via `Connect-MgGraph`) |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour `-ClientId` (via `Connect-M365Graph`, qui réutilise une session adéquate et ne déconnecte que ce qu'il a ouvert) |
+| `-AppOnly` | Non | Votre propre application avec `ClientId` et `CertificateThumbprint` tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -539,10 +560,12 @@ Nécessite les autorisations d'application `Calendars.Read` et `User.Read.All`, 
 | # | Voie | Ce qu'il faut |
 |---|-------|---------------|
 | 1 | Une session Graph app-only que vous avez déjà établie | Rien — elle est utilisée telle quelle |
-| 2 | `-ClientId` + `-ClientSecret` ou `-CertificateThumbprint` | Votre propre application avec les autorisations ci-dessus, consentement administrateur accordé. Une autorisation plus large (`Calendars.ReadWrite`, `Directory.Read.All`) est également acceptée |
+| 2 | `-ClientId` + `-ClientSecret` ou `-CertificateThumbprint`, ou `-AppOnly` | Votre propre application avec les autorisations ci-dessus, consentement administrateur accordé. Une autorisation plus large (`Calendars.ReadWrite`, `Directory.Read.All`) est également acceptée |
 | 3 | **Automatique** — connexion par code d'appareil, une App Registration de courte durée qui s'accorde elle-même les trois autorisations de lecture, supprimée à la fin de l'exécution (y compris en cas d'échec) | Global Administrator ou Privileged Role Administrator pour cette connexion. Aucun module supplémentaire |
 
 Aucune connexion à Exchange Online n'est établie, le conflit MSAL entre Exchange et Graph décrit sous `Remove-PhishingMessage.ps1` ne s'applique donc pas. Compatible GDAP comme les autres scripts Graph : dans une session GDAP, `-TenantId` est déduit du tenant client sélectionné.
+
+**Pourquoi app-only, et pas de `-Delegated` :** le rapport lit la liste de calendriers de chaque boîte aux lettres. Un jeton délégué (`Calendars.Read.Shared`) ne voit que les calendriers partagés avec *vous*, pas ce que les autres utilisateurs mettent dans leur propre liste ; une exécution déléguée ne rapporterait donc rien d'utile. La connexion de la voie 3 est toujours un code d'appareil en REST pur, car `Move-SharedCalendar.ps1` appelle ce script après s'être connecté à Exchange.
 
 **Remarques**
 
@@ -568,7 +591,9 @@ Les entrées héritées et les entrées SELF sont automatiquement filtrées.
 |-----------|----------|-------------|
 | `-Mailbox` | Non | UPN d'une seule boîte aux lettres. S'il est omis, toutes les boîtes aux lettres utilisateur et partagées sont vérifiées |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -599,7 +624,9 @@ Audite les groupes de distribution et les groupes de sécurité à extension mes
 | `-Group` | Non | Nom, alias ou adresse e-mail d'un seul groupe. S'il est omis, tous les groupes de distribution sont audités |
 | `-IncludeMembers` | Non | Lister aussi les membres individuels du groupe dans le rapport |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -635,7 +662,9 @@ Valide la configuration de signature DKIM pour un ou tous les domaines acceptés
 |-----------|----------|-------------|
 | `-Domain` | Non | Domaine à valider. S'il est omis, tous les domaines ayant une configuration de signature sont vérifiés |
 | `-ShowAll` | Non | Afficher l'objet complet de configuration de signature au lieu de la vue résumée |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -659,7 +688,9 @@ Audite toutes les boîtes aux lettres à la recherche de règles de transfert po
 |-----------|----------|-------------|
 | `-Mailbox` | Non | UPN d'une seule boîte aux lettres. S'il est omis, toutes les boîtes aux lettres sont vérifiées |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -683,7 +714,9 @@ Rend compte de la taille des boîtes aux lettres (Mo/Go), du nombre d'éléments
 |-----------|----------|-------------|
 | `-Mailbox` | Non | UPN d'une seule boîte aux lettres. S'il est omis, toutes les boîtes aux lettres utilisateur et partagées sont incluses dans le rapport |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -786,7 +819,9 @@ Appartenance directe uniquement — une personne dans un groupe imbriqué n'est 
 | `-IncludeM365Groups` | Non | Inclure aussi les groupes Microsoft 365, y compris ceux associés à une équipe Teams |
 | `-OutputPath` | Non | Chemin du `.xlsx` (par défaut : `C:\Temp\Distributielijsten_<timestamp>.xlsx`) |
 | `-Csv` | Non | Écrire deux fichiers CSV au lieu d'Excel |
-| `-TenantId` | Non | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut : le client GDAP (`authMode = 'GDAP'` dans `load.config.ps1`), sinon votre propre tenant |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec votre propre application (nécessite `Exchange.ManageAsApp` et un rôle Exchange). Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -814,7 +849,8 @@ Appartenance directe uniquement — une personne dans un groupe imbriqué n'est 
 ```
 
 **Remarques**
-- Nécessite [ImportExcel](https://github.com/dfinke/ImportExcel) pour le `.xlsx`. S'il manque, le script propose de l'installer, et écrit deux fichiers CSV (`*-overzicht.csv`, `*-leden.csv`) si vous refusez — un module manquant ne vous coûte jamais le rapport. `Install-Modules.ps1` l'installe
+- Nécessite [ImportExcel](https://github.com/dfinke/ImportExcel) pour le `.xlsx`. S'il manque, le script le signale, renvoie vers `scripts\Startup\Install-Modules.ps1` et écrit à la place deux fichiers CSV (`*-overzicht.csv`, `*-leden.csv`) — un module manquant ne vous coûte jamais le rapport. Le script n'installe plus lui-même de modules
+- Reste sur Exchange Online : `transitiveMembers` de Graph couvre les listes de distribution et les groupes de sécurité à extension messagerie, mais pas les groupes de distribution dynamiques, les propriétaires `ManagedBy` ni les contacts de messagerie tels que ce rapport les montre
 - Une liste sans membres obtient une ligne `(geen leden)` dans la feuille `Leden` au lieu d'en être discrètement absente — une liste vide est exactement ce qu'un client veut repérer
 - L'appartenance est lue par groupe ; une personne qui ne figure sur aucune liste n'apparaît donc nulle part — le rapport couvre l'appartenance aux groupes, pas l'annuaire des utilisateurs
 - Un filtre de domaine qui ne trouve rien affiche *"No distribution list has a member on @x"* et n'écrit aucun fichier — un classeur vide se lirait comme un rapport en échec plutôt que comme la réponse qu'il est
@@ -839,7 +875,7 @@ Répond à « qui a reçu ceci, quand exactement, et où est-ce allé ensuite ? 
 
 En plus de cela, le script indique le transfert **configuré** de chaque boîte aux lettres interne qui apparaît dans le suivi — `ForwardingSMTPAddress` / `ForwardingAddress` plus toute règle de boîte de réception avec `ForwardTo` / `RedirectTo` / `ForwardAsAttachmentTo` — de sorte qu'un transfert qui ne s'est pas déclenché dans la fenêtre tracée reste visible.
 
-Utilise `Get-MessageTraceV2` lorsqu'il est disponible et se rabat sur l'ancien `Get-MessageTrace`, désormais retiré. Les plages plus longues que la limite V2 sont automatiquement découpées en tranches de 10 jours, et chaque tranche est paginée jusqu'à épuisement.
+Utilise uniquement `Get-MessageTraceV2` et `Get-MessageTraceDetailV2` — les anciens `Get-MessageTrace` / `Get-MessageTraceDetail` sont retirés, et le script s'arrête avec une indication si les cmdlets V2 manquent. Les plages plus longues que la limite V2 sont automatiquement découpées en tranches de 10 jours, et chaque tranche est paginée avec `-StartingRecipientAddress` jusqu'à épuisement. Exchange Online PowerShell parce que Graph n'a pas d'API de suivi des messages ; la configuration de transfert y est lue également.
 
 **Paramètres**
 
@@ -861,7 +897,9 @@ Utilise `Get-MessageTraceV2` lorsqu'il est disponible et se rabat sur l'ancien `
 | `-MaxSiblingLookups` | Non | `100` | Plafond de recherches de messages apparentés |
 | `-SkipForwardingConfig` | Non | désactivé | Ignorer l'inspection du transfert de boîte aux lettres / des règles de boîte de réception |
 | `-OutputPath` | Non | `C:\Temp\` / `~/Downloads` | Chemin du CSV principal. Les rapports de détail et de transfert sont écrits à côté avec les suffixes `_Details` / `_ForwardingConfig` |
-| `-TenantId` | Non | — | ID de tenant Entra ID ou domaine |
+| `-TenantId` | Non | client GDAP / propre tenant | ID de tenant ou domaine |
+| `-ClientId` / `-CertificateThumbprint` | Non | — | Connexion app-only avec votre propre application. Sans eux : déléguée, en votre nom |
+| `-AppOnly` | Non | désactivé | App-only avec le `ClientId` et le `CertificateThumbprint` du tenant tirés de `graph.appid.json` |
 
 **Exemples**
 
@@ -892,11 +930,7 @@ Utilise `Get-MessageTraceV2` lorsqu'il est disponible et se rabat sur l'ancien `
 - La lecture des règles de boîte de réception nécessite des autorisations sur la boîte aux lettres — les boîtes aux lettres illisibles sont ignorées sans message (utilisez `-Verbose` pour voir lesquelles)
 - `-IncludeDetails` effectue un appel d'API par message et est soumis à la limitation d'Exchange Online ; augmentez `-MaxDetailLookups` en connaissance de cause
 
-**Module requis**
-
-```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
-```
+**Module requis :** `ExchangeOnlineManagement` — installé par `scripts\Startup\Install-Modules.ps1`.
 
 ---
 
@@ -944,15 +978,17 @@ Le moteur est `Graph` par défaut lorsque `-Mailbox` est fourni, et `Purview` si
 | `-IncludeCalendar` | Non | désactivé | Supprimer aussi les **éléments de calendrier** correspondants, pas seulement le courrier. Fonctionne avec **les deux moteurs** ; nécessite `-Subject` ou `-SenderAddress` |
 | `-CalendarDaysBack` | Non | `30` | Jusqu'où remonter dans le calendrier |
 | `-CalendarDaysForward` | Non | `365` | Jusqu'où avancer dans le calendrier |
-| `-VerifyWithGraph` | Non | désactivé | Après une purge Purview, vérifier les boîtes aux lettres concernées via Graph pour confirmer que les messages ont réellement disparu. Nécessite la même session Graph app-only que `-Engine Graph` |
+| `-VerifyWithGraph` | Non | désactivé | Après une purge Purview, vérifier les boîtes aux lettres concernées via Graph pour confirmer que les messages ont réellement disparu. Nécessite le même accès Graph que `-Engine Graph` |
 | `-MaxPurgeRounds` | Non | `10` | Purview purge au maximum 10 éléments par boîte aux lettres et par action, le script procède donc par tours. 10 tours = jusqu'à 100 éléments par boîte aux lettres |
 | `-MaxMessagesPerMailbox` | Non | `500` | Plafond de sécurité Graph par boîte aux lettres ; son atteinte est signalée explicitement |
 | `-TimeoutMinutes` | Non | `30` | Durée d'attente de la fin d'une recherche ou d'une action de purge |
 | `-OutputPath` | Non | `C:\Temp\` / `~/Downloads` | Chemin du rapport CSV |
-| `-TenantId` | Non | — | ID de tenant ou domaine, utilisé lorsque le script doit se connecter lui-même |
+| `-TenantId` | Non | client GDAP | ID de tenant ou domaine, utilisé lorsque le script doit se connecter lui-même |
 | `-ClientId` | Non | — | Votre propre App Registration pour l'authentification Graph app-only — ignore l'application temporaire automatique |
 | `-ClientSecret` | Non | — | Secret client pour `-ClientId` |
 | `-CertificateThumbprint` | Non | — | Empreinte du certificat pour `-ClientId` |
+| `-AppOnly` | Non | désactivé | Votre propre application avec `ClientId` et `CertificateThumbprint` tirés de `graph.appid.json` |
+| `-Delegated` | Non | désactivé | Moteur Graph en votre nom (`Mail.ReadWrite.Shared`, plus `Calendars.ReadWrite.Shared` avec `-IncludeCalendar`) — aucune application. N'atteint **que les boîtes aux lettres sur lesquelles vous avez déjà Full Access**, donc adapté à quelques destinataires connus, pas à `-AllMailboxes`. Pas sous GDAP |
 
 **Exemples**
 
@@ -986,6 +1022,10 @@ Le moteur est `Graph` par défaut lorsque `-Mailbox` est fourni, et `Purview` si
 # 6. Campagne avec pièce jointe HTML
 .\Remove-PhishingMessage.ps1 -AttachmentName "*.html" `
     -Sender "billing@evil.example" -Apply
+
+# 7. Deux destinataires connus sur lesquels vous avez Full Access — Graph en votre nom, sans application
+.\Remove-PhishingMessage.ps1 -Mailbox "a@contoso.com","b@contoso.com" `
+    -Sender "no-reply@evil.example" -Delegated -Apply
 ```
 
 **Déroulement type d'un incident**
@@ -1005,8 +1045,8 @@ Le moteur est `Graph` par défaut lorsque `-Mailbox` est fourni, et `Purview` si
 
 | Moteur | Autorisation |
 |--------|-----------|
-| `Purview` | Appartenance au rôle **Search And Purge** — en pratique le groupe de rôles *Organization Management* ou *eDiscovery Manager* dans le portail de conformité Purview. Se connecte via `Connect-IPPSSession -EnableSearchOnlySession` |
-| `Graph` | `Mail.ReadWrite` en app-only. **Vous n'avez pas à le mettre en place vous-même** — voir les trois voies ci-dessous |
+| `Purview` | Appartenance au rôle **Search And Purge** — en pratique le groupe de rôles *Organization Management* ou *eDiscovery Manager* dans le portail de conformité Purview. Se connecte en délégué via `Connect-IPPSSession -EnableSearchOnlySession`, et atteint un client GDAP avec `-DelegatedOrganization` (un appel propre au script, car `Connect-M365Exchange -IncludeCompliance` ne transmet pas `-EnableSearchOnlySession`) |
+| `Graph` | `Mail.ReadWrite` en app-only par défaut — **vous n'avez pas à le mettre en place vous-même**, voir les trois voies ci-dessous. Ou `-Delegated` avec Full Access sur les boîtes aux lettres cibles |
 
 **Comment le moteur Graph (et `-VerifyWithGraph`) obtient son accès**
 
@@ -1015,7 +1055,7 @@ Le même modèle en trois voies que [`Move-InboxToArchive.ps1`](Move-InboxToArch
 | # | Voie | Ce qu'il faut |
 |---|-------|---------------|
 | 1 | Une session Graph app-only que vous avez déjà établie | Rien — elle est utilisée telle quelle |
-| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` ou `-CertificateThumbprint`) | Votre propre application avec l'autorisation d'application `Mail.ReadWrite`, consentement administrateur accordé. **Avec `-ClientSecret`, c'est la voie la plus robuste** — elle obtient son jeton en REST pur et ne charge jamais le SDK Graph |
+| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` ou `-CertificateThumbprint`), ou `-AppOnly` | Votre propre application avec l'autorisation d'application `Mail.ReadWrite`, consentement administrateur accordé. **Avec `-ClientSecret`, c'est la voie la plus robuste** — elle obtient son jeton en REST pur et ne charge jamais le SDK Graph |
 | 3 | **Automatique** — connexion par code d'appareil, puis une App Registration de courte durée qui s'accorde elle-même `Mail.ReadWrite`, remet un jeton app-only et est **supprimée à la fin de l'exécution** | Global Administrator ou Privileged Role Administrator pour cette connexion ponctuelle. Aucun module supplémentaire |
 
 La voie 3 est celle qui s'applique lorsque vous ne fournissez rien, de sorte que `-VerifyWithGraph` fonctionne d'emblée. Le rôle délégué accorde le consentement, il n'y a donc pas d'écran de consentement administrateur séparé. Si la configuration échoue à mi-chemin, l'application partiellement créée est supprimée avant que l'erreur ne soit signalée — aucun orphelin ne reste dans Entra ID.
@@ -1035,7 +1075,7 @@ Les voies 2 (avec `-ClientSecret`) et 3 reposent toutes deux sur du REST pur —
 >
 > Lorsque `-VerifyWithGraph` est utilisé avec le moteur Purview, l'accès Graph est établi **avant** la purge, de sorte qu'une vérification impossible est signalée d'emblée plutôt qu'après la disparition des messages. La purge a lieu dans tous les cas — une vérification en échec ne signifie jamais une purge en échec.
 
-> `Mail.ReadWrite` délégué n'atteint jamais que *votre propre* boîte aux lettres ; une session déléguée n'est donc volontairement **pas** acceptée pour le moteur Graph, et le script passe à la voie 2 ou 3. Notez que `Mail.ReadWrite` (application) donne accès à **toutes** les boîtes aux lettres du tenant ; limitez l'application avec `New-ApplicationAccessPolicy` si c'est plus large que souhaité.
+> `Mail.ReadWrite` délégué n'atteint jamais que *votre propre* boîte aux lettres ; une session déléguée `Connect-MgGraph` existante n'est donc volontairement **pas** acceptée pour le moteur Graph, et le script passe à la voie 2 ou 3. C'est pourquoi app-only est le mode par défaut. `-Delegated` est l'alternative explicite : une connexion par code d'appareil en même REST pur avec `Mail.ReadWrite.Shared`, actualisée pour les longues exécutions, qui ne fonctionne que sur les boîtes aux lettres où vous avez déjà Full Access. Notez que `Mail.ReadWrite` (application) donne accès à **toutes** les boîtes aux lettres du tenant ; limitez l'application avec `New-ApplicationAccessPolicy` si c'est plus large que souhaité.
 
 > Compatible GDAP : dans une session GDAP (`$global:authMode -eq 'GDAP'`, définie par `Connect-Tenant` / `load.ps1`), `-TenantId` est déduit du tenant client sélectionné, comme pour les scripts SharePoint.
 
@@ -1061,12 +1101,7 @@ Les voies 2 (avec `-ClientSecret`) et 3 reposent toutes deux sur du REST pur —
 - KQL ne prend pas en charge les caractères génériques dans une expression ; avec `-Subject "*invoice*"`, les caractères génériques sont donc retirés sur le moteur Purview et la comparaison se fait sur l'expression ; sur Graph, les caractères génériques fonctionnent tels qu'écrits
 - Chaque exécution écrit un rapport CSV de ce qui a été trouvé et de ce qui a été supprimé
 
-**Modules requis**
-
-```powershell
-Install-Module ExchangeOnlineManagement       -Scope CurrentUser
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # facultatif, voir ci-dessous
-```
+**Modules requis :** `ExchangeOnlineManagement`, et facultativement `Microsoft.Graph.Authentication` — tous deux installés par `scripts\Startup\Install-Modules.ps1`.
 
 Microsoft.Graph.Authentication n'est nécessaire que pour réutiliser une session `Connect-MgGraph` existante ou pour utiliser `-CertificateThumbprint`. Les voies `-ClientSecret` et application temporaire automatique fonctionnent en REST pur et n'ont besoin de rien d'autre qu'ExchangeOnlineManagement.
 
@@ -1101,10 +1136,12 @@ Les messages arrivés dans **Archive** sans enregistrement d'audit — Exchange 
 | `-UnauditedArchiveToInbox` | Non | désactivé | Déplacer aussi vers la boîte de réception les éléments d'Archive non audités modifiés dans la fenêtre |
 | `-Apply` | Non | désactivé | **Restaurer réellement.** Sans ce commutateur, l'exécution se contente de rendre compte |
 | `-OutputPath` | Non | `C:\Temp\` / `~/Downloads` | Chemin du rapport CSV ; la piste d'audit est écrite à côté sous `*_Audit.csv` |
-| `-TenantId` | Non | — | ID de tenant ou domaine ; nécessaire pour Graph app-only, sauf s'il peut être déduit de GDAP |
+| `-TenantId` | Non | client GDAP | ID de tenant ou domaine ; nécessaire pour Graph app-only, sauf s'il peut être déduit de GDAP |
 | `-ClientId` | Non | — | Votre propre App Registration (autorisation d'application Mail.ReadWrite) — ignore l'application temporaire |
 | `-ClientSecret` | Non | — | Secret client pour `-ClientId` |
 | `-CertificateThumbprint` | Non | — | Empreinte du certificat pour `-ClientId` |
+| `-AppOnly` | Non | désactivé | Votre propre application avec `ClientId` et `CertificateThumbprint` tirés de `graph.appid.json` |
+| `-Delegated` | Non | désactivé | Graph en votre nom (`Mail.ReadWrite.Shared`), sans aucune application. Ne fonctionne que si vous avez **déjà Full Access** sur `-Mailbox` ; un droit fraîchement accordé peut mettre jusqu'à une heure à atteindre Graph. Pas sous GDAP |
 
 **Exemples**
 
@@ -1121,6 +1158,9 @@ Les messages arrivés dans **Archive** sans enregistrement d'audit — Exchange 
 # 3. Uniquement les suppressions, dans une fenêtre précise — aucun accès Graph nécessaire
 .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Include Deleted `
     -After "2026-09-25 14:00" -Before "2026-09-25 16:00" -Apply
+
+# 3b. Graph en votre nom, parce que vous avez déjà Full Access sur la boîte aux lettres
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 -Delegated
 
 # 4. Annuler une exécution de Move-InboxToArchive.ps1, y compris les éléments d'Archive non audités
 .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 `
@@ -1149,7 +1189,8 @@ Les messages arrivés dans **Archive** sans enregistrement d'audit — Exchange 
 |------|-----------|
 | Journal d'audit | **View-Only Audit Logs** ou **Audit Logs** (Organization Management / Compliance Management) |
 | `Deleted` | **Mailbox Import Export** — dans aucun groupe de rôles par défaut : `New-ManagementRoleAssignment -Role "Mailbox Import Export" -User admin@contoso.com`, puis reconnectez-vous. **Facultatif :** sans ce rôle, l'exécution restaure via Graph — tout sauf les éléments supprimés définitivement |
-| `Moved` (et `Deleted` sans le rôle) | `Mail.ReadWrite` en app-only, par les trois mêmes voies que [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) : une session app-only existante, `-ClientId`, ou une application temporaire supprimée à la fin |
+| `Moved` (et `Deleted` sans le rôle) | `Mail.ReadWrite` en app-only, par les trois mêmes voies que [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1) : une session app-only existante, `-ClientId` / `-AppOnly`, ou une application temporaire supprimée à la fin (sa connexion est toujours un code d'appareil en REST pur, pour rester à l'écart de la MSAL du module Exchange). App-only est le mode par défaut parce qu'un jeton délégué n'atteint la boîte aux lettres d'un autre utilisateur qu'avec Full Access sur celle-ci ; `-Delegated` prend cette voie si vous l'avez |
+| Connexion | Exchange Online se connecte en délégué via `Connect-M365Exchange` (code d'appareil et client GDAP selon `load.config.ps1`) ; une session existante est réutilisée |
 
 **Remarques**
 

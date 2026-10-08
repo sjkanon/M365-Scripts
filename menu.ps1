@@ -221,7 +221,8 @@ $ExchangeSubmenu = @(
         $mbx   = Read-Host "  Mailbox UPN"
         $after = Read-Host "  Only messages on/after this date [yyyy-MM-dd] (optional)"
         $before = Read-Host "  Only messages before this date [yyyy-MM-dd] (optional)"
-        $deleg = Read-Host "  Delegated mode (Exchange Admin, no temp app) instead of automatic? [y/N]"
+        # -Delegated needs your own Full Access on the mailbox, which a GDAP partner cannot get.
+        $deleg = if ($global:authMode -eq 'GDAP') { 'n' } else { Read-Host "  Delegated mode (you have Full Access on the mailbox, no temp app)? [y/N]" }
         $p = @{ Mailbox = $mbx }
         if ($after)  { $p['After']  = [datetime]$after }
         if ($before) { $p['Before'] = [datetime]$before }
@@ -572,18 +573,21 @@ $menu = @(
         Label='Migrate-Calendar    — migrate M365 group calendar to room mailbox'
         Script="$ROOT\scripts\Exchange\Migrate-Calendar.ps1"
         Params={
-            $tenantId  = Read-Host "  TenantId"
-            $adminUPN  = Read-Host "  AdminUPN"
+            $tenantId  = Read-Host "  TenantId (blank = GDAP customer / the tenant you sign in to)"
+            $adminUPN  = Read-Host "  AdminUPN (optional)"
             $groupMail = Read-Host "  Source group mail"
-            return @{ TenantId=$tenantId; AdminUPN=$adminUPN; SourceGroupMail=$groupMail }
+            $a = @{ SourceGroupMail=$groupMail }
+            if ($tenantId) { $a['TenantId']=$tenantId }
+            if ($adminUPN) { $a['AdminUPN']=$adminUPN }
+            return $a
         }
     }
     [PSCustomObject]@{ Key='3'; FKey=[ConsoleKey]::F3; Category='Exchange'
         Label='Set-Calendar-rights — grant calendar permissions to a user'
         Script="$ROOT\scripts\Exchange\Set-Calendar-rights.ps1"
         Params={
-            $user    = Read-Host "  User (without domain)"
-            $mailbox = Read-Host "  Target mailbox (without domain)"
+            $user    = Read-Host "  User (UPN, or name without domain)"
+            $mailbox = Read-Host "  Target mailbox (UPN, or name without domain)"
             $rights  = Read-Host "  Access rights (e.g. Reviewer, Editor, Owner)"
             return @{ User=$user; TargetMailbox=$mailbox; AccessRights=$rights }
         }
