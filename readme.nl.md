@@ -1008,6 +1008,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (12)
+| Wijziging |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.nl.md#connect-m365ps1) werkt onder `Set-StrictMode` en kan een nieuwe aanmelding afdwingen.** Het las `$global:authMode`, `cid`, `connectmsoldomain`, `useDeviceCodeAuth` en `upn` rechtstreeks; een script met `Set-StrictMode -Version Latest` dat zonder `load.ps1` draaide (een geplande taak, een runbook, een nieuw venster) stopte met "variable has not been set". De instellingen worden nu via `Get-Variable` gelezen, en `Invoke-M365GraphPaged` leest geen `value` of `@odata.nextLink` meer die er niet is. Nieuw `Connect-M365Graph -Force` meldt opnieuw aan als een sessie goed lijkt maar het token niet meer geldig is |
+| Geverifieerd: syntaxcheck; onder `Set-StrictMode -Version Latest` zonder enige instelling geven de tenant-, device code- en Exchange-domeinkeuze leeg terug, en met GDAP de klant; `Invoke-M365GraphPaged` onder strict mode met een gemockt antwoord van twee pagina's, een leeg antwoord en een los object. **Niet** geverifieerd: tegen een tenant |
+
 ### 2026-10-08 (11)
 | Wijziging |
 |--------|

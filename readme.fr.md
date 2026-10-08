@@ -1008,6 +1008,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (12)
+| Modification |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.fr.md#connect-m365ps1) fonctionne sous `Set-StrictMode` et peut forcer une nouvelle connexion.** Il lisait directement `$global:authMode`, `cid`, `connectmsoldomain`, `useDeviceCodeAuth` et `upn` ; un script avec `Set-StrictMode -Version Latest` lancé sans `load.ps1` (tâche planifiée, runbook, nouvelle fenêtre) s'arrêtait sur « variable has not been set ». Les réglages sont maintenant lus via `Get-Variable`, et `Invoke-M365GraphPaged` ne lit plus de `value` ou `@odata.nextLink` absent. Nouveau `Connect-M365Graph -Force` pour se reconnecter quand une session semble correcte mais que son jeton n'est plus valide |
+| Vérifié : contrôle de syntaxe ; sous `Set-StrictMode -Version Latest` sans aucun réglage, le choix du tenant, du code d'appareil et du domaine Exchange renvoie vide, et avec GDAP le client ; `Invoke-M365GraphPaged` sous mode strict avec une réponse simulée de deux pages, une vide et un objet seul. **Non** vérifié : sur un tenant |
+
 ### 2026-10-08 (11)
 | Modification |
 |--------|
