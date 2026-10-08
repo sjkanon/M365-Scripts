@@ -1,7 +1,20 @@
 # ============================================================
-# Teams Archivering - Volledig Automatisch Script v8.19
+# Teams Archivering - Volledig Automatisch Script v9.0
 # PowerShell 7+ vereist | Uitvoeren als Global Admin
 # ============================================================
+#
+# Aanmelden (via scripts\Startup\Connect-M365.ps1):
+#   - Standaard gedelegeerd: je meldt je aan als de admin van de klant, met een
+#     apparaatcode zoals load.config.ps1 zegt (zonder load.config: apparaatcode,
+#     zoals vroeger). Geen tijdelijke app-registratie meer.
+#   - App-only op aanvraag: -ClientId + -CertificateThumbprint, of -AppOnly
+#     (graph.appid.json). De app heeft dan de application-varianten nodig van
+#     Group.Read.All, Sites.Read.All, TeamMember.Read.All, ChannelMessage.Read.All
+#     (een protected API) en TeamSettings/ChannelSettings.ReadWrite.All.
+#   - Alles loopt via Microsoft Graph (teams, leden, kanalen, bestanden, chat,
+#     archiveren). Alleen het toekennen van site-admin rechten bij een "access
+#     denied" (Set-PnPSite -Owners) heeft geen Graph-API en blijft PnP; dat
+#     gebruikt de PnP-app uit pnp.appid.json of -PnPClientId.
 
 param(
     [ValidateSet("interactive", "archive", "undo", "skip")]
@@ -13,7 +26,16 @@ param(
     [switch]$ChannelFallbackToRename,
     [switch]$DryRun,
     # Werkblad met de Teams-lijst. Leeg = het eerste werkblad van het Excel-bestand.
-    [string]$WorksheetName
+    [string]$WorksheetName,
+    # Tenant ID van de klant. Leeg = de GDAP-klant (Connect-Tenant) als standaard in de wizard.
+    [string]$TenantId,
+    # App-only in plaats van gedelegeerd: app-registratie + certificaat.
+    [string]$ClientId,
+    [string]$CertificateThumbprint,
+    # App-only met ClientId/CertificateThumbprint uit graph.appid.json.
+    [switch]$AppOnly,
+    # PnP-app voor de site-admin fallback. Leeg = pnp.appid.json.
+    [string]$PnPClientId
 )
 
 #region ZELFHERSTART - Modules opkuisen en sessie hernieuwen
@@ -55,7 +77,8 @@ if ($herstart -ne "1") {
     Write-Host "  Installeren: Microsoft.Graph..." -ForegroundColor Yellow
     Install-Module Microsoft.Graph -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
 
-    foreach ($mod in @("MicrosoftTeams","PnP.PowerShell","ImportExcel")) {
+    # De Teams-module is niet meer nodig: teams, leden en kanalen komen uit Graph.
+    foreach ($mod in @("PnP.PowerShell","ImportExcel")) {
         if (-not (Get-Module -ListAvailable $mod -ErrorAction SilentlyContinue)) {
             Write-Host "  Installeren: $mod..." -ForegroundColor Yellow
             Install-Module $mod -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
@@ -69,6 +92,12 @@ if ($herstart -ne "1") {
     # De parameters gaan mee: zonder dat viel o.a. -DryRun bij elke eerste run weg
     # en archiveerde de herstarte sessie echt.
     $env:TEAMS_ARCHIVER_HERSTART = "1"
+    # De nieuwe sessie start met -NoProfile en kent load.config.ps1 niet: geef de
+    # aanmeldinstellingen mee. Zonder instelling blijft het de apparaatcode van vroeger.
+    $env:TEAMS_ARCHIVER_DEVICECODE = if ($null -eq $global:useDeviceCodeAuth) { "1" } elseif ($global:useDeviceCodeAuth) { "1" } else { "0" }
+    $env:TEAMS_ARCHIVER_AUTHMODE   = [string]$global:authMode
+    $env:TEAMS_ARCHIVER_CID        = [string]$global:cid
+    $env:TEAMS_ARCHIVER_UPN        = [string]$global:upn
     $pwshPath = (Get-Command pwsh).Source
     $restartArgs = if ($IsWindows) {
         @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $MyInvocation.MyCommand.Path)
@@ -84,78 +113,39 @@ if ($herstart -ne "1") {
         }
     }
     & $pwshPath @restartArgs
-    exit $LASTEXITCODE
+    $restartExit = $LASTEXITCODE
+    # Niet laten hangen in de aanroepende sessie: anders slaat een volgende run de opkuis over.
+    foreach ($v in 'TEAMS_ARCHIVER_HERSTART','TEAMS_ARCHIVER_DEVICECODE','TEAMS_ARCHIVER_AUTHMODE','TEAMS_ARCHIVER_CID','TEAMS_ARCHIVER_UPN') {
+        Remove-Item "Env:$v" -ErrorAction SilentlyContinue
+    }
+    exit $restartExit
 }
 
 # Vanaf hier: we zitten in de hergestarte schone sessie
 Write-Host "`n  Schone sessie actief. Modules worden geladen..." -ForegroundColor Green
 
-Import-Module Microsoft.Graph.Authentication,
-              Microsoft.Graph.Applications,
-              Microsoft.Graph.Groups -ErrorAction Stop
+Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 
-Write-Host "  Graph modules geladen." -ForegroundColor Green
+# Aanmeldinstellingen van de aanroepende sessie terugzetten (zie de herstart hierboven).
+if ($env:TEAMS_ARCHIVER_DEVICECODE) { $global:useDeviceCodeAuth = $env:TEAMS_ARCHIVER_DEVICECODE -eq "1" }
+if ($env:TEAMS_ARCHIVER_AUTHMODE)   { $global:authMode = $env:TEAMS_ARCHIVER_AUTHMODE }
+if ($env:TEAMS_ARCHIVER_CID)        { $global:cid = $env:TEAMS_ARCHIVER_CID }
+if ($env:TEAMS_ARCHIVER_UPN)        { $global:upn = $env:TEAMS_ARCHIVER_UPN }
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
+Write-Host "  Graph module geladen." -ForegroundColor Green
+
+$wantAppOnly = [bool]$ClientId -or $AppOnly
 
 # Cross-platform tijdelijke map
 $tempDir = [System.IO.Path]::GetTempPath()
-$cleanupEventName = "TeamsArchiverCleanup"
-
-# Tijdelijke app-tracking
-$isTempApp = $false
-$app = $null
-$sp = $null
-
-function Remove-TempArchiverApp {
-    param(
-        [Parameter(Mandatory = $false)]$App,
-        [Parameter(Mandatory = $false)]$Sp,
-        [switch]$Silent
-    )
-
-    if (-not $App) { return }
-
-    try {
-        if ($Sp -and $Sp.Id) {
-            Remove-MgServicePrincipal -ServicePrincipalId $Sp.Id -ErrorAction SilentlyContinue
-        }
-        if ($App.Id) {
-            Remove-MgApplication -ApplicationId $App.Id -ErrorAction SilentlyContinue
-        }
-        if (-not $Silent) {
-            Write-Host "  Tijdelijke app verwijderd." -ForegroundColor Yellow
-        }
-    } catch {
-        if (-not $Silent) {
-            Write-Warning "  Kon tijdelijke app niet volledig verwijderen: $_"
-        }
-    }
-}
-
-function Register-TempAppCleanupEvent {
-    param(
-        [Parameter(Mandatory = $true)][string]$EventName,
-        [Parameter(Mandatory = $true)]$App,
-        [Parameter(Mandatory = $true)]$Sp
-    )
-
-    Unregister-Event -SourceIdentifier $EventName -ErrorAction SilentlyContinue
-    Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
-        if ($using:App -and $using:App.Id) {
-            try {
-                if ($using:Sp -and $using:Sp.Id) {
-                    Remove-MgServicePrincipal -ServicePrincipalId $using:Sp.Id -ErrorAction SilentlyContinue
-                }
-                Remove-MgApplication -ApplicationId $using:App.Id -ErrorAction SilentlyContinue
-            } catch { }
-        }
-    } | Out-Null
-}
 #endregion
 
 #region CONFIGURATIE - Interactief opvragen
 Clear-Host
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  Teams Archivering - Setup Wizard v8.19" -ForegroundColor Cyan
+Write-Host "  Teams Archivering - Setup Wizard v9.0" -ForegroundColor Cyan
 Write-Host "============================================`n" -ForegroundColor Cyan
 
 # Excel-bestand
@@ -188,8 +178,12 @@ Write-Host "  OK: $archiveRoot`n" -ForegroundColor Green
 Write-Host "Stap 3/5 - Tenant ID van de Microsoft 365-omgeving van de klant" -ForegroundColor Yellow
 Write-Host "  Vind je via: https://entra.microsoft.com > Microsoft Entra ID > Overview"
 Write-Host "  Formaat: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`n"
+$tenantStandaard = Resolve-M365TenantId -TenantId $TenantId
+if ($tenantStandaard -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { $tenantStandaard = $null }
+if ($tenantStandaard) { Write-Host "  Standaard (Enter): $tenantStandaard" }
 do {
     $tenantId = (Read-Host "  Tenant ID").Trim()
+    if (-not $tenantId -and $tenantStandaard) { $tenantId = $tenantStandaard.ToLowerInvariant() }
     if ($tenantId -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') {
         Write-Host "  Ongeldig formaat. Probeer opnieuw.`n" -ForegroundColor Red
     }
@@ -229,185 +223,135 @@ $bevestig = Read-Host "Klopt alles? Start? (j/n)"
 if ($bevestig -ne "j") { Write-Host "Geannuleerd." -ForegroundColor Yellow; exit }
 #endregion
 
-#region STAP 1 - Login Global Admin
-Write-Host "`n[1/12] Inloggen als Global Admin..." -ForegroundColor Cyan
-Write-Host "  Je krijgt een code + link." -ForegroundColor Yellow
-Write-Host "  Log in met het GLOBAL ADMIN account van de klant.`n" -ForegroundColor Yellow
+#region STAP 1-4 - Inloggen (Graph, gedelegeerd standaard)
+Write-Host "`n[1/12] Inloggen op Microsoft Graph..." -ForegroundColor Cyan
 
-Disconnect-MgGraph -ErrorAction SilentlyContinue
+# Gedelegeerd: de Microsoft Graph Command Line Tools-app met deze scopes; de admin geeft
+# bij de eerste aanmelding toestemming. Een tijdelijke app-registratie is niet meer nodig.
+$graphScopes = @(
+    "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
+    "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All","ChannelSettings.ReadWrite.All"
+)
 
-try {
-    Connect-MgGraph `
-        -TenantId $tenantId `
-        -Scopes "Application.ReadWrite.All","AppRoleAssignment.ReadWrite.All" `
-    -ContextScope Process `
-        -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
-} catch {
-    Write-Host "`n  FOUT bij inloggen: $_" -ForegroundColor Red
-    Write-Host "  Controleer:" -ForegroundColor Yellow
-    Write-Host "   - Tenant ID correct? ($tenantId)"
-    Write-Host "   - Log je in met het admin-account van de klant (niet je eigen of partner-account)?"
-    Write-Host "   - Is MFA ingesteld op dit account?"
-    exit
+if ($wantAppOnly) {
+    Write-Host "  App-only: de app moet in de tenant van de klant toestemming hebben.`n" -ForegroundColor Yellow
+} else {
+    if ($global:useDeviceCodeAuth) { Write-Host "  Je krijgt een code + link." -ForegroundColor Yellow }
+    Write-Host "  Log in met het GLOBAL ADMIN account van de klant (of je GDAP-partneraccount).`n" -ForegroundColor Yellow
 }
-
-$account = (Get-MgContext).Account
-if (-not $account) {
-    Write-Host "  FOUT: Inloggen mislukt, geen account gevonden." -ForegroundColor Red; exit
-}
-Write-Host "  Ingelogd als: $account" -ForegroundColor Green
-#endregion
-
-#region STAP 2 - Entra App aanmaken of hergebruiken
-Write-Host "`n[2/12] Tijdelijke Entra app registreren..." -ForegroundColor Cyan
-
-$appName = "Temp-Teams-Archiver-$(Get-Date -Format 'yyyyMMddHHmmss')"
-$isTempApp = $true
-
-try {
-    $app = New-MgApplication -DisplayName $appName `
-        -PublicClient @{ RedirectUris = @("http://localhost") } `
-        -IsFallbackPublicClient -ErrorAction Stop
-    Write-Host "  Tijdelijke app aangemaakt: $($app.AppId)" -ForegroundColor Green
-} catch {
-    Write-Host "  FOUT bij aanmaken tijdelijke app: $_" -ForegroundColor Red; exit
-}
-
-try {
-    $sp = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
-    Write-Host "  Service Principal aangemaakt." -ForegroundColor Green
-    Register-TempAppCleanupEvent -EventName $cleanupEventName -App $app -Sp $sp
-} catch {
-    Write-Host "  FOUT bij aanmaken Service Principal: $_" -ForegroundColor Red
-    Remove-TempArchiverApp -App $app -Sp $sp
-    exit
-}
-
-# ClientId ophalen en valideren
-$clientId = $app.AppId
-if ([string]::IsNullOrWhiteSpace($clientId)) {
-    Write-Host "  FOUT: ClientId is leeg na aanmaken app." -ForegroundColor Red; exit
-}
-
-# Opslaan als fallback
-$clientId | Out-File (Join-Path $tempDir "teams_archiver_clientid.txt") -Force
-Write-Host "  Client ID: $clientId" -ForegroundColor Green
-#endregion
-
-#region STAP 3 - Permissies instellen en admin consent geven
-Write-Host "`n[3/12] API Permissies instellen en admin consent geven..." -ForegroundColor Cyan
-
-$graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" |
-           Select-Object -First 1
-$spSp    = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0ff1-ce00-000000000000'" |
-           Select-Object -First 1
-
-function Grant-DelegatedPermission {
-    param($ResourceSp, [string[]]$Scopes, $ResourceName)
-    $validScopes = @()
-    foreach ($scopeName in $Scopes) {
-        $permDef = $ResourceSp.Oauth2PermissionScopes |
-                   Where-Object { $_.Value -eq $scopeName } | Select-Object -First 1
-        if (-not $permDef) {
-            Write-Warning "    Scope '$scopeName' niet gevonden op $ResourceName"
-            continue
-        }
-        $validScopes += $scopeName
-    }
-
-    if (-not $validScopes -or $validScopes.Count -eq 0) {
-        return
-    }
-
-    $grant = Get-MgOauth2PermissionGrant `
-        -Filter "clientId eq '$($sp.Id)' and resourceId eq '$($ResourceSp.Id)' and consentType eq 'AllPrincipals'" `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-
-    $existingScopes = @()
-    if ($grant -and $grant.Scope) {
-        $existingScopes = $grant.Scope -split ' '
-    }
-
-    $missingScopes = $validScopes | Where-Object { $_ -notin $existingScopes }
-    if (-not $missingScopes -or $missingScopes.Count -eq 0) {
-        Write-Host "    Alle scopes al aanwezig op $ResourceName" -ForegroundColor Gray
-        return
-    }
-
-    $mergedScopes = ($existingScopes + $validScopes | Select-Object -Unique) -join ' '
-
-    if ($grant) {
-        Update-MgOauth2PermissionGrant `
-            -OAuth2PermissionGrantId $grant.Id `
-            -Scope $mergedScopes `
-            -ErrorAction Stop | Out-Null
-        Write-Host "    Bijgewerkt op ${ResourceName}: $($missingScopes -join ', ')" -ForegroundColor Green
-    } else {
-        New-MgOauth2PermissionGrant `
-            -ClientId    $sp.Id `
-            -ResourceId  $ResourceSp.Id `
-            -Scope       $mergedScopes `
-            -ConsentType "AllPrincipals" `
-            -ErrorAction Stop | Out-Null
-        Write-Host "    Toegekend op ${ResourceName}: $($missingScopes -join ', ')" -ForegroundColor Green
-    }
-}
-
-try {
-    Write-Host "  Microsoft Graph permissies..." -ForegroundColor White
-    Grant-DelegatedPermission -ResourceSp $graphSp -ResourceName "Graph" -Scopes @(
-        "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
-        "ChannelMessage.Read.All","TeamSettings.ReadWrite.All","TeamMember.Read.All",
-        "ChannelSettings.ReadWrite.All"
-    )
-    Write-Host "  SharePoint permissies..." -ForegroundColor White
-    Grant-DelegatedPermission -ResourceSp $spSp -ResourceName "SharePoint" -Scopes @(
-        "AllSites.FullControl"
-    )
-    Write-Host "  Alle permissies ingesteld." -ForegroundColor Green
-} catch {
-    Write-Host "  FOUT bij permissies: $_" -ForegroundColor Red
-    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
-    exit
-}
-#endregion
-
-#region STAP 4 - Opnieuw inloggen met volledige permissies
-Write-Host "`n[4/12] Opnieuw inloggen met volledige permissies..." -ForegroundColor Cyan
-Write-Host "  Gebruik opnieuw het admin-account van de klant.`n" -ForegroundColor Yellow
-
 if ($DryRun) {
     Write-Host "  DRY RUN: login wordt normaal uitgevoerd; alleen mutaties worden gesimuleerd." -ForegroundColor DarkYellow
 }
 
-Disconnect-MgGraph -ErrorAction SilentlyContinue
+$graphParams = @{ Scopes = $graphScopes; TenantId = $tenantId }
+if ($ClientId)              { $graphParams['ClientId'] = $ClientId }
+if ($CertificateThumbprint) { $graphParams['CertificateThumbprint'] = $CertificateThumbprint }
+if ($AppOnly)               { $graphParams['AppOnly'] = $true }
 
 try {
-    Connect-MgGraph `
-        -ClientId $clientId `
-        -TenantId $tenantId `
-        -Scopes "Group.ReadWrite.All","Sites.Read.All","Files.ReadWrite.All",
-            "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All","ChannelSettings.ReadWrite.All" `
-        -ContextScope Process `
-        -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
+    $graphConn = Connect-M365Graph @graphParams
 } catch {
-    Write-Host "  FOUT bij tweede login: $_" -ForegroundColor Red
-    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
-    exit
+    Write-Host "`n  FOUT bij inloggen: $_" -ForegroundColor Red
+    Write-Host "  Controleer:" -ForegroundColor Yellow
+    Write-Host "   - Tenant ID correct? ($tenantId)"
+    Write-Host "   - Log je in met het admin-account van de klant, of heb je GDAP-rechten op deze klant?"
+    Write-Host "   - Is MFA ingesteld op dit account?"
+    exit 1
 }
 
-Import-Module MicrosoftTeams -ErrorAction Stop
-
-try {
-    Connect-MicrosoftTeams -TenantId $tenantId -ErrorAction Stop
-} catch {
-    Write-Host "  FOUT bij Teams-verbinding: $_" -ForegroundColor Red
-    if ($isTempApp) { Remove-TempArchiverApp -App $app -Sp $sp }
-    exit
+Write-Host "`n[2/12] Sessie controleren..." -ForegroundColor Cyan
+$ctx = Get-MgContext
+if ($ctx.TenantId -and $ctx.TenantId -ne $tenantId) {
+    Write-Host "  FOUT: aangemeld in tenant $($ctx.TenantId), niet in $tenantId." -ForegroundColor Red
+    Disconnect-M365Graph $graphConn
+    exit 1
+}
+$account = $ctx.Account
+if ($graphConn.AuthType -eq 'Delegated') {
+    if (-not $account) {
+        Write-Host "  FOUT: Inloggen mislukt, geen account gevonden." -ForegroundColor Red; exit 1
+    }
+    Write-Host "  Ingelogd als: $account" -ForegroundColor Green
+    $ontbrekend = @($graphScopes | Where-Object { $_ -notin $ctx.Scopes })
+    if ($ontbrekend) { Write-Warning "  Scopes niet toegekend: $($ontbrekend -join ', ')" }
+} else {
+    Write-Host "  App-only verbonden ($($ctx.ClientId))." -ForegroundColor Green
 }
 
-Write-Host "  Verbonden als: $((Get-MgContext).Account)" -ForegroundColor Green
+Write-Host "`n[3-4/12] SharePoint site-admin fallback voorbereiden..." -ForegroundColor Cyan
+# Alleen gebruikt als een kanaalmap "access denied" geeft: Graph heeft geen API om een
+# site-collectiebeheerder toe te voegen, dus dat ene gebeurt met PnP (Set-PnPSite -Owners).
+if ($graphConn.AuthType -ne 'Delegated') {
+    Write-Host "  App-only: niet nodig, de app leest alle sites." -ForegroundColor Gray
+} elseif ($PnPClientId) {
+    Write-Host "  PnP-app: $PnPClientId" -ForegroundColor Green
+} elseif (Test-Path (Join-Path $PSScriptRoot '..\..\pnp.appid.json')) {
+    Write-Host "  PnP-app: uit pnp.appid.json (als die een regel voor deze tenant heeft)." -ForegroundColor Green
+} else {
+    Write-Host "  Geen PnP-app (pnp.appid.json / -PnPClientId): bij 'access denied' moet je jezelf handmatig site-beheerder maken." -ForegroundColor Yellow
+}
+#endregion
+
+#region Graph-hulpfuncties
+function Invoke-GraphRequestWithRetry {
+    param(
+        [ValidateSet("GET","POST","PATCH","DELETE")]
+        [string]$Method,
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        [string]$OutputFilePath,
+        [int]$MaxRetries = 5
+    )
+
+    $attempt = 0
+    while ($true) {
+        try {
+            if ($OutputFilePath) {
+                return Invoke-MgGraphRequest -Method $Method -Uri $Uri -OutputFilePath $OutputFilePath -ErrorAction Stop
+            }
+            return Invoke-MgGraphRequest -Method $Method -Uri $Uri -ErrorAction Stop
+        } catch {
+            $attempt++
+            $message = $_.Exception.Message
+            $isThrottle = $message -match "Status:\s*429|Too Many Requests|TooManyRequests|throttl"
+            $isTransient = $message -match "Status:\s*5\d\d|ServiceUnavailable|GatewayTimeout|BadGateway|timeout|temporar"
+
+            if (($isThrottle -or $isTransient) -and $attempt -lt $MaxRetries) {
+                $waitSeconds = [Math]::Min(30, [Math]::Pow(2, $attempt))
+                Write-Host "    Graph retry na ${waitSeconds}s (poging $attempt/$MaxRetries)..." -ForegroundColor DarkYellow
+                Start-Sleep -Seconds $waitSeconds
+                continue
+            }
+
+            throw
+        }
+    }
+}
+
+function Get-GraphPagedCollection {
+    param([Parameter(Mandatory = $true)][string]$StartUri)
+
+    $all = [System.Collections.Generic.List[object]]::new()
+    $uri = $StartUri
+    do {
+        $result = Invoke-GraphRequestWithRetry -Method GET -Uri $uri
+        if ($result.value) {
+            $all.AddRange(@($result.value))
+        }
+        $uri = $result.'@odata.nextLink'
+    } while ($uri)
+
+    return $all
+}
+
+function Find-TeamByName {
+    # Vervangt Get-Team -DisplayName: de groep met die naam die een Team is.
+    param([Parameter(Mandatory = $true)][string]$DisplayName)
+    $safe   = $DisplayName.Replace("'", "''")
+    $filter = [System.Uri]::EscapeDataString("displayName eq '$safe'")
+    $groups = Get-GraphPagedCollection -StartUri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,resourceProvisioningOptions"
+    return $groups | Where-Object { @($_.resourceProvisioningOptions) -contains 'Team' } | Select-Object -First 1
+}
 #endregion
 
 #region STAP 5 - Excel inlezen en Teams-IDs ophalen
@@ -432,9 +376,10 @@ $archiveTeams = $toArchive | Select-Object -ExpandProperty TeamName -Unique
 $teamMapping  = @{}
 
 foreach ($teamName in $archiveTeams) {
-    $team = Get-Team -DisplayName $teamName -ErrorAction SilentlyContinue | Select-Object -First 1
+    $team = $null
+    try { $team = Find-TeamByName -DisplayName $teamName } catch { Write-Warning "  Opzoeken mislukt voor ${teamName}: $_" }
     if ($team) {
-        $teamMapping[$teamName] = [string]$team.GroupId
+        $teamMapping[$teamName] = [string]$team.id
         Write-Host "  OK: $teamName" -ForegroundColor Green
     } else {
         Write-Warning "  Niet gevonden: $teamName"
@@ -497,7 +442,15 @@ foreach ($row in $toArchive) {
     $safeTeam = $teamName -replace '[\\/:*?"<>|]', '_'
     $safeChannel = $row.ChannelName -replace '[\\/:*?"<>|]', '_'
     try {
-        $members = @(Get-TeamUser -GroupId $groupId)
+        # Vervangt Get-TeamUser: dezelfde kolommen Name, User en Role.
+        $members = @(Get-GraphPagedCollection -StartUri "https://graph.microsoft.com/v1.0/teams/$groupId/members" | ForEach-Object {
+            $roles = @($_.roles)
+            [PSCustomObject]@{
+                Name = $_.displayName
+                User = $_.email
+                Role = if ($roles -contains 'owner') { 'Owner' } elseif ($roles -contains 'guest') { 'Guest' } else { 'Member' }
+            }
+        })
         if ($DryRun) {
             Write-Host "  [DRYRUN] Leden gevonden: $teamName / $($row.ChannelName) ($($members.Count))" -ForegroundColor Cyan
         } else {
@@ -515,39 +468,24 @@ foreach ($row in $toArchive) {
 #region STAP 8 - Bestanden exporteren
 Write-Host "`n[8/12] Bestanden exporteren (SharePoint -> $archiveRoot)..." -ForegroundColor Cyan
 
-Import-Module PnP.PowerShell -ErrorAction Stop
+# Lezen en downloaden gaat via Graph (/drives/{id}/items/{id}/children en /content).
+# PnP is alleen nog nodig voor de site-admin fallback hieronder.
 
 function Test-IsAccessDeniedError {
     param([string]$Message)
-    return $Message -match "Access denied|Unauthorized|Forbidden|Status:\s*401|Status:\s*403|Insufficient privileges"
+    return $Message -match "Access denied|accessDenied|Unauthorized|Forbidden|Status:\s*401|Status:\s*403|Insufficient privileges"
 }
 
 function Test-IsNotFoundError {
     param([string]$Message)
-    return $Message -match "Status:\s*404|NotFound|Item does not exist|bestaat niet"
+    return $Message -match "Status:\s*404|NotFound|itemNotFound|Item does not exist|bestaat niet"
 }
 
-function Resolve-PnPFolderLocationFromFilesFolder {
-    param([Parameter(Mandatory = $true)][string]$WebUrl)
-
-    if ([string]::IsNullOrWhiteSpace($WebUrl)) { return $null }
-
-    $u = [System.Uri]$WebUrl
-    $decodedPath = [System.Uri]::UnescapeDataString($u.AbsolutePath)
-
-    if ($decodedPath -notmatch '^(?<site>.+?)/Shared Documents(?:/(?<tail>.*))?$') {
-        return $null
-    }
-
-    $sitePath = $Matches.site
-    $tail = $Matches.tail
-    $siteUrl = "$($u.Scheme)://$($u.Host)$sitePath"
-    $folder = if ([string]::IsNullOrWhiteSpace($tail)) { "Shared Documents" } else { "Shared Documents/$tail" }
-
-    return [PSCustomObject]@{
-        SiteUrl = $siteUrl
-        Folder  = $folder
-    }
+function Get-SiteUrlFromWebUrl {
+    # https://contoso.sharepoint.com/sites/Team-Kanaal/Gedeelde documenten/Kanaal -> .../sites/Team-Kanaal
+    param([string]$WebUrl)
+    if ($WebUrl -match '^(https://[^/]+/(?:sites|teams)/[^/]+)') { return $Matches[1] }
+    return $null
 }
 
 function Get-TeamChannelCached {
@@ -557,75 +495,38 @@ function Get-TeamChannelCached {
         [Parameter(Mandatory = $true)][hashtable]$Cache
     )
 
+    # Vervangt Get-TeamChannel: de kanalen komen uit Graph, eenmaal per team.
     if (-not $Cache.ContainsKey($GroupId)) {
-        $Cache[$GroupId] = @(Get-TeamChannel -GroupId $GroupId -ErrorAction SilentlyContinue)
+        $Cache[$GroupId] = @(Get-GraphPagedCollection -StartUri "https://graph.microsoft.com/v1.0/teams/$GroupId/channels")
     }
 
     $targetNormalized = Normalize-LookupValue -Value $ChannelName
 
-    $channel = $Cache[$GroupId] | Where-Object { $_.DisplayName -eq $ChannelName } | Select-Object -First 1
+    $channel = $Cache[$GroupId] | Where-Object { $_.displayName -eq $ChannelName } | Select-Object -First 1
     if ($channel) { return $channel }
 
-    $channel = $Cache[$GroupId] |
-        Where-Object { (Normalize-LookupValue -Value $_.DisplayName) -eq $targetNormalized } |
-        Select-Object -First 1
-    if ($channel) { return $channel }
-
-    # Fallback op Graph-lijst als Teams-module niets teruggeeft
-    $uri = "https://graph.microsoft.com/v1.0/teams/$GroupId/channels"
-    $allChannels = [System.Collections.Generic.List[object]]::new()
-    do {
-        $result = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction SilentlyContinue
-        if ($result.value) { $allChannels.AddRange($result.value) }
-        $uri = $result.'@odata.nextLink'
-    } while ($uri)
-
-    $channel = $allChannels | Where-Object { $_.displayName -eq $ChannelName } | Select-Object -First 1
-    if ($channel) { return $channel }
-
-    return $allChannels |
+    return $Cache[$GroupId] |
         Where-Object { (Normalize-LookupValue -Value $_.displayName) -eq $targetNormalized } |
         Select-Object -First 1
-}
-
-function Ensure-HigherRights {
-    param(
-        [Parameter(Mandatory = $true)][string]$TenantId,
-        [Parameter(Mandatory = $true)][string]$ClientId,
-        [Parameter(Mandatory = $true)]$GraphSp
-    )
-
-    Write-Host "  Hogere rechten nodig gedetecteerd. Extra Graph-rechten worden toegekend..." -ForegroundColor Yellow
-
-    Grant-DelegatedPermission -ResourceSp $GraphSp -ResourceName "Graph" -Scopes @(
-        "Sites.ReadWrite.All",
-        "Sites.FullControl.All"
-    )
-
-    Disconnect-MgGraph -ErrorAction SilentlyContinue
-    Connect-MgGraph `
-        -ClientId $ClientId `
-        -TenantId $TenantId `
-        -Scopes "Group.ReadWrite.All","Sites.Read.All","Sites.ReadWrite.All","Sites.FullControl.All","Files.ReadWrite.All",
-            "TeamSettings.ReadWrite.All","TeamMember.Read.All","ChannelMessage.Read.All","ChannelSettings.ReadWrite.All" `
-        -ContextScope Process `
-        -UseDeviceAuthentication -NoWelcome -ErrorAction Stop
-
-    Write-Host "  Hogere rechten toegekend en nieuwe Graph-sessie actief." -ForegroundColor Green
 }
 
 function Grant-SiteAdminAccess {
     param(
         [Parameter(Mandatory = $true)][string]$SiteUrl,
         [Parameter(Mandatory = $true)][string]$AdminAccount,
-        [Parameter(Mandatory = $true)][string]$TenantUrl,
-        [Parameter(Mandatory = $true)][string]$ClientId
+        [Parameter(Mandatory = $true)][string]$TenantUrl
     )
+    # Geen Graph-API om een site-collectiebeheerder toe te voegen: dit ene blijft PnP.
     $spoAdminUrl = $TenantUrl -replace '(https://[^.]+)(\.sharepoint\.com)', '$1-admin$2'
     try {
         Write-Host "    Site-admin rechten verlenen via SPO Admin voor: $SiteUrl" -ForegroundColor Yellow
-        Connect-PnPOnline -Url $spoAdminUrl -Interactive -ClientId $ClientId -ErrorAction Stop
-        Set-PnPSite -Identity $SiteUrl -Owners @($AdminAccount) -ErrorAction Stop
+        Import-Module PnP.PowerShell -ErrorAction Stop
+        # pnp.appid.json is per tenantdomein (contoso.onmicrosoft.com), niet per GUID.
+        $pnpTenant = if ($TenantUrl -match '^https://([^.]+)\.sharepoint\.com') { "$($Matches[1]).onmicrosoft.com" } else { $tenantId }
+        $pnpParams = @{ Url = $spoAdminUrl; TenantId = $pnpTenant }
+        if ($PnPClientId) { $pnpParams['ClientId'] = $PnPClientId }
+        $pnp = Connect-M365PnP @pnpParams
+        Set-PnPSite -Identity $SiteUrl -Owners @($AdminAccount) -Connection $pnp -ErrorAction Stop
         Write-Host "    Site-admin rechten verleend. Wachten op propagatie..." -ForegroundColor Green
         Start-Sleep -Seconds 10
         return $true
@@ -636,68 +537,63 @@ function Grant-SiteAdminAccess {
     }
 }
 
-function Download-PnPFilesReliable {
+function Get-DriveFilesRecursive {
+    # Alle bestanden onder een map, met hun pad relatief tegenover die map.
+    param(
+        [Parameter(Mandatory = $true)][string]$DriveId,
+        [Parameter(Mandatory = $true)][string]$ItemId,
+        [string]$RelativePath = ""
+    )
+    $children = Get-GraphPagedCollection -StartUri "https://graph.microsoft.com/v1.0/drives/$DriveId/items/$ItemId/children?`$select=id,name,file,folder,size&`$top=999"
+    foreach ($child in $children) {
+        $rel = if ($RelativePath) { Join-Path $RelativePath $child.name } else { [string]$child.name }
+        if ($child.folder) {
+            Get-DriveFilesRecursive -DriveId $DriveId -ItemId $child.id -RelativePath $rel
+        } elseif ($child.file) {
+            [PSCustomObject]@{ DriveId = $DriveId; Id = $child.id; Name = $child.name; RelativePath = $rel; Size = $child.size }
+        }
+    }
+}
+
+function Save-DriveFilesReliable {
     param(
         [Parameter(Mandatory = $true)][array]$Items,
         [Parameter(Mandatory = $true)][string]$DestPath,
-        [Parameter(Mandatory = $true)][string]$SiteUrl,
-        [Parameter(Mandatory = $true)][string]$ClientId,
         [int]$MaxRetriesPerFile = 3
     )
 
-    $remaining = [System.Collections.Generic.List[object]]::new()
-    if ($Items) { $remaining.AddRange(@($Items)) }
-
-    for ($pass = 1; $pass -le 2 -and $remaining.Count -gt 0; $pass++) {
-        if ($pass -gt 1) {
-            # Nieuwe PnP-verbinding voor hardnekkige gevallen
-            Connect-PnPOnline -Url $SiteUrl -Interactive -ClientId $ClientId
-        }
-
-        $nextRound = [System.Collections.Generic.List[object]]::new()
-        foreach ($item in $remaining) {
-            $ok = $false
-            for ($attempt = 1; $attempt -le $MaxRetriesPerFile; $attempt++) {
-                try {
-                    Get-PnPFile -Url $item.ServerRelativeUrl `
-                        -Path $DestPath -Filename $item.Name -AsFile -Force -ErrorAction Stop
-                    $ok = $true
-                    break
-                } catch {
-                    if ($attempt -lt $MaxRetriesPerFile) {
-                        Start-Sleep -Seconds ([Math]::Min(5, $attempt))
-                    }
+    $failed = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in $Items) {
+        # De mappenstructuur blijft behouden: twee bestanden met dezelfde naam in
+        # verschillende submappen overschrijven elkaar niet meer.
+        $target = Join-Path $DestPath $item.RelativePath
+        $dir = Split-Path $target -Parent
+        if ($dir) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $ok = $false
+        for ($attempt = 1; $attempt -le $MaxRetriesPerFile; $attempt++) {
+            try {
+                Invoke-GraphRequestWithRetry -Method GET `
+                    -Uri "https://graph.microsoft.com/v1.0/drives/$($item.DriveId)/items/$($item.Id)/content" `
+                    -OutputFilePath $target | Out-Null
+                $ok = $true
+                break
+            } catch {
+                if ($attempt -lt $MaxRetriesPerFile) {
+                    Start-Sleep -Seconds ([Math]::Min(5, $attempt))
                 }
             }
-
-            if (-not $ok) {
-                $nextRound.Add($item)
-            }
         }
-
-        $remaining = $nextRound
+        if (-not $ok) { $failed.Add($item) }
     }
 
     return [PSCustomObject]@{
-        FailedCount = $remaining.Count
-        FailedItems = $remaining
+        FailedCount = $failed.Count
+        FailedItems = $failed
     }
 }
 
-$higherRightsGranted = $false
 $adminGrantedSites   = @{}
 $teamChannelCache    = @{}
-
-# Laatste check op ClientId voor gebruik in PnP
-if ([string]::IsNullOrWhiteSpace($clientId)) {
-    $clientId = (Get-Content (Join-Path $tempDir "teams_archiver_clientid.txt") -Raw -ErrorAction SilentlyContinue).Trim()
-    if ([string]::IsNullOrWhiteSpace($clientId)) {
-        Write-Host "  FOUT: ClientId is null. Herstart het script volledig." -ForegroundColor Red; exit
-    }
-    Write-Host "  ClientId hersteld: $clientId" -ForegroundColor Yellow
-}
-
-$currentSiteUrl = $null
 
 foreach ($row in $toArchive) {
     $rowKey = New-ArchiveRowKey -TeamName $row.TeamName -ChannelName $row.ChannelName
@@ -721,48 +617,34 @@ foreach ($row in $toArchive) {
             continue
         }
 
-        $ff = Invoke-MgGraphRequest -Method GET `
-            -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.Id)/filesFolder" `
-            -ErrorAction Stop
-        $loc = Resolve-PnPFolderLocationFromFilesFolder -WebUrl $ff.webUrl
-        if (-not $loc) {
-            Write-Warning "  FilesFolder kon niet vertaald worden: $($row.TeamName) / $($row.ChannelName)"
+        # filesFolder werkt voor standaard, privé en gedeelde kanalen (die laatste twee
+        # hebben hun eigen site) en geeft de drive en de map rechtstreeks.
+        $ff = Invoke-GraphRequestWithRetry -Method GET `
+            -Uri "https://graph.microsoft.com/v1.0/teams/$groupId/channels/$($channel.id)/filesFolder"
+        $driveId  = [string]$ff.parentReference.driveId
+        $folderId = [string]$ff.id
+        $siteUrl  = Get-SiteUrlFromWebUrl -WebUrl $ff.webUrl
+        if (-not $driveId -or -not $folderId) {
+            Write-Warning "  FilesFolder zonder drive/map: $($row.TeamName) / $($row.ChannelName)"
             continue
         }
 
-        $siteUrl = $loc.SiteUrl
-        $folder = $loc.Folder
-
-        if ($siteUrl -ne $currentSiteUrl) {
-            Connect-PnPOnline -Url $siteUrl -Interactive -ClientId $clientId
-            $currentSiteUrl = $siteUrl
-        }
-
         try {
-            $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
+            $items = @(Get-DriveFilesRecursive -DriveId $driveId -ItemId $folderId)
         } catch {
             $errMsg = $_.Exception.Message
             if (Test-IsAccessDeniedError -Message $errMsg) {
-                # Stap 1: eenmalig hogere Graph-rechten proberen
-                if (-not $higherRightsGranted) {
-                    $higherRightsGranted = $true
-                    try {
-                        Ensure-HigherRights -TenantId $tenantId -ClientId $clientId -GraphSp $graphSp
-                    } catch {
-                        Write-Warning "    Hogere Graph-rechten mislukten: $_"
-                    }
+                # Per site eenmalig SPO site-admin rechten toekennen. Alleen gedelegeerd:
+                # app-only leest alle sites al.
+                if ($graphConn.AuthType -ne 'Delegated' -or -not $siteUrl -or $adminGrantedSites.ContainsKey($siteUrl)) { throw }
+                $adminGrantedSites[$siteUrl] = $true
+                if ($DryRun) {
+                    Write-Host "  [DRYRUN] Geen toegang; zou site-admin rechten verlenen op $siteUrl." -ForegroundColor Cyan
+                    continue
                 }
-                # Stap 2: per site eenmalig SPO site-admin rechten toekennen
-                if (-not $adminGrantedSites.ContainsKey($siteUrl)) {
-                    $adminGrantedSites[$siteUrl] = $true
-                    $granted = Grant-SiteAdminAccess -SiteUrl $siteUrl -AdminAccount $account `
-                        -TenantUrl $tenantUrl -ClientId $clientId
-                    if (-not $granted) { throw }
-                } else {
-                    throw
-                }
-                Connect-PnPOnline -Url $siteUrl -Interactive -ClientId $clientId
-                $items = Get-PnPFolderItem -FolderSiteRelativeUrl $folder -ItemType File -Recursive -ErrorAction Stop
+                $granted = Grant-SiteAdminAccess -SiteUrl $siteUrl -AdminAccount $account -TenantUrl $tenantUrl
+                if (-not $granted) { throw }
+                $items = @(Get-DriveFilesRecursive -DriveId $driveId -ItemId $folderId)
             } elseif (Test-IsNotFoundError -Message $errMsg) {
                 Write-Warning "  Niet gevonden in SharePoint (overgeslagen): $($row.TeamName) / $($row.ChannelName)"
                 continue
@@ -783,7 +665,7 @@ foreach ($row in $toArchive) {
             Write-Host "  [DRYRUN] Bestanden gevonden: $($row.TeamName) / $($row.ChannelName) ($($itemList.Count))" -ForegroundColor Cyan
             continue
         }
-        $dl = Download-PnPFilesReliable -Items $itemList -DestPath $destPath -SiteUrl $siteUrl -ClientId $clientId
+        $dl = Save-DriveFilesReliable -Items $itemList -DestPath $destPath
         if ($dl.FailedCount -gt 0) {
             throw "Niet alle bestanden konden gedownload worden ($($itemList.Count - $dl.FailedCount)/$($itemList.Count))."
         }
@@ -804,53 +686,6 @@ foreach ($row in $toArchive) {
 
 #region STAP 9 - Chat exporteren (VOOR archivering)
 Write-Host "`n[9/12] Chat history exporteren..." -ForegroundColor Cyan
-
-function Invoke-GraphRequestWithRetry {
-    param(
-        [ValidateSet("GET","POST","PATCH","DELETE")]
-        [string]$Method,
-        [Parameter(Mandatory = $true)]
-        [string]$Uri,
-        [int]$MaxRetries = 5
-    )
-
-    $attempt = 0
-    while ($true) {
-        try {
-            return Invoke-MgGraphRequest -Method $Method -Uri $Uri -ErrorAction Stop
-        } catch {
-            $attempt++
-            $message = $_.Exception.Message
-            $isThrottle = $message -match "Status:\s*429|Too Many Requests|throttl"
-            $isTransient = $message -match "Status:\s*5\d\d|timeout|temporar"
-
-            if (($isThrottle -or $isTransient) -and $attempt -lt $MaxRetries) {
-                $waitSeconds = [Math]::Min(30, [Math]::Pow(2, $attempt))
-                Write-Host "    Graph retry na ${waitSeconds}s (poging $attempt/$MaxRetries)..." -ForegroundColor DarkYellow
-                Start-Sleep -Seconds $waitSeconds
-                continue
-            }
-
-            throw
-        }
-    }
-}
-
-function Get-GraphPagedCollection {
-    param([Parameter(Mandatory = $true)][string]$StartUri)
-
-    $all = [System.Collections.Generic.List[object]]::new()
-    $uri = $StartUri
-    do {
-        $result = Invoke-GraphRequestWithRetry -Method GET -Uri $uri
-        if ($result.value) {
-            $all.AddRange($result.value)
-        }
-        $uri = $result.'@odata.nextLink'
-    } while ($uri)
-
-    return $all
-}
 
 if ($chatMethode -eq "a") {
     Write-Host "  Methode: Graph API (automatisch)`n" -ForegroundColor White
@@ -987,7 +822,7 @@ if ($chatOntbreekt -gt 0) {
 
 #region STAP 10 - Teams archiveren (na chat-export)
 Write-Host "`n[10/12] Teams archiveren in Microsoft 365..." -ForegroundColor Cyan
-Write-Host "  Standaard is archiveren UITGESCHAKELD in v8.19." -ForegroundColor Yellow
+Write-Host "  Standaard is archiveren UITGESCHAKELD in v9.0." -ForegroundColor Yellow
 Write-Host "  Let op: echte archiveren/unarchiven gebeurt op TEAM-niveau." -ForegroundColor Yellow
 Write-Host "  C/D gebruiken nu echte kanaal archiveren/unarchiven via Graph." -ForegroundColor Yellow
 if ($ChannelFallbackToRename) {
@@ -1352,14 +1187,10 @@ Write-Host "  Rapport: $rapportPad" -ForegroundColor Green
 
 #region STAP 12 - Opruimen
 Write-Host "`n[12/12] Opruimen..." -ForegroundColor Cyan
-if ($isTempApp) {
-    Remove-TempArchiverApp -App $app -Sp $sp
-} else {
-    Write-Host "  Niet-tijdelijke app behouden. Client ID: $clientId" -ForegroundColor Gray
-}
-Unregister-Event -SourceIdentifier $cleanupEventName -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $tempDir "teams_archiver_clientid.txt") -ErrorAction SilentlyContinue
-Write-Host "  Tijdelijke bestanden verwijderd." -ForegroundColor Yellow
+# Geen tijdelijke app meer om op te ruimen. Alleen de Graph-sessie sluiten als dit
+# script haar zelf opende (de herstarte sessie is sowieso eigen).
+Disconnect-M365Graph $graphConn
+Write-Host "  Graph-sessie afgesloten." -ForegroundColor Yellow
 
 # Omgevingsvariabele opruimen
 $env:TEAMS_ARCHIVER_HERSTART = $null

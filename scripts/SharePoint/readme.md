@@ -4,8 +4,11 @@
 
 # SharePoint Scripts
 
-SharePoint Online and OneDrive content operations via PnP PowerShell, with interactive
-admin sign-in on any (customer) tenant.
+SharePoint Online and OneDrive content operations, with a delegated admin sign-in on any
+(customer) tenant by default — device code and GDAP customer per `load.config.ps1`, through
+[`Connect-M365.ps1`](../Startup/readme.md#connect-m365ps1). Microsoft Graph where it has an
+API; PnP / SharePoint REST for role assignments, SharePoint groups, site collection admins
+and the recycle bin, which Graph has no API for; Exchange Online for the audit log.
 
 ---
 
@@ -20,7 +23,7 @@ admin sign-in on any (customer) tenant.
 | Script | Description |
 |--------|-------------|
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
-| [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | The same question tenant-wide through Microsoft Graph, app-only, no interactive login — files and folders |
+| [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | The same question through Microsoft Graph, one site or tenant-wide — signed in as you, or app-only (`-AppOnly`) to see everything — files and folders |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Where did a file go? Renames, moves, copies and deletes from the audit log, folder moves included — in Brussels time, over a period you choose |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
@@ -35,7 +38,7 @@ CSV. They differ in what they can see and in what they need from you.
 
 | | `Find-SiteContent.ps1` (PnP) | `Search-SharePointContent.ps1` (Graph) |
 |---|---|---|
-| Sign-in | Interactive, as you | App-only, unattended — fine in a scheduled task |
+| Sign-in | Delegated, as you (device code per `load.config.ps1`) | Delegated as you by default — sees only what you can reach; `-AppOnly` for everything, unattended, fine in a scheduled task |
 | Rights needed | Access to the site, or `-GrantSiteAdmin` per site | One admin consent, once, for the whole tenant |
 | Scope | One site collection (+ subsites) | One site, or **every site in the tenant**, OneDrive included |
 | Files and folders | Yes | Yes, and faster — `delta` reads a library in pages of a thousand and permissions come 20 per `$batch` |
@@ -104,11 +107,15 @@ shared differently from the rest"; `-Permissions None` skips permissions entirel
 
 **Sign-in**
 
-Same as `Restore-RecycleBinItems.ps1`: the first run against a tenant registers a
-public-client Entra app (delegated `AllSites.FullControl`, admin-consented) and caches
-the client ID per tenant in `pnp.appid.json` in the repo root (gitignored). A client ID
-cached by the other script is reused, so this usually costs nothing. Pass `-ClientId`
-to skip app registration entirely.
+Same as `Restore-RecycleBinItems.ps1`: delegated, as you, through `Connect-M365PnP` — a
+device code when `useDeviceCodeAuth` is set in `load.config.ps1`, otherwise the browser.
+The first run against a tenant registers a public-client Entra app (delegated
+`AllSites.FullControl`, admin-consented; the one-time Graph admin sign-in goes through
+`Connect-M365Graph`) and caches the client ID per tenant in `pnp.appid.json` in the repo
+root (gitignored). A client ID cached by the other script is reused, so this usually costs
+nothing. Pass `-ClientId` to skip app registration entirely. It stays PnP/CSOM because
+SharePoint role assignments, SharePoint groups and items in ordinary lists have no Graph API.
+With `-Disconnect` the cached per-web connections are dropped as well.
 
 Reading permissions requires access to the site. `-GrantSiteAdmin` makes the signed-in
 admin site collection administrator for the duration of the run and removes the rights
@@ -185,7 +192,8 @@ someone else's OneDrive or a site you are not a member of possible.
 
 ### Search-SharePointContent.ps1
 
-The Graph counterpart of `Find-SiteContent.ps1`: same question, app-only, and it reaches
+The Graph counterpart of `Find-SiteContent.ps1`: same question, Microsoft Graph only.
+Signed in as you by default, it sees what your account can reach; with `-AppOnly` it reaches
 every site and every OneDrive in the tenant without you having rights on any of them.
 Read-only.
 
@@ -221,9 +229,17 @@ because those are reachable without signing in at all. External guests (`#EXT#`)
 - **Libraries only.** Permissions exist for driveItems, not for items in ordinary lists.
 - No role definitions, and no "Limited Access" nuance.
 
-**Sign-in — app-only, created for you**
+**Sign-in — delegated by default, app-only on request**
 
-The first run against a tenant sets the app up:
+By default you sign in as yourself through `Connect-M365Graph` (device code and GDAP
+customer per `load.config.ps1`) with `Sites.Read.All` and `Files.Read.All` (plus
+`GroupMember.Read.All` for `-ExpandGroups`). Graph then only shows what **your** account can
+reach: sites you are not a member or admin of stay hidden, `-AllSites` lists sites through
+the search index (`/sites?search=*`, because `/sites/getAllSites` is application-only), and a
+`-Content` search needs no region. For a complete tenant sweep, use `-AppOnly`.
+
+`-AppOnly` (or `-ClientId`) uses application permissions. The first `-AppOnly` run against
+a tenant sets the app up:
 
 1. Sign in to Graph as a Global Administrator (once)
 2. Create or reuse an app named after `-AppName`
@@ -234,7 +250,7 @@ The first run against a tenant sets the app up:
 5. Cache the client ID and thumbprint per tenant in `graph.appid.json` in the repo root
    (gitignored)
 
-Later runs connect app-only with no prompt at all, which is what makes this one usable from
+Later `-AppOnly` runs connect with no prompt at all, which is what makes this one usable from
 a scheduled task. Bring your own app with `-ClientId` plus `-CertificateThumbprint` or
 `-ClientSecret`. The certificate is non-exportable and lives in the creating user's store,
 so a scheduled task has to run as that same account.
@@ -264,8 +280,9 @@ so a scheduled task has to run as that same account.
 | `-Everything` | No | Subsites, personal sites, and no caps |
 | `-MaxItems` | No | Stop after this many matches (default 5000, `0` = no limit) |
 | `-MaxPermissionLookups` | No | Cap on permission lookups (default 2000, `0` = no limit) |
-| `-TenantId` | * | Required with `-AllSites`; derived from `-SiteUrl` otherwise |
-| `-ClientId` / `-CertificateThumbprint` / `-ClientSecret` / `-AppName` | No | Bring your own app registration |
+| `-TenantId` | * | Derived from `-SiteUrl`; with `-AllSites` the GDAP customer or your own tenant, required for `-AllSites -AppOnly` |
+| `-AppOnly` | No | App-only with the app cached for the tenant in `graph.appid.json` (created on the first run) — sees every site |
+| `-ClientId` / `-CertificateThumbprint` / `-ClientSecret` / `-AppName` | No | Bring your own app registration (implies app-only) |
 | `-OutputPath` | No | CSV path (default: `C:\Temp\GraphSharePointFind_<timestamp>.csv`) |
 | `-MaxRetries` | No | Retries on throttling (429), default 5 |
 
@@ -276,13 +293,13 @@ so a scheduled task has to run as that same account.
 .\Search-SharePointContent.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Finance `
     -Name "*veiligheid*" -IncludeSubsites
 
-# Tenant-wide full text: which documents mention "salarisschaal"?
+# Tenant-wide full text, app-only so nothing is hidden: which documents mention "salarisschaal"?
 .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
-    -Content "salarisschaal"
+    -Content "salarisschaal" -AppOnly
 
 # Everything in the tenant that carries permissions of its own — start with 25 sites
 .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
-    -Permissions Unique -MaxSites 25
+    -Permissions Unique -MaxSites 25 -AppOnly
 
 # Unattended, with an app you already have
 .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
@@ -302,7 +319,7 @@ so a scheduled task has to run as that same account.
 **Required modules**
 ```powershell
 Install-Module Microsoft.Graph.Authentication -Scope CurrentUser  # to run
-Install-Module Microsoft.Graph.Applications  -Scope CurrentUser   # only for the one-time app registration
+Install-Module Microsoft.Graph.Applications  -Scope CurrentUser   # only for the one-time -AppOnly app registration
 ```
 
 ---
@@ -382,9 +399,11 @@ required. The first run against a tenant creates one automatically:
 3. It grants and admin-consents the delegated SharePoint scope `AllSites.FullControl`
 4. The client ID is cached per tenant in `pnp.appid.json` in the repo root (gitignored)
 
-Later runs read the cached client ID and go straight to the interactive SharePoint login —
-the Graph admin sign-in only happens once per tenant. Pass an existing `-ClientId` to skip
-app creation entirely.
+Later runs read the cached client ID and go straight to the delegated SharePoint sign-in
+(`Connect-M365PnP`: a device code when `useDeviceCodeAuth` is set in `load.config.ps1`,
+otherwise the browser) — the Graph admin sign-in (`Connect-M365Graph`) only happens once
+per tenant. Pass an existing `-ClientId` to skip app creation entirely. The script stays on
+PnP because Graph has no API for the SharePoint recycle bin or for site collection admins.
 
 **Parameters**
 
@@ -498,7 +517,9 @@ Per item you get the timeline, the **last known location** and a status: `Presen
 | `-FollowCopies` | switch | off | Also follow copies. By default a copy is reported but not followed — the original stays where it was |
 | `-IncludeActivity` | switch | off | Also opens, edits, downloads, sync and check-in/out: who last worked in it. Many more records, so slower |
 | `-OutputPath` | string | `C:\Temp\FileTrail_<name>_<ts>.csv` | CSV path; the raw audit records of the trail go to the same name with `.json` |
-| `-TenantId` | string | — | Tenant domain for `Connect-ExchangeOnline`; not needed when already connected |
+| `-TenantId` | string | — | Tenant domain to read. Delegated, a partner reaches a customer with it (`-DelegatedOrganization`); default the GDAP customer from `Connect-Tenant`, else your own tenant. Not needed when already connected to the right organisation |
+| `-ClientId` / `-CertificateThumbprint` | string | — | App-only instead of delegated: an app with `Exchange.ManageAsApp` and an Exchange role holding View-Only Audit Logs. Needs `-TenantId` (domain) |
+| `-AppOnly` | switch | off | App-only with the app for the tenant in `graph.appid.json` |
 | `-PassThru` | switch | off | Also return the timeline rows as objects |
 
 **Examples**
@@ -519,6 +540,8 @@ Per item you get the timeline, the **last known location** and a status: `Presen
 **Notes**
 
 - Needs the **View-Only Audit Logs** or **Audit Logs** role in Exchange Online, and the module `ExchangeOnlineManagement`. Runs in Windows PowerShell 5.1 and PowerShell 7
+- Sign-in: delegated by default through `Connect-M365Exchange` (device code per `load.config.ps1`; a GDAP customer through `-DelegatedOrganization` — the old `-Organization` only applies to app-only sign-in, so a partner landed in its own tenant), app-only with `-ClientId`/`-CertificateThumbprint` or `-AppOnly`. Windows PowerShell 5.1 cannot load that PowerShell 7 helper and connects with the same rules inline. An Exchange session the script did not open is left open
+- Why Exchange Online and not Graph: Graph's audit log query API (`/security/auditLog/queries`) is asynchronous — a query is created, runs for minutes, then its records are fetched — with a different record shape. The slicing, splitting and retry logic here is built on `Search-UnifiedAuditLog`, so the script keeps it
 - The audit log runs 30–90 minutes (occasionally 24 hours) behind. Audit Standard keeps **180 days**; the script warns when the window starts earlier
 - Only what happened **inside** the window can be followed. A folder renamed before `-StartDate` is invisible; if the trail seems to start halfway, widen the window
 - Renames by the OneDrive sync client (in Explorer) are audited like those in the browser; the `UserAgent` column tells them apart
@@ -581,11 +604,12 @@ This script removes permissions, so its failure modes differ from those of a rep
 | `-IncludeOneDriveSites` | switch | off | Also search personal OneDrive sites |
 | `-IncludeHiddenLists` | switch | off | Also hidden and system lists |
 | `-TenantId` / `-ClientId` / `-CertificateThumbprint` | string | — | Your own app registration instead of the temporary one. It needs SharePoint `Sites.FullControl.All` plus Graph `Sites.Read.All`, `User.Read.All` and `GroupMember.Read.All`. Without `User.Read.All` the user lookup comes back `403` and the run stops rather than mistaking that for a missing account |
+| `-AppOnly` | switch | off | The same, with ClientId and CertificateThumbprint for the tenant from `graph.appid.json` (PowerShell 7) |
 | `-ClientSecret` | string | — | Works for Graph but **not** for SharePoint (see authentication under the report) |
 | `-OutputPath` | string | `C:\Temp` | Output folder |
 | `-GraphTimeoutSec` / `-MaxGraphRetry` | int | `120` / `6` | Timeout and retries |
 
-Authentication is identical to the report: a short-lived, certificate-based app registration with SharePoint `Sites.FullControl.All`, which is deleted again afterwards.
+Authentication is identical to the report: a short-lived, certificate-based app registration with SharePoint `Sites.FullControl.All`, which is deleted again afterwards. The one interactive step — creating that app — is a delegated sign-in through `Connect-M365Graph` (PowerShell 7): device code per `load.config.ps1`, the GDAP customer from `Connect-Tenant`, and a Graph session that already holds the scopes is reused and left open. The work itself stays app-only on purpose: role assignments, SharePoint groups and site collection admins only exist in SharePoint REST, which accepts neither a delegated Graph token (wrong audience) nor a secret-based app-only token.
 
 
 #### Removing the Entra ID groups too

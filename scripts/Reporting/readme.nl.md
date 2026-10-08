@@ -112,7 +112,7 @@ Zie [Licensing/](Licensing/) voor het maandelijkse licentierapport.
 
 ## Get-SharePointStorageReport.ps1
 
-Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard verbindt het script delegated en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd.
+Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard meldt het script zich gedelegeerd aan via [`Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1) (apparaatcode en GDAP-klant volgens `load.config.ps1`) en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd. `-AppOnly` gebruikt in de plaats de app voor de tenant uit `graph.appid.json`. Alles wordt via Microsoft Graph gelezen — sites, libraries (ook verborgen, zoals de Preservation Hold Library, gevonden via Graph `/lists` met de facetten `system`/`hidden`), bestanden en versies. De bestandsscan had een SharePoint REST-variant voor verborgen libraries, gevoed met een client-secret-token dat SharePoint Online altijd weigert; die is weg, en een verborgen library die Graph niet opent wordt nu gemeld in plaats van stil overgeslagen. Vereist PowerShell 7.
 
 
 ### Dekking
@@ -130,7 +130,7 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Stand
 
 ### Prullenbak (recycle bin)
 
-De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt daarom **apart** van de library-scan opgehaald, alleen voor echte SharePoint site collections (geen OneDrive):
+De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt daarom **apart** van de library-scan opgehaald, alleen voor echte SharePoint site collections (geen OneDrive). Graph heeft geen prullenbak-API voor SharePoint-sites, dus dit deel gebruikt nog SharePoint REST met een token uit het client secret van de tijdelijke app (of `-ClientSecret`) — en SharePoint Online weigert app-only tokens op basis van een secret, dus reken op lege prullenbakcijfers tot dat naar een certificaat verhuist (niet geverifieerd op een tenant):
 
 - Standaard (`-Apply`, als Phase 2b) of los via **`-RecycleBinOnly`** (slaat de library-scan helemaal over, alleen prullenbak)
 - Alleen root site collections hebben een eigen prullenbak (sub-webs delen die van de root)
@@ -207,7 +207,7 @@ Daarnaast is `-SiteUrl` (1 specifieke site) geoptimaliseerd: in normale mode geb
 
 Voor GDAP-betrouwbaarheid schakelt het script bij single-site scans automatisch naar app-only bootstrap wanneer `authMode=GDAP` is gedetecteerd (uit `load.config.ps1`/launcher-context). Wil je dat altijd forceren, gebruik dan `-ForceAppOnlySingleSite`.
 
-Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-context (`$global:cid`/`-TenantId`) voor zowel `Connect-MgGraph` als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden.
+Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-context (`$global:cid`/`-TenantId`) voor zowel de gedelegeerde aanmelding (`Connect-M365Graph`) als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden. Een Graph-sessie die de scopes al heeft wordt hergebruikt en blijft op het einde open.
 
 ### Parameters
 
@@ -220,6 +220,7 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-contex
 | `-ClientId` | Bestaande App Registration client ID — slaat auto-create over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
 | `-ClientSecret` | Client secret voor een bestaande app registration |
 | `-CertificateThumbprint` | Certificate thumbprint voor een bestaande app registration |
+| `-AppOnly` | App-only met ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` — geen aanmelding, geen tijdelijke app. Vereist `Sites.Read.All` (en `User.Read.All` voor het profielpad) als application permissions |
 | `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting |
 | `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken |
 | `-RecycleBinOnly` | Slaat storage/library scanning over — leest alleen recycle bin items (stage 1 + stage 2) per site collection |
@@ -281,7 +282,7 @@ Overerving wordt gevolgd zoals SharePoint die zelf modelleert: een item verschij
 
 ### Authenticatie
 
-Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onder de Read/Write/Manage-rollen van SharePoint: daarvoor is de applicatierol `Sites.FullControl.All` nodig. Het script logt je daarom één keer interactief in en maakt vervolgens zelf een kortlevende App Registration aan met:
+Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onder de Read/Write/Manage-rollen van SharePoint: daarvoor is de applicatierol `Sites.FullControl.All` nodig. Het script meldt je daarom één keer aan — gedelegeerd, via [`Connect-M365Graph`](../Startup/readme.nl.md#connect-m365ps1): een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, de GDAP-klant uit `Connect-Tenant`, en een bestaande Graph-sessie met de scopes wordt hergebruikt — en maakt vervolgens zelf een kortlevende App Registration aan met:
 
 | Resource | Rol | Waarvoor |
 |---|---|---|
@@ -289,7 +290,7 @@ Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onde
 | Graph | `Sites.Read.All` | Tenantbrede site-enumeratie |
 | Graph | `GroupMember.Read.All` | Entra-groepslidmaatschap oplossen |
 
-Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft.
+Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft, of `-AppOnly` om ze uit `graph.appid.json` te nemen (PowerShell 7). De scan zelf blijft bewust app-only: SharePoint REST aanvaardt noch een gedelegeerd Graph-token (verkeerde audience) noch een app-only token op basis van een secret.
 
 > **Certificaat, geen secret — en dat is geen voorkeur.** SharePoint Online weigert elk app-only token dat met een client secret is opgehaald: je krijgt `401` met `x-ms-diagnostics: ... Unsupported app only token`. Alleen certificaat-gebaseerde app-only authenticatie werkt tegen `_api`. De tijdelijke app krijgt daarom een certificaat dat het script **in het geheugen** aanmaakt en op de app registreert; het komt niet in de certificate store en niet op schijf, dus er valt achteraf niets op te ruimen. Geef je `-ClientSecret` mee bij een eigen app, dan waarschuwt het script: de Graph-helft werkt dan wel, de SharePoint-helft niet.
 
@@ -426,6 +427,7 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 | `-ClientId` | string | — | Bestaande App Registration; slaat de tijdelijke app over |
 | `-ClientSecret` | string | — | Secret bij `-ClientId`. **Werkt niet tegen SharePoint** (zie Authenticatie); het script waarschuwt |
 | `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My`. Dit is de werkende variant |
+| `-AppOnly` | switch | uit | ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` in plaats van een tijdelijke app. Die app heeft de rollen hierboven nodig, SharePoint `Sites.FullControl.All` inbegrepen (PowerShell 7) |
 | `-OutputPath` | string | `C:\Temp` | Outputmap |
 | `-IncludeOneDriveSites` | switch | uit | Neemt ook persoonlijke OneDrive-sites mee (één site per gebruiker) |
 | `-IncludeHiddenLists` | switch | uit | Neemt verborgen en systeemlijsten mee (Form Templates, Style Library, workflowhistorie, …) |
@@ -479,9 +481,9 @@ Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document
 
 ### Authenticatie
 
-Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
+Standaard meldt het script zich gedelegeerd aan met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via [`Connect-M365Graph`](../Startup/readme.nl.md#connect-m365ps1) — een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, de GDAP-klant uit `Connect-Tenant`, Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`; een Graph-sessie die de scopes al heeft wordt hergebruikt en blijft open. Vereist PowerShell 7. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
 
-Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al de application permission `Sites.ReadWrite.All` hebben.
+Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee, of `-AppOnly` om ClientId en CertificateThumbprint uit `graph.appid.json` te nemen; die app moet dan al de application permission `Sites.ReadWrite.All` hebben.
 
 > **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie-garantie is.
 
@@ -508,6 +510,7 @@ Tijdens de scan toont het script geneste progress-balken (sites → libraries �
 | `-ClientId` | `string` | Bestaande App Registration client ID — slaat de tijdelijke app over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
 | `-ClientSecret` | `string` | Client secret voor een bestaande app registration |
 | `-CertificateThumbprint` | `string` | Certificate thumbprint voor een bestaande app registration |
+| `-AppOnly` | `switch` | App-only met ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` (vereist `Sites.ReadWrite.All` als application permission) |
 | `-Apply` | `switch` | Voert de verwijdering echt uit |
 | `-IncludeOneDriveSites` | `switch` | Neemt OneDrive-sites mee in de tenantscan |
 | `-IncludeHiddenLibraries` | `switch` | Neemt hidden document libraries mee |

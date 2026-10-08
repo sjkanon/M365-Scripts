@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Remove SharePoint Online file versions older than a cutoff date while preserving the current version.
@@ -17,8 +17,11 @@
     Default behavior is safe preview mode.
 
     Authentication:
-      By default the script connects interactively (delegated) with Sites.ReadWrite.All and
-      Files.ReadWrite.All — no Entra ID app registration is required. Scanning all sites in the
+      By default the script signs in delegated with Sites.ReadWrite.All and Files.ReadWrite.All,
+      through scripts\Startup\Connect-M365.ps1: a device code when $global:useDeviceCodeAuth is
+      set in load.config.ps1, the GDAP customer from Connect-Tenant, and an existing Graph
+      session reused when it already holds the scopes (and then left open). No Entra ID app
+      registration is required. Scanning all sites in the
       tenant additionally needs app-only auth for site/library enumeration and version-history
       lookups (Microsoft does not support delegated tenant-wide site enumeration); the script
       creates a short-lived, read-only temporary App Registration for that and removes it when
@@ -31,8 +34,9 @@
       are deleted when the run finishes.
 
       To skip the temporary app(s) and use your own existing app registration instead, pass
-      -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint). That app must already
-      have Sites.ReadWrite.All application permission granted.
+      -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint), or -AppOnly to take
+      ClientId and CertificateThumbprint from graph.appid.json. That app must already have
+      Sites.ReadWrite.All application permission granted.
 
 .PARAMETER BeforeDate
     Delete versions older than this date/time.
@@ -57,6 +61,10 @@
 
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for an existing app registration.
+
+.PARAMETER AppOnly
+    Connect app-only with the app registration for the tenant in graph.appid.json
+    (ClientId + CertificateThumbprint). It needs Sites.ReadWrite.All (application).
 
 .PARAMETER OutputPath
     Override the default output folder.
@@ -119,6 +127,7 @@ param(
     [string] $ClientId,
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [string] $OutputPath,
     [switch] $Apply,
     [switch] $IncludeOneDriveSites,
@@ -378,6 +387,21 @@ if ($allSitesMode -and [string]::IsNullOrWhiteSpace($TenantUrl)) {
     exit 1
 }
 
+# Sign-in helper: delegated by default (device code / GDAP customer per load.config.ps1),
+# -AppOnly takes the app for the tenant from graph.appid.json.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+if ($AppOnly -and -not $ClientId) {
+    try {
+        $appRegistration = Get-M365AppRegistration -TenantId $(if ($TenantId) { $TenantId } else { Resolve-M365TenantId })
+    } catch {
+        Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+    $ClientId              = $appRegistration.ClientId
+    $CertificateThumbprint = $appRegistration.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $appRegistration.Tenant }
+}
+
 $useTempApp = $allSitesMode -and -not $ClientId
 if ($useTempApp -and -not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
     Write-Host "  [ERROR] Missing required module: Microsoft.Graph.Applications (needed for the temporary App Registration in all-sites mode)." -ForegroundColor Red
@@ -407,30 +431,27 @@ try {
     if ($ClientId -and $effectiveTenantId) {
         # ── Provided app credentials → full app-only SDK connection ──────────
         if ($CertificateThumbprint) {
-            Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId `
-                -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+            $graphConnection = Connect-M365Graph -ClientId $ClientId -TenantId $effectiveTenantId `
+                -CertificateThumbprint $CertificateThumbprint
         } elseif ($ClientSecret) {
             $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-            $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
-            Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId `
-                -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+            $graphConnection = Connect-M365Graph -ClientId $ClientId -TenantId $effectiveTenantId `
+                -ClientSecret $secureSecret
         } else {
             Write-Host "  [ERROR] -ClientId requires -ClientSecret or -CertificateThumbprint." -ForegroundColor Red
             exit 1
         }
-        $script:ConnectedHere = $true
+        $script:ConnectedHere = [bool]$graphConnection.ConnectedHere
         Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
     } else {
-        Write-Host "  Connecting interactively..." -ForegroundColor Cyan
+        Write-Host "  Connecting (delegated)..." -ForegroundColor Cyan
         $delegatedScopes = @('Sites.ReadWrite.All', 'Files.ReadWrite.All')
         if ($useTempApp) {
             $delegatedScopes += @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
             Write-Host "  Required role: Global Administrator or Application Administrator (for the temporary all-sites lookup app)" -ForegroundColor DarkGray
         }
-        $connectParams = @{ Scopes = $delegatedScopes; NoWelcome = $true }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams -ErrorAction Stop
-        $script:ConnectedHere = $true
+        $graphConnection = Connect-M365Graph -Scopes $delegatedScopes -TenantId $effectiveTenantId
+        $script:ConnectedHere = [bool]$graphConnection.ConnectedHere
         Write-Host "  [OK]   Connected (delegated)." -ForegroundColor DarkGray
 
         if ($useTempApp) {
