@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Bulk-create M365 users from a CSV file via Microsoft Graph.
@@ -27,6 +27,12 @@
       Password            Initial password (auto-generated if absent)
       LicenseSkuId        SKU part number to assign (e.g. ENTERPRISEPACK)
 
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused and left
+    connected; only a session this script opened is disconnected.
+    Delegated scopes: User.ReadWrite.All, Organization.Read.All.
+
 .PARAMETER CsvPath
     Path to the input CSV file.
 
@@ -48,7 +54,16 @@
     CSV report path. Default: .\CreatedAccounts_<timestamp>.csv
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Dry run (default — shows what would be created)
@@ -78,8 +93,16 @@ param (
 
     [string] $OutputPath,
 
-    [string] $TenantId
+    [string] $TenantId,
+
+    [string] $ClientId,
+
+    [string] $CertificateThumbprint,
+
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -105,24 +128,18 @@ function New-RandomPassword {
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-$ctx = Get-MgContext -ErrorAction SilentlyContinue
-if (-not $ctx) {
-    $connectParams = @{
-        Scopes    = @('User.ReadWrite.All', 'Directory.ReadWrite.All')
-        NoWelcome = $true
-    }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+# Reuses a session for the right tenant that has the scopes (the old check only
+# looked for any session, whatever its tenant or scopes); connects otherwise.
+# Organization.Read.All is for the SKU lookup (Get-MgSubscribedSku).
+$graph = Connect-M365Graph -Scopes 'User.ReadWrite.All', 'Organization.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Load and validate CSV ─────────────────────────────────────────────────────
 $rows = Import-Csv -Path $CsvPath
 
 if ($rows.Count -eq 0) {
     Write-Error "CSV is empty."
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
@@ -133,12 +150,12 @@ $dnCol  = $cols | Where-Object { $_ -match '^displayname$' }             | Selec
 
 if (-not $upnCol) {
     Write-Error "CSV must have a 'UserPrincipalName' or 'UPN' column. Found: $($cols -join ', ')"
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 if (-not $dnCol) {
     Write-Error "CSV must have a 'DisplayName' column. Found: $($cols -join ', ')"
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
@@ -176,6 +193,7 @@ if ($LicenseSkuId -or ($cols | Where-Object { $_ -match 'licenseskuid' })) {
 # ── Process rows ──────────────────────────────────────────────────────────────
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 $created = 0
+$wouldCreate = 0
 $skipped = 0
 $errors  = 0
 
@@ -216,7 +234,7 @@ foreach ($row in $rows) {
             Status            = 'DryRun'
             Timestamp         = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         })
-        $skipped++
+        $wouldCreate++
         continue
     }
 
@@ -224,6 +242,8 @@ foreach ($row in $rows) {
     $userParams = @{
         UserPrincipalName = $upn
         DisplayName       = $dn
+        # mailNickname is a required property of POST /users (Graph docs).
+        MailNickname      = (($upn -split '@')[0] -replace '[^A-Za-z0-9._-]', '')
         AccountEnabled    = $true
         UsageLocation     = $loc
         PasswordProfile   = @{
@@ -288,7 +308,8 @@ if ($Apply) {
     Write-Host "  Skipped : $skipped" -ForegroundColor DarkYellow
     Write-Host "  Errors  : $errors"  -ForegroundColor Red
 } else {
-    Write-Host "  Would create : $($rows.Count - $skipped) user(s)" -ForegroundColor Yellow
+    # Dry-run rows used to be counted as skipped, so this always showed 0.
+    Write-Host "  Would create : $wouldCreate user(s)" -ForegroundColor Yellow
     Write-Host "  Skipped      : $skipped (invalid UPN)" -ForegroundColor DarkYellow
 }
 
@@ -301,4 +322,4 @@ if ($Apply -and $created -gt 0) {
 }
 Write-Host ""
 
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Grant a user access rights on every folder in a mailbox (not just Calendar/Inbox).
@@ -13,9 +13,16 @@
     Outlook, or where only specific folder-level rights (not full mailbox access)
     should be granted.
 
-    Connects to Exchange Online automatically if no session is active; reuses an
-    existing session if already connected. Defaults to a safe preview — pass
-    -Apply to actually grant the permission.
+    Stays on Exchange Online PowerShell: Graph has no API for mailbox folder
+    permissions (Add/Set-MailboxFolderPermission); only the calendar has
+    calendarPermission in Graph.
+    Sign-in goes through scripts\Startup\Connect-M365.ps1 (Connect-M365Exchange):
+    delegated as the admin by default (device code / GDAP customer via
+    -DelegatedOrganization per load.config.ps1), app-only with -ClientId and
+    -CertificateThumbprint or -AppOnly. An Exchange session for the tenant is reused
+    and left connected; only a session this script opened is disconnected.
+
+    Defaults to a safe preview — pass -Apply to actually grant the permission.
 
 .PARAMETER Mailbox
     UPN or identity of the target mailbox whose folders will get the permission.
@@ -33,7 +40,17 @@
     folders that would be affected.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant domain (contoso.onmicrosoft.com) or ID. Defaults to the GDAP customer when
+    authMode is GDAP. App-only needs the domain form.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Preview — list every folder that would receive the permission
@@ -63,8 +80,13 @@ param(
     [string] $AccessRights,
 
     [switch] $Apply,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 $excludedFolders = @(
     '/Sync Issues',
@@ -78,15 +100,10 @@ $excludedFolders = @(
 )
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# -Organization (used here before) only applies to app-only sign-in, so a GDAP
+# customer was never reached; the helper uses -DelegatedOrganization for that.
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId `
+    -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -153,4 +170,4 @@ if (-not $Apply) { Write-Host "  Re-run with -Apply to grant the permission." -F
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo

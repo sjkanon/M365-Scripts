@@ -41,11 +41,18 @@ Exchange/SharePoint par défaut vers ce tenant. Essai à blanc par défaut.
 | `-EnvironmentName` | Oui | Nom d'environnement alphanumérique en minuscules |
 | `-RequestingUserUpn` | Non | Par défaut, l'utilisateur connecté |
 | `-Apply` | Non | Provisionner réellement (par défaut : aperçu) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 ```powershell
 .\New-Workspace365Environment.ps1 -WorkspaceHostname "https://yourcompany.workspace365.net" -ProvisioningKey $key -EnvironmentName "contoso" -Apply
 ```
+
+**Remarques**
+- Se connecte à Graph via [`Connect-M365.ps1`](../../Startup/readme.fr.md) : en délégué par défaut, en app-only avec `-ClientId` + `-CertificateThumbprint` ou `-AppOnly` (`-RequestingUserUpn` est alors obligatoire — il n'y a pas d'utilisateur connecté). Une session adaptée est réutilisée ; seule une session ouverte par le script est fermée
+- Étendues déléguées : `Application.ReadWrite.All`, `User.Read`, `User.ReadBasic.All` (ajoutée : `-RequestingUserUpn` peut désigner un autre administrateur), `Organization.Read.All`
+- L'API de provisionnement elle-même est appelée avec la clé de provisionnement, pas via Graph
 
 ---
 

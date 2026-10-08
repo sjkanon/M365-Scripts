@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Copy the members of one Entra ID group into another group via Microsoft Graph.
@@ -15,6 +15,11 @@
       - -MemberType limits the copy to a single object type (User, Group, ...)
       - -Mirror also removes members from the target that are not in the source
         (making the target an exact copy instead of a union)
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused.
+    Delegated scopes: Group.Read.All, GroupMember.ReadWrite.All, Directory.Read.All.
 
 .PARAMETER SourceGroup
     Display name or Object ID of the group to copy members FROM.
@@ -39,15 +44,25 @@
     reports what it would do.
 
 .PARAMETER Disconnect
-    Sign out of Microsoft Graph when finished. Off by default: Disconnect-MgGraph
-    clears the SDK token cache, which means a new browser prompt on every run.
+    Sign out of Microsoft Graph when finished - only when this script opened the
+    session; a session you already had is never closed. Off by default, so the next
+    run in the same PowerShell session needs no new sign-in.
 
 .PARAMETER OutputPath
     CSV report path. Defaults to C:\Temp\GroupMemberCopy_<timestamp>.csv
     (~/Downloads on non-Windows).
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Dry run — show what would be copied
@@ -82,25 +97,21 @@ param(
     [switch] $Disconnect,
 
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
-# ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    if (-not (Get-MgContext -ErrorAction Stop)) { throw }
-} catch {
-    $connectParams = @{
-        Scopes = @('Group.Read.All', 'GroupMember.ReadWrite.All', 'Directory.Read.All')
-    }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+# ── Connection (reuses a session that has the scopes; reconnects when not) ────
+$graph = Connect-M365Graph -Scopes 'Group.Read.All', 'GroupMember.ReadWrite.All', 'Directory.Read.All' `
+    -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 function Resolve-Group {
@@ -314,7 +325,6 @@ if (-not $Apply) {
 Write-Host ""
 
 # ── Session ───────────────────────────────────────────────────────────────────
-# Deliberately NOT calling Disconnect-MgGraph: it clears the SDK token cache, so
-# every following run would trigger a fresh browser prompt. Use -Disconnect if
-# you really want the session torn down (e.g. on a shared machine).
-if ($Disconnect -and $script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+# Left connected by default, so the next run needs no new sign-in. -Disconnect
+# closes the session, but only when this script opened it.
+if ($Disconnect) { Disconnect-M365Graph $graph }

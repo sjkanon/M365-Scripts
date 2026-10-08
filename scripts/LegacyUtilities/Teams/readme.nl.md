@@ -4,9 +4,7 @@
 
 # Legacy Utilities — Teams
 
-Hulpscripts voor het inrichten van Teams en Planner via Microsoft Graph (en Microsoft Teams
-PowerShell voor het in bulk aanmaken van Teams/kanalen). Ze maken automatisch verbinding als er
-geen sessie actief is, en hergebruiken een bestaande sessie als je al verbonden bent.
+Hulpscripts voor het inrichten van Teams en Planner, volledig via Microsoft Graph — de MicrosoftTeams-module is niet meer nodig. Ze melden aan via [`Connect-M365.ps1`](../../Startup/readme.nl.md): standaard delegated als beheerder (browser, of apparaatcode / GDAP-klant volgens `load.config.ps1`), app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (app uit `graph.appid.json`). Een passende sessie voor de juiste tenant wordt hergebruikt en blijft verbonden; alleen een sessie die het script zelf opende, wordt verbroken. Elk script accepteert `-TenantId`, `-ClientId`, `-CertificateThumbprint` en `-AppOnly`.
 
 ---
 
@@ -40,6 +38,10 @@ blijft pollen tot het nieuwe Team verschijnt. Standaard een proefdraai.
 .\Copy-Team.ps1 -SourceTeamId "Project Template" -NewTeamName "Project 1234" -Apply
 ```
 
+**Opmerkingen**
+- Pollt de kloonbewerking uit de `Location`-header en meldt de ID van het nieuwe Team, of de fout als het klonen mislukte; voorheen wachtte het op een willekeurige groep met de nieuwe naam, waaraan een bestaande groep met die naam ook voldeed
+- Aanhalingstekens in een weergavenaam voor `-SourceTeamId` worden ge-escaped voor het filter
+
 ---
 
 ### Copy-PlannerPlan.ps1
@@ -52,6 +54,11 @@ Standaard een proefdraai.
 ```powershell
 .\Copy-PlannerPlan.ps1 -SourcePlanId "xqQg5FS2LkCp935s-FIFm2QAFkHM" -DestinationGroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -Apply
 ```
+
+**Opmerkingen**
+- Leest alle buckets en taken pagina voor pagina (bij een plan groter dan één pagina ging de rest verloren)
+- Checklists worden weer gekopieerd — de items werden uit de verkeerde eigenschappen gelezen — ook bij taken met een checklist maar zonder beschrijving
+- Delegated moet de beheerder lid zijn van beide groepen; app-only werkt met de applicatiemachtiging `Tasks.ReadWrite.All`
 
 ---
 
@@ -84,5 +91,13 @@ ChannelName,Description
 
 ```powershell
 Install-Module Microsoft.Graph -Scope CurrentUser
-Install-Module MicrosoftTeams -Scope CurrentUser
 ```
+
+**Hoe het werkt**
+
+1. `POST /groups` maakt de Microsoft 365-groep aan met de `MailNickname` uit de CSV, met de eigenaar als eigenaar en lid
+2. `POST /teams` met `group@odata.bind` en de sjabloon `standard` maakt er een Team van (404's worden opnieuw geprobeerd zolang de nieuwe groep repliceert)
+3. De asynchrone bewerking uit de `Location`-header wordt gepolld tot het Team is ingericht
+4. `POST /teams/{id}/channels` voegt elk kanaal toe
+
+Gedelegeerde scopes: `Group.ReadWrite.All`, `User.Read.All`, `Team.Create`, `Channel.Create`. App-only: `Group.ReadWrite.All`, `User.Read.All` (applicatiemachtigingen). Een CSV zonder `TeamName` of `ChannelName` wordt nu geweigerd (die controle werkte voorheen nooit).

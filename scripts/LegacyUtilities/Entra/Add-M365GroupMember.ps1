@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Add or remove one or more members of a Microsoft 365 / security group via
@@ -9,8 +9,12 @@
     group, identified by object ID or display name. Defaults to a safe preview —
     pass -Apply to actually change membership.
 
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected.
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A Graph session for the right tenant that
+    already has the scopes is reused and left connected; only a session this script
+    opened is disconnected.
+    Delegated scopes: GroupMember.ReadWrite.All, Group.Read.All, User.Read.All.
 
 .PARAMETER GroupId
     Object ID or exact display name of the target group.
@@ -34,7 +38,16 @@
     (`~/Downloads` on Linux/macOS).
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Preview
@@ -52,7 +65,7 @@
     .\Add-M365GroupMember.ps1 -GroupId "Sales Team" -CsvPath .\leavers.csv -Action Remove -Apply
 
 .NOTES
-    Required module: Microsoft.Graph.Groups
+    Required modules: Microsoft.Graph.Groups, Microsoft.Graph.Users
 #>
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Single')]
 param(
@@ -71,8 +84,13 @@ param(
 
     [switch] $Apply,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -80,27 +98,26 @@ if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir
 if (-not $OutputPath) { $OutputPath = Join-Path $outputDir "GroupMembershipChanges_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv" }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('GroupMember.ReadWrite.All', 'Group.Read.All'); NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+# User.Read.All: members are looked up with Get-MgUser, which the old scope set
+# did not cover.
+$graph = Connect-M365Graph -Scopes 'GroupMember.ReadWrite.All', 'Group.Read.All', 'User.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Resolve group ──────────────────────────────────────────────────────────────
 try {
     $group = Get-MgGroup -GroupId $GroupId -ErrorAction Stop
 } catch {
-    $group = Get-MgGroup -Filter "displayName eq '$GroupId'" -ErrorAction Stop | Select-Object -First 1
-    if (-not $group) {
-        Write-Error "Group '$GroupId' not found by ID or display name."
-        if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    # Quotes escaped for OData; an ambiguous name is an error, not "first match",
+    # because writing members into the wrong group is worse than stopping.
+    $escaped = $GroupId -replace "'", "''"
+    $found = @(Get-MgGroup -Filter "displayName eq '$escaped'" -All -ErrorAction Stop)
+    if ($found.Count -ne 1) {
+        if ($found.Count -eq 0) { Write-Error "Group '$GroupId' not found by ID or display name." }
+        else { Write-Error "Group name '$GroupId' matches $($found.Count) groups. Use the object ID." }
+        Disconnect-M365Graph $graph
         exit 1
     }
+    $group = $found[0]
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -124,7 +141,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Csv') {
             Where-Object { $_ -match 'userprincipalname|^upn$|^mail$' } | Select-Object -First 1
         if (-not $col) {
             Write-Error "CSV must have a UserPrincipalName, UPN, or Mail column. Found: $($raw[0].PSObject.Properties.Name -join ', ')"
-            if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+            Disconnect-M365Graph $graph
             exit 1
         }
         $raw.$col | Where-Object { $_ } | ForEach-Object { $identities.Add($_.Trim()) }
@@ -178,5 +195,5 @@ Write-Host "  Report saved: $OutputPath" -ForegroundColor Green
 if (-not $Apply) { Write-Host "  Re-run with -Apply to make these changes." -ForegroundColor Yellow }
 Write-Host ""
 
-# ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+# ── Disconnect only if this script connected ──────────────────────────────────
+Disconnect-M365Graph $graph

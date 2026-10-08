@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Bulk delete M365 user accounts from a tenant.
@@ -7,7 +7,13 @@
     Removes specified user accounts from Entra ID / Microsoft 365.
     Accepts users via -UserList parameter, a CSV/TXT file, or interactive pipeline.
     Revokes sessions and removes licenses before deletion.
-    Defaults to dry-run mode — pass -DryRun:$false to perform actual deletions.
+    Defaults to dry-run mode — pass -Apply to perform actual deletions.
+
+    Signs in to Microsoft Graph through scripts\Startup\Connect-M365.ps1: delegated as
+    the admin by default (device code / GDAP customer per load.config.ps1), app-only with
+    -ClientId and -CertificateThumbprint or -AppOnly. An existing Graph session that fits
+    is reused and left connected; only a session this script opened is disconnected.
+    Delegated scope: User.ReadWrite.All.
 
 .PARAMETER UserList
     Array of UPNs to delete. e.g. -UserList "user1@domain.com","user2@domain.com"
@@ -29,7 +35,17 @@
     Path for the CSV results report. Default: .\DeletedAccounts_<timestamp>.csv
 
 .PARAMETER TenantId
-    Optional: Entra ID tenant ID or domain to connect to.
+    Optional: Entra ID tenant ID or domain to connect to. Defaults to the GDAP customer
+    when authMode is GDAP, else the tenant you sign in to.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Dry run with inline list (default — no changes made)
@@ -65,10 +81,18 @@ param (
 
     [string] $OutputPath,
 
-    [string] $TenantId
+    [string] $TenantId,
+
+    [string] $ClientId,
+
+    [string] $CertificateThumbprint,
+
+    [switch] $AppOnly
 )
 
 begin {
+    . (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
     # ── Output folder ─────────────────────────────────────────────────────────
     $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
     if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
@@ -80,18 +104,10 @@ begin {
         exit 1
     }
 
-    # ── Connect (only if not already connected) ───────────────────────────────
-    $script:ConnectedHere = $false
-    try {
-        $null = Get-MgContext -ErrorAction Stop
-    } catch {
-        Write-Host ""
-        Write-Host "  Connecting to Microsoft Graph..." -ForegroundColor Cyan
-        $connectParams = @{ Scopes = 'User.ReadWrite.All'; NoWelcome = $true }
-        if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-        Connect-MgGraph @connectParams
-        $script:ConnectedHere = $true
-    }
+    # ── Connect (reuses a fitting session; Get-MgContext never throws, so the old
+    #    try/catch around it never connected when there was no session) ───────────
+    $script:Graph = Connect-M365Graph -Scopes 'User.ReadWrite.All' -TenantId $TenantId `
+        -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
     # ── Load users from file ──────────────────────────────────────────────────
     $allUsers = [System.Collections.Generic.List[string]]::new()
@@ -140,7 +156,7 @@ end {
 
     if ($uniqueUpns.Count -eq 0) {
         Write-Warning "No valid UPNs found. Use -UserList or -CsvPath."
-        if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+        Disconnect-M365Graph $script:Graph
         return
     }
 
@@ -228,5 +244,5 @@ end {
     Write-Host "  Report saved to: $OutputPath" -ForegroundColor Cyan
     Write-Host ""
 
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $script:Graph
 }

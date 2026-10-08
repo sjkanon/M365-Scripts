@@ -40,11 +40,18 @@ Exchange/SharePoint naar deze tenant wijzen. Standaard een proefdraai.
 | `-EnvironmentName` | Ja | Omgevingsnaam in kleine letters en cijfers |
 | `-RequestingUserUpn` | Nee | Standaard de aangemelde gebruiker |
 | `-Apply` | Nee | Voer de provisioning echt uit (standaard: voorbeeldweergave) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein van Entra ID (standaard: de GDAP-klant als `authMode` GDAP is) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 ```powershell
 .\New-Workspace365Environment.ps1 -WorkspaceHostname "https://yourcompany.workspace365.net" -ProvisioningKey $key -EnvironmentName "contoso" -Apply
 ```
+
+**Opmerkingen**
+- Meldt bij Graph aan via [`Connect-M365.ps1`](../../Startup/readme.nl.md): standaard delegated, app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (dan is `-RequestingUserUpn` verplicht — er is geen aangemelde gebruiker). Een passende sessie wordt hergebruikt; alleen een sessie die het script zelf opende, wordt verbroken
+- Gedelegeerde scopes: `Application.ReadWrite.All`, `User.Read`, `User.ReadBasic.All` (toegevoegd: `-RequestingUserUpn` kan een andere beheerder noemen), `Organization.Read.All`
+- De Provisioning API zelf wordt aangeroepen met de provisioning key, niet via Graph
 
 ---
 

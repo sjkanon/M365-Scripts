@@ -4,9 +4,7 @@
 
 # Legacy Utilities — Teams
 
-Team and Planner provisioning utilities via Microsoft Graph (and Microsoft
-Teams PowerShell for bulk Team/channel creation). Connect automatically if no
-session is active; reuse an existing session if already connected.
+Team and Planner provisioning utilities, all on Microsoft Graph — the MicrosoftTeams module is no longer needed. They sign in through [`Connect-M365.ps1`](../../Startup/readme.md): delegated as the admin by default (browser, or device code / GDAP customer per `load.config.ps1`), app-only with `-ClientId` + `-CertificateThumbprint` or `-AppOnly` (app from `graph.appid.json`). A session for the right tenant that already fits is reused and left connected; only a session the script opened is disconnected. Every script accepts `-TenantId`, `-ClientId`, `-CertificateThumbprint` and `-AppOnly`.
 
 ---
 
@@ -40,6 +38,10 @@ polls until the new Team appears. Dry-run by default.
 .\Copy-Team.ps1 -SourceTeamId "Project Template" -NewTeamName "Project 1234" -Apply
 ```
 
+**Notes**
+- Polls the clone operation from the `Location` header and reports the new Team's ID, or the error when the clone failed; before, it waited for any group with the new name, which an existing group with that name also satisfied
+- Quotes in a `-SourceTeamId` display name are escaped for the filter
+
 ---
 
 ### Copy-PlannerPlan.ps1
@@ -52,6 +54,11 @@ Microsoft.Graph.Planner — no PnP dependency needed. Dry-run by default.
 ```powershell
 .\Copy-PlannerPlan.ps1 -SourcePlanId "xqQg5FS2LkCp935s-FIFm2QAFkHM" -DestinationGroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -Apply
 ```
+
+**Notes**
+- Reads all buckets and tasks page by page (a plan larger than one page lost the rest)
+- Checklists are copied again — the items were read from the wrong properties — also for tasks with a checklist but no description
+- Delegated, the admin must be a member of both groups; app-only works with the `Tasks.ReadWrite.All` application permission
 
 ---
 
@@ -84,5 +91,13 @@ ChannelName,Description
 
 ```powershell
 Install-Module Microsoft.Graph -Scope CurrentUser
-Install-Module MicrosoftTeams -Scope CurrentUser
 ```
+
+**How it works**
+
+1. `POST /groups` creates the Microsoft 365 group with the CSV's `MailNickname`, the owner as owner and member
+2. `POST /teams` with `group@odata.bind` and the `standard` template turns it into a Team (404s are retried while the new group replicates)
+3. The async operation from the `Location` header is polled until the Team is provisioned
+4. `POST /teams/{id}/channels` adds each channel
+
+Delegated scopes: `Group.ReadWrite.All`, `User.Read.All`, `Team.Create`, `Channel.Create`. App-only: `Group.ReadWrite.All`, `User.Read.All` (application permissions). A CSV without `TeamName` or `ChannelName` is now rejected (that check never fired before).
