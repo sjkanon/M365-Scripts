@@ -8,6 +8,15 @@ Scripts de rapport et de durcissement de la posture de sécurité : tendance du 
 d'applications d'entreprise, verrouillage de la connexion aux boîtes aux lettres partagées et base de référence EOP anti-spam/
 anti-malware.
 
+**Connexion.** Chaque script se connecte via
+[`Connect-M365.ps1`](../../Startup/readme.fr.md#connect-m365ps1) : délégué par défaut (vous vous
+connectez en tant qu'administrateur), avec le code d'appareil et le client GDAP issus de
+`load.config.ps1`. App-only avec `-ClientId` + `-CertificateThumbprint`, ou `-AppOnly` (ClientId et
+empreinte issus de `graph.appid.json`). Une session déjà adaptée est réutilisée et reste
+connectée ; les scripts ne déconnectent que ce qu'ils ont ouvert eux-mêmes. Microsoft Graph est
+utilisé partout où il offre une API ; Exchange Online uniquement pour la liste des boîtes aux
+lettres partagées et les stratégies EOP.
+
 ---
 
 ## Scripts
@@ -24,15 +33,19 @@ anti-malware.
 ### Get-SecureScoreReport.ps1
 
 Rapporte l'évolution du Microsoft Secure Score du tenant dans le temps et détaille les
-scores par contrôle du dernier instantané, triés du plus faible au plus fort. Lecture seule.
+scores par contrôle du dernier instantané, triés du plus faible au plus fort. Le nombre maximal
+de points et le titre de chaque contrôle proviennent de son profil de contrôle. Lecture seule.
 
 **Paramètres**
 
 | Paramètre | Obligatoire | Description |
 |-----------|----------|-------------|
 | `-HistoryCount` | Non | Nombre d'instantanés historiques à inclure (par défaut `30`) |
-| `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant ou domaine Entra ID |
+| `-OutputPath` | Non | Dossier des deux rapports CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
+| `-TenantId` | Non | ID de tenant ou domaine ; par défaut le client GDAP de `load.config.ps1` |
+| `-ClientId` | Non | Inscription d'application pour la connexion app-only (avec `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour la connexion app-only |
+| `-AppOnly` | Non | App-only avec ClientId et empreinte issus de `graph.appid.json` |
 
 **Exemples**
 
@@ -42,8 +55,15 @@ scores par contrôle du dernier instantané, triés du plus faible au plus fort.
 .\Get-SecureScoreReport.ps1 -HistoryCount 90 -OutputPath C:\Reports
 ```
 
+**Remarques**
+- Le détail par contrôle sortait vide : il lisait `controlName` et `maxScore` dans les
+  `AdditionalProperties` du SDK, où les propriétés typées n'arrivent jamais, et le score d'un
+  contrôle dans un instantané n'a pas de maximum. Le script lit désormais le JSON brut et associe
+  chaque contrôle à son `secureScoreControlProfile` pour le maximum et le titre.
+- La liste des plus faibles ignore les contrôles déjà complets ou obsolètes.
+
 **Étendue requise :** `SecurityEvents.Read.All`
-**Module requis :** `Microsoft.Graph.Security`
+**Module requis :** `Microsoft.Graph.Authentication`
 
 ---
 
@@ -64,7 +84,10 @@ les applications du tenant.
 | `-IncludeUserConsent` | Non | Signaler/révoquer aussi le consentement délégué par utilisateur (pas uniquement le consentement administrateur à l'échelle du tenant) |
 | `-Apply` | Non | Révoquer réellement les autorisations signalées (par défaut : aperçu uniquement) |
 | `-OutputPath` | Non | Chemin du rapport CSV |
-| `-TenantId` | Non | ID de tenant ou domaine Entra ID |
+| `-TenantId` | Non | ID de tenant ou domaine ; par défaut le client GDAP de `load.config.ps1` |
+| `-ClientId` | Non | Inscription d'application pour la connexion app-only (avec `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour la connexion app-only |
+| `-AppOnly` | Non | App-only avec ClientId et empreinte issus de `graph.appid.json` |
 
 *Exactement un des paramètres `-AppId` / `-AppDisplayName` est obligatoire.
 
@@ -83,8 +106,18 @@ les applications du tenant.
 
 Prend en charge `-WhatIf` (`SupportsShouldProcess`).
 
-**Étendues requises :** `Application.Read.All`, `DelegatedPermissionGrant.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All`
-**Module requis :** `Microsoft.Graph.Applications`
+**Remarques**
+- Les autorisations déléguées sont désormais lues avec un filtre côté serveur
+  (`clientId eq '<id du principal de service>'`) au lieu de filtrer localement toutes les
+  autorisations du tenant ; un échec de lecture arrête maintenant le script au lieu de signaler
+  « aucune autorisation ».
+- Les autorisations d'application affichent leur valeur de rôle (p. ex. `Mail.Read`) au lieu d'un
+  simple GUID.
+- Sans `-IncludeUserConsent`, le script indique combien d'autorisations par utilisateur il a
+  laissées de côté.
+
+**Étendues requises :** aperçu `Application.Read.All`, `DelegatedPermissionGrant.Read.All`, `User.ReadBasic.All` ; `-Apply` ajoute `DelegatedPermissionGrant.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All`
+**Modules requis :** `Microsoft.Graph.Applications`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Users`
 
 ---
 
@@ -103,7 +136,10 @@ L'accès délégué (Full Access / Send As) n'est pas affecté.
 | `-Mailbox` | Non | UPN d'une seule boîte aux lettres partagée. Si omis, toutes les boîtes aux lettres partagées sont vérifiées |
 | `-Apply` | Non | Désactiver réellement la connexion pour les comptes activés trouvés (par défaut : aperçu uniquement) |
 | `-OutputPath` | Non | Chemin du rapport CSV |
-| `-TenantId` | Non | ID de tenant ou domaine Entra ID |
+| `-TenantId` | Non | ID de tenant ou domaine ; par défaut le client GDAP de `load.config.ps1` (Exchange app-only exige la forme domaine) |
+| `-ClientId` | Non | Inscription d'application pour la connexion app-only à Graph et Exchange (avec `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour la connexion app-only |
+| `-AppOnly` | Non | App-only avec ClientId et empreinte issus de `graph.appid.json` |
 
 **Exemples**
 
@@ -117,7 +153,14 @@ L'accès délégué (Full Access / Send As) n'est pas affecté.
 
 Prend en charge `-WhatIf` (`SupportsShouldProcess`).
 
-**Étendue requise :** `User.ReadWrite.All`
+**Remarques**
+- Exchange Online reste utilisé pour lister les boîtes aux lettres partagées : « boîte aux lettres
+  partagée » est une propriété Exchange (`RecipientTypeDetails`) sur laquelle Graph ne peut pas
+  filtrer. L'état du compte et la modification passent par Graph.
+- Sous GDAP, Exchange est désormais atteint avec `-DelegatedOrganization` ; l'ancien
+  `-Organization` ne s'applique qu'à la connexion app-only.
+
+**Étendues requises :** `User.Read.All` (aperçu), `User.ReadWrite.All` (`-Apply`)
 **Modules requis :** `ExchangeOnlineManagement`, `Microsoft.Graph.Users`
 
 ---
@@ -140,7 +183,10 @@ domaines acceptés).
 | `-MalwarePolicyName` | Non | Nom de la stratégie/règle anti-malware (par défaut `MSP Baseline Anti-Malware`) |
 | `-UpdateExisting` | Non | Mettre à jour la stratégie sur place si une stratégie du même nom existe déjà |
 | `-Apply` | Non | Créer/mettre à jour réellement les stratégies (par défaut : aperçu uniquement) |
-| `-TenantId` | Non | ID de tenant ou domaine Entra ID |
+| `-TenantId` | Non | ID de tenant ou domaine ; par défaut le client GDAP de `load.config.ps1` (l'app-only exige la forme domaine) |
+| `-ClientId` | Non | Inscription d'application pour la connexion app-only (avec `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour la connexion app-only |
+| `-AppOnly` | Non | App-only avec ClientId et empreinte issus de `graph.appid.json` |
 
 **Exemples**
 
@@ -156,6 +202,10 @@ domaines acceptés).
 ```
 
 **Remarques**
+- Reste sur Exchange Online : les stratégies anti-spam et anti-malware d'EOP n'ont pas d'API Graph.
+- Sous GDAP, Exchange est désormais atteint avec `-DelegatedOrganization` ; l'ancien
+  `-Organization` ne s'applique qu'à la connexion app-only, si bien qu'une exécution déléguée
+  aboutissait dans le tenant du partenaire lui-même.
 - Il s'agit de recommandations de base, pas d'un durcissement complet — comparez-les
   aux stratégies de sécurité prédéfinies Standard/Strict de votre tenant avant de les
   appliquer à grande échelle.

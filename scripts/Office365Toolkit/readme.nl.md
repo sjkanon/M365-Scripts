@@ -28,7 +28,7 @@ nieuwe implementatie in de eigen stijl van deze repo, niet gekopieerd uit het br
 | Map | Omschrijving |
 |--------|-------------|
 | [`Security/`](Security/readme.nl.md) | Secure Score-rapportage, opschonen van toestemmingen voor enterprise-apps, aanmelding op gedeelde mailboxen dichtzetten, EOP-basislijn voor antispam/antimalware |
-| [`Exchange/`](Exchange/readme.nl.md) | Hygiënebasislijn voor mailboxen, doorstuurrisico via inboxregels, mailbox-invoegtoepassingen, zoeken in het Unified Audit Log, message trace |
+| [`Exchange/`](Exchange/readme.nl.md) | Hygiënebasislijn voor mailboxen, doorstuurrisico via inboxregels, mailbox-invoegtoepassingen, zoeken in het Unified Audit Log (Graph) |
 | [`Intune/`](Intune/readme.nl.md) | Tenantbrede inventaris van Intune/Endpoint Manager-beleid |
 
 ---
@@ -46,10 +46,10 @@ nieuwe implementatie in de eigen stijl van deze repo, niet gekopieerd uit het br
 **Hulpscripts voor verbinding/infrastructuur, geen functies** (`*-connect*.ps1`,
 `graph-connect.ps1`, `msgraph-connect.ps1`, `Intune-connect.ps1`, `az-connect*.ps1`,
 `o365-setup.ps1`, `o365-update.ps1`, `o365-getrepo.ps1`, `save-cred-file.ps1`,
-`c.ps1`, `r.ps1`, `sc-config.ps1`, `text-colour.ps1`): deze repo maakt in elk script al
-automatisch verbinding en hergebruikt bestaande sessies (zie de huisstijl in
-`scripts/Entra/Test-M365GroupMembership.ps1`), dus losse verbindingsscripts voegen
-niets toe. `o365-setup.ps1` bevatte bovendien het hardgecodeerde OneDrive-pad van een echte klant en
+`c.ps1`, `r.ps1`, `sc-config.ps1`, `text-colour.ps1`): deze repo meldt in elk script op dezelfde manier aan via
+[`scripts/Startup/Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1) (Graph eerst,
+standaard delegated, app-only op verzoek, GDAP-bewust, met hergebruik van bestaande sessies), dus
+losse verbindingsscripts voegen niets toe. `o365-setup.ps1` bevatte bovendien het hardgecodeerde OneDrive-pad van een echte klant en
 installeert de uitgefaseerde modules `MSOnline`/`AzureAD`; `save-cred-file.ps1` slaat
 inloggegevens op in een lokaal XML-bestand — beide vallen buiten de veiligheidsregels van dit project.
 

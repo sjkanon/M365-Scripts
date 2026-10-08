@@ -8,6 +8,15 @@ Security posture reporting and hardening scripts: Secure Score trend, enterprise
 app consent review, shared mailbox sign-in lockdown, and an EOP anti-spam/
 anti-malware baseline.
 
+**Sign-in.** Every script signs in through
+[`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): delegated (you sign
+in as the admin) by default, with device code and the GDAP customer taken from
+`load.config.ps1`. App-only with `-ClientId` + `-CertificateThumbprint`, or
+`-AppOnly` (ClientId and thumbprint from `graph.appid.json`). A session that
+already fits is reused and left connected; the scripts only disconnect what they
+opened themselves. Microsoft Graph is used wherever it has an API; Exchange
+Online only for the shared mailbox list and the EOP policies.
+
 ---
 
 ## Scripts
@@ -24,15 +33,19 @@ anti-malware baseline.
 ### Get-SecureScoreReport.ps1
 
 Reports the tenant's Microsoft Secure Score trend over time and breaks down the
-latest snapshot's control scores, sorted weakest-first. Read-only.
+latest snapshot's control scores, sorted weakest-first. The maximum points and
+title of each control come from its control profile. Read-only.
 
 **Parameters**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-HistoryCount` | No | Number of historical snapshots to include (default `30`) |
-| `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-OutputPath` | No | Folder for the two CSV reports (default: `C:\Temp\` / `~/Downloads\`) |
+| `-TenantId` | No | Tenant ID or domain; defaults to the GDAP customer from `load.config.ps1` |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 
 **Examples**
 
@@ -42,8 +55,16 @@ latest snapshot's control scores, sorted weakest-first. Read-only.
 .\Get-SecureScoreReport.ps1 -HistoryCount 90 -OutputPath C:\Reports
 ```
 
+**Notes**
+- The control breakdown used to come out empty: it read `controlName` and
+  `maxScore` from the SDK's `AdditionalProperties`, where typed properties never
+  land, and a snapshot's control score has no maximum at all. The script now
+  reads the raw JSON and joins each control on its `secureScoreControlProfile`
+  for the maximum points and title.
+- The "weakest" list skips controls that are already complete or deprecated.
+
 **Required scope:** `SecurityEvents.Read.All`
-**Required module:** `Microsoft.Graph.Security`
+**Required module:** `Microsoft.Graph.Authentication`
 
 ---
 
@@ -64,7 +85,10 @@ app in the tenant.
 | `-IncludeUserConsent` | No | Also report/revoke per-user delegated consent (not just tenant-wide admin consent) |
 | `-Apply` | No | Actually revoke the reported grants (default: preview only) |
 | `-OutputPath` | No | CSV report path |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain; defaults to the GDAP customer from `load.config.ps1` |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 
 *Exactly one of `-AppId` / `-AppDisplayName` is required.
 
@@ -83,8 +107,18 @@ app in the tenant.
 
 Supports `-WhatIf` (`SupportsShouldProcess`).
 
-**Required scopes:** `Application.Read.All`, `DelegatedPermissionGrant.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All`
-**Required module:** `Microsoft.Graph.Applications`
+**Notes**
+- Delegated grants are now read with a server-side filter
+  (`clientId eq '<service principal id>'`) instead of every grant in the tenant
+  filtered locally; a failed read now stops the script instead of reporting
+  "no grants".
+- Application permissions show their role value (e.g. `Mail.Read`) instead of a
+  bare app role GUID.
+- Without `-IncludeUserConsent` the script says how many per-user grants it left
+  out.
+
+**Required scopes:** preview `Application.Read.All`, `DelegatedPermissionGrant.Read.All`, `User.ReadBasic.All`; `-Apply` adds `DelegatedPermissionGrant.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All`
+**Required modules:** `Microsoft.Graph.Applications`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Users`
 
 ---
 
@@ -103,7 +137,10 @@ Delegated access (Full Access / Send As) is unaffected.
 | `-Mailbox` | No | UPN of a single shared mailbox. If omitted, all shared mailboxes are checked |
 | `-Apply` | No | Actually disable sign-in for enabled accounts found (default: preview only) |
 | `-OutputPath` | No | CSV report path |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain; defaults to the GDAP customer from `load.config.ps1` (app-only Exchange needs the domain form) |
+| `-ClientId` | No | App registration for app-only sign-in to Graph and Exchange (with `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 
 **Examples**
 
@@ -117,7 +154,14 @@ Delegated access (Full Access / Send As) is unaffected.
 
 Supports `-WhatIf` (`SupportsShouldProcess`).
 
-**Required scope:** `User.ReadWrite.All`
+**Notes**
+- Exchange Online stays for listing the shared mailboxes: "shared mailbox" is an
+  Exchange property (`RecipientTypeDetails`) that Graph cannot filter on. The
+  account state and the change go through Graph.
+- Under GDAP, Exchange is now reached with `-DelegatedOrganization`; the old
+  `-Organization` only applies to app-only sign-in.
+
+**Required scopes:** `User.Read.All` (preview), `User.ReadWrite.All` (`-Apply`)
 **Required modules:** `ExchangeOnlineManagement`, `Microsoft.Graph.Users`
 
 ---
@@ -140,7 +184,10 @@ accepted domains).
 | `-MalwarePolicyName` | No | Name for the anti-malware policy/rule (default `MSP Baseline Anti-Malware`) |
 | `-UpdateExisting` | No | Update the policy in place if one with the same name already exists |
 | `-Apply` | No | Actually create/update the policies (default: preview only) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain; defaults to the GDAP customer from `load.config.ps1` (app-only needs the domain form) |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`) |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 
 **Examples**
 
@@ -156,6 +203,11 @@ accepted domains).
 ```
 
 **Notes**
+- Stays on Exchange Online: EOP anti-spam and anti-malware policies have no
+  Graph API.
+- Under GDAP, Exchange is now reached with `-DelegatedOrganization`; the old
+  `-Organization` only applies to app-only sign-in, so a delegated run landed in
+  the partner's own tenant.
 - These are baseline recommendations, not a full hardening pass — review
   against your tenant's Standard/Strict preset security policies before
   applying broadly.
