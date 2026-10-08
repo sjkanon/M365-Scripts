@@ -30,7 +30,6 @@
         @{ Name = 'Az.OperationalInsights' }
         @{ Name = 'DCToolbox' }
         @{ Name = 'IntuneBackupAndRestore' }
-        @{ Name = 'WindowsAutopilotIntune';                       WindowsOnly = $true }
         @{ Name = 'IntuneWin32App';                               WindowsOnly = $true }
     )
 

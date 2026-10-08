@@ -108,9 +108,10 @@ GOTO MENU
 :AUTOPILOT_ONLINE
 ECHO.
 ECHO   Autopilot enrollment — uploading directly to Intune...
-ECHO   You will be prompted to sign in with your Microsoft 365 admin account.
+ECHO   Sign in with your Microsoft 365 admin account: open the address shown on
+ECHO   another device and enter the code (no browser is needed during OOBE).
 ECHO.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online -DeviceCode"
 ECHO.
 ECHO   Upload complete. Device should appear in Intune Autopilot within a few minutes.
 ECHO.
@@ -204,8 +205,8 @@ IF EXIST "%~dp0compHash.csv" (
 )
 
 ECHO   [2/4] Running Autopilot enrollment (online - upload to Intune)...
-ECHO         Sign in with your Microsoft 365 admin account when prompted.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online"
+ECHO         Sign in with your Microsoft 365 admin account with the device code shown.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0Get-WindowsAutoPilotInfo.ps1' -Online -DeviceCode"
 
 ECHO.
 ECHO   [3/4] Installing PSWindowsUpdate and running updates...

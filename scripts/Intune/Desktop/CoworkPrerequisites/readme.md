@@ -73,7 +73,10 @@ Same confirmation/`-Force` behavior as `Deploy-ClaudeDesktopIntune.ps1`. Since t
 | `-WorkingDirectory` | `C:\Temp\CoworkPrereqDeploy` | Build staging folder (`Source/`, `Output/`) |
 | `-AppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Used to find the existing app on later runs — don't change without renaming in Intune too |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Requirement rule |
-| `-TenantId` | auto-detected | Entra ID tenant ID |
+| `-TenantId` | GDAP customer, else your sign-in tenant | Entra ID tenant ID or domain |
+| `-ClientId` | — | Optional permanent app for app-only (with `-CertificateThumbprint`); no temporary App Registration is created |
+| `-CertificateThumbprint` | — | Certificate for `-ClientId` (CurrentUser\My or LocalMachine\My); used for Graph and for `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | off | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | auto-download | Use an already-downloaded `IntuneWinAppUtil.exe` |
 | `-Force` | off | Skip the confirmation prompt(s) |
 
@@ -89,6 +92,7 @@ Win32-app uninstall command.
 
 ## Prerequisites
 
+- PowerShell 7. Sign-in works like `Deploy-ClaudeDesktopIntune.ps1` (see [ClaudeDesktop](../ClaudeDesktop/readme.md#deploy-claudedesktopintuneps1)): delegated by default with a temporary App Registration for the `IntuneWin32App` module, or app-only with `-ClientId` + `-CertificateThumbprint` / `-AppOnly`. The deploy script is part of `ScriptsHash`, so the first run after updating it re-uploads the package once.
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
 - Run from Windows (the packaging tool and DISM cmdlets are Windows-only)
 

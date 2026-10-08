@@ -116,7 +116,7 @@ Instellingen die bij de site horen en niet in de repo thuishoren. `start.bat` la
 
 ### Autopilot online (optie 4)
 
-Voert `Get-WindowsAutoPilotInfo.ps1 -Online` uit — uploadt de hardwarehash rechtstreeks naar Intune zonder een CSV-bestand te maken. Vraagt om admin-inloggegevens voor Microsoft 365. Het apparaat verschijnt binnen enkele minuten in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices**.
+Voert `Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode` uit — uploadt de hardwarehash via Microsoft Graph rechtstreeks naar Intune zonder een CSV-bestand te maken. Meld je aan met een Microsoft 365-beheerdersaccount via device code: open het getoonde adres op een telefoon of andere pc en voer de code in, zodat er tijdens OOBE geen browser nodig is. Het apparaat verschijnt binnen enkele minuten in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices**.
 
 > Het instellingenpaneel van Windows Update is niet beschikbaar in OOBE, maar `UsoClient` start updates rechtstreeks vanaf de opdrachtregel en dat werkt prima.
 
@@ -129,7 +129,7 @@ Gebruikt `winget install Microsoft.PowerShell`. Vereist internet. Als `winget` n
 Voor Intune-/cloudbeheerde omgevingen. Voert achtereenvolgens uit:
 1. Hernoemt het apparaat — vraagt om een prefix en voegt het serienummer toe (`PREFIX-SERIALNUMBER`)
 2. Verwijdert de bestaande `compHash.csv`
-3. Voert de online Autopilot-inschrijving uit (`Get-WindowsAutoPilotInfo.ps1 -Online`)
+3. Voert de online Autopilot-inschrijving uit (`Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode`)
 4. Installeert Windows-updates via `PSWindowsUpdate`
 5. Herstart na 30 seconden (Ctrl+C om te annuleren)
 
@@ -158,6 +158,7 @@ Zet het label van de USB-stick op `Setup Toolkit` wanneer die wordt ingestoken. 
 
 | Datum | Versie | Wijziging |
 |---|---|---|
+| 2026-10-08 | 2.9 | Autopilot online meldt aan met device code (`-DeviceCode`): het script praat nu met Microsoft Graph in plaats van de uitgefaseerde modules AzureAD/WindowsAutopilotIntune, en een browseraanmelding opent tijdens OOBE mogelijk niet |
 | 2026-03-20 | 2.8 | Alles in één gesplitst in A (Intune) en C (Active Directory); de AD-variant slaat Autopilot over |
 | 2026-03-20 | 2.7 | Alles in één bijgewerkt: domeinlidmaatschap voor AD toegevoegd als stap 3 |
 | 2026-03-20 | 2.6 | Alles in één bijgewerkt: apparaat hernoemen toegevoegd als eerste stap |

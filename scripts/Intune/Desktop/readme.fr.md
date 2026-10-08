@@ -29,7 +29,7 @@ Personnalisation du poste de travail déployée via Intune : fond d'écran et é
 
 ### Deploy-AllIntune.ps1
 
-Un orchestrateur minimal sans logique Intune/Graph propre — il exécute `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` puis `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1`, en transmettant `-AssignmentGroupName`/`-TenantId`/`-Force` aux deux. Chaque déploiement gère toujours de manière indépendante sa propre session Graph et son App Registration temporaire — cela vous évite seulement de lancer deux commandes à la main.
+Un orchestrateur minimal sans logique Intune/Graph propre — il exécute `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` puis `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1`, en transmettant `-AssignmentGroupName`/`-TenantId`/`-ClientId`/`-CertificateThumbprint`/`-AppOnly`/`-Force` aux deux. Nécessite PowerShell 7, comme les deux scripts de déploiement. Chaque déploiement gère toujours de manière indépendante sa propre session Graph et son App Registration temporaire — cela vous évite seulement de lancer deux commandes à la main.
 
 ```powershell
 # Les deux applications, une seule commande

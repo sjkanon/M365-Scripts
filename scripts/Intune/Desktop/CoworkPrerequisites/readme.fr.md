@@ -73,7 +73,10 @@ Même comportement de confirmation/`-Force` que `Deploy-ClaudeDesktopIntune.ps1`
 | `-WorkingDirectory` | `C:\Temp\CoworkPrereqDeploy` | Dossier de préparation de la construction (`Source/`, `Output/`) |
 | `-AppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Sert à retrouver l'application existante lors des exécutions suivantes — ne le modifiez pas sans renommer aussi l'application dans Intune |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Règle de configuration requise |
-| `-TenantId` | détecté automatiquement | ID du tenant Entra ID |
+| `-TenantId` | client GDAP, sinon le tenant de connexion | ID ou domaine du tenant Entra ID |
+| `-ClientId` | — | Application permanente facultative pour l'application seule (avec `-CertificateThumbprint`) ; aucune App Registration temporaire n'est créée |
+| `-CertificateThumbprint` | — | Certificat pour `-ClientId` (CurrentUser\My ou LocalMachine\My) ; utilisé pour Graph et pour `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | désactivé | Application seule avec le ClientId et l'empreinte de `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | téléchargement automatique | Utiliser un `IntuneWinAppUtil.exe` déjà téléchargé |
 | `-Force` | désactivé | Ignorer la ou les invites de confirmation |
 
@@ -89,6 +92,7 @@ Commande de désinstallation de l'application Win32.
 
 ## Prérequis
 
+- PowerShell 7. La connexion fonctionne comme pour `Deploy-ClaudeDesktopIntune.ps1` (voir [ClaudeDesktop](../ClaudeDesktop/readme.fr.md#deploy-claudedesktopintuneps1)) : déléguée par défaut avec une App Registration temporaire pour le module `IntuneWin32App`, ou application seule avec `-ClientId` + `-CertificateThumbprint` / `-AppOnly`. Le script de déploiement fait partie de `ScriptsHash` : la première exécution après sa mise à jour téléverse donc le paquet une fois de plus.
 - Les modules PowerShell `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` et `IntuneWin32App` — à installer avec `.\scripts\Startup\Install-Modules.ps1`
 - Exécution depuis Windows (l'outil d'empaquetage et les cmdlets DISM n'existent que sous Windows)
 

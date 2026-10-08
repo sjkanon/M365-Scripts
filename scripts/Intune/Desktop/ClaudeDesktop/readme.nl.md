@@ -34,7 +34,7 @@ Wat het doet:
 1. Downloadt de nieuwste x64-MSIX van Claude Desktop via de officiële "latest"-redirect-URL van Anthropic.
 2. Leest de versie uit `AppxManifest.xml` in de MSIX.
 3. Kopieert de installatie-/verwijderscripts naast de MSIX en bouwt een `.intunewin`-pakket (module `IntuneWin32App` — `IntuneWinAppUtil.exe` wordt automatisch gedownload als die er nog niet is).
-4. Maakt gedelegeerd verbinding met Microsoft Graph (interactieve aanmelding) en maakt een kortlevende **tijdelijke App Registration** aan — hetzelfde patroon als [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.nl.md) — met alleen de applicatiemachtiging `DeviceManagementApps.ReadWrite.All`. Die wordt gebruikt om de module `IntuneWin32App` te authenticeren en aan het eind van de run weer verwijderd. Tussen runs blijft niets bestaan behalve de Intune-app zelf.
+4. Maakt gedelegeerd verbinding met Microsoft Graph (interactieve aanmelding) en maakt een kortlevende **tijdelijke App Registration** aan — hetzelfde patroon als [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.nl.md) — met alleen de applicatiemachtiging `DeviceManagementApps.ReadWrite.All`. Die wordt gebruikt om de module `IntuneWin32App` te authenticeren en aan het eind van de run weer verwijderd. Tussen runs blijft niets bestaan behalve de Intune-app zelf. Aanmelden gaat via [`Connect-M365.ps1`](../../../Startup/Connect-M365.ps1): standaard gedelegeerd (apparaatcode volgens `$global:useDeviceCodeAuth`, GDAP-klant uit `$global:cid`). De upload zelf blijft bij de module `IntuneWin32App`: `Connect-MSIntuneGraph` haalt een eigen token op en kan de Microsoft Graph PowerShell-sessie niet gebruiken, en het in blokken uploaden van de `.intunewin` naar Azure Storage plus de commit van de versleutelingsgegevens herschrijven als losse Graph-calls is veel risico voor weinig winst. Met `-ClientId` + `-CertificateThumbprint` (of `-AppOnly`) gebruik je in plaats daarvan een eigen permanente app: er wordt niets tijdelijks aangemaakt en `Connect-MSIntuneGraph` meldt zich aan met hetzelfde certificaat (`-ClientCert`).
 5. Eerste run: maakt in Intune de Win32-app "Claude Desktop (Machine-wide)" aan met detectie- en vereistenregels, en wijst die als **Required** toe aan de Entra ID-groep die je meegeeft.
 6. Latere runs: pusht een bijgewerkt pakket via `Update-IntuneWin32AppPackageFile` (bestaande toewijzing blijft ongemoeid, apparaten krijgen gewoon de nieuwe content) als **ofwel** de gedownloade MSIX-versie nieuwer is, **ofwel** de scripts Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 zelf sinds de vorige run zijn gewijzigd — beide bijgehouden in het veld Notes van de app (`ClaudeMsixVersion=...; ScriptsHash=...`), dus geen lokaal statusbestand nodig. Detectie- **en vereistenregels worden bij elke run opnieuw opgebouwd en ingediend**, niet alleen bij het aanmaken (zie "Bekend probleem" hieronder). Is de versie noch zijn de scripts gewijzigd, dan worden alleen de regels ververst.
 
@@ -79,7 +79,10 @@ Je krijgt een interactieve aanmeldprompt en een bevestiging "type JA to continue
 | `-AppDisplayName` | `Claude Desktop (Machine-wide)` | Wordt gebruikt om de bestaande app bij latere runs te vinden — niet wijzigen zonder de app ook in Intune te hernoemen |
 | `-MsixDownloadUrl` | Officiële x64-"latest"-redirect van Anthropic | Overschrijven om te testen |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Vereistenregel |
-| `-TenantId` | automatisch gedetecteerd | Tenant-ID van Entra ID |
+| `-TenantId` | GDAP-klant, anders je aanmeldtenant | Tenant-ID of domein van Entra ID |
+| `-ClientId` | — | Optionele permanente app voor app-only (met `-CertificateThumbprint`); er wordt geen tijdelijke App Registration aangemaakt |
+| `-CertificateThumbprint` | — | Certificaat voor `-ClientId` (CurrentUser\My of LocalMachine\My); gebruikt voor Graph en voor `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | uit | App-only met ClientId en vingerafdruk uit `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | automatische download | Gebruik een al gedownloade `IntuneWinAppUtil.exe` |
 | `-Force` | uit | Sla de bevestigingsprompt(s) over |
 | `-RequireCoworkPrerequisites` | uit | Voeg een echte Intune-afhankelijkheid van de app Cowork Prerequisites toe — zie hieronder |
@@ -126,5 +129,6 @@ Beide contentscripts zijn zo geschreven dat een apparaat waarop Claude nooit hee
 
 ## Vereisten
 
+- PowerShell 7 (de deploy-scripts laden `scripts\Startup\Connect-M365.ps1`). Het deploy-script zelf telt mee in `ScriptsHash`, dus de eerste run na het bijwerken van dit script uploadt het pakket één keer opnieuw.
 - De PowerShell-modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` en `IntuneWin32App` — installeer ze met `.\scripts\Startup\Install-Modules.ps1`
 - Uitvoeren vanaf Windows (de verpakkingstool en de MSIX-/AppX-cmdlets werken alleen op Windows)

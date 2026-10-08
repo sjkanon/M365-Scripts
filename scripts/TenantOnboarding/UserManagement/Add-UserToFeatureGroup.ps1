@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Add or remove a user from a named Entra ID group, to gate access to an add-on feature.
@@ -11,8 +11,11 @@
     Conditional Access policy, Intune app assignment, or license group ("enable this
     add-on for these users") to a subset of the tenant.
 
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected.
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated by default (you
+    sign in as an admin; device code when $global:useDeviceCodeAuth is set, the GDAP
+    customer tenant from $global:cid), app-only with -ClientId and
+    -CertificateThumbprint, or -AppOnly. An existing Graph session is reused only when
+    it is for the right tenant and already holds the scopes below.
 
 .PARAMETER UserId
     UPN or object ID of the user.
@@ -28,8 +31,17 @@
     Remove the user from the group instead of adding them.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected, or resolvable from a
-    GDAP customer tenant context.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer tenant ($global:cid /
+    $env:M365_CUSTOMER_TENANTID), else the tenant you sign in to.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in, with -CertificateThumbprint.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER Apply
     Actually change group membership. Without this switch, the script only reports
@@ -57,36 +69,28 @@ param(
     [string] $GroupName,
     [switch] $Remove,
     [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [switch] $Apply
 )
 
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
 if (-not $GroupId -and -not $GroupName) { throw "Provide either -GroupId or -GroupName." }
 
-$effectiveTenantId = $TenantId
-if (-not $effectiveTenantId) {
-    try {
-        if ($global:authMode -eq 'GDAP' -and $global:cid) { $effectiveTenantId = [string]$global:cid }
-        elseif ($env:M365_CUSTOMER_TENANTID) { $effectiveTenantId = [string]$env:M365_CUSTOMER_TENANTID }
-    } catch {}
-}
-
-$script:ConnectedHere = $false
 try {
-    if (-not (Get-MgContext)) {
-        $connectParams = @{ Scopes = @('GroupMember.ReadWrite.All', 'User.Read.All', 'Group.Read.All') }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams -NoWelcome -ErrorAction Stop
-        $script:ConnectedHere = $true
-    }
+    $graph = Connect-M365Graph -Scopes 'GroupMember.ReadWrite.All', 'User.Read.All', 'Group.Read.All' -TenantId $TenantId `
+        -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 } catch {
     Write-Host "  [ERROR] Could not connect to Microsoft Graph: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
 if ($GroupName) {
-    $groups = @(Get-MgGroup -Filter "displayName eq '$GroupName'" -ErrorAction Stop)
-    if ($groups.Count -eq 0) { Write-Host "  [ERROR] No group found named '$GroupName'." -ForegroundColor Red; if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }; exit 1 }
-    if ($groups.Count -gt 1) { Write-Host "  [ERROR] Multiple groups named '$GroupName' — use -GroupId instead." -ForegroundColor Red; if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }; exit 1 }
+    $groups = @(Get-MgGroup -Filter "displayName eq '$($GroupName -replace "'", "''")'" -ErrorAction Stop)
+    if ($groups.Count -eq 0) { Write-Host "  [ERROR] No group found named '$GroupName'." -ForegroundColor Red; Disconnect-M365Graph $graph; exit 1 }
+    if ($groups.Count -gt 1) { Write-Host "  [ERROR] Multiple groups named '$GroupName' — use -GroupId instead." -ForegroundColor Red; Disconnect-M365Graph $graph; exit 1 }
     $GroupId = $groups[0].Id
 }
 
@@ -102,12 +106,12 @@ Write-Host ""
 if (-not $Apply) {
     Write-Host "  Would $(if ($Remove) { 'remove' } else { 'add' }) '$($user.UserPrincipalName)' $(if ($Remove) { 'from' } else { 'to' }) group $GroupId." -ForegroundColor Yellow
     Write-Host "  Re-run with -Apply to perform this change." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 0
 }
 
 if (-not $PSCmdlet.ShouldProcess($user.UserPrincipalName, "$(if ($Remove) { 'Remove from' } else { 'Add to' }) group $GroupId")) {
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 0
 }
 
@@ -124,4 +128,4 @@ try {
 }
 
 Write-Host ""
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

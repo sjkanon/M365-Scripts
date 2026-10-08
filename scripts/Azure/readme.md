@@ -49,6 +49,8 @@ Override with `-Table` to add others (e.g. `AADDomainServicesDNSAuditsGeneral`) 
 | `-Table` | No | Tables to include in the union (see defaults above) |
 | `-MaxRows` | No | Max rows returned, most recent first (default: `5000`) |
 | `-ExportPath` | No | Folder for the CSV report (default: `C:\Temp`) |
+| `-TenantId` | No | Tenant that holds the subscription; signs in again when the current Az context is for another tenant |
+| `-SubscriptionId` | No | Subscription that holds the workspace (switches the Az context to it) |
 
 *If `-WorkspaceId` is omitted, the script tries to auto-resolve a single workspace via `-WorkspaceName`/`-ResourceGroupName`, or the only workspace in the subscription if there's just one.
 
@@ -67,9 +69,9 @@ Override with `-Table` to add others (e.g. `AADDomainServicesDNSAuditsGeneral`) 
 ```
 
 **Notes**
-- Connects with `Connect-AzAccount` automatically if no Az session is active
+- Signs in with Az, not Microsoft Graph: Log Analytics is an Azure Resource Manager / Log Analytics API resource that Graph does not cover. An existing Az context is reused when it is for `-TenantId` (or any tenant when it is omitted); otherwise `Connect-AzAccount` signs you in delegated — with a device code when `$global:useDeviceCodeAuth` is set in `load.config.ps1`. The Az session stays open (Az saves it for later runs).
 - Result set is capped at `-MaxRows` (default 5000) — the script warns if the cap was hit, so you know to narrow the window or raise it
-- CSV is exported to `-ExportPath` as `AADDSUserActivity_<username>_<timestamp>.csv`
+- CSV is exported to `-ExportPath` as `AADDSUserActivity_<username>_<timestamp>.csv` (characters not allowed in a file name, such as the `\` in `DOMAIN\user`, become `_`)
 
 **Required modules**
 ```powershell

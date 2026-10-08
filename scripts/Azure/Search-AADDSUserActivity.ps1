@@ -9,8 +9,13 @@
     logon/logoff, directory service access) so you don't have to guess which table an event landed
     in. Matches the given username against every column in each table.
 
-    Connects with Connect-AzAccount if no Az session is active, and resolves the target Log
-    Analytics workspace by name or ID (or auto-picks it if the subscription only has one).
+    Signs in with Az (Connect-AzAccount), not Microsoft Graph: Log Analytics is an Azure
+    Resource Manager / Log Analytics API resource that Graph does not cover. An existing Az
+    context is reused when it is for -TenantId (or any tenant when -TenantId is omitted);
+    otherwise it signs in delegated - with a device code when $global:useDeviceCodeAuth is set
+    in load.config.ps1. The Az session is left open, as Az saves it for later runs. It then
+    resolves the target Log Analytics workspace by name or ID (or auto-picks it if the
+    subscription only has one).
 
 .PARAMETER Username
     Username, SamAccountName, or UPN to search for. Matched with `has` across every column, so a
@@ -46,12 +51,25 @@
 .PARAMETER ExportPath
     Folder where the CSV report is saved. Default: C:\Temp.
 
+.PARAMETER TenantId
+    Entra tenant ID or domain that holds the subscription. When the current Az context is for
+    another tenant, the script signs in again for this one.
+
+.PARAMETER SubscriptionId
+    Subscription that holds the workspace (needed to resolve -WorkspaceName outside the current
+    subscription).
+
 .EXAMPLE
     .\Search-AADDSUserActivity.ps1 -Username "jdoe" -WorkspaceId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 .EXAMPLE
     # Resolve workspace by name, look back 24 hours
     .\Search-AADDSUserActivity.ps1 -Username "jdoe" -WorkspaceName "log-aadds-prod" -HoursBack 24
+
+.EXAMPLE
+    # Another tenant, device code sign-in when $global:useDeviceCodeAuth is set
+    .\Search-AADDSUserActivity.ps1 -Username "jdoe" -WorkspaceName "log-aadds-prod" `
+        -TenantId "contoso.onmicrosoft.com" -SubscriptionId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 .EXAMPLE
     # Explicit time window
@@ -79,7 +97,10 @@ param (
     ),
 
     [int]      $MaxRows = 5000,
-    [string]   $ExportPath = 'C:\Temp'
+    [string]   $ExportPath = 'C:\Temp',
+
+    [string]   $TenantId,
+    [string]   $SubscriptionId
 )
 
 Set-StrictMode -Version Latest
@@ -104,10 +125,30 @@ Write-Host '  ══════════════════════
 Write-Host ''
 
 # ── Az connection ──────────────────────────────────────────────────────────────
-if (-not (Get-AzContext)) {
-    Write-Status 'No active Az session — connecting...' 'WARN'
-    Connect-AzAccount | Out-Null
+# Log Analytics queries go through Azure Resource Manager / the Log Analytics API, which
+# Microsoft Graph does not cover — so this script signs in with Az, not Connect-M365.ps1.
+# An existing Az context is reused when it is for the requested tenant (or any tenant
+# when -TenantId is omitted).
+$ctx = Get-AzContext -ErrorAction SilentlyContinue
+$tenantMatches = $ctx -and (-not $TenantId -or $ctx.Tenant.Id -eq $TenantId -or
+    ($ctx.Tenant.PSObject.Properties['Domains'] -and @($ctx.Tenant.Domains) -contains $TenantId))
+if (-not $tenantMatches) {
+    $azParams = @{ ErrorAction = 'Stop' }
+    if ($TenantId) { $azParams['Tenant'] = $TenantId }
+    if ($SubscriptionId) { $azParams['Subscription'] = $SubscriptionId }
+    # Device code when load.config.ps1 sets $global:useDeviceCodeAuth (read without
+    # tripping StrictMode when it is not set).
+    if (Get-Variable -Name useDeviceCodeAuth -Scope Global -ValueOnly -ErrorAction SilentlyContinue) {
+        $azParams['UseDeviceAuthentication'] = $true
+    }
+    Write-Status "Connecting to Azure$(if ($TenantId) { " (tenant $TenantId)" })$(if ($azParams['UseDeviceAuthentication']) { ', device code' })..." 'WARN'
+    Connect-AzAccount @azParams | Out-Null
+} elseif ($SubscriptionId -and (-not $ctx.Subscription -or $ctx.Subscription.Id -ne $SubscriptionId)) {
+    Set-AzContext -Subscription $SubscriptionId -ErrorAction Stop | Out-Null
 }
+$ctx = Get-AzContext
+$subName = if ($ctx.Subscription) { $ctx.Subscription.Name } else { '(none)' }
+Write-Status "Azure context: $($ctx.Account.Id), tenant $($ctx.Tenant.Id), subscription $subName" 'INFO'
 
 # ── Resolve workspace ──────────────────────────────────────────────────────────
 if (-not $WorkspaceId) {
@@ -170,7 +211,9 @@ Write-Host ''
 # ── Export CSV ─────────────────────────────────────────────────────────────────
 if (-not (Test-Path $ExportPath)) { New-Item -ItemType Directory -Path $ExportPath | Out-Null }
 $ts      = Get-Date -Format 'yyyyMMdd_HHmmss'
-$csvFile = Join-Path $ExportPath "AADDSUserActivity_${Username}_$ts.csv"
+# A DOMAIN\user name would otherwise put a path separator in the file name.
+$safeName = $Username -replace '[\\/:*?"<>|]', '_'
+$csvFile = Join-Path $ExportPath "AADDSUserActivity_${safeName}_$ts.csv"
 $rows | Export-Csv -Path $csvFile -NoTypeInformation -Encoding UTF8
 
 $rows | Format-Table -AutoSize TimeGenerated, Type, OperationName, SamAccountName, IpAddress, ResultDescription

@@ -6,6 +6,8 @@
 
 Scripts d'amorçage d'un tenant unique nouvellement intégré : compte administrateur break-glass, groupes de sécurité de base et attribution de la stratégie de base Intune. Remplace un ancien script d'installation interactif piloté par menu par des scripts unitaires et paramétrés, cohérents avec le reste de ce dépôt. Exécutez-les dans l'ordre ci-dessous, dans le cadre d'une liste de contrôle pour nouveau tenant.
 
+**La connexion** (pour les trois scripts) passe par [`Connect-M365.ps1`](../../Startup/Connect-M365.ps1) : **déléguée par défaut**, vous vous connectez en tant qu'administrateur du tenant (code d'appareil si `$global:useDeviceCodeAuth` est défini ; en GDAP, le tenant client vient de `$global:cid`, sauf si `-TenantId` en désigne un). **L'application seule** est une option avec `-ClientId` + `-CertificateThumbprint`, ou `-AppOnly` pour les lire dans `graph.appid.json`. Une session Graph existante n'est réutilisée que si elle porte sur le bon tenant et dispose déjà des scopes nécessaires au script ; le script ne ferme que la session qu'il a lui-même ouverte.
+
 ---
 
 ## Scripts
@@ -18,8 +20,8 @@ Scripts d'amorçage d'un tenant unique nouvellement intégré : compte administr
 
 **Ordre recommandé pour un nouveau tenant :**
 1. `New-BreakGlassAdminAccount.ps1` : créer le compte d'accès d'urgence
-2. `New-TenantBaselineGroups.ps1` : créer le groupe d'exclusion CA (qui fait référence au modèle d'UPN du compte break-glass) et les éventuels groupes d'activation de fonctionnalités
-3. `New-BreakGlassAdminAccount.ps1 -ExcludeFromGroupId <exclusion group id>` (ou relancer `Add-UserToFeatureGroup.ps1` depuis `../UserManagement/`) pour vous assurer que le compte break-glass est membre de son propre groupe d'exclusion
+2. `New-TenantBaselineGroups.ps1` : créer le groupe « tous les utilisateurs sauf break glass » (sa règle dynamique écarte le modèle d'UPN du compte break-glass) et les éventuels groupes d'activation de fonctionnalités
+3. Uniquement si vos stratégies Conditional Access excluent un groupe *statique* : ajoutez-y le compte break-glass avec `New-BreakGlassAdminAccount.ps1 -ExcludeFromGroupId <group id>` lors de la création, ou plus tard avec `Add-UserToFeatureGroup.ps1` depuis `../UserManagement/`. Le groupe dynamique de l'étape 2 n'a pas besoin de membres ajoutés (et n'en accepte pas).
 4. Importer/configurer vos stratégies de base Conditional Access et Intune (par ex. `Import-ConditionalAccessBaseline.ps1` dans `scripts/Entra/`)
 5. `Set-IntuneBaselinePolicyAssignment.ps1` : attribuer les stratégies de base Intune au groupe « tous les utilisateurs sauf break glass »
 
@@ -37,8 +39,10 @@ Crée un utilisateur Entra ID uniquement cloud comme compte d'accès d'urgence (
 | `-DisplayName` | Non | Nom d'affichage (par défaut : `Break Glass Admin`) |
 | `-PasswordLength` | Non | Longueur du mot de passe généré (par défaut : `24`) |
 | `-AssignGlobalAdmin` | Non | Attribuer Global Administrator (par défaut : activé) |
-| `-ExcludeFromGroupId` | Non | Groupe auquel ajouter le compte (par ex. un groupe d'exclusion CA) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-ExcludeFromGroupId` | Non | Un groupe d'exclusion CA statique auquel ajouter le compte (pas le groupe dynamique de `New-TenantBaselineGroups.ps1`) |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : client GDAP, sinon le tenant de connexion) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion en application seule |
+| `-AppOnly` | Non | Application seule avec le ClientId et l'empreinte de `graph.appid.json` |
 | `-Apply` | Non | Créer réellement le compte (par défaut : aperçu uniquement) |
 
 **Exemples**
@@ -48,10 +52,14 @@ Crée un utilisateur Entra ID uniquement cloud comme compte d'accès d'urgence (
 .\New-BreakGlassAdminAccount.ps1 -UserPrincipalName "breakglass-admin@contoso.onmicrosoft.com" -Apply
 ```
 
+**Remarques**
+- Scopes : `User.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`, `GroupMember.ReadWrite.All`.
+- Global Administrator est attribué par une attribution de rôle unifiée (`roleManagement/directory/roleAssignments`, rôle `62e90394-69f5-4237-9190-012177145e10`). L'ancien code tentait d'activer le rôle avec `New-MgDirectoryRoleTemplate -RoleTemplateId` ; cette cmdlet crée un modèle de rôle et n'a pas de paramètre `-RoleTemplateId` : un tenant dans lequel le rôle n'avait jamais été activé échouait à cette étape.
+
 **Modules requis**
 ```powershell
 Install-Module Microsoft.Graph.Users -Scope CurrentUser
-Install-Module Microsoft.Graph.Identity.DirectoryManagement -Scope CurrentUser
+Install-Module Microsoft.Graph.Identity.Governance -Scope CurrentUser
 Install-Module Microsoft.Graph.Groups -Scope CurrentUser
 ```
 
@@ -69,7 +77,9 @@ Crée un groupe d'exclusion dynamique « tous les utilisateurs sauf les comptes 
 | `-ExclusionGroupName` | Non | Nom d'affichage du groupe d'exclusion |
 | `-SkipExclusionGroup` | Non | Ignorer entièrement le groupe d'exclusion |
 | `-AdditionalGroupNames` | Non | Noms des groupes statiques supplémentaires à créer |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : client GDAP, sinon le tenant de connexion) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion en application seule |
+| `-AppOnly` | Non | Application seule avec le ClientId et l'empreinte de `graph.appid.json` |
 | `-Apply` | Non | Créer réellement les groupes (par défaut : aperçu uniquement) |
 
 *Obligatoire, sauf si `-SkipExclusionGroup` est utilisé.
@@ -83,6 +93,9 @@ Crée un groupe d'exclusion dynamique « tous les utilisateurs sauf les comptes 
 .\New-TenantBaselineGroups.ps1 -BreakGlassUpnPattern "breakglass-admin" -Apply
 ```
 
+**Remarques**
+- Scope : `Group.ReadWrite.All`. L'appartenance dynamique nécessite Entra ID P1.
+
 **Module requis**
 ```powershell
 Install-Module Microsoft.Graph.Groups -Scope CurrentUser
@@ -92,7 +105,7 @@ Install-Module Microsoft.Graph.Groups -Scope CurrentUser
 
 ### Set-IntuneBaselinePolicyAssignment.ps1
 
-Attribue en masse à un seul groupe cible les profils de configuration, stratégies de conformité, modèles d'administration, scripts et références de sécurité Intune dont le nom d'affichage correspond à un filtre.
+Attribue en masse à un seul groupe cible les profils de configuration, stratégies de conformité, modèles d'administration, scripts de plateforme et références de sécurité Intune dont le nom d'affichage correspond à un filtre. Le groupe est **ajouté** aux attributions existantes de chaque stratégie.
 
 **Paramètres**
 
@@ -101,7 +114,9 @@ Attribue en masse à un seul groupe cible les profils de configuration, stratég
 | `-TargetGroupId` | Oui | Groupe auquel attribuer les stratégies correspondantes |
 | `-NameFilter` | Non | Filtre générique sur le nom d'affichage de la stratégie (par défaut : `*Default*`) |
 | `-PolicyTypes` | Non | Types d'objets à inclure (par défaut : tous) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : client GDAP, sinon le tenant de connexion) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion en application seule |
+| `-AppOnly` | Non | Application seule avec le ClientId et l'empreinte de `graph.appid.json` |
 | `-Apply` | Non | Créer réellement les attributions (par défaut : aperçu uniquement) |
 
 **Exemples**
@@ -118,4 +133,7 @@ Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
 
 **Remarques**
 - Utilise le point de terminaison beta de Microsoft Graph : l'attribution des stratégies Intune n'est pas entièrement exposée en v1.0 pour tous les types de stratégies.
-- Tous les scripts de ce dossier se connectent automatiquement à Microsoft Graph si aucune session n'est active, et réutilisent la session existante si vous êtes déjà connecté, comme `Test-M365GroupMembership.ps1` dans `scripts/Entra/`.
+- L'action `/assign` d'Intune remplace toute la liste d'attributions d'une stratégie. Le script lit désormais les attributions actuelles et les renvoie avec le nouveau groupe ; auparavant, chaque stratégie traitée perdait ses autres attributions. Les stratégies déjà attribuées au groupe sont ignorées.
+- Les listes de stratégies suivent `@odata.nextLink`, de sorte que les tenants comptant plus de stratégies qu'une page sont entièrement couverts.
+- Les stratégies du catalogue de paramètres (`configurationPolicies`) ne sont pas incluses.
+- Scopes : `DeviceManagementConfiguration.ReadWrite.All`, `DeviceManagementServiceConfig.ReadWrite.All`.

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Eén-op-de-maand deploy-script: haalt de nieuwste Claude Desktop MSIX op, pakt hem in als
@@ -42,7 +42,17 @@
     de MSIX-versie zelf niet is veranderd — zonder dat je zelf hoeft te onthouden wanneer dat
     nodig is.
 
-    Vereiste rol tijdens het draaien van dit script: Global Administrator, of Application
+    Aanmelden gaat via scripts\Startup\Connect-M365.ps1: standaard gedelegeerd (jij als
+    beheerder; apparaatcode als $global:useDeviceCodeAuth aan staat; onder GDAP de klanttenant
+    uit $global:cid). De upload zelf blijft bij de IntuneWin32App-module: Connect-MSIntuneGraph
+    vraagt een eigen token aan en kan de Microsoft Graph PowerShell-sessie niet gebruiken, en het
+    in blokken uploaden van een .intunewin naar Azure Storage plus de commit van de
+    versleutelingsgegevens zelf in Graph-calls herschrijven is veel risico voor weinig winst.
+    Gedelegeerd krijgt die module daarom een kortlevende tijdelijke App Registration. Met
+    -ClientId + -CertificateThumbprint (of -AppOnly) gebruik je een eigen permanente app met
+    certificaat: dan wordt er niets tijdelijks aangemaakt en verbindt Connect-MSIntuneGraph met
+    hetzelfde certificaat (-ClientCert).
+    Vereiste rol tijdens het draaien van dit script (gedelegeerd): Global Administrator, of Application
     Administrator in combinatie met een rol die AppRoleAssignment.ReadWrite.All-consent mag geven
     (zelfde vereiste als bij de tijdelijke App Registration in Remove-SharePointFileVersionsByDate.ps1).
 
@@ -73,7 +83,20 @@
     New-IntuneWin32AppRequirementRule voor geldige waarden van de geïnstalleerde module-versie.
 
 .PARAMETER TenantId
-    Entra ID tenant ID. Standaard automatisch bepaald uit de delegated sessie.
+    Entra ID tenant ID of domein. Standaard de GDAP-klanttenant ($global:cid), anders de tenant
+    waarbij je je aanmeldt.
+
+.PARAMETER ClientId
+    Optioneel: een eigen, permanente App Registration voor app-only, met -CertificateThumbprint.
+    Er wordt dan geen tijdelijke App Registration aangemaakt. De app heeft de application
+    permissions DeviceManagementApps.ReadWrite.All en Group.Read.All nodig.
+
+.PARAMETER CertificateThumbprint
+    Vingerafdruk van het certificaat voor -ClientId (CurrentUser\My of LocalMachine\My, met
+    privésleutel). Microsoft Graph én Connect-MSIntuneGraph (-ClientCert) gebruiken het.
+
+.PARAMETER AppOnly
+    App-only met ClientId en CertificateThumbprint uit graph.appid.json.
 
 .PARAMETER IntuneWinAppUtilPath
     Pad naar een al aanwezige IntuneWinAppUtil.exe. Zonder opgave downloadt de IntuneWin32App-
@@ -128,6 +151,12 @@ param(
 
     [string]$TenantId,
 
+    [string]$ClientId,
+
+    [string]$CertificateThumbprint,
+
+    [switch]$AppOnly,
+
     [string]$IntuneWinAppUtilPath,
 
     [switch]$Force,
@@ -137,9 +166,11 @@ param(
     [string]$CoworkPrerequisitesAppDisplayName = 'Cowork Windows Prerequisites (Machine-wide)'
 )
 
+. (Join-Path $PSScriptRoot '..\..\..\Startup\Connect-M365.ps1')
+
 # ── Cleanup tracking ─────────────────────────────────────────────────────────
 $script:TempAppObjectId  = $null
-$script:ConnectedHere    = $false
+$script:Graph            = $null
 
 # ── Cultuur tijdelijk op invariant zetten ────────────────────────────────────
 # De IntuneWin32App-module heeft een bekende, nog niet gemergede bug (upstream issue #210):
@@ -309,9 +340,11 @@ function Set-Win32AppArchitectureRequirement {
         # De blote exceptionmessage van Invoke-RestMethod op PS5.1 is alleen "Response status code
         # does not indicate success: 400 (Bad Request)" — zonder de echte Graph error.code/message
         # uit de response body. Die er expliciet bij pakken, anders is dit niet te diagnosticeren.
-        $graphErrorDetail = $null
+        # PowerShell 7 zet de response body in ErrorDetails; de StreamReader-route hieronder is
+        # die van Windows PowerShell 5.1 en vindt op PS7 niets (HttpResponseMessage).
+        $graphErrorDetail = $_.ErrorDetails.Message
         try {
-            if ($_.Exception.Response) {
+            if (-not $graphErrorDetail -and $_.Exception.Response -and $_.Exception.Response.PSObject.Methods['GetResponseStream']) {
                 $streamReader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
                 try {
                     $streamReader.BaseStream.Position = 0
@@ -383,6 +416,16 @@ function Remove-TempApp {
         Write-Host "    [WARN] Kon tijdelijke App Registration niet verwijderen (Object ID: $ObjectId)." -ForegroundColor Yellow
         Write-Host "    [WARN] Verwijder deze handmatig in Entra ID > App registrations." -ForegroundColor Yellow
     }
+}
+
+function Get-ClientCertificate {
+    # Connect-MSIntuneGraph wil een X509Certificate2-object (-ClientCert), geen vingerafdruk.
+    param([Parameter(Mandatory = $true)][string]$Thumbprint)
+    foreach ($store in 'Cert:\CurrentUser\My', 'Cert:\LocalMachine\My') {
+        $cert = Get-Item -Path (Join-Path $store $Thumbprint) -ErrorAction SilentlyContinue
+        if ($cert -and $cert.HasPrivateKey) { return $cert }
+    }
+    throw "Certificaat $Thumbprint met privésleutel niet gevonden in CurrentUser\My of LocalMachine\My."
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -481,26 +524,41 @@ if ([string]::IsNullOrWhiteSpace($intuneWinFile) -or -not (Test-Path $intuneWinF
 }
 Write-Info "[OK]   Package gebouwd: $intuneWinFile"
 
-# ── Microsoft Graph (delegated) ──────────────────────────────────────────────
-Write-Step "Verbinden met Microsoft Graph (delegated)"
-Write-Info "Vereiste rol: Global Administrator of Application Administrator." -ForegroundColor Yellow
-try {
-    $connectParams = @{
-        Scopes    = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'Group.Read.All')
-        NoWelcome = $true
+# ── Microsoft Graph ──────────────────────────────────────────────────────────
+# Delegated (standaard): een Graph-sessie als jij, voor de groep en de tijdelijke App
+# Registration. App-only (-ClientId + -CertificateThumbprint, of -AppOnly): een eigen
+# permanente app met certificaat, zonder tijdelijke App Registration.
+if ($AppOnly -and -not $ClientId) {
+    try {
+        $reg = Get-M365AppRegistration -TenantId (Resolve-M365TenantId -TenantId $TenantId)
+    } catch {
+        Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
     }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams -ErrorAction Stop
-    $script:ConnectedHere = $true
-    Write-Info "[OK]   Verbonden (delegated)."
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $reg.Tenant }
+}
+$useAppOnly = [bool]$ClientId
+if ($useAppOnly -and -not $CertificateThumbprint) {
+    Write-Host "  [ERROR] -ClientId vereist -CertificateThumbprint (Connect-MSIntuneGraph krijgt hetzelfde certificaat)." -ForegroundColor Red
+    exit 1
+}
+Write-Step "Verbinden met Microsoft Graph ($(if ($useAppOnly) { 'app-only' } else { 'delegated' }))"
+if (-not $useAppOnly) {
+    Write-Info "Vereiste rol: Global Administrator, of Application Administrator + een rol die app-rechten mag consenten." -ForegroundColor Yellow
+}
+try {
+    $graphScopes = if ($useAppOnly) { @() } else { @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'Group.Read.All') }
+    $script:Graph = Connect-M365Graph -Scopes $graphScopes -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint
+    Write-Info "[OK]   Verbonden ($($script:Graph.AuthType), tenant $($script:Graph.TenantId))."
 } catch {
     Write-Host "  [ERROR] Verbinden met Microsoft Graph mislukt: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
 try {
-    $ctx = Get-MgContext
-    $effectiveTenantId = if ($TenantId) { $TenantId } else { $ctx.TenantId }
+    $effectiveTenantId = $script:Graph.TenantId
     if (-not $effectiveTenantId) {
         throw "Kon tenant ID niet bepalen. Geef -TenantId op."
     }
@@ -519,13 +577,21 @@ try {
     Write-Info "[OK]   Groep gevonden: $($assignmentGroup.DisplayName) ($($assignmentGroup.Id))"
 
     # ── Tijdelijke App Registration ──────────────────────────────────────────
-    Write-Step "Tijdelijke App Registration aanmaken (DeviceManagementApps.ReadWrite.All)"
-    $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $tempApp = New-TempAppRegistration -AppName "ClaudeDeploy-Temp-$ts" -UsedTenantId $effectiveTenantId
-    $script:TempAppObjectId = $tempApp.AppObjectId
+    # Connect-MSIntuneGraph haalt een eigen token op en kan de Graph PowerShell-sessie niet
+    # gebruiken. Delegated krijgt de module daarom een kortlevende tijdelijke app; app-only
+    # krijgt ze het certificaat van -ClientId.
+    if ($useAppOnly) {
+        $intuneConnect = @{ TenantID = $effectiveTenantId; ClientID = $ClientId; ClientCert = (Get-ClientCertificate -Thumbprint $CertificateThumbprint) }
+    } else {
+        Write-Step "Tijdelijke App Registration aanmaken (DeviceManagementApps.ReadWrite.All)"
+        $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
+        $tempApp = New-TempAppRegistration -AppName "ClaudeDeploy-Temp-$ts" -UsedTenantId $effectiveTenantId
+        $script:TempAppObjectId = $tempApp.AppObjectId
+        $intuneConnect = @{ TenantID = $effectiveTenantId; ClientID = $tempApp.AppId; ClientSecret = $tempApp.ClientSecret }
+    }
 
     # ── Verbinden met Intune Graph via de tijdelijke app (met propagatie-retry) ─────────────
-    Write-Step "Verbinden met Intune (app-only, via tijdelijke App Registration)"
+    Write-Step "Verbinden met Intune (IntuneWin32App, app-only$(if (-not $useAppOnly) { ' via tijdelijke App Registration' }))"
     # Connect-MSIntuneGraph meldt een mislukte token-aanvraag (bv. AADSTS7000215 doordat het
     # secret van de zojuist aangemaakte app nog niet is gerepliceerd) via Write-Warning, niet
     # via een terminating error — -ErrorAction Stop op zichzelf vangt dat dus niet af. Door
@@ -538,7 +604,7 @@ try {
     $retryDelaySeconds = 10
     for ($i = 1; $i -le $maxAttempts; $i++) {
         try {
-            Connect-MSIntuneGraph -TenantID $effectiveTenantId -ClientID $tempApp.AppId -ClientSecret $tempApp.ClientSecret -ErrorAction Stop -WarningAction Stop | Out-Null
+            Connect-MSIntuneGraph @intuneConnect -ErrorAction Stop -WarningAction Stop | Out-Null
             Get-IntuneWin32App -ErrorAction Stop -WarningAction Stop | Out-Null
             $connected = $true
             break
@@ -550,7 +616,7 @@ try {
         }
     }
     if (-not $connected) {
-        throw "Kon niet verbinden met Intune via de tijdelijke App Registration (na $maxAttempts pogingen)."
+        throw "Kon niet verbinden met Intune (na $maxAttempts pogingen)."
     }
     Write-Info "[OK]   Verbonden met Intune."
 
@@ -687,9 +753,7 @@ catch {
 finally {
     Write-Step "Opruimen"
     Remove-TempApp -ObjectId $script:TempAppObjectId
-    if ($script:ConnectedHere) {
-        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
-    }
+    Disconnect-M365Graph $script:Graph
     [System.Threading.Thread]::CurrentThread.CurrentCulture   = $script:OriginalCulture
     [System.Threading.Thread]::CurrentThread.CurrentUICulture = $script:OriginalUICulture
 }

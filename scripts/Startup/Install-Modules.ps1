@@ -6,8 +6,8 @@
 .DESCRIPTION
     Installs and imports all PowerShell modules used across the M365-Scripts repository,
     as listed in RequiredModules.psd1 (the same list load.ps1 checks at startup).
-    Runs cross-platform (Windows, macOS, Linux). Windows-only modules (WindowsAutopilotIntune,
-    IntuneWin32App) are skipped on other platforms, and PnP.PowerShell below PowerShell 7.4.
+    Runs cross-platform (Windows, macOS, Linux). Windows-only modules (IntuneWin32App)
+    are skipped on other platforms, and PnP.PowerShell below PowerShell 7.4.
     Already installed modules are left alone; Update-Modules.ps1 updates them.
 
 .PARAMETER Force

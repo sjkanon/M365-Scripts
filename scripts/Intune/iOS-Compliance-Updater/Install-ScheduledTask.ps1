@@ -6,7 +6,9 @@
 
 .DESCRIPTION
     Creates a Task Scheduler task that runs Update-iOSCompliancePolicy.ps1
-    every Monday at 07:00 as SYSTEM.
+    every Monday at 07:00 as SYSTEM, with PowerShell 7 (pwsh.exe). Running as
+    SYSTEM, the updater's certificate must be in LocalMachine\My (Setup.ps1 puts it
+    there when run elevated).
 
 .PARAMETER ScriptPath
     Full path to Update-iOSCompliancePolicy.ps1 (default: same folder as this script).
@@ -40,8 +42,15 @@ if (-not (Test-Path $ScriptPath)) {
     exit 1
 }
 
+# The updater needs PowerShell 7 (pwsh.exe); Windows PowerShell 5.1 cannot run it.
+$pwsh = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+if (-not $pwsh) {
+    Write-Host "  [ERROR] PowerShell 7 (pwsh.exe) not found. Install it first: winget install Microsoft.PowerShell" -ForegroundColor Red
+    exit 1
+}
+
 $action    = New-ScheduledTaskAction `
-    -Execute  'powershell.exe' `
+    -Execute  $pwsh `
     -Argument "-ExecutionPolicy Bypass -NonInteractive -File `"$ScriptPath`""
 
 $trigger   = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At '07:00'

@@ -73,7 +73,10 @@ Zelfde gedrag voor bevestiging/`-Force` als `Deploy-ClaudeDesktopIntune.ps1`. Om
 | `-WorkingDirectory` | `C:\Temp\CoworkPrereqDeploy` | Staging-map voor de build (`Source/`, `Output/`) |
 | `-AppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Wordt gebruikt om de bestaande app bij latere runs te vinden — niet wijzigen zonder de app ook in Intune te hernoemen |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Vereistenregel |
-| `-TenantId` | automatisch gedetecteerd | Tenant-ID van Entra ID |
+| `-TenantId` | GDAP-klant, anders je aanmeldtenant | Tenant-ID of domein van Entra ID |
+| `-ClientId` | — | Optionele permanente app voor app-only (met `-CertificateThumbprint`); er wordt geen tijdelijke App Registration aangemaakt |
+| `-CertificateThumbprint` | — | Certificaat voor `-ClientId` (CurrentUser\My of LocalMachine\My); gebruikt voor Graph en voor `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | uit | App-only met ClientId en vingerafdruk uit `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | automatische download | Gebruik een al gedownloade `IntuneWinAppUtil.exe` |
 | `-Force` | uit | Sla de bevestigingsprompt(s) over |
 
@@ -89,6 +92,7 @@ Verwijderopdracht van de Win32-app.
 
 ## Vereisten
 
+- PowerShell 7. Aanmelden werkt zoals bij `Deploy-ClaudeDesktopIntune.ps1` (zie [ClaudeDesktop](../ClaudeDesktop/readme.nl.md#deploy-claudedesktopintuneps1)): standaard gedelegeerd met een tijdelijke App Registration voor de module `IntuneWin32App`, of app-only met `-ClientId` + `-CertificateThumbprint` / `-AppOnly`. Het deploy-script telt mee in `ScriptsHash`, dus de eerste run na het bijwerken uploadt het pakket één keer opnieuw.
 - De PowerShell-modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` en `IntuneWin32App` — installeer ze met `.\scripts\Startup\Install-Modules.ps1`
 - Uitvoeren vanaf Windows (de verpakkingstool en de DISM-cmdlets werken alleen op Windows)
 
