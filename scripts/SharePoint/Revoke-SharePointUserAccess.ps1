@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Revoke one user's access to SharePoint Online everywhere it is granted — site collection

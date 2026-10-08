@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Test file I/O on a path, diagnose failures, and monitor the directory in real time.

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Map SharePoint Online / OneDrive document libraries to drive letters via WebDAV.

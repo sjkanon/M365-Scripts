@@ -1,4 +1,4 @@
-# ============================================
+﻿# ============================================
 # Rollback: Re-enable Internal Microphone
 # Ticket: #0250981 - Best Next Contact BVBA
 # Auteur: Sjoerd Kanon

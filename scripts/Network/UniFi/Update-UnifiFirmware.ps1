@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     List and optionally trigger firmware upgrades for UniFi devices across one or all sites.

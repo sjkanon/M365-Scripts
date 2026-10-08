@@ -214,20 +214,30 @@ function ConvertTo-Version {
     return $null
 }
 
-function Get-ForwardedArgument {
-    <# Rebuild the caller's own parameters as a command line for a relaunch. #>
-    param([Parameter(Mandatory)] $Bound)
-    $list = @()
-    foreach ($entry in $Bound.GetEnumerator()) {
-        if ($entry.Value -is [switch] -or $entry.Value -is [bool]) {
-            if ($entry.Value) { $list += "-$($entry.Key)" } else { $list += "-$($entry.Key):`$false" }
-        } elseif ($entry.Value -is [array]) {
-            $list += "-$($entry.Key)"; $list += ($entry.Value -join ',')
+function ConvertTo-ScriptCommand {
+    <#
+        A script call with its parameters as one -Command string. Not -File: that
+        hands every argument over as text, so -Confirm:$false arrives as the string
+        '$false' and the call dies on "Cannot convert 'System.String' to the type
+        SwitchParameter". Here PowerShell parses the line itself; strings are
+        single-quoted, and the script's exit code is passed on.
+    #>
+    param([Parameter(Mandatory)] [string] $Path, [System.Collections.IDictionary] $Parameters = @{})
+    $quote = { param($s) "'" + ([string] $s -replace "'", "''") + "'" }
+    $line  = '& ' + (& $quote $Path)
+    foreach ($entry in $Parameters.GetEnumerator()) {
+        $value = $entry.Value
+        if ($value -is [switch] -or $value -is [bool]) {
+            $line += ' -{0}:${1}' -f $entry.Key, ([bool] $value).ToString().ToLower()
+        } elseif ($value -is [array]) {
+            $line += ' -{0} {1}' -f $entry.Key, (($value | ForEach-Object { & $quote $_ }) -join ',')
+        } elseif ($value -is [pscredential]) {
+            continue   # cannot travel on a command line
         } else {
-            $list += "-$($entry.Key)"; $list += [string] $entry.Value
+            $line += ' -{0} {1}' -f $entry.Key, (& $quote $value)
         }
     }
-    return $list
+    return $line + '; exit $LASTEXITCODE'
 }
 
 # -- Several session hosts -----------------------------------------------------------
@@ -311,8 +321,7 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
     $nativeShell = Join-Path $env:WINDIR 'SysNative\WindowsPowerShell\v1.0\powershell.exe'
 }
 if ($PSVersionTable.PSEdition -eq 'Core' -or ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess)) {
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) + (Get-ForwardedArgument -Bound $PSBoundParameters)
-    & $nativeShell @argList
+    & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command (ConvertTo-ScriptCommand -Path $PSCommandPath -Parameters $PSBoundParameters)
     exit $LASTEXITCODE
 }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -630,12 +639,13 @@ function Find-Helper {
 
 function Invoke-Helper {
     <# Run a repo script in its own process, so its exit does not end this one. #>
-    param([string] $Name, [string[]] $Arguments)
+    param([string] $Name, [System.Collections.IDictionary] $Parameters)
     $path = Find-Helper $Name
     if (-not $path) { Write-Bad "$Name not found locally and not verified from GitHub - skipped"; return 1 }
-    Write-Step "$Name $($Arguments -join ' ')"
+    $command = ConvertTo-ScriptCommand -Path $path -Parameters $Parameters
+    Write-Step $command
     # To the host, not the pipeline: the return value is the exit code alone.
-    & $nativeShell -NoProfile -ExecutionPolicy Bypass -File $path @Arguments | Out-Host
+    & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command $command | Out-Host
     $code = $LASTEXITCODE
     if ($code -eq 0) { Write-Ok "$Name finished" } else { Write-Warn "$Name exited with $code" }
     return $code
@@ -668,13 +678,13 @@ try {
 
         if (-not $SkipApps) {
             if ('apps' -in $fixes) {
-                if ((Invoke-Helper 'Repair-AppxPackageStore.ps1' @('-Name', 'teams,outlook', '-Latest', '-Provision', '-RemoveOld', '-Confirm:$false')) -eq 1) { $exitCode = 1 }
+                if ((Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = @('teams', 'outlook'); Latest = $true; Provision = $true; RemoveOld = $true; Confirm = $false })) -eq 1) { $exitCode = 1 }
             }
             if ('copilot' -in $fixes -or 'apps' -in $fixes) {
-                if ((Invoke-Helper 'Repair-AppxPackageStore.ps1' @('-Name', 'copilot', '-Provision', '-Confirm:$false')) -eq 1) { $exitCode = 1 }
+                if ((Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = @('copilot'); Provision = $true; Confirm = $false })) -eq 1) { $exitCode = 1 }
             }
             if ('teams' -in $fixes -or 'apps' -in $fixes) {
-                if ((Invoke-Helper 'Update-TeamsClient.ps1' @('-AvdOptimizations', '-Confirm:$false')) -eq 1) { $exitCode = 1 }
+                if ((Invoke-Helper 'Update-TeamsClient.ps1' ([ordered]@{ AvdOptimizations = $true; Confirm = $false })) -eq 1) { $exitCode = 1 }
             }
         } elseif (@($fixes | Where-Object { $_ -in 'apps', 'copilot', 'teams' }).Count -gt 0) {
             Write-Skip '-SkipApps: Teams, Outlook and Copilot left as they are'
