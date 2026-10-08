@@ -41,11 +41,18 @@ points its default Exchange/SharePoint URLs at this tenant. Dry-run by default.
 | `-EnvironmentName` | Yes | Lowercase alphanumeric environment name |
 | `-RequestingUserUpn` | No | Defaults to the signed-in user |
 | `-Apply` | No | Actually provision (default: preview) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 ```powershell
 .\New-Workspace365Environment.ps1 -WorkspaceHostname "https://yourcompany.workspace365.net" -ProvisioningKey $key -EnvironmentName "contoso" -Apply
 ```
+
+**Notes**
+- Signs in to Graph through [`Connect-M365.ps1`](../../Startup/readme.md): delegated by default, app-only with `-ClientId` + `-CertificateThumbprint` or `-AppOnly` (then `-RequestingUserUpn` is required — there is no signed-in user). A fitting session is reused; only a session the script opened is disconnected
+- Delegated scopes: `Application.ReadWrite.All`, `User.Read`, `User.ReadBasic.All` (added: `-RequestingUserUpn` may name another admin), `Organization.Read.All`
+- The Provisioning API itself is called with the provisioning key, not with Graph
 
 ---
 

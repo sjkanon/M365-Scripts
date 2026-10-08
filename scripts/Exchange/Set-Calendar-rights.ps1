@@ -2,35 +2,58 @@
 #Requires -Modules ExchangeOnlineManagement
 <#
 .SYNOPSIS
-    Geeft een gebruiker toegangsrechten op de agenda van een andere gebruiker.
+    Give a user access rights on another user's calendar.
 
 .DESCRIPTION
-    Voegt een MailboxFolderPermission toe op de agendasmap van de opgegeven mailbox.
-    Werkt voor Nederlandstalige (\Agenda), Franstalige (\Calendrier) en Engelstalige (\Calendar) mailboxen.
-    Geschikt voor Belgische omgevingen met gemengde NL/FR taalinstellingen.
-    De standaarddomeinnaam wordt automatisch opgehaald via Exchange Online.
+    Adds (or updates) a mailbox folder permission on the default calendar of the
+    target mailbox. The calendar is found by folder type, not by name, so it works
+    for Dutch (\Agenda), French (\Calendrier), English (\Calendar) and any other
+    mailbox language.
+
+    -User and -TargetMailbox take a full UPN, or a name without domain; the tenant's
+    default accepted domain is then appended.
+
+    Exchange Online PowerShell, not Graph: Graph's calendarPermissions can only change
+    another user's calendar with an app-only Calendars.ReadWrite permission, or when
+    the signed-in admin already has rights on that calendar, and it has no equivalent
+    of roles such as PublishingEditor or Contributor. Exchange accepts the admin's
+    Exchange role for every mailbox, so a delegated sign-in is enough.
 
 .PARAMETER User
-    De gebruikersnaam (zonder domein) die de rechten ontvangt.
-    Voorbeeld: Sjoerd.Kanon
+    The user who receives the rights: UPN, or name without domain (e.g. Sjoerd.Kanon).
 
 .PARAMETER TargetMailbox
-    De gebruikersnaam (zonder domein) van de mailbox waarop rechten worden gezet.
-    Voorbeeld: Jan.Jansen
+    The mailbox whose calendar is shared: UPN, or name without domain (e.g. Jan.Jansen).
 
 .PARAMETER AccessRights
-    Het toegangsniveau dat wordt toegekend. Geldige waarden:
+    The access level to grant:
     Owner, PublishingEditor, Editor, PublishingAuthor, Author,
     NonEditingAuthor, Reviewer, Contributor, AvailabilityOnly, LimitedDetails
 
-.EXAMPLE
-    .\Set-CalendarRights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Reviewer
+.PARAMETER TenantId
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself (device code per load.config.ps1).
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .EXAMPLE
-    .\Set-CalendarRights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Editor -WhatIf
+    .\Set-Calendar-rights.ps1 -User Sjoerd.Kanon -TargetMailbox Jan.Jansen -AccessRights Reviewer
+
+.EXAMPLE
+    .\Set-Calendar-rights.ps1 -User sjoerd@contoso.com -TargetMailbox jan@contoso.com -AccessRights Editor -WhatIf
 
 .NOTES
-    Vereist een actieve Exchange Online verbinding (Connect-ExchangeOnline).
+    Connects to Exchange Online itself (delegated by default); an existing session for
+    the same tenant is reused and left open.
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -46,49 +69,61 @@ param (
         'Owner', 'PublishingEditor', 'Editor', 'PublishingAuthor', 'Author',
         'NonEditingAuthor', 'Reviewer', 'Contributor', 'AvailabilityOnly', 'LimitedDetails'
     )]
-    [string]$AccessRights
+    [string]$AccessRights,
+
+    [string]$TenantId,
+    [string]$ClientId,
+    [string]$CertificateThumbprint,
+    [switch]$AppOnly
 )
 
-# Haal het standaarddomein op via Exchange Online (vervangt Get-MsolDomain)
-$defaultDomain = (Get-AcceptedDomain | Where-Object { $_.Default }).DomainName
-if (-not $defaultDomain) {
-    throw 'Kan het standaarddomein niet ophalen. Controleer of je verbonden bent via Connect-ExchangeOnline.'
-}
+# Delegated by default (device code and GDAP customer per load.config.ps1), app-only
+# with -ClientId/-CertificateThumbprint or -AppOnly.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
-$userUPN    = "$User@$defaultDomain"
-$targetUPN  = "$TargetMailbox@$defaultDomain"
+try {
+    # Names without a domain get the tenant's default domain (replaces Get-MsolDomain).
+    $defaultDomain = $null
+    if ($User -notmatch '@' -or $TargetMailbox -notmatch '@') {
+        $defaultDomain = (Get-AcceptedDomain | Where-Object { $_.Default }).DomainName
+        if (-not $defaultDomain) { throw 'Could not read the default accepted domain.' }
+    }
+    $userUPN   = if ($User -match '@')          { $User }          else { "$User@$defaultDomain" }
+    $targetUPN = if ($TargetMailbox -match '@') { $TargetMailbox } else { "$TargetMailbox@$defaultDomain" }
 
-# Alle paden om locale-varianten (NL/FR/EN) te dekken
-$calendarPaths = @(
-    "$targetUPN`:\Agenda",       # Nederlands
-    "$targetUPN`:\Calendrier",   # Frans (België)
-    "$targetUPN`:\Calendar"      # Engels
-)
+    # The default calendar by folder type, so the mailbox language does not matter.
+    $calendar = Get-EXOMailboxFolderStatistics -Identity $targetUPN -FolderScope Calendar -ErrorAction Stop |
+        Where-Object { $_.FolderType -eq 'Calendar' } |
+        Select-Object -First 1
+    if (-not $calendar) { throw "No default calendar found in mailbox $targetUPN." }
+    $path = "${targetUPN}:\$($calendar.Name)"
 
-Write-Verbose "Gebruiker  : $userUPN"
-Write-Verbose "Doelmap    : $targetUPN"
-Write-Verbose "Rechten    : $AccessRights"
+    Write-Verbose "User     : $userUPN"
+    Write-Verbose "Calendar : $path"
+    Write-Verbose "Rights   : $AccessRights"
 
-foreach ($path in $calendarPaths) {
-    try {
-        if ($PSCmdlet.ShouldProcess($path, "Add-MailboxFolderPermission ($AccessRights) voor $userUPN")) {
-            Add-MailboxFolderPermission -Identity $path -User $userUPN -AccessRights $AccessRights -ErrorAction Stop
-            Write-Host "Rechten toegevoegd op: $path" -ForegroundColor Green
+    # Add when the user has no entry yet, otherwise change the existing one.
+    $existing = Get-MailboxFolderPermission -Identity $path -User $userUPN -ErrorAction SilentlyContinue
+    if ($existing) {
+        if ($PSCmdlet.ShouldProcess($path, "Set-MailboxFolderPermission ($AccessRights) for $userUPN (was: $($existing.AccessRights -join ', '))")) {
+            Set-MailboxFolderPermission -Identity $path -User $userUPN -AccessRights $AccessRights -ErrorAction Stop | Out-Null
+            Write-Host "Rights changed on $path for $userUPN : $AccessRights" -ForegroundColor Green
+        }
+    } else {
+        if ($PSCmdlet.ShouldProcess($path, "Add-MailboxFolderPermission ($AccessRights) for $userUPN")) {
+            Add-MailboxFolderPermission -Identity $path -User $userUPN -AccessRights $AccessRights -ErrorAction Stop | Out-Null
+            Write-Host "Rights added on $path for $userUPN : $AccessRights" -ForegroundColor Green
         }
     }
-    catch [System.Exception] {
-        # Map bestaat niet in deze locale of recht bestaat al — overslaan
-        Write-Verbose "Overgeslagen ($path): $($_.Exception.Message)"
-    }
-}
 
-# Toon huidige rechten als verificatie
-Write-Host "`nHuidige agendarechten:" -ForegroundColor Cyan
-foreach ($path in $calendarPaths) {
-    $perms = Get-MailboxFolderPermission -Identity $path -ErrorAction SilentlyContinue
-    if ($perms) {
-        $perms | Where-Object { $_.User.DisplayName -notin @('Default', 'Anonymous') } |
-            Select-Object Identity, User, AccessRights |
-            Format-Table -AutoSize
-    }
+    # Show the current rights as verification.
+    Write-Host "`nCurrent calendar rights on ${path}:" -ForegroundColor Cyan
+    Get-MailboxFolderPermission -Identity $path -ErrorAction SilentlyContinue |
+        Where-Object { $_.User.DisplayName -notin @('Default', 'Anonymous') } |
+        Select-Object Identity, User, AccessRights |
+        Format-Table -AutoSize
+}
+finally {
+    Disconnect-M365Exchange $exo
 }

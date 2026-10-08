@@ -29,8 +29,9 @@ The table below is the other way round: what each category is *for*.
 | [`SharePoint/`](SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration), and where a file went: renamed, moved or deleted (audit log) |
 | [`Reporting/`](Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
 | [`Device/`](Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
+| [`Linux/`](Linux/readme.md) | Linux servers (Debian/Ubuntu, 3CX Phone System) — bash disk cleanup: packages, journal, logs, temp, user caches, Docker, 3CX logs and backups |
 | [`Network/`](Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
-| [`RDS/`](RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking |
+| [`RDS/`](RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking, session host image preparation (Teams, Outlook, Copilot) |
 | [`SMTP/`](SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
 | [`Deployment/`](Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
 | [`DNS/`](DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |

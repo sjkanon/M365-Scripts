@@ -10,8 +10,33 @@ Intune-uitrol als Win32-app die [`Invoke-WindowsCleanup.ps1`](../../Device/readm
 
 | Script | Rol in Intune |
 |---|---|
-| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) | Contentscript voor de installatieopdracht — roept het gedeelde `Invoke-WindowsCleanup.ps1 -Apply` aan, daarna `Restart-Computer -Force` |
-| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) | Aangepast detectiescript |
+| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) ([docs](#invoke-diskcleanupintuneps1)) | Contentscript voor de installatieopdracht — roept het gedeelde `Invoke-WindowsCleanup.ps1 -Apply` aan, daarna `Restart-Computer -Force` |
+| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) ([docs](#detect-diskcleanupintuneps1)) | Aangepast detectiescript |
+
+### Invoke-DiskCleanupIntune.ps1
+
+Installatieopdracht van de Win32-app. Voert `Invoke-WindowsCleanup.ps1 -Apply` uit vanuit dezelfde contentmap, zet bij succes een tijdstempel in `HKLM:\SOFTWARE\DiskCleanupDeploy\LastRunUtc` en forceert daarna een herstart.
+
+**Parameters**
+
+| Parameter | Verplicht | Beschrijving |
+|-----------|-----------|--------------|
+| `-SkipDism` | Nee | Slaat het opschonen van het DISM-componentarchief (`/StartComponentCleanup /ResetBase`) over, voor een kortere, voorspelbare looptijd |
+| `-NoRestart` | Nee | Ruimt op maar herstart niet — alleen voor handmatig testen buiten Intune; laat het weg in de echte installatieopdracht |
+
+**Voorbeelden**
+
+```powershell
+# Intune-installatieopdracht
+%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Invoke-DiskCleanupIntune.ps1
+
+# Handmatige testrun zonder DISM en zonder herstart
+.\Invoke-DiskCleanupIntune.ps1 -SkipDism -NoRestart
+```
+
+### Detect-DiskCleanupIntune.ps1
+
+Aangepast detectiescript van de Win32-app. Meldt "installed" (exit 0) zolang de tijdstempel `LastRunUtc` hoogstens `$MaxAgeDays` (30) dagen oud is, en "not installed" (exit 1) zodra die ouder is of ontbreekt, zodat Intune het opruimen opnieuw uitvoert. Intune geeft geen parameters mee aan detectiescripts: pas `$MaxAgeDays` in het script aan vóór het verpakken om de cyclus te wijzigen.
 
 ## Gedrag
 

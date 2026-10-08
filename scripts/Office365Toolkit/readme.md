@@ -28,7 +28,7 @@ fresh implementation in this repo's own style, not copied from the source projec
 | Folder | Description |
 |--------|-------------|
 | [`Security/`](Security/readme.md) | Secure Score reporting, enterprise app consent cleanup, shared mailbox sign-in lockdown, EOP anti-spam/anti-malware baseline |
-| [`Exchange/`](Exchange/readme.md) | Mailbox hygiene baseline, inbox-rule forwarding risk, mailbox add-ins, Unified Audit Log search, message trace |
+| [`Exchange/`](Exchange/readme.md) | Mailbox hygiene baseline, inbox-rule forwarding risk, mailbox add-ins, Unified Audit Log search (Graph) |
 | [`Intune/`](Intune/readme.md) | Tenant-wide Intune/Endpoint Manager policy inventory |
 
 ---
@@ -47,9 +47,10 @@ fresh implementation in this repo's own style, not copied from the source projec
 `graph-connect.ps1`, `msgraph-connect.ps1`, `Intune-connect.ps1`, `az-connect*.ps1`,
 `o365-setup.ps1`, `o365-update.ps1`, `o365-getrepo.ps1`, `save-cred-file.ps1`,
 `c.ps1`, `r.ps1`, `sc-config.ps1`, `text-colour.ps1`): this repo already
-auto-connects and reuses existing sessions in every script (see house style in
-`scripts/Entra/Test-M365GroupMembership.ps1`), so standalone connector scripts add
-nothing. `o365-setup.ps1` also hardcoded a real customer's OneDrive folder path and
+signs in the same way in every script through
+[`scripts/Startup/Connect-M365.ps1`](../Startup/readme.md#connect-m365ps1) (Graph
+first, delegated by default, app-only on request, GDAP-aware, reusing existing
+sessions), so standalone connector scripts add nothing. `o365-setup.ps1` also hardcoded a real customer's OneDrive folder path and
 installs the retired `MSOnline`/`AzureAD` modules; `save-cred-file.ps1` stores
 credentials in a local XML file — both out of scope per this project's safety rules.
 

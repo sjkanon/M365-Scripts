@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report Microsoft Defender / Entra security alerts for a tenant via Microsoft Graph.
@@ -23,7 +23,18 @@
     CSV report path. Defaults to .\SecurityAlerts_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1) or
+    your own tenant. Required for app-only sign-in.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-SecurityAlerts.ps1
@@ -38,7 +49,11 @@
     /security/alerts endpoint using a manually-constructed OAuth token read from local
     encrypted XML credential files.
 
-    Required scope: SecurityAlert.Read.All
+    Sign-in: Microsoft Graph through scripts\Startup\Connect-M365.ps1 - delegated by
+    default (scope SecurityAlert.Read.All plus a Security Reader role; device code / GDAP
+    customer per load.config.ps1), app-only with -ClientId/-CertificateThumbprint or
+    -AppOnly (application permission SecurityAlert.Read.All). An existing fitting Graph
+    session is reused and left connected.
 #>
 [CmdletBinding()]
 param(
@@ -48,24 +63,21 @@ param(
     [ValidateSet('new', 'inProgress', 'resolved')]
     [string[]] $Status,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('SecurityAlert.Read.All') }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+$graph = Connect-M365Graph -Scopes 'SecurityAlert.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -100,13 +112,14 @@ try {
 } catch {
     Write-Host "  [ERROR] Could not retrieve security alerts: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "  [HINT] Requires SecurityAlert.Read.All and an eligible Defender/Entra ID Protection license." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
 Write-Host "  Retrieved $($alerts.Count) alert(s)." -ForegroundColor DarkGray
 Write-Host ""
 
+$severityRank = @{ high = 4; medium = 3; low = 2; informational = 1 }
 $results = foreach ($a in $alerts) {
     [PSCustomObject]@{
         Title           = $a.title
@@ -122,7 +135,9 @@ $results = foreach ($a in $alerts) {
         Description     = $a.description
     }
 }
-$results = $results | Sort-Object @{Expression = 'Severity'; Descending = $true }, CreatedDateTime -Descending
+# Sort on severity rank, not the string: alphabetically 'medium' > 'low' > 'informational' > 'high'.
+$results = @($results | Sort-Object @{ Expression = { [int]$severityRank[[string]$_.Severity] }; Descending = $true },
+                                    @{ Expression = 'CreatedDateTime'; Descending = $true })
 
 # ── Output ────────────────────────────────────────────────────────────────────
 if (-not $results -or @($results).Count -eq 0) {
@@ -144,4 +159,4 @@ Write-Host ("  {0} alert(s) — {1} high severity" -f @($results).Count, $highCo
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

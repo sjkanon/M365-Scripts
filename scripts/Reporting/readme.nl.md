@@ -19,7 +19,7 @@ Scripts voor het genereren van rapporten over Active Directory, SharePoint Onlin
 | Script | Omschrijving |
 |--------|-------------|
 | [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Laatste inlogdatum van computerobjecten in één of meerdere OUs, met export naar CSV |
-| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis en prullenbak |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenantbreed opslagrapport: sites, bibliotheken, versiegeschiedenis, prullenbak en lange paden |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Wie heeft waar toegang, via welke groep en met welk niveau — elke site, lijst, map en bestand met eigen rechten. Alleen-lezen, naar CSV en één Excel-werkmap |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Verwijdert bestandsversies ouder dan een datum; de huidige versie blijft altijd staan. Standaard alleen rapporteren |
 
@@ -112,7 +112,7 @@ Zie [Licensing/](Licensing/) voor het maandelijkse licentierapport.
 
 ## Get-SharePointStorageReport.ps1
 
-Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard verbindt het script delegated en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd.
+Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Standaard meldt het script zich gedelegeerd aan via [`Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1) (apparaatcode en GDAP-klant volgens `load.config.ps1`) en maakt het tijdelijk een App Registration (`Sites.Read.All`) aan voor site-enumeratie; die app wordt na afloop weer verwijderd. `-AppOnly` gebruikt in de plaats de app voor de tenant uit `graph.appid.json`. Alles wordt via Microsoft Graph gelezen — sites, libraries (ook verborgen, zoals de Preservation Hold Library, gevonden via Graph `/lists` met de facetten `system`/`hidden`), bestanden en versies. De bestandsscan had een SharePoint REST-variant voor verborgen libraries, gevoed met een client-secret-token dat SharePoint Online altijd weigert; die is weg, en een verborgen library die Graph niet opent wordt nu gemeld in plaats van stil overgeslagen. Vereist PowerShell 7.
 
 
 ### Dekking
@@ -130,7 +130,7 @@ Rapporteert opslaggebruik over SharePoint Online met een tenantbrede scan. Stand
 
 ### Prullenbak (recycle bin)
 
-De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt daarom **apart** van de library-scan opgehaald, alleen voor echte SharePoint site collections (geen OneDrive):
+De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt daarom **apart** van de library-scan opgehaald, alleen voor echte SharePoint site collections (geen OneDrive). Graph heeft geen prullenbak-API voor SharePoint-sites, dus dit deel gebruikt nog SharePoint REST met een token uit het client secret van de tijdelijke app (of `-ClientSecret`) — en SharePoint Online weigert app-only tokens op basis van een secret, dus reken op lege prullenbakcijfers tot dat naar een certificaat verhuist (niet geverifieerd op een tenant):
 
 - Standaard (`-Apply`, als Phase 2b) of los via **`-RecycleBinOnly`** (slaat de library-scan helemaal over, alleen prullenbak)
 - Alleen root site collections hebben een eigen prullenbak (sub-webs delen die van de root)
@@ -146,7 +146,7 @@ De prullenbak (stage 1 + stage 2) telt mee voor de tenant-opslagquota en wordt d
 
 ### Hervatten na onderbreking (checkpoints) en voortgang
 
-Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-prullenbak) een checkpoint weggeschreven in de outputmap: `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. De `<hash>` is afgeleid van alle scanparameters (site, mode, outputmap, enz.), dus:
+Bij `-Apply` (of `-RecycleBinOnly`) wordt na elke afgeronde library (of site-prullenbak) een checkpoint weggeschreven in de outputmap: `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv` + `.longpaths.partial.csv`. De `<hash>` is afgeleid van alle scanparameters (site, mode, outputmap, enz.), dus:
 
 - **Opnieuw starten met dezelfde parameters** hervat automatisch vanaf de laatst voltooide library — al afgeronde libraries worden overgeslagen (`[SKIP] Already completed in a previous run.`).
 - **`-Restart`** gooit een bestaand checkpoint weg en start de scan volledig opnieuw, ook als de parameters hetzelfde zijn.
@@ -176,6 +176,23 @@ Wijkt `GrandTotalGB` voor een site nog steeds af van het adminportaal-cijfer, da
 - **Mislukte version-lookups** — vallen terug op "0 versies" bij herhaalde Graph-fouten (zeldzaam, alleen na 3 mislukte retries)
 - Vergelijk eerst zonder `-Apply` (quick mode) — dat gebruikt hetzelfde officiële `quota.used`-cijfer als het adminportaal, dus wijkt dat ook al af, dan zit het verschil niet in de `-Apply`-telling zelf
 
+### Lange paden (Windows-limieten)
+
+Een bibliotheek die in SharePoint in orde is, kan alsnog stuklopen zodra hij met de OneDrive-client gesynchroniseerd of vanuit Windows geopend wordt: het lokale pad is langer dan het SharePoint-pad, omdat de profielmap en de syncmap ervoor komen. Met `-Apply` (ook met `-FastMode`) wordt daarom elk bestand en elke map twee keer gemeten:
+
+| Pad | Voorbeeld | Limiet |
+|---|---|---|
+| SharePoint (server-relatief, gedecodeerd) | `/sites/Finance/Shared Documents/<mappen>/<bestand>` | **400** tekens — SharePoint weigert alles wat langer is |
+| Lokaal OneDrive-syncpad | `C:\Users\<gebruiker>\<Organisatie>\<Site> - <Bibliotheek>\<mappen>\<bestand>` | **260** (Windows `MAX_PATH`, 259 bruikbaar) — Verkenner, veel applicaties en oudere tools lopen daarboven vast |
+| Idem, voor Excel-werkmappen (`.xls*`, `.xlt*`) | | **218** — Excel opent of bewaart de werkmap niet |
+| Idem, voor pdf's (`.pdf`) | | **255** — Adobe Acrobat/Reader kan het bestand niet openen, vooral vanuit een gesynchroniseerde of netwerkmap |
+
+Het lokale pad is een schatting, want de lengte hangt af van wie synchroniseert. Standaard meet het script voor het **ingeschakelde member-account met de langste UPN** in de tenant: de profielmap krijgt de naam van het UPN-voorvoegsel (het deel vóór de `@`), dus een pad dat voor die gebruiker past, past voor iedereen. Daarvoor is `User.Read.All` nodig (toegevoegd aan de interactieve aanmelding); als de gebruikers niet te lezen zijn, valt het terug op `C:\Users\firstname.lastname`. De organisatienaam is de weergavenaam van de tenant uit Graph, of de tenantnaam uit de SharePoint-URL als die niet te lezen is. `-SyncProfilePath` en `-OrganizationName` overschrijven beide. Een persoonlijke OneDrive-site (`-IncludeOneDriveUsers`) wordt gemeten als `C:\Users\<gebruiker>\OneDrive - <Organisatie>\...`.
+
+Uitvoer: `SharePoint_LongPaths_<timestamp>.csv`, langste eerst, met elk item waarvan het lokale pad `-LongPathThreshold` (standaard `200`) tekens of meer is, of dat over een limiet gaat — kolommen `LocalPathLength`, `SharePointPathLength`, `OverLimit` (`SharePoint (400)`, `Windows (260)`, `Excel (218)`, `Adobe (255)` of leeg) en het geschatte `LocalPath`. De console toont per bibliotheek hoeveel lange paden er zijn, en aan het eind het aantal per limiet en de 10 langste paden; het Markdown-rapport krijgt dezelfde top 10.
+
+> Windows kan de naam van de profielmap inkorten (bijvoorbeeld tot 20 tekens bij een on-premises account, of met een achtervoegsel als de naam al bestaat). Meten met het volledige UPN-voorvoegsel is de voorzichtige kant: het kan een pad als te lang melden dat net past, nooit andersom.
+
 ### Performance (version history lookups)
 
 Version history is de duurste stap: van nature 1 Graph-call per bestand. Drie optimalisaties beperken dat:
@@ -190,7 +207,7 @@ Daarnaast is `-SiteUrl` (1 specifieke site) geoptimaliseerd: in normale mode geb
 
 Voor GDAP-betrouwbaarheid schakelt het script bij single-site scans automatisch naar app-only bootstrap wanneer `authMode=GDAP` is gedetecteerd (uit `load.config.ps1`/launcher-context). Wil je dat altijd forceren, gebruik dan `-ForceAppOnlySingleSite`.
 
-Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-context (`$global:cid`/`-TenantId`) voor zowel `Connect-MgGraph` als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden.
+Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-context (`$global:cid`/`-TenantId`) voor zowel de gedelegeerde aanmelding (`Connect-M365Graph`) als de tijdelijke app-bootstrap, zodat consent en site-enumeratie altijd in de juiste tenant plaatsvinden. Een Graph-sessie die de scopes al heeft wordt hergebruikt en blijft op het einde open.
 
 ### Parameters
 
@@ -203,6 +220,7 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-contex
 | `-ClientId` | Bestaande App Registration client ID — slaat auto-create over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
 | `-ClientSecret` | Client secret voor een bestaande app registration |
 | `-CertificateThumbprint` | Certificate thumbprint voor een bestaande app registration |
+| `-AppOnly` | App-only met ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` — geen aanmelding, geen tijdelijke app. Vereist `Sites.Read.All` (en `User.Read.All` voor het profielpad) als application permissions |
 | `-Apply` | Volledige recursieve scan van libraries, mappen en bestanden. Zonder deze switch alleen quota-samenvatting |
 | `-UseHighPrivilege` | Auto mode: kent tijdelijk `Sites.FullControl.All` toe i.p.v. `Sites.Read.All` wanneer read-only rechten niet voldoende blijken |
 | `-RecycleBinOnly` | Slaat storage/library scanning over — leest alleen recycle bin items (stage 1 + stage 2) per site collection |
@@ -212,6 +230,9 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-contex
 | `-VersionBatchConcurrency` | Aantal parallelle `$batch`-workers voor het ophalen van versiegeschiedenis, 1-8 (standaard: `4`) |
 | `-MaxVersionRetryPasses` | Max. aantal retry-passes voor versiegeschiedenis onder aanhoudende throttling. `0` (standaard) schaalt automatisch mee met het aantal bestanden — SharePoint hanteert een harde activity-ceiling van ~1500-2500 opgeloste versie-lookups per pass, dus bij tenants met honderdduizenden bestanden gaf een vaste lage waarde (voorheen hardcoded op 8) vroegtijdig op voor het gros van de scan. Zet expliciet hoger/lager om de auto-schaling te overschrijven |
 | `-Restart` | Gooit een bestaand checkpoint voor deze parametercombinatie weg en begint de scan volledig opnieuw |
+| `-SyncProfilePath` | Profielmap voor de schatting van het lokale pad (standaard: `C:\Users\<voorvoegsel>` van het ingeschakelde member-account met de langste UPN; terugval `C:\Users\firstname.lastname`) |
+| `-OrganizationName` | Organisatienaam in de OneDrive-syncmap (standaard: de weergavenaam van de tenant, terugval de tenantnaam uit de URL) |
+| `-LongPathThreshold` | Lengte van het lokale pad vanaf welke een item in de CSV met lange paden komt, 1-1000 (standaard: `200`). Alles boven een limiet staat er altijd in |
 
 ### Voorbeelden
 
@@ -233,6 +254,9 @@ Voor full-site scans in GDAP gebruikt het script dezelfde customer-tenant-contex
 
 # Onderbroken run negeren en volledig opnieuw beginnen
 .\Get-SharePointStorageReport.ps1 -Apply -Restart
+
+# Alleen lange paden, snel (geen versies, geen detail-CSV), gemeten voor een bepaalde gebruiker
+.\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 ```
 
 ---
@@ -258,7 +282,7 @@ Overerving wordt gevolgd zoals SharePoint die zelf modelleert: een item verschij
 
 ### Authenticatie
 
-Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onder de Read/Write/Manage-rollen van SharePoint: daarvoor is de applicatierol `Sites.FullControl.All` nodig. Het script logt je daarom één keer interactief in en maakt vervolgens zelf een kortlevende App Registration aan met:
+Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onder de Read/Write/Manage-rollen van SharePoint: daarvoor is de applicatierol `Sites.FullControl.All` nodig. Het script meldt je daarom één keer aan — gedelegeerd, via [`Connect-M365Graph`](../Startup/readme.nl.md#connect-m365ps1): een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, de GDAP-klant uit `Connect-Tenant`, en een bestaande Graph-sessie met de scopes wordt hergebruikt — en maakt vervolgens zelf een kortlevende App Registration aan met:
 
 | Resource | Rol | Waarvoor |
 |---|---|---|
@@ -266,7 +290,7 @@ Roltoewijzingen uitlezen kan **niet** via Microsoft Graph, en valt ook niet onde
 | Graph | `Sites.Read.All` | Tenantbrede site-enumeratie |
 | Graph | `GroupMember.Read.All` | Entra-groepslidmaatschap oplossen |
 
-Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft.
+Die app wordt na afloop weer verwijderd. Ondanks de Full Control-rol schrijft het script nooit iets. Wil je geen tijdelijke app, geef dan `-ClientId` + `-TenantId` + `-CertificateThumbprint` mee van een bestaande registratie die deze rollen al heeft, of `-AppOnly` om ze uit `graph.appid.json` te nemen (PowerShell 7). De scan zelf blijft bewust app-only: SharePoint REST aanvaardt noch een gedelegeerd Graph-token (verkeerde audience) noch een app-only token op basis van een secret.
 
 > **Certificaat, geen secret — en dat is geen voorkeur.** SharePoint Online weigert elk app-only token dat met een client secret is opgehaald: je krijgt `401` met `x-ms-diagnostics: ... Unsupported app only token`. Alleen certificaat-gebaseerde app-only authenticatie werkt tegen `_api`. De tijdelijke app krijgt daarom een certificaat dat het script **in het geheugen** aanmaakt en op de app registreert; het komt niet in de certificate store en niet op schijf, dus er valt achteraf niets op te ruimen. Geef je `-ClientSecret` mee bij een eigen app, dan waarschuwt het script: de Graph-helft werkt dan wel, de SharePoint-helft niet.
 
@@ -403,6 +427,7 @@ Een tenantbrede run duurt uren en raakt duizenden objecten, dus de storingen hie
 | `-ClientId` | string | — | Bestaande App Registration; slaat de tijdelijke app over |
 | `-ClientSecret` | string | — | Secret bij `-ClientId`. **Werkt niet tegen SharePoint** (zie Authenticatie); het script waarschuwt |
 | `-CertificateThumbprint` | string | — | Certificaat bij `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My`. Dit is de werkende variant |
+| `-AppOnly` | switch | uit | ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` in plaats van een tijdelijke app. Die app heeft de rollen hierboven nodig, SharePoint `Sites.FullControl.All` inbegrepen (PowerShell 7) |
 | `-OutputPath` | string | `C:\Temp` | Outputmap |
 | `-IncludeOneDriveSites` | switch | uit | Neemt ook persoonlijke OneDrive-sites mee (één site per gebruiker) |
 | `-IncludeHiddenLists` | switch | uit | Neemt verborgen en systeemlijsten mee (Form Templates, Style Library, workflowhistorie, …) |
@@ -456,9 +481,9 @@ Rapporteert of verwijdert **oude bestandsversies** in SharePoint Online document
 
 ### Authenticatie
 
-Standaard verbindt het script interactief (delegated) met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — dat gebruikt Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
+Standaard meldt het script zich gedelegeerd aan met `Sites.ReadWrite.All` + `Files.ReadWrite.All` via [`Connect-M365Graph`](../Startup/readme.nl.md#connect-m365ps1) — een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, de GDAP-klant uit `Connect-Tenant`, Microsoft's eigen voorgeconsente app, dus zonder eigen App Registration of `-ClientId`; een Graph-sessie die de scopes al heeft wordt hergebruikt en blijft open. Vereist PowerShell 7. Alleen een **tenantbrede scan** (geen `-SiteUrl`) heeft daarnaast een kortstondige, read-only tijdelijke App Registration nodig (`Sites.Read.All`) voor site/library-enumeratie én het ophalen van versiegeschiedenis — Microsoft ondersteunt tenantbrede site-enumeratie niet delegated. Bij `-VersionBatchConcurrency` boven `1` (standaard) wordt daarnaast een **tweede** tijdelijke App Registration aangemaakt, puur om de doorvoer van versie-lookups te verdubbelen: SharePoint's "activityLimitReached"-throttle geldt per app-registratie, dus twee apps geven elk hun eigen throttle-budget (zelfde aanpak als `Get-SharePointStorageReport.ps1`). Beide tijdelijke apps worden na afloop weer verwijderd. Version-**deletes** lopen altijd via je eigen delegated permissies, nooit via een tijdelijke app.
 
-Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee; die app moet dan al de application permission `Sites.ReadWrite.All` hebben.
+Wil je de tijdelijke app(s) overslaan en je eigen bestaande app-registratie gebruiken? Geef dan `-ClientId` + `-TenantId` + `-ClientSecret` (of `-CertificateThumbprint`) mee, of `-AppOnly` om ClientId en CertificateThumbprint uit `graph.appid.json` te nemen; die app moet dan al de application permission `Sites.ReadWrite.All` hebben.
 
 > **Let op:** het verwijderen van een specifieke versie (`DELETE .../versions/{id}`) staat niet in Microsoft's officiële Graph API-referentie, maar is een breed gebruikte en bevestigd werkende operatie (zowel voor OneDrive als SharePoint document libraries). De huidige/laatste versie kan hiermee niet verwijderd worden — Graph weigert dat, wat precies de behouden-huidige-versie-garantie is.
 
@@ -485,6 +510,7 @@ Tijdens de scan toont het script geneste progress-balken (sites → libraries �
 | `-ClientId` | `string` | Bestaande App Registration client ID — slaat de tijdelijke app over; gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
 | `-ClientSecret` | `string` | Client secret voor een bestaande app registration |
 | `-CertificateThumbprint` | `string` | Certificate thumbprint voor een bestaande app registration |
+| `-AppOnly` | `switch` | App-only met ClientId en CertificateThumbprint voor de tenant uit `graph.appid.json` (vereist `Sites.ReadWrite.All` als application permission) |
 | `-Apply` | `switch` | Voert de verwijdering echt uit |
 | `-IncludeOneDriveSites` | `switch` | Neemt OneDrive-sites mee in de tenantscan |
 | `-IncludeHiddenLibraries` | `switch` | Neemt hidden document libraries mee |

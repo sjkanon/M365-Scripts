@@ -49,6 +49,8 @@ Overschrijf met `-Table` om andere toe te voegen (bijv. `AADDomainServicesDNSAud
 | `-Table` | Nee | Tabellen die in de union worden opgenomen (zie standaardwaarden hierboven) |
 | `-MaxRows` | Nee | Maximaal aantal geretourneerde rijen, nieuwste eerst (standaard: `5000`) |
 | `-ExportPath` | Nee | Map voor het CSV-rapport (standaard: `C:\Temp`) |
+| `-TenantId` | Nee | Tenant waarin het abonnement staat; meldt opnieuw aan als de huidige Az-context voor een andere tenant is |
+| `-SubscriptionId` | Nee | Abonnement waarin de workspace staat (zet de Az-context daarop) |
 
 *Als `-WorkspaceId` is weggelaten, probeert het script automatisch één werkruimte te vinden via `-WorkspaceName`/`-ResourceGroupName`, of de enige werkruimte in het abonnement als er maar één is.
 
@@ -67,9 +69,9 @@ Overschrijf met `-Table` om andere toe te voegen (bijv. `AADDomainServicesDNSAud
 ```
 
 **Opmerkingen**
-- Maakt automatisch verbinding met `Connect-AzAccount` als er geen Az-sessie actief is
+- Meldt zich aan met Az, niet met Microsoft Graph: Log Analytics is een resource van Azure Resource Manager / de Log Analytics API die Graph niet dekt. Een bestaande Az-context wordt hergebruikt als die voor `-TenantId` is (of voor elke tenant als die ontbreekt); anders meldt `Connect-AzAccount` je gedelegeerd aan — met een apparaatcode als `$global:useDeviceCodeAuth` in `load.config.ps1` is ingesteld. De Az-sessie blijft open (Az bewaart die voor volgende runs).
 - De resultaatset is begrensd op `-MaxRows` (standaard 5000) — het script waarschuwt als die grens is bereikt, zodat je weet dat je het venster moet verkleinen of de grens moet verhogen
-- De CSV wordt geëxporteerd naar `-ExportPath` als `AADDSUserActivity_<username>_<timestamp>.csv`
+- De CSV wordt geëxporteerd naar `-ExportPath` als `AADDSUserActivity_<username>_<timestamp>.csv` (tekens die niet in een bestandsnaam mogen, zoals de `\` in `DOMAIN\user`, worden `_`)
 
 **Vereiste modules**
 ```powershell

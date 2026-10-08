@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Copy a Planner plan's buckets and tasks (with descriptions and checklists)
@@ -9,12 +9,18 @@
     a new plan created under -DestinationGroupId, preserving bucket order, task
     titles, due/start dates, descriptions, and checklist items. Consolidates two
     old ad hoc variants of this pattern (one via raw Graph REST calls, one via
-    PnP.PowerShell) into a single script using the Microsoft.Graph.Planner
-    module, so no extra PnP dependency is required.
+    PnP.PowerShell) into a single script on the Planner Graph API, so no extra
+    PnP dependency is required.
 
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected. Defaults to a safe preview — pass
-    -Apply to actually create the new plan.
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly (Planner supports app-only with the
+    Tasks.ReadWrite.All application permission). A Graph session for the right tenant
+    that already has the scopes is reused and left connected; only a session this
+    script opened is disconnected. Delegated: the signed-in admin must be a member of
+    both groups to see and create their plans.
+
+    Defaults to a safe preview — pass -Apply to actually create the new plan.
 
 .PARAMETER SourcePlanId
     ID of the Planner plan to copy from.
@@ -31,7 +37,16 @@
     only reports what it would copy.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Preview
@@ -41,7 +56,9 @@
     .\Copy-PlannerPlan.ps1 -SourcePlanId "xqQg5FS2LkCp935s-FIFm2QAFkHM" -DestinationGroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -Apply
 
 .NOTES
-    Required module: Microsoft.Graph.Planner (Tasks.ReadWrite, Group.ReadWrite.All)
+    Required module: Microsoft.Graph.Authentication
+    Delegated scopes: Tasks.ReadWrite, Group.ReadWrite.All
+    Application permissions: Tasks.ReadWrite.All (or Group.ReadWrite.All)
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
@@ -53,20 +70,17 @@ param(
 
     [string] $NewPlanTitle,
     [switch] $Apply,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
 
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Tasks.ReadWrite', 'Group.ReadWrite.All'); NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+$graph = Connect-M365Graph -Scopes 'Tasks.ReadWrite', 'Group.ReadWrite.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 function Invoke-Graph {
     param([string] $Method = 'GET', [string] $Uri, [string] $Body)
@@ -75,12 +89,23 @@ function Invoke-Graph {
     Invoke-MgGraphRequest @params
 }
 
+function Get-GraphAll {
+    # Follows @odata.nextLink; a plan with more tasks than one page lost the rest.
+    param([string] $Uri)
+    $next = $Uri
+    while ($next) {
+        $resp = Invoke-Graph -Uri $next
+        $resp.value
+        $next = $resp.'@odata.nextLink'
+    }
+}
+
 # ── Resolve source plan ────────────────────────────────────────────────────────
 $plan = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/planner/plans/$SourcePlanId"
 if (-not $NewPlanTitle) { $NewPlanTitle = $plan.title }
 
-$buckets = (Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/planner/plans/$SourcePlanId/buckets").value
-$tasks   = (Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/planner/plans/$SourcePlanId/tasks").value
+$buckets = @(Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/planner/plans/$SourcePlanId/buckets")
+$tasks   = @(Get-GraphAll -Uri "https://graph.microsoft.com/v1.0/planner/plans/$SourcePlanId/tasks")
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -98,12 +123,12 @@ Write-Host ""
 if (-not $Apply) {
     Write-Host "  Would create plan '$NewPlanTitle' with $($buckets.Count) bucket(s) and $($tasks.Count) task(s)." -ForegroundColor Yellow
     Write-Host "  Re-run with -Apply to perform the copy." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     return
 }
 
 if (-not $PSCmdlet.ShouldProcess($NewPlanTitle, "Create copy of plan '$($plan.title)'")) {
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     return
 }
 
@@ -138,19 +163,22 @@ foreach ($task in ($tasks | Sort-Object orderHint)) {
         $newTask = Invoke-Graph -Method POST -Uri 'https://graph.microsoft.com/v1.0/planner/tasks' -Body ($taskBody | ConvertTo-Json)
         $taskCount++
 
-        if ($task.hasDescription) {
+        # Also for tasks with only a checklist (no description), which were skipped.
+        if ($task.hasDescription -or $task.checklistItemCount -gt 0) {
             Start-Sleep -Milliseconds 300
             $taskDetails    = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/planner/tasks/$($task.id)/details"
             $newTaskDetails = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/planner/tasks/$($newTask.id)/details"
 
             $detailBody = @{ description = $taskDetails.description }
-            if ($taskDetails.checklist -and $taskDetails.checklist.PSObject.Properties.Count -gt 0) {
+            # checklist is a hashtable keyed by item id; its .PSObject.Properties are
+            # the hashtable's own (Count, Keys, ...), not the items.
+            if ($taskDetails.checklist -and $taskDetails.checklist.Count -gt 0) {
                 $checklist = @{}
-                foreach ($item in $taskDetails.checklist.PSObject.Properties) {
+                foreach ($item in $taskDetails.checklist.Values) {
                     $checklist[[guid]::NewGuid().Guid] = @{
                         '@odata.type' = '#microsoft.graph.plannerChecklistItem'
-                        title         = $item.Value.title
-                        isChecked     = $item.Value.isChecked
+                        title         = $item.title
+                        isChecked     = $item.isChecked
                     }
                 }
                 $detailBody['checklist'] = $checklist
@@ -158,7 +186,7 @@ foreach ($task in ($tasks | Sort-Object orderHint)) {
 
             Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/planner/tasks/$($newTask.id)/details" `
                 -Body ($detailBody | ConvertTo-Json -Depth 6) -ContentType 'application/json' `
-                -Headers @{ 'if-match' = $newTaskDetails.'@odata.etag' } -ErrorAction SilentlyContinue | Out-Null
+                -Headers @{ 'if-match' = $newTaskDetails.'@odata.etag' } -ErrorAction Stop | Out-Null
         }
         Write-Host "  [OK]   Task: $($task.title)" -ForegroundColor Green
     } catch {
@@ -170,5 +198,5 @@ Write-Host ""
 Write-Host "  Copied $($bucketMap.Count) bucket(s) and $taskCount task(s) to '$($newPlan.title)'." -ForegroundColor Cyan
 Write-Host ""
 
-# ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+# ── Disconnect only if this script connected ──────────────────────────────────
+Disconnect-M365Graph $graph

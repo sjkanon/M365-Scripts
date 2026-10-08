@@ -9,6 +9,13 @@
     Optionally keeps the current session open and removes the policy immediately
     after the configured end time.
 
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused. The
+    session is left open (so the menu's follow-up TAP step needs no new sign-in).
+    Delegated scopes: Policy.ReadWrite.ConditionalAccess, Policy.Read.All,
+    Directory.Read.All.
+
 .PARAMETER TargetType
     Target object type: User or Group.
 
@@ -39,7 +46,16 @@
     Policy state.
 
 .PARAMETER TenantId
-    Optional tenant ID/domain for Connect-MgGraph.
+    Optional tenant ID/domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER NoAutoCleanup
     If set, do not wait and auto-remove at expiry.
@@ -84,8 +100,16 @@ param(
 
     [string]$TenantId,
 
-    [switch]$NoAutoCleanup
+    [switch]$NoAutoCleanup,
+
+    [string]$ClientId,
+
+    [string]$CertificateThumbprint,
+
+    [switch]$AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 $ErrorActionPreference = 'Stop'
 
@@ -111,37 +135,6 @@ function Wait-UntilUtc {
     }
 }
 
-function Connect-GraphForConditionalAccess {
-    param([string]$Tenant)
-
-    $requiredScopes = @(
-        'Policy.ReadWrite.ConditionalAccess',
-        'Policy.Read.All',
-        'Directory.Read.All'
-    )
-
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
-    $missingScope = $true
-
-    if ($ctx -and $ctx.Scopes) {
-        $missingScope = ($requiredScopes | Where-Object { $_ -notin $ctx.Scopes }).Count -gt 0
-    }
-
-    if (-not $ctx -or $missingScope) {
-        Write-Step 'Connecting to Microsoft Graph for Conditional Access'
-        $params = @{
-            Scopes       = $requiredScopes
-            ContextScope = 'Process'
-            NoWelcome    = $true
-        }
-        if ($Tenant) {
-            $params['TenantId'] = $Tenant
-        }
-
-        Connect-MgGraph @params | Out-Null
-    }
-}
-
 function Remove-TemporaryPolicyById {
     param(
         [Parameter(Mandatory = $true)]
@@ -154,7 +147,9 @@ function Remove-TemporaryPolicyById {
     Write-Ok "Temporary policy removed: $Name ($PolicyId)"
 }
 
-Connect-GraphForConditionalAccess -Tenant $TenantId
+# Reuses a session for the right tenant that has the scopes; connects otherwise.
+$null = Connect-M365Graph -Scopes 'Policy.ReadWrite.ConditionalAccess', 'Policy.Read.All', 'Directory.Read.All' `
+    -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 if (($PSBoundParameters.ContainsKey('StartDateTimeLocal') -and -not $PSBoundParameters.ContainsKey('EndDateTimeLocal')) -or
     (-not $PSBoundParameters.ContainsKey('StartDateTimeLocal') -and $PSBoundParameters.ContainsKey('EndDateTimeLocal'))) {
@@ -231,6 +226,10 @@ if ($PSCmdlet.ShouldProcess($policyName, 'Create temporary conditional access po
     Write-Host "      Start UTC: $startIso"
     Write-Host "      End UTC  : $endIso"
 }
+
+# -WhatIf (or declining the confirmation) creates nothing, so there is nothing to
+# enable or clean up; without this the cleanup below ran against $null.
+if (-not $policy) { return }
 
 if ($NoAutoCleanup) {
     if ($startUtc -gt [DateTime]::UtcNow -and $desiredState -ne 'disabled') {

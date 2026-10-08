@@ -20,19 +20,21 @@ Intune installs LOB MSIX apps per-user. That fails for standard users without ad
 
 | Script | Role in Intune |
 |---|---|
-| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) | **The one you run.** Orchestrates everything below — see "Monthly run" section. |
-| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) | Install command content script |
-| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) | Uninstall command content script |
-| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) | Custom detection script |
+| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) ([docs](#deploy-claudedesktopintuneps1)) | **The one you run.** Orchestrates everything below — see "Monthly run" section. |
+| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Install command content script |
+| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Uninstall command content script |
+| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Custom detection script |
 
 `Install-`/`Uninstall-`/`Detect-ClaudeDesktop-Intune.ps1` are never run manually — `Deploy-ClaudeDesktopIntune.ps1` packages them into the `.intunewin` (or, for the detection script, uploads it as part of the detection rule) automatically.
 
-## What `Deploy-ClaudeDesktopIntune.ps1` does
+## Deploy-ClaudeDesktopIntune.ps1
+
+What it does:
 
 1. Downloads the latest Claude Desktop x64 MSIX from Anthropic's official "latest" redirect URL.
 2. Reads the version out of `AppxManifest.xml` inside the MSIX.
 3. Copies the install/uninstall scripts next to the MSIX and builds a `.intunewin` package (`IntuneWin32App` module — `IntuneWinAppUtil.exe` is downloaded automatically if not already present).
-4. Connects to Microsoft Graph delegated (interactive sign-in) and creates a short-lived **temporary App Registration** — same pattern as [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.md) — with only the `DeviceManagementApps.ReadWrite.All` application permission. Used to authenticate the `IntuneWin32App` module, then deleted at the end of the run. Nothing persists between runs except the Intune app itself.
+4. Connects to Microsoft Graph delegated (interactive sign-in) and creates a short-lived **temporary App Registration** — same pattern as [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.md) — with only the `DeviceManagementApps.ReadWrite.All` application permission. Used to authenticate the `IntuneWin32App` module, then deleted at the end of the run. Nothing persists between runs except the Intune app itself. Sign-in goes through [`Connect-M365.ps1`](../../../Startup/Connect-M365.ps1): delegated by default (device code per `$global:useDeviceCodeAuth`, GDAP customer from `$global:cid`). The upload itself stays with the `IntuneWin32App` module: `Connect-MSIntuneGraph` fetches its own token and cannot use the Microsoft Graph PowerShell session, and rewriting the chunked `.intunewin` upload to Azure Storage plus the encryption-info commit as raw Graph calls is a lot of risk for little gain. With `-ClientId` + `-CertificateThumbprint` (or `-AppOnly`) you use a permanent app of your own instead: nothing temporary is created and `Connect-MSIntuneGraph` signs in with the same certificate (`-ClientCert`).
 5. First run: creates the Win32 app "Claude Desktop (Machine-wide)" in Intune with detection/requirement rules and assigns it **Required** to the Entra ID group you pass in.
 6. Later runs: pushes an updated package via `Update-IntuneWin32AppPackageFile` (existing assignment left untouched, devices just get the new content) if **either** the downloaded MSIX version is newer, **or** the Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 scripts themselves changed since the last run — both tracked in the app's Notes field (`ClaudeMsixVersion=...; ScriptsHash=...`), no local state file needed. Detection **and requirement rules are rebuilt and resubmitted on every run**, not just at first creation (see "Known issue" below). If neither the version nor the scripts changed, only the rules get refreshed.
 
@@ -77,7 +79,10 @@ You'll get an interactive sign-in prompt and a "type JA to continue" confirmatio
 | `-AppDisplayName` | `Claude Desktop (Machine-wide)` | Used to find the existing app on later runs — don't change without renaming in Intune too |
 | `-MsixDownloadUrl` | Anthropic's official x64 "latest" redirect | Override for testing |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Requirement rule |
-| `-TenantId` | auto-detected | Entra ID tenant ID |
+| `-TenantId` | GDAP customer, else your sign-in tenant | Entra ID tenant ID or domain |
+| `-ClientId` | — | Optional permanent app for app-only (with `-CertificateThumbprint`); no temporary App Registration is created |
+| `-CertificateThumbprint` | — | Certificate for `-ClientId` (CurrentUser\My or LocalMachine\My); used for Graph and for `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | off | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | auto-download | Use an already-downloaded `IntuneWinAppUtil.exe` |
 | `-Force` | off | Skip the confirmation prompt(s) |
 | `-RequireCoworkPrerequisites` | off | Add a real Intune dependency on the Cowork Prerequisites app — see below |
@@ -92,6 +97,14 @@ By default, Claude Desktop and Cowork Prerequisites are independent — no Intun
 ```
 
 This looks up the Cowork Prerequisites app (deploy that one **first** — `Deploy-CoworkPrerequisitesIntune.ps1`) and calls `Add-IntuneWin32AppDependency` with `DependencyType 'Detect'` (not `'AutoInstall'`): the prerequisites app must still be independently assigned Required and already detected on the device — this dependency doesn't auto-install it on Claude Desktop's behalf, it only makes Intune wait for it. The tradeoff versus the default: a device stuck on Cowork prerequisites (e.g. mid-reboot, or genuinely failing) will also not get Claude Desktop until that's resolved, instead of getting Claude Desktop immediately and Cowork later.
+
+## Install- / Uninstall- / Detect-ClaudeDesktop-Intune.ps1
+
+The Win32-app content scripts. `Deploy-ClaudeDesktopIntune.ps1` packages and uploads them; they are never run by hand.
+
+- **`Install-ClaudeDesktop-Intune.ps1`** (install command): fully removes any existing Claude Desktop, provisions the MSIX machine-wide with `Add-AppxProvisionedPackage` and disables Claude's own auto-updater — see the sections below. Parameter `-MsixFileName` (default `Claude.msix`): file name of the MSIX next to the script. Logs to `%ProgramData%\ClaudeDeploy\install.log`.
+- **`Uninstall-ClaudeDesktop-Intune.ps1`** (uninstall command): removes the machine-wide provisioned package and, as a fallback, per-user Appx installations of profiles that have already signed in. Leaves Cowork's Windows prerequisites alone. Logs to `%ProgramData%\ClaudeDeploy\uninstall.log`.
+- **`Detect-ClaudeDesktop-Intune.ps1`** (custom detection script, 64-bit): reports "installed" when the machine-wide provisioned package is present. Deliberately version-agnostic, and retries only on a transient DISM exception.
 
 ### Auto-update policy
 
@@ -114,7 +127,8 @@ Both content scripts are written so a device where Claude has never been present
 - **Install script**: every removal pass (process kill, Appx, classic per-user uninstall) checks for an empty/`$null` result before acting, so a completely clean machine just logs "none found" at each step instead of erroring.
 - **Detection script**: an empty/negative result from `Get-AppxProvisionedPackage` (the expected outcome on a never-installed device) reports "not installed" (exit 1) immediately, with no retry — retries only kick in on an actual **exception** (e.g. a transient DISM lock, plausible right after the install script's own heavy Appx activity on the same device), so a genuinely clean machine is never slowed down waiting on retries that can't change the outcome.
 
-### Prerequisites
+## Prerequisites
 
+- PowerShell 7 (the deploy scripts dot-source `scripts\Startup\Connect-M365.ps1`). The deploy script itself is part of `ScriptsHash`, so the first run after updating this script re-uploads the package once.
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
 - Run from Windows (the packaging tool and MSIX/AppX cmdlets are Windows-only)

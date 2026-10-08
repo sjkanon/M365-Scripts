@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Provision a new Workspace 365 environment for this tenant, including its SSO
@@ -24,8 +24,15 @@
       4. Points the environment's default Exchange (EWS) and SharePoint URLs at
          this tenant.
 
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected.
+    Sign-in (the Graph part) goes through scripts\Startup\Connect-M365.ps1:
+    delegated as the admin by default (device code / GDAP customer per
+    load.config.ps1), app-only with -ClientId and -CertificateThumbprint or -AppOnly
+    (then -RequestingUserUpn is required, as there is no signed-in user). A Graph
+    session for the right tenant that already has the scopes is reused and left
+    connected; only a session this script opened is disconnected. The Workspace 365
+    Provisioning API is called with the provisioning key, not with Graph.
+    Delegated scopes: Application.ReadWrite.All, User.Read, User.ReadBasic.All,
+    Organization.Read.All.
 
 .PARAMETER WorkspaceHostname
     Base URL of your Workspace 365 tenant, e.g. "https://yourcompany.workspace365.net".
@@ -48,7 +55,16 @@
     switch, the script only reports what it would do.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Preview
@@ -77,21 +93,24 @@ param(
 
     [string] $RequestingUserUpn,
     [switch] $Apply,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 $WorkspaceHostname = $WorkspaceHostname.TrimEnd('/')
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Application.ReadWrite.All', 'User.Read', 'Organization.Read.All'); NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
+# User.ReadBasic.All: -RequestingUserUpn may name another admin, and User.Read
+# alone only reads the signed-in user.
+$graph = Connect-M365Graph -Scopes 'Application.ReadWrite.All', 'User.Read', 'User.ReadBasic.All', 'Organization.Read.All' `
+    -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+if ($graph.AuthType -eq 'AppOnly' -and -not $RequestingUserUpn) {
+    Disconnect-M365Graph $graph
+    throw 'App-only sign-in has no signed-in user: pass -RequestingUserUpn.'
 }
 
 function Invoke-Graph {
@@ -120,10 +139,11 @@ $requestingUser = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/users/$Req
 $appName = "Workspace365 - $EnvironmentName"
 
 # ── Check for an existing app registration with this name ────────────────────
-$existingApps = (Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$appName'").value
+$escapedAppName = $appName -replace "'", "''"
+$existingApps = (Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=displayName eq '$escapedAppName'").value
 if ($existingApps) {
     Write-Host "  [ERROR] An App Registration named '$appName' already exists. Aborting to avoid duplicates." -ForegroundColor Red
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
@@ -133,12 +153,12 @@ if (-not $Apply) {
     Write-Host "    - Workspace 365 environment '$EnvironmentName' for $($requestingUser.displayName)" -ForegroundColor Yellow
     Write-Host "    - SSO link + default Exchange/SharePoint URLs for this tenant" -ForegroundColor Yellow
     Write-Host "  Re-run with -Apply to provision." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     return
 }
 
 if (-not $PSCmdlet.ShouldProcess("$WorkspaceHostname/$EnvironmentName", "Provision Workspace 365 environment")) {
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     return
 }
 
@@ -212,7 +232,7 @@ try {
     Write-Host "  [OK]   Environment created." -ForegroundColor Green
 } catch {
     Write-Host "  [ERROR] Environment creation failed: $($_.Exception.Message)" -ForegroundColor Red
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
@@ -253,4 +273,4 @@ Write-Host "  It can take a few minutes for Entra ID to fully propagate the new 
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

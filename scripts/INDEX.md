@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-187 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+191 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -27,6 +27,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Clear-TempFiles.ps1`](Device/Clear-TempFiles.ps1) | [`Device/`](Device/readme.md) | Clears the shared script temp folder. |
 | [`Compare-IntuneConfig.ps1`](Intune/Compare-IntuneConfig.ps1) | [`Intune/`](Intune/readme.md) | Compare a customer tenant's Intune configuration against an MSP baseline backup. |
 | [`Connect-AzureFileShareDrive.ps1`](LegacyUtilities/Network/Connect-AzureFileShareDrive.ps1) | [`LegacyUtilities/Network/`](LegacyUtilities/Network/readme.md) | Mount an Azure Files SMB share as a persistent drive letter. |
+| [`Connect-M365.ps1`](Startup/Connect-M365.ps1) | [`Startup/`](Startup/readme.md) | One way to sign in to Microsoft 365 for every script in this repo: Graph first, delegated by default, app-only on request. |
 | [`Convert-MarkdownToHtml.ps1`](Startup/Convert-MarkdownToHtml.ps1) | [`Startup/`](Startup/readme.md) | Turn a repository markdown document into one self-contained, styled HTML page - made to paste into IT Glue or to print. Supports -WhatIf. |
 | [`Convert-SharedCalendarToResource.ps1`](Exchange/Convert-SharedCalendarToResource.ps1) | [`Exchange/`](Exchange/readme.md) | Move a shared calendar out of a user's mailbox into a resource mailbox of its own - every item and every permission along with it - and then remove the origina… |
 | [`Copy-GroupMember.ps1`](Entra/Copy-GroupMember.ps1) | [`Entra/`](Entra/readme.md) | Copy the members of one Entra ID group into another group via Microsoft Graph. |
@@ -83,17 +84,18 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Install-ClaudeDesktop-Intune.ps1`](Intune/Desktop/ClaudeDesktop/Install-ClaudeDesktop-Intune.ps1) | [`Intune/Desktop/ClaudeDesktop/`](Intune/Desktop/ClaudeDesktop/readme.md) | Intune Win32-app install script voor Claude Desktop (machine-breed). |
 | [`Install-CoworkPrerequisites-Intune.ps1`](Intune/Desktop/CoworkPrerequisites/Install-CoworkPrerequisites-Intune.ps1) | [`Intune/Desktop/CoworkPrerequisites/`](Intune/Desktop/CoworkPrerequisites/readme.md) | Intune Win32-app install script voor de Windows-vereisten van Claude Cowork (VirtualMachinePlatform + Fast Startup), los van de Claude Desktop-app zelf. |
 | [`Install-Modules.ps1`](Startup/Install-Modules.ps1) | [`Startup/`](Startup/readme.md) | Bootstrap script to install and import all required modules for M365-Scripts. |
+| [`Install-Printer.ps1`](Device/Printer/Install-Printer.ps1) | [`Device/Printer/`](Device/Printer/readme.md) | Install printer drivers and printers as described in a JSON file, with the drivers downloaded from a GitHub repository. Supports -WhatIf and -CheckOnly. |
 | [`Install-ScheduledTask.ps1`](Intune/iOS-Compliance-Updater/Install-ScheduledTask.ps1) | [`Intune/iOS-Compliance-Updater/`](Intune/iOS-Compliance-Updater/readme.md) | Registers the Intune iOS Compliance Updater as a Windows scheduled task. |
 | [`Install-SharePointStructure.ps1`](SharePoint/Provisioning/Install-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Build the whole SharePoint structure in one run: app registration, metadata model, libraries, permissions, views and a verification pass. Supports -WhatIf. |
 | [`Install-Win32AppPackage.ps1`](TenantOnboarding/AppDeployment/Install-Win32AppPackage.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Download a zipped PSAppDeployToolkit (or similar) package and run its silent install. |
 | [`Invoke-DiskCleanupIntune.ps1`](Intune/DiskCleanup/Invoke-DiskCleanupIntune.ps1) | [`Intune/DiskCleanup/`](Intune/DiskCleanup/readme.md) | Intune Win32-app install command: schoont C:\ op en herstart het apparaat. |
 | [`Invoke-FSLogixShrink.ps1`](RDS/Invoke-FSLogixShrink.ps1) | [`RDS/`](RDS/readme.md) | Shrinks FSLogix profile / ODFC containers on a share with Invoke-FslShrinkDisk, and checks whether FSLogix's own compaction at sign-out is doing that job. |
-| [`Invoke-TeamsArchive.ps1`](Teams/Invoke-TeamsArchive.ps1) | [`Teams/`](Teams/readme.md) | Teams Archivering - Volledig Automatisch Script v8.19 |
+| [`Invoke-TeamsArchive.ps1`](Teams/Invoke-TeamsArchive.ps1) | [`Teams/`](Teams/readme.md) | Teams Archivering - Volledig Automatisch Script v9.0 |
 | [`Invoke-WindowsActivation.ps1`](Device/Invoke-WindowsActivation.ps1) | [`Device/`](Device/readme.md) | Activate Windows or manage product key and KMS settings. |
 | [`Invoke-WindowsCleanup.ps1`](Device/Invoke-WindowsCleanup.ps1) | [`Device/`](Device/readme.md) | Clean up temporary files, caches, and reclaimable disk space on Windows. |
 | [`logic-permissies.ps1`](Graph/logic-permissies.ps1) | [`Graph/`](Graph/readme.md) | Grant a Microsoft Graph application permission to a Logic App's managed identity. Supports -WhatIf. |
 | [`Make-lockscreen.ps1`](Intune/Desktop/Background/Lockscreen/Make-lockscreen.ps1) | [`Intune/Desktop/Background/Lockscreen/`](Intune/Desktop/Background/Lockscreen/readme.md) | Make-lockscreen.ps1 |
-| [`Migrate-Calendar.ps1`](Exchange/Migrate-Calendar.ps1) | [`Exchange/`](Exchange/readme.md) | Migrates an M365 Group calendar to a Room or Shared Mailbox. Automatically creates an App Registration if no ClientId/ClientSecret is provided. |
+| [`Migrate-Calendar.ps1`](Exchange/Migrate-Calendar.ps1) | [`Exchange/`](Exchange/readme.md) | Migrates an M365 Group calendar to a Room or Shared Mailbox. Writes with a temporary App Registration that is removed again at the end, unless your own app is… |
 | [`Monitor-SASBatchErrors.ps1`](SAS/Monitor-SASBatchErrors.ps1) | [`SAS/`](SAS/readme.md) | Comprehensive SAS batch job monitoring with Event Viewer integration |
 | [`Move-InboxToArchive.ps1`](Exchange/Move-InboxToArchive.ps1) | [`Exchange/`](Exchange/readme.md) | Archive all Inbox messages of a mailbox to the Archive folder via Microsoft Graph. |
 | [`Move-SharedCalendar.ps1`](Exchange/Move-SharedCalendar.ps1) | [`Exchange/`](Exchange/readme.md) | All in one: find a shared calendar by keyword, move it into a resource mailbox with every item and permission, and list who has to switch. One sign-in. |
@@ -120,7 +122,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Register-InitTempDiskTask.ps1`](Device/TempDisk/Register-InitTempDiskTask.ps1) | [`Device/TempDisk/`](Device/TempDisk/readme.md) | Install Init-TempDisk.ps1 on the device and register it as a scheduled task that runs at every boot as SYSTEM. Supports -WhatIf. |
 | [`Register-OneDriveWatchdog.ps1`](TenantOnboarding/OneDriveManagement/Register-OneDriveWatchdog.ps1) | [`TenantOnboarding/OneDriveManagement/`](TenantOnboarding/OneDriveManagement/readme.md) | Register a scheduled task that keeps OneDrive running, restarting it hourly if needed. |
 | [`Remediate-StuckWin32AppEnforcement.ps1`](Intune/Remediate-StuckWin32AppEnforcement.ps1) | [`Intune/`](Intune/readme.md) | Intune Remediation fix script - clears Win32 apps stuck behind Intune's GRS retry cooldown on this device. |
-| [`Remove-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Remove-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Remove-CorporateWallpaper.ps1 |
+| [`Remove-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Remove-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Undo Set-CorporateWallpaper.ps1: remove the corporate wallpaper for every user, and leave the corporate lockscreen alone. |
 | [`Remove-DesktopShortcut.ps1`](TenantOnboarding/AppDeployment/Remove-DesktopShortcut.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Remove desktop shortcuts matching a name pattern, from the Public Desktop or the current user's desktop. |
 | [`Remove-DuplicateMailItems.ps1`](LegacyUtilities/Exchange/Remove-DuplicateMailItems.ps1) | [`LegacyUtilities/Exchange/`](LegacyUtilities/Exchange/readme.md) | Find and remove duplicate messages in a mailbox folder via Microsoft Graph. |
 | [`Remove-EnterpriseAppConsent.ps1`](Office365Toolkit/Security/Remove-EnterpriseAppConsent.ps1) | [`Office365Toolkit/Security/`](Office365Toolkit/Security/readme.md) | Audit and optionally revoke OAuth consent grants for an enterprise application. |
@@ -140,8 +142,8 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Rollback-InternalMic.ps1`](Device/audio/Rollback-InternalMic.ps1) | [`Device/audio/`](Device/audio/readme.md) | Rollback: Re-enable Internal Microphone |
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |
 | [`Search-MailboxAuditLog.ps1`](Office365Toolkit/Exchange/Search-MailboxAuditLog.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Search the Microsoft 365 Unified Audit Log for sign-in and mailbox access events. |
-| [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content tenant-wide through Microsoft Graph - app-only, no interactive sign-in - and report the permissions on every hit. |
-| [`Set-Calendar-rights.ps1`](Exchange/Set-Calendar-rights.ps1) | [`Exchange/`](Exchange/readme.md) | Geeft een gebruiker toegangsrechten op de agenda van een andere gebruiker. |
+| [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content through Microsoft Graph - signed in as you by default, or app-only tenant-wide - and report the permissions on every hit. |
+| [`Set-Calendar-rights.ps1`](Exchange/Set-Calendar-rights.ps1) | [`Exchange/`](Exchange/readme.md) | Give a user access rights on another user's calendar. |
 | [`Set-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Set-CorporateWallpaper.ps1 |
 | [`Set-DefaultFileAssociation.ps1`](TenantOnboarding/AppDeployment/Set-DefaultFileAssociation.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Set the default application for a file extension, bypassing Windows' UserChoice hash protection. |
 | [`Set-Distributionlist-dynamic-static.ps1`](Exchange/Set-Distributionlist-dynamic-static.ps1) | [`Exchange/`](Exchange/readme.md) | Resolves members of a dynamic distribution group and copies them into a regular distribution group. |
@@ -179,6 +181,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Test-Ports.ps1`](Network/Test-Ports.ps1) | [`Network/`](Network/readme.md) | Tests TCP connectivity on one or more ports against a target host. |
 | [`Test-PowerShellSyntax.ps1`](Startup/Test-PowerShellSyntax.ps1) | [`Startup/`](Startup/readme.md) | Parse PowerShell files and report syntax errors, without running any of them. |
 | [`Test-RDSDiagnostics.ps1`](RDS/Test-RDSDiagnostics.ps1) | [`RDS/`](RDS/readme.md) | Diagnose why users cannot log in to an RDP server or RD Web Access server. |
+| [`Test-RequiredModules.ps1`](Startup/Test-RequiredModules.ps1) | [`Startup/`](Startup/readme.md) | Reports modules that scripts load but RequiredModules.psd1 does not list. |
 | [`Test-SASWorkDirectory.ps1`](SAS/Test-SASWorkDirectory.ps1) | [`SAS/`](SAS/readme.md) | Test SAS WORK directory health and permissions |
 | [`Test-SharedMailboxSignIn.ps1`](Office365Toolkit/Security/Test-SharedMailboxSignIn.ps1) | [`Office365Toolkit/Security/`](Office365Toolkit/Security/readme.md) | Report (and optionally block) direct interactive sign-in to shared mailboxes. |
 | [`Test-SharePointAccessScripts.ps1`](SharePoint/Test-SharePointAccessScripts.ps1) | [`SharePoint/`](SharePoint/readme.md) | Verify Get-SharePointPermissionsReport.ps1 and Revoke-SharePointUserAccess.ps1 without touching a tenant. |
@@ -193,9 +196,10 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Uninstall-MicrosoftOffice.ps1`](TenantOnboarding/DeviceConfig/Uninstall-MicrosoftOffice.ps1) | [`TenantOnboarding/DeviceConfig/`](TenantOnboarding/DeviceConfig/readme.md) | Silently uninstall Microsoft Office (Click-to-Run) from a device. |
 | [`Update-BreakGlassAdminPassword.ps1`](TenantOnboarding/MultiTenant/Update-BreakGlassAdminPassword.ps1) | [`TenantOnboarding/MultiTenant/`](TenantOnboarding/MultiTenant/readme.md) | Rotate the password of a named break-glass admin account, in one tenant or across all GDAP customers. |
 | [`Update-iOSCompliancePolicy.ps1`](Intune/iOS-Compliance-Updater/Update-iOSCompliancePolicy.ps1) | [`Intune/iOS-Compliance-Updater/`](Intune/iOS-Compliance-Updater/readme.md) | Automatically updates the minimum iOS version in an Intune compliance policy. |
-| [`Update-Modules.ps1`](Startup/Update-Modules.ps1) | [`Startup/`](Startup/readme.md) | updaten van modules |
+| [`Update-Modules.ps1`](Startup/Update-Modules.ps1) | [`Startup/`](Startup/readme.md) | Controleert en update de PowerShell modules van deze repo, en daarna desgewenst alle andere. |
 | [`Update-ReadmeHeader.ps1`](Startup/Update-ReadmeHeader.ps1) | [`Startup/`](Startup/readme.md) | Put the language switcher and the breadcrumb at the top of every readme, in all three languages. Supports -WhatIf. |
 | [`Update-ScriptIndex.ps1`](Startup/Update-ScriptIndex.ps1) | [`Startup/`](Startup/readme.md) | Build scripts/INDEX.md - one searchable A-Z table of every script in the repo, with a link to the file, its folder readme and what it does. Supports -WhatIf. |
+| [`Update-SessionHostImage.ps1`](RDS/Update-SessionHostImage.ps1) | [`RDS/`](RDS/readme.md) | Check and prepare a Windows 11 multi-session image (or a running AVD session host) so new Teams, new Outlook and Copilot keep working with FSLogix profile cont… |
 | [`Update-SharePointShareStatus.ps1`](SharePoint/Provisioning/Update-SharePointShareStatus.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Work out how every document is actually shared and write that back to the Deelstatus column. Reports files shared wider than their Vertrouwelijkheid tag allows… |
 | [`Update-TeamsClient.ps1`](Device/Update-TeamsClient.ps1) | [`Device/`](Device/readme.md) | Update the new Microsoft Teams client, including the Teams Meeting Add-in for Outlook, only when Microsoft publishes a newer build. Supports -WhatIf. |
 | [`Update-UnifiFirmware.ps1`](Network/UniFi/Update-UnifiFirmware.ps1) | [`Network/UniFi/`](Network/UniFi/readme.md) | List and optionally trigger firmware upgrades for UniFi devices across one or all sites. |

@@ -30,6 +30,17 @@ Scripts voor het beheren van gebruikers en resources in Microsoft Entra ID (voor
 
 ---
 
+## Aanmelden
+
+Elk script in deze map meldt aan via [`Connect-M365.ps1`](../Startup/readme.nl.md) en werkt met Microsoft Graph:
+
+- **Standaard delegated** — je meldt aan als de beheerder: in de browser, of met een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat. Onder GDAP (`authMode = GDAP`) wordt de klanttenant van `Connect-Tenant` gebruikt, tenzij `-TenantId` een andere noemt.
+- **App-only op verzoek** — `-ClientId` met `-CertificateThumbprint`, of `-AppOnly` om beide voor de tenant uit `graph.appid.json` in de root van de repo te halen. De app heeft de bijbehorende *applicatie*machtigingen nodig, met toestemming in die tenant (GDAP geeft geen app-only-toegang).
+- **Sessie hergebruiken** — een Graph-sessie voor de juiste tenant die de scopes al heeft, wordt hergebruikt en blijft verbonden; een script verbreekt alleen een sessie die het zelf heeft geopend, nooit de jouwe.
+- `Phising-rollout.ps1` heeft eigen modi (managed identity in Azure Automation, tijdelijke app) — zie de sectie daarvan.
+
+---
+
 ### Set-UserManager.ps1
 
 Rapporteert de manager van een set Entra ID-gebruikers en stelt die desgewenst in bulk in. Gebruikers kun je selecteren op groep, afdeling, huidige manager of een expliciete lijst UPN's; als `-NewManager` wordt weggelaten, rapporteert het script alleen de huidige manager van elke gebruiker.
@@ -45,7 +56,9 @@ Rapporteert de manager van een set Entra ID-gebruikers en stelt die desgewenst i
 | `-UserList` | * | Expliciete array van UPN's of object-ID's |
 | `-NewManager` | Nee | UPN of object-ID om als manager in te stellen voor alle gevonden gebruikers. Laat weg om alleen de huidige managers te rapporteren |
 | `-OutputPath` | Nee | Pad voor CSV-export |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein voor `Connect-MgGraph` |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 *Precies één van `-GroupId` / `-GroupName` / `-Department` / `-CurrentManager` / `-UserList` bepaalt de bron van de gebruikers.
 
@@ -70,6 +83,11 @@ Rapporteert de manager van een set Entra ID-gebruikers en stelt die desgewenst i
 
 Ondersteunt `-WhatIf` (`SupportsShouldProcess`).
 
+**Opmerkingen**
+- Groepsleden en directe ondergeschikten komen elk uit één gepagineerde Graph-aanroep (`/members/microsoft.graph.user?$select=...`) in plaats van één `Get-MgUser` per lid
+- Aanhalingstekens in `-GroupName` / `-Department` worden ge-escaped voor het OData-filter (een naam als `O'Brien` brak de query)
+- Een Graph-sessie die het script niet zelf opende, blijft ongemoeid (voorheen riep het aan het eind altijd `Disconnect-MgGraph` aan)
+
 ---
 
 ### Remove-M365Users.ps1
@@ -86,7 +104,9 @@ Verwijdert M365-gebruikersaccounts in bulk uit een tenant. Trekt sessies in en v
 | `-SkipLicenseRemoval` | Nee | Sla het verwijderen van licenties vóór het verwijderen over |
 | `-SkipSessionRevoke` | Nee | Sla het intrekken van actieve sessies over |
 | `-OutputPath` | Nee | Pad voor CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 *`-UserList` of `-CsvPath` is verplicht.
 
@@ -106,7 +126,7 @@ Verwijdert M365-gebruikersaccounts in bulk uit een tenant. Trekt sessies in en v
 **Opmerkingen**
 - Verwijderen is een voorlopige verwijdering (soft delete) — accounts komen in Verwijderde gebruikers terecht en zijn 30 dagen te herstellen
 - Er wordt altijd een CSV-rapport geschreven, ook bij een proefdraai
-- Als er al een Graph-verbinding is (bijv. via `functies.ps1`), wordt de bestaande verbinding hergebruikt
+- Een Graph-sessie die al `User.ReadWrite.All` heeft voor de juiste tenant wordt hergebruikt; anders maakt het script verbinding. Voorheen maakte het nooit verbinding als er helemaal geen sessie was, omdat `Get-MgContext` geen fout geeft
 
 **Vereiste module**
 ```powershell
@@ -134,7 +154,9 @@ Maakt één M365-gebruiker aan via Microsoft Graph. Genereert een willekeurig wa
 | `-MobilePhone` | Nee | Mobiel telefoonnummer |
 | `-LicenseSkuId` | Nee | Onderdeelnummer van de licentie-SKU om toe te wijzen (bijv. `ENTERPRISEPACK`) |
 | `-NoPasswordReset` | Nee | Dwing geen wachtwoordwijziging af bij de eerste aanmelding |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -146,6 +168,9 @@ Maakt één M365-gebruiker aan via Microsoft Graph. Genereert een willekeurig wa
 .\New-M365User.ps1 -UserPrincipalName "j.doe@contoso.com" -DisplayName "Jane Doe" `
     -GivenName "Jane" -Surname "Doe" -Department "Finance" -LicenseSkuId "ENTERPRISEPACK"
 ```
+
+**Opmerkingen**
+- De mailnickname, een verplichte eigenschap van een nieuwe gebruiker in Graph, is het deel van de UPN vóór de `@`
 
 ---
 
@@ -167,7 +192,9 @@ Maakt M365-gebruikers in bulk aan vanuit een CSV-bestand via Microsoft Graph. Dr
 | `-LicenseSkuId` | Nee | Wijs deze licentie toe aan alle gebruikers (overschrijft de CSV-kolom) |
 | `-NoPasswordReset` | Nee | Dwing geen wachtwoordwijziging af bij de eerste aanmelding |
 | `-OutputPath` | Nee | Pad voor CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -186,6 +213,8 @@ Maakt M365-gebruikers in bulk aan vanuit een CSV-bestand via Microsoft Graph. Dr
 - Een proefdraai schrijft altijd een resultaten-CSV — controleer die voordat je met `-Apply` draait
 - Gegenereerde wachtwoorden staan in de resultaten-CSV — deel ze op een veilige manier
 - Een licentie vereist dat `UsageLocation` is ingesteld; het script regelt dit automatisch
+- De mailnickname, die Graph verplicht stelt, is het deel van de UPN vóór de `@`
+- De samenvatting van een proefdraai telt de rijen die zouden worden aangemaakt (die toonde altijd 0, omdat proefdraairijen als overgeslagen telden)
 
 ---
 
@@ -205,7 +234,9 @@ Controleert toegewezen licenties voor een lijst gebruikers via Microsoft Graph e
 | `-UserList` | * | Array van UPN's/e-mailadressen |
 | `-CsvPath` | * | Pad naar CSV/TXT met gebruikers |
 | `-OutputPath` | Nee | Pad voor CSV-rapport (standaard: `C:\Temp\UserLicenseReport_<timestamp>.csv`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 *`-UserList` of `-CsvPath` is verplicht.
 
@@ -226,6 +257,9 @@ Controleert toegewezen licenties voor een lijst gebruikers via Microsoft Graph e
 - Eén rij per toewijzing van een licentie aan een gebruiker
 - Gebruikers zonder licentie worden opgenomen met `LicenseStatus = Unlicensed`
 - Niet-gevonden gebruikers worden opgenomen met `LicenseStatus = NotFound`
+
+**Opmerkingen**
+- Een gebruiker die niet op UPN/ID wordt gevonden, wordt opgezocht met een gewoon `userPrincipalName`/`mail`-filter (geen `ConsistencyLevel: eventual` zonder telling, en niet meer toegewezen aan de automatische variabele `$matches`)
 
 ---
 
@@ -251,7 +285,9 @@ Het ondersteunt ook een vervolgactie om geïmporteerde beleidsregels op alleen-r
 | `-PolicyStateOnImport` | Nee | `disabled` (standaard) of `enabledForReportingButNotEnforced` |
 | `-TargetState` | Nee | Voor `SetState`: `disabled`, `enabledForReportingButNotEnforced` of `enabled` |
 | `-SourcePath` | Nee | Lokale baselinemap met `Config\...` |
-| `-TenantId` | Nee | Tenant-ID of domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 | `-UpdateExisting` | Nee | Werk bestaande beleidsregels met een overeenkomende weergavenaam bij |
 
 **Voorbeelden**
@@ -270,6 +306,8 @@ Het ondersteunt ook een vervolgactie om geïmporteerde beleidsregels op alleen-r
 **Opmerkingen**
 - Houd minstens één break-glass-account uitgesloten voordat je beleidsregels inschakelt
 - Controleer na het importeren de uitsluitingsgroepen en benoemde locaties
+- Groepen en service principals worden opgezocht met een gewoon `eq`-filter, zonder `ConsistencyLevel: eventual` (dat een telling vereist)
+- Een sessie wordt alleen hergebruikt als die voor de juiste tenant is en alle scopes heeft (voorheen werd elke sessie hergebruikt); de provider `Daniel` (DCToolbox) draait op diezelfde sessie
 
 ---
 
@@ -300,6 +338,10 @@ Belangrijk:
 .\New-TemporaryConditionalAccessPolicy.ps1 -TargetType Group -TargetId "<object-id>" -DisplayName "Temporary Block" -Action Block -NoAutoCleanup
 ```
 
+**Opmerkingen**
+- Accepteert `-TenantId`, `-ClientId`, `-CertificateThumbprint` en `-AppOnly` (zie [Aanmelden](#aanmelden)). De Graph-sessie blijft open, zodat de vervolgstap voor een TAP in het menu geen nieuwe aanmelding nodig heeft
+- Met `-WhatIf` wordt niets aangemaakt en stopt het script daar (voorheen liep het wachten/opruimen tegen een beleid dat niet bestond)
+
 ---
 
 ### Remove-TemporaryConditionalAccessPolicies.ps1
@@ -321,6 +363,9 @@ Modi:
 .\Remove-TemporaryConditionalAccessPolicies.ps1 -PolicyId "<policy-id>"
 ```
 
+**Opmerkingen**
+- Accepteert `-TenantId`, `-ClientId`, `-CertificateThumbprint` en `-AppOnly` (zie [Aanmelden](#aanmelden)); de Graph-sessie blijft open
+
 ---
 
 ### New-UserTemporaryAccessPass.ps1
@@ -336,12 +381,13 @@ Maakt een Temporary Access Pass (TAP) aan voor één gebruiker.
 **Opmerkingen**
 - Gebruik bij voorkeur `-IsUsableOnce` voor support-/installatiescenario's
 - Deel de TAP-code via een veilig kanaal en laat hem snel verlopen
+- Accepteert `-TenantId`, `-ClientId`, `-CertificateThumbprint` en `-AppOnly` (zie [Aanmelden](#aanmelden)); app-only vereist de applicatiemachtiging `UserAuthenticationMethod.ReadWrite.All`
 
 ---
 
 ### Test-M365GroupMembership.ps1
 
-Toont alle eigenaren en leden van Microsoft 365-groepen (inclusief groepen achter Teams). De resultaten worden geëxporteerd naar CSV met één rij per eigenaar/lid. Maakt automatisch verbinding met Graph als er geen sessie actief is; hergebruikt een bestaande sessie als er al verbinding is.
+Toont alle eigenaren en leden van Microsoft 365-groepen (inclusief groepen achter Teams). De resultaten worden geëxporteerd naar CSV met één rij per eigenaar/lid. Eigenaren en leden komen uit één gepagineerde Graph-aanroep per groep (geen `Get-MgUser` per lid); leden die geen gebruiker zijn (groepen, apparaten, service principals) worden ook getoond, met een kolom `ObjectType`. Aanhalingstekens in een `-Group`-naam worden ge-escaped voor het OData-filter.
 
 **Parameters**
 
@@ -349,7 +395,9 @@ Toont alle eigenaren en leden van Microsoft 365-groepen (inclusief groepen achte
 |-----------|----------|-------------|
 | `-Group` | Nee | Weergavenaam of object-ID van één groep. Als dit wordt weggelaten, worden alle M365-groepen gecontroleerd |
 | `-OutputPath` | Nee | Pad voor CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -389,9 +437,11 @@ Kopieert de leden van de ene Entra ID-groep naar een andere groep. Leden die al 
 | `-Flatten` | Nee | Klap geneste groepen uit en kopieer hun effectieve leden in plaats van het geneste groepsobject |
 | `-Mirror` | Nee | Verwijder ook leden uit de doelgroep die niet in de brongroep zitten (exacte kopie in plaats van een vereniging) |
 | `-Apply` | Nee | Voeg leden echt toe/verwijder ze echt (standaard: proefdraai) |
-| `-Disconnect` | Nee | Meld af bij Graph als het klaar is (standaard uit — afmelden wist de tokencache en dwingt bij de volgende run een nieuwe browserprompt af) |
+| `-Disconnect` | Nee | Meld af bij Graph als het klaar is — alleen als dit script de sessie opende (standaard uit, zodat de volgende run in dezelfde PowerShell-sessie geen nieuwe aanmelding nodig heeft) |
 | `-OutputPath` | Nee | Pad voor CSV-rapport (standaard: `C:\Temp\GroupMemberCopy_<timestamp>.csv`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of -domein |
+| `-TenantId` | Nee | Entra ID-tenant-ID of -domein (standaard: de GDAP-klant als `authMode` GDAP is, anders de tenant waarin je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -413,11 +463,13 @@ Kopieert de leden van de ene Entra ID-groep naar een andere groep. Leden die al 
 - Weergavenamen worden via Graph omgezet; een niet-eenduidige naam is een harde fout — gebruik dan de object-ID
 - Een doelgroep met dynamisch lidmaatschap wordt geweigerd: het lidmaatschap wordt door regels bepaald en kan niet worden bewerkt
 - E-mailbeveiligingsgroepen en distributiegroepen zijn niet beschrijfbaar via Graph — gebruik daarvoor Exchange Online-cmdlets
+- Een sessie zonder de scopes wordt niet meer ongewijzigd hergebruikt; het script maakt opnieuw verbinding met die scopes
 - Ondersteunt `-WhatIf` (`SupportsShouldProcess`)
 
 **Vereiste scopes**
 - `Group.Read.All`
 - `GroupMember.ReadWrite.All`
+- `Directory.Read.All`
 
 **Vereiste module**
 ```powershell
@@ -441,7 +493,9 @@ Accepteert een array van tenants, zodat een GDAP-partner in één run alle klant
 
 | Parameter | Verplicht | Omschrijving |
 |-----------|----------|-------------|
-| `-TenantId` | Nee | Een of meer tenant-ID's of domeinnamen. Laat weg om de huidige verbinding / standaardtenant te gebruiken |
+| `-TenantId` | Nee | Een of meer tenant-ID's of domeinnamen. Laat weg om de huidige verbinding / de GDAP-klant / je standaardtenant te gebruiken |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat (zie [Aanmelden](#aanmelden)) |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 | `-Revert` | Nee | Zet `passkeyDynamicMigration` terug op `false` (laat de tenant weer MEEDOEN aan de automatische migratie) |
 | `-ReportOnly` | Nee | Lees en toon de huidige waarde zonder iets te wijzigen |
 
@@ -475,6 +529,7 @@ Accepteert een array van tenants, zodat een GDAP-partner in één run alle klant
 - Schrijfacties worden per tenant bevestigd (`ConfirmImpact = 'High'`); geef `-Confirm:$false` mee voor onbeheerde runs over meerdere tenants
 - De instelling wordt ~2 seconden na de PATCH teruggelezen; een afwijking wordt gemeld als `PatchedUnverified` in plaats van als succes behandeld
 - Geeft één object per tenant terug (`Tenant`, `Before`, `After`, `Status`, `Message`), zodat je een run naar `Export-Csv` kunt pipen
+- Per tenant verbreekt het script alleen een sessie die het voor die tenant opende; voorheen riep het na elke tenant `Disconnect-MgGraph` aan, ook op een sessie die je al had
 - Ondersteunt `-WhatIf` (`SupportsShouldProcess`)
 - Heb je na 1 februari 2027 nog sms/spraak nodig, configureer dan een door de klant beheerde telecomprovider via de Microsoft Security Store (te selecteren vanaf 30 oktober 2026)
 
@@ -530,15 +585,28 @@ die zijn passkey verwijdert stilletjes het label 'compliant'.
 | `-RegisteredGroupId` | Object-ID van de statische Registered-groep (al compliant) |
 | `-AcceptedMethod` | `AuthenticatorPasskey` (standaard) of `AnyPhishingResistant` |
 | `-AllowedAaGuids` | AAGUID's die tellen als passkey in Authenticator (standaard: de iOS- en Android-AAGUID's van Microsoft Authenticator). Genegeerd bij `AnyPhishingResistant` |
-| `-Interactive` | Meld aan via de browser in plaats van een managed identity — om het vanaf je eigen machine te draaien |
+| `-Interactive` | Delegated aanmelden als beheerder via `Connect-M365.ps1` — nu ook de standaard buiten Azure Automation; de switch dwingt het overal af |
+| `-UseManagedIdentity` | Managed identity (`-ClientId` voor een door de gebruiker toegewezen identity) — automatisch in Azure Automation, gebruik de switch op een Azure-VM |
 | `-UseAppRegistration` | Gebruik een bestaande app-registratie (certificaat of secret) |
 | `-UseTemporaryApp` | Maak een wegwerp-app-registratie aan, draai app-only en verwijder hem daarna weer |
+| `-AppOnly` | App-only met de app en het certificaat voor de tenant uit `graph.appid.json` |
+| `-UseExistingSession` | Draai alleen op je eigen `Connect-MgGraph`-sessie; het script meldt nooit zelf aan |
+| `-TenantId` / `-ClientId` / `-ClientCertificateThumbprint` | Voor `-UseAppRegistration` (alias `-CertificateThumbprint`); `-TenantId` kiest ook de tenant bij delegated aanmelden |
 
 **Authenticatie**
 
 Gebouwd als **Azure Automation-runbook** op een door het systeem toegewezen managed
-identity, om elke een tot vier uur te draaien. Zonder `-Interactive` of een app-registratie
-probeert het een managed identity, wat buiten Azure altijd mislukt.
+identity, om elke een tot vier uur te draaien. Zonder modus-switch kiest het script zelf
+hoe het aanmeldt:
+
+| Waar het draait | Standaard aanmelding |
+|-----------------|----------------------|
+| Azure Automation (cloudjob of Hybrid Worker, herkend aan `AUTOMATION_ASSET_ACCOUNTID` / `$PSPrivateMetadata.JobId`) | Managed identity — bestaande runbooks blijven ongewijzigd werken |
+| Overal elders | Delegated als beheerder via [`Connect-M365.ps1`](../Startup/readme.nl.md) (browser, of apparaatcode / GDAP-klant uit `load.config.ps1`); een sessie met de scopes en een levend token wordt hergebruikt |
+
+Voorheen was managed identity overal de standaard, wat buiten Azure altijd mislukte. In
+een runbook is de helper er niet: managed identity en `-UseAppRegistration` werken daar
+zonder, delegated aanmelden en `-AppOnly` hebben de repository nodig.
 
 Voor een run over veel gebruikers is `-UseTemporaryApp` (of `-UseAppRegistration` met een
 certificaat) de betrouwbare keuze: een app-only-token wordt bij elke aanroep vers

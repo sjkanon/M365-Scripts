@@ -8,6 +8,27 @@ Scripts voor het beheer van agenda's, mailboxen en distributiegroepen in Exchang
 
 ---
 
+## Aanmelden
+
+Elk script meldt aan via [`Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1): **standaard gedelegeerd** — je meldt je aan als jezelf, met een apparaatcode als `load.config.ps1` `useDeviceCodeAuth` zet, en onder GDAP wordt de klanttenant bereikt met `-DelegatedOrganization` (`-Organization` geldt alleen voor app-only aanmelden). App-only op verzoek met `-ClientId` + `-CertificateThumbprint`, of `-AppOnly` om beide uit `graph.appid.json` te halen. Een bestaande sessie voor dezelfde tenant wordt hergebruikt, en een script verbreekt alleen wat het zelf heeft geopend. Alle scripts hier vereisen PowerShell 7.
+
+Graph is de standaard. Waar een script nog Exchange Online PowerShell gebruikt, of nog standaard app-only werkt, is dit de reden:
+
+| Script | Gebruikt | Standaard aanmelding | Waarom |
+|--------|----------|----------------------|--------|
+| `Test-MailboxPermissions`, `Test-DistributionGroupPermissions`, `Set-Distributionlist-dynamic-static` | Exchange Online | Gedelegeerd | Graph heeft geen API voor Full Access, Send As, Send on Behalf, `ManagedBy` of dynamische distributiegroepen |
+| `Get-DistributionGroupMembers` | Exchange Online | Gedelegeerd | Graph toont groepsleden, maar geen dynamische distributiegroepen, `ManagedBy`-eigenaars of e-mailcontactpersonen zoals het rapport ze toont |
+| `Test-CalendarPermissions`, `Set-Calendar-rights` | Exchange Online | Gedelegeerd | Graph's `calendarPermissions` bereikt de agenda van een andere gebruiker alleen app-only of als je er al rechten op hebt, en kent geen rollen als `PublishingEditor`; Exchange accepteert je beheerdersrol voor elke mailbox |
+| `Get-ExternalForwards`, `Test-DkimConfig`, `Get-MessageTraceReport` | Exchange Online | Gedelegeerd | Geen Graph-API voor mailboxdoorsturing, DKIM of message trace |
+| `Get-MailboxSizes` | Exchange Online | Gedelegeerd | Het Graph-rapport `getMailboxUsageDetail` is geaggregeerd, loopt een dag of meer achter en toont verborgen namen als de tenant gebruikersgegevens afschermt |
+| `Move-InboxToArchive`, `Restore-MailboxMessages`, `Remove-PhishingMessage` (Graph-engine) | Graph (+ Exchange) | **App-only** (tijdelijke app) | Een gedelegeerd token bereikt de mailbox van een andere gebruiker alleen met Full Access erop (`Mail.ReadWrite.Shared`). `-Delegated` neemt die route als je Full Access hebt (of, in `Move-InboxToArchive`, krijgt) — niet onder GDAP |
+| `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar` | Graph (+ Exchange) | **App-only** (tijdelijke app) | Kan niet anders: ze lezen de agendalijst van elke gebruiker of schrijven in een resourcemailbox, en daar komt geen gedelegeerd token bij. Geen `-Delegated` |
+| `Migrate-Calendar` | Graph + Exchange | Gedelegeerd om te lezen, **app-only** om te schrijven | Graph leest groepsagenda's alleen gedelegeerd, en schrijft alleen app-only in de nieuwe mailbox |
+
+De tijdelijke app wordt aangemaakt met een gedelegeerde aanmelding (Global Administrator of Privileged Role Administrator) en aan het eind van de run weer verwijderd. In `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage` en `Restore-MailboxMessages` is die aanmelding altijd een **apparaatcode via gewone REST**, wat `load.config.ps1` ook zegt: die scripts praten ook met Exchange Online, waarvan de MSAL botst met die van de Graph SDK, dus laden ze de SDK daar niet voor. `Move-InboxToArchive` en `Migrate-Calendar` gebruiken er `Connect-M365Graph` voor en volgen `load.config.ps1`.
+
+---
+
 ## Scripts
 
 | Script | Omschrijving |
@@ -38,24 +59,29 @@ Migreert een gedeelde M365-groepsagenda naar een Room Mailbox. Lost het probleem
 
 **Hoe het werkt**
 
-1. Maakt een Entra ID App Registration aan (of hergebruikt een bestaande)
-2. Maakt een Room Mailbox aan als doelagenda
-3. Configureert AutoAccept en zet de Default-rechten op Reviewer
-4. Leest afspraken uit de M365-groepsagenda via gedelegeerde toegang
-5. Kopieert afspraken naar de Room Mailbox via app-authenticatie
+1. Meldt je bij Graph aan als jezelf (gedelegeerd) en bij Exchange Online
+2. Leest de afspraken uit de M365-groepsagenda — gedelegeerd, de enige manier die Graph toestaat
+3. Maakt een **tijdelijke** App Registration aan met `Calendars.ReadWrite` (plus `Group.ReadWrite.All` met `-DeleteSourceGroup`), of gebruikt je eigen app
+4. Maakt een Room Mailbox aan als doelagenda, configureert AutoAccept en zet de Default-rechten op Reviewer
+5. Kopieert de afspraken naar de Room Mailbox met het app-only-token
 6. Verwijdert optioneel de bron-M365-groep
+7. Verwijdert de tijdelijke App Registration — ook als de run mislukt
 
-> Het script gebruikt een dubbele authenticatiestroom, omdat Microsoft gedelegeerde toegang vereist om groepsagenda's te lezen maar applicatierechten om naar andere mailboxen te schrijven.
+> Twee soorten toegang omdat Microsoft dat zo bepaalt: groepsagenda's kunnen alleen gedelegeerd gelezen worden, en een mailbox die niet van jou is alleen app-only beschreven.
+
+Het secret van de tijdelijke app leeft twee uur, wordt nooit getoond, en de app wordt aan het eind verwijderd. (Vóór oktober 2026 maakte het script een permanente app `HolidaysCalendarMigration` aan en toonde het het secret.) De gedelegeerde aanmelding volgt `load.config.ps1`: apparaatcode met `useDeviceCodeAuth`, de GDAP-klant onder GDAP.
 
 **Parameters**
 
 | Parameter | Verplicht | Standaard | Omschrijving |
 |-----------|----------|---------|-------------|
-| `-TenantId` | Ja | — | Entra ID-tenant-ID |
-| `-AdminUPN` | Ja | — | UPN van de uitvoerende beheerder (moet lid zijn van de brongroep) |
-| `-ClientId` | Nee | — | Client-ID van de App Registration. Zonder deze parameter wordt automatisch een nieuwe registratie aangemaakt |
-| `-ClientSecret` | Nee | — | Client secret. Zonder deze parameter wordt het automatisch aangemaakt |
-| `-AppName` | Nee | `HolidaysCalendarMigration` | Naam voor de App Registration |
+| `-TenantId` | Nee | GDAP-klant / je aanmelding | Tenant-ID of domein |
+| `-AdminUPN` | Nee | — | Beheerder die het uitvoert (moet lid zijn van de brongroep). Alleen gebruikt om te waarschuwen als je met een ander account bent aangemeld |
+| `-ClientId` | Nee | — | Je eigen App Registration om te schrijven, met `-ClientSecret` of `-CertificateThumbprint`. Zonder deze parameter wordt een tijdelijke aangemaakt en weer verwijderd |
+| `-ClientSecret` | Nee | — | Client secret voor `-ClientId` |
+| `-CertificateThumbprint` | Nee | — | Certificaatvingerafdruk voor `-ClientId` |
+| `-AppOnly` | Nee | uit | Je eigen app met `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
+| `-AppName` | Nee | `CalendarMigration-Temp` | Naamvoorvoegsel van de tijdelijke App Registration |
 | `-SourceGroupMail` | Nee | — | E-mailadres van de bron-M365-groep |
 | `-SourceGroupDisplayName` | Nee | — | Weergavenaam van de brongroep (gebruikt als alternatieve zoekmethode) |
 | `-DestinationType` | Nee | `Room` | Type doelmailbox: `Room` of `Shared` |
@@ -69,18 +95,16 @@ Migreert een gedeelde M365-groepsagenda naar een Room Mailbox. Lost het probleem
 **Voorbeelden**
 
 ```powershell
-# Eerste run — App Registration automatisch aanmaken
+# Tijdelijke App Registration, aan het eind weer verwijderd
 .\Migrate-Calendar.ps1 `
-    -TenantId     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
+    -TenantId     "contoso.onmicrosoft.com" `
     -AdminUPN     "admin@contoso.com" `
     -SourceGroupMail "holidays@contoso.com"
 
-# Volgende runs — bestaande App Registration hergebruiken
+# Je eigen App Registration (applicatiemachtiging Calendars.ReadWrite)
 .\Migrate-Calendar.ps1 `
-    -TenantId     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-    -AdminUPN     "admin@contoso.com" `
-    -ClientId     "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-    -ClientSecret "your-client-secret" `
+    -TenantId     "contoso.onmicrosoft.com" `
+    -AppOnly `
     -SourceGroupMail "holidays@contoso.com"
 
 # Proefdraai — geen wijzigingen
@@ -96,33 +120,29 @@ Migreert een gedeelde M365-groepsagenda naar een Room Mailbox. Lost het probleem
 | Recht | Doel |
 |-----------|---------|
 | Exchange Admin of Global Admin | Room Mailbox aanmaken |
-| Global Admin | App Registration aanmaken + admin consent verlenen |
+| Global Administrator of Privileged Role Administrator | De tijdelijke App Registration aanmaken en haar machtiging toekennen (niet nodig met je eigen app) |
 | Lid van de bron-M365-groep | Groepsagenda lezen via gedelegeerde toegang |
 
-**Vereiste modules**
-
-```powershell
-Install-Module ExchangeOnlineManagement     -Scope CurrentUser
-Install-Module Microsoft.Graph.Applications  -Scope CurrentUser
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
-Install-Module Microsoft.Graph.Calendar      -Scope CurrentUser
-Install-Module Microsoft.Graph.Groups        -Scope CurrentUser
-Install-Module Microsoft.Graph.Users         -Scope CurrentUser
-```
+**Vereiste modules:** `ExchangeOnlineManagement`, `Microsoft.Graph.Authentication`, `.Applications`, `.Calendar`, `.Groups` — geïnstalleerd door `scripts\Startup\Install-Modules.ps1`.
 
 ---
 
 ### Set-Calendar-rights.ps1
 
-Geeft een gebruiker toegangsrechten op de agendamap van een andere gebruiker in Exchange Online. Ondersteunt mailboxen in het Nederlands, Frans en Engels.
+Geeft een gebruiker toegangsrechten op de agenda van een andere gebruiker in Exchange Online, of wijzigt de rechten die de gebruiker daar al heeft. De agenda wordt op maptype gevonden, dus de taal van de mailbox maakt niet uit (`\Agenda`, `\Calendrier`, `\Calendar`, ...). Maakt zelf verbinding met Exchange Online (standaard gedelegeerd).
+
+Blijft op Exchange Online: Graph's `calendarPermissions` kan de agenda van een andere gebruiker alleen app-only wijzigen of als je er al rechten op hebt, en kent geen rollen als `PublishingEditor` of `Contributor`. Het standaarddomein wordt nog steeds met `Get-AcceptedDomain` gelezen — de Exchange-sessie is toch al open, een Graph-aanmelding alleen voor `/domains` zou niets toevoegen.
 
 **Parameters**
 
 | Parameter | Verplicht | Omschrijving |
 |-----------|----------|-------------|
-| `-User` | Ja | Gebruikersnaam (zonder domein) die de rechten krijgt |
-| `-TargetMailbox` | Ja | Gebruikersnaam (zonder domein) van de doelmailbox |
+| `-User` | Ja | Gebruiker die de rechten krijgt: UPN, of naam zonder domein (het standaarddomein wordt toegevoegd) |
+| `-TargetMailbox` | Ja | Mailbox waarvan de agenda gedeeld wordt: UPN, of naam zonder domein |
 | `-AccessRights` | Ja | Toegangsniveau (zie de tabel hieronder) |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Toegangsniveaus**
 
@@ -142,21 +162,15 @@ Geeft een gebruiker toegangsrechten op de agendamap van een andere gebruiker in 
 # Reviewer-rechten toekennen
 .\Set-Calendar-rights.ps1 -User j.doe -TargetMailbox a.smith -AccessRights Reviewer
 
-# Proefdraai
-.\Set-Calendar-rights.ps1 -User j.doe -TargetMailbox a.smith -AccessRights Editor -WhatIf
-```
-
-**Vereiste module**
-
-```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
+# Proefdraai, met volledige adressen
+.\Set-Calendar-rights.ps1 -User j.doe@contoso.com -TargetMailbox a.smith@contoso.com -AccessRights Editor -WhatIf
 ```
 
 ---
 
 ### Set-Distributionlist-dynamic-static.ps1
 
-Bepaalt welke leden op dit moment aan het filter van een dynamische distributiegroep voldoen en kopieert ze naar een gewone (statische) distributiegroep — de doelgroep wordt aangemaakt als die nog niet bestaat. Exporteert de gevonden ledenlijst ook naar CSV. Vereist een actieve Exchange Online-sessie (`Connect-ExchangeOnline`).
+Bepaalt welke leden op dit moment aan het filter van een dynamische distributiegroep voldoen en kopieert ze naar een gewone (statische) distributiegroep — de doelgroep wordt aangemaakt als die nog niet bestaat. Exporteert de gevonden ledenlijst ook naar CSV. Maakt zelf verbinding met Exchange Online (standaard gedelegeerd); een bestaande sessie voor dezelfde tenant wordt hergebruikt.
 
 **Parameters**
 
@@ -175,6 +189,9 @@ Bepaalt welke leden op dit moment aan het filter van een dynamische distributieg
 | `-ExportCsvPath` | Nee | CSV-exportpad voor de gevonden leden (standaard: `C:\Temp\DynamicGroupMembers_<timestamp>.csv` op Windows, `~/Downloads` op Linux/macOS) |
 | `-SkipMemberAdd` | Nee | Alleen leden bepalen en exporteren, de doelgroep niet wijzigen |
 | `-RenameDynamicGroupTo` | Nee | De dynamische brondistributiegroep na verwerking hernoemen |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -196,8 +213,8 @@ Bepaalt welke leden op dit moment aan het filter van een dynamische distributieg
 ```
 
 **Opmerkingen**
-- Vereist de Exchange Online PowerShell-module en een actieve EXO-sessie (`Connect-ExchangeOnline`)
-- Dynamische distributiegroepen zijn Exchange-objecten; dit script gebruikt Exchange-cmdlets, geen Graph
+- Vereist de module ExchangeOnlineManagement; het script maakt zelf verbinding
+- Dynamische distributiegroepen zijn Exchange-objecten zonder Graph-API; dit script gebruikt Exchange-cmdlets, geen Graph
 
 ---
 
@@ -207,11 +224,13 @@ Verplaatst elk bericht in het Postvak IN van een mailbox naar de map Archief —
 
 **Authenticatie (standaard: automatisch, geen Full Access nodig)**
 
-Standaard archiveert het script elke mailbox in de tenant zonder dat je er Full Access op nodig hebt. Het maakt interactief verbinding (gedelegeerd, `Application.ReadWrite.All` + `AppRoleAssignment.ReadWrite.All`), maakt een kortlevende tijdelijke App Registration aan, kent die zelf de applicatiemachtiging `Mail.ReadWrite` toe (geen apart admin-consentscherm — de gedelegeerde rol regelt dat), gebruikt die voor de mailboxbewerkingen en verwijdert haar weer als het script klaar is. Dit volgt hetzelfde patroon met een tijdelijke app als `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. Vereist Global Administrator of Privileged Role Administrator voor die eenmalige setup, en de module `Microsoft.Graph.Applications`.
+App-only is hier de standaard omdat een gedelegeerd Graph-token de mailbox van een andere gebruiker alleen bereikt met Full Access erop, en die krijg je niet met een Exchange-beheerdersrol.
 
-- `-Delegated` slaat dat allemaal over en gebruikt in plaats daarvan een gewone gedelegeerde `Mail.ReadWrite`-sessie — daarvoor heb je Exchange Admin nodig, geen rechten om Entra-apps aan te maken. Voor een andere mailbox dan die van de aangemelde gebruiker zelf maakt het script verbinding met Exchange Online, geeft dat account tijdelijk Full Access, pollt `Get-MailboxPermission` tot het recht echt zichtbaar is (tot ~3 minuten — rechtenwijzigingen in Exchange Online worden niet direct doorgevoerd), archiveert en trekt het recht daarna weer in (met een paar nieuwe pogingen, omdat de intrekking evengoed op een domain controller kan uitkomen die nog niet bij is).
+Standaard archiveert het script elke mailbox in de tenant zonder dat je er Full Access op nodig hebt. Het maakt gedelegeerd verbinding via `Connect-M365Graph` (`Application.ReadWrite.All` + `AppRoleAssignment.ReadWrite.All`; apparaatcode en GDAP-klant volgens `load.config.ps1`, een bestaande sessie met die scopes wordt hergebruikt), maakt een kortlevende tijdelijke App Registration aan, kent die zelf de applicatiemachtiging `Mail.ReadWrite` toe (geen apart admin-consentscherm — de gedelegeerde rol regelt dat), gebruikt die voor de mailboxbewerkingen en verwijdert haar weer als het script klaar is. Dit volgt hetzelfde patroon met een tijdelijke app als `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. Vereist Global Administrator of Privileged Role Administrator voor die eenmalige setup, en de module `Microsoft.Graph.Applications`.
+
+- `-Delegated` slaat dat allemaal over en gebruikt in plaats daarvan een gewone gedelegeerde `Mail.ReadWrite` + `Mail.ReadWrite.Shared`-sessie (`Mail.ReadWrite.Shared` is wat de mailbox van een andere gebruiker bereikt) — daarvoor heb je Exchange Admin nodig, geen rechten om Entra-apps aan te maken. **Niet onder GDAP**: een partneraccount staat niet in de directory van de klant en kan dus geen Full Access krijgen; het script stopt met die melding. Voor een andere mailbox dan die van de aangemelde gebruiker zelf maakt het script verbinding met Exchange Online (`Connect-M365Exchange`), geeft dat account tijdelijk Full Access, pollt `Get-MailboxPermission` tot het recht echt zichtbaar is (tot ~3 minuten — rechtenwijzigingen in Exchange Online worden niet direct doorgevoerd), archiveert en trekt het recht daarna weer in (met een paar nieuwe pogingen, omdat de intrekking evengoed op een domain controller kan uitkomen die nog niet bij is).
   > **Bekende beperking:** `Get-MailboxPermission` toont de eigen status van Exchange vrijwel direct, maar de autorisatiecache van Microsoft Graph voor gedelegeerde mailboxtoegang kan daar tot **~60 minuten** op achterlopen — dit is een beperking aan de kant van Microsoft. Als het lezen van het Postvak IN na het pollen van Full Access nog steeds een 403 geeft, blijft het script het opnieuw proberen (met 60 s ertussen) tot een deadline van **`-MaxWaitMinutes`** (standaard 65, wat het door Microsoft gedocumenteerde worstcasescenario dekt) — het Full Access-recht blijft de hele wachttijd staan, omdat intrekken en opnieuw toekennen tussen de pogingen de doorvoerklok zou resetten. Verhoog `-MaxWaitMinutes` als 65 niet genoeg is, of laat `-Delegated` weg om de standaard app-only-modus te gebruiken, die zo'n vertraging niet heeft.
-- `-ClientId` + `-ClientSecret`/`-CertificateThumbprint` hergebruikt je eigen bestaande App Registration in plaats van een tijdelijke aan te maken — die app moet al de applicatiemachtiging `Mail.ReadWrite` hebben (met admin consent).
+- `-ClientId` + `-ClientSecret`/`-CertificateThumbprint`, of `-AppOnly` (uit `graph.appid.json`), hergebruikt je eigen bestaande App Registration in plaats van een tijdelijke aan te maken — die app moet al de applicatiemachtiging `Mail.ReadWrite` hebben (met admin consent).
 
 **Parameters**
 
@@ -224,7 +243,8 @@ Standaard archiveert het script elke mailbox in de tenant zonder dat je er Full 
 | `-ClientId` | Nee | Client-ID van een bestaande App Registration voor app-only-authenticatie — slaat de automatische tijdelijke app over. Gebruik samen met `-TenantId` en `-ClientSecret` of `-CertificateThumbprint` |
 | `-ClientSecret` | Nee | Client secret voor de App Registration in `-ClientId` |
 | `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor de App Registration in `-ClientId` |
-| `-Delegated` | Nee | De automatische tijdelijke app-only-setup overslaan en gedelegeerd verbinden. Voor andere mailboxen wordt tijdelijke Full Access via Exchange Online automatisch toegekend, gepolld en ingetrokken (vereist Exchange Admin) |
+| `-AppOnly` | Nee | Je eigen app met `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
+| `-Delegated` | Nee | De automatische tijdelijke app-only-setup overslaan en gedelegeerd (`Mail.ReadWrite` + `Mail.ReadWrite.Shared`) verbinden. Voor andere mailboxen wordt tijdelijke Full Access via Exchange Online automatisch toegekend, gepolld en ingetrokken (vereist Exchange Admin). Niet onder GDAP |
 | `-MaxWaitMinutes` | Nee | Alleen bij `-Delegated`. Hoe lang het script blijft proberen terwijl het wacht tot Graph het Full Access-recht honoreert, voordat het opgeeft en het recht intrekt. Standaard `65` |
 | `-Apply` | Nee | De berichten echt verplaatsen. Zonder deze switch meldt het script alleen hoeveel berichten gearchiveerd zouden worden |
 
@@ -258,17 +278,11 @@ Standaard archiveert het script elke mailbox in de tenant zonder dat je er Full 
 ```
 
 **Opmerkingen**
-- Mailboxen worden altijd via Microsoft Graph gelezen en berichten altijd via Graph verplaatst, niet via Exchange Online-cmdlets — vereist `Microsoft.Graph.Authentication` (en `Microsoft.Graph.Applications` voor de standaard automatische modus met tijdelijke app, of `ExchangeOnlineManagement` voor het tijdelijke Full Access-recht van `-Delegated`)
+- Mailboxen worden altijd via Microsoft Graph gelezen en berichten altijd via Graph verplaatst, niet via Exchange Online-cmdlets — vereist `Microsoft.Graph.Authentication` (en `Microsoft.Graph.Applications` voor de standaard automatische modus met tijdelijke app, of `ExchangeOnlineManagement` voor het tijdelijke Full Access-recht van `-Delegated`). Aan het eind worden alleen de sessies verbroken die het script zelf heeft geopend
 - Toont voortgang met tijdstempel tijdens het pagineren door het Postvak IN, tijdens het verplaatsen van batches (`[HH:mm:ss] N / total moved (...%)`) en tijdens het pollen op de doorvoering van Full Access in `-Delegated`-modus
-- GDAP-bewust: onder een GDAP-sessie (`$global:authMode -eq 'GDAP'`, ingesteld via `Connect-Tenant` / `load.ps1`) wordt `-TenantId`, als die ontbreekt, automatisch afgeleid uit de geselecteerde klanttenant (`$global:cid`) — dezelfde terugvaloptie als in `Get-SharePointStorageReport.ps1` / `Remove-SharePointFileVersionsByDate.ps1`. Ook `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` worden gerespecteerd
+- GDAP-bewust: onder een GDAP-sessie (`$global:authMode -eq 'GDAP'`, ingesteld via `Connect-Tenant` / `load.ps1`) wordt `-TenantId`, als die ontbreekt, automatisch afgeleid uit de geselecteerde klanttenant (`$global:cid`) — via `Resolve-M365TenantId` in `Connect-M365.ps1`. Ook `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` worden gerespecteerd
 
-**Vereiste modules**
-
-```powershell
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
-Install-Module Microsoft.Graph.Applications    -Scope CurrentUser
-Install-Module ExchangeOnlineManagement        -Scope CurrentUser
-```
+**Vereiste modules:** `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `ExchangeOnlineManagement` — geïnstalleerd door `scripts\Startup\Install-Modules.ps1`.
 
 ---
 
@@ -283,7 +297,9 @@ Install-Module ExchangeOnlineManagement        -Scope CurrentUser
 | 3. Verplaatsen | `Convert-SharedCalendarToResource.ps1`: voorbeeld, daarna drie vragen — doorgaan? uitnodigingen versturen? origineel verwijderen? `-Apply` slaat de voorbeeldronde over |
 | 4. Melden | Wie de oude agenda in Outlook had en wie alleen rechten had: de mensen die moeten overstappen |
 
-**Eén aanmelding.** Een tijdelijke App Registration met alles wat beide scripts nodig hebben (`Calendars.ReadWrite`, `User.Read.All`, `Group.Read.All`, `MailboxSettings.ReadWrite`) wordt één keer aangemaakt, aan beide doorgegeven en aan het eind verwijderd — ook als er iets misgaat. Ook met Exchange Online wordt maar één keer verbinding gemaakt. Een bestaande app-only Graph-sessie of `-ClientId` / `-ClientSecret` wordt in plaats daarvan gebruikt als die is opgegeven.
+**Eén aanmelding.** Een tijdelijke App Registration met alles wat beide scripts nodig hebben (`Calendars.ReadWrite`, `User.Read.All`, `Group.Read.All`, `MailboxSettings.ReadWrite`) wordt één keer aangemaakt, aan beide doorgegeven en aan het eind verwijderd — ook als er iets misgaat. Ook met Exchange Online wordt maar één keer verbinding gemaakt — gedelegeerd via `Connect-M365Exchange` (apparaatcode en GDAP-klant volgens `load.config.ps1`), en beide scripts hergebruiken die sessie. Een bestaande app-only Graph-sessie of `-ClientId` / `-ClientSecret` wordt in plaats daarvan gebruikt als die is opgegeven.
+
+App-only Graph is de standaard omdat het niet anders kan: de agenda vinden leest de agendalijst van elke mailbox en de verhuizing schrijft in een nieuwe resourcemailbox, en daar komt geen gedelegeerd token bij. De aanmelding voor de tijdelijke app is altijd een apparaatcode via gewone REST, omdat Exchange dan al verbonden is en de MSAL van de Graph SDK botst met die van Exchange — om dezelfde reden werkt je eigen app hier alleen met `-ClientSecret`, niet met een certificaat of `-AppOnly`.
 
 Een mailbox waarvan de **hoofd**agenda overeenkomt (een `balie@`-account dat zelf de gedeelde agenda is) kan niet worden verplaatst; het script meldt dat en noemt het alternatief ter plaatse, `Set-Mailbox -Type Room`.
 
@@ -371,8 +387,9 @@ Verplaatst een gedeelde agenda uit de mailbox van een gebruiker naar een **eigen
 | `-PassThru` | Nee | Een resultaatobject teruggeven (`ResourceAddress`, `Items`, `Verified`, `SourceRemoved`, `BackupPath`) voor een aanroepend script |
 | `-SeriesHorizonDays` | Nee | Hoe ver vooruit uitzonderingen van open reeksen worden vergeleken (standaard 1095) |
 | `-BackupPath` | Nee | Back-upmap (standaard `C:\Temp\CalendarConvert_<calendar>_<timestamp>`) |
-| `-TenantId` | Nee | Tenant-ID of domein (standaard: de tenant van de Exchange-sessie) |
+| `-TenantId` | Nee | Tenant-ID of domein (standaard: de GDAP-klant, anders de tenant van de Exchange-sessie) |
 | `-ClientId` / `-ClientSecret` / `-CertificateThumbprint` | Nee | Je eigen App Registration voor app-only Graph-toegang |
+| `-AppOnly` | Nee | Je eigen app met `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -394,8 +411,9 @@ Stap 3 voert eerst de kopie opnieuw uit: alles wat al gekopieerd is wordt overge
 
 | | |
 |--|--|
-| Exchange Online | Exchange Administrator (`New-Mailbox`, maprechten). Een bestaande sessie wordt hergebruikt |
-| Graph | Applicatiemachtiging `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` voor categoriekleuren (optioneel). Dezelfde drie routes als [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)): een bestaande app-only-sessie, een eigen App Registration, of een tijdelijke die wordt verwijderd als de run eindigt. Gewone REST, dus geen MSAL-conflict tussen Exchange en Graph |
+| Exchange Online | Exchange Administrator (`New-Mailbox`, maprechten). Gedelegeerd via `Connect-M365Exchange` (apparaatcode en GDAP-klant volgens `load.config.ps1`); een bestaande sessie wordt hergebruikt |
+| Graph | Applicatiemachtiging `Calendars.ReadWrite`, plus `MailboxSettings.ReadWrite` voor categoriekleuren (optioneel). Dezelfde drie routes als [`Remove-PhishingMessage.ps1`](Remove-PhishingMessage.ps1) ([docs](#remove-phishingmessageps1)): een bestaande app-only-sessie, een eigen App Registration (`-ClientId`, of `-AppOnly`), of een tijdelijke die wordt verwijderd als de run eindigt. Gewone REST, dus geen MSAL-conflict tussen Exchange en Graph — en daarom altijd een apparaatcode voor de aanmelding van de tijdelijke app |
+| Waarom app-only | Kan niet anders: het script leest de agenda van één gebruiker en schrijft in een mailbox die het net heeft aangemaakt, en daar komt geen gedelegeerd token bij zonder expliciete rechten op beide — en Graph kan de categoriekleuren van een andere mailbox gedelegeerd helemaal niet lezen. Geen `-Delegated` |
 
 **Opmerkingen**
 
@@ -407,7 +425,7 @@ Stap 3 voert eerst de kopie opnieuw uit: alles wat al gekopieerd is wordt overge
 
 ## Auditscripts
 
-Maken automatisch verbinding met Exchange Online als er geen sessie actief is; hergebruiken een bestaande sessie als er al verbinding is.
+Maken automatisch verbinding met Exchange Online (standaard gedelegeerd, zie [Aanmelden](#aanmelden)); een bestaande sessie voor dezelfde tenant wordt hergebruikt en blijft open.
 
 ---
 
@@ -421,7 +439,9 @@ Haalt de rechten op agendamappen op voor één of alle mailboxen. Gebruikt `Fold
 |-----------|----------|-------------|
 | `-Mailbox` | Nee | UPN van één mailbox. Zonder deze parameter worden alle gebruikers- en gedeelde mailboxen gecontroleerd |
 | `-OutputPath` | Nee | Pad van het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -514,7 +534,8 @@ Zonder `-Mailbox` wordt elke mailbox in de tenant gescand — de enige manier om
 | `-TenantId` | Nee | Tenant-ID of domein. Optioneel voor de route met de tijdelijke app — de aanmelding bepaalt dan de tenant, en die wordt getoond |
 | `-ClientId` | Nee | Je eigen App Registration voor app-only Graph-toegang |
 | `-ClientSecret` | Nee | Client secret voor `-ClientId` (gewone REST, geen Graph SDK) |
-| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor `-ClientId` (via `Connect-MgGraph`) |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor `-ClientId` (via `Connect-M365Graph`, dat een passende sessie hergebruikt en alleen verbreekt wat het zelf opende) |
+| `-AppOnly` | Nee | Je eigen app met `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -539,10 +560,12 @@ Vereist de applicatiemachtigingen `Calendars.Read` en `User.Read.All`, plus `Gro
 | # | Route | Wat er nodig is |
 |---|-------|---------------|
 | 1 | Een app-only Graph-sessie die je al had opgezet | Niets — wordt gebruikt zoals ze is |
-| 2 | `-ClientId` + `-ClientSecret` of `-CertificateThumbprint` | Je eigen app met de machtigingen hierboven, met admin consent. Een ruimere machtiging (`Calendars.ReadWrite`, `Directory.Read.All`) wordt ook geaccepteerd |
+| 2 | `-ClientId` + `-ClientSecret` of `-CertificateThumbprint`, of `-AppOnly` | Je eigen app met de machtigingen hierboven, met admin consent. Een ruimere machtiging (`Calendars.ReadWrite`, `Directory.Read.All`) wordt ook geaccepteerd |
 | 3 | **Automatisch** — aanmelding met apparaatcode, een kortlevende App Registration die zichzelf de drie leesmachtigingen toekent en weer wordt verwijderd als de run eindigt (ook bij een fout) | Global Administrator of Privileged Role Administrator voor die aanmelding. Geen extra modules |
 
 Er wordt geen verbinding met Exchange Online gemaakt, dus het MSAL-conflict tussen Exchange en Graph dat onder `Remove-PhishingMessage.ps1` wordt beschreven, speelt hier niet. GDAP-bewust zoals de andere Graph-scripts: onder een GDAP-sessie wordt `-TenantId` afgeleid uit de geselecteerde klanttenant.
+
+**Waarom app-only, en geen `-Delegated`:** het rapport leest de agendalijst van elke mailbox. Een gedelegeerd token (`Calendars.Read.Shared`) ziet alleen de agenda's die met *jou* gedeeld zijn, niet wat andere gebruikers in hun eigen lijst zetten, dus een gedelegeerde run zou niets bruikbaars opleveren. De aanmelding van route 3 is altijd een apparaatcode via gewone REST, omdat `Move-SharedCalendar.ps1` dit script aanroept nadat het met Exchange verbonden is.
 
 **Opmerkingen**
 
@@ -568,7 +591,9 @@ Overgenomen vermeldingen en SELF-vermeldingen worden automatisch weggefilterd.
 |-----------|----------|-------------|
 | `-Mailbox` | Nee | UPN van één mailbox. Zonder deze parameter worden alle gebruikers- en gedeelde mailboxen gecontroleerd |
 | `-OutputPath` | Nee | Pad van het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -599,7 +624,9 @@ Auditeert distributiegroepen en mail-enabled beveiligingsgroepen:
 | `-Group` | Nee | Naam, alias of e-mailadres van één groep. Zonder deze parameter worden alle distributiegroepen geaudit |
 | `-IncludeMembers` | Nee | Ook de individuele groepsleden in het rapport opnemen |
 | `-OutputPath` | Nee | Pad van het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -635,7 +662,9 @@ Valideert de DKIM-ondertekeningsconfiguratie voor één of alle geaccepteerde do
 |-----------|----------|-------------|
 | `-Domain` | Nee | Te valideren domein. Zonder deze parameter worden alle domeinen met een ondertekeningsconfiguratie gecontroleerd |
 | `-ShowAll` | Nee | Het volledige ondertekeningsconfiguratie-object tonen in plaats van de samengevatte weergave |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -659,7 +688,9 @@ Controleert alle mailboxen op doorstuurregels die naar externe domeinen (buiten 
 |-----------|----------|-------------|
 | `-Mailbox` | Nee | UPN van één mailbox. Zonder deze parameter worden alle mailboxen gecontroleerd |
 | `-OutputPath` | Nee | Pad van het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -683,7 +714,9 @@ Rapporteert mailboxgroottes (MB/GB), aantallen items en quotumstatus. Aflopend g
 |-----------|----------|-------------|
 | `-Mailbox` | Nee | UPN van één mailbox. Zonder deze parameter worden alle gebruikers- en gedeelde mailboxen gerapporteerd |
 | `-OutputPath` | Nee | Pad van het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -786,7 +819,9 @@ Alleen direct lidmaatschap — iemand in een geneste groep is geen treffer. De g
 | `-IncludeM365Groups` | Nee | Ook Microsoft 365-groepen rapporteren, inclusief groepen achter een Team |
 | `-OutputPath` | Nee | Pad van de `.xlsx` (standaard: `C:\Temp\Distributielijsten_<timestamp>.xlsx`) |
 | `-Csv` | Nee | Twee CSV-bestanden schrijven in plaats van Excel |
-| `-TenantId` | Nee | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard: de GDAP-klant (`authMode = 'GDAP'` in `load.config.ps1`), anders je eigen tenant |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met je eigen app (vereist `Exchange.ManageAsApp` en een Exchange-rol). Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -814,7 +849,8 @@ Alleen direct lidmaatschap — iemand in een geneste groep is geen treffer. De g
 ```
 
 **Opmerkingen**
-- Vereist [ImportExcel](https://github.com/dfinke/ImportExcel) voor de `.xlsx`. Als de module ontbreekt, biedt het script aan haar te installeren, en schrijft het twee CSV-bestanden (`*-overzicht.csv`, `*-leden.csv`) als je weigert — een ontbrekende module kost je nooit het rapport. `Install-Modules.ps1` installeert haar
+- Vereist [ImportExcel](https://github.com/dfinke/ImportExcel) voor de `.xlsx`. Als de module ontbreekt, meldt het script dat, verwijst het naar `scripts\Startup\Install-Modules.ps1` en schrijft het in plaats daarvan twee CSV-bestanden (`*-overzicht.csv`, `*-leden.csv`) — een ontbrekende module kost je nooit het rapport. Het script installeert zelf geen modules meer
+- Blijft op Exchange Online: Graph's `transitiveMembers` dekt distributielijsten en mail-enabled beveiligingsgroepen, maar geen dynamische distributiegroepen, `ManagedBy`-eigenaars of e-mailcontactpersonen zoals dit rapport ze toont
 - Een lijst zonder leden krijgt een rij `(geen leden)` in het blad `Leden` in plaats van er stilletjes in te ontbreken — een lege lijst is precies wat een klant wil opmerken
 - Lidmaatschap wordt per groep gelezen, dus iemand die op geen enkele lijst staat, verschijnt nergens — het rapport gaat over groepslidmaatschap, niet over de gebruikersdirectory
 - Een domeinfilter zonder treffers meldt *"No distribution list has a member on @x"* en schrijft geen bestand — een lege werkmap leest als een mislukt rapport in plaats van als het antwoord dat het is
@@ -839,7 +875,7 @@ Beantwoordt "wie heeft dit ontvangen, wanneer precies, en waar ging het daarna h
 
 Daarbovenop rapporteert het script de **ingestelde** doorsturing van elke interne mailbox die in de trace voorkomt — `ForwardingSMTPAddress` / `ForwardingAddress` plus elke inboxregel met `ForwardTo` / `RedirectTo` / `ForwardAsAttachmentTo` — zodat een doorsturing die binnen het getraceerde venster niet is afgegaan, toch zichtbaar is.
 
-Gebruikt `Get-MessageTraceV2` als die beschikbaar is en valt terug op het uitgefaseerde `Get-MessageTrace`. Bereiken die langer zijn dan de V2-limiet worden automatisch in blokken van 10 dagen opgesplitst, en elk blok wordt gepagineerd tot het uitgeput is.
+Gebruikt alleen `Get-MessageTraceV2` en `Get-MessageTraceDetailV2` — de oude `Get-MessageTrace` / `Get-MessageTraceDetail` zijn uitgefaseerd, en het script stopt met een hint als de V2-cmdlets ontbreken. Bereiken die langer zijn dan de V2-limiet worden automatisch in blokken van 10 dagen opgesplitst, en elk blok wordt met `-StartingRecipientAddress` gepagineerd tot het uitgeput is. Exchange Online PowerShell omdat Graph geen message-trace-API heeft; de doorstuurconfiguratie wordt daar ook gelezen.
 
 **Parameters**
 
@@ -861,7 +897,9 @@ Gebruikt `Get-MessageTraceV2` als die beschikbaar is en valt terug op het uitgef
 | `-MaxSiblingLookups` | Nee | `100` | Maximum aantal sibling-opvragingen |
 | `-SkipForwardingConfig` | Nee | uit | De controle van mailboxdoorsturing / inboxregels overslaan |
 | `-OutputPath` | Nee | `C:\Temp\` / `~/Downloads` | Pad van de hoofd-CSV. Detail- en doorstuurrapporten worden ernaast geschreven met de achtervoegsels `_Details` / `_ForwardingConfig` |
-| `-TenantId` | Nee | — | Entra ID-tenant-ID of domein |
+| `-TenantId` | Nee | GDAP-klant / eigen tenant | Tenant-ID of domein |
+| `-ClientId` / `-CertificateThumbprint` | Nee | — | App-only aanmelden met je eigen app. Zonder: gedelegeerd, als jezelf |
+| `-AppOnly` | Nee | uit | App-only met de `ClientId` en `CertificateThumbprint` van de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -892,11 +930,7 @@ Gebruikt `Get-MessageTraceV2` als die beschikbaar is en valt terug op het uitgef
 - Voor het lezen van inboxregels zijn rechten op de mailbox nodig — mailboxen die niet gelezen kunnen worden, worden stil overgeslagen (gebruik `-Verbose` om te zien welke)
 - `-IncludeDetails` doet één API-aanroep per bericht en is onderhevig aan throttling van Exchange Online; verhoog `-MaxDetailLookups` bewust
 
-**Vereiste module**
-
-```powershell
-Install-Module ExchangeOnlineManagement -Scope CurrentUser
-```
+**Vereiste module:** `ExchangeOnlineManagement` — geïnstalleerd door `scripts\Startup\Install-Modules.ps1`.
 
 ---
 
@@ -944,15 +978,17 @@ De engine is standaard `Graph` als `-Mailbox` is opgegeven en anders `Purview`. 
 | `-IncludeCalendar` | Nee | uit | Ook overeenkomende **agenda-items** verwijderen, niet alleen mail. Werkt met **beide engines**; vereist `-Subject` of `-SenderAddress` |
 | `-CalendarDaysBack` | Nee | `30` | Hoe ver terug de agenda wordt doorzocht |
 | `-CalendarDaysForward` | Nee | `365` | Hoe ver vooruit de agenda wordt doorzocht |
-| `-VerifyWithGraph` | Nee | uit | Na een Purview-purge de betrokken mailboxen via Graph controleren om te bevestigen dat de berichten echt weg zijn. Vereist dezelfde app-only Graph-sessie als `-Engine Graph` |
+| `-VerifyWithGraph` | Nee | uit | Na een Purview-purge de betrokken mailboxen via Graph controleren om te bevestigen dat de berichten echt weg zijn. Vereist dezelfde Graph-toegang als `-Engine Graph` |
 | `-MaxPurgeRounds` | Nee | `10` | Purview purget maximaal 10 items per mailbox per actie, dus het script werkt in rondes. 10 rondes = tot 100 items per mailbox |
 | `-MaxMessagesPerMailbox` | Nee | `500` | Veiligheidslimiet per mailbox voor Graph; het bereiken ervan wordt expliciet gemeld |
 | `-TimeoutMinutes` | Nee | `30` | Hoe lang er wordt gewacht tot een zoek- of purge-actie klaar is |
 | `-OutputPath` | Nee | `C:\Temp\` / `~/Downloads` | Pad van het CSV-rapport |
-| `-TenantId` | Nee | — | Tenant-ID of domein, gebruikt als het script zelf verbinding moet maken |
+| `-TenantId` | Nee | GDAP-klant | Tenant-ID of domein, gebruikt als het script zelf verbinding moet maken |
 | `-ClientId` | Nee | — | Je eigen App Registration voor app-only Graph-authenticatie — slaat de automatische tijdelijke app over |
 | `-ClientSecret` | Nee | — | Client secret voor `-ClientId` |
 | `-CertificateThumbprint` | Nee | — | Certificaatvingerafdruk voor `-ClientId` |
+| `-AppOnly` | Nee | uit | Je eigen app met `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
+| `-Delegated` | Nee | uit | Graph-engine als jezelf (`Mail.ReadWrite.Shared`, plus `Calendars.ReadWrite.Shared` met `-IncludeCalendar`) — helemaal geen app. Bereikt **alleen mailboxen waarop je al Full Access hebt**, dus geschikt voor een paar bekende ontvangers, niet voor `-AllMailboxes`. Niet onder GDAP |
 
 **Voorbeelden**
 
@@ -986,6 +1022,10 @@ De engine is standaard `Graph` als `-Mailbox` is opgegeven en anders `Purview`. 
 # 6. Campagne met HTML-bijlage
 .\Remove-PhishingMessage.ps1 -AttachmentName "*.html" `
     -Sender "billing@evil.example" -Apply
+
+# 7. Twee bekende ontvangers waarop je Full Access hebt — Graph als jezelf, geen app
+.\Remove-PhishingMessage.ps1 -Mailbox "a@contoso.com","b@contoso.com" `
+    -Sender "no-reply@evil.example" -Delegated -Apply
 ```
 
 **Typisch verloop van een incident**
@@ -1005,8 +1045,8 @@ De engine is standaard `Graph` als `-Mailbox` is opgegeven en anders `Purview`. 
 
 | Engine | Recht |
 |--------|-----------|
-| `Purview` | Lidmaatschap van de rol **Search And Purge** — in de praktijk de rolgroep *Organization Management* of *eDiscovery Manager* in de Purview-complianceportal. Maakt verbinding via `Connect-IPPSSession -EnableSearchOnlySession` |
-| `Graph` | App-only `Mail.ReadWrite`. **Dat hoef je niet zelf te regelen** — zie de drie routes hieronder |
+| `Purview` | Lidmaatschap van de rol **Search And Purge** — in de praktijk de rolgroep *Organization Management* of *eDiscovery Manager* in de Purview-complianceportal. Maakt gedelegeerd verbinding via `Connect-IPPSSession -EnableSearchOnlySession`, en bereikt een GDAP-klant met `-DelegatedOrganization` (een eigen aanroep van het script, omdat `Connect-M365Exchange -IncludeCompliance` `-EnableSearchOnlySession` niet doorgeeft) |
+| `Graph` | Standaard app-only `Mail.ReadWrite` — **dat hoef je niet zelf te regelen**, zie de drie routes hieronder. Of `-Delegated` met Full Access op de doelmailboxen |
 
 **Hoe de Graph-engine (en `-VerifyWithGraph`) aan toegang komt**
 
@@ -1015,7 +1055,7 @@ Hetzelfde drieledige patroon als [`Move-InboxToArchive.ps1`](Move-InboxToArchive
 | # | Route | Wat er nodig is |
 |---|-------|---------------|
 | 1 | Een app-only Graph-sessie die je al had opgezet | Niets — wordt gebruikt zoals ze is |
-| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` of `-CertificateThumbprint`) | Je eigen app met de applicatiemachtiging `Mail.ReadWrite`, met admin consent. **Met `-ClientSecret` is dit de robuustste route** — die haalt haar token via gewone REST en laadt nooit de Graph SDK |
+| 2 | `-ClientId` + `-TenantId` + (`-ClientSecret` of `-CertificateThumbprint`), of `-AppOnly` | Je eigen app met de applicatiemachtiging `Mail.ReadWrite`, met admin consent. **Met `-ClientSecret` is dit de robuustste route** — die haalt haar token via gewone REST en laadt nooit de Graph SDK |
 | 3 | **Automatisch** — aanmelding met apparaatcode, daarna een kortlevende App Registration die zichzelf `Mail.ReadWrite` toekent, een app-only-token afgeeft en **weer wordt verwijderd als de run klaar is** | Global Administrator of Privileged Role Administrator voor die eenmalige aanmelding. Geen extra modules |
 
 Route 3 is wat er gebeurt als je niets meegeeft, dus `-VerifyWithGraph` werkt direct. De gedelegeerde rol verleent de consent, dus er is geen apart admin-consentscherm. Als de setup halverwege mislukt, wordt de half aangemaakte app verwijderd voordat de fout wordt gemeld — er blijven geen wezen achter in Entra ID.
@@ -1035,7 +1075,7 @@ Routes 2 (met `-ClientSecret`) en 3 zijn allebei gebouwd op gewone REST — de d
 >
 > Als `-VerifyWithGraph` met de Purview-engine wordt gebruikt, wordt de Graph-toegang **vóór** de purge opgezet, zodat een verificatie die niet kan draaien vooraf wordt gemeld in plaats van nadat de berichten weg zijn. De purge wordt hoe dan ook uitgevoerd — een mislukte verificatie betekent nooit een mislukte purge.
 
-> Gedelegeerde `Mail.ReadWrite` bereikt alleen ooit *je eigen* mailbox, dus een gedelegeerde sessie wordt bewust **niet** geaccepteerd voor de Graph-engine; het script valt in plaats daarvan door naar route 2 of 3. Let op: `Mail.ReadWrite` (applicatie) geeft toegang tot **elke** mailbox in de tenant; beperk de app met `New-ApplicationAccessPolicy` als dat ruimer is dan je wilt.
+> Gedelegeerde `Mail.ReadWrite` bereikt alleen ooit *je eigen* mailbox, dus een bestaande gedelegeerde `Connect-MgGraph`-sessie wordt bewust **niet** geaccepteerd voor de Graph-engine; het script valt in plaats daarvan door naar route 2 of 3. Daarom is app-only de standaard. `-Delegated` is het expliciete alternatief: een aanmelding met apparaatcode via dezelfde gewone REST met `Mail.ReadWrite.Shared`, ververst voor lange runs, die alleen werkt op mailboxen waarop je al Full Access hebt. Let op: `Mail.ReadWrite` (applicatie) geeft toegang tot **elke** mailbox in de tenant; beperk de app met `New-ApplicationAccessPolicy` als dat ruimer is dan je wilt.
 
 > GDAP-bewust: onder een GDAP-sessie (`$global:authMode -eq 'GDAP'`, ingesteld door `Connect-Tenant` / `load.ps1`) wordt `-TenantId` afgeleid uit de geselecteerde klanttenant, net als bij de SharePoint-scripts.
 
@@ -1061,12 +1101,7 @@ Routes 2 (met `-ClientSecret`) en 3 zijn allebei gebouwd op gewone REST — de d
 - KQL ondersteunt geen jokertekens binnen een woordgroep, dus bij `-Subject "*invoice*"` worden de jokertekens bij de Purview-engine weggehaald en wordt als woordgroep gematcht; bij Graph werken de jokertekens zoals geschreven
 - Elke run schrijft een CSV-rapport van wat er is gevonden en wat er is verwijderd
 
-**Vereiste modules**
-
-```powershell
-Install-Module ExchangeOnlineManagement       -Scope CurrentUser
-Install-Module Microsoft.Graph.Authentication -Scope CurrentUser   # optioneel, zie hieronder
-```
+**Vereiste modules:** `ExchangeOnlineManagement`, en optioneel `Microsoft.Graph.Authentication` — beide geïnstalleerd door `scripts\Startup\Install-Modules.ps1`.
 
 Microsoft.Graph.Authentication is alleen nodig om een bestaande `Connect-MgGraph`-sessie te hergebruiken of om `-CertificateThumbprint` te gebruiken. De routes met `-ClientSecret` en met de automatische tijdelijke app draaien op gewone REST en hebben niets nodig naast ExchangeOnlineManagement.
 
@@ -1101,10 +1136,12 @@ Berichten die zonder auditrecord in **Archief** zijn beland — Exchange auditee
 | `-UnauditedArchiveToInbox` | Nee | uit | Ook niet-geauditeerde Archief-items die in het venster zijn gewijzigd naar het Postvak IN verplaatsen |
 | `-Apply` | Nee | uit | **Echt terugzetten.** Zonder deze switch rapporteert de run alleen |
 | `-OutputPath` | Nee | `C:\Temp\` / `~/Downloads` | Pad van het CSV-rapport; het audittrail wordt ernaast geschreven als `*_Audit.csv` |
-| `-TenantId` | Nee | — | Tenant-ID of domein; nodig voor app-only Graph, tenzij af te leiden uit GDAP |
+| `-TenantId` | Nee | GDAP-klant | Tenant-ID of domein; nodig voor app-only Graph, tenzij af te leiden uit GDAP |
 | `-ClientId` | Nee | — | Je eigen App Registration (Mail.ReadWrite-applicatiemachtiging) — slaat de tijdelijke app over |
 | `-ClientSecret` | Nee | — | Client secret voor `-ClientId` |
 | `-CertificateThumbprint` | Nee | — | Certificaatvingerafdruk voor `-ClientId` |
+| `-AppOnly` | Nee | uit | Je eigen app met `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
+| `-Delegated` | Nee | uit | Graph als jezelf (`Mail.ReadWrite.Shared`), helemaal geen app. Werkt alleen als je **al Full Access hebt** op `-Mailbox`; een vers toegekend recht kan tot een uur nodig hebben om Graph te bereiken. Niet onder GDAP |
 
 **Voorbeelden**
 
@@ -1121,6 +1158,9 @@ Berichten die zonder auditrecord in **Archief** zijn beland — Exchange auditee
 # 3. Alleen de verwijderingen, in een precies venster — helemaal geen Graph-toegang nodig
 .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Include Deleted `
     -After "2026-09-25 14:00" -Before "2026-09-25 16:00" -Apply
+
+# 3b. Graph als jezelf, omdat je al Full Access op de mailbox hebt
+.\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 -Delegated
 
 # 4. Een run van Move-InboxToArchive.ps1 terugdraaien, inclusief de niet-geauditeerde Archief-items
 .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 `
@@ -1149,7 +1189,8 @@ Berichten die zonder auditrecord in **Archief** zijn beland — Exchange auditee
 |------|-----------|
 | Auditlog | **View-Only Audit Logs** of **Audit Logs** (Organization Management / Compliance Management) |
 | `Deleted` | **Mailbox Import Export** — standaard in geen enkele rolgroep: `New-ManagementRoleAssignment -Role "Mailbox Import Export" -User admin@contoso.com`, daarna opnieuw verbinden. **Optioneel:** zonder deze rol zet de run via Graph terug — alles behalve hard verwijderde items |
-| `Moved` (en `Deleted` zonder de rol) | App-only `Mail.ReadWrite`, via dezelfde drie routes als [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): een bestaande app-only-sessie, `-ClientId`, of een tijdelijke app die aan het eind wordt verwijderd |
+| `Moved` (en `Deleted` zonder de rol) | App-only `Mail.ReadWrite`, via dezelfde drie routes als [`Remove-PhishingMessage.ps1`](#remove-phishingmessageps1): een bestaande app-only-sessie, `-ClientId` / `-AppOnly`, of een tijdelijke app die aan het eind wordt verwijderd (de aanmelding daarvoor is altijd een apparaatcode via gewone REST, om uit de buurt te blijven van de MSAL van de Exchange-module). App-only is de standaard omdat een gedelegeerd token de mailbox van een andere gebruiker alleen met Full Access erop bereikt; `-Delegated` neemt die route als je die hebt |
+| Aanmelden | Exchange Online maakt gedelegeerd verbinding via `Connect-M365Exchange` (apparaatcode en GDAP-klant volgens `load.config.ps1`); een bestaande sessie wordt hergebruikt |
 
 **Opmerkingen**
 

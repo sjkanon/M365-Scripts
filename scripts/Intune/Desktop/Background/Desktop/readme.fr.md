@@ -2,7 +2,20 @@
 
 [M365-Scripts](../../../../../readme.fr.md) › [scripts](../../../../readme.fr.md) › [Intune](../../../readme.fr.md) › [Desktop](../../readme.fr.md) › [Background](../readme.fr.md) › **Desktop**
 
-# Set-CorporateWallpaper.ps1
+# Desktop
+
+Fond d'écran d'entreprise du bureau via Intune — le définir, et le retirer.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Set-CorporateWallpaper.ps1`](Set-CorporateWallpaper.ps1) ([docs](#set-corporatewallpaperps1)) | Télécharger le fond d'écran d'entreprise et l'imposer à tous les utilisateurs (PersonalizationCSP, utilisateur actuel, Default User) |
+| [`Remove-CorporateWallpaper.ps1`](Remove-CorporateWallpaper.ps1) ([docs](#remove-corporatewallpaperps1)) | Annuler le fond d'écran d'entreprise pour chaque utilisateur — uniquement ce qu'a écrit `Set-CorporateWallpaper.ps1`, l'écran de verrouillage d'entreprise reste |
+
+---
+
+## Set-CorporateWallpaper.ps1
 
 > Auteur : Sjoerd Kanon
 
@@ -125,3 +138,41 @@ L'empaquetage en application Win32 permet de contrôler les réexécutions et d'
 | 2026-04-14 | 2.5 | Ajout d'une étape de redémarrage d'`explorer.exe` pour que les changements de fond d'écran/thème soient visibles immédiatement pour les utilisateurs connectés |
 | 2026-04-14 | 2.6 | Rétablissement des valeurs de configuration génériques par défaut (`$ImageUrl`, `$ClientName`) pour des déploiements clients réutilisables |
 | 2026-04-14 | 2.7 | Ajout d'une sauvegarde de sécurité du fond d'écran actuel et modification de l'ordre de remplacement pour que le fond d'écran précédent reste disponible si la mise à jour échoue |
+
+---
+
+## Remove-CorporateWallpaper.ps1
+
+Annule ce que `Set-CorporateWallpaper.ps1` a mis en place, et uniquement cela. À exécuter en tant que SYSTEM (script de plateforme Intune, ou commande de désinstallation de l'application Win32).
+
+1. **PersonalizationCSP** — supprime les valeurs `DesktopImagePath`, `DesktopImageUrl` et `DesktopImageStatus`. La clé elle-même n'est supprimée que si elle est alors vide : [`Make-lockscreen.ps1`](../Lockscreen/Make-lockscreen.ps1) conserve ses valeurs `LockScreen*` dans la même clé
+2. **`HKLM\...\Policies\System`** — supprime `Wallpaper` et `WallpaperStyle`, mais seulement s'ils pointent vers un fond d'écran d'entreprise ; une stratégie définie par autre chose est conservée
+3. **Chaque ruche utilisateur chargée** (`S-1-5-21-*`) — un fond d'écran pointant vers un fichier d'entreprise est remis au fond Windows par défaut (`img0.jpg`, style Remplir), et le cache de fond d'écran transcodé de cet utilisateur est vidé pour que l'ancienne image ne subsiste pas
+4. **`HKCU` de l'utilisateur courant** — même réinitialisation, mais seulement hors exécution en SYSTEM (en SYSTEM, `HKCU` est le profil de SYSTEM et l'étape 3 a déjà couvert les utilisateurs)
+5. **Profil Default User** (`C:\Users\Default\NTUSER.DAT`) — même réinitialisation, pour que les nouveaux comptes ne reçoivent plus le fond d'écran. Ignoré avec un message si la ruche ne peut pas être chargée (non élevé)
+6. **Fichiers** — supprime les fichiers `corporate-background-*` de `C:\ProgramData\Wallpapers`. Le dossier n'est supprimé que s'il est vide — l'image de l'écran de verrouillage s'y trouve aussi
+7. Redémarre `explorer.exe` pour que le changement soit visible immédiatement
+
+« Un fichier d'entreprise » désigne un fichier `corporate-background-*` dans `C:\ProgramData\Wallpapers` — le nom que lui donne `Set-CorporateWallpaper.ps1`.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-WhatIf` | Afficher chaque valeur et chaque fichier qui serait supprimé ou réinitialisé ; ne rien modifier |
+
+**Exemples**
+
+```powershell
+# En tant que SYSTEM (script de plateforme Intune / commande de désinstallation Win32)
+powershell.exe -ExecutionPolicy Bypass -File Remove-CorporateWallpaper.ps1
+
+# Voir ce qu'il ferait
+.\Remove-CorporateWallpaper.ps1 -WhatIf
+```
+
+**Remarques**
+
+- Journal : `C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\CorporateWallpaper-Remove.log`
+- Les utilisateurs dont le profil n'est pas chargé (non connectés) gardent la valeur du fond d'écran dans leur propre ruche ; Windows affiche le fond par défaut dès que le fichier a disparu, et la prochaine exécution de ce script pendant qu'ils sont connectés réinitialise la valeur
+- Les versions précédentes supprimaient toute la clé PersonalizationCSP et tout le dossier `C:\ProgramData\Wallpapers`, ce qui supprimait aussi l'écran de verrouillage d'entreprise

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Create or update a baseline Exchange Online Protection anti-spam and
@@ -15,6 +15,15 @@
 
     Default behavior is a safe report-only preview — no changes are made
     without -Apply.
+
+    Sign-in: delegated (you sign in as the admin) by default, through
+    scripts\Startup\Connect-M365.ps1 — device code and the GDAP customer come
+    from load.config.ps1; under GDAP the customer is reached with
+    -DelegatedOrganization (earlier versions passed -Organization, which only
+    applies to app-only sign-in, so they landed in the partner's own tenant).
+    App-only with -ClientId + -CertificateThumbprint, or -AppOnly
+    (graph.appid.json). An existing Exchange session for the tenant is reused
+    and left connected.
 
 .PARAMETER Domains
     Recipient domain(s) the baseline rule(s) should apply to. Defaults to all
@@ -40,7 +49,19 @@
     script only reports the recommended baseline vs. what currently exists.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1),
+    else the tenant you sign in to. App-only needs the domain form
+    (contoso.onmicrosoft.com).
+
+.PARAMETER ClientId
+    App registration for app-only Exchange Online sign-in (with
+    -CertificateThumbprint).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Preview only
@@ -68,6 +89,9 @@
 
     Supports -WhatIf (SupportsShouldProcess).
 
+    Exchange Online only: anti-spam and anti-malware (EOP) policies have no
+    Microsoft Graph API.
+
     Required module: ExchangeOnlineManagement
 #>
 [CmdletBinding(SupportsShouldProcess)]
@@ -81,19 +105,16 @@ param(
     [string] $MalwarePolicyName = 'MSP Baseline Anti-Malware',
     [switch] $UpdateExisting,
     [switch] $Apply,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
 
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-AcceptedDomain -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -201,4 +222,4 @@ if ($Protection -in 'Malware', 'Both') {
 }
 
 # ── Disconnect if we connected ──────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+Disconnect-M365Exchange $exo

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Validate DKIM signing configuration and DNS records for Exchange Online domains.
@@ -21,7 +21,19 @@
     Show full DKIM signing config object instead of the summarised view.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself (device code per load.config.ps1).
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .EXAMPLE
     .\Test-DkimConfig.ps1
@@ -36,21 +48,21 @@
 param(
     [string] $Domain,
     [switch] $ShowAll,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
 
-$isWindows = $PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows
+# Not $isWindows: PowerShell 7 has a read-only automatic $IsWindows (variables are case-insensitive).
+$onWindows = $PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-DkimSigningConfig -ErrorAction Stop | Select-Object -First 1
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# Delegated by default (device code and GDAP customer per load.config.ps1),
+# app-only with -ClientId/-CertificateThumbprint or -AppOnly. Exchange Online
+# PowerShell because Graph has no API for DKIM signing configuration.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Helper: compare public key in DNS TXT to Exchange config ──────────────────
 function Compare-DkimKeys {
@@ -89,7 +101,7 @@ function Test-DomainDkim {
     }
 
     if (-not $isOnmicrosoft) {
-        if (-not $isWindows) {
+        if (-not $onWindows) {
             Write-Host "  [INFO] DNS lookup skipped — Resolve-DnsName is Windows-only." -ForegroundColor DarkGray
         } else {
             Write-Host "  Checking DNS..." -ForegroundColor DarkGray
@@ -170,7 +182,7 @@ if ($Domain) {
 
         if ($Domain -notmatch '(onmicrosoft|microsoftonline)\.com$') {
             # Try DNS-only check (no EXO config yet)
-            if ($isWindows) {
+            if ($onWindows) {
                 Write-Host "  Checking DNS CNAME records only..." -ForegroundColor DarkGray
                 Write-Host ""
                 foreach ($n in 1, 2) {
@@ -200,4 +212,4 @@ if ($Domain) {
 }
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo

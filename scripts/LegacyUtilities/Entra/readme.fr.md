@@ -4,9 +4,7 @@
 
 # Legacy Utilities — Entra
 
-Utilitaires d'appartenance aux groupes et de Conditional Access via Microsoft Graph. Ils se
-connectent automatiquement si aucune session n'est active, et réutilisent la session existante
-si vous êtes déjà connecté.
+Utilitaires d'appartenance aux groupes et de Conditional Access via Microsoft Graph. Ils se connectent via [`Connect-M365.ps1`](../../Startup/readme.fr.md) : en délégué en tant qu'administrateur par défaut (navigateur, ou code d'appareil / client GDAP selon `load.config.ps1`), en app-only avec `-ClientId` + `-CertificateThumbprint` ou `-AppOnly` (application de `graph.appid.json`). Une session adaptée pour le bon tenant est réutilisée et reste connectée ; seule une session ouverte par le script est fermée. Chaque script accepte `-TenantId`, `-ClientId`, `-CertificateThumbprint` et `-AppOnly`.
 
 ---
 
@@ -33,11 +31,18 @@ Ajoute à un groupe, ou en retire, un membre unique ou une liste de membres au f
 | `-CsvPath` | * | Liste de membres CSV/TXT |
 | `-Action` | Non | `Add` (par défaut) ou `Remove` |
 | `-Apply` | Non | Modifier réellement l'appartenance (par défaut : aperçu) |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 ```powershell
 .\Add-M365GroupMember.ps1 -GroupId "Sales Team" -Member "j.doe@contoso.com" -Apply
 .\Add-M365GroupMember.ps1 -GroupId "Sales Team" -CsvPath .\leavers.csv -Action Remove -Apply
 ```
+
+**Remarques**
+- Un nom de groupe contenant des apostrophes est échappé pour le filtre, et un nom correspondant à plus d'un groupe arrête le script (auparavant, la première correspondance était prise)
+- Étendues déléguées : `GroupMember.ReadWrite.All`, `Group.Read.All`, `User.Read.All` (cette dernière manquait pour la recherche des membres)
 
 ---
 
@@ -58,3 +63,7 @@ d'un ancien script qui utilisait le module retiré AzureADPreview.
 ```powershell
 Install-Module Microsoft.Graph -Scope CurrentUser
 ```
+
+**Remarques**
+- Chaque fichier contient la stratégie exactement telle que Graph la renvoie (`GET /identity/conditionalAccess/policies`, paginé) ; auparavant, les objets du SDK étaient sérialisés avec `-Depth 10`, ce qui ajoute des propriétés d'enveloppe du SDK et peut tronquer les conditions imbriquées
+- Étendue déléguée : `Policy.Read.All`

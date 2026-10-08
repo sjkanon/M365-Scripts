@@ -2,7 +2,19 @@
 
 [M365-Scripts](../../../../../readme.fr.md) › [scripts](../../../../readme.fr.md) › [Intune](../../../readme.fr.md) › [Desktop](../../readme.fr.md) › [Background](../readme.fr.md) › **Lockscreen**
 
-# Make-lockscreen.ps1
+# Lockscreen
+
+Image d'entreprise pour l'écran de verrouillage via Intune.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Make-lockscreen.ps1`](Make-lockscreen.ps1) ([docs](#make-lockscreenps1)) | Télécharger l'image d'entreprise de l'écran de verrouillage et l'imposer via PersonalizationCSP |
+
+---
+
+## Make-lockscreen.ps1
 
 > Auteur : Sjoerd Kanon
 

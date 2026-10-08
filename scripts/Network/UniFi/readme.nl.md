@@ -14,7 +14,7 @@ Tooling voor een UniFi Network Controller of UniFi OS-console (UDM/UDM-Pro/UDR).
 |--------|-------------|
 | [`Get-UnifiNetworkReport.ps1`](Get-UnifiNetworkReport.ps1) ([docs](#get-unifinetworkreportps1)) | Een HTML-rapport met netwerkdocumentatie genereren (apparaten, firmware, uptime) |
 | [`Update-UnifiFirmware.ps1`](Update-UnifiFirmware.ps1) ([docs](#update-unififirmwareps1)) | Firmware-upgrades over sites heen weergeven en optioneel starten |
-| [`UnifiApi.ps1`](UnifiApi.ps1) | Gedeelde helper voor aanmelding/sessie, automatisch dot-sourced door de twee scripts hierboven — niet bedoeld om rechtstreeks uit te voeren |
+| [`UnifiApi.ps1`](UnifiApi.ps1) ([docs](#unifiapips1)) | Gedeelde helper voor aanmelding/sessie, automatisch dot-sourced door de twee scripts hierboven — niet bedoeld om rechtstreeks uit te voeren |
 
 ---
 
@@ -74,3 +74,11 @@ Toont per site de apparaten waarvoor een firmware-upgrade beschikbaar is (volgen
 - Beide scripts ondersteunen de klassieke zelfgehoste UniFi Network Controller (`/api/login`) en UniFi OS-consoles (`/api/auth/login` + `/proxy/network/...`) — bij het aanmelden wordt automatisch gedetecteerd welke van de twee er is.
 - `-SkipCertificateCheck` is geïmplementeerd voor zowel PowerShell 7+ (native parameter) als Windows PowerShell 5.1 (tijdelijke callback voor certificaatvalidatie, direct na het verzoek teruggezet).
 - Na elke run wordt altijd een CSV-/HTML-rapport geschreven, ook bij een proefdraai.
+
+---
+
+### UnifiApi.ps1
+
+Gedeelde hulpfuncties voor beide scripts hierboven, automatisch dot-sourced — niet bedoeld om los uit te voeren, en het heeft geen parameters. Het regelt de aanmelding (klassieke zelf-gehoste controller en UniFi OS-consoles zoals UDM/UDM-Pro/UDR, die een ander auth-endpoint, een CSRF-header en het pad `/proxy/network/...` gebruiken), de sessiecookies en de afhandeling van zelfondertekende certificaten voor zowel Windows PowerShell 5.1 als PowerShell 7+. Functies: `Connect-UnifiController`, `Disconnect-UnifiController`, `Invoke-UnifiApi`, `Invoke-UnifiRestMethod`, `Get-UnifiSite`, `Get-UnifiDevice`.
+
+Referenties komen altijd uit `Get-Credential` (interactief of van het aanroepende script) — nooit hardcoded.

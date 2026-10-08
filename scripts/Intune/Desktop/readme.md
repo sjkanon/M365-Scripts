@@ -29,7 +29,7 @@ Intune-deployed desktop customization: corporate wallpaper + lockscreen, and a t
 
 ### Deploy-AllIntune.ps1
 
-Thin orchestrator with no Intune/Graph logic of its own — runs `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` then `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1`, passing through `-AssignmentGroupName`/`-TenantId`/`-Force` to both. Each deploy still manages its own Graph session and temporary App Registration independently — this just saves running two commands by hand.
+Thin orchestrator with no Intune/Graph logic of its own — runs `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` then `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1`, passing through `-AssignmentGroupName`/`-TenantId`/`-ClientId`/`-CertificateThumbprint`/`-AppOnly`/`-Force` to both. Needs PowerShell 7, like the two deploy scripts. Each deploy still manages its own Graph session and temporary App Registration independently — this just saves running two commands by hand.
 
 ```powershell
 # Both apps, one command

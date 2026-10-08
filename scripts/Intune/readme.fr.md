@@ -6,7 +6,7 @@
 
 Inscription Autopilot, automatisation des stratégies de conformité, détection des dérives de configuration et déploiement du poste de travail chez les clients (fond d'écran, écran de verrouillage, raccourci de verrouillage dans la barre des tâches).
 
-> Le déploiement des thèmes et couleurs Office se trouve dans [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.fr.md) — ces scripts ont leur URL de téléchargement codée en dur vers ce chemin.
+> Le déploiement des thèmes et couleurs Office se trouve dans [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.fr.md) — ces scripts reçoivent l'URL de téléchargement du thème en paramètre.
 
 ---
 
@@ -39,7 +39,9 @@ Encapsule le module communautaire `IntuneBackupAndRestore` pour détecter les d�
 |-----------|----------|-------------|
 | `-BaselinePath` | Oui | Dossier de la sauvegarde de référence du MSP (issu d'une exécution antérieure de `Start-IntuneBackup -Path <path>`) |
 | `-CustomerBackupPath` | Non | Sauvegarde existante du tenant client. S'il est omis, le script sauvegarde d'abord le tenant actuellement connecté |
-| `-TenantId` | Non | ID de tenant ou domaine auquel se connecter (utilisé uniquement si `-CustomerBackupPath` est omis) |
+| `-TenantId` | Non | ID de tenant ou domaine à sauvegarder (utilisé uniquement si `-CustomerBackupPath` est omis ; par défaut : client GDAP, sinon le tenant de connexion) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion en application seule (l'application a besoin des cinq scopes ci-dessous en autorisations d'application) |
+| `-AppOnly` | Non | Application seule avec le ClientId et l'empreinte de `graph.appid.json` |
 | `-OutputPath` | Non | Dossier pour la sauvegarde automatique et le rapport des différences (par défaut : `C:\Temp\` / `~/Downloads`) |
 
 **Exemples**
@@ -53,7 +55,8 @@ Encapsule le module communautaire `IntuneBackupAndRestore` pour détecter les d�
 ```
 
 **Remarques**
-- Compatible GDAP : si `-TenantId` est omis, il est déduit automatiquement du tenant client sélectionné (`$global:cid`), comme pour `Move-InboxToArchive.ps1` / `Get-SharePointStorageReport.ps1`
+- La connexion (sauvegarde en direct uniquement) passe par [`Connect-M365.ps1`](../Startup/Connect-M365.ps1) : **déléguée par défaut** (code d'appareil selon `$global:useDeviceCodeAuth` ; client GDAP depuis `$global:cid` si `-TenantId` est omis), **application seule** avec `-ClientId` + `-CertificateThumbprint` ou `-AppOnly`. Le script ne ferme que la session qu'il a lui-même ouverte.
+- La sauvegarde et la comparaison restent confiées à `IntuneBackupAndRestore` (la 4.x lit Intune via Microsoft Graph, `Invoke-MgGraphRequest`, sur la même session). `Start-IntuneBackup` vérifie la présence de `DeviceManagementApps`, `DeviceManagementConfiguration`, `DeviceManagementServiceConfig`, `DeviceManagementManagedDevices` et `DeviceManagementScripts` `.ReadWrite.All` et, s'il en manque un, appelle lui-même `Connect-MgGraph` sans tenant — une exécution GDAP sauvegardait alors silencieusement votre propre tenant. Le script demande désormais exactement ces cinq scopes (bien qu'il ne fasse que lire), au lieu des deux scopes `.Read.All` d'avant.
 - Non intégré à `menu.ps1` — il travaille avec des chemins de dossiers de sauvegarde et un export à l'échelle du tenant, exécutez-le directement
 
 **Module requis**

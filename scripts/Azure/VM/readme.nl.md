@@ -2,7 +2,19 @@
 
 [M365-Scripts](../../../readme.nl.md) › [scripts](../../readme.nl.md) › [Azure](../readme.nl.md) › **VM**
 
-# Azure-NVMe-Conversion.ps1
+# VM
+
+Onderhoud van virtuele Azure-machines.
+
+## Scripts
+
+| Script | Omschrijving |
+|--------|--------------|
+| [`Azure-NVMe-Conversion.ps1`](Azure-NVMe-Conversion.ps1) ([docs](#azure-nvme-conversionps1)) | Het type schijfcontroller van een Azure-VM omzetten tussen SCSI en NVMe, inclusief voorbereiding van de drivers in de gast (overgenomen script van Microsoft) |
+
+---
+
+### Azure-NVMe-Conversion.ps1
 
 > **Overgenomen script van derden.** Dit is de eigen tool van Microsoft uit [`Azure/SAP-on-Azure-Scripts-and-Utilities`](https://github.com/Azure/SAP-on-Azure-Scripts-and-Utilities) (MIT-licentie) — ongewijzigd overgenomen in plaats van herschreven, omdat het upstream al wordt onderhouden. Controleer de `.LINK` in de scriptheader op de nieuwste versie voordat je er voor iets kritieks op vertrouwt.
 

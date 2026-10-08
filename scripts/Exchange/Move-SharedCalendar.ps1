@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     All in one: find a shared calendar by keyword, move it into a resource mailbox
@@ -21,7 +21,17 @@
     -ClientSecret is supplied, a temporary App Registration with everything both
     scripts need (Calendars.ReadWrite, User.Read.All, Group.Read.All,
     MailboxSettings.ReadWrite) is created, handed to both, and removed at the end -
-    also when something fails. Exchange Online is connected once as well.
+    also when something fails. Exchange Online is connected once as well,
+    delegated through Connect-M365.ps1 (device code and GDAP customer per
+    load.config.ps1); an existing session for the same tenant is reused.
+
+    App-only Graph is the default because it cannot be otherwise: finding the
+    calendar reads every mailbox's calendar list, and the move writes into a new
+    resource mailbox - a delegated token reaches neither. The temporary app's
+    sign-in is always a device code over plain REST, because Exchange is already
+    connected by then and the Graph SDK's MSAL clashes with Exchange's. For the
+    same reason your own app works here with -ClientSecret only (no certificate,
+    no -AppOnly): a certificate goes through the Graph SDK.
 
     A mailbox whose MAIN calendar matches (a balie@ account that is itself the
     shared calendar) cannot be moved out. The script says so and names the
@@ -121,6 +131,8 @@ param(
     [string] $ClientId,
     [string] $ClientSecret
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 $mappingScript = Join-Path $PSScriptRoot 'Get-CalendarMappings.ps1'
 $convertScript = Join-Path $PSScriptRoot 'Convert-SharedCalendarToResource.ps1'
@@ -296,32 +308,16 @@ function New-TemporaryApp {
 # ==============================================================================
 #  Run
 # ==============================================================================
-$script:ConnectedExo = $false
+$script:Exo = $null
 $transcribing = $false
 $log = Join-Path $outputDir "SharedCalendarMove_$stamp.log"
 try {
     # -- Exchange Online, once -------------------------------------------------------
-    if (-not (Get-Command Connect-ExchangeOnline -ErrorAction SilentlyContinue)) {
-        throw "The ExchangeOnlineManagement module is required: Install-Module ExchangeOnlineManagement -Scope CurrentUser"
-    }
-    try {
-        $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-    } catch {
-        $connectParams = @{ ShowBanner = $false }
-        if ($TenantId) { $connectParams['Organization'] = $TenantId }
-        Connect-ExchangeOnline @connectParams
-        $script:ConnectedExo = $true
-    }
+    # Delegated (device code and GDAP customer per load.config.ps1); a fitting
+    # session is reused, and the two scripts below reuse this one.
+    $script:Exo = Connect-M365Exchange -TenantId $TenantId
 
-    $tenant = $TenantId
-    if (-not $tenant) {
-        try {
-            $gdap = ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') -or
-                    ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP')
-            if ($gdap -and $global:cid)          { $tenant = [string]$global:cid }
-            elseif ($env:M365_CUSTOMER_TENANTID) { $tenant = [string]$env:M365_CUSTOMER_TENANTID }
-        } catch {}
-    }
+    $tenant = Resolve-M365TenantId -TenantId $TenantId
     if (-not $tenant) {
         try { $tenant = [string](@(Get-ConnectionInformation | Where-Object { $_.State -eq 'Connected' })[0].TenantID) } catch {}
     }
@@ -460,5 +456,5 @@ try {
         try { Stop-Transcript | Out-Null } catch {}
         Write-Host "  Log: $log" -ForegroundColor DarkGray
     }
-    if ($script:ConnectedExo) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Exchange $script:Exo
 }

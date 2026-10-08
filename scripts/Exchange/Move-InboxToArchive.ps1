@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Archive all Inbox messages of a mailbox to the Archive folder via Microsoft Graph.
@@ -14,6 +14,11 @@
     messages actually moved.
 
     Authentication:
+      App-only is the default here because it cannot be otherwise: a delegated
+      Graph token reaches another user's mailbox only when the signed-in admin has
+      Full Access on it (Mail.ReadWrite.Shared), which an Exchange admin role does
+      not give. -Delegated exists for that route, see below.
+
       By default the script works app-only against any mailbox in the tenant,
       without requiring Full Access on the target mailbox. It connects
       interactively (delegated, Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All),
@@ -25,8 +30,16 @@
       Requires Global Administrator or Privileged Role Administrator for that one-time
       setup, and the Microsoft.Graph.Applications module.
 
-      Pass -Delegated to skip all of that and use a plain delegated Mail.ReadWrite
-      connection instead — no Entra app-creation rights needed, only Exchange Admin.
+      The delegated sign-in for that setup goes through scripts\Startup\Connect-M365.ps1:
+      device code when load.config.ps1 sets useDeviceCodeAuth, the GDAP customer
+      tenant when authMode is GDAP, and an existing Graph session with those scopes
+      is reused (and then left connected).
+
+      Pass -Delegated to skip all of that and use a plain delegated
+      Mail.ReadWrite + Mail.ReadWrite.Shared connection instead — no Entra
+      app-creation rights needed, only Exchange Admin. Not under GDAP: a partner
+      account does not exist in the customer's directory, so it cannot be given
+      Full Access on a customer mailbox.
       When the target mailbox isn't the signed-in user's own, the script connects to
       Exchange Online, grants that account temporary Full Access on the mailbox,
       polls Get-MailboxPermission until it's visible (up to ~3 minutes), then keeps
@@ -39,8 +52,9 @@
       -Delegated) has no such delay if you'd rather not wait at all.
 
       To reuse your own existing App Registration instead of creating a temporary one,
-      pass -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint); that app
-      must already have Mail.ReadWrite application permission (admin consent granted).
+      pass -ClientId + -TenantId + -ClientSecret (or -CertificateThumbprint), or
+      -AppOnly to take ClientId and CertificateThumbprint from graph.appid.json; that
+      app must already have Mail.ReadWrite application permission (admin consent granted).
       -TenantId accepts either the tenant ID (GUID) or a verified domain of that
       tenant (e.g. contoso.com) — whichever is easier to fill in.
 
@@ -77,9 +91,14 @@
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for the app registration given in -ClientId.
 
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root (instead of -ClientId). That app needs
+    Mail.ReadWrite application permission.
+
 .PARAMETER Delegated
     Skip the automatic temporary app-only setup and connect with a plain delegated
-    Mail.ReadWrite session instead (needs Exchange Admin, not Entra app-creation
+    Mail.ReadWrite + Mail.ReadWrite.Shared session instead (needs Exchange Admin, not Entra app-creation
     rights). For a mailbox other than the signed-in user's own, the script grants
     that account temporary Full Access via Exchange Online, polls for it to
     propagate, archives, then removes the grant again. Note: Microsoft Graph can
@@ -139,10 +158,13 @@ param(
     [string] $ClientId,
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [switch] $Delegated,
     [switch] $Apply,
     [int] $MaxWaitMinutes = 65
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 if ($After -and $Before -and $After -ge $Before) {
     throw "-After must be earlier than -Before."
@@ -152,9 +174,18 @@ if ($ClientId -and -not $ClientSecret -and -not $CertificateThumbprint) {
     throw "-ClientId requires -ClientSecret or -CertificateThumbprint."
 }
 
-if ($ClientId -and $Delegated) {
-    throw "Use either -ClientId or -Delegated, not both."
+if (($ClientId -or $AppOnly) -and $Delegated) {
+    throw "Use either -ClientId/-AppOnly or -Delegated, not both."
 }
+
+if ($Delegated -and (Test-M365Gdap)) {
+    throw "-Delegated does not work under GDAP: a partner account is not in the customer's directory, so it cannot be given Full Access on a customer mailbox. Drop -Delegated (temporary app) or use -ClientId/-AppOnly."
+}
+
+# Connections opened by this script (Connect-M365Graph / Connect-M365Exchange); only
+# these are disconnected at the end, never a session the caller already had.
+$script:Graph = $null
+$script:Exo   = $null
 
 # ── Progress helper ──────────────────────────────────────────────────────────
 function Write-ProgressHost {
@@ -221,7 +252,6 @@ function Invoke-Graph {
 # long enough to archive it, then revokes it again — no permission is left behind.
 $script:GrantedFullAccessMailbox = $null
 $script:GrantedFullAccessUser    = $null
-$script:ConnectedExo             = $false
 function Remove-TempFullAccess {
     if ($script:GrantedFullAccessMailbox -and $script:GrantedFullAccessUser) {
         Write-ProgressHost -Message "Removing temporary Full Access on '$($script:GrantedFullAccessMailbox)'..."
@@ -252,38 +282,23 @@ function Remove-TempFullAccess {
         $script:GrantedFullAccessMailbox = $null
         $script:GrantedFullAccessUser    = $null
     }
-    if ($script:ConnectedExo) {
-        Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
-        $script:ConnectedExo = $false
-    }
+    Disconnect-M365Exchange $script:Exo
+    $script:Exo = $null
 }
 
-$useTempApp = (-not $ClientId) -and (-not $Delegated)
+$useTempApp = (-not $ClientId) -and (-not $AppOnly) -and (-not $Delegated)
 if ($useTempApp -and -not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
     Write-Host "  [ERROR] Missing required module: Microsoft.Graph.Applications (needed to auto-create the temporary app registration)." -ForegroundColor Red
     Write-Host "  Install with: .\scripts\Startup\Install-Modules.ps1, or pass -Delegated to skip app-only mode." -ForegroundColor Yellow
     exit 1
 }
 
-# ── Tenant resolution (GDAP-aware, consistent with Get-SharePointStorageReport.ps1) ──
-$isGdapMode = $false
-try {
-    if ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') {
-        $isGdapMode = $true
-    } elseif ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP') {
-        $isGdapMode = $true
-    }
-} catch {}
-
-$effectiveTenantId = $TenantId
-if (-not $effectiveTenantId) {
-    try {
-        if ($isGdapMode -and $global:cid) {
-            $effectiveTenantId = [string]$global:cid
-        } elseif ($env:M365_CUSTOMER_TENANTID) {
-            $effectiveTenantId = [string]$env:M365_CUSTOMER_TENANTID
-        }
-    } catch {}
+# ── Tenant resolution (GDAP-aware, via Connect-M365.ps1) ──────────────────────
+$isGdapMode        = Test-M365Gdap
+$effectiveTenantId = Resolve-M365TenantId -TenantId $TenantId
+if ($AppOnly -and -not $ClientId -and -not $effectiveTenantId) {
+    # graph.appid.json with a single tenant names it.
+    $effectiveTenantId = (Get-M365AppRegistration).Tenant
 }
 
 if (($ClientId -or $useTempApp) -and -not $effectiveTenantId) {
@@ -295,20 +310,17 @@ if ($isGdapMode -and -not $effectiveTenantId) {
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
 try {
-    if ($ClientId) {
+    if ($ClientId -or $AppOnly) {
         # ── Bring your own app: full app-only connection, no temp app needed ────
-        if ($CertificateThumbprint) {
-            Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId `
-                -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
-        } else {
-            $secureSecret = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-            $cred = [System.Management.Automation.PSCredential]::new($ClientId, $secureSecret)
-            Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId `
-                -ClientSecretCredential $cred -NoWelcome -ErrorAction Stop
+        $appParams = @{ TenantId = $effectiveTenantId }
+        if ($AppOnly -and -not $ClientId) { $appParams['AppOnly'] = $true }
+        else {
+            $appParams['ClientId'] = $ClientId
+            if ($CertificateThumbprint) { $appParams['CertificateThumbprint'] = $CertificateThumbprint }
+            else { $appParams['ClientSecret'] = ConvertTo-SecureString $ClientSecret -AsPlainText -Force }
         }
-        $script:ConnectedHere = $true
+        $script:Graph = Connect-M365Graph @appParams
         Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
 
     } elseif ($Delegated) {
@@ -319,12 +331,9 @@ try {
         }
 
         Write-Host "  Connecting to Exchange Online..." -ForegroundColor Cyan
-        $eos = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $eos) {
-            Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
-            $script:ConnectedExo = $true
-            $eos = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-        }
+        $script:Exo = Connect-M365Exchange -TenantId $TenantId
+        $eos = Get-ConnectionInformation -ErrorAction SilentlyContinue |
+            Where-Object { $_.State -eq 'Connected' -and -not $_.IsEopSession } | Select-Object -First 1
         $adminUpn = $eos.UserPrincipalName
 
         if ($adminUpn -and $adminUpn.ToLowerInvariant() -ne $Mailbox.ToLowerInvariant()) {
@@ -355,19 +364,18 @@ try {
             }
         }
 
-        $connectParams = @{ Scopes = @('Mail.ReadWrite'); NoWelcome = $true }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams -ErrorAction Stop
-        $script:ConnectedHere = $true
+        # Mail.ReadWrite covers the admin's own mailbox; another user's mailbox
+        # (/users/{other}/...) needs Mail.ReadWrite.Shared plus the Full Access above.
+        $script:Graph = Connect-M365Graph -Scopes @('Mail.ReadWrite', 'Mail.ReadWrite.Shared') -TenantId $TenantId
         Write-Host "  [OK]   Connected (delegated)." -ForegroundColor DarkGray
 
     } else {
         # ── Auto mode: create a short-lived app-only app, use it, then remove it ──
         Write-Host "  Connecting interactively to set up a temporary app registration..." -ForegroundColor Cyan
         Write-Host "  Required role: Global Administrator or Privileged Role Administrator (one-time setup)" -ForegroundColor DarkGray
-        Connect-MgGraph -Scopes @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All') `
-            -TenantId $effectiveTenantId -NoWelcome -ErrorAction Stop
-        $script:ConnectedHere = $true
+        # Device code / GDAP customer per load.config.ps1; a fitting session is reused.
+        $script:Graph = Connect-M365Graph -Scopes @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All') `
+            -TenantId $effectiveTenantId
         Write-Host "  [OK]   Connected (delegated, for app setup only)." -ForegroundColor DarkGray
 
         $ts = Get-Date -Format 'yyyyMMddHHmmss'
@@ -382,7 +390,7 @@ try {
         if (-not $appRole) {
             Write-Host "  [ERROR] Could not resolve app role 'Mail.ReadWrite'." -ForegroundColor Red
             Remove-TempApp
-            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            Disconnect-M365Graph $script:Graph
             exit 1
         }
         New-MgServicePrincipalAppRoleAssignment `
@@ -423,7 +431,7 @@ try {
         if (-not $tokenObtained) {
             Write-Host "  [ERROR] Could not obtain an app-only token after propagation retries." -ForegroundColor Red
             Remove-TempApp
-            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            Disconnect-M365Graph $script:Graph
             exit 1
         }
 
@@ -435,7 +443,7 @@ try {
     Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Remove-TempApp
     Remove-TempFullAccess
-    if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Graph $script:Graph
     exit 1
 }
 
@@ -448,7 +456,7 @@ Write-Host ""
 Write-Host "  Mailbox : $Mailbox"
 if ($After)  { Write-Host "  After   : $($After.ToString('yyyy-MM-dd HH:mm'))" }
 if ($Before) { Write-Host "  Before  : $($Before.ToString('yyyy-MM-dd HH:mm'))" }
-Write-Host ("  Auth    : {0}" -f $(if ($ClientId) { 'App-only (provided app)' } elseif ($Delegated) { 'Delegated (temporary Full Access)' } else { 'App-only (temporary app)' })) -ForegroundColor DarkGray
+Write-Host ("  Auth    : {0}" -f $(if ($ClientId) { 'App-only (provided app)' } elseif ($AppOnly) { 'App-only (graph.appid.json)' } elseif ($Delegated) { 'Delegated (temporary Full Access)' } else { 'App-only (temporary app)' })) -ForegroundColor DarkGray
 Write-Host ("  Mode    : {0}" -f $(if ($Apply) { 'Apply (messages will be moved)' } else { 'Preview only (no changes)' })) -ForegroundColor $(if ($Apply) { 'Yellow' } else { 'DarkGray' })
 Write-Host ""
 
@@ -596,7 +604,7 @@ while ($true) {
         }
         Remove-TempApp
         Remove-TempFullAccess
-        if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+        Disconnect-M365Graph $script:Graph
         exit 1
     }
 }
@@ -622,4 +630,4 @@ Write-Host ""
 # ── Disconnect / cleanup ─────────────────────────────────────────────────────
 Remove-TempApp
 Remove-TempFullAccess
-if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+Disconnect-M365Graph $script:Graph

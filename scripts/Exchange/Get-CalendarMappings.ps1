@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Show where every calendar is mapped: which mailboxes have which other people's
@@ -87,11 +87,23 @@
 
       1. An app-only Graph session you already established is used as-is.
       2. -ClientId with -ClientSecret (plain REST) or -CertificateThumbprint
-         (Graph SDK) uses your own App Registration.
+         (Graph SDK), or -AppOnly (ClientId and certificate from graph.appid.json),
+         uses your own App Registration.
       3. Otherwise: device code sign-in, a short-lived App Registration that
          self-grants the three read permissions, an app-only token, and the app is
          removed again when the run ends. Needs Global Administrator or Privileged
          Role Administrator for that sign-in. No extra modules.
+
+    App-only is the default because it cannot be otherwise: the calendar list of
+    every mailbox is read, and a delegated token (Calendars.Read.Shared) only sees
+    the calendars that were shared with the signed-in admin - not what other users
+    put in their own list. There is therefore no -Delegated here.
+
+    The sign-in for route 3 is always a device code, whatever load.config.ps1
+    says: it runs on plain REST so it neither loads the Graph SDK nor touches the
+    Graph session you may already have (Move-SharedCalendar.ps1 calls this script
+    after connecting to Exchange, whose MSAL clashes with the SDK's). A browser
+    sign-in would need the SDK.
 
     Everything is read-only. No Exchange Online connection is made, so the
     Exchange/Graph MSAL clash described in the Exchange readme does not apply.
@@ -126,7 +138,13 @@
     Client secret for -ClientId.
 
 .PARAMETER CertificateThumbprint
-    Certificate thumbprint for -ClientId. Goes through Connect-MgGraph.
+    Certificate thumbprint for -ClientId. Goes through Connect-MgGraph (via
+    Connect-M365Graph, which reuses a matching session and only disconnects what
+    it opened).
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root (instead of -ClientId).
 
 .EXAMPLE
     # Where is the Balie calendar, and who has it mapped?
@@ -156,8 +174,19 @@ param(
     [string]   $TenantId,
     [string]   $ClientId,
     [string]   $ClientSecret,
-    [string]   $CertificateThumbprint
+    [string]   $CertificateThumbprint,
+    [switch]   $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
+# -AppOnly: your own app from graph.appid.json, used like -ClientId -CertificateThumbprint.
+if ($AppOnly -and -not $ClientId) {
+    $reg = Get-M365AppRegistration -TenantId (Resolve-M365TenantId -TenantId $TenantId)
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $reg.Tenant }
+}
 
 if ($Search -and $Mailbox) {
     throw "Use either -Search or -Mailbox, not both."
@@ -208,6 +237,7 @@ $script:TokenTenantId   = $null
 $script:TokenExpiry     = [datetime]::MinValue
 $script:AccessToken     = $null
 $script:GraphConnected  = $false
+$script:Graph           = $null     # Connect-M365Graph result; disconnect only what it opened
 $script:AdminHeaders    = $null
 $script:SkipGroups      = $false
 
@@ -358,14 +388,8 @@ function Confirm-AppRole {
 }
 
 function Resolve-EffectiveTenantId {
-    if ($TenantId) { return $TenantId }
-    try {
-        $gdap = ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') -or
-                ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP')
-        if ($gdap -and $global:cid)      { return [string]$global:cid }
-        if ($env:M365_CUSTOMER_TENANTID) { return [string]$env:M365_CUSTOMER_TENANTID }
-    } catch {}
-    return $null
+    # GDAP-aware: -TenantId, else the GDAP customer, else $env:M365_CUSTOMER_TENANTID.
+    return Resolve-M365TenantId -TenantId $TenantId
 }
 
 function Get-AppOnlyTokenByRest {
@@ -470,7 +494,7 @@ function Connect-GraphForCalendars {
         }
         if ($CertificateThumbprint) {
             try {
-                Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+                $script:Graph = Connect-M365Graph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint
             } catch {
                 Write-Warning "Could not connect with the supplied certificate: $($_.Exception.Message)"
                 return $false
@@ -1197,4 +1221,5 @@ try {
 } finally {
     # The temporary app must never outlive the run, whatever happened above.
     Remove-TempApp
+    Disconnect-M365Graph $script:Graph
 }

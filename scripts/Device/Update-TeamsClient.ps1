@@ -26,12 +26,13 @@
                       -RemoveWebRtcRedirector instead: take that redirector away.
       4. Classic    - only with -RemoveClassicTeams: uninstall the classic Teams
                       machine-wide installer and clear the per-profile installs.
-      5. Download   - fetch teamsbootstrapper.exe and verify its Microsoft signature
-                      BEFORE anything is uninstalled, so a failed download can never
-                      leave the device without a Teams client.
+      5. Download   - fetch teamsbootstrapper.exe and the MSIX of the published build,
+                      and verify both Microsoft signatures BEFORE anything is
+                      uninstalled, so a failed download can never leave the device
+                      without a Teams client.
       6. Uninstall  - the MSTeams AppX package for all users and the provisioned
                       package. The add-in is deliberately not touched here.
-      7. Install    - provision new Teams for all users (teamsbootstrapper.exe -p).
+      7. Install    - provision that package for all users (teamsbootstrapper.exe -p -o).
       8. Add-in     - the whole add-in replacement, in one place and only once the
                       MSI that replaces it is in hand: uninstall the registered one,
                       clear every other copy, install the new one (ALLUSERS=1).
@@ -109,13 +110,25 @@
     ordinary removal work again; what is left is removed key by key, each one named
     first, and nothing outside MSTeams is ever touched.
 
-    -UseWinget attacks the same problem from the other side. Instead of letting the
-    bootstrapper fetch a package at run time and provision it through the store,
-    winget downloads the MSIX - checking it against the SHA256 in its own manifest -
-    and the bootstrapper provisions that file with -p -o. The deployment then has an
-    explicit source rather than a store entry it has to resolve for itself, and the
-    run knows exactly which build it installed. winget's manifest lags the config
-    service by a build or two, and the run says so when it does.
+    Provisioning from a package in hand attacks the same problem from the other side.
+    By default the script downloads the MSIX the config service links for the build it
+    calls current, and the bootstrapper provisions that file with -p -o. The
+    deployment then has an explicit source rather than a store entry it has to resolve
+    for itself, and the run knows exactly which build it installed. -UseWinget does
+    the same with the package winget downloads - checked against the SHA256 in its own
+    manifest - which lags the config service by a build or two; the run says so when
+    it does.
+
+    Which build gets installed
+    --------------------------
+    Left to itself, teamsbootstrapper.exe -p downloads whatever its own staged rollout
+    hands out, and that can trail the config service for weeks: 26246.1604.5133.838
+    was installed three weeks after 26260.1701.5139.3736 had been published. The
+    version check then calls the freshly updated host outdated again. So the default
+    is the build the version check compared against. -UseBootstrapperBuild gives the
+    choice back to the bootstrapper - and with it Microsoft's staged rollout - and a
+    package that cannot be downloaded or fails its signature check falls back to that
+    automatically, since nothing has been uninstalled at that point.
 
     The meeting add-in
     ------------------
@@ -216,7 +229,7 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
       - Script variables arrive as environment variables, so checkboxes named whatIf,
         quiet, checkOnly, force, avdOptimizations, removeClassicTeams, repairOutlookAddIn,
         skipMeetingAddIn, skipSignatureCheck, removeWebRtcRedirector,
-        clearOrphanedAddInRegistration, repairAppxStore or useWinget
+        clearOrphanedAddInRegistration, repairAppxStore, useWinget or useBootstrapperBuild
         and text fields named workingDir, logPath,
         ring, webRtcUrl or bootstrapperUrl are picked up when the matching parameter
         is not passed.
@@ -285,17 +298,25 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
 
 .PARAMETER UseWinget
     Fetch the Teams MSIX with winget and provision that exact package
-    (teamsbootstrapper.exe -p -o) instead of letting the bootstrapper download one
-    at run time. Three reasons to want it: the run knows which build it installed,
-    the package is checked twice (winget against its published SHA256, this script
-    against its Microsoft signature), and a provision with an explicit source does
-    not depend on the package store being able to resolve one - which is the state
-    -RepairAppxStore exists for.
+    (teamsbootstrapper.exe -p -o) instead of the package the config service links.
+    The one thing it adds is a second check: winget compares the package against its
+    published SHA256 before this script checks its Microsoft signature. Like the
+    default, a provision with an explicit source does not depend on the package store
+    being able to resolve one - which is the state -RepairAppxStore exists for.
 
     winget's manifest is maintained separately from the Teams config service and
     lags behind it, so this can install a slightly older build than the version
     check reports; the run says so when it does. Run as System winget is resolved
     from Program Files\WindowsApps, because its alias only exists per user.
+    Cannot be combined with -UseBootstrapperBuild.
+
+.PARAMETER UseBootstrapperBuild
+    Let teamsbootstrapper.exe -p download a build of its own choosing, as the script
+    did before, instead of provisioning the package the config service links. That
+    keeps Microsoft's staged rollout in charge, at the price that the installed build
+    can trail the version check - the run then ends with a warning that the build is
+    still older than the published one, and the next run calls the host outdated
+    again. Cannot be combined with -UseWinget.
 
 .PARAMETER RemoveClassicTeams
     Also remove the classic Teams client: uninstall the Teams Machine-Wide Installer
@@ -344,9 +365,9 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
     machine or session host needs.
 
 .PARAMETER SkipSignatureCheck
-    Accept the downloaded bootstrapper without verifying its Authenticode signature.
-    Only for an air-gapped or internally hosted -BootstrapperUrl that is not signed
-    by Microsoft.
+    Accept the downloaded bootstrapper and Teams package without verifying their
+    Authenticode signatures. Only for an air-gapped or internally hosted
+    -BootstrapperUrl that is not signed by Microsoft.
 
 .PARAMETER TimeoutSeconds
     Per-process timeout for msiexec and the bootstrapper (default: 900). A process
@@ -399,6 +420,7 @@ param (
     [switch] $ClearOrphanedAddInRegistration,
     [switch] $RepairAppxStore,
     [switch] $UseWinget,
+    [switch] $UseBootstrapperBuild,
     [string] $Ring            = 'general',
     [string] $WorkingDir      = 'C:\IT\AVD\Teams',
     [string] $LogPath         = 'C:\Temp',
@@ -459,6 +481,10 @@ if ($AvdOptimizations -and $RemoveWebRtcRedirector) {
     Write-Error 'Use either -AvdOptimizations (which installs the WebRTC redirector) or -RemoveWebRtcRedirector, not both.'
     exit 1
 }
+if ($UseWinget -and $UseBootstrapperBuild) {
+    Write-Error 'Use either -UseWinget (winget picks the package) or -UseBootstrapperBuild (the bootstrapper picks it), not both.'
+    exit 1
+}
 
 # -- Elevation -----------------------------------------------------------------
 # AppX enumeration, the MSI calls and the bootstrapper all need administrator rights.
@@ -503,6 +529,7 @@ if (-not $PSBoundParameters.ContainsKey('RemoveWebRtcRedirector') -and $env:remo
 if (-not $PSBoundParameters.ContainsKey('ClearOrphanedAddInRegistration') -and $env:clearOrphanedAddInRegistration -in $rmmTrue) { $ClearOrphanedAddInRegistration = $true }
 if (-not $PSBoundParameters.ContainsKey('RepairAppxStore') -and $env:repairAppxStore -in $rmmTrue) { $RepairAppxStore = $true }
 if (-not $PSBoundParameters.ContainsKey('UseWinget')       -and $env:useWinget       -in $rmmTrue) { $UseWinget       = $true }
+if (-not $PSBoundParameters.ContainsKey('UseBootstrapperBuild') -and $env:useBootstrapperBuild -in $rmmTrue) { $UseBootstrapperBuild = $true }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)                      { $WorkingDir         = $env:workingDir }
 if (-not $PSBoundParameters.ContainsKey('LogPath')            -and $env:logPath)                         { $LogPath            = $env:logPath }
 if (-not $PSBoundParameters.ContainsKey('Ring')               -and $env:ring)                            { $Ring               = $env:ring }
@@ -511,6 +538,10 @@ if (-not $PSBoundParameters.ContainsKey('BootstrapperUrl')    -and $env:bootstra
 
 if ($AvdOptimizations -and $RemoveWebRtcRedirector) {
     Write-Error 'Use either -AvdOptimizations (which installs the WebRTC redirector) or -RemoveWebRtcRedirector, not both.'
+    exit 1
+}
+if ($UseWinget -and $UseBootstrapperBuild) {
+    Write-Error 'Use either -UseWinget (winget picks the package) or -UseBootstrapperBuild (the bootstrapper picks it), not both.'
     exit 1
 }
 
@@ -2411,7 +2442,7 @@ try {
     # Deliberately before any uninstall: a failed download must never leave the
     # device without a Teams client.
     Write-Out ''
-    Write-Step '5. Download new Teams bootstrapper'
+    Write-Step '5. Download new Teams'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
     } else {
@@ -2451,6 +2482,32 @@ try {
                 # rather than letting the verification below call it "still older".
                 if ($package.Version -and $latest -and $package.Version -lt $latest.Version) {
                     Write-Warn "winget publishes $($package.Version) while the config service publishes $($latest.Version) - winget's manifest lags, so this installs the older build"
+                }
+            }
+        } elseif ($UseBootstrapperBuild) {
+            Write-Skip 'The bootstrapper picks the build itself (-UseBootstrapperBuild) - that can be older than the version check above'
+        } elseif (-not ($latest -and $latest.Link -match '^https://')) {
+            Write-Skip 'The config service gave no package link - the bootstrapper picks the build itself'
+        } else {
+            # Left to itself the bootstrapper fetches whatever its own rollout hands
+            # out, which can trail the config service for weeks - measured at
+            # 26246.1604.5133.838 installed against a published 26260.1701.5139.3736,
+            # three weeks after that build went up. The config service links the exact
+            # package it calls current, so that is what gets provisioned (-p -o): the
+            # build that step 2 compared against, and the one step 9 verifies.
+            $msixName = Split-Path ([uri] $latest.Link).AbsolutePath -Leaf
+            $msixPath = Join-Path $WorkingDir $msixName
+            if ($PSCmdlet.ShouldProcess($msixPath, "Download Teams $($latest.Version) from the config service")) {
+                try {
+                    $file        = Save-VerifiedDownload -Uri $latest.Link -Path $msixPath -MinimumBytes 50MB
+                    $offlineMsix = $file.FullName
+                    Write-Ok ("Teams {0} package: {1} ({2} MB), signature verified" -f
+                              $latest.Version, $file.Name, [math]::Round($file.Length / 1MB, 0))
+                } catch {
+                    # Nothing has been uninstalled yet, and the bootstrapper can still
+                    # fetch a build of its own - an older Teams beats a run that stops.
+                    Write-Warn "$($_.Exception.Message) - falling back to the build the bootstrapper picks"
+                    Remove-Item -LiteralPath $msixPath -Force -ErrorAction SilentlyContinue
                 }
             }
         }
@@ -2626,7 +2683,7 @@ try {
     Write-Step '7. Install new Teams'
     if (-not $fullReinstall) {
         Write-Skip 'Not needed - the client stays as it is'
-    } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p)')) {
+    } elseif ($PSCmdlet.ShouldProcess($exePath, 'Provision new Teams for all users (-p, or -p -o with the downloaded package)')) {
         if (-not (Test-Path $exePath)) { throw "Bootstrapper not found at $exePath" }
 
         # -p provisions whatever the bootstrapper downloads for itself; -p -o <msix>
@@ -2662,7 +2719,7 @@ try {
             Write-AppxDeploymentError
 
             if (-not $offlineMsix) {
-                Write-Skip '  -UseWinget fetches the MSIX and provisions from it (-p -o), which hands the deployment an explicit source instead of a store entry it has to resolve for itself'
+                Write-Skip '  Provisioning from a package in hand (-p -o) - the default, or -UseWinget - hands the deployment an explicit source instead of a store entry it has to resolve for itself'
             }
 
             # -f binds tighter than +, so building this message by concatenating

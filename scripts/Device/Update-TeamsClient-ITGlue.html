@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-09-28 16:11. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Update-TeamsClient-ITGlue.md</code> op 2026-10-07 21:43. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-update-op-een-werkplek-update-teamsclientps1">Teams-update op een werkplek (Update-TeamsClient.ps1)</h1>
 <p>Deze procedure beschrijft hoe de Microsoft Teams-client en de Teams Meeting Add-in voor Outlook gecontroleerd, bijgewerkt en waar nodig hersteld worden op een werkstation of AVD-sessiehost.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 controleert en meldt, level 2 voert uit, level 3 vindt onderaan de details.</p>
@@ -92,7 +92,7 @@ li > p { margin: .4rem 0; }
 </li>
 <li><strong>Is de werkplek al bij?</strong> Dan gebeurt er niets. Het script stopt zonder iets aan te raken.
 </li>
-<li><strong>Loopt de werkplek achter?</strong> Dan haalt het de installer op, controleert of die echt van Microsoft komt, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug. De oude kopieën van de add-in gaan er pas uit als de vervanger klaarstaat én er ook in kan — anders blijft staan wat werkt.
+<li><strong>Loopt de werkplek achter?</strong> Dan haalt het de installer en precies die nieuwste versie op, controleert of beide echt van Microsoft komen, verwijdert de oude Teams, installeert de nieuwe en zet de vergaderknop in Outlook terug. De oude kopieën van de add-in gaan er pas uit als de vervanger klaarstaat én er ook in kan — anders blijft staan wat werkt.
 </li>
 <li>Daarna controleert het of alles er ook echt staat, en meldt of het gelukt is.
 </li>
@@ -321,9 +321,10 @@ li > p { margin: .4rem 0; }
 <p>daarna gewoon verwijderen. Wat dan nog overblijft gaat sleutel voor sleutel weg, elk</p>
 <p>met naam en volledig pad in het log.</p>
 </li>
-<li><code>-UseWinget</code> haalt de MSIX zelf op en geeft die aan de bootstrapper mee. De installatie
-<p>krijgt dan een concreet bestand als bron in plaats van een verwijzing die Windows zelf</p>
-<p>moet zien op te lossen — precies het ding dat hier stuk is.</p>
+<li>Het script haalt de MSIX zelf op — standaard bij Microsoft, met <code>-UseWinget</code> via
+<p>winget — en geeft die aan de bootstrapper mee. De installatie krijgt dan een concreet</p>
+<p>bestand als bron in plaats van een verwijzing die Windows zelf moet zien op te lossen —</p>
+<p>precies het ding dat hier stuk is. Laat <code>-UseBootstrapperBuild</code> hier dus weg.</p>
 </li>
 </ul>
 <p>Na afloop vraagt het script om een herstart. Doe die: de deployment-engine leest de</p>
@@ -495,7 +496,8 @@ li > p { margin: .4rem 0; }
 <tr><td><code>-RemoveWebRtcRedirector</code></td><td>Verwijdert de oude WebRTC-optimalisatie. Alleen als élk lokaal apparaat SlimCore aankan. Gaat niet samen met <code>-AvdOptimizations</code></td></tr>
 <tr><td><code>-ClearOrphanedAddInRegistration</code></td><td><strong>Laatste redmiddel, L3.</strong> Laat Windows Installer een add-in vergeten die hij zelf niet meer kan verwijderen (<code>1612</code> én de gecachte MSI weg), zodat herinstalleren weer kan. Raakt alleen dat ene product</td></tr>
 <tr><td><code>-RepairAppxStore</code></td><td><strong>Laatste redmiddel, L3.</strong> Repareert de pakketadministratie van Windows waar die Teams is kwijtgeraakt: herregistreert een pakket waarvan de bestanden er nog staan, en verwijdert daarna de vermeldingen onder <code>AppxAllUserStore</code> die nergens meer op slaan. Alleen MSTeams, elke sleutel met naam en pad in het log</td></tr>
-<tr><td><code>-UseWinget</code></td><td>Haalt de Teams-MSIX op met winget en installeert precies dat bestand (<code>teamsbootstrapper.exe -p -o</code>), in plaats van de bootstrapper zelf iets te laten downloaden. Handig bij een beschadigde pakketadministratie, en de run weet dan welke build erop staat</td></tr>
+<tr><td><code>-UseWinget</code></td><td>Haalt de Teams-MSIX op met winget in plaats van rechtstreeks bij Microsoft, en installeert precies dat bestand (<code>teamsbootstrapper.exe -p -o</code>). winget controleert het bestand nog een keer extra, maar loopt een build of twee achter</td></tr>
+<tr><td><code>-UseBootstrapperBuild</code></td><td>Laat de bootstrapper zelf kiezen welke versie erop komt, zoals vroeger. Microsoft rolt nieuwe versies gefaseerd uit, dus dan kan de werkplek wekenlang een versie achter blijven — en elke run meldt dat dan opnieuw. Gaat niet samen met <code>-UseWinget</code></td></tr>
 <tr><td><code>-RemoveClassicTeams</code></td><td>Verwijdert de oude Teams-client: machine-wide installer plus de installatie in elk gebruikersprofiel</td></tr>
 <tr><td><code>-RepairOutlookAddIn</code></td><td>Ruimt per-gebruiker-registraties op die naar een verdwenen add-in-DLL wijzen</td></tr>
 <tr><td><code>-WebRtcUrl</code></td><td>Andere downloadlocatie voor de WebRTC-redirector</td></tr>
@@ -523,6 +525,7 @@ li > p { margin: .4rem 0; }
 <tbody>
 <tr><td>Logbestand (alleen bij een run die iets wijzigt)</td><td><code>C:\Temp\Update-TeamsClient_&lt;datum-tijd&gt;.log</code></td></tr>
 <tr><td>Gedownloade installer</td><td><code>C:\IT\AVD\Teams\teamsbootstrapper.exe</code></td></tr>
+<tr><td>Gedownloade Teams-versie</td><td><code>C:\IT\AVD\Teams\MSTeams-x64.msix</code> (ongeveer 275 MB)</td></tr>
 <tr><td>Geïnstalleerde Outlook-add-in</td><td><code>C:\Program Files (x86)\Microsoft\TeamsMeetingAddin\&lt;versie&gt;\</code></td></tr>
 <tr><td>Versiebron van Microsoft</td><td><code>config.teams.microsoft.com</code></td></tr>
 </tbody>
@@ -567,6 +570,8 @@ li > p { margin: .4rem 0; }
 <tr><td><code>Package store orphan - ... : ...</code></td><td>Het script noemt precies welke vermelding in <code>AppxAllUserStore</code> nergens meer op slaat, met het registerpad erbij</td><td>Alleen melden; <code>-CheckOnly</code> geeft de volledige lijst. Opruimen doet <code>-RepairAppxStore</code></td><td>L2</td></tr>
 <tr><td><code>N orphaned MSTeams entries in the package store</code></td><td>Er zijn wezen gevonden maar de schakelaar stond niet aan</td><td>Opnieuw draaien met <code>-RepairAppxStore</code>. Dat herregistreert eerst wat nog bestanden op schijf heeft en ruimt daarna de registervermeldingen op, per stuk met naam en pad in het log</td><td>L3</td></tr>
 <tr><td><code>winget publishes X while the config service publishes Y</code></td><td>Normaal. Het winget-manifest wordt los onderhouden en loopt een build of twee achter</td><td>Geen actie. Wil je per se de allernieuwste build, laat <code>-UseWinget</code> dan weg</td><td>L1</td></tr>
+<tr><td><code>Installed build X is still older than the published Y</code></td><td>Teams is bijgewerkt, maar niet naar de allernieuwste versie</td><td>Met <code>-UseWinget</code> of <code>-UseBootstrapperBuild</code> is dat normaal. Zonder die twee: kijk of er bij stap 5 een <code>falling back</code>-regel staat (zie hieronder); zo niet, log doorzetten</td><td>L2</td></tr>
+<tr><td><code>... - falling back to the build the bootstrapper picks</code></td><td>De nieuwste versie kon niet bij Microsoft worden opgehaald, of was niet goed ondertekend. Er was nog niets verwijderd; de bootstrapper haalt nu zelf een (mogelijk iets oudere) versie</td><td>Meestal een proxy of firewall die <code>teamsinstaller.public.onecdn.static.microsoft</code> blokkeert. Teams werkt gewoon; de volgende run probeert het opnieuw</td><td>L2</td></tr>
 <tr><td><code>Teams installation failed</code></td><td>De installatie is niet doorgekomen</td><td>Log in <code>C:\Temp</code> lezen en doorzetten</td><td>L3</td></tr>
 <tr><td><code>A reboot is required</code></td><td>Windows wil herstarten om af te ronden</td><td>Herstart inplannen met de gebruiker</td><td>L1</td></tr>
 </tbody>
@@ -622,6 +627,7 @@ li > p { margin: .4rem 0; }
 <tr><td><code>removeWebRtcRedirector</code></td><td>Checkbox</td><td>Oude WebRTC-optimalisatie verwijderen (niet samen met <code>avdOptimizations</code>)</td></tr>
 <tr><td><code>clearOrphanedAddInRegistration</code></td><td>Checkbox</td><td><strong>Laatste redmiddel:</strong> add-in-registratie opruimen die Windows Installer niet meer kan verwijderen</td></tr>
 <tr><td><code>skipMeetingAddIn</code></td><td>Checkbox</td><td>Outlook-add-in met rust laten</td></tr>
+<tr><td><code>useBootstrapperBuild</code></td><td>Checkbox</td><td>De bootstrapper zelf de versie laten kiezen (Microsofts gefaseerde uitrol) in plaats van de nieuwste</td></tr>
 <tr><td><code>workingDir</code></td><td>Text</td><td>Andere downloadmap</td></tr>
 <tr><td><code>logPath</code></td><td>Text</td><td>Andere logmap</td></tr>
 <tr><td><code>ring</code></td><td>Text</td><td>Andere update-ring</td></tr>

@@ -1,14 +1,25 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Search SharePoint and OneDrive content tenant-wide through Microsoft Graph -
-    app-only, no interactive sign-in - and report the permissions on every hit.
+    Search SharePoint and OneDrive content through Microsoft Graph - signed in as
+    you by default, or app-only tenant-wide - and report the permissions on every hit.
 
 .DESCRIPTION
     The Graph counterpart of Find-SiteContent.ps1. Where that script drives CSOM
-    through PnP and signs in as you, this one runs on an app registration with
-    application permissions: no interactive login, no site collection admin rights
-    to arrange, and it reaches every site and every OneDrive in the tenant.
+    through PnP, this one uses Microsoft Graph only. It signs in two ways:
+
+      Delegated (default)  You sign in as the admin (device code per load.config.ps1,
+                           the GDAP customer from Connect-Tenant). Graph then shows
+                           only what YOUR account can reach: sites you are not a
+                           member or admin of come back empty or unreadable, and
+                           -AllSites lists sites through the search index
+                           (/sites?search=*) instead of /sites/getAllSites, which
+                           is application-only.
+
+      App-only (-AppOnly,  An app registration with the application role
+       or -ClientId)       Sites.Read.All: no interactive login, no site collection
+                           admin rights to arrange, every site and every OneDrive in
+                           the tenant. Use this for a complete tenant sweep.
 
     Two engines, same filters:
 
@@ -44,8 +55,11 @@
     lists (not libraries) are out of scope. For the site- and list-level picture,
     and for non-library lists, use Find-SiteContent.ps1 in this folder.
 
-    SIGN-IN. Application permissions need an app registration with admin consent.
-    The first run against a tenant creates one for you:
+    SIGN-IN. Delegated by default, through scripts\Startup\Connect-M365.ps1, with the
+    scopes Sites.Read.All and Files.Read.All (plus GroupMember.Read.All for
+    -ExpandGroups). -AppOnly switches to application permissions, which need an app
+    registration with admin consent. The first -AppOnly run against a tenant
+    creates one for you:
 
       1. Sign in to Microsoft Graph as a Global Administrator (once)
       2. Create (or reuse) an app named after -AppName
@@ -55,9 +69,10 @@
       5. Cache the client ID and thumbprint per tenant in graph.appid.json
          (gitignored) in the repo root
 
-    Later runs read that cache and connect app-only without any prompt, which also
+    Later -AppOnly runs read that cache and connect without any prompt, which also
     makes the script usable from a scheduled task. Pass -ClientId together with
-    -CertificateThumbprint or -ClientSecret to use an app you already have.
+    -CertificateThumbprint or -ClientSecret to use an app you already have (that
+    implies app-only).
 
 .PARAMETER SiteUrl
     Search one site collection, e.g. https://contoso.sharepoint.com/sites/Finance
@@ -137,10 +152,17 @@
     limit. Lookups are batched 20 per request, so this is cheaper than it sounds.
 
 .PARAMETER TenantId
-    Tenant ID or domain. Defaults to the tenant derived from -SiteUrl.
+    Tenant ID or domain. Defaults to the tenant derived from -SiteUrl; with -AllSites
+    to the GDAP customer (Connect-Tenant), else your own tenant when delegated.
+    -AppOnly with -AllSites needs it.
+
+.PARAMETER AppOnly
+    Sign in app-only instead of as yourself: the app registration cached for the
+    tenant in graph.appid.json, created on the first run (see SIGN-IN).
 
 .PARAMETER ClientId
     Client ID of an existing app registration with Sites.Read.All (application).
+    Implies app-only.
 
 .PARAMETER CertificateThumbprint
     Thumbprint of a certificate in CurrentUser\My to authenticate that app with.
@@ -150,13 +172,13 @@
     certificate. Never written to disk by this script.
 
 .PARAMETER AppName
-    Display name of the app registration to create or reuse.
+    With -AppOnly: display name of the app registration to create or reuse.
     Default: "M365-Scripts Graph SharePoint Search".
 
 .PARAMETER Region
     Geography for -Content searches, e.g. EUR, NAM, DEU, GBR. The Graph search API
     demands one for app-only requests ("Region is required when request with
-    application permission"). Left out, the script reads it from the site's data
+    application permission"); delegated searches do not use it. Left out, the script reads it from the site's data
     location and, when the tenant is not multi-geo and reports none, tries the
     common regions until a query comes back with results.
 
@@ -173,14 +195,14 @@
         -Name "*veiligheid*" -IncludeSubsites
 
 .EXAMPLE
-    # Tenant-wide: which documents mention "salarisschaal" anywhere?
+    # Tenant-wide, app-only so nothing is hidden: which documents mention "salarisschaal"?
     .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
-        -Content "salarisschaal"
+        -Content "salarisschaal" -AppOnly
 
 .EXAMPLE
     # Everything in the tenant that hangs on an "anyone with the link" link
     .\Search-SharePointContent.ps1 -AllSites -TenantId contoso.onmicrosoft.com `
-        -Permissions Unique -MaxSites 25
+        -Permissions Unique -MaxSites 25 -AppOnly
 
 .EXAMPLE
     # Leave nothing out on one site, including its subsites, no caps
@@ -240,6 +262,7 @@ param(
     [int] $MaxPermissionLookups = 2000,
 
     [string] $TenantId,
+    [switch] $AppOnly,
     [string] $ClientId,
     [string] $CertificateThumbprint,
     [string] $ClientSecret,
@@ -280,6 +303,10 @@ if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication')) {
     throw "Module 'Microsoft.Graph.Authentication' is not installed. Run: Install-Module Microsoft.Graph.Authentication -Scope CurrentUser"
 }
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
+# App-only on request (-AppOnly, or an app passed with -ClientId); delegated otherwise.
+$useAppOnly = $AppOnly -or [bool]$ClientId
 
 # -- Output folder -------------------------------------------------------------
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -296,8 +323,9 @@ if (-not $tenantMode) {
     }
     if (-not $TenantId) { $TenantId = "$($Matches[1]).onmicrosoft.com" }
 }
-if (-not $TenantId) {
-    throw 'Pass -TenantId when using -AllSites, e.g. -TenantId contoso.onmicrosoft.com'
+if (-not $TenantId) { $TenantId = Resolve-M365TenantId }
+if (-not $TenantId -and $useAppOnly) {
+    throw 'Pass -TenantId when using -AllSites app-only, e.g. -TenantId contoso.onmicrosoft.com'
 }
 
 $repoRoot   = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -315,7 +343,8 @@ $useMinSize        = $PSBoundParameters.ContainsKey('MinSizeMB')
 
 Write-Host ''
 Write-Host "  Scope  : $(if ($tenantMode) { 'every site in the tenant' } else { $SiteUrl })" -ForegroundColor Cyan
-Write-Host "  Tenant : $TenantId" -ForegroundColor Cyan
+Write-Host "  Tenant : $(if ($TenantId) { $TenantId } else { 'your own (delegated sign-in)' })" -ForegroundColor Cyan
+Write-Host "  Sign-in: $(if ($useAppOnly) { 'app-only - every site in the tenant' } else { 'delegated - only what your account can reach' })" -ForegroundColor Cyan
 Write-Host "  Engine : $(if ($searchMode) { 'Graph search index' } else { 'Graph delta - every document library' })" -ForegroundColor Cyan
 $filterParts = @()
 if ($Name)               { $filterParts += "name $Name" }
@@ -393,11 +422,11 @@ function New-GraphSearchApp {
     Write-Host '  No app registration known for this tenant - creating one.' -ForegroundColor Yellow
     Write-Host "  Sign in as a Global Administrator of $Tenant." -ForegroundColor Yellow
 
-    Connect-MgGraph -TenantId $Tenant -NoWelcome -ContextScope Process -Scopes @(
+    $bootstrap = Connect-M365Graph -TenantId $Tenant -Scopes @(
         'Application.ReadWrite.All'
         'AppRoleAssignment.ReadWrite.All'
         'Directory.Read.All'
-    ) | Out-Null
+    )
     Write-Host "  Signed in as $((Get-MgContext).Account)" -ForegroundColor Green
 
     $escaped = $DisplayName -replace "'", "''"
@@ -466,12 +495,12 @@ function New-GraphSearchApp {
         Write-Host '  Certificate uploaded to the app registration.' -ForegroundColor Green
     }
 
-    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    Disconnect-M365Graph $bootstrap
     return [pscustomobject]@{ ClientId = $app.AppId; CertificateThumbprint = $cert.Thumbprint; IsNew = $true }
 }
 
 $appIsNew = $false
-if (-not $ClientId) {
+if ($useAppOnly -and -not $ClientId) {
     $cached = Get-CachedApp -Tenant $TenantId
     if ($cached -and $cached.ClientId) {
         $ClientId = $cached.ClientId
@@ -480,7 +509,7 @@ if (-not $ClientId) {
     }
 }
 
-if (-not $ClientId) {
+if ($useAppOnly -and -not $ClientId) {
     $created = New-GraphSearchApp -Tenant $TenantId -DisplayName $AppName -WithGroups:$ExpandGroups
     $ClientId              = $created.ClientId
     $CertificateThumbprint = $created.CertificateThumbprint
@@ -488,43 +517,51 @@ if (-not $ClientId) {
     $appIsNew = $true
 }
 
-if (-not $CertificateThumbprint -and -not $ClientSecret) {
+if ($useAppOnly -and -not $CertificateThumbprint -and -not $ClientSecret) {
     throw "No credential for app $ClientId - pass -CertificateThumbprint or -ClientSecret."
 }
 
-# -- Connect app-only ----------------------------------------------------------
+# -- Connect -------------------------------------------------------------------
 if ($appIsNew) {
     Write-Host '  Waiting 30s for the new app registration and its consent to propagate...' -ForegroundColor DarkGray
     Start-Sleep -Seconds 30
 }
 
-$connected = $false
-for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
-    try {
-        if ($ClientSecret) {
-            $secure = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-            $credential = [pscredential]::new($ClientId, $secure)
-            Connect-MgGraph -TenantId $TenantId -ClientSecretCredential $credential -NoWelcome -ContextScope Process | Out-Null
-        } else {
-            Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ContextScope Process | Out-Null
-        }
-        $connected = $true
-        break
-    } catch {
-        if ($attempt -eq $MaxRetries) { throw }
-        Write-Host "  Sign-in attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying in 10s..." -ForegroundColor DarkYellow
-        Start-Sleep -Seconds 10
+$graphConnection = $null
+if ($useAppOnly) {
+    $connectArgs = @{ TenantId = $TenantId; ClientId = $ClientId }
+    if ($ClientSecret) {
+        $connectArgs['ClientSecret'] = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+    } else {
+        $connectArgs['CertificateThumbprint'] = $CertificateThumbprint
     }
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            $graphConnection = Connect-M365Graph @connectArgs
+            break
+        } catch {
+            if ($attempt -eq $MaxRetries) { throw }
+            Write-Host "  Sign-in attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying in 10s..." -ForegroundColor DarkYellow
+            Start-Sleep -Seconds 10
+        }
+    }
+    if (-not $graphConnection) { throw 'Could not connect to Microsoft Graph.' }
+    Write-Host "  Connected app-only as $ClientId" -ForegroundColor Green
+} else {
+    $delegatedScopes = @('Sites.Read.All', 'Files.Read.All')
+    if ($ExpandGroups) { $delegatedScopes += 'GroupMember.Read.All' }
+    $graphConnection = Connect-M365Graph -TenantId $TenantId -Scopes $delegatedScopes
+    Write-Host "  Connected as $($graphConnection.Account) (delegated)" -ForegroundColor Green
+    Write-Host '  Access : what your account can reach - sites you are not a member or admin of stay hidden. Use -AppOnly for a full sweep.' -ForegroundColor Yellow
 }
-if (-not $connected) { throw 'Could not connect to Microsoft Graph.' }
-Write-Host "  Connected app-only as $ClientId" -ForegroundColor Green
+$script:IsDelegated = -not $useAppOnly
 
 # App-only means the token carries roles, not user rights: with Sites.Read.All it
 # reads every site in the tenant regardless of who is a member. Say so, and warn
 # when the role is missing instead of letting sites come back mysteriously empty.
 $grantedRoles = @()
 try { $grantedRoles = @((Get-MgContext).Scopes) } catch { }
-if ($grantedRoles.Count -gt 0) {
+if ($useAppOnly -and $grantedRoles.Count -gt 0) {
     Write-Host "  Roles  : $($grantedRoles -join ', ')" -ForegroundColor DarkGray
     $readAll = @('Sites.Read.All', 'Sites.FullControl.All', 'Sites.Manage.All', 'Sites.ReadWrite.All', 'Files.Read.All') |
         Where-Object { $grantedRoles -contains $_ }
@@ -673,6 +710,19 @@ function Invoke-GraphSearchPage {
     #>
     param([string] $Kql, [int] $From, [int] $Size)
 
+    # Delegated searches run in the signed-in user's own geography and take no region.
+    if ($script:IsDelegated) {
+        $payload = @{
+            requests = @(@{
+                entityTypes = @('driveItem')
+                query       = @{ queryString = $Kql }
+                from        = $From
+                size        = $Size
+            })
+        }
+        return Invoke-Graph -Uri '/search/query' -Method POST -Body $payload
+    }
+
     $queue = [System.Collections.Generic.Queue[string]]::new()
     if ($script:SearchRegion) {
         $queue.Enqueue($script:SearchRegion)
@@ -759,7 +809,10 @@ $timer = [System.Diagnostics.Stopwatch]::StartNew()
 
 if ($tenantMode) {
     Write-Host '  Enumerating sites...' -ForegroundColor DarkGray
-    $tenantSites = Get-GraphAll -Uri '/sites/getAllSites' -Activity 'Enumerating sites'
+    # /sites/getAllSites is application-only. Delegated, the search index lists the
+    # sites the signed-in account can see - which is exactly what it can search.
+    $siteListUri = if ($script:IsDelegated) { '/sites?search=*' } else { '/sites/getAllSites' }
+    $tenantSites = Get-GraphAll -Uri $siteListUri -Activity 'Enumerating sites'
 
     $skippedPersonal = 0
     $skippedFiltered = 0
@@ -898,7 +951,9 @@ if ($searchMode) {
     # reports it per site; a single-geo one reports nothing, so it has to be found by
     # trying - see Invoke-GraphSearchPage.
     $script:SearchRegion = $Region
-    if ($script:SearchRegion) {
+    if ($script:IsDelegated) {
+        # No region for a delegated search - see Invoke-GraphSearchPage.
+    } elseif ($script:SearchRegion) {
         Write-Host "  Region : $script:SearchRegion" -ForegroundColor DarkGray
     } else {
         $siteInfo = Invoke-Graph -Uri "/sites/$($sites[0].Id)?`$select=siteCollection" -Quiet
@@ -1056,7 +1111,7 @@ function Get-GroupMemberSummary {
             if ($_.userPrincipalName) { $_.userPrincipalName } else { $_.displayName }
         }) -join '; '
     } elseif (-not $response) {
-        $summary = '<no Group.Read.All - members not read>'
+        $summary = if ($script:IsDelegated) { '<no GroupMember.Read.All - members not read>' } else { '<no Group.Read.All - members not read>' }
     }
     $script:GroupCache[$GroupId] = $summary
     return $summary
@@ -1368,4 +1423,4 @@ if ($results.Count -gt 0) {
 }
 Write-Host ''
 
-Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+Disconnect-M365Graph $graphConnection

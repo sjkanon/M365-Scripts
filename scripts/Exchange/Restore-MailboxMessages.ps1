@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Put messages that were moved or deleted on a given day back where they came
@@ -90,6 +90,17 @@
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for the app registration given in -ClientId.
 
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root (instead of -ClientId).
+
+.PARAMETER Delegated
+    Graph as yourself instead of app-only: a device code sign-in with
+    Mail.ReadWrite.Shared, no app registration at all. Only works when your
+    account already has Full Access on -Mailbox (Add-MailboxPermission), and a
+    fresh grant can take up to an hour to reach Graph. Not under GDAP: a partner
+    account cannot be given Full Access on a customer mailbox.
+
 .EXAMPLE
     # What was moved or deleted on 25 September, by whom, and what would go back?
     .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25
@@ -108,6 +119,10 @@
         -After "2026-09-25 14:00" -Before "2026-09-25 16:00" -Apply
 
 .EXAMPLE
+    # Graph as yourself - you already have Full Access on the mailbox
+    .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 -Delegated
+
+.EXAMPLE
     # Undo a Move-InboxToArchive.ps1 run: also move unaudited Archive items to the Inbox
     .\Restore-MailboxMessages.ps1 -Mailbox "user@contoso.com" -Date 2026-09-25 `
         -UnauditedArchiveToInbox -Apply
@@ -124,13 +139,26 @@
                 instead (see above) - everything but Purges.
 
       Graph     App-only Mail.ReadWrite, for the Moved part and for the Deleted
-                part when the role is missing. Same three
+                part when the role is missing. App-only is the default because
+                a delegated token reaches another user's mailbox only with Full
+                Access on it. Same three
                 routes as Remove-PhishingMessage.ps1: an existing app-only
-                session, your own app (-ClientId), or a temporary app created
+                session, your own app (-ClientId, or -AppOnly from
+                graph.appid.json), or a temporary app created
                 with a device code sign-in (Global Administrator or Privileged
                 Role Administrator) and removed again at the end. Those last two
                 run on plain REST, so they do not clash with the Exchange
-                module's MSAL.
+                module's MSAL - which is also why that sign-in is always a
+                device code, whatever load.config.ps1 says: a browser sign-in
+                would need the Graph SDK.
+
+                -Delegated: Graph as yourself (Mail.ReadWrite.Shared, device
+                code over REST, refreshed for long runs). Needs Full Access on
+                the mailbox already in place.
+
+      Sign-in   Exchange Online connects delegated via Connect-M365.ps1:
+                device code per load.config.ps1, the GDAP customer through
+                -DelegatedOrganization. An existing session is reused.
 
     Audit log
 
@@ -165,8 +193,12 @@ param(
     [string]   $TenantId,
     [string]   $ClientId,
     [string]   $ClientSecret,
-    [string]   $CertificateThumbprint
+    [string]   $CertificateThumbprint,
+    [switch]   $AppOnly,
+    [switch]   $Delegated
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # ── Window ────────────────────────────────────────────────────────────────────
 if ($PSBoundParameters.ContainsKey('Date')) {
@@ -185,6 +217,19 @@ if ($windowStart -ge $windowEnd) { throw "The start of the window must be before
 
 if ($ClientId -and -not $ClientSecret -and -not $CertificateThumbprint) {
     throw "-ClientId requires -ClientSecret or -CertificateThumbprint."
+}
+if ($Delegated -and ($ClientId -or $AppOnly)) {
+    throw "Use either -Delegated or -ClientId/-AppOnly, not both."
+}
+if ($Delegated -and (Test-M365Gdap)) {
+    throw "-Delegated does not work under GDAP: a partner account cannot be given Full Access on a customer mailbox. Drop -Delegated."
+}
+# -AppOnly: your own app from graph.appid.json, used like -ClientId -CertificateThumbprint.
+if ($AppOnly -and -not $ClientId) {
+    $reg = Get-M365AppRegistration -TenantId (Resolve-M365TenantId -TenantId $TenantId)
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $reg.Tenant }
 }
 if ($UnauditedArchiveToInbox -and $Include -notcontains 'Moved') {
     throw "-UnauditedArchiveToInbox belongs to the Moved part; add 'Moved' to -Include."
@@ -208,7 +253,7 @@ Write-Host ""
 
 $results              = [System.Collections.Generic.List[PSObject]]::new()
 $script:AuditEvents   = [System.Collections.Generic.List[PSObject]]::new()
-$script:ConnectedExo  = $false
+$script:Exo           = $null
 $script:AuditTruncated = $false
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -226,6 +271,7 @@ $script:TokenTenantId   = $null
 $script:TokenExpiry     = [datetime]::MinValue
 $script:AccessToken     = $null
 $script:GraphConnected  = $false
+$script:Graph           = $null     # Connect-M365Graph result; disconnect only what it opened
 $script:AdminHeaders    = $null
 # The Graph PowerShell SDK's own public client, used for the device code sign-in.
 $script:GraphCliClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
@@ -331,15 +377,8 @@ function Confirm-AppRole {
 }
 
 function Resolve-EffectiveTenantId {
-    # GDAP-aware, matching Move-InboxToArchive.ps1 / Remove-PhishingMessage.ps1.
-    if ($TenantId) { return $TenantId }
-    try {
-        $gdap = ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') -or
-                ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP')
-        if ($gdap -and $global:cid)      { return [string]$global:cid }
-        if ($env:M365_CUSTOMER_TENANTID) { return [string]$env:M365_CUSTOMER_TENANTID }
-    } catch {}
-    return $null
+    # GDAP-aware: -TenantId, else the GDAP customer, else $env:M365_CUSTOMER_TENANTID.
+    return Resolve-M365TenantId -TenantId $TenantId
 }
 
 function Get-AppOnlyTokenByRest {
@@ -383,6 +422,7 @@ function Get-DelegatedTokenByDeviceCode {
                         client_id   = $script:GraphCliClientId
                         device_code = $dc.device_code
                     }
+            $script:DeviceCodeToken = $tok
             return @{ Authorization = "Bearer $($tok.access_token)" }
         } catch {
             $code = ''
@@ -410,12 +450,40 @@ function Invoke-GraphAdmin {
 function Connect-GraphForMail {
     if ($script:GraphConnected -or $script:AppOnlyHeaders) { return $true }
 
+    # 0. -Delegated: Graph as yourself, over REST like the temporary-app route so
+    #    it does not clash with the Exchange module's MSAL. The token goes where
+    #    the app-only token would; Update-AppOnlyToken renews it with the refresh
+    #    token (TokenBody), so a long run keeps working.
+    if ($Delegated) {
+        $tenant = Resolve-EffectiveTenantId
+        if (-not $tenant) { $tenant = 'organizations' }
+        try {
+            Write-Host "  Signing in as yourself for Graph (Mail.ReadWrite.Shared)..." -ForegroundColor Cyan
+            $script:AppOnlyHeaders = Get-DelegatedTokenByDeviceCode -Tenant $tenant -Scopes @('Mail.ReadWrite', 'Mail.ReadWrite.Shared')
+        } catch {
+            Write-Warning "Delegated Graph sign-in failed: $($_.Exception.Message)"
+            return $false
+        }
+        $script:TokenTenantId = $tenant
+        $script:TokenExpiry   = (Get-Date).AddSeconds([int]$script:DeviceCodeToken.expires_in - 300)
+        if ($script:DeviceCodeToken.refresh_token) {
+            $script:TokenBody = @{
+                grant_type    = 'refresh_token'
+                client_id     = $script:GraphCliClientId
+                refresh_token = $script:DeviceCodeToken.refresh_token
+                scope         = 'https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.ReadWrite.Shared offline_access'
+            }
+        }
+        Write-Host "  [OK]   Signed in (delegated). Needs Full Access on $Mailbox." -ForegroundColor DarkGray
+        return $true
+    }
+
     # 1. An app-only session the caller already established.
     $ctx = $null
     try { $ctx = Get-MgContext -ErrorAction SilentlyContinue } catch {}
-    if ($ctx -and $ctx.AuthType -eq 'AppOnly') {
+    if ($ctx -and $ctx.AuthType -eq 'AppOnly' -and -not $ClientId) {
         Write-Host "  [OK]   Using the existing app-only Graph session." -ForegroundColor DarkGray
-        $script:GraphConnected = $true
+        $script:GraphConnected = $true   # the caller's session: never disconnected here
         return $true
     }
 
@@ -441,7 +509,7 @@ function Connect-GraphForMail {
             return $true
         }
         try {
-            Connect-MgGraph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+            $script:Graph = Connect-M365Graph -ClientId $ClientId -TenantId $effectiveTenantId -CertificateThumbprint $CertificateThumbprint
         } catch {
             Write-Warning "Could not connect with the supplied certificate: $($_.Exception.Message)"
             return $false
@@ -1190,23 +1258,15 @@ try {
         Write-Host "  Preparing Graph access (for the moved messages)..." -ForegroundColor DarkGray
         $graphOk = Connect-GraphForMail
         if (-not $graphOk) {
-            Write-Warning "No app-only Graph access - the moved messages are skipped. The audit report and the deleted messages still run."
+            Write-Warning "No Graph access - the moved messages are skipped. The audit report and the deleted messages still run."
         }
         Write-Host ""
     }
 
-    $exoSession = $null
-    try { $exoSession = Get-ConnectionInformation -ErrorAction Stop | Where-Object { $_.State -eq 'Connected' } } catch {}
-    if (-not $exoSession) {
-        if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
-            throw "Missing required module: ExchangeOnlineManagement. Install with: .\scripts\Startup\Install-Modules.ps1"
-        }
-        Write-Host "  Connecting to Exchange Online..." -ForegroundColor Cyan
-        $exoParams = @{ ShowBanner = $false; ErrorAction = 'Stop' }
-        if ($TenantId) { $exoParams['Organization'] = $TenantId }
-        Connect-ExchangeOnline @exoParams
-        $script:ConnectedExo = $true
-    }
+    # Delegated (device code and GDAP customer per load.config.ps1); a fitting
+    # session is reused. Stays delegated even with -ClientId/-AppOnly: those name
+    # a Graph app, and the audit log needs an admin's role anyway.
+    $script:Exo = Connect-M365Exchange -TenantId $TenantId
 
     $mbx = Get-Mailbox -Identity $Mailbox -ErrorAction Stop
     $mbxUpn  = "$($mbx.UserPrincipalName)"
@@ -1277,8 +1337,8 @@ try {
 } finally {
     # The temporary app must go before the delegated token that can delete it expires.
     Remove-TempApp
-    if ($script:GraphConnected) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
-    if ($script:ConnectedExo) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Graph $script:Graph
+    Disconnect-M365Exchange $script:Exo
 }
 
 # ── Who did it ────────────────────────────────────────────────────────────────

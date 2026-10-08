@@ -74,9 +74,9 @@ Everything the script does hangs off facts gathered read-only in steps 1 and 2: 
 | 2 | Version check | Ask the Teams config service for the published build, compare, decide | read-only |
 | 3 | AVD | Only with `-AvdOptimizations`: set `IsWVDEnvironment`, install the WebRTC redirector. Only with `-RemoveWebRtcRedirector`: uninstall that redirector | guarded |
 | 4 | Classic | Only with `-RemoveClassicTeams`: uninstall the Teams Machine-Wide Installer, clear the per-profile installs | guarded |
-| 5 | Download | Create the working folder, download `teamsbootstrapper.exe`, check size and Authenticode signature | guarded |
+| 5 | Download | Create the working folder, download `teamsbootstrapper.exe` and the MSIX the config service links for the published build (`buildLink`), check size and Authenticode signature of both. A package that fails falls back to the bootstrapper's own choice | guarded |
 | 6 | Uninstall | `Remove-AppxPackage -AllUsers` and `Remove-AppxProvisionedPackage`. A package the AppX stack refuses to remove is reported, not fatal. The add-in is not touched here | guarded |
-| 7 | Install | `teamsbootstrapper.exe -p` (provision for all users) | guarded |
+| 7 | Install | `teamsbootstrapper.exe -p -o <msix>` (provision that package for all users); plain `-p` with `-UseBootstrapperBuild` or when no package could be fetched | guarded |
 | 8 | Add-in | Locate `MicrosoftTeamsMeetingAddinInstaller.msi` inside the installed package, then the whole replacement: `msiexec /x` the registered add-in (`1612` retried against Windows Installer's cached copy), check nothing survived, clear **every other copy** (machine-wide folder, per-profile folders, per-user COM registrations) and install with `ALLUSERS=1` | guarded |
 | 8b | Repair | Only with `-RepairOutlookAddIn`: clear a per-user registration that points at a removed DLL, put `LoadBehavior` back to 3 | guarded |
 | 9 | Verify | Re-read the add-in registration machine-wide **and** per signed-in user in Outlook, the provisioned package, the classic removal and the AVD components, compare against the published build | reported as skipped |
@@ -319,6 +319,7 @@ The relevant part of the response:
 - The comparison is a `[version]` comparison against the installed AppX package version, falling back to the **provisioned** package version when no user has Teams installed yet. That fallback matters: on a pooled session host or a fresh image, Teams is often only provisioned, and without it the version check has nothing to compare, declares the host outdated and reinstalls ~275 MB on every scheduled run.
 - **Equal or newer means nothing to do** — a device on an insider build is left alone rather than downgraded.
 - If the service cannot be reached, the run **stops** instead of reinstalling blindly. `-Force` overrides that.
+- `buildLink` is what gets installed. Left to itself, `teamsbootstrapper.exe -p` downloads whatever its own staged rollout hands out, which can trail this feed for weeks: a host updated on 7 October 2026 got `26246.1604.5133.838` while the feed had published `26260.1701.5139.3736` on 18 September. The run then ended with `Installed build ... is still older than the published ...`, and the next scheduled run called the host outdated again. So step 5 downloads the MSIX behind `buildLink` and step 7 provisions exactly that file — the build this comparison was made against. `-UseBootstrapperBuild` hands the choice back to the bootstrapper, and with it to Microsoft's staged rollout.
 
 ---
 
@@ -356,16 +357,17 @@ A transcript (`C:\Temp\Update-TeamsClient_<timestamp>.log`, override with `-LogP
 | `-CheckOnly` | — | Report the decision and stop (exit `2` when work is due) |
 | `-Confirm:$false` | — | Never ask the interactive confirmation |
 | `-Ring` | `general` | Update ring queried at the config service |
-| `-WorkingDir` | `C:\IT\AVD\Teams` | Where the bootstrapper is downloaded |
+| `-WorkingDir` | `C:\IT\AVD\Teams` | Where the bootstrapper and the Teams MSIX are downloaded |
 | `-LogPath` | `C:\Temp` | Transcript folder |
 | `-BootstrapperUrl` | Microsoft fwlink | Download URL, https only |
 | `-WebRtcUrl` | `aka.ms/msrdcwebrtcsvc/msi` | WebRTC redirector MSI, https only |
 | `-RemoveWebRtcRedirector` | — | Uninstall the old WebRTC media optimization. Cannot be combined with `-AvdOptimizations` |
 | `-ClearOrphanedAddInRegistration` | — | Make Windows Installer forget an add-in it can no longer uninstall (`1612` with the cached MSI gone), so a reinstall can go in |
 | `-RepairAppxStore` | — | Repair the AppX package store where it has lost track of MSTeams: re-register what still has files, remove the `AppxAllUserStore` entries that resolve to nothing |
-| `-UseWinget` | — | Fetch the MSIX with winget and provision that file (`-p -o`); the run then knows which build it installed. winget's manifest lags the config service |
+| `-UseWinget` | — | Take the MSIX from winget instead of the config service's `buildLink` and provision that file (`-p -o`). winget adds its own SHA256 check, but its manifest lags the config service |
+| `-UseBootstrapperBuild` | — | Let `teamsbootstrapper.exe -p` pick the build itself, as before: Microsoft's staged rollout decides, and the installed build can trail the version check. Cannot be combined with `-UseWinget` |
 | `-SkipMeetingAddIn` | — | Leave the add-in alone; a missing add-in is then not "work" |
-| `-SkipSignatureCheck` | — | Accept an installer not signed by Microsoft (internal mirror) |
+| `-SkipSignatureCheck` | — | Accept an installer or package not signed by Microsoft (internal mirror) |
 | `-TimeoutSeconds` | `900` | Per-process timeout for msiexec and the bootstrapper |
 | `-Force` | — | Reinstall even when current; also allows running without Teams or without version info |
 
@@ -407,6 +409,7 @@ Script variables are read from the environment when the matching parameter is no
 | `clearOrphanedAddInRegistration` | checkbox | `-ClearOrphanedAddInRegistration` |
 | `repairAppxStore` | checkbox | `-RepairAppxStore` |
 | `useWinget` | checkbox | `-UseWinget` |
+| `useBootstrapperBuild` | checkbox | `-UseBootstrapperBuild` |
 | `skipMeetingAddIn` | checkbox | `-SkipMeetingAddIn` |
 | `skipSignatureCheck` | checkbox | `-SkipSignatureCheck` |
 | `workingDir` | text | `-WorkingDir` |
@@ -425,6 +428,8 @@ Accepted truthy values: `true`, `1`, `yes`. Capitalisation of the variable name 
 Why the script looks the way it does — most of these are scars from a real failure mode.
 
 **Download before uninstall.** The obvious order (remove Teams, then fetch the installer) leaves a device with no Teams client at all when the download fails, the URL is blocked by a proxy, or the CDN is having a day. The installer is fetched *and* signature-checked first; only then is anything removed.
+
+**Install the build that was checked.** The version check asks the config service which build is current, and the install used to ask the bootstrapper — two sources that disagree for weeks during a staged rollout. A run that compares against one and installs from the other can never finish: it updates, verifies "still older than the published", and schedules itself to do it all again. The package now comes from the same answer the comparison came from (`buildLink`), downloaded and signature-checked before the first uninstall like the bootstrapper itself. When that download fails, nothing has been removed yet and the bootstrapper can still fetch a build of its own, so the run falls back rather than stops: an older Teams beats a run that gives up.
 
 **Both uninstall hives.** The meeting add-in's uninstall entry does not always land in the same place — on a Windows 11 endpoint with add-in 1.26.21803 it was the 64-bit hive, other builds put it under `HKLM:\SOFTWARE\WOW6432Node\...`. A lookup in one hive alone silently finds nothing, and then the uninstall is skipped and the final verification reports failure on a perfectly good install.
 
@@ -481,7 +486,9 @@ Why the script looks the way it does — most of these are scars from a real fai
 | `Package store orphan - <kind> for <account>: <package>` | Preflight naming an `AppxAllUserStore` entry that resolves to nothing, with its registry path. Read-only; `-RepairAppxStore` removes them, `-CheckOnly` just lists them |
 | `N orphaned MSTeams entries in the package store` | Step 6b found orphans and the switch was not given. Add `-RepairAppxStore` |
 | `it still refuses removal` after a re-register | The files were there and the package was re-registered from its own manifest, and it still will not come off. The registry entries are cleared next in the same step |
-| `winget publishes X while the config service publishes Y` | Normal: winget's manifest is maintained separately and lags a build or two. `-UseWinget` then installs X, which the verification below reports as older than published |
+| `winget publishes X while the config service publishes Y` | Normal: winget's manifest is maintained separately and lags a build or two. `-UseWinget` then installs X, which the verification below reports as older than published. Drop `-UseWinget` to get Y |
+| `Installed build X is still older than the published Y` | The provisioned package is not the build the version check found. Expected with `-UseWinget` or `-UseBootstrapperBuild`, or after the fallback below. Without either, the package in hand was not what got provisioned — read the step 5 and step 7 output |
+| `... - falling back to the build the bootstrapper picks` | The package behind `buildLink` could not be downloaded or failed its size or signature check. Nothing had been removed yet; the bootstrapper fetches its own build instead, which may be older. A proxy blocking `teamsinstaller.public.onecdn.static.microsoft` is the usual cause |
 | `those profiles are no longer on this host` | A removal parked at `Installed(pending removal)` only finishes when that user signs out. With the profile gone there is nobody left to sign out, so it never finishes and no reboot is flagged for it |
 | `Catastrophic failure` removing the AppX package (`0x8000FFFF`) | The AppX stack could not unstage it, nearly always because a signed-in user is holding the package. No longer fatal: it is reported and the provision upgrades in place whatever survived. Drain the session host or run outside working hours |
 | `the bootstrapper reported failure, errorCode 0x...` | Its own JSON verdict, which is what decides success now — the exit code can go missing entirely. The `AppX deployment` lines printed under it name the package and the reason |
@@ -530,6 +537,7 @@ Verified on a Windows 11 device with Teams `26225.1806.5074.1452` and add-in `1.
 | Package store reader | Run against this workstation's live `AppxAllUserStore`: it found two genuine orphans (`S-1-0-0` and a deleted profile's SID under `EndOfLife`), reported zero for healthy packages, returned nothing for a pattern that matches nothing, and every path it returned was readable and inside `AppxAllUserStore` |
 | Package store repair | Exercised for real against a rebuilt store under `HKCU`, so the destructive path ran without touching the machine: 9 MSTeams entries, 6 orphaned, all 6 removed. The healthy user registration, the healthy `Applications` entry and the `Staged` entry survived, another product's orphaned entry was left alone, and the dead SID's own key stayed — only the package key under it goes. Against a real damaged store it is **untested**; no machine here has one |
 | winget download | Measured end to end: `winget download` fetched the 271 MB `MSTeams-x64.msix` in 23 seconds with no Store account, verified its own SHA256, and the file is validly signed by `O=Microsoft Corporation`. The staging folder is emptied first (proved with a stale file planted in it) and removed after, the version is parsed off winget's file name before the rename, and an id winget does not have throws instead of returning nothing |
+| Published package (`buildLink`) | Measured: the config service published `26260.1701.5139.3736` with a `buildLink` to `MSTeams-x64.msix` on `teamsinstaller.public.onecdn.static.microsoft`; the file is 287 MB and Authenticode `Valid`, signed by `O=Microsoft Corporation`, under both PowerShell 7 and Windows PowerShell 5.1. The script's own `Get-LatestTeamsBuild` and `Save-VerifiedDownload`, run with the step 5 logic under 5.1, downloaded and accepted it (`[ OK ] Teams 26260.1701.5139.3736 package: MSTeams-x64.msix (274 MB), signature verified`); a link that answers 404 produced the fallback warning, left no file behind and no package to provision. `-UseWinget -UseBootstrapperBuild` together is refused with exit `1` on both runtimes. The full provision from that package (`-p -o`) has **not** been run on a live host yet |
 | winget as System | `winget.exe` is an MSIX alias that only exists per user, so a run as System finds nothing on `PATH`. With `PATH` emptied the resolver falls back to `C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe\winget.exe` and finds it |
 | Orphaned package store | A production host answered `0x80070490` for every holder of the package, `S-1-5-18` included, and provisioning the same version answered it too. Exercised against those exact strings plus a live SID from a workstation as the contrast: four pending removals whose profiles are gone read as orphaned and flag no reboot, a pending removal for a profile that does exist still reads as "sign them out", a missing and an empty `InstallLocation` are both flagged, and a healthy package stays quiet. What to *do* about such a host is **untested** — no machine here has a damaged package store |
 | Package holders | The SID is taken out of `PackageUserInformation`'s string form rather than a property path, because that rendering differs across builds. Exercised against a bare SID, a SID with account and install state, a property-style rendering, two holders at once, an empty list, text with no SID in it and a package object without the property at all — the Entra `S-1-12-1` form included |

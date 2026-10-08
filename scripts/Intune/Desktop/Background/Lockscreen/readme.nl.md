@@ -2,7 +2,19 @@
 
 [M365-Scripts](../../../../../readme.nl.md) › [scripts](../../../../readme.nl.md) › [Intune](../../../readme.nl.md) › [Desktop](../../readme.nl.md) › [Background](../readme.nl.md) › **Lockscreen**
 
-# Make-lockscreen.ps1
+# Lockscreen
+
+Bedrijfsafbeelding voor het vergrendelscherm via Intune.
+
+## Scripts
+
+| Script | Omschrijving |
+|--------|--------------|
+| [`Make-lockscreen.ps1`](Make-lockscreen.ps1) ([docs](#make-lockscreenps1)) | De bedrijfsafbeelding voor het vergrendelscherm downloaden en afdwingen via PersonalizationCSP |
+
+---
+
+## Make-lockscreen.ps1
 
 > Auteur: Sjoerd Kanon
 

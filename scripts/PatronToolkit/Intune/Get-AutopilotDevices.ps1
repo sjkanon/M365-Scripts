@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report registered Windows Autopilot devices and deployment profiles for a tenant.
@@ -18,7 +18,18 @@
     CSV report path. Defaults to .\AutopilotDevices_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1) or
+    your own tenant. Required for app-only sign-in.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-AutopilotDevices.ps1
@@ -38,29 +49,47 @@
     Microsoft's own Get-AutopilotDeployment community module, rather than a bulk scripted
     delete/reassign against this list.
 
-    Required scopes: DeviceManagementServiceConfig.Read.All
+    Devices come from Graph v1.0 (windowsAutopilotDeviceIdentities); deployment profiles
+    only exist in Graph beta (windowsAutopilotDeploymentProfiles) and are read with
+    Invoke-MgGraphRequest — the Microsoft.Graph v2 SDK has no
+    Get-MgDeviceManagementWindowsAutopilotDeploymentProfile cmdlet, which is why the
+    earlier version always listed zero profiles.
+
+    Sign-in: Microsoft Graph through scripts\Startup\Connect-M365.ps1 - delegated by
+    default (scope DeviceManagementServiceConfig.Read.All plus an Intune role; device
+    code / GDAP customer per load.config.ps1), app-only with
+    -ClientId/-CertificateThumbprint or -AppOnly (the same application permission). An
+    existing fitting Graph session is reused and left connected.
 #>
 [CmdletBinding()]
 param(
     [string] $GroupTag,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('DeviceManagementServiceConfig.Read.All') }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
+$graph = Connect-M365Graph -Scopes 'DeviceManagementServiceConfig.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+
+function Get-GraphPaged {
+    param([string] $Uri)
+    $items = [System.Collections.Generic.List[object]]::new()
+    while ($Uri) {
+        $resp = Invoke-MgGraphRequest -Method GET -Uri $Uri -OutputType Hashtable -ErrorAction Stop
+        foreach ($v in @($resp.value)) { if ($null -ne $v) { $items.Add($v) } }
+        $Uri = $resp.'@odata.nextLink'
+    }
+    $items
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -72,18 +101,28 @@ Write-Host ""
 
 # ── Deployment profiles ──────────────────────────────────────────────────────
 Write-Host "  Retrieving deployment profiles..." -ForegroundColor DarkGray
-$profiles = @(Get-MgDeviceManagementWindowsAutopilotDeploymentProfile -All -ErrorAction SilentlyContinue)
-Write-Host "  Found $($profiles.Count) deployment profile(s):" -ForegroundColor DarkGray
-foreach ($p in $profiles) {
-    Write-Host "    - $($p.DisplayName)  (Id: $($p.Id))" -ForegroundColor DarkGray
+try {
+    $profiles = @(Get-GraphPaged -Uri 'https://graph.microsoft.com/beta/deviceManagement/windowsAutopilotDeploymentProfiles')
+    Write-Host "  Found $($profiles.Count) deployment profile(s):" -ForegroundColor DarkGray
+    foreach ($p in $profiles) {
+        Write-Host "    - $($p.displayName)  (Id: $($p.id))" -ForegroundColor DarkGray
+    }
+} catch {
+    Write-Host "  [WARN] Could not list deployment profiles: $($_.Exception.Message)" -ForegroundColor Yellow
 }
 Write-Host ""
 
 # ── Devices ───────────────────────────────────────────────────────────────────
 Write-Host "  Retrieving Autopilot devices..." -ForegroundColor DarkGray
-$devices = @(Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -All -ErrorAction Stop)
+try {
+    $devices = @(Get-MgDeviceManagementWindowsAutopilotDeviceIdentity -All -ErrorAction Stop)
+} catch {
+    Write-Host "  [ERROR] Could not list Autopilot devices: $($_.Exception.Message)" -ForegroundColor Red
+    Disconnect-M365Graph $graph
+    exit 1
+}
 if ($GroupTag) {
-    $devices = $devices | Where-Object { $_.GroupTag -eq $GroupTag }
+    $devices = @($devices | Where-Object { $_.GroupTag -eq $GroupTag })
 }
 Write-Host "  Found $($devices.Count) device(s)." -ForegroundColor DarkGray
 Write-Host ""
@@ -117,10 +156,13 @@ if (-not $results -or @($results).Count -eq 0) {
     Write-Host "  Report saved: $OutputPath" -ForegroundColor Green
 }
 
-$unassigned = @($results | Where-Object { $_.DeploymentProfileAssignmentStatus -ne 'assigned' }).Count
+# Graph reports assignedInSync / assignedOutOfSync / assignedUnkownSyncState for an
+# assigned profile - there is no plain 'assigned' value, so the old -ne 'assigned'
+# counted every device as unassigned.
+$unassigned = @($results | Where-Object { [string]$_.DeploymentProfileAssignmentStatus -notlike 'assigned*' }).Count
 Write-Host ""
 Write-Host ("  {0} device(s) — {1} without an assigned deployment profile" -f @($results).Count, $unassigned) -ForegroundColor $(if ($unassigned -gt 0) { 'Yellow' } else { 'Cyan' })
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

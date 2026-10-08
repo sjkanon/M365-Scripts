@@ -29,13 +29,34 @@
     om Authenticator gaat.
 
 .NOTES
-    Benodigde Graph applicatiepermissies (Managed Identity / App Registration):
+    Benodigde Graph-permissies (delegated scopes resp. applicatiepermissies):
         User.Read.All
         UserAuthenticationMethod.Read.All
         GroupMember.ReadWrite.All  (of breder: Group.ReadWrite.All)
 
+    Aanmelden (één modus kiezen; zonder switch bepaalt het script het zelf):
+      - Zonder switch, lokaal       : delegated als beheerder via
+                                      scripts\Startup\Connect-M365.ps1 (browser,
+                                      of device code / GDAP-klant volgens
+                                      load.config.ps1). Een passende bestaande
+                                      sessie wordt hergebruikt.
+      - Zonder switch, in Azure Automation (cloud job of Hybrid Worker, herkend
+        aan $env:AUTOMATION_ASSET_ACCOUNTID / $PSPrivateMetadata.JobId):
+                                      managed identity, zoals voorheen.
+      - -Interactive                : expliciet delegated (zelfde als lokaal).
+      - -UseManagedIdentity         : managed identity, ook buiten Automation
+                                      (Azure VM).
+      - -UseAppRegistration         : app-only met -TenantId, -ClientId en
+                                      -ClientCertificateThumbprint.
+      - -AppOnly                    : app-only met ClientId/certificaat uit
+                                      graph.appid.json (via de helper).
+      - -UseTemporaryApp            : wegwerp-app, app-only.
+      - -UseExistingSession         : alleen je eigen Connect-MgGraph-sessie.
+
     Bedoeld als Azure Automation Runbook (system-assigned managed identity),
-    periodiek te draaien (bv. elke 1-4 uur).
+    periodiek te draaien (bv. elke 1-4 uur). In een runbook ontbreekt de helper
+    (scripts\Startup); managed identity en -UseAppRegistration werken daar
+    zonder. Delegated en -AppOnly hebben de helper nodig.
 
 .PARAMETER RolloutGroupId
     Object Id van de statische Rollout-groep (moet nog registreren).
@@ -57,19 +78,41 @@
     security-key-model wilt accepteren. Wordt genegeerd bij AnyPhishingResistant.
 
 .PARAMETER Interactive
-    Log interactief in (browser-prompt) i.p.v. managed identity. Gebruik dit
-    als je het script lokaal op je eigen machine draait. Zonder deze switch
-    en zonder -UseAppRegistration wordt managed identity geprobeerd, wat
-    buiten Azure altijd faalt.
+    Log delegated in als beheerder (browser, of device code als
+    load.config.ps1 dat zegt) via scripts\Startup\Connect-M365.ps1. Dit is
+    sinds de overstap op de helper ook de standaard als je lokaal zonder
+    switch draait; de switch maakt het expliciet (ook binnen Azure Automation).
+    Een bestaande sessie met de benodigde scopes en een levend token wordt
+    hergebruikt.
 
-    Het inloggen gebeurt met -ContextScope CurrentUser, zodat de tokencache op
-    schijf staat en de SDK het token stil kan vernieuwen. Zonder dat leeft de
-    cache alleen in het huidige proces en opent de SDK bij een verlopen token
-    alsnog een browser - midden in de run, per gebruiker.
+    De helper logt in met -ContextScope Process: de tokencache leeft in dit
+    proces en de SDK vernieuwt het token daarin stil. Een nieuwe PowerShell-
+    sessie vraagt dus opnieuw om in te loggen.
 
     Voor een run over veel gebruikers of onbewaakt draaien is
-    -UseAppRegistration met certificaat betrouwbaarder: app-only tokens kunnen
-    nooit om interactie vragen.
+    -UseAppRegistration met certificaat (of -UseTemporaryApp) betrouwbaarder:
+    app-only tokens kunnen nooit om interactie vragen.
+
+.PARAMETER UseManagedIdentity
+    Verbind met de managed identity (Connect-MgGraph -Identity, met -ClientId
+    voor een user-assigned identity). In Azure Automation gebeurt dit ook
+    zonder switch; gebruik de switch op een Azure VM of als je het zeker wilt
+    weten.
+
+.PARAMETER AppOnly
+    App-only via scripts\Startup\Connect-M365.ps1 met ClientId en
+    CertificateThumbprint voor de tenant uit graph.appid.json (repo-root).
+
+.PARAMETER TenantId
+    Tenant (id of domein). Verplicht bij -UseAppRegistration; bij delegated
+    standaard de GDAP-klant (authMode GDAP) of je eigen tenant.
+
+.PARAMETER ClientId
+    App-registratie voor -UseAppRegistration, of de client id van een
+    user-assigned managed identity.
+
+.PARAMETER ClientCertificateThumbprint
+    Certificaat-thumbprint voor -UseAppRegistration. Alias: -CertificateThumbprint.
 
 .PARAMETER UseTemporaryApp
     Maakt zelf een wegwerp-app-registratie aan, draait de hele run app-only, en
@@ -104,9 +147,10 @@
     en daar kan het script niet tussen komen. Klik je die weg, dan stopt het
     script met een duidelijke melding i.p.v. de prompt per gebruiker te herhalen.
 
-    Zonder deze switch gebeurt hetzelfde impliciet als je geen modus kiest en
-    er toevallig een delegated sessie is; met de switch is het een bewuste
-    keuze en klaagt het script meteen als die sessie er niet is.
+    Het verschil met de standaard (delegated via de helper, die een passende
+    sessie ook hergebruikt): met deze switch logt het script nooit zelf in,
+    ook niet als scopes ontbreken of het token sneuvelt, en klaagt het meteen
+    als er geen delegated sessie is.
 
     Log zelf in met de scopes die het script nodig heeft, en met
     -ContextScope CurrentUser zodat de tokencache op schijf staat en stil
@@ -146,7 +190,8 @@
     -IntervalMinutes als die niet expliciet is opgegeven.
 
 .EXAMPLE
-    # Eenmalig draaien (aanbevolen i.c.m. een externe scheduler / Automation Schedule)
+    # Eenmalig draaien (aanbevolen i.c.m. een externe scheduler / Automation Schedule).
+    # In Azure Automation: managed identity; lokaal: delegated als beheerder.
     ./Phising-rollout.ps1 `
         -RolloutGroupId "11111111-1111-1111-1111-111111111111" `
         -RegisteredGroupId "22222222-2222-2222-2222-222222222222"
@@ -212,9 +257,12 @@ param(
     [switch]$UseTemporaryApp,
     [switch]$Interactive,
     [switch]$UseExistingSession,
+    [switch]$UseManagedIdentity,
+    [switch]$AppOnly,
     [switch]$ForceLogin,
     [string]$TenantId,
     [string]$ClientId,
+    [Alias('CertificateThumbprint')]
     [string]$ClientCertificateThumbprint,
 
     [string]$PendingCsvPath,
@@ -233,9 +281,40 @@ if ($IntervalMinutes -lt 1) { throw "IntervalMinutes moet minimaal 1 zijn." }
 # ---------------------------------------------------------------------------
 # 0. Modules & connectie
 # ---------------------------------------------------------------------------
-if ($UseTemporaryApp -and ($UseAppRegistration -or $UseExistingSession)) {
-    throw "-UseTemporaryApp gaat niet samen met -UseAppRegistration of -UseExistingSession: kies één authenticatiemodus."
+if ($UseTemporaryApp -and ($UseAppRegistration -or $UseExistingSession -or $AppOnly)) {
+    throw "-UseTemporaryApp gaat niet samen met -UseAppRegistration, -AppOnly of -UseExistingSession: kies één authenticatiemodus."
 }
+if ($UseManagedIdentity -and ($UseAppRegistration -or $UseTemporaryApp -or $Interactive -or $UseExistingSession -or $AppOnly)) {
+    throw "-UseManagedIdentity gaat niet samen met een andere authenticatiemodus: kies er één."
+}
+
+# De gedeelde aanmeld-helper van deze repo. In een Azure Automation runbook staat
+# alleen dit script, zonder scripts\Startup; managed identity en
+# -UseAppRegistration hebben de helper niet nodig en werken daar dus gewoon.
+$m365Helper = if ($PSScriptRoot) { Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1' }
+if ($m365Helper -and (Test-Path $m365Helper)) { . $m365Helper }
+
+function Assert-M365Helper {
+    if (-not (Get-Command Connect-M365Graph -ErrorAction SilentlyContinue)) {
+        throw "Delegated aanmelden en -AppOnly gebruiken scripts\Startup\Connect-M365.ps1, en die is hier niet gevonden. In een runbook: gebruik managed identity of -UseAppRegistration."
+    }
+}
+
+# Draaien we in Azure Automation (cloud job of Hybrid Runbook Worker)?
+$script:InAzureAutomation = [bool]($env:AUTOMATION_ASSET_ACCOUNTID -or ($PSPrivateMetadata -and $PSPrivateMetadata.JobId))
+
+# Eén modus. Zonder switch: in Azure Automation managed identity (zoals altijd,
+# zodat bestaande runbooks blijven werken), daarbuiten delegated als beheerder.
+$script:AuthMode =
+    if     ($UseTemporaryApp)    { 'TemporaryApp' }
+    elseif ($UseAppRegistration) { 'AppRegistration' }
+    elseif ($AppOnly)            { 'AppOnly' }
+    elseif ($UseManagedIdentity) { 'ManagedIdentity' }
+    elseif ($Interactive)        { 'Delegated' }
+    elseif ($UseExistingSession) { 'ExistingSession' }
+    elseif ($script:InAzureAutomation) { 'ManagedIdentity' }
+    else                         { 'Delegated' }
+Write-Verbose "Authenticatiemodus: $($script:AuthMode)"
 
 $RequiredModules = @("Microsoft.Graph.Authentication", "Microsoft.Graph.Users", "Microsoft.Graph.Groups", "Microsoft.Graph.Identity.SignIns")
 if ($UseTemporaryApp) { $RequiredModules += "Microsoft.Graph.Applications" }
@@ -276,37 +355,30 @@ function Test-GraphSessionUsable {
     return ($canWriteGroups -and $canReadMethods)
 }
 
-# Meeliften op de Connect-MgGraph die de gebruiker zelf heeft gedaan. Met
-# -UseExistingSession is dat een expliciete keuze; zonder enige modus-switch is
-# managed identity de bedoeling, maar die faalt buiten Azure altijd - dan is een
-# bestaande delegated sessie duidelijk wat je bedoelde, en is hergebruiken beter
-# dan afbreken op een IMDS-timeout van 169.254.169.254.
+# Meeliften op de Connect-MgGraph die de gebruiker zelf heeft gedaan, met
+# -UseExistingSession als expliciete keuze. (Zonder switch hergebruikt de
+# delegated modus een passende sessie al via de helper, en managed identity is
+# buiten Azure Automation geen standaard meer, dus geen IMDS-timeout op
+# 169.254.169.254 meer als je lokaal zonder switch draait.)
 #
 # In deze modus roept het script zelf geen Connect-MgGraph of Disconnect-MgGraph
 # aan. Is het token op, dan stopt het en log je zelf opnieuw in. (De SDK kan bij
 # een dood token nog wel zelf een prompt openen; dat zit in de credential van de
 # sessie en daar komt het script niet tussen.)
 $script:ReuseCallerSession = $false
-if ($UseExistingSession -or -not ($UseAppRegistration -or $UseTemporaryApp -or $Interactive)) {
+if ($script:AuthMode -eq 'ExistingSession') {
     $existingContext = Get-MgContext
 
     if ($existingContext -and $existingContext.AuthType -eq 'Delegated') {
         $script:ReuseCallerSession = $true
-
-        if ($UseExistingSession) {
-            Write-Output "Hergebruikt je eigen Graph-sessie: $($existingContext.Account)"
-        }
-        else {
-            Write-Warning "Bestaande Graph-sessie gevonden ($($existingContext.Account)); die wordt hergebruikt i.p.v. managed identity."
-        }
+        Write-Output "Hergebruikt je eigen Graph-sessie: $($existingContext.Account)"
 
         if (-not (Test-GraphSessionUsable -Context $existingContext)) {
             Write-Warning "Die sessie mist waarschijnlijk scopes: $($existingContext.Scopes -join ', '). Verwacht: $($InteractiveScopes -join ', '). Een kale 'Connect-MgGraph' krijgt alleen User.Read en loopt dus vast op de groepen."
         }
     }
-    elseif ($UseExistingSession) {
-        # Expliciet gevraagd om hergebruik, maar er is niets om te hergebruiken:
-        # doorgaan zou stilletjes managed identity proberen.
+    else {
+        # Expliciet gevraagd om hergebruik, maar er is niets om te hergebruiken.
         $found = if ($existingContext) { "authenticatietype $($existingContext.AuthType)" } else { "geen Graph-sessie" }
         throw "-UseExistingSession vraagt om een bestaande delegated sessie, maar ik vond $found. Log eerst in met: Connect-MgGraph -Scopes $($InteractiveScopes -join ',') -ContextScope CurrentUser"
     }
@@ -486,18 +558,13 @@ function Connect-TemporaryAppSession {
     if (-not $script:TempApp) {
         # De app aanmaken vraagt om een beheerderssessie; daarna is de delegated
         # sessie niet meer nodig en nemen we het app-only token over.
-        Write-Output "Interactief inloggen om de tijdelijke app aan te maken (Application Administrator of Global Administrator vereist)..."
-        $adminParams = @{
-            Scopes       = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
-            ContextScope = 'CurrentUser'
-            NoWelcome    = $true
-            ErrorAction  = 'Stop'
-        }
-        if ($TenantId) { $adminParams['TenantId'] = $TenantId }
-        Connect-MgGraph @adminParams
-
-        $adminContext  = Get-MgContext
-        $script:TenantIdForApp = if ($TenantId) { $TenantId } else { $adminContext.TenantId }
+        Write-Output "Delegated inloggen om de tijdelijke app aan te maken (Application Administrator of Global Administrator vereist)..."
+        Assert-M365Helper
+        # Via de helper: device code / GDAP-klant volgens load.config.ps1, en een
+        # sessie die deze scopes al heeft wordt hergebruikt.
+        $adminConn = Connect-M365Graph -Scopes 'Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All' -TenantId $TenantId
+        # De tenant waarin we echt zitten (ook onder GDAP, waar -TenantId leeg kan zijn).
+        $script:TenantIdForApp = if ($adminConn.TenantId) { $adminConn.TenantId } else { $TenantId }
 
         New-TemporaryGraphApp -AppName "PhishingRollout-Temp-$(Get-Date -Format 'yyyyMMddHHmmss')" | Out-Null
     }
@@ -567,60 +634,62 @@ function Connect-GraphSession {
     }
 
     try {
-        if ($UseTemporaryApp) {
-            # App-only tokens verlopen wel, maar worden stil vernieuwd met het
-            # secret; opnieuw verbinden is alleen nodig bij -Force.
-            if ($script:TempApp -and -not $Force -and (Get-MgContext)) { return }
-            Connect-TemporaryAppSession
-        }
-        elseif ($UseAppRegistration) {
-            if (-not ($TenantId -and $ClientId -and $ClientCertificateThumbprint)) {
-                throw "-UseAppRegistration vereist -TenantId, -ClientId en -ClientCertificateThumbprint."
+        switch ($script:AuthMode) {
+            'TemporaryApp' {
+                # App-only tokens verlopen wel, maar worden stil vernieuwd met het
+                # secret; opnieuw verbinden is alleen nodig bij -Force.
+                if ($script:TempApp -and -not $Force -and (Get-MgContext)) { return }
+                Connect-TemporaryAppSession
             }
-            Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $ClientCertificateThumbprint -NoWelcome -ErrorAction Stop
-        }
-        elseif ($Interactive) {
-            # Een bruikbare bestaande sessie hergebruiken, ook bij de eerste
-            # aanroep. De SDK vernieuwt het access token zelf via de refresh
-            # token in de cache; opnieuw Connect-MgGraph draaien levert alleen
-            # een extra browser-prompt op.
-            $context = Get-MgContext
-            if ($context -and -not $ForceLogin -and -not $Force) {
-                if ((Test-GraphSessionUsable -Context $context) -and (Test-GraphTokenAlive)) { return }
+            'AppRegistration' {
+                if (-not ($TenantId -and $ClientId -and $ClientCertificateThumbprint)) {
+                    throw "-UseAppRegistration vereist -TenantId, -ClientId en -ClientCertificateThumbprint."
+                }
+                # Bewust zonder helper: zo werkt deze modus ook in een runbook.
+                Connect-MgGraph -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $ClientCertificateThumbprint -NoWelcome -ErrorAction Stop
+            }
+            'AppOnly' {
+                Assert-M365Helper
+                $null = Connect-M365Graph -AppOnly -TenantId $TenantId -ClientId $ClientId `
+                    -CertificateThumbprint $ClientCertificateThumbprint
+            }
+            'Delegated' {
+                # Een bruikbare bestaande sessie hergebruiken, ook bij de eerste
+                # aanroep. De SDK vernieuwt het access token zelf via de refresh
+                # token in de cache; opnieuw inloggen levert alleen een extra
+                # browser-prompt op.
+                $context = Get-MgContext
+                if ($context -and -not $ForceLogin -and -not $Force) {
+                    if ((Test-GraphSessionUsable -Context $context) -and (Test-GraphTokenAlive)) { return }
 
-                # In de continue lus nooit alsnog een browser openen: dat blokkeert
-                # een onbewaakte run tot iemand toevallig langsloopt.
-                if ($Silent) { return }
+                    # In de continue lus nooit alsnog een browser openen: dat blokkeert
+                    # een onbewaakte run tot iemand toevallig langsloopt.
+                    if ($Silent) { return }
 
-                Write-Warning "Bestaande sessie ($($context.Account)) is niet bruikbaar (scopes: $($context.Scopes -join ', ')). Opnieuw inloggen."
-            }
+                    Write-Warning "Bestaande sessie ($($context.Account)) is niet bruikbaar (scopes: $($context.Scopes -join ', ')). Opnieuw inloggen."
+                }
 
-            # -ContextScope CurrentUser: zet de tokencache op schijf i.p.v.
-            # alleen in dit proces. Daardoor kan de SDK het token stil
-            # vernieuwen en hoef je niet bij elke run (of elk verlopen token)
-            # opnieuw door de browser.
-            $connectParams = @{
-                Scopes       = $InteractiveScopes
-                ContextScope = 'CurrentUser'
-                NoWelcome    = $true
-                ErrorAction  = 'Stop'
+                Assert-M365Helper
+                # De helper hergebruikt een sessie met de juiste scopes, ook als het
+                # token dood is; die moet hier dus eerst weg. Hier komen we alleen
+                # met een onbruikbare sessie of bij -Force / -ForceLogin.
+                if ($context) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+                $null = Connect-M365Graph -Scopes $InteractiveScopes -TenantId $TenantId
             }
-            if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-            Connect-MgGraph @connectParams
-        }
-        else {
-            # Azure Automation Runbook / Azure VM met (system-assigned) managed identity
-            if ($ClientId) {
-                Connect-MgGraph -Identity -ClientId $ClientId -NoWelcome -ErrorAction Stop
-            }
-            else {
-                Connect-MgGraph -Identity -NoWelcome -ErrorAction Stop
+            'ManagedIdentity' {
+                # Azure Automation Runbook / Azure VM met (system- of user-assigned) managed identity
+                if ($ClientId) {
+                    Connect-MgGraph -Identity -ClientId $ClientId -NoWelcome -ErrorAction Stop
+                }
+                else {
+                    Connect-MgGraph -Identity -NoWelcome -ErrorAction Stop
+                }
             }
         }
     }
     catch {
-        if (-not ($UseAppRegistration -or $Interactive)) {
-            Write-Warning "Managed identity is niet beschikbaar. Draai je dit lokaal? Gebruik dan -Interactive, of -UseAppRegistration met certificaat."
+        if ($script:AuthMode -eq 'ManagedIdentity') {
+            Write-Warning "Managed identity is niet beschikbaar. Draai je dit buiten Azure? Laat dan -UseManagedIdentity weg (delegated als beheerder), of gebruik -UseAppRegistration met certificaat."
         }
         throw "Verbinden met Microsoft Graph mislukt: $($_.Exception.Message)"
     }

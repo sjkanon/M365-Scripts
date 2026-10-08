@@ -221,7 +221,8 @@ $ExchangeSubmenu = @(
         $mbx   = Read-Host "  Mailbox UPN"
         $after = Read-Host "  Only messages on/after this date [yyyy-MM-dd] (optional)"
         $before = Read-Host "  Only messages before this date [yyyy-MM-dd] (optional)"
-        $deleg = Read-Host "  Delegated mode (Exchange Admin, no temp app) instead of automatic? [y/N]"
+        # -Delegated needs your own Full Access on the mailbox, which a GDAP partner cannot get.
+        $deleg = if ($global:authMode -eq 'GDAP') { 'n' } else { Read-Host "  Delegated mode (you have Full Access on the mailbox, no temp app)? [y/N]" }
         $p = @{ Mailbox = $mbx }
         if ($after)  { $p['After']  = [datetime]$after }
         if ($before) { $p['Before'] = [datetime]$before }
@@ -572,18 +573,21 @@ $menu = @(
         Label='Migrate-Calendar    — migrate M365 group calendar to room mailbox'
         Script="$ROOT\scripts\Exchange\Migrate-Calendar.ps1"
         Params={
-            $tenantId  = Read-Host "  TenantId"
-            $adminUPN  = Read-Host "  AdminUPN"
+            $tenantId  = Read-Host "  TenantId (blank = GDAP customer / the tenant you sign in to)"
+            $adminUPN  = Read-Host "  AdminUPN (optional)"
             $groupMail = Read-Host "  Source group mail"
-            return @{ TenantId=$tenantId; AdminUPN=$adminUPN; SourceGroupMail=$groupMail }
+            $a = @{ SourceGroupMail=$groupMail }
+            if ($tenantId) { $a['TenantId']=$tenantId }
+            if ($adminUPN) { $a['AdminUPN']=$adminUPN }
+            return $a
         }
     }
     [PSCustomObject]@{ Key='3'; FKey=[ConsoleKey]::F3; Category='Exchange'
         Label='Set-Calendar-rights — grant calendar permissions to a user'
         Script="$ROOT\scripts\Exchange\Set-Calendar-rights.ps1"
         Params={
-            $user    = Read-Host "  User (without domain)"
-            $mailbox = Read-Host "  Target mailbox (without domain)"
+            $user    = Read-Host "  User (UPN, or name without domain)"
+            $mailbox = Read-Host "  Target mailbox (UPN, or name without domain)"
             $rights  = Read-Host "  Access rights (e.g. Reviewer, Editor, Owner)"
             return @{ User=$user; TargetMailbox=$mailbox; AccessRights=$rights }
         }
@@ -679,6 +683,24 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='J'; FKey=$null; Category='Device'
+        Label='SessionHostImage    — prepare a multi-session image / AVD hosts for Teams, Outlook, Copilot (FSLogix)'
+        Script="$ROOT\scripts\RDS\Update-SessionHostImage.ps1"
+        Params={
+            $hosts = Read-Host "  Session hosts, e.g. avd-0,avd-1,avd-2 (empty = this machine)"
+            $apply = Read-Host "  Fix now (not just check)? [y/N]"
+            $a = @{}
+            if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
+            if ($apply -notmatch '^[Yy]') {
+                $a['CheckOnly'] = $true
+                $cap = Read-Host "  Is this the image VM, about to be captured? [y/N]"
+                if ($cap -match '^[Yy]') { $a['ForCapture'] = $true }
+            } else {
+                $a['Confirm'] = $false   # already answered here, don't ask twice
+            }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='K'; FKey=$null; Category='Device'
         Label='FSLogix-Shrink      — shrink FSLogix profile disks on a share, or check compaction at sign-out'
         Script="$ROOT\scripts\RDS\Invoke-FSLogixShrink.ps1"
@@ -706,9 +728,40 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='N'; FKey=$null; Category='Device'
+        Label='Install-Printer     — install printer drivers (from GitHub) and printers from a JSON file'
+        Script="$ROOT\scripts\Device\Printer\Install-Printer.ps1"
+        Params={
+            $cfg = Read-Host "  JSON file or https URL"
+            $a = @{ ConfigPath = $cfg }
+            $sel = Read-Host "  Only these printers, comma separated (empty = all)"
+            if ($sel) { $a['Printer'] = @($sel -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+            $apply = Read-Host "  Install now (not just check)? [y/N]"
+            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"
+        Params={ return @{} }
+    }
+    [PSCustomObject]@{ Key='U'; FKey=$null; Category='Startup'
+        Label='Update-Modules      — check/update the required modules (and optionally all others)'
+        Script="$ROOT\scripts\Startup\Update-Modules.ps1"
+        Params={
+            $a = @{}
+            $all = Read-Host '  Also update every other installed module? [y/N]'
+            if ($all -notmatch '^[Yy]') { $a['RequiredOnly'] = $true }
+            $check = Read-Host '  Only check, change nothing? [y/N]'
+            if ($check -match '^[Yy]') { $a['CheckOnly'] = $true }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='Z'; FKey=$null; Category='Startup'
+        Label='Test-RequiredModules — modules scripts load that RequiredModules.psd1 misses'
+        Script="$ROOT\scripts\Startup\Test-RequiredModules.ps1"
         Params={ return @{} }
     }
     [PSCustomObject]@{ Key='X'; FKey=$null; Category='Startup'
@@ -852,7 +905,7 @@ $menu = @(
             } elseif ($step -eq '6') {
                 # Reports unless -Apply, so the question here is the one that matters.
                 $a['Interactive'] = $true
-                $client = Read-Host '  ClientId of the PnP app registration'
+                $client = Read-Host '  ClientId of the PnP app registration [Enter = pnp.appid.json]'
                 if ($client) { $a['ClientId'] = $client }
                 Write-Host ''
                 Write-Host '  Without confirmation this only reports what it would remove.' -ForegroundColor DarkGray
@@ -866,7 +919,7 @@ $menu = @(
                 }
             } else {
                 $a['Interactive'] = $true
-                $client = Read-Host '  ClientId of the PnP app registration'
+                $client = Read-Host '  ClientId of the PnP app registration [Enter = pnp.appid.json]'
                 if ($client) { $a['ClientId'] = $client }
             }
 

@@ -30,6 +30,17 @@ Scripts for managing users and resources in Microsoft Entra ID (formerly Azure A
 
 ---
 
+## Sign-in
+
+Every script in this folder signs in through [`Connect-M365.ps1`](../Startup/readme.md) and works on Microsoft Graph:
+
+- **Delegated by default** — you sign in as the admin: in the browser, or with a device code when `useDeviceCodeAuth` is set in `load.config.ps1`. Under GDAP (`authMode = GDAP`) the customer tenant from `Connect-Tenant` is used unless `-TenantId` names another.
+- **App-only on request** — `-ClientId` with `-CertificateThumbprint`, or `-AppOnly` to take both for the tenant from `graph.appid.json` in the repo root. The app needs the matching *application* permissions, consented in that tenant (GDAP does not grant app-only access).
+- **Session reuse** — a Graph session for the right tenant that already holds the scopes is reused and left connected; a script only disconnects a session it opened itself, never yours.
+- `Phising-rollout.ps1` adds its own modes (managed identity in Azure Automation, temporary app) — see its section.
+
+---
+
 ### Set-UserManager.ps1
 
 Reports and optionally bulk-sets the manager for a set of Entra ID users. Users can be selected by group, department, current manager, or an explicit UPN list; when `-NewManager` is omitted the script only reports each user's current manager.
@@ -45,7 +56,9 @@ Reports and optionally bulk-sets the manager for a set of Entra ID users. Users 
 | `-UserList` | * | Explicit array of UPNs or object IDs |
 | `-NewManager` | No | UPN or object ID to set as manager for all resolved users. Omit to only report current managers |
 | `-OutputPath` | No | CSV export path |
-| `-TenantId` | No | Entra ID tenant ID or domain for `Connect-MgGraph` |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 *Exactly one of `-GroupId` / `-GroupName` / `-Department` / `-CurrentManager` / `-UserList` selects the user source.
 
@@ -70,6 +83,11 @@ Reports and optionally bulk-sets the manager for a set of Entra ID users. Users 
 
 Supports `-WhatIf` (`SupportsShouldProcess`).
 
+**Notes**
+- Group members and direct reports come from one paged Graph call each (`/members/microsoft.graph.user?$select=...`) instead of one `Get-MgUser` per member
+- Quotes in `-GroupName` / `-Department` are escaped for the OData filter (a name like `O'Brien` broke the query)
+- A Graph session the script did not open is left alone (it used to call `Disconnect-MgGraph` unconditionally at the end)
+
 ---
 
 ### Remove-M365Users.ps1
@@ -86,7 +104,9 @@ Bulk-deletes M365 user accounts from a tenant. Revokes sessions and removes lice
 | `-SkipLicenseRemoval` | No | Skip removing licenses before deletion |
 | `-SkipSessionRevoke` | No | Skip revoking active sessions |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 *Either `-UserList` or `-CsvPath` is required.
 
@@ -106,7 +126,7 @@ Bulk-deletes M365 user accounts from a tenant. Revokes sessions and removes lice
 **Notes**
 - Deletion is a soft-delete — accounts land in Deleted Users and are recoverable for 30 days
 - A CSV report is always written, even in dry-run mode
-- If already connected to Graph (e.g. via `functies.ps1`), the existing connection is reused
+- A Graph session that already has `User.ReadWrite.All` for the right tenant is reused; otherwise the script connects. Before, it never connected when there was no session at all, because `Get-MgContext` does not throw
 
 **Required module**
 ```powershell
@@ -134,7 +154,9 @@ Creates a single M365 user via Microsoft Graph. Generates a random 16-character 
 | `-MobilePhone` | No | Mobile phone number |
 | `-LicenseSkuId` | No | License SKU part number to assign (e.g. `ENTERPRISEPACK`) |
 | `-NoPasswordReset` | No | Do not force password change on first sign-in |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 **Examples**
 
@@ -146,6 +168,9 @@ Creates a single M365 user via Microsoft Graph. Generates a random 16-character 
 .\New-M365User.ps1 -UserPrincipalName "j.doe@contoso.com" -DisplayName "Jane Doe" `
     -GivenName "Jane" -Surname "Doe" -Department "Finance" -LicenseSkuId "ENTERPRISEPACK"
 ```
+
+**Notes**
+- The mail nickname, a required property of a new user in Graph, is the part of the UPN before the `@`
 
 ---
 
@@ -167,7 +192,9 @@ Bulk-creates M365 users from a CSV file via Microsoft Graph. Defaults to dry-run
 | `-LicenseSkuId` | No | Assign this license to all users (overrides CSV column) |
 | `-NoPasswordReset` | No | Do not force password change on first sign-in |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 **Examples**
 
@@ -186,6 +213,8 @@ Bulk-creates M365 users from a CSV file via Microsoft Graph. Defaults to dry-run
 - Dry-run always writes a results CSV — check it before running with `-Apply`
 - Generated passwords are in the results CSV — share securely
 - A license requires `UsageLocation` to be set; the script handles this automatically
+- The mail nickname, which Graph requires, is the part of the UPN before the `@`
+- The dry-run summary counts the rows it would create (it always showed 0, because dry-run rows were counted as skipped)
 
 ---
 
@@ -205,7 +234,9 @@ Checks assigned licenses for a list of users via Microsoft Graph and exports a C
 | `-UserList` | * | Array of UPNs/emails |
 | `-CsvPath` | * | Path to CSV/TXT with users |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\UserLicenseReport_<timestamp>.csv`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 *Either `-UserList` or `-CsvPath` is required.
 
@@ -226,6 +257,9 @@ Checks assigned licenses for a list of users via Microsoft Graph and exports a C
 - One row per user-license assignment
 - Unlicensed users are included with `LicenseStatus = Unlicensed`
 - Not found users are included with `LicenseStatus = NotFound`
+
+**Notes**
+- A user not found by UPN/ID is looked up with a plain `userPrincipalName`/`mail` filter (no `ConsistencyLevel: eventual` without a count, and no longer assigned to the automatic `$matches` variable)
 
 ---
 
@@ -251,7 +285,9 @@ It also supports a follow-up action to switch imported policies to report-only o
 | `-PolicyStateOnImport` | No | `disabled` (default) or `enabledForReportingButNotEnforced` |
 | `-TargetState` | No | For `SetState`: `disabled`, `enabledForReportingButNotEnforced`, or `enabled` |
 | `-SourcePath` | No | Local baseline folder containing `Config\...` |
-| `-TenantId` | No | Tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 | `-UpdateExisting` | No | Update existing policies with matching display names |
 
 **Examples**
@@ -270,6 +306,8 @@ It also supports a follow-up action to switch imported policies to report-only o
 **Notes**
 - Keep at least one break-glass account excluded before enabling policies
 - Review exclusion groups and named locations after import
+- Group and service-principal lookups use a plain `eq` filter, without `ConsistencyLevel: eventual` (which needs a count)
+- A session is reused only when it is for the right tenant and holds all scopes (before, any session was reused); the `Daniel` provider (DCToolbox) runs on that same session
 
 ---
 
@@ -300,6 +338,10 @@ Important:
 .\New-TemporaryConditionalAccessPolicy.ps1 -TargetType Group -TargetId "<object-id>" -DisplayName "Temporary Block" -Action Block -NoAutoCleanup
 ```
 
+**Notes**
+- Accepts `-TenantId`, `-ClientId`, `-CertificateThumbprint` and `-AppOnly` (see [Sign-in](#sign-in)). The Graph session is left open, so the menu's follow-up TAP step needs no new sign-in
+- With `-WhatIf` nothing is created and the script stops there (it used to run the wait/cleanup against a policy that did not exist)
+
 ---
 
 ### Remove-TemporaryConditionalAccessPolicies.ps1
@@ -321,6 +363,9 @@ Modes:
 .\Remove-TemporaryConditionalAccessPolicies.ps1 -PolicyId "<policy-id>"
 ```
 
+**Notes**
+- Accepts `-TenantId`, `-ClientId`, `-CertificateThumbprint` and `-AppOnly` (see [Sign-in](#sign-in)); the Graph session is left open
+
 ---
 
 ### New-UserTemporaryAccessPass.ps1
@@ -336,12 +381,13 @@ Creates a Temporary Access Pass (TAP) for one user.
 **Notes**
 - Prefer `-IsUsableOnce` for support/install scenarios
 - Share the TAP code through a secure channel and expire it quickly
+- Accepts `-TenantId`, `-ClientId`, `-CertificateThumbprint` and `-AppOnly` (see [Sign-in](#sign-in)); app-only needs the `UserAuthenticationMethod.ReadWrite.All` application permission
 
 ---
 
 ### Test-M365GroupMembership.ps1
 
-Lists all owners and members of Microsoft 365 Groups (including Teams-backed groups). Results are exported to CSV with one row per owner/member entry. Connects to Graph automatically if no session is active; reuses an existing session if already connected.
+Lists all owners and members of Microsoft 365 Groups (including Teams-backed groups). Results are exported to CSV with one row per owner/member entry. Owners and members come from one paged Graph call per group (no `Get-MgUser` per member); members that are not users (groups, devices, service principals) are listed too, with an `ObjectType` column. Quotes in a `-Group` name are escaped for the OData filter.
 
 **Parameters**
 
@@ -349,7 +395,9 @@ Lists all owners and members of Microsoft 365 Groups (including Teams-backed gro
 |-----------|----------|-------------|
 | `-Group` | No | Display name or Object ID of a single group. If omitted, all M365 groups are audited |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 **Examples**
 
@@ -389,9 +437,11 @@ Copies the members of one Entra ID group into another group. Members already pre
 | `-Flatten` | No | Expand nested groups and copy their effective members instead of the nested group object |
 | `-Mirror` | No | Also remove members from the target that are not in the source (exact copy instead of union) |
 | `-Apply` | No | Actually add/remove members (default: dry run) |
-| `-Disconnect` | No | Sign out of Graph when finished (off by default — disconnecting clears the token cache and forces a new browser prompt next run) |
+| `-Disconnect` | No | Sign out of Graph when finished — only when this script opened the session (off by default, so the next run in the same PowerShell session needs no new sign-in) |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\GroupMemberCopy_<timestamp>.csv`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: the GDAP customer when `authMode` is GDAP, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 
 **Examples**
 
@@ -413,11 +463,13 @@ Copies the members of one Entra ID group into another group. Members already pre
 - Display names are resolved via Graph; an ambiguous name is a hard error — use the Object ID instead
 - A dynamic-membership target group is rejected: its membership is rule-driven and cannot be edited
 - Mail-enabled security and distribution groups are not writable through Graph — use Exchange Online cmdlets for those
+- A session that lacks the scopes is no longer reused as is; the script reconnects with them
 - Supports `-WhatIf` (`SupportsShouldProcess`)
 
 **Required scopes**
 - `Group.Read.All`
 - `GroupMember.ReadWrite.All`
+- `Directory.Read.All`
 
 **Required module**
 ```powershell
@@ -441,7 +493,9 @@ Accepts an array of tenants, so a GDAP partner can walk every customer tenant in
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `-TenantId` | No | One or more tenant IDs or domain names. Omit to use the current connection / default tenant |
+| `-TenantId` | No | One or more tenant IDs or domain names. Omit to use the current connection / the GDAP customer / your default tenant |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in with this app registration and certificate (see [Sign-in](#sign-in)) |
+| `-AppOnly` | No | App-only sign-in with the app from `graph.appid.json` |
 | `-Revert` | No | Set `passkeyDynamicMigration` back to `false` (re-opt the tenant IN to the automatic migration) |
 | `-ReportOnly` | No | Read and display the current value without changing anything |
 
@@ -475,6 +529,7 @@ Accepts an array of tenants, so a GDAP partner can walk every customer tenant in
 - Writes are confirmed per tenant (`ConfirmImpact = 'High'`); pass `-Confirm:$false` for unattended multi-tenant runs
 - The setting is read back ~2 seconds after the PATCH; a mismatch is reported as `PatchedUnverified` rather than treated as success
 - Returns one object per tenant (`Tenant`, `Before`, `After`, `Status`, `Message`) so a run can be piped to `Export-Csv`
+- Per tenant the script disconnects only a session it opened for that tenant; before, it called `Disconnect-MgGraph` after every tenant, also on a session you already had
 - Supports `-WhatIf` (`SupportsShouldProcess`)
 - If you need SMS/voice after Feb 1, 2027, configure a customer-managed telecom provider through the Microsoft Security Store (selectable from Oct 30, 2026)
 
@@ -530,15 +585,27 @@ passkey silently keeps the compliant label.
 | `-RegisteredGroupId` | Object ID of the static Registered group (already compliant) |
 | `-AcceptedMethod` | `AuthenticatorPasskey` (default) or `AnyPhishingResistant` |
 | `-AllowedAaGuids` | AAGUIDs that count as a passkey in Authenticator (default: the iOS and Android AAGUIDs of Microsoft Authenticator). Ignored for `AnyPhishingResistant` |
-| `-Interactive` | Sign in through the browser instead of a managed identity — for running it from your own machine |
+| `-Interactive` | Delegated sign-in as the admin through `Connect-M365.ps1` — now also the default outside Azure Automation; the switch forces it everywhere |
+| `-UseManagedIdentity` | Managed identity (`-ClientId` for a user-assigned one) — automatic in Azure Automation, use the switch on an Azure VM |
 | `-UseAppRegistration` | Use an existing app registration (certificate or secret) |
 | `-UseTemporaryApp` | Create a throwaway app registration, run app-only, and delete it again afterwards |
+| `-AppOnly` | App-only with the app and certificate for the tenant from `graph.appid.json` |
+| `-UseExistingSession` | Run only on your own `Connect-MgGraph` session; the script never signs in itself |
+| `-TenantId` / `-ClientId` / `-ClientCertificateThumbprint` | For `-UseAppRegistration` (alias `-CertificateThumbprint`); `-TenantId` also picks the tenant for delegated sign-in |
 
 **Authentication**
 
 Built as an **Azure Automation runbook** on a system-assigned managed identity, to run
-every one to four hours. Without `-Interactive` or an app registration it tries managed
-identity, which always fails outside Azure.
+every one to four hours. Without a mode switch the script picks the sign-in itself:
+
+| Where it runs | Default sign-in |
+|---------------|-----------------|
+| Azure Automation (cloud job or Hybrid Worker, detected through `AUTOMATION_ASSET_ACCOUNTID` / `$PSPrivateMetadata.JobId`) | Managed identity — existing runbooks keep working unchanged |
+| Anywhere else | Delegated as the admin through [`Connect-M365.ps1`](../Startup/readme.md) (browser, or device code / GDAP customer from `load.config.ps1`); a session with the scopes and a live token is reused |
+
+Before, managed identity was the default everywhere, which always failed outside Azure.
+In a runbook the helper is not present: managed identity and `-UseAppRegistration` work
+there without it, delegated sign-in and `-AppOnly` need the repository.
 
 For a run across many users, `-UseTemporaryApp` (or `-UseAppRegistration` with a
 certificate) is the reliable choice: an app-only token is minted fresh on every call and

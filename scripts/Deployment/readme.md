@@ -10,6 +10,18 @@ A USB toolkit for Windows setup and Autopilot enrollment. Designed to be used du
 
 ---
 
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`start.bat`](start.bat) ([docs](#startbat)) | Main menu of the toolkit — self-elevates and offers Autopilot enrollment, Windows Update, rename, domain join and the customer install browser |
+| [`start.local.example.cmd`](start.local.example.cmd) ([docs](#startlocalcmd)) | Template for `start.local.cmd` — the site's LocalAdmin password and install share, kept out of the repo |
+| [`Browse-InstallScripts.ps1`](Browse-InstallScripts.ps1) ([docs](#browse-installscriptsps1)) | Interactive customer/script browser behind menu options `D` and `E` — browse customer folders and launch `.ps1` / `.bat` / `.cmd` files |
+
+Also in this folder: [`autorun.inf`](autorun.inf) — USB drive label only ([details](#autoruninf)).
+
+---
+
 ## USB folder structure
 
 All files must be in the **same folder** on the USB drive:
@@ -17,6 +29,7 @@ All files must be in the **same folder** on the USB drive:
 ```
 USB:\
 ├── start.bat                      ← Main menu — run this
+├── start.local.cmd                ← Site settings: LocalAdmin password, install share (not in the repo)
 ├── GetAutoPilot.CMD               ← Autopilot enrollment script
 ├── Get-WindowsAutoPilotInfo.ps1   ← PowerShell module for hardware hash
 ├── Browse-InstallScripts.ps1       ← Customer install browser for option D/E
@@ -48,7 +61,9 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 
 ---
 
-## Menu options
+## start.bat
+
+The main menu of the toolkit. It switches to its own folder (`cd /d %~dp0`), requests administrator privileges, and shows these options:
 
 | Option | Action | Works in OOBE |
 |---|---|---|
@@ -65,22 +80,43 @@ Windows does **not** auto-run USB scripts (blocked since Vista). Manual steps:
 | `B` | **Rename device** — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`) | ✅ |
 | `C` | **Do it all — AD** — Rename + Domain join + Windows Update + restart | ✅ (needs domain connectivity) |
 | `D` | **Customer install scripts (local)** — open customer menu from local `Install` folder | ✅ |
-| `E` | **Customer install scripts (network share)** — open customer menu from `\\10.222.3.94\Software` | ✅ (needs network access) |
+| `E` | **Customer install scripts (network share)** — open customer menu from the share in `INSTALL_SHARE` (asked when not set) | ✅ (needs network access) |
 | `0` | Exit | ✅ |
 
-### Customer install browser (options D and E)
+### Browse-InstallScripts.ps1
+
+Customer install browser behind menu options `D` and `E`. Shows the first-level customer folders under `-RootPath` as a menu, then lets you browse into them and launch `.ps1`, `.bat` and `.cmd` files (`AppDeployToolkit` folders are hidden).
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-RootPath` | Yes | Folder whose subfolders are the customers (local `Install` folder or a network share) |
+| `-SourceLabel` | No | Title shown above the customer menu (default `Install Scripts`) |
+
+```powershell
+# What option D runs
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Browse-InstallScripts.ps1 -RootPath .\Install -SourceLabel "Local Install"
+```
 
 - Option `D` needs local files: `Browse-InstallScripts.ps1` and the complete `Install` folder next to `start.bat`.
-- Option `E` reads customer folders from `\\10.222.3.94\Software` and needs network access.
+- Option `E` reads customer folders from the share in `INSTALL_SHARE` (from [`start.local.cmd`](#startlocalcmd), otherwise asked) and needs network access.
 - Before option `D` or `E` opens the deploy browser, `start.bat` prepares the device for deployment:
    - Creates or updates local admin user `LocalAdmin`
-   - Password: `Er@smus_Roter0`
+   - Password: `LOCALADMIN_PASSWORD` from [`start.local.cmd`](#startlocalcmd), otherwise asked with hidden input. No password, no account: the option stops and the menu returns
    - Adds `LocalAdmin` to the local `Administrators` group
    - Sets OOBE skip registry flags so the remaining OOBE flow can be skipped more easily
 
+### start.local.cmd
+
+Site-specific settings that do not belong in the repo. `start.bat` loads it from its own folder when it exists; copy [`start.local.example.cmd`](start.local.example.cmd) to `start.local.cmd` on the USB stick and fill it in. `start.local.cmd` is git-ignored.
+
+| Variable | Description |
+|----------|-------------|
+| `LOCALADMIN_PASSWORD` | Password for the `LocalAdmin` account options `D` and `E` create. Empty or missing: asked with hidden input. Avoid `%` — batch expands it |
+| `INSTALL_SHARE` | UNC path of the customer install share for option `E`, e.g. `\\server\Software`. Empty or missing: asked when option `E` is chosen |
+
 ### Autopilot online (option 4)
 
-Runs `Get-WindowsAutoPilotInfo.ps1 -Online` — uploads the hardware hash directly to Intune without generating a CSV file. Prompts for Microsoft 365 admin credentials. Device appears in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** within a few minutes.
+Runs `Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode` — uploads the hardware hash directly to Intune through Microsoft Graph without generating a CSV file. Sign in with a Microsoft 365 admin account by device code: open the address shown on a phone or another PC and enter the code, so no browser is needed during OOBE. Device appears in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** within a few minutes.
 
 > Windows Update Settings panel is not available in OOBE, but `UsoClient` triggers updates directly from the command line and works fine.
 
@@ -93,7 +129,7 @@ Uses `winget install Microsoft.PowerShell`. Requires internet. If `winget` is no
 For Intune/cloud-managed environments. Runs in sequence:
 1. Renames the device — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`)
 2. Removes existing `compHash.csv`
-3. Runs Autopilot enrollment online (`Get-WindowsAutoPilotInfo.ps1 -Online`)
+3. Runs Autopilot enrollment online (`Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode`)
 4. Installs Windows updates via `PSWindowsUpdate`
 5. Restarts after 30 seconds (Ctrl+C to cancel)
 
@@ -117,10 +153,12 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
-| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens `\\10.222.3.94\Software`; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts; documented that option `D` requires copying both `Browse-InstallScripts.ps1` and the full `Install` folder; options `D` and `E` now create/update local admin `LocalAdmin` (`Er@smus_Roter0`) and set OOBE skip flags before deployment starts |
+| 2026-10-05 | 3.0 | The LocalAdmin password and the install share's address are no longer in `start.bat`: they come from `start.local.cmd` (git-ignored), and are asked when it is missing — the password with hidden input. With no password, options `D`/`E` stop instead of creating an account. Added `start.local.example.cmd` |
+| 2026-04-17 | 2.9 | Added customer-based install browser to `start.bat`: option `D` opens local `Install` customer folders and option `E` opens a network share; added `Browse-InstallScripts.ps1` to browse customer folders and run `.ps1` / `.bat` / `.cmd` scripts; documented that option `D` requires copying both `Browse-InstallScripts.ps1` and the full `Install` folder; options `D` and `E` now create/update local admin `LocalAdmin` and set OOBE skip flags before deployment starts |
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-10-08 | 2.9 | Autopilot online signs in by device code (`-DeviceCode`): the script now talks to Microsoft Graph instead of the retired AzureAD/WindowsAutopilotIntune modules, and a browser sign-in may not open during OOBE |
 | 2026-03-20 | 2.8 | Split Do it all into A (Intune) and C (Active Directory); AD variant skips Autopilot |
 | 2026-03-20 | 2.7 | Do it all updated: AD domain join added as step 3 |
 | 2026-03-20 | 2.6 | Do it all updated: device rename added as first step |

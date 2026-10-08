@@ -2,7 +2,19 @@
 
 [M365-Scripts](../../../../../readme.md) › [scripts](../../../../readme.md) › [Intune](../../../readme.md) › [Desktop](../../readme.md) › [Background](../readme.md) › **Lockscreen**
 
-# Make-lockscreen.ps1
+# Lockscreen
+
+Corporate lockscreen image via Intune.
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| [`Make-lockscreen.ps1`](Make-lockscreen.ps1) ([docs](#make-lockscreenps1)) | Download the corporate lockscreen image and enforce it via PersonalizationCSP |
+
+---
+
+## Make-lockscreen.ps1
 
 > Author: Sjoerd Kanon
 

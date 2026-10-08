@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Move a shared calendar out of a user's mailbox into a resource mailbox of its
@@ -72,15 +72,25 @@
     Access
     ------
     Exchange Online: Exchange Administrator (New-Mailbox, folder permissions).
-    An existing Exchange session is reused.
+    Connected delegated through Connect-M365.ps1 (device code and GDAP customer
+    per load.config.ps1, -DelegatedOrganization for a customer); an existing
+    session for the same tenant is reused.
 
     Graph: application permission Calendars.ReadWrite, plus
     MailboxSettings.ReadWrite for the categories (optional - without it
     categories are copied by name, without colour). Obtained the same three ways
     as in Remove-PhishingMessage.ps1: an existing app-only session, -ClientId
-    with -ClientSecret or -CertificateThumbprint, or a temporary App Registration
+    with -ClientSecret or -CertificateThumbprint (or -AppOnly from
+    graph.appid.json), or a temporary App Registration
     that is removed again when the run ends. The Graph calls are plain REST, so
-    the Exchange/Graph MSAL clash does not apply.
+    the Exchange/Graph MSAL clash does not apply; for the same reason the sign-in
+    that creates the temporary app is always a device code.
+
+    App-only is the default because it cannot be otherwise: the script reads one
+    user's calendar and writes into a resource mailbox it has just created, and
+    a delegated token reaches neither without explicit rights on both (and
+    Graph has no delegated way at all to read another mailbox's category
+    colours). There is therefore no -Delegated here.
 
 .PARAMETER Mailbox
     The user mailbox that holds the calendar (UPN or SMTP address).
@@ -143,7 +153,12 @@
     Client secret for -ClientId.
 
 .PARAMETER CertificateThumbprint
-    Certificate thumbprint for -ClientId (via Connect-MgGraph).
+    Certificate thumbprint for -ClientId (via Connect-M365Graph, which reuses a
+    matching session and only disconnects what it opened).
+
+.PARAMETER AppOnly
+    App-only Graph with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root (instead of -ClientId).
 
 .EXAMPLE
     # Preview: what would happen to Jan's calendar "Balie"?
@@ -181,8 +196,19 @@ param(
     [string] $TenantId,
     [string] $ClientId,
     [string] $ClientSecret,
-    [string] $CertificateThumbprint
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
+# -AppOnly: your own app from graph.appid.json, used like -ClientId -CertificateThumbprint.
+if ($AppOnly -and -not $ClientId) {
+    $reg = Get-M365AppRegistration -TenantId (Resolve-M365TenantId -TenantId $TenantId)
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $reg.Tenant }
+}
 
 if ($RemoveSourceCalendar -and -not $Apply) {
     throw "-RemoveSourceCalendar needs -Apply: the original is only removed after its copy has been made and verified."
@@ -243,6 +269,7 @@ $script:TokenExpiry     = [datetime]::MinValue
 $script:AccessToken     = $null
 $script:AdminHeaders    = $null
 $script:SkipCategories  = $false
+$script:Graph           = $null     # Connect-M365Graph result; disconnect only what it opened
 $script:GraphCliClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
 
 function Invoke-GraphAdmin {
@@ -469,7 +496,7 @@ function Connect-GraphForCalendar {
         }
         if ($CertificateThumbprint) {
             try {
-                Connect-MgGraph -ClientId $ClientId -TenantId $Tenant -CertificateThumbprint $CertificateThumbprint -NoWelcome -ErrorAction Stop
+                $script:Graph = Connect-M365Graph -ClientId $ClientId -TenantId $Tenant -CertificateThumbprint $CertificateThumbprint
             } catch {
                 Write-Warning "Could not connect with the supplied certificate: $($_.Exception.Message)"
                 return $false
@@ -945,32 +972,17 @@ function Wait-Until {
 # ==============================================================================
 #  Run
 # ==============================================================================
-$script:ConnectedExo = $false
+$script:Exo = $null
 try {
     # -- Exchange Online ---------------------------------------------------------
-    if (-not (Get-Command Connect-ExchangeOnline -ErrorAction SilentlyContinue)) {
-        throw "The ExchangeOnlineManagement module is required: Install-Module ExchangeOnlineManagement -Scope CurrentUser"
-    }
-    try {
-        $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-    } catch {
-        $connectParams = @{ ShowBanner = $false }
-        if ($TenantId) { $connectParams['Organization'] = $TenantId }
-        Connect-ExchangeOnline @connectParams
-        $script:ConnectedExo = $true
-    }
+    # Delegated (device code and GDAP customer per load.config.ps1); a fitting
+    # session is reused. Stays delegated even with -ClientId/-AppOnly: those name
+    # the Graph app.
+    $script:Exo = Connect-M365Exchange -TenantId $TenantId
 
     # The same tenant for Graph as for Exchange: explicit, GDAP customer, or the
     # tenant the Exchange session is connected to.
-    $tenant = $TenantId
-    if (-not $tenant) {
-        try {
-            $gdap = ($global:authMode -and ([string]$global:authMode).ToUpperInvariant() -eq 'GDAP') -or
-                    ($env:M365_AUTH_MODE -and ([string]$env:M365_AUTH_MODE).ToUpperInvariant() -eq 'GDAP')
-            if ($gdap -and $global:cid)          { $tenant = [string]$global:cid }
-            elseif ($env:M365_CUSTOMER_TENANTID) { $tenant = [string]$env:M365_CUSTOMER_TENANTID }
-        } catch {}
-    }
+    $tenant = Resolve-M365TenantId -TenantId $TenantId
     if (-not $tenant) {
         try { $tenant = [string](@(Get-ConnectionInformation | Where-Object { $_.State -eq 'Connected' })[0].TenantID) } catch {}
     }
@@ -1368,5 +1380,6 @@ try {
     }
 } finally {
     Remove-TempApp
-    if ($script:ConnectedExo) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Graph $script:Graph
+    Disconnect-M365Exchange $script:Exo
 }

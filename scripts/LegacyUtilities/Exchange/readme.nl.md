@@ -4,9 +4,9 @@
 
 # Legacy Utilities — Exchange
 
-Scripts voor mailbox- en contactbeheer, gemoderniseerd vanuit een reeks oude ad-hocscripts.
-Ze maken automatisch verbinding met Exchange Online / Microsoft Graph als er geen sessie
-actief is, en hergebruiken een bestaande sessie als je al verbonden bent.
+Scripts voor mailbox- en contactbeheer, gemoderniseerd vanuit een reeks oude ad-hocscripts. Ze melden aan via [`Connect-M365.ps1`](../../Startup/readme.nl.md): standaard delegated als beheerder (browser, of apparaatcode / GDAP-klant volgens `load.config.ps1`), app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (app uit `graph.appid.json`). Een passende sessie voor de juiste tenant wordt hergebruikt en blijft verbonden; alleen een sessie die het script zelf opende, wordt verbroken. Elk script accepteert `-TenantId`, `-ClientId`, `-CertificateThumbprint` en `-AppOnly`.
+
+Graph is de standaard. Vijf scripts blijven op Exchange Online PowerShell omdat Graph geen API heeft voor wat ze doen (zie elke sectie); onder GDAP bereiken ze de klant nu met `-DelegatedOrganization` — voorheen werd `-TenantId` doorgegeven als `-Organization`, wat alleen voor app-only aanmelden geldt. `Sync-UserContacts.ps1` is het enige script dat **standaard app-only** aanmeldt, omdat een delegated token geen contacten van andere gebruikers kan schrijven.
 
 ---
 
@@ -39,11 +39,16 @@ niet de juiste vorm is. Standaard een proefdraai.
 | `-User` | Ja | Gebruiker die toegang krijgt |
 | `-AccessRights` | Ja | Niveau van het maprecht (Owner, Editor, Reviewer, ...) |
 | `-Apply` | Nee | Ken het recht echt toe (standaard: voorbeeldweergave) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenantdomein of -ID (standaard: de GDAP-klant als `authMode` GDAP is); app-only vereist het domein |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 ```powershell
 .\Set-MailboxFolderPermission.ps1 -Mailbox "shared@contoso.com" -User "j.doe@contoso.com" -AccessRights Editor -Apply
 ```
+
+**Opmerkingen**
+- Blijft op Exchange Online: Graph heeft geen API voor mapmachtigingen in mailboxen (alleen de agenda heeft `calendarPermission`)
 
 ---
 
@@ -65,7 +70,9 @@ elke mailbox in de organisatie). Standaard een proefdraai.
 | `-AutoMapping` | Nee | Schakel automatische toewijzing in Outlook in (standaard: uit) |
 | `-Apply` | Nee | Ken de toegang echt toe (standaard: voorbeeldweergave) |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenantdomein of -ID (standaard: de GDAP-klant als `authMode` GDAP is); app-only vereist het domein |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 *Precies één van `-Mailbox` / `-CsvPath` / `-AllMailboxes` bepaalt het bereik.
 
@@ -73,6 +80,9 @@ elke mailbox in de organisatie). Standaard een proefdraai.
 .\Add-MailboxDelegateAccess.ps1 -Mailbox "sales@contoso.com" -User "j.doe@contoso.com" -Apply
 .\Add-MailboxDelegateAccess.ps1 -AllMailboxes -User "helpdesk@contoso.com"   # bekijk eerst het bereik
 ```
+
+**Opmerkingen**
+- Blijft op Exchange Online: Full Access en Send As zijn Exchange-machtigingen zonder Graph-API
 
 ---
 
@@ -85,6 +95,9 @@ Maakt gedeelde mailboxen aan vanuit een CSV (`Name`, `PrimarySmtpAddress`, optio
 .\New-BulkSharedMailboxes.ps1 -CsvPath .\sharedmailboxes.csv -Apply
 ```
 
+**Opmerkingen**
+- Blijft op Exchange Online: Graph kan geen gedeelde mailboxen aanmaken
+
 ---
 
 ### New-BulkMailContacts.ps1
@@ -95,6 +108,9 @@ contact optioneel toe aan een distributiegroep. Standaard een proefdraai.
 ```powershell
 .\New-BulkMailContacts.ps1 -CsvPath .\contacts.csv -DistributionGroup "everyone@contoso.com" -Apply
 ```
+
+**Opmerkingen**
+- Blijft op Exchange Online: e-mailcontacten en lidmaatschap van distributiegroepen zijn Exchange-objecten; `orgContact` in Graph is alleen-lezen en Graph kan geen leden van distributiegroepen wijzigen
 
 ---
 
@@ -115,10 +131,20 @@ proefdraai.
 | `-Tag` | Nee | Markering die in PersonalNotes wordt geschreven (standaard: `Synced-by-Sync-UserContacts`) |
 | `-RemoveExisting` | Nee | Verwijder eerder gesynchroniseerde contacten vóór het opnieuw importeren |
 | `-Apply` | Nee | Schrijf de contacten echt weg (standaard: voorbeeldweergave) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-registratie met de applicatiemachtiging `Contacts.ReadWrite` (plus `GroupMember.Read.All` voor `-GroupId`) |
+| `-AppOnly` | Nee | De app uit `graph.appid.json` — is al de standaard |
+| `-Delegated` | Nee | Meld aan als jezelf; alleen je eigen mailbox kan een doel zijn |
+| `-TenantId` | Nee | Tenant (standaard: de GDAP-klant); kiest ook de vermelding in `graph.appid.json` |
 
 ```powershell
 .\Sync-UserContacts.ps1 -CsvPath .\companycontacts.csv -GroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -RemoveExisting -Apply
 ```
+
+**Opmerkingen**
+- **Standaard app-only**: een delegated token, zelfs van een Global Administrator, kan alleen de eigen contacten van de aangemelde gebruiker schrijven. Zonder `-ClientId`/`-CertificateThumbprint` komt de app uit `graph.appid.json`; is die er niet, dan stopt het script en zegt het waarom
+- Met `-Delegated` moet elk doel jijzelf zijn; het script stopt als er een andere gebruiker in de lijst of de groep zit
+- Alleen gebruikers in `-GroupId` zijn doel (geneste groepen en apparaten worden overgeslagen)
+- Een CSV zonder `DisplayName` of `EmailAddress` wordt geweigerd (die controle werkte voorheen nooit)
 
 ---
 
@@ -133,6 +159,9 @@ om de lijst met mailboxen op te bouwen.
 ```powershell
 .\Start-MailboxMessageTraceReport.ps1 -NotifyAddress "admin@contoso.com" -AllMailboxes -Apply
 ```
+
+**Opmerkingen**
+- Blijft op Exchange Online: `Start-HistoricalSearch` (historische berichttracering) bestaat alleen in Exchange Online PowerShell
 
 ---
 
@@ -155,3 +184,8 @@ en verwijdert (met `-Apply`) de rest. Standaard een proefdraai.
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
 Install-Module Microsoft.Graph -Scope CurrentUser
 ```
+
+**Opmerkingen**
+- Delegated bereikt Graph de mailbox van een andere gebruiker alleen als die met jou gedeeld is: het script vraagt `Mail.ReadWrite` + `Mail.ReadWrite.Shared`, en de aangemelde beheerder heeft **Full Access** op de doelmailbox nodig (bijv. `Add-MailboxDelegateAccess.ps1 -AccessRights FullAccess`)
+- Zonder Full Access draai je app-only (`-ClientId`/`-CertificateThumbprint` of `-AppOnly`) met de applicatiemachtiging `Mail.ReadWrite`, bij voorkeur afgebakend met RBAC for Applications
+- `-IncludeSubfolders` werkt weer: het doorlopen van mappen mislukte bij de eerste map zonder submappen

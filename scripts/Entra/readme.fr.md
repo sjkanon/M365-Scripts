@@ -30,6 +30,17 @@ Scripts de gestion des utilisateurs et des ressources dans Microsoft Entra ID (a
 
 ---
 
+## Connexion
+
+Chaque script de ce dossier se connecte via [`Connect-M365.ps1`](../Startup/readme.fr.md) et travaille avec Microsoft Graph :
+
+- **Délégué par défaut** — vous vous connectez en tant qu'administrateur : dans le navigateur, ou avec un code d'appareil si `useDeviceCodeAuth` est activé dans `load.config.ps1`. Sous GDAP (`authMode = GDAP`), le tenant client de `Connect-Tenant` est utilisé, sauf si `-TenantId` en désigne un autre.
+- **App-only sur demande** — `-ClientId` avec `-CertificateThumbprint`, ou `-AppOnly` pour prendre les deux pour le tenant dans `graph.appid.json` à la racine du dépôt. L'application a besoin des autorisations *d'application* correspondantes, consenties dans ce tenant (GDAP n'accorde pas d'accès app-only).
+- **Réutilisation de session** — une session Graph pour le bon tenant qui possède déjà les étendues est réutilisée et reste connectée ; un script ne ferme qu'une session qu'il a lui-même ouverte, jamais la vôtre.
+- `Phising-rollout.ps1` ajoute ses propres modes (identité managée dans Azure Automation, application temporaire) — voir sa section.
+
+---
+
 ### Set-UserManager.ps1
 
 Signale et, au besoin, définit en masse le responsable d'un ensemble d'utilisateurs Entra ID. Les utilisateurs peuvent être sélectionnés par groupe, service, responsable actuel ou liste explicite d'UPN ; lorsque `-NewManager` est omis, le script se contente de signaler le responsable actuel de chaque utilisateur.
@@ -45,7 +56,9 @@ Signale et, au besoin, définit en masse le responsable d'un ensemble d'utilisat
 | `-UserList` | * | Tableau explicite d'UPN ou d'ID d'objet |
 | `-NewManager` | Non | UPN ou ID d'objet à définir comme responsable pour tous les utilisateurs trouvés. Omettez-le pour seulement signaler les responsables actuels |
 | `-OutputPath` | Non | Chemin d'export CSV |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID pour `Connect-MgGraph` |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 *Un seul paramètre parmi `-GroupId` / `-GroupName` / `-Department` / `-CurrentManager` / `-UserList` sélectionne la source des utilisateurs.
 
@@ -70,6 +83,11 @@ Signale et, au besoin, définit en masse le responsable d'un ensemble d'utilisat
 
 Prend en charge `-WhatIf` (`SupportsShouldProcess`).
 
+**Remarques**
+- Les membres du groupe et les subordonnés directs proviennent chacun d'un seul appel Graph paginé (`/members/microsoft.graph.user?$select=...`) au lieu d'un `Get-MgUser` par membre
+- Les apostrophes dans `-GroupName` / `-Department` sont échappées pour le filtre OData (un nom comme `O'Brien` cassait la requête)
+- Une session Graph que le script n'a pas ouverte est laissée intacte (auparavant, il appelait toujours `Disconnect-MgGraph` à la fin)
+
 ---
 
 ### Remove-M365Users.ps1
@@ -86,7 +104,9 @@ Supprime en masse des comptes utilisateurs M365 d'un tenant. Révoque les sessio
 | `-SkipLicenseRemoval` | Non | Ne pas retirer les licences avant la suppression |
 | `-SkipSessionRevoke` | Non | Ne pas révoquer les sessions actives |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 *`-UserList` ou `-CsvPath` est obligatoire.
 
@@ -106,7 +126,7 @@ Supprime en masse des comptes utilisateurs M365 d'un tenant. Révoque les sessio
 **Remarques**
 - La suppression est réversible (soft delete) — les comptes arrivent dans Utilisateurs supprimés et sont récupérables pendant 30 jours
 - Un rapport CSV est toujours écrit, même en essai à blanc
-- Si une connexion Graph existe déjà (par ex. via `functies.ps1`), elle est réutilisée
+- Une session Graph qui possède déjà `User.ReadWrite.All` pour le bon tenant est réutilisée ; sinon le script se connecte. Auparavant, il ne se connectait jamais en l'absence de toute session, car `Get-MgContext` ne lève pas d'erreur
 
 **Module requis**
 ```powershell
@@ -134,7 +154,9 @@ Crée un utilisateur M365 via Microsoft Graph. Génère un mot de passe aléatoi
 | `-MobilePhone` | Non | Numéro de téléphone mobile |
 | `-LicenseSkuId` | Non | Référence de la SKU de licence à attribuer (par ex. `ENTERPRISEPACK`) |
 | `-NoPasswordReset` | Non | Ne pas imposer de changement de mot de passe à la première connexion |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 **Exemples**
 
@@ -146,6 +168,9 @@ Crée un utilisateur M365 via Microsoft Graph. Génère un mot de passe aléatoi
 .\New-M365User.ps1 -UserPrincipalName "j.doe@contoso.com" -DisplayName "Jane Doe" `
     -GivenName "Jane" -Surname "Doe" -Department "Finance" -LicenseSkuId "ENTERPRISEPACK"
 ```
+
+**Remarques**
+- Le mail nickname, propriété obligatoire d'un nouvel utilisateur dans Graph, est la partie de l'UPN avant le `@`
 
 ---
 
@@ -167,7 +192,9 @@ Crée en masse des utilisateurs M365 à partir d'un fichier CSV via Microsoft Gr
 | `-LicenseSkuId` | Non | Attribuer cette licence à tous les utilisateurs (remplace la colonne CSV) |
 | `-NoPasswordReset` | Non | Ne pas imposer de changement de mot de passe à la première connexion |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 **Exemples**
 
@@ -186,6 +213,8 @@ Crée en masse des utilisateurs M365 à partir d'un fichier CSV via Microsoft Gr
 - L'essai à blanc écrit toujours un CSV de résultats — vérifiez-le avant de lancer avec `-Apply`
 - Les mots de passe générés figurent dans le CSV de résultats — transmettez-les de manière sécurisée
 - Une licence nécessite que `UsageLocation` soit défini ; le script s'en charge automatiquement
+- Le mail nickname, exigé par Graph, est la partie de l'UPN avant le `@`
+- Le résumé de l'essai à blanc compte les lignes qui seraient créées (il affichait toujours 0, car les lignes d'essai étaient comptées comme ignorées)
 
 ---
 
@@ -205,7 +234,9 @@ Vérifie les licences attribuées pour une liste d'utilisateurs via Microsoft Gr
 | `-UserList` | * | Tableau d'UPN/adresses e-mail |
 | `-CsvPath` | * | Chemin vers un CSV/TXT contenant les utilisateurs |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\UserLicenseReport_<timestamp>.csv`) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 *`-UserList` ou `-CsvPath` est obligatoire.
 
@@ -226,6 +257,9 @@ Vérifie les licences attribuées pour une liste d'utilisateurs via Microsoft Gr
 - Une ligne par attribution de licence à un utilisateur
 - Les utilisateurs sans licence sont inclus avec `LicenseStatus = Unlicensed`
 - Les utilisateurs introuvables sont inclus avec `LicenseStatus = NotFound`
+
+**Remarques**
+- Un utilisateur introuvable par UPN/ID est recherché avec un simple filtre `userPrincipalName`/`mail` (sans `ConsistencyLevel: eventual` sans comptage, et plus affecté à la variable automatique `$matches`)
 
 ---
 
@@ -251,7 +285,9 @@ Il prend aussi en charge une action ultérieure pour passer les stratégies impo
 | `-PolicyStateOnImport` | Non | `disabled` (par défaut) ou `enabledForReportingButNotEnforced` |
 | `-TargetState` | Non | Pour `SetState` : `disabled`, `enabledForReportingButNotEnforced` ou `enabled` |
 | `-SourcePath` | Non | Dossier local de la baseline contenant `Config\...` |
-| `-TenantId` | Non | ID ou domaine du tenant |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 | `-UpdateExisting` | Non | Mettre à jour les stratégies existantes dont le nom d'affichage correspond |
 
 **Exemples**
@@ -270,6 +306,8 @@ Il prend aussi en charge une action ultérieure pour passer les stratégies impo
 **Remarques**
 - Gardez au moins un compte d'urgence (break-glass) exclu avant d'activer les stratégies
 - Vérifiez les groupes d'exclusion et les emplacements nommés après l'import
+- Les groupes et principaux de service sont recherchés avec un simple filtre `eq`, sans `ConsistencyLevel: eventual` (qui exige un comptage)
+- Une session n'est réutilisée que si elle porte sur le bon tenant et possède toutes les étendues (auparavant, toute session était réutilisée) ; le fournisseur `Daniel` (DCToolbox) s'exécute sur cette même session
 
 ---
 
@@ -300,6 +338,10 @@ Important :
 .\New-TemporaryConditionalAccessPolicy.ps1 -TargetType Group -TargetId "<object-id>" -DisplayName "Temporary Block" -Action Block -NoAutoCleanup
 ```
 
+**Remarques**
+- Accepte `-TenantId`, `-ClientId`, `-CertificateThumbprint` et `-AppOnly` (voir [Connexion](#connexion)). La session Graph reste ouverte, afin que l'étape TAP qui suit dans le menu ne demande pas de nouvelle connexion
+- Avec `-WhatIf`, rien n'est créé et le script s'arrête là (auparavant, l'attente/le nettoyage s'exécutait sur une stratégie inexistante)
+
 ---
 
 ### Remove-TemporaryConditionalAccessPolicies.ps1
@@ -321,6 +363,9 @@ Modes :
 .\Remove-TemporaryConditionalAccessPolicies.ps1 -PolicyId "<policy-id>"
 ```
 
+**Remarques**
+- Accepte `-TenantId`, `-ClientId`, `-CertificateThumbprint` et `-AppOnly` (voir [Connexion](#connexion)) ; la session Graph reste ouverte
+
 ---
 
 ### New-UserTemporaryAccessPass.ps1
@@ -336,12 +381,13 @@ Crée un Temporary Access Pass (TAP) pour un utilisateur.
 **Remarques**
 - Privilégiez `-IsUsableOnce` pour les scénarios de support/d'installation
 - Transmettez le code TAP par un canal sécurisé et faites-le expirer rapidement
+- Accepte `-TenantId`, `-ClientId`, `-CertificateThumbprint` et `-AppOnly` (voir [Connexion](#connexion)) ; l'app-only exige l'autorisation d'application `UserAuthenticationMethod.ReadWrite.All`
 
 ---
 
 ### Test-M365GroupMembership.ps1
 
-Liste tous les propriétaires et membres des groupes Microsoft 365 (y compris les groupes associés à Teams). Les résultats sont exportés en CSV avec une ligne par propriétaire/membre. Se connecte automatiquement à Graph si aucune session n'est active ; réutilise une session existante si une connexion est déjà établie.
+Liste tous les propriétaires et membres des groupes Microsoft 365 (y compris les groupes associés à Teams). Les résultats sont exportés en CSV avec une ligne par propriétaire/membre. Les propriétaires et membres proviennent d'un seul appel Graph paginé par groupe (pas de `Get-MgUser` par membre) ; les membres qui ne sont pas des utilisateurs (groupes, appareils, principaux de service) sont aussi listés, avec une colonne `ObjectType`. Les apostrophes dans un nom `-Group` sont échappées pour le filtre OData.
 
 **Paramètres**
 
@@ -349,7 +395,9 @@ Liste tous les propriétaires et membres des groupes Microsoft 365 (y compris le
 |-----------|----------|-------------|
 | `-Group` | Non | Nom d'affichage ou ID d'objet d'un seul groupe. S'il est omis, tous les groupes M365 sont audités |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 **Exemples**
 
@@ -389,9 +437,11 @@ Copie les membres d'un groupe Entra ID dans un autre groupe. Les membres déjà 
 | `-Flatten` | Non | Développer les groupes imbriqués et copier leurs membres effectifs au lieu de l'objet groupe imbriqué |
 | `-Mirror` | Non | Retirer aussi de la cible les membres absents de la source (copie exacte au lieu d'une union) |
 | `-Apply` | Non | Ajouter/retirer réellement les membres (par défaut : essai à blanc) |
-| `-Disconnect` | Non | Se déconnecter de Graph à la fin (désactivé par défaut — la déconnexion vide le cache de jetons et impose une nouvelle invite dans le navigateur à l'exécution suivante) |
+| `-Disconnect` | Non | Se déconnecter de Graph à la fin — uniquement si ce script a ouvert la session (désactivé par défaut, afin que l'exécution suivante dans la même session PowerShell ne demande pas de nouvelle connexion) |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\GroupMemberCopy_<timestamp>.csv`) |
-| `-TenantId` | Non | ID ou domaine du tenant Entra ID |
+| `-TenantId` | Non | ID ou domaine du tenant Entra ID (par défaut : le client GDAP si `authMode` vaut GDAP, sinon le tenant auquel vous vous connectez) |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 
 **Exemples**
 
@@ -413,11 +463,13 @@ Copie les membres d'un groupe Entra ID dans un autre groupe. Les membres déjà 
 - Les noms d'affichage sont résolus via Graph ; un nom ambigu provoque une erreur bloquante — utilisez alors l'ID d'objet
 - Un groupe cible à appartenance dynamique est refusé : son appartenance est pilotée par des règles et ne peut pas être modifiée
 - Les groupes de sécurité à extension messagerie et les groupes de distribution ne sont pas modifiables via Graph — utilisez les cmdlets Exchange Online pour ceux-ci
+- Une session sans les étendues n'est plus réutilisée telle quelle ; le script se reconnecte avec celles-ci
 - Prend en charge `-WhatIf` (`SupportsShouldProcess`)
 
 **Étendues requises**
 - `Group.Read.All`
 - `GroupMember.ReadWrite.All`
+- `Directory.Read.All`
 
 **Module requis**
 ```powershell
@@ -441,7 +493,9 @@ Accepte un tableau de tenants, pour qu'un partenaire GDAP puisse parcourir tous 
 
 | Paramètre | Obligatoire | Description |
 |-----------|----------|-------------|
-| `-TenantId` | Non | Un ou plusieurs ID de tenant ou noms de domaine. Omettez-le pour utiliser la connexion actuelle / le tenant par défaut |
+| `-TenantId` | Non | Un ou plusieurs ID de tenant ou noms de domaine. Omettez-le pour utiliser la connexion actuelle / le client GDAP / votre tenant par défaut |
+| `-ClientId` / `-CertificateThumbprint` | Non | Connexion app-only avec cette inscription d'application et ce certificat (voir [Connexion](#connexion)) |
+| `-AppOnly` | Non | Connexion app-only avec l'application de `graph.appid.json` |
 | `-Revert` | Non | Remettre `passkeyDynamicMigration` à `false` (réinscrire le tenant DANS la migration automatique) |
 | `-ReportOnly` | Non | Lire et afficher la valeur actuelle sans rien modifier |
 
@@ -475,6 +529,7 @@ Accepte un tableau de tenants, pour qu'un partenaire GDAP puisse parcourir tous 
 - Les écritures sont confirmées par tenant (`ConfirmImpact = 'High'`) ; passez `-Confirm:$false` pour les exécutions multi-tenants sans surveillance
 - Le paramètre est relu environ 2 secondes après le PATCH ; un écart est signalé comme `PatchedUnverified` au lieu d'être traité comme un succès
 - Renvoie un objet par tenant (`Tenant`, `Before`, `After`, `Status`, `Message`), de sorte qu'une exécution peut être envoyée vers `Export-Csv`
+- Pour chaque tenant, le script ne ferme qu'une session qu'il a ouverte pour ce tenant ; auparavant, il appelait `Disconnect-MgGraph` après chaque tenant, y compris sur une session que vous aviez déjà
 - Prend en charge `-WhatIf` (`SupportsShouldProcess`)
 - Si vous avez besoin des SMS/de la voix après le 1er février 2027, configurez un fournisseur télécom géré par le client via le Microsoft Security Store (sélectionnable à partir du 30 octobre 2026)
 
@@ -531,15 +586,29 @@ passkey conserve discrètement l'étiquette « conforme ».
 | `-RegisteredGroupId` | ID d'objet du groupe statique Registered (déjà conforme) |
 | `-AcceptedMethod` | `AuthenticatorPasskey` (par défaut) ou `AnyPhishingResistant` |
 | `-AllowedAaGuids` | AAGUID qui comptent comme passkey dans Authenticator (par défaut : les AAGUID iOS et Android de Microsoft Authenticator). Ignoré pour `AnyPhishingResistant` |
-| `-Interactive` | Se connecter via le navigateur au lieu d'une identité managée — pour l'exécuter depuis votre propre poste |
+| `-Interactive` | Connexion déléguée en tant qu'administrateur via `Connect-M365.ps1` — désormais aussi le défaut hors Azure Automation ; le commutateur l'impose partout |
+| `-UseManagedIdentity` | Identité managée (`-ClientId` pour une identité affectée par l'utilisateur) — automatique dans Azure Automation, utilisez le commutateur sur une VM Azure |
 | `-UseAppRegistration` | Utiliser une inscription d'application existante (certificat ou secret) |
 | `-UseTemporaryApp` | Créer une inscription d'application jetable, s'exécuter en app-only, puis la supprimer ensuite |
+| `-AppOnly` | App-only avec l'application et le certificat du tenant dans `graph.appid.json` |
+| `-UseExistingSession` | S'exécuter uniquement sur votre propre session `Connect-MgGraph` ; le script ne se connecte jamais lui-même |
+| `-TenantId` / `-ClientId` / `-ClientCertificateThumbprint` | Pour `-UseAppRegistration` (alias `-CertificateThumbprint`) ; `-TenantId` choisit aussi le tenant pour la connexion déléguée |
 
 **Authentification**
 
 Conçu comme **runbook Azure Automation** sur une identité managée affectée par le système,
-à exécuter toutes les une à quatre heures. Sans `-Interactive` ni inscription
-d'application, il tente l'identité managée, ce qui échoue toujours en dehors d'Azure.
+à exécuter toutes les une à quatre heures. Sans commutateur de mode, le script choisit
+lui-même la connexion :
+
+| Où il s'exécute | Connexion par défaut |
+|-----------------|----------------------|
+| Azure Automation (tâche cloud ou Hybrid Worker, détecté via `AUTOMATION_ASSET_ACCOUNTID` / `$PSPrivateMetadata.JobId`) | Identité managée — les runbooks existants continuent de fonctionner sans changement |
+| Partout ailleurs | Déléguée en tant qu'administrateur via [`Connect-M365.ps1`](../Startup/readme.fr.md) (navigateur, ou code d'appareil / client GDAP de `load.config.ps1`) ; une session avec les étendues et un jeton valide est réutilisée |
+
+Auparavant, l'identité managée était le défaut partout, ce qui échouait toujours hors
+d'Azure. Dans un runbook, l'assistant n'est pas présent : l'identité managée et
+`-UseAppRegistration` y fonctionnent sans lui, la connexion déléguée et `-AppOnly` ont
+besoin du dépôt.
 
 Pour une exécution portant sur de nombreux utilisateurs, `-UseTemporaryApp` (ou
 `-UseAppRegistration` avec un certificat) est le choix fiable : un jeton app-only est émis

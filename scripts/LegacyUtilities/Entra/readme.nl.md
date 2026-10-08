@@ -4,9 +4,7 @@
 
 # Legacy Utilities — Entra
 
-Hulpscripts voor groepslidmaatschap en Conditional Access via Microsoft Graph. Ze maken
-automatisch verbinding als er geen sessie actief is, en hergebruiken een bestaande sessie als
-je al verbonden bent.
+Hulpscripts voor groepslidmaatschap en Conditional Access via Microsoft Graph. Ze melden aan via [`Connect-M365.ps1`](../../Startup/readme.nl.md): standaard delegated als beheerder (browser, of apparaatcode / GDAP-klant volgens `load.config.ps1`), app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (app uit `graph.appid.json`). Een passende sessie voor de juiste tenant wordt hergebruikt en blijft verbonden; alleen een sessie die het script zelf opende, wordt verbroken. Elk script accepteert `-TenantId`, `-ClientId`, `-CertificateThumbprint` en `-AppOnly`.
 
 ---
 
@@ -33,11 +31,18 @@ Voegt één lid of een CSV/TXT-lijst met leden toe aan een groep, of verwijdert 
 | `-CsvPath` | * | CSV/TXT-lijst met leden |
 | `-Action` | Nee | `Add` (standaard) of `Remove` |
 | `-Apply` | Nee | Wijzig het lidmaatschap echt (standaard: voorbeeldweergave) |
+| `-TenantId` | Nee | Tenant-ID of domein van Entra ID (standaard: de GDAP-klant als `authMode` GDAP is) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden met deze app-registratie en dit certificaat |
+| `-AppOnly` | Nee | App-only aanmelden met de app uit `graph.appid.json` |
 
 ```powershell
 .\Add-M365GroupMember.ps1 -GroupId "Sales Team" -Member "j.doe@contoso.com" -Apply
 .\Add-M365GroupMember.ps1 -GroupId "Sales Team" -CsvPath .\leavers.csv -Action Remove -Apply
 ```
+
+**Opmerkingen**
+- Aanhalingstekens in een groepsnaam worden ge-escaped voor het filter, en een naam die bij meer dan één groep past, stopt het script (voorheen werd de eerste treffer genomen)
+- Gedelegeerde scopes: `GroupMember.ReadWrite.All`, `Group.Read.All`, `User.Read.All` (die laatste ontbrak voor het opzoeken van leden)
 
 ---
 
@@ -58,3 +63,7 @@ van een oud script dat de uitgefaseerde AzureADPreview-module gebruikte.
 ```powershell
 Install-Module Microsoft.Graph -Scope CurrentUser
 ```
+
+**Opmerkingen**
+- Elk bestand bevat het beleid precies zoals Graph het teruggeeft (`GET /identity/conditionalAccess/policies`, gepagineerd); voorheen werden de SDK-objecten geserialiseerd met `-Depth 10`, wat SDK-wrappereigenschappen toevoegt en geneste voorwaarden kan afkappen
+- Gedelegeerde scope: `Policy.Read.All`

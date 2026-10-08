@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report (and optionally block) direct interactive sign-in to shared mailboxes.
@@ -17,6 +17,14 @@
     enabled. This does not affect delegated access (Full Access / Send As) — only
     the mailbox's own account can no longer sign in directly.
 
+    Sign-in: delegated (you sign in as the admin) by default, through
+    scripts\Startup\Connect-M365.ps1 — device code and the GDAP customer come
+    from load.config.ps1 (Exchange then targets the customer with
+    -DelegatedOrganization). App-only with -ClientId + -CertificateThumbprint,
+    or -AppOnly (graph.appid.json). A preview asks Graph only for User.Read.All;
+    -Apply asks for User.ReadWrite.All. Existing sessions that fit are reused
+    and left connected.
+
 .PARAMETER Mailbox
     UPN of a single shared mailbox to check. If omitted, all shared mailboxes are
     checked.
@@ -29,7 +37,19 @@
     CSV report path. Defaults to C:\Temp\ (Windows) or ~/Downloads (macOS/Linux).
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1),
+    else the tenant you sign in to. App-only Exchange needs the domain form
+    (contoso.onmicrosoft.com).
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint), used
+    for both Graph and Exchange Online.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Test-SharedMailboxSignIn.ps1
@@ -47,9 +67,13 @@
     Graph (Get-MgUser / Update-MgUser) for the account state, alongside
     Exchange Online for the shared mailbox list.
 
+    Exchange Online stays for the enumeration: Graph has no filter for
+    "shared mailbox" (RecipientTypeDetails is an Exchange property). The
+    account state and the change are Graph (Get-MgUser / Update-MgUser).
+
     Supports -WhatIf (SupportsShouldProcess).
 
-    Required Graph scope: User.ReadWrite.All
+    Delegated Graph scopes: User.Read.All (preview), User.ReadWrite.All (-Apply).
     Required modules: ExchangeOnlineManagement, Microsoft.Graph.Users
 #>
 [CmdletBinding(SupportsShouldProcess)]
@@ -57,35 +81,23 @@ param(
     [string] $Mailbox,
     [switch] $Apply,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
-# ── Connection (Exchange Online) ────────────────────────────────────────────
-$script:ConnectedExoHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedExoHere = $true
-}
-
-# ── Connection (Microsoft Graph) ────────────────────────────────────────────
-$script:ConnectedGraphHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('User.ReadWrite.All') }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedGraphHere = $true
-}
+# ── Connection ────────────────────────────────────────────────────────────────
+$auth = @{ TenantId = $TenantId; ClientId = $ClientId; CertificateThumbprint = $CertificateThumbprint; AppOnly = $AppOnly }
+$graph = Connect-M365Graph @auth -Scopes $(if ($Apply) { 'User.ReadWrite.All' } else { 'User.Read.All' })
+# Exchange Online only for listing shared mailboxes - Graph cannot tell a shared mailbox from a user.
+$exo = Connect-M365Exchange @auth
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -166,5 +178,5 @@ Write-Host "  Report saved: $OutputPath" -ForegroundColor Green
 Write-Host ""
 
 # ── Disconnect if we connected ──────────────────────────────────────────────
-if ($script:ConnectedExoHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
-if ($script:ConnectedGraphHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+Disconnect-M365Exchange $exo
+Disconnect-M365Graph $graph

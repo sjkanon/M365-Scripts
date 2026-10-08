@@ -10,8 +10,33 @@ Déploiement Intune sous forme d'application Win32 qui exécute [`Invoke-Windows
 
 | Script | Rôle dans Intune |
 |---|---|
-| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) | Script de contenu de la commande d'installation — appelle le script partagé `Invoke-WindowsCleanup.ps1 -Apply`, puis `Restart-Computer -Force` |
-| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) | Script de détection personnalisé |
+| [`Invoke-DiskCleanupIntune.ps1`](Invoke-DiskCleanupIntune.ps1) ([docs](#invoke-diskcleanupintuneps1)) | Script de contenu de la commande d'installation — appelle le script partagé `Invoke-WindowsCleanup.ps1 -Apply`, puis `Restart-Computer -Force` |
+| [`Detect-DiskCleanupIntune.ps1`](Detect-DiskCleanupIntune.ps1) ([docs](#detect-diskcleanupintuneps1)) | Script de détection personnalisé |
+
+### Invoke-DiskCleanupIntune.ps1
+
+Commande d'installation de l'application Win32. Exécute `Invoke-WindowsCleanup.ps1 -Apply` depuis le même dossier de contenu, inscrit en cas de succès un horodatage dans `HKLM:\SOFTWARE\DiskCleanupDeploy\LastRunUtc`, puis force un redémarrage.
+
+**Paramètres**
+
+| Paramètre | Obligatoire | Description |
+|-----------|-------------|-------------|
+| `-SkipDism` | Non | Ignore le nettoyage du magasin de composants DISM (`/StartComponentCleanup /ResetBase`) pour une durée d'exécution plus courte et prévisible |
+| `-NoRestart` | Non | Nettoie sans redémarrer — uniquement pour des tests manuels hors Intune ; à omettre dans la vraie commande d'installation |
+
+**Exemples**
+
+```powershell
+# Commande d'installation Intune
+%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File Invoke-DiskCleanupIntune.ps1
+
+# Test manuel sans DISM et sans redémarrage
+.\Invoke-DiskCleanupIntune.ps1 -SkipDism -NoRestart
+```
+
+### Detect-DiskCleanupIntune.ps1
+
+Script de détection personnalisé de l'application Win32. Signale « installed » (exit 0) tant que l'horodatage `LastRunUtc` date d'au plus `$MaxAgeDays` (30) jours, et « not installed » (exit 1) dès qu'il est plus ancien ou absent, afin qu'Intune relance le nettoyage. Intune ne transmet aucun paramètre aux scripts de détection : modifiez `$MaxAgeDays` dans le script avant l'empaquetage pour changer le cycle.
 
 ## Comportement
 

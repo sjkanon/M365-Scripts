@@ -19,14 +19,17 @@ Kleine hulpscripts voor gebruikers- en groepsbeheer in Entra ID / Exchange Onlin
 
 ### New-DynamicDistributionGroupByFilter.ps1
 
-Toont eerst de ontvangers die voldoen aan een Exchange-filter op functietitel (of een eigen filter), en maakt na bevestiging een dynamische distributiegroep met dat filter aan. Vereist een actieve Exchange Online-sessie: dynamische distributiegroepen zijn een Exchange-functie, geen Graph-functie.
+Toont eerst de ontvangers die voldoen aan een Exchange-filter op functietitel (of een eigen filter), en maakt na bevestiging een dynamische distributiegroep met dat filter aan. Alleen Exchange Online: Microsoft Graph heeft geen API voor dynamische distributiegroepen of voor het vooraf bekijken van een ontvangersfilter. Maakt verbinding via `Connect-M365Exchange` ([`Connect-M365.ps1`](../../Startup/Connect-M365.ps1)): standaard gedelegeerd (Exchange-beheerder; apparaatcode volgens `$global:useDeviceCodeAuth`; de GDAP-klant via `-DelegatedOrganization`), app-only met `-ClientId` + `-CertificateThumbprint` en `-TenantId` als het `*.onmicrosoft.com`-domein. Een bestaande Exchange-sessie voor de tenant wordt hergebruikt en blijft open.
 
 | Parameter | Verplicht | Omschrijving |
 |-----------|----------|-------------|
 | `-JobTitle` | * | Functietitel waarop gefilterd wordt |
 | `-RecipientFilter` | * | Eigen filtertekenreeks voor Exchange-ontvangers |
 | `-Name` | Nee | Groepsnaam (standaard: de functietitel; verplicht met `-RecipientFilter`) |
-| `-PrimarySmtpAddress` | Nee | SMTP-adres voor de nieuwe groep |
+| `-PrimarySmtpAddress` | Nee | SMTP-adres voor de nieuwe groep (standaard: afgeleid door Exchange) |
+| `-TenantId` | Nee | Tenantdomein of -ID (standaard: GDAP-klant, anders de tenant waarbij je je aanmeldt; app-only vereist het domein) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden |
+| `-AppOnly` | Nee | App-only met ClientId en vingerafdruk uit `graph.appid.json` |
 | `-Apply` | Nee | Maak de groep echt aan (standaard: alleen voorbeeldweergave) |
 
 *Een van `-JobTitle` / `-RecipientFilter` is verplicht.
@@ -56,7 +59,9 @@ Voegt een gebruiker toe als direct lid van een Entra ID-beveiligingsgroep, of ve
 | `-GroupId` | * | Object-ID van de doelgroep |
 | `-GroupName` | * | Weergavenaam van de doelgroep (wordt automatisch opgezocht) |
 | `-Remove` | Nee | Verwijder in plaats van toevoegen |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein van Entra ID (standaard: GDAP-klant, anders de tenant waarbij je je aanmeldt) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden |
+| `-AppOnly` | Nee | App-only met ClientId en vingerafdruk uit `graph.appid.json` |
 | `-Apply` | Nee | Wijzig het lidmaatschap echt (standaard: alleen voorbeeldweergave) |
 
 *Een van `-GroupId` / `-GroupName` is verplicht.
@@ -71,4 +76,4 @@ Voegt een gebruiker toe als direct lid van een Entra ID-beveiligingsgroep, of ve
 
 ---
 
-Maakt automatisch verbinding met Microsoft Graph als er geen sessie actief is, en hergebruikt een bestaande sessie als je al verbonden bent, net als `Test-M365GroupMembership.ps1` in `scripts/Entra/`.
+`Add-UserToFeatureGroup.ps1` meldt zich aan via [`Connect-M365.ps1`](../../Startup/Connect-M365.ps1): **standaard gedelegeerd** (je meldt je aan als beheerder; apparaatcode als `$global:useDeviceCodeAuth` is ingesteld; onder GDAP de klant uit `$global:cid`), **app-only** met `-ClientId` + `-CertificateThumbprint` of `-AppOnly`. Een bestaande Graph-sessie wordt alleen hergebruikt als die voor de juiste tenant is en de bovenstaande scopes heeft; het script verbreekt alleen een sessie die het zelf heeft geopend.

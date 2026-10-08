@@ -1,37 +1,53 @@
-#Requires -Modules ExchangeOnlineManagement, Microsoft.Graph.Applications, Microsoft.Graph.Authentication, Microsoft.Graph.Calendar, Microsoft.Graph.Groups, Microsoft.Graph.Users
+#Requires -Version 7.0
+#Requires -Modules ExchangeOnlineManagement, Microsoft.Graph.Applications, Microsoft.Graph.Authentication, Microsoft.Graph.Calendar, Microsoft.Graph.Groups
 
 <#
 .SYNOPSIS
     Migrates an M365 Group calendar to a Room or Shared Mailbox.
-    Automatically creates an App Registration if no ClientId/ClientSecret is provided.
+    Writes with a temporary App Registration that is removed again at the end,
+    unless your own app is given.
 
 .DESCRIPTION
     Author : Sjoerd Kanon
     Date   : 19/03/2026
 
-    The script operates in two modes:
+    Sign-in
+    -------
+    Two kinds of access are needed, and Microsoft decides which:
 
-    MODE A — Fully automatic (recommended, first run):
-        Do not provide ClientId/ClientSecret. The script creates an App Registration
-        with the required application permissions and uses it immediately.
+      Reading   The group calendar can only be read DELEGATED - Graph refuses
+                group calendar reads for application permissions
+                (https://learn.microsoft.com/en-us/graph/known-issues). So you sign
+                in as yourself, and you must be a member of the group.
+      Writing   The events go into the new room/shared mailbox, which is not yours.
+                A delegated token only reaches it with explicit rights on it, so
+                writing is APP-ONLY (Calendars.ReadWrite application permission).
 
-    MODE B — Existing App Registration:
-        Provide ClientId and ClientSecret. The script skips the setup step.
+    Delegated sign-in goes through scripts\Startup\Connect-M365.ps1: device code
+    when load.config.ps1 sets useDeviceCodeAuth, the GDAP customer when authMode
+    is GDAP. Exchange Online connects the same way.
+
+    For writing, by default (MODE A) the script creates a short-lived App
+    Registration with that delegated session (Application.ReadWrite.All +
+    AppRoleAssignment.ReadWrite.All - Global Administrator or Privileged Role
+    Administrator), grants it Calendars.ReadWrite (and Group.ReadWrite.All with
+    -DeleteSourceGroup), takes an app-only token with a 2-hour secret that is
+    never shown, and deletes the app again when the run ends - also when it fails.
+
+    MODE B - your own app: -ClientId with -ClientSecret or -CertificateThumbprint,
+    or -AppOnly to take ClientId and CertificateThumbprint from graph.appid.json.
+    It needs Calendars.ReadWrite (and Group.ReadWrite.All for -DeleteSourceGroup)
+    as application permissions with admin consent.
 
     Steps:
-    1.  Detect platform (Windows / macOS / Linux)
-    2.  Connect to Exchange Online
-    3.  Connect to Graph (delegated) for App Registration setup
-    4.  Create App Registration + grant admin consent (Mode A only)
-    5.  Reconnect Graph with application permissions (client credentials)
-    6.  Create destination mailbox (Room or Shared)
-    7.  Set calendar permissions + configure AutoAccept
-    8.  Reconnect Graph as delegated user (required to read group calendar)
-    9.  Find source M365 Group + retrieve events
-    10. Switch back to app auth for writing
-    11. Copy events to destination mailbox
-    12. (Optional) Delete source M365 Group
-    13. Summary
+    1.  Connect Graph (delegated) and Exchange Online
+    2.  Find the source M365 Group and read its events (delegated)
+    3.  Temporary App Registration (Mode A) or your own app (Mode B) for writing
+    4.  Create destination mailbox (Room or Shared)
+    5.  Set calendar permissions + configure AutoAccept
+    6.  Copy events to the destination mailbox (app-only)
+    7.  (Optional) Delete source M365 Group (app-only)
+    8.  Summary, remove the temporary app, disconnect what this script connected
 
     Why Room Mailbox instead of M365 Group?
     - No email notifications to the entire company on new events
@@ -39,28 +55,32 @@
     - Everyone can read the calendar without being a member
     - AutoAccept so leave is automatically approved
 
-    Install modules if needed:
-        Install-Module ExchangeOnlineManagement       -Scope CurrentUser
-        Install-Module Microsoft.Graph.Applications   -Scope CurrentUser
-        Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
-        Install-Module Microsoft.Graph.Calendar       -Scope CurrentUser
-        Install-Module Microsoft.Graph.Groups         -Scope CurrentUser
-        Install-Module Microsoft.Graph.Users          -Scope CurrentUser
+    Modules: installed by scripts\Startup\Install-Modules.ps1.
 
 .PARAMETER TenantId
-    Azure AD Tenant ID (Entra ID > Overview > Tenant ID).
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise the tenant you sign in to.
 
 .PARAMETER AdminUPN
     UPN of the admin running the script. Must be a member of the source M365 Group.
+    Optional: only used to warn when you signed in with another account.
 
 .PARAMETER ClientId
-    AppId of an existing App Registration. Leave empty to create one automatically.
+    AppId of your own App Registration for writing (Mode B). Leave empty for a
+    temporary one.
 
 .PARAMETER ClientSecret
-    Client Secret of the App Registration. Leave empty to create one automatically.
+    Client secret for -ClientId.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for -ClientId.
+
+.PARAMETER AppOnly
+    Mode B with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .PARAMETER AppName
-    Name for the App Registration. Default: HolidaysCalendarMigration
+    Name prefix of the temporary App Registration. Default: CalendarMigration-Temp
 
 .PARAMETER SourceGroupMail
     Email address of the source M365 Group.
@@ -90,30 +110,30 @@
     If $true, deletes the M365 Group after migration. Default: $false.
 
 .EXAMPLE
-    # First run — fully automatic (Mode A)
-    .\Migrate-Calendar.ps1 -TenantId "xxxx" -AdminUPN "admin@domain.com" -SourceGroupMail "holidays@domain.com"
+    # Fully automatic (Mode A): temporary app, removed again at the end
+    .\Migrate-Calendar.ps1 -TenantId "contoso.onmicrosoft.com" -AdminUPN "admin@contoso.com" -SourceGroupMail "holidays@contoso.com"
 
 .EXAMPLE
-    # Existing App Registration (Mode B)
-    .\Migrate-Calendar.ps1 -TenantId "xxxx" -AdminUPN "admin@domain.com" -ClientId "yyyy" -ClientSecret "zzzz" -SourceGroupMail "holidays@domain.com"
+    # Your own App Registration (Mode B), certificate from graph.appid.json
+    .\Migrate-Calendar.ps1 -TenantId "contoso.onmicrosoft.com" -AppOnly -SourceGroupMail "holidays@contoso.com"
 
 .EXAMPLE
     # Dry run
-    .\Migrate-Calendar.ps1 -TenantId "xxxx" -AdminUPN "admin@domain.com" -SourceGroupMail "holidays@domain.com" -WhatIf
+    .\Migrate-Calendar.ps1 -TenantId "contoso.onmicrosoft.com" -AdminUPN "admin@contoso.com" -SourceGroupMail "holidays@contoso.com" -WhatIf
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [Parameter(Mandatory)]
     [string]$TenantId,
 
-    [Parameter(Mandatory)]
     [string]$AdminUPN,
 
-    # App Registration — leave empty to create automatically
-    [string]$ClientId     = "",
-    [string]$ClientSecret = "",
-    [string]$AppName      = "HolidaysCalendarMigration",
+    # Your own App Registration for writing - leave empty for a temporary one
+    [string]$ClientId              = "",
+    [string]$ClientSecret          = "",
+    [string]$CertificateThumbprint = "",
+    [switch]$AppOnly,
+    [string]$AppName               = "CalendarMigration-Temp",
 
     # Source M365 Group
     [string]$SourceGroupMail        = "holidays@domain.com",
@@ -136,6 +156,8 @@ param(
     [bool]$DeleteSourceGroup = $false
 )
 
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
 #region Helpers
 
 function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan }
@@ -143,219 +165,209 @@ function Write-OK   { param([string]$m) Write-Host "    [OK]   $m" -ForegroundCo
 function Write-Warn { param([string]$m) Write-Host "    [WARN] $m" -ForegroundColor Yellow }
 function Write-Fail { param([string]$m) Write-Host "    [FAIL] $m" -ForegroundColor Red }
 
-function Connect-GraphDelegated {
-    param([string]$TenantId, [string[]]$Scopes)
-    if ($runOnWindows) {
-        Connect-MgGraph -TenantId $TenantId -Scopes $Scopes -NoWelcome
-    } else {
-        Write-Host "    Device code flow: copy the code and open the URL in your browser." -ForegroundColor DarkGray
-        Connect-MgGraph -TenantId $TenantId -Scopes $Scopes -UseDeviceAuthentication -NoWelcome
-    }
-}
+$script:Graph        = $null    # Connect-M365Graph results; only what this script opened is disconnected
+$script:GraphApp     = $null
+$script:Exo          = $null
+$script:TempAppId    = $null    # object id of the temporary App Registration
+$script:WriteHeaders = $null    # app-only bearer token (Mode A, or Mode B with a secret)
 
-function Connect-GraphAppAuth {
-    param([string]$TenantId, [string]$ClientId, [string]$ClientSecret)
-    $secure     = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-    $credential = New-Object System.Management.Automation.PSCredential($ClientId, $secure)
-
+function Get-JwtRoles {
+    param([string]$Jwt)
     try {
-        Connect-MgGraph -TenantId $TenantId -ClientSecretCredential $credential -NoWelcome
-        return
+        $payload = $Jwt.Split('.')[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
+        return @(([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload)) | ConvertFrom-Json).roles)
+    } catch { return @() }
+}
+
+function Get-AppToken {
+    # client_credentials over REST: the delegated Graph session stays as it is,
+    # so it can remove the temporary app at the end.
+    param([string]$Tenant, [string]$App, [string]$Secret)
+    (Invoke-RestMethod -Method POST -ErrorAction Stop -Uri "https://login.microsoftonline.com/$Tenant/oauth2/v2.0/token" -Body @{
+        grant_type = 'client_credentials'; scope = 'https://graph.microsoft.com/.default'; client_id = $App; client_secret = $Secret
+    }).access_token
+}
+
+function Invoke-AppGraph {
+    # Every write goes through here: the app-only bearer token when there is one,
+    # otherwise the app-only Graph SDK session (Mode B with a certificate).
+    param([string]$Method, [string]$Uri, $Body)
+    $p = @{ Method = $Method; Uri = $Uri; ErrorAction = 'Stop' }
+    if ($Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 6); $p['ContentType'] = 'application/json' }
+    if ($script:WriteHeaders) { return Invoke-RestMethod @p -Headers $script:WriteHeaders }
+    return Invoke-MgGraphRequest @p
+}
+
+function Remove-TempApp {
+    # Needs the delegated session (Application.ReadWrite.All).
+    if (-not $script:TempAppId) { return }
+    try {
+        Remove-MgApplication -ApplicationId $script:TempAppId -ErrorAction Stop
+        Write-OK "Temporary App Registration removed"
     } catch {
-        Write-Warn "ClientSecretCredential failed, falling back to environment variables..."
+        Write-Warn "Could not remove the temporary App Registration (object ID $($script:TempAppId)). Remove it by hand in Entra ID > App registrations."
     }
+    $script:TempAppId = $null
+}
 
-    # Fallback via environment variables (compatible with all SDK versions)
-    $env:AZURE_CLIENT_ID     = $ClientId
-    $env:AZURE_CLIENT_SECRET = $ClientSecret
-    $env:AZURE_TENANT_ID     = $TenantId
-    Connect-MgGraph -EnvironmentVariable -NoWelcome
-
-    Remove-Item Env:AZURE_CLIENT_ID     -ErrorAction SilentlyContinue
-    Remove-Item Env:AZURE_CLIENT_SECRET -ErrorAction SilentlyContinue
-    Remove-Item Env:AZURE_TENANT_ID     -ErrorAction SilentlyContinue
+function Close-Connections {
+    Remove-TempApp
+    Disconnect-M365Graph $script:GraphApp
+    Disconnect-M365Graph $script:Graph
+    Disconnect-M365Exchange $script:Exo
 }
 
 #endregion
 
-#region Step 1: Detect platform
-
-Write-Step "Detecting platform"
-
-$runOnMacOS   = ($IsMacOS -eq $true)
-$runOnLinux   = ($IsLinux -eq $true)
-$runOnWindows = ($IsWindows -eq $true) -or ($PSVersionTable.PSVersion.Major -le 5)
-
-if (-not $runOnMacOS -and -not $runOnLinux -and -not $runOnWindows) {
-    Write-Warn "Platform unknown — using device code flow as fallback"
-    $runOnMacOS = $true
+$tenant = Resolve-M365TenantId -TenantId $TenantId
+if ($AppOnly -and -not $ClientId) {
+    $reg = Get-M365AppRegistration -TenantId $tenant
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $tenant) { $tenant = $reg.Tenant }
 }
+if ($ClientId -and -not $ClientSecret -and -not $CertificateThumbprint) {
+    throw "-ClientId needs -ClientSecret or -CertificateThumbprint."
+}
+$modeA = -not $ClientId
 
-if     ($runOnWindows) { Write-OK "Platform: Windows — interactive browser login" }
-elseif ($runOnMacOS)   { Write-OK "Platform: macOS   — device code flow" }
-elseif ($runOnLinux)   { Write-OK "Platform: Linux   — device code flow" }
+try {
 
-#endregion
+#region Step 1: Connect Graph (delegated) and Exchange Online
 
-#region Step 2: Connect to Exchange Online
+# Graph first: the Graph SDK and Exchange Online each bundle their own MSAL, and
+# the Graph SDK is the one that breaks when Exchange loaded first.
+Write-Step "Connecting to Microsoft Graph (delegated)"
+$scopes = @("Group.Read.All", "Calendars.Read")
+if ($modeA) { $scopes += @("Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All") }
+$script:Graph = Connect-M365Graph -Scopes $scopes -TenantId $tenant
+$ctx = Get-MgContext
+if (-not $tenant) { $tenant = $ctx.TenantId }
+Write-OK "Graph connected (delegated) as $($ctx.Account)"
+if ($AdminUPN -and $ctx.Account -and $ctx.Account -ne $AdminUPN) {
+    Write-Warn "Signed in as $($ctx.Account), not $AdminUPN - that account must be a member of the group."
+}
 
 Write-Step "Connecting to Exchange Online"
-try {
-    if ($runOnWindows) {
-        Connect-ExchangeOnline -UserPrincipalName $AdminUPN -ShowBanner:$false
-    } else {
-        Write-Host "    Device code flow: copy the code and open the URL in your browser." -ForegroundColor DarkGray
-        Connect-ExchangeOnline -UserPrincipalName $AdminUPN -ShowBanner:$false -Device
-    }
-    Write-OK "Exchange Online connected as $AdminUPN"
-} catch {
-    Write-Error "Exchange Online connection failed: $_"
-    exit 1
-}
+$script:Exo = Connect-M365Exchange -TenantId $TenantId
+Write-OK "Exchange Online connected"
 
 #endregion
 
-#region Steps 3 + 4: Create or reuse App Registration
+#region Step 2: Find M365 Group and retrieve events (delegated)
 
-$setupScopes = @("Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All", "Group.Read.All")
+Write-Step "Looking up source M365 Group"
 
-if (-not $ClientId -or -not $ClientSecret) {
+$group = $null
 
-    Write-Step "Creating App Registration (Mode A — no ClientId/ClientSecret provided)"
+$mailLower = $SourceGroupMail.ToLower()
+$group     = Get-MgGroup -Filter "mail eq '$mailLower'" -ErrorAction SilentlyContinue
 
-    try {
-        Connect-GraphDelegated -TenantId $TenantId -Scopes $setupScopes
-        Write-OK "Graph connected (delegated) for setup"
-    } catch {
-        Write-Error "Graph connection failed: $_"
-        exit 1
-    }
+if (-not $group) {
+    Write-Warn "Not found on '$mailLower', trying '$SourceGroupMail'..."
+    $group = Get-MgGroup -Filter "mail eq '$SourceGroupMail'" -ErrorAction SilentlyContinue
+}
 
-    # Reuse existing app or create new
-    $app = Get-MgApplication -Filter "displayName eq '$AppName'" -ErrorAction SilentlyContinue
+if (-not $group) {
+    Write-Warn "Not found by mail, falling back to displayName '$SourceGroupDisplayName'..."
+    $group = Get-MgGroup -Filter "displayName eq '$SourceGroupDisplayName'" -ErrorAction SilentlyContinue
+}
 
-    if ($app) {
-        Write-Warn "App '$AppName' already exists (AppId: $($app.AppId)) — reusing"
-    } else {
-        if ($PSCmdlet.ShouldProcess($AppName, "Create App Registration")) {
-            $app = New-MgApplication -DisplayName $AppName
-            Write-OK "App created: $($app.DisplayName) | AppId: $($app.AppId)"
+if (-not $group) {
+    Write-Warn "Not found via filter, last attempt via Search..."
+    $group = Get-MgGroup -Search "`"displayName:$SourceGroupDisplayName`"" `
+        -ConsistencyLevel eventual -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -eq $SourceGroupDisplayName -or $_.Mail -like "*holiday*" } |
+        Select-Object -First 1
+}
+
+if (-not $group) {
+    Write-Fail "Group not found after 4 attempts."
+    Write-Host "    Tip: make sure the admin account is a member of the group." -ForegroundColor Yellow
+    Write-Host "    Manual lookup: Get-MgGroup -Search `"`"displayName:Holidays`"`" -ConsistencyLevel eventual | Select DisplayName,Mail,Id" -ForegroundColor Yellow
+    return
+}
+
+Write-OK "Group found: '$($group.DisplayName)' | Mail: $($group.Mail) | ID: $($group.Id)"
+
+Write-Step "Retrieving events ($DaysBack days back to $DaysForward days forward)"
+
+$startDate = (Get-Date).AddDays(-$DaysBack).ToString("yyyy-MM-ddT00:00:00")
+$endDate   = (Get-Date).AddDays($DaysForward).ToString("yyyy-MM-ddT23:59:59")
+
+$calEvents = Get-MgGroupCalendarEvent `
+    -GroupId     $group.Id `
+    -Filter      "start/dateTime ge '$startDate' and start/dateTime le '$endDate'" `
+    -All `
+    -ErrorAction Stop
+Write-OK "$($calEvents.Count) events retrieved"
+
+#endregion
+
+#region Step 3: App-only access for writing
+
+$writeRoles = @("Calendars.ReadWrite")
+if ($DeleteSourceGroup) { $writeRoles += "Group.ReadWrite.All" }
+
+if ($modeA) {
+    Write-Step "Creating a temporary App Registration for writing (Mode A)"
+    if ($PSCmdlet.ShouldProcess($AppName, "Create temporary App Registration ($($writeRoles -join ', '))")) {
+        $name = "$AppName-$(Get-Date -Format 'yyyyMMddHHmmss')"
+        $app  = New-MgApplication -DisplayName $name -SignInAudience AzureADMyOrg -ErrorAction Stop
+        $script:TempAppId = $app.Id
+        Write-OK "App created: $name | AppId: $($app.AppId)"
+
+        $appSp   = New-MgServicePrincipal -AppId $app.AppId -ErrorAction Stop
+        $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ErrorAction Stop
+        foreach ($perm in $writeRoles) {
+            $role = $graphSp.AppRoles | Where-Object { $_.Value -eq $perm -and $_.AllowedMemberTypes -contains 'Application' }
+            if (-not $role) { throw "Application permission '$perm' not found." }
+            New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $appSp.Id -PrincipalId $appSp.Id `
+                -ResourceId $graphSp.Id -AppRoleId $role.Id -ErrorAction Stop | Out-Null
+            Write-OK "Granted (application): $perm"
         }
-    }
 
-    # Get Graph service principal for permission IDs
-    $graphResourceId = "00000003-0000-0000-c000-000000000000"
-    $graphSp         = Get-MgServicePrincipal -Filter "appId eq '$graphResourceId'"
+        # Short-lived and never printed: the app is deleted at the end of the run.
+        $secret = Add-MgApplicationPassword -ApplicationId $app.Id -PasswordCredential @{
+            DisplayName = 'temp'
+            EndDateTime = (Get-Date).AddHours(2)
+        } -ErrorAction Stop
 
-    $requiredPerms = @("Calendars.ReadWrite", "Calendars.Read", "Group.Read.All", "Group.ReadWrite.All", "User.Read.All")
-    $appRoles      = [System.Collections.Generic.List[object]]::new()
-
-    foreach ($perm in $requiredPerms) {
-        $role = $graphSp.AppRoles | Where-Object { $_.Value -eq $perm }
-        if ($role) {
-            Write-OK "Permission: $perm"
-            $appRoles.Add([PSCustomObject]@{ Id = $role.Id; Type = "Role" })
-        } else {
-            Write-Warn "Permission '$perm' not found"
+        # A new app and its role assignments take a while to reach the token service.
+        $deadline = (Get-Date).AddMinutes(4)
+        while ($true) {
+            $missing = $writeRoles
+            try {
+                $tok = Get-AppToken -Tenant $tenant -App $app.AppId -Secret $secret.SecretText
+                $missing = @($writeRoles | Where-Object { (Get-JwtRoles $tok) -notcontains $_ })
+            } catch { }
+            if ($missing.Count -eq 0) { break }
+            if ((Get-Date) -ge $deadline) { throw "The temporary app's token still lacks $($missing -join ', ') after 4 minutes." }
+            Write-Host "    Waiting for the app and its permissions to propagate..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds 10
         }
+        $script:WriteHeaders = @{ Authorization = "Bearer $tok" }
+        Write-OK "App-only token obtained (temporary app)"
     }
-
-    if ($PSCmdlet.ShouldProcess($app.AppId, "Set application permissions")) {
-        $resourceAccess = $appRoles | ForEach-Object {
-            @{ id = $_.Id.ToString(); type = $_.Type }
-        }
-        Update-MgApplication -ApplicationId $app.Id -RequiredResourceAccess @(
-            @{
-                resourceAppId  = $graphResourceId
-                resourceAccess = @($resourceAccess)
-            }
-        )
-        Write-OK "Application permissions set"
-    }
-
-    # Create Service Principal for admin consent
-    $appSp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue
-    if (-not $appSp) {
-        if ($PSCmdlet.ShouldProcess($app.AppId, "Create Service Principal")) {
-            $appSp = New-MgServicePrincipal -AppId $app.AppId
-            Write-OK "Service Principal created"
-            Start-Sleep -Seconds 5
-        }
-    } else {
-        Write-OK "Service Principal already exists"
-    }
-
-    # Grant admin consent
-    foreach ($role in $appRoles) {
-        try {
-            if ($PSCmdlet.ShouldProcess($role.Id, "Grant admin consent")) {
-                New-MgServicePrincipalAppRoleAssignment `
-                    -ServicePrincipalId $appSp.Id `
-                    -PrincipalId        $appSp.Id `
-                    -ResourceId         $graphSp.Id `
-                    -AppRoleId          $role.Id `
-                    -ErrorAction Stop | Out-Null
-                Write-OK "Admin consent granted: $($requiredPerms[$appRoles.IndexOf($role)])"
-            }
-        } catch {
-            if ($_ -match "already exists") {
-                Write-Warn "Consent already present — skipped"
-            } else {
-                Write-Warn "Consent failed: $_"
-            }
-        }
-    }
-
-    # Create Client Secret
-    if ($PSCmdlet.ShouldProcess($app.AppId, "Create Client Secret")) {
-        $secretEndDate = (Get-Date).AddMonths(3)
-        $secret = Add-MgApplicationPassword `
-            -ApplicationId $app.Id `
-            -PasswordCredential @{
-                DisplayName = "CalendarMigration-$(Get-Date -Format 'yyyyMMdd')"
-                EndDateTime = $secretEndDate
-            }
-        $ClientId     = $app.AppId
-        $ClientSecret = $secret.SecretText
-        Write-OK "Client Secret created (expires: $($secretEndDate.ToString('yyyy-MM-dd')))"
-        Write-Host ""
-        Write-Host "    Store these values securely (e.g. password manager):" -ForegroundColor Yellow
-        Write-Host "    ClientId    : $ClientId"     -ForegroundColor Yellow
-        Write-Host "    ClientSecret: $ClientSecret" -ForegroundColor Yellow
-        Write-Host ""
-    }
-
-    # Wait for consent to propagate in Azure AD (can take 30–60s)
-    Write-Host "    Waiting 60s for admin consent propagation in Azure AD..." -ForegroundColor DarkGray
-    Start-Sleep -Seconds 60
-
-    Write-Host "    Reconnecting with application permissions..." -ForegroundColor DarkGray
-    Disconnect-MgGraph | Out-Null
-    Start-Sleep -Seconds 5
-
+} elseif ($ClientSecret) {
+    Write-Step "Using your own App Registration (Mode B, secret)"
+    $tok = Get-AppToken -Tenant $tenant -App $ClientId -Secret $ClientSecret
+    $missing = @($writeRoles | Where-Object { (Get-JwtRoles $tok) -notcontains $_ })
+    if ($missing.Count -gt 0) { Write-Warn "App $ClientId has no $($missing -join ', ') application permission - writes will fail with 403." }
+    $script:WriteHeaders = @{ Authorization = "Bearer $tok" }
+    Write-OK "App-only token obtained (ClientId $ClientId)"
 } else {
-    Write-Step "Using existing App Registration (Mode B)"
-    Write-OK "ClientId: $ClientId"
+    # A certificate goes through the Graph SDK; this replaces the delegated Graph
+    # session in this process, which is no longer needed now the events are read.
+    Write-Step "Using your own App Registration (Mode B, certificate)"
+    $script:GraphApp = Connect-M365Graph -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -TenantId $tenant
+    Write-OK "Graph connected (app-only) | ClientId $ClientId"
 }
 
 #endregion
 
-#region Step 5: Connect Graph with application permissions
-
-Write-Step "Connecting Graph with application permissions"
-try {
-    Connect-GraphAppAuth -TenantId $TenantId -ClientId $ClientId -ClientSecret $ClientSecret
-    $ctx = Get-MgContext
-    if (-not $ctx) { throw "Get-MgContext empty after connection" }
-    Write-OK "Graph connected | App: $($ctx.AppName) | AuthType: $($ctx.AuthType)"
-} catch {
-    Write-Error "Graph app auth failed: $_"
-    exit 1
-}
-
-#endregion
-
-#region Step 6: Create destination mailbox
+#region Step 4: Create destination mailbox
 
 Write-Step "Checking / creating destination mailbox: $DestinationEmail"
 
@@ -387,7 +399,7 @@ if ($existingMailbox) {
 
 #endregion
 
-#region Step 7: Calendar permissions and AutoAccept
+#region Step 5: Calendar permissions and AutoAccept
 
 Write-Step "Setting calendar permissions on $DestinationEmail"
 
@@ -440,120 +452,14 @@ if ($PSCmdlet.ShouldProcess($DestinationEmail, "Set calendar permissions")) {
 
 #endregion
 
-#region Step 8: Reconnect delegated for reading group calendar
-
-# Microsoft Graph blocks Get-MgGroupCalendarEvent for application permissions (AppOnly).
-# Known limitation: https://learn.microsoft.com/en-us/graph/known-issues#group-calendar
-# Solution: temporarily reconnect as a delegated user to read the group calendar,
-# then switch back to app auth to write to the destination mailbox.
-
-Write-Step "Reconnecting as delegated user (required for group calendar)"
-Write-Host "    Microsoft Graph blocks group calendar reads via app auth." -ForegroundColor DarkGray
-Write-Host "    Delegated connection required for steps 9." -ForegroundColor DarkGray
-
-# Fully disconnect and clear MSAL token cache for a clean session
-try { Disconnect-MgGraph | Out-Null } catch {}
-Start-Sleep -Seconds 3
-
-# Reload module to clear token cache
-Remove-Module Microsoft.Graph.Authentication -Force -ErrorAction SilentlyContinue
-Import-Module Microsoft.Graph.Authentication -Force
-
-try {
-    $readScopes = @("Group.Read.All", "Calendars.Read", "Calendars.ReadWrite", "User.Read.All")
-    if ($runOnWindows) {
-        Connect-MgGraph -TenantId $TenantId -Scopes $readScopes -NoWelcome
-    } else {
-        Write-Host "    Device code flow: copy the code and open the URL in your browser." -ForegroundColor DarkGray
-        Connect-MgGraph -TenantId $TenantId -Scopes $readScopes -UseDeviceAuthentication -NoWelcome
-    }
-
-    $ctx = Get-MgContext
-    if (-not $ctx) { throw "No context after connection" }
-    Write-OK "Graph reconnected (delegated) as $($ctx.Account)"
-} catch {
-    Write-Error "Delegated reconnect failed: $_"
-    exit 1
-}
-
-#endregion
-
-#region Step 9: Find M365 Group and retrieve events
-
-Write-Step "Looking up source M365 Group"
-
-$group = $null
-
-$mailLower = $SourceGroupMail.ToLower()
-$group     = Get-MgGroup -Filter "mail eq '$mailLower'" -ErrorAction SilentlyContinue
-
-if (-not $group) {
-    Write-Warn "Not found on '$mailLower', trying '$SourceGroupMail'..."
-    $group = Get-MgGroup -Filter "mail eq '$SourceGroupMail'" -ErrorAction SilentlyContinue
-}
-
-if (-not $group) {
-    Write-Warn "Not found by mail, falling back to displayName '$SourceGroupDisplayName'..."
-    $group = Get-MgGroup -Filter "displayName eq '$SourceGroupDisplayName'" -ErrorAction SilentlyContinue
-}
-
-if (-not $group) {
-    Write-Warn "Not found via filter, last attempt via Search..."
-    $group = Get-MgGroup -Search "`"displayName:$SourceGroupDisplayName`"" `
-        -ConsistencyLevel eventual -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -eq $SourceGroupDisplayName -or $_.Mail -like "*holiday*" } |
-        Select-Object -First 1
-}
-
-if (-not $group) {
-    Write-Fail "Group not found after 4 attempts."
-    Write-Host "    Tip: make sure the admin account is a member of the group." -ForegroundColor Yellow
-    Write-Host "    Manual lookup: Get-MgGroup -Search `"`"displayName:Holidays`"`" -ConsistencyLevel eventual | Select DisplayName,Mail,Id" -ForegroundColor Yellow
-    Disconnect-ExchangeOnline -Confirm:$false
-    Disconnect-MgGraph | Out-Null
-    exit 1
-}
-
-Write-OK "Group found: '$($group.DisplayName)' | Mail: $($group.Mail) | ID: $($group.Id)"
-
-Write-Step "Retrieving events ($DaysBack days back to $DaysForward days forward)"
-
-$startDate = (Get-Date).AddDays(-$DaysBack).ToString("yyyy-MM-ddT00:00:00")
-$endDate   = (Get-Date).AddDays($DaysForward).ToString("yyyy-MM-ddT23:59:59")
-
-try {
-    $calEvents = Get-MgGroupCalendarEvent `
-        -GroupId     $group.Id `
-        -Filter      "start/dateTime ge '$startDate' and start/dateTime le '$endDate'" `
-        -All `
-        -ErrorAction Stop
-    Write-OK "$($calEvents.Count) events retrieved"
-} catch {
-    Write-Error "Could not retrieve events: $_"
-    exit 1
-}
-
-# Switch back to app auth for writing to the destination mailbox
-Write-Step "Switching back to application permissions for writing"
-Disconnect-MgGraph | Out-Null
-
-try {
-    Connect-GraphAppAuth -TenantId $TenantId -ClientId $ClientId -ClientSecret $ClientSecret
-    Write-OK "Graph reconnected (app auth) | AuthType: $((Get-MgContext).AuthType)"
-} catch {
-    Write-Error "App auth reconnect failed: $_"
-    exit 1
-}
-
-#endregion
-
-#region Step 10: Copy events
+#region Step 6: Copy events (app-only)
 
 Write-Step "Copying events to destination mailbox calendar"
 
 $successCount = 0
 $failCount    = 0
 $skippedCount = 0
+$destUri      = "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($DestinationEmail))/events"
 
 foreach ($calEvent in $calEvents) {
 
@@ -567,18 +473,18 @@ foreach ($calEvent in $calEvents) {
             $tz = if ($calEvent.Start.TimeZone) { $calEvent.Start.TimeZone } else { "UTC" }
 
             $params = @{
-                Subject  = $calEvent.Subject
-                IsAllDay = $calEvent.IsAllDay
-                ShowAs   = "oof"
-                Start    = @{ DateTime = $calEvent.Start.DateTime; TimeZone = $tz }
-                End      = @{ DateTime = $calEvent.End.DateTime;   TimeZone = $tz }
-                Body     = @{
-                    ContentType = "text"
-                    Content     = "Migrated from M365 Group calendar. Original organizer: $($calEvent.Organizer.EmailAddress.Address)"
+                subject  = $calEvent.Subject
+                isAllDay = [bool]$calEvent.IsAllDay
+                showAs   = "oof"
+                start    = @{ dateTime = $calEvent.Start.DateTime; timeZone = $tz }
+                end      = @{ dateTime = $calEvent.End.DateTime;   timeZone = $tz }
+                body     = @{
+                    contentType = "text"
+                    content     = "Migrated from M365 Group calendar. Original organizer: $($calEvent.Organizer.EmailAddress.Address)"
                 }
             }
 
-            New-MgUserEvent -UserId $DestinationEmail -BodyParameter $params | Out-Null
+            Invoke-AppGraph -Method POST -Uri $destUri -Body $params | Out-Null
             Write-Host "    [+] $($calEvent.Subject) | $($calEvent.Start.DateTime)" -ForegroundColor DarkGreen
             $successCount++
         } catch {
@@ -592,13 +498,13 @@ Write-OK "Copy complete: $successCount OK | $skippedCount skipped (cancelled) | 
 
 #endregion
 
-#region Step 11: Delete source M365 Group (optional)
+#region Step 7: Delete source M365 Group (optional)
 
 if ($DeleteSourceGroup) {
     Write-Step "Deleting source M365 Group: $SourceGroupDisplayName"
     if ($PSCmdlet.ShouldProcess($group.Id, "Delete M365 Group")) {
         try {
-            Remove-MgGroup -GroupId $group.Id -Confirm:$false
+            Invoke-AppGraph -Method DELETE -Uri "https://graph.microsoft.com/v1.0/groups/$($group.Id)" | Out-Null
             Write-OK "M365 Group deleted"
         } catch {
             Write-Warn "Could not delete group: $_"
@@ -612,14 +518,13 @@ if ($DeleteSourceGroup) {
 
 #endregion
 
-#region Step 12: Summary
+#region Step 8: Summary
 
 $line = "=" * 65
 Write-Host "`n$line" -ForegroundColor Cyan
 Write-Host " SUMMARY  —  Calendar Migration" -ForegroundColor Cyan
 Write-Host $line -ForegroundColor Cyan
-Write-Host "  Platform           : $(if ($runOnWindows) { 'Windows' } elseif ($runOnMacOS) { 'macOS' } else { 'Linux' })"
-Write-Host "  App Registration   : $ClientId"
+Write-Host "  App Registration   : $(if ($modeA) { 'temporary (removed at the end)' } else { $ClientId })"
 Write-Host "  Source calendar    : $SourceGroupMail (M365 Group)"
 Write-Host "  Destination type   : $DestinationType Mailbox"
 Write-Host "  Destination mailbox: $DestinationEmail"
@@ -647,8 +552,9 @@ if ($DestinationType -eq "Room") {
 }
 Write-Host $line -ForegroundColor Cyan
 
-Disconnect-ExchangeOnline -Confirm:$false
-Disconnect-MgGraph | Out-Null
-Write-OK "Done. Connections closed."
-
 #endregion
+
+} finally {
+    # The temporary app never outlives the run; only what this script connected is closed.
+    Close-Connections
+}

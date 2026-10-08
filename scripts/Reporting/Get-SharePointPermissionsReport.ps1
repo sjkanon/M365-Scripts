@@ -55,8 +55,16 @@
       only ever issues HTTP GET requests — it never writes, and it never changes a permission.
 
       To avoid the temporary app, pass -ClientId + -TenantId + -CertificateThumbprint for an
-      existing app registration that already holds those roles. -ClientSecret is accepted for the
-      Graph half but will fail against SharePoint for the reason above.
+      existing app registration that already holds those roles, or -AppOnly to take them from
+      graph.appid.json. -ClientSecret is accepted for the Graph half but will fail against
+      SharePoint for the reason above.
+
+      Sign-in: the one interactive step - creating the temporary app - is delegated and goes
+      through scripts\Startup\Connect-M365.ps1 (PowerShell 7): a device code when
+      $global:useDeviceCodeAuth is set in load.config.ps1, the GDAP customer from Connect-Tenant,
+      and a Graph session that already holds the scopes is reused and left open. The scan itself
+      stays app-only on purpose: SharePoint REST accepts neither a delegated Graph token (wrong
+      audience) nor a secret-based app-only token, and role assignments have no Graph API.
 
 .PARAMETER SiteUrl
     Optional. Report on a single site collection (including its sub-sites) instead of the tenant.
@@ -80,6 +88,11 @@
     Certificate thumbprint for an existing app registration. The certificate must be in
     Cert:\CurrentUser\My or Cert:\LocalMachine\My and have a private key. This is the supported
     way to authenticate an existing app against SharePoint Online.
+
+.PARAMETER AppOnly
+    Use the app registration for the tenant in graph.appid.json (ClientId + CertificateThumbprint)
+    instead of creating a temporary one. That app must hold the roles listed under
+    Authentication, SharePoint Sites.FullControl.All included. PowerShell 7 only.
 
 .PARAMETER OutputPath
     Override the default output folder (C:\Temp on Windows).
@@ -160,6 +173,7 @@ param(
     [string] $ClientId,
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [string] $OutputPath,
     [ValidateSet('Site', 'List', 'Item')]
     [string] $Scope = 'Item',
@@ -921,6 +935,27 @@ if ($allSitesMode -and [string]::IsNullOrWhiteSpace($TenantUrl)) {
 # Unlike the storage/version reports, a single-site run needs the app-only path too: SharePoint
 # role assignments are only readable with a Sites.FullControl.All token, and a delegated Graph
 # token is the wrong audience for the /_api endpoints entirely.
+# Sign-in goes through scripts\Startup\Connect-M365.ps1 where it can (PowerShell 7): the bootstrap
+# sign-in below is delegated - device code and the GDAP customer per load.config.ps1 - and
+# -AppOnly takes ClientId and CertificateThumbprint for the tenant from graph.appid.json. That app
+# then needs the same roles as the temporary one, SharePoint Sites.FullControl.All included.
+if ($PSVersionTable.PSVersion.Major -ge 7) { . (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1') }
+if ($AppOnly -and -not $ClientId) {
+    if (-not (Get-Command Get-M365AppRegistration -ErrorAction SilentlyContinue)) {
+        Write-Host '  [ERROR] -AppOnly needs PowerShell 7. Pass -ClientId, -TenantId and -CertificateThumbprint instead.' -ForegroundColor Red
+        exit 1
+    }
+    try {
+        $appRegistration = Get-M365AppRegistration -TenantId $(if ($TenantId) { $TenantId } else { Resolve-M365TenantId })
+    } catch {
+        Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+    $ClientId              = $appRegistration.ClientId
+    $CertificateThumbprint = $appRegistration.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $appRegistration.Tenant }
+}
+
 $useTempApp = -not $ClientId
 if ($useTempApp -and -not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Applications')) {
     Write-Host "  [ERROR] Missing required module: Microsoft.Graph.Applications (needed for the temporary App Registration)." -ForegroundColor Red
@@ -981,15 +1016,22 @@ try {
         [void](Get-ResourceToken -Resource $GraphResource)
         Write-Host "  [OK]   Connected with provided app credentials." -ForegroundColor DarkGray
     } else {
-        Write-Host "  Connecting interactively..." -ForegroundColor Cyan
+        Write-Host "  Connecting (delegated)..." -ForegroundColor Cyan
         Write-Host "  Required role: Global Administrator or Application Administrator (to create the temporary lookup app)" -ForegroundColor DarkGray
-        $connectParams = @{
-            Scopes    = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
-            NoWelcome = $true
+        $bootstrapScopes = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All')
+        if (Get-Command Connect-M365Graph -ErrorAction SilentlyContinue) {
+            # Device code per load.config.ps1, the GDAP customer, and an existing session reused
+            # when it already holds these scopes - which is then also left open at the end.
+            $bootstrap = Connect-M365Graph -Scopes $bootstrapScopes -TenantId $effectiveTenantId
+            $script:ConnectedHere = [bool]$bootstrap.ConnectedHere
+        } else {
+            # Windows PowerShell 5.1 cannot load Connect-M365.ps1: the same sign-in, inline.
+            $connectParams = @{ Scopes = $bootstrapScopes; NoWelcome = $true }
+            if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
+            if ($global:useDeviceCodeAuth) { $connectParams['UseDeviceCode'] = $true }
+            Connect-MgGraph @connectParams -ErrorAction Stop
+            $script:ConnectedHere = $true
         }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams -ErrorAction Stop
-        $script:ConnectedHere = $true
         Write-Host "  [OK]   Connected (delegated)." -ForegroundColor DarkGray
 
         $ctx = Get-MgContext

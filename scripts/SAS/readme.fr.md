@@ -12,9 +12,9 @@ Surveille les journaux des jobs batch SAS et l'Event Viewer de Windows à la rec
 
 | Fichier | Description |
 |------|-------------|
-| [`Monitor-SASBatchErrors.ps1`](Monitor-SASBatchErrors.ps1) | Script principal — analyse les fichiers journaux et l'Event Viewer |
-| [`Setup-SASMonitoring.ps1`](Setup-SASMonitoring.ps1) | Configuration initiale unique — installe le script, la tâche planifiée et la configuration Zabbix |
-| [`Test-SASWorkDirectory.ps1`](Test-SASWorkDirectory.ps1) | Vérifie l'état et les autorisations du répertoire SAS WORK |
+| [`Monitor-SASBatchErrors.ps1`](Monitor-SASBatchErrors.ps1) ([docs](#monitor-sasbatcherrorsps1)) | Script principal — analyse les fichiers journaux et l'Event Viewer |
+| [`Setup-SASMonitoring.ps1`](Setup-SASMonitoring.ps1) ([docs](#setup-sasmonitoringps1)) | Configuration initiale unique — installe le script, la tâche planifiée et la configuration Zabbix |
+| [`Test-SASWorkDirectory.ps1`](Test-SASWorkDirectory.ps1) ([docs](#test-sasworkdirectoryps1)) | Vérifie l'état et les autorisations du répertoire SAS WORK |
 | `rca.md` | Analyse des causes profondes des échecs intermittents access-denied lors des suppressions dans SAS WORK |
 | `zabbix_sas_monitor.conf` | Exemple de configuration Zabbix UserParameter |
 
@@ -33,7 +33,7 @@ Surveille les journaux des jobs batch SAS et l'Event Viewer de Windows à la rec
 
 ---
 
-## Configuration
+## Setup-SASMonitoring.ps1
 
 ```powershell
 # À exécuter en tant qu'Administrateur
@@ -50,7 +50,7 @@ La configuration installe `Monitor-SASBatchErrors.ps1` dans `C:\Scripts\` et cr�
 
 ---
 
-## Utilisation
+## Monitor-SASBatchErrors.ps1
 
 ```powershell
 # Analyser les 7 derniers jours, sortie texte
@@ -70,12 +70,20 @@ La configuration installe `Monitor-SASBatchErrors.ps1` dans `C:\Scripts\` et cr�
 
 # Enregistrer dans un fichier
 .\Monitor-SASBatchErrors.ps1 -LogDirectory "E:\SAS\Logs" -OutputFile "C:\Temp\report.txt"
-
-# Contrôle de l'état de WORK/USERWORK avec diagnostic antivirus/filtres
-.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
 ```
 
 **Codes de sortie :** `0` = aucune erreur critical/high · `1` = gravité high · `2` = critical · `-1` = erreur du script
+
+---
+
+## Test-SASWorkDirectory.ps1
+
+Vérifie que les répertoires SAS WORK (`G:\sas\work`) et USERWORK (`U:\sas\userwork`) sont accessibles et fonctionnent, avec des tests d'E/S simples qui ne perturbent pas les jobs SAS en cours (`-Iterations`, 10 par défaut), et contrôle le profil des disques de travail éphémères.
+
+```powershell
+# Contrôle de l'état de WORK/USERWORK avec diagnostic antivirus/filtres
+.\Test-SASWorkDirectory.ps1 -Iterations 1000 -EventLogHours 2 -IncludeAVDiagnostics $true -AVLogHours 2
+```
 
 Le diagnostic antivirus de `Test-SASWorkDirectory.ps1` comprend :
 

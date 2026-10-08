@@ -36,7 +36,10 @@ risk check.
 |-----------|----------|-------------|
 | `-RiskyOnly` | No | Only include grants flagged High risk |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -49,7 +52,12 @@ risk check.
 **Notes**
 - Risk flagging is a heuristic (string match against a known-risky scope list) — review
   flagged entries manually, don't treat "Normal" as a guarantee of safety
-- Required scopes: `Application.Read.All`, `Directory.Read.All`
+- High-risk grants are now listed first in the console table (sorting on the flag text put
+  `Normal` before `High`)
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Microsoft
+  Graph, delegated by default (scopes `Application.Read.All`, `Directory.Read.All`);
+  app-only with `-ClientId` + `-CertificateThumbprint` or `-AppOnly` (the same application
+  permissions)
 
 ---
 
@@ -67,7 +75,10 @@ read-only report; `-Apply` disables (not deletes) high-confidence matches.
 | `-Mailbox` | No | UPN of a single mailbox. If omitted, all mailboxes are checked |
 | `-Apply` | No | Disable high-confidence flagged rules (default: report only) |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -86,8 +97,18 @@ Supports `-WhatIf` (`SupportsShouldProcess`).
 
 **Notes**
 - "External" is determined against the tenant's accepted domains (`Get-AcceptedDomain`)
+- Forward targets to internal recipients (`EX:/o=ExchangeLabs/...`) are no longer counted
+  as external — only SMTP addresses outside the accepted domains are
 - Disabling (not deleting) is intentional — reversible, and preserves the rule for
   incident-response review
+- Stays on Exchange Online on purpose. Graph has `messageRules`, but delegated it only
+  reaches mailboxes the signed-in admin was given access to (an Exchange admin role does not
+  open other users' rules there), and it never returns hidden rules — which
+  `Get-InboxRule -IncludeHidden` does, and hiding a rule is a known attacker technique
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Exchange
+  Online, delegated by default (device code and the GDAP customer via
+  `-DelegatedOrganization`); app-only with `-ClientId` + `-CertificateThumbprint` or
+  `-AppOnly` (`Exchange.ManageAsApp` plus an Exchange role; `-TenantId` as a domain)
 
 ---
 
@@ -105,7 +126,10 @@ Cloud Apps, and Entra ID Protection.
 | `-Severity` | No | Filter: `informational`, `low`, `medium`, `high` |
 | `-Status` | No | Filter: `new`, `inProgress`, `resolved` |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -116,7 +140,12 @@ Cloud Apps, and Entra ID Protection.
 ```
 
 **Notes**
-- Required scope: `SecurityAlert.Read.All`
+- Alerts are sorted high → medium → low → informational, newest first (the earlier
+  alphabetical sort put `medium` first and `high` last)
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Microsoft
+  Graph, delegated by default (scope `SecurityAlert.Read.All` plus a Security Reader role);
+  app-only with `-ClientId` + `-CertificateThumbprint` or `-AppOnly` (application
+  permission `SecurityAlert.Read.All`)
 
 ---
 
@@ -134,7 +163,10 @@ POP/IMAP enablement and litigation hold per mailbox.
 |-----------|----------|-------------|
 | `-IncludeMailboxDetail` | No | Also check per-mailbox legacy protocols + litigation hold (slower) |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -150,6 +182,16 @@ POP/IMAP enablement and litigation hold per mailbox.
 - The mutating `*-set.ps1` / `*-del.ps1` counterparts from the source project were
   intentionally not ported — each hardcoded one MSP's specific "recommended" values with
   no per-tenant override
+- Security & Compliance PowerShell (DLP, alert policies) is now opened for the same tenant
+  and sign-in as Exchange (`Connect-M365Exchange -IncludeCompliance`); the earlier bare
+  `Connect-IPPSSession` ignored `-TenantId` and so read your own tenant under GDAP
+- `-IncludeMailboxDetail` reads POP/IMAP with one bulk `Get-EXOCASMailbox` call instead of
+  one `Get-CASMailbox` per mailbox
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1), delegated by
+  default (device code and the GDAP customer via `-DelegatedOrganization`); app-only with
+  `-ClientId` + `-CertificateThumbprint` or `-AppOnly` (`-TenantId` as a domain). Stays on
+  Exchange Online / Security & Compliance: Graph has no API for EOP/Defender for Office 365
+  policies, remote domains, CAS protocols, DLP or alert policies
 
 **Required modules**
 ```powershell
@@ -161,8 +203,9 @@ Install-Module ExchangeOnlineManagement -Scope CurrentUser
 ### Test-MailboxAuditingConfig.ps1
 
 Reports (and, with `-Apply`, fixes) unified audit log and per-mailbox audit logging
-gaps: whether the org-wide Unified Audit Log is enabled, and whether each mailbox has
-`AuditEnabled` on with a sufficient `AuditLogAgeLimit`.
+gaps: whether the org-wide Unified Audit Log is enabled, whether mailbox auditing is
+switched off for the whole organization (`AuditDisabled`, reported only), and whether each
+mailbox has `AuditEnabled` on with a sufficient `AuditLogAgeLimit`.
 
 **Parameters**
 
@@ -171,7 +214,10 @@ gaps: whether the org-wide Unified Audit Log is enabled, and whether each mailbo
 | `-MinimumAuditLogAgeDays` | No | Minimum acceptable retention in days (default: `180`) |
 | `-Apply` | No | Enable the unified audit log and fix flagged mailboxes (default: report only) |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -184,6 +230,16 @@ gaps: whether the org-wide Unified Audit Log is enabled, and whether each mailbo
 ```
 
 Supports `-WhatIf` (`SupportsShouldProcess`).
+
+**Notes**
+- With `AuditDisabled = True` (`Get-OrganizationConfig`) no mailbox is audited, whatever
+  its own `AuditEnabled` says. The script reports it but does not change it — that is a
+  deliberate org decision (`Set-OrganizationConfig -AuditDisabled $false`)
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Exchange
+  Online, delegated by default (device code and the GDAP customer via
+  `-DelegatedOrganization`); app-only with `-ClientId` + `-CertificateThumbprint` or
+  `-AppOnly` (`-TenantId` as a domain). Stays on Exchange Online: Graph has no API for the
+  audit log switch or per-mailbox audit settings
 
 ---
 
@@ -201,7 +257,10 @@ address is configured. DKIM is intentionally out of scope — use
 |-----------|----------|-------------|
 | `-Domain` | No | One or more domains. If omitted, auto-discovered via Microsoft Graph |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Used only for auto-discovering domains via Graph |
+| `-TenantId` | No | Only used to discover domains via Graph when `-Domain` is omitted. Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -213,3 +272,9 @@ address is configured. DKIM is intentionally out of scope — use
 
 **Notes**
 - Windows-only (uses `Resolve-DnsName`)
+- The DMARC policy is read from the `p=` tag itself; a record with `sp=` before `p=` used
+  to report the subdomain policy instead
+- Signs in only when `-Domain` is omitted, via
+  [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Microsoft Graph, delegated
+  by default (scope `Domain.Read.All`); app-only with `-ClientId` + `-CertificateThumbprint`
+  or `-AppOnly`
