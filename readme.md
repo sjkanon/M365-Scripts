@@ -733,6 +733,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
 
 <pre>
 <a href="readme.md">M365-Scripts/</a>
+├── <a href=".github/workflows/ci.yml">.github/workflows/ci.yml</a>         ← CI: syntax, analyzer, links, generated docs, ShellCheck
 ├── <a href=".gitignore">.gitignore</a>
 ├── <a href=".vscode">.vscode/</a>
 │   └── <a href=".vscode/settings.json">settings.json</a>
@@ -980,6 +981,7 @@ When adding new scripts:
 |------|-----------|
 | You commit | The git hook [`.githooks/pre-commit`](.githooks/pre-commit) regenerates the index and the readme headers, adds them to the commit, and stops the commit on a broken link. It warns when an English readme changed without its Dutch/French version — ask Claude to translate |
 | Claude Code edits a file | A hook in [`.claude/settings.json`](.claude/settings.json) does the same in the background after every edit, and before Claude finishes it checks that changed readmes were translated and changed scripts were documented |
+| You push to `devel`/`main` or open a PR | [GitHub Actions](.github/workflows/ci.yml) runs the same checks once more, for commits made without the hook or in the web editor: PowerShell syntax (7 and 5.1), PSScriptAnalyzer errors, the link check, whether `INDEX.md` and the readme headers are current and every folder has all three languages, and ShellCheck on the `.sh` scripts |
 
 Turn the git hook on once per clone:
 
@@ -998,6 +1000,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-08 (7)
+| Change |
+|--------|
+| **GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).** Until now every check ran only locally, through the pre-commit hook and the Claude Code hooks; a commit from a clone without `core.hooksPath`, or from the GitHub web editor, reached `main` unchecked. The workflow runs on every push and PR to `devel`/`main`, and executes nothing - it only parses and lints. Four jobs: **PowerShell 7** ([`Test-PowerShellSyntax.ps1`](scripts/Startup/Test-PowerShellSyntax.ps1) on every `.ps1`/`.psm1`, and PSScriptAnalyzer at error level, without `PSAvoidUsingConvertToSecureStringWithPlainText`, which the break-glass scripts trigger on purpose); **Windows PowerShell 5.1** (parse every script that has no `#Requires -Version 7`); **readmes** ([`Test-MarkdownLinks.ps1`](scripts/Startup/Test-MarkdownLinks.ps1), [`Update-ReadmeHeader.ps1`](scripts/Startup/Update-ReadmeHeader.ps1) - which fails on a missing language - and [`Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1), followed by `git diff --exit-code` so stale generated files fail); **shell** (`bash -n` and ShellCheck at warning level on every `.sh`). Findings appear as annotations on the file and line |
+| **The 5.1 job found 66 scripts that do not parse in Windows PowerShell 5.1.** Nearly all are UTF-8 without BOM containing a character such as `—` or `é`: 5.1 reads them as ANSI, the bytes become a stray quote, and the script breaks with "string is missing the terminator". PowerShell 7 has no such problem, so it went unnoticed - but Intune, GPO and scheduled tasks run 5.1. A few others use `??` or `?.` without `#Requires -Version 7` (`Import-M365Users.ps1`, `create_scheduled_task.ps1`, `Get-SharePointStorageReport.ps1`). The job is therefore `continue-on-error` for now: it reports, it does not block. Fixing the scripts is a separate change |
+| Verified: on a clean checkout of `HEAD`, locally, PowerShell 7 syntax (194 files), the analyzer at error level (only the excluded rule), the link check, header and index generation (no difference) and ShellCheck 0.11 on [`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) are all clean; the 5.1 parse was run with `powershell.exe` and gives the list above. If the first run on GitHub needed a fix, that is in the commit after this one |
 
 ### 2026-10-08 (6)
 | Change |

@@ -733,6 +733,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
 
 <pre>
 <a href="readme.nl.md">M365-Scripts/</a>
+├── <a href=".github/workflows/ci.yml">.github/workflows/ci.yml</a>         ← CI: syntax, analyzer, links, gegenereerde docs, ShellCheck
 ├── <a href=".gitignore">.gitignore</a>
 ├── <a href=".vscode">.vscode/</a>
 │   └── <a href=".vscode/settings.json">settings.json</a>
@@ -980,6 +981,7 @@ Bij het toevoegen van nieuwe scripts:
 |---------|---------------|
 | Je commit | De git-hook [`.githooks/pre-commit`](.githooks/pre-commit) genereert de index en de readme-headers opnieuw, neemt ze op in de commit, en stopt de commit bij een kapotte link. Hij waarschuwt als een Engelse readme is gewijzigd zonder de Nederlandse/Franse versie — vraag Claude dan om te vertalen |
 | Claude Code past een bestand aan | Een hook in [`.claude/settings.json`](.claude/settings.json) doet na elke wijziging hetzelfde op de achtergrond, en voordat Claude klaar is controleert hij of gewijzigde readmes vertaald zijn en gewijzigde scripts gedocumenteerd |
+| Je pusht naar `devel`/`main` of opent een PR | [GitHub Actions](.github/workflows/ci.yml) draait dezelfde controles nog eens, voor commits zonder hook of uit de webeditor: PowerShell-syntax (7 en 5.1), PSScriptAnalyzer-fouten, de linkcontrole, of `INDEX.md` en de readme-headers actueel zijn en elke map alle drie de talen heeft, en ShellCheck op de `.sh`-scripts |
 
 Zet de git-hook eenmalig aan per clone:
 
@@ -998,6 +1000,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-08 (7)
+| Wijziging |
+|--------|
+| **GitHub Actions: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).** Tot nu toe draaide elke controle alleen lokaal, via de pre-commit-hook en de Claude Code-hooks; een commit uit een clone zonder `core.hooksPath`, of uit de webeditor van GitHub, kwam ongecontroleerd op `main`. De workflow draait bij elke push en PR naar `devel`/`main` en voert niets uit - hij parset en lint alleen. Vier jobs: **PowerShell 7** ([`Test-PowerShellSyntax.ps1`](scripts/Startup/Test-PowerShellSyntax.ps1) op elke `.ps1`/`.psm1`, en PSScriptAnalyzer op foutniveau, zonder `PSAvoidUsingConvertToSecureStringWithPlainText`, die de break-glass-scripts bewust raken); **Windows PowerShell 5.1** (elk script zonder `#Requires -Version 7` parsen); **readmes** ([`Test-MarkdownLinks.ps1`](scripts/Startup/Test-MarkdownLinks.ps1), [`Update-ReadmeHeader.ps1`](scripts/Startup/Update-ReadmeHeader.ps1) - dat faalt op een ontbrekende taal - en [`Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1), gevolgd door `git diff --exit-code` zodat verouderde gegenereerde bestanden falen); **shell** (`bash -n` en ShellCheck op waarschuwingsniveau op elk `.sh`). Bevindingen verschijnen als annotaties op bestand en regel |
+| **De 5.1-job vond 66 scripts die niet parsen in Windows PowerShell 5.1.** Bijna allemaal UTF-8 zonder BOM met een teken als `—` of `é`: 5.1 leest ze als ANSI, de bytes worden een losse quote, en het script breekt met "string is missing the terminator". PowerShell 7 heeft dat probleem niet, dus het viel niet op - maar Intune, GPO en geplande taken draaien 5.1. Een paar andere gebruiken `??` of `?.` zonder `#Requires -Version 7` (`Import-M365Users.ps1`, `create_scheduled_task.ps1`, `Get-SharePointStorageReport.ps1`). De job is daarom voorlopig `continue-on-error`: hij meldt, hij blokkeert niet. De scripts repareren is een aparte wijziging |
+| Geverifieerd: op een schone checkout van `HEAD`, lokaal, zijn PowerShell 7-syntax (194 bestanden), de analyzer op foutniveau (alleen de uitgezonderde regel), de linkcontrole, het genereren van headers en index (geen verschil) en ShellCheck 0.11 op [`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) allemaal schoon; de 5.1-parse is gedraaid met `powershell.exe` en geeft de lijst hierboven. Had de eerste run op GitHub een correctie nodig, dan staat die in de commit hierna |
 
 ### 2026-10-08 (6)
 | Wijziging |

@@ -733,6 +733,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
 
 <pre>
 <a href="readme.fr.md">M365-Scripts/</a>
+├── <a href=".github/workflows/ci.yml">.github/workflows/ci.yml</a>         ← CI : syntaxe, analyseur, liens, docs générées, ShellCheck
 ├── <a href=".gitignore">.gitignore</a>
 ├── <a href=".vscode">.vscode/</a>
 │   └── <a href=".vscode/settings.json">settings.json</a>
@@ -980,6 +981,7 @@ Lorsque vous ajoutez de nouveaux scripts :
 |-------|------------------|
 | Vous commitez | Le hook git [`.githooks/pre-commit`](.githooks/pre-commit) régénère l'index et les en-têtes des readmes, les ajoute au commit, et arrête le commit en cas de lien cassé. Il avertit lorsqu'un readme anglais a changé sans sa version néerlandaise/française — demandez alors à Claude de traduire |
 | Claude Code modifie un fichier | Un hook dans [`.claude/settings.json`](.claude/settings.json) fait de même en arrière-plan après chaque modification, et avant que Claude ne termine il vérifie que les readmes modifiés ont été traduits et les scripts modifiés documentés |
+| Vous poussez vers `devel`/`main` ou ouvrez une PR | [GitHub Actions](.github/workflows/ci.yml) refait les mêmes vérifications, pour les commits faits sans le hook ou dans l'éditeur web : syntaxe PowerShell (7 et 5.1), erreurs PSScriptAnalyzer, vérification des liens, `INDEX.md` et en-têtes des readmes à jour et les trois langues présentes dans chaque dossier, et ShellCheck sur les scripts `.sh` |
 
 Activez le hook git une fois par clone :
 
@@ -998,6 +1000,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-08 (7)
+| Modification |
+|--------|
+| **GitHub Actions : [`.github/workflows/ci.yml`](.github/workflows/ci.yml).** Jusqu'ici chaque vérification ne tournait qu'en local, via le hook pre-commit et les hooks Claude Code ; un commit depuis un clone sans `core.hooksPath`, ou depuis l'éditeur web de GitHub, arrivait sur `main` sans contrôle. Le workflow tourne à chaque push et PR vers `devel`/`main` et n'exécute rien - il analyse et vérifie seulement. Quatre jobs : **PowerShell 7** ([`Test-PowerShellSyntax.ps1`](scripts/Startup/Test-PowerShellSyntax.ps1) sur chaque `.ps1`/`.psm1`, et PSScriptAnalyzer au niveau erreur, sans `PSAvoidUsingConvertToSecureStringWithPlainText`, que les scripts break-glass déclenchent volontairement) ; **Windows PowerShell 5.1** (analyse de chaque script sans `#Requires -Version 7`) ; **readmes** ([`Test-MarkdownLinks.ps1`](scripts/Startup/Test-MarkdownLinks.ps1), [`Update-ReadmeHeader.ps1`](scripts/Startup/Update-ReadmeHeader.ps1) - qui échoue sur une langue manquante - et [`Update-ScriptIndex.ps1`](scripts/Startup/Update-ScriptIndex.ps1), suivis de `git diff --exit-code` pour que des fichiers générés périmés échouent) ; **shell** (`bash -n` et ShellCheck au niveau avertissement sur chaque `.sh`). Les constats apparaissent en annotations sur le fichier et la ligne |
+| **Le job 5.1 a trouvé 66 scripts qui ne s'analysent pas sous Windows PowerShell 5.1.** Presque tous sont en UTF-8 sans BOM avec un caractère comme `—` ou `é` : 5.1 les lit en ANSI, les octets deviennent un guillemet isolé, et le script casse avec « string is missing the terminator ». PowerShell 7 n'a pas ce problème, d'où le fait que personne ne l'a remarqué - mais Intune, les GPO et les tâches planifiées utilisent 5.1. Quelques autres utilisent `??` ou `?.` sans `#Requires -Version 7` (`Import-M365Users.ps1`, `create_scheduled_task.ps1`, `Get-SharePointStorageReport.ps1`). Le job est donc pour l'instant `continue-on-error` : il signale, il ne bloque pas. Corriger les scripts est un changement séparé |
+| Vérifié : sur un checkout propre de `HEAD`, en local, la syntaxe PowerShell 7 (194 fichiers), l'analyseur au niveau erreur (seule la règle exclue), la vérification des liens, la génération des en-têtes et de l'index (aucune différence) et ShellCheck 0.11 sur [`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) sont tous propres ; l'analyse 5.1 a été lancée avec `powershell.exe` et donne la liste ci-dessus. Si la première exécution sur GitHub a demandé une correction, elle est dans le commit suivant |
 
 ### 2026-10-08 (6)
 | Modification |
