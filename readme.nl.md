@@ -1008,6 +1008,18 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (15)
+| Wijziging |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.nl.md#connect-m365ps1): app-opzoeking onder GDAP, geen partnerscopes bij een klant, en delegated aanmelden via je eigen app.** `graph.appid.json` en `pnp.appid.json` gebruiken het onmicrosoft-domein als sleutel, terwijl de tenant onder GDAP de GUID van de klant is, dus `-AppOnly` en het opzoeken van de PnP-ClientId misten; ze proberen nu ook het klantdomein uit `Connect-Tenant` en de tenant in de SharePoint-URL. Een delegated herverbinding hield de scopes van de vorige sessie, ook als die van tenant wisselde, waardoor partnerscopes zoals `Domain.ReadWrite.All` bij de klant werden aangevraagd; scopes gaan nu alleen binnen dezelfde tenant mee. Nieuw `-DelegatedClient`: `-ClientId` wijst dan een eigen public client aan voor een delegated aanmelding in plaats van app-only te betekenen (nodig voor SharePoint-provisioning) |
+| Geverifieerd: syntaxcheck; onder `Set-StrictMode`: de GDAP-GUID wordt de domeinsleutel van de klant, een SharePoint-admin-URL de sleutel van zijn tenant, een onbekende tenant niets, en `graph.appid.json` wordt gevonden vanuit een site-URL; met gemockte Graph-cmdlets vraagt een wissel van partner- naar klanttenant alleen de nieuwe scopes, en `-DelegatedClient` geeft de ClientId mee aan een delegated aanmelding. **Niet** geverifieerd: tegen een tenant |
+
+### 2026-10-08 (15)
+| Wijziging |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) draait los: staan Update-TeamsClient.ps1 en Repair-AppxPackageStore.ps1 er niet naast (de repo, of de map waar `-ComputerName` ze neerzet), dan haalt het ze uit deze repo op GitHub op een vastgepinde commit van `main` (`746541e`, 2026-10-05) en weigert het ze als de SHA-256 niet klopt. Eerst sloeg een losse kopie van alleen dit bestand op de image-VM elke app-reparatie over. Vastgepind in plaats van de nieuwste `main`, zodat een gewijzigd script nooit ongezien als System draait; bijwerken betekent een nieuwe commit en twee hashes, na het lezen van de diff |
+| Geverifieerd: syntaxcontrole; beide hashes zijn berekend met `git show` op die commit en komen overeen met wat raw.githubusercontent.com ervoor levert. **Niet** geverifieerd: een run op een sessiehost die ze echt downloadt |
+
 ### 2026-10-08 (14)
 | Wijziging |
 |--------|

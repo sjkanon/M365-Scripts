@@ -100,17 +100,29 @@ function Resolve-M365CustomerDomain {
     return $TenantId
 }
 
+function Find-M365TenantKey {
+    # graph.appid.json and pnp.appid.json are keyed by the onmicrosoft domain, while under
+    # GDAP the tenant is often the customer GUID: try every name the tenant goes by.
+    param([string[]] $Keys, [string] $TenantId, [string] $Url)
+    $names = @($TenantId, (Resolve-M365CustomerDomain -TenantId $TenantId))
+    if ($Url -match '^https://([^./]+?)(-admin|-my)?\.sharepoint\.com') { $names = @("$($Matches[1]).onmicrosoft.com") + $names }
+    foreach ($n in $names | Where-Object { $_ }) {
+        $hit = $Keys | Where-Object { $_ -eq $n } | Select-Object -First 1
+        if ($hit) { return $hit }
+    }
+}
+
 function Get-M365AppRegistration {
     <#
     .SYNOPSIS
         ClientId and CertificateThumbprint for a tenant from graph.appid.json (repo root).
     #>
-    param([string] $TenantId)
+    param([string] $TenantId, [string] $Url)
     $file = Join-Path $PSScriptRoot '..\..\graph.appid.json'
     if (-not (Test-Path $file)) { throw "-AppOnly needs graph.appid.json in the repo root, or pass -ClientId and -CertificateThumbprint." }
     $map = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable
     $keys = @($map.Keys)
-    $key = if ($TenantId) { $keys | Where-Object { $_ -eq $TenantId } | Select-Object -First 1 }
+    $key = if ($TenantId -or $Url) { Find-M365TenantKey -Keys $keys -TenantId $TenantId -Url $Url }
            elseif ($keys.Count -eq 1) { $keys[0] }
     if (-not $key) {
         throw "graph.appid.json has no entry for tenant '$TenantId' (it has: $($keys -join ', ')). Pass -TenantId with one of those, or -ClientId and -CertificateThumbprint."
@@ -149,6 +161,10 @@ function Connect-M365Graph {
     .PARAMETER Force
         Sign in again even when the current session would fit (e.g. its token is dead).
 
+    .PARAMETER DelegatedClient
+        Sign in delegated through the app named by -ClientId (a public client of your own,
+        e.g. one with SharePoint delegated permissions) instead of app-only.
+
     .OUTPUTS
         [pscustomobject] ConnectedHere, AuthType (Delegated/AppOnly), TenantId, Account.
     #>
@@ -162,7 +178,8 @@ function Connect-M365Graph {
         [switch]       $AppOnly,
         [switch]       $DeviceCode,
         [switch]       $Interactive,
-        [switch]       $Force
+        [switch]       $Force,
+        [switch]       $DelegatedClient
     )
 
     if (-not (Get-Command Connect-MgGraph -ErrorAction SilentlyContinue)) {
@@ -177,7 +194,7 @@ function Connect-M365Graph {
         $CertificateThumbprint = $reg.CertificateThumbprint
         if (-not $tenant) { $tenant = $reg.Tenant }
     }
-    $wantAppOnly = [bool]$ClientId
+    $wantAppOnly = [bool]$ClientId -and -not $DelegatedClient
     if ($wantAppOnly -and -not $tenant) { throw 'App-only sign-in needs -TenantId.' }
     if ($wantAppOnly -and -not $CertificateThumbprint -and -not $ClientSecret) {
         throw '-ClientId needs -CertificateThumbprint or -ClientSecret.'
@@ -185,14 +202,15 @@ function Connect-M365Graph {
 
     # Reuse what is there when it fits.
     $ctx = Get-MgContext
+    $tenantOk = $ctx -and (-not $tenant -or $ctx.TenantId -eq $tenant -or
+                ($tenant -notmatch '^[0-9a-fA-F-]{36}$' -and $ctx.Account -and $ctx.Account -like "*@$tenant"))
     if ($ctx -and -not $Force) {
-        $tenantOk = -not $tenant -or $ctx.TenantId -eq $tenant -or
-                    ($tenant -notmatch '^[0-9a-fA-F-]{36}$' -and $ctx.Account -and $ctx.Account -like "*@$tenant")
         if ($wantAppOnly) {
             $fits = $ctx.AuthType -eq 'AppOnly' -and $ctx.ClientId -eq $ClientId -and $tenantOk
         } else {
             $missing = @($Scopes | Where-Object { $_ -notin $ctx.Scopes })
-            $fits = $ctx.AuthType -eq 'Delegated' -and $tenantOk -and $missing.Count -eq 0
+            $fits = $ctx.AuthType -eq 'Delegated' -and $tenantOk -and $missing.Count -eq 0 -and
+                    (-not $DelegatedClient -or $ctx.ClientId -eq $ClientId)
         }
         if ($fits) {
             return [pscustomobject]@{ ConnectedHere = $false; AuthType = [string]$ctx.AuthType; TenantId = $ctx.TenantId; Account = $ctx.Account }
@@ -212,10 +230,12 @@ function Connect-M365Graph {
         }
         Write-Host "  Connecting to Microsoft Graph (app-only, $ClientId)..." -ForegroundColor DarkGray
     } else {
-        # Keep the scopes an existing delegated session already had, so a second script
-        # in the same process does not lose what the first one asked for.
+        # Keep the scopes an existing delegated session in the same tenant already had, so
+        # a second script in the same window does not lose what the first one asked for.
+        # Not across tenants: partner scopes have no business in a customer sign-in.
         $all = @($Scopes)
-        if ($ctx -and $ctx.AuthType -eq 'Delegated') { $all = @($ctx.Scopes) + $all }
+        if ($tenantOk -and $ctx.AuthType -eq 'Delegated') { $all = @($ctx.Scopes) + $all }
+        if ($DelegatedClient) { $p['ClientId'] = $ClientId }
         $all = @($all | Where-Object { $_ } | Select-Object -Unique)
         if ($all.Count) { $p['Scopes'] = $all }
         $device = Test-M365DeviceCode -DeviceCode:$DeviceCode -Interactive:$Interactive
@@ -462,7 +482,7 @@ function Connect-M365PnP {
     # -AppOnly: the certificate app from graph.appid.json (it needs SharePoint application
     # permissions, e.g. Sites.FullControl.All, for this to work).
     if ($AppOnly -and -not $CertificateThumbprint) {
-        $reg = Get-M365AppRegistration -TenantId $tenant
+        $reg = Get-M365AppRegistration -TenantId $tenant -Url $Url
         if (-not $ClientId) { $ClientId = $reg.ClientId }
         $CertificateThumbprint = $reg.CertificateThumbprint
         if (-not $tenant) { $tenant = $reg.Tenant }
@@ -472,7 +492,8 @@ function Connect-M365PnP {
         $file = Join-Path $PSScriptRoot '..\..\pnp.appid.json'
         if (Test-Path $file) {
             $map = Get-Content $file -Raw | ConvertFrom-Json -AsHashtable
-            if ($tenant -and $map.ContainsKey($tenant)) { $ClientId = [string]$map[$tenant] }
+            $key = Find-M365TenantKey -Keys @($map.Keys) -TenantId $tenant -Url $Url
+            if ($key) { $ClientId = [string]$map[$key] }
         }
     }
     if (-not $ClientId) {

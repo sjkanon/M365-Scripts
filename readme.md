@@ -1008,6 +1008,18 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (15)
+| Change |
+|--------|
+| **[`Connect-M365.ps1`](scripts/Startup/readme.md#connect-m365ps1): GDAP app lookups, no partner scopes in a customer, and delegated sign-in through your own app.** `graph.appid.json` and `pnp.appid.json` are keyed by the onmicrosoft domain, while under GDAP the tenant is the customer GUID, so `-AppOnly` and the PnP ClientId lookup missed; they now also try the customer domain from `Connect-Tenant` and the tenant in the SharePoint URL. A delegated reconnect kept the scopes of the previous session even when it switched tenant, so partner scopes such as `Domain.ReadWrite.All` were requested in the customer; scopes are only carried over within the same tenant. New `-DelegatedClient`: `-ClientId` then names a public client of your own for a delegated sign-in instead of meaning app-only (SharePoint provisioning needs that) |
+| Verified: syntax check; under `Set-StrictMode`: the GDAP GUID resolves to the customer's domain key, a SharePoint admin URL to its tenant key, an unknown tenant to nothing, and `graph.appid.json` is found from a site URL; with mocked Graph cmdlets a switch from the partner to a customer tenant asks only for the new scopes, and `-DelegatedClient` passes the ClientId to a delegated sign-in. **Not** verified: against a tenant |
+
+### 2026-10-08 (15)
+| Change |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) runs on its own: when Update-TeamsClient.ps1 and Repair-AppxPackageStore.ps1 are not next to it (the repo, or the folder `-ComputerName` copies to), it fetches them from this repo on GitHub at a pinned commit of `main` (`746541e`, 2026-10-05) and refuses them unless the SHA-256 matches. Before, a copy of only this file on the image VM skipped every app fix. Pinned rather than the latest `main`, so a changed script is never run as System unseen; moving up means a new commit and two hashes, after reading the diff |
+| Verified: syntax check; both hashes were computed from `git show` at that commit and match what raw.githubusercontent.com serves for it. **Not** verified: a run on a session host that actually downloads them |
+
 ### 2026-10-08 (14)
 | Change |
 |--------|
