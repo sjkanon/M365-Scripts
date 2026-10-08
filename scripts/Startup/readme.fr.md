@@ -211,7 +211,7 @@ Disconnect-M365Graph $graph    # ne déconnecte que ce que cet appel a connecté
 
 | Fonction | Ce qu'elle fait |
 |----------|-----------------|
-| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive`, `-Force`; `-Force` se reconnecte même si la session conviendrait. Fonctionne sous `Set-StrictMode`, même sans `load.ps1` |
 | `Disconnect-M365Graph` | Ne déconnecte que si `Connect-M365Graph` a ouvert la session |
 | `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` ajoute Security & Compliance (`Connect-IPPSSession`), `-EnableSearchOnlySession` pour Content Search |
 | `Disconnect-M365Exchange` | Ne ferme que les sessions ouvertes par `Connect-M365Exchange` (par identifiant de connexion), jamais celle de l'appelant |

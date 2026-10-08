@@ -210,7 +210,7 @@ Disconnect-M365Graph $graph    # verbreekt alleen wat deze aanroep verbond
 
 | Functie | Wat het doet |
 |---------|--------------|
-| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive`, `-Force`; `-Force` meldt opnieuw aan ook als de sessie zou passen. Veilig onder `Set-StrictMode`, ook zonder `load.ps1` |
 | `Disconnect-M365Graph` | Verbreekt alleen als `Connect-M365Graph` de sessie opende |
 | `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` voegt Security & Compliance toe (`Connect-IPPSSession`), `-EnableSearchOnlySession` voor Content Search |
 | `Disconnect-M365Exchange` | Sluit alleen de sessies die `Connect-M365Exchange` opende (op connection id), nooit die van de aanroeper |

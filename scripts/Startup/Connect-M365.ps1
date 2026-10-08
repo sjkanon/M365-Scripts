@@ -54,8 +54,15 @@
 
 #region Tenant and settings
 
+# Settings from load.config.ps1. Read through Get-Variable so a script running under
+# Set-StrictMode does not throw when load.ps1 never ran and they do not exist.
+function Get-M365Setting {
+    param([Parameter(Mandatory)] [string] $Name)
+    Get-Variable -Name $Name -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+}
+
 function Test-M365Gdap {
-    $mode = if ($global:authMode) { [string]$global:authMode } elseif ($env:M365_AUTH_MODE) { [string]$env:M365_AUTH_MODE } else { '' }
+    $mode = if ((Get-M365Setting authMode)) { [string](Get-M365Setting authMode) } elseif ($env:M365_AUTH_MODE) { [string]$env:M365_AUTH_MODE } else { '' }
     return $mode.ToUpperInvariant() -eq 'GDAP'
 }
 
@@ -63,7 +70,7 @@ function Test-M365DeviceCode {
     param([switch] $DeviceCode, [switch] $Interactive)
     if ($Interactive) { return $false }
     if ($DeviceCode)  { return $true }
-    return [bool]$global:useDeviceCodeAuth
+    return [bool](Get-M365Setting useDeviceCodeAuth)
 }
 
 function Resolve-M365TenantId {
@@ -75,8 +82,8 @@ function Resolve-M365TenantId {
     param([string] $TenantId)
     if ($TenantId) { return $TenantId }
     if (Test-M365Gdap) {
-        if ($global:cid)               { return [string]$global:cid }
-        if ($global:connectmsoldomain) { return [string]$global:connectmsoldomain }
+        if ((Get-M365Setting cid))               { return [string](Get-M365Setting cid) }
+        if ((Get-M365Setting connectmsoldomain)) { return [string](Get-M365Setting connectmsoldomain) }
     }
     if ($env:M365_CUSTOMER_TENANTID) { return [string]$env:M365_CUSTOMER_TENANTID }
     return $null
@@ -87,8 +94,8 @@ function Resolve-M365CustomerDomain {
     # works for -DelegatedOrganization too, so fall back to it.
     param([string] $TenantId)
     if ($TenantId -and $TenantId -notmatch '^[0-9a-fA-F-]{36}$') { return $TenantId }
-    if ((Test-M365Gdap) -and $global:connectmsoldomain -and (-not $TenantId -or $TenantId -eq [string]$global:cid)) {
-        return [string]$global:connectmsoldomain
+    if ((Test-M365Gdap) -and (Get-M365Setting connectmsoldomain) -and (-not $TenantId -or $TenantId -eq [string](Get-M365Setting cid))) {
+        return [string](Get-M365Setting connectmsoldomain)
     }
     return $TenantId
 }
@@ -139,6 +146,9 @@ function Connect-M365Graph {
     .PARAMETER Interactive
         Delegated sign-in in the browser, whatever load.config.ps1 says.
 
+    .PARAMETER Force
+        Sign in again even when the current session would fit (e.g. its token is dead).
+
     .OUTPUTS
         [pscustomobject] ConnectedHere, AuthType (Delegated/AppOnly), TenantId, Account.
     #>
@@ -151,7 +161,8 @@ function Connect-M365Graph {
         [securestring] $ClientSecret,
         [switch]       $AppOnly,
         [switch]       $DeviceCode,
-        [switch]       $Interactive
+        [switch]       $Interactive,
+        [switch]       $Force
     )
 
     if (-not (Get-Command Connect-MgGraph -ErrorAction SilentlyContinue)) {
@@ -174,7 +185,7 @@ function Connect-M365Graph {
 
     # Reuse what is there when it fits.
     $ctx = Get-MgContext
-    if ($ctx) {
+    if ($ctx -and -not $Force) {
         $tenantOk = -not $tenant -or $ctx.TenantId -eq $tenant -or
                     ($tenant -notmatch '^[0-9a-fA-F-]{36}$' -and $ctx.Account -and $ctx.Account -like "*@$tenant")
         if ($wantAppOnly) {
@@ -209,7 +220,7 @@ function Connect-M365Graph {
         if ($all.Count) { $p['Scopes'] = $all }
         $device = Test-M365DeviceCode -DeviceCode:$DeviceCode -Interactive:$Interactive
         if ($device) { $p['UseDeviceCode'] = $true }
-        elseif ($global:upn) { $p['LoginHint'] = [string]$global:upn }
+        elseif ((Get-M365Setting upn)) { $p['LoginHint'] = [string](Get-M365Setting upn) }
         Write-Host "  Connecting to Microsoft Graph (delegated$(if ($device) { ', device code' })$(if ($tenant) { ", tenant $tenant" }))..." -ForegroundColor DarkGray
     }
 
@@ -237,9 +248,10 @@ function Invoke-M365GraphPaged {
     )
     $next = $Uri
     while ($next) {
-        $page = Invoke-MgGraphRequest -Method GET -Uri $next -Headers $Headers -OutputType PSObject -ErrorAction Stop
-        if ($null -ne $page.value) { $page.value } elseif ($page -and -not $page.PSObject.Properties['@odata.nextLink']) { $page }
-        $next = $page.'@odata.nextLink'
+        $page  = Invoke-MgGraphRequest -Method GET -Uri $next -Headers $Headers -OutputType PSObject -ErrorAction Stop
+        $props = $page.PSObject.Properties
+        if ($props['value']) { $page.value } else { $page }   # a single object, not a collection
+        $next  = if ($props['@odata.nextLink']) { $page.'@odata.nextLink' }
     }
 }
 
@@ -318,7 +330,7 @@ function Connect-M365Exchange {
         $common['AppId'] = $ClientId; $common['CertificateThumbprint'] = $CertificateThumbprint; $common['Organization'] = $org
     } else {
         if ($delegatedOrg) { $common['DelegatedOrganization'] = $delegatedOrg }
-        if ($global:upn)   { $common['UserPrincipalName'] = [string]$global:upn }
+        if ((Get-M365Setting upn))   { $common['UserPrincipalName'] = [string](Get-M365Setting upn) }
     }
 
     if (-not ($connected | Where-Object { -not $_.IsEopSession -and (& $fitsSession $_) })) {
