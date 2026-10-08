@@ -169,6 +169,7 @@ f -Edit bloatware         # open in $env:EDITOR, VS Code of notepad
 |-------------|---------|
 | PowerShell | 7.0+ (cross-platform); afzonderlijke scripts ondersteunen PS 5.1 op Windows |
 | Rechten | Microsoft 365-beheerrechten voor de betreffende workload |
+| Aanmelden | Elk M365-script meldt aan via [`Connect-M365.ps1`](scripts/Startup/readme.nl.md#connect-m365ps1): Microsoft Graph eerst, **standaard delegated** (device code en GDAP-klant uit `load.config.ps1`), app-only met `-ClientId`/`-CertificateThumbprint` of `-AppOnly` (`graph.appid.json`). Exchange Online, Teams en PnP alleen waar Graph geen API heeft |
 | Execution Policy | Alleen Windows: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
 
 ---
@@ -1000,6 +1001,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-08 (8)
+| Wijziging |
+|--------|
+| **Nieuw [`Connect-M365.ps1`](scripts/Startup/Connect-M365.ps1): één aanmelding voor elk script, Graph eerst en standaard delegated.** Een audit van alle M365-scripts liet zien dat elk script op zijn eigen manier aanmeldde: alleen de start van `functies.ps1` volgde `useDeviceCodeAuth` uit `load.config.ps1`, geen enkel Exchange-script bereikte een GDAP-klant (ze gaven `-Organization` mee, dat Exchange alleen bij app-only aanmelden gebruikt; een partner heeft `-DelegatedOrganization` nodig), een twaalftal scripts kon alleen app-only draaien en zo'n 35 alleen in de browser. Het nieuwe bestand geeft `Connect-M365Graph`, `Connect-M365Exchange` (met `-IncludeCompliance`), `Connect-M365Teams` en `Connect-M365PnP` dezelfde regels: standaard delegated, device code als `load.config.ps1` dat zegt, de GDAP-klant uit `$global:cid` / `Connect-Tenant`, app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` uit `graph.appid.json`; een bestaande sessie wordt hergebruikt als die past, en `Disconnect-M365Graph` / `Disconnect-M365Exchange` sluiten alleen wat het script zelf opende. Exchange, Teams en PnP alleen voor werk waar Graph geen API voor heeft. De scripts stappen erop over in de commits hierna |
+| Geverifieerd: syntaxcheck; de tenantkeuze (geen instelling, GDAP met `cid`, expliciete `-TenantId`, Direct), het Exchange-klantdomein onder GDAP, de keuze voor device code (`useDeviceCodeAuth`, `-Interactive` dat het overschrijft) en het opzoeken in `graph.appid.json` (per tenant, de enige entry, een onbekende tenant met een duidelijke fout) lokaal uitgevoerd; parameternamen gecontroleerd tegen ExchangeOnlineManagement 3.10.1 en Microsoft.Graph.Authentication 2.41.1. **Niet** geverifieerd: een echte aanmelding bij een tenant |
 
 ### 2026-10-08 (7)
 | Wijziging |

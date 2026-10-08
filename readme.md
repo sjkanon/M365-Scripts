@@ -169,6 +169,7 @@ f -Edit bloatware         # open in $env:EDITOR, VS Code, or notepad
 |-------------|---------|
 | PowerShell | 7.0+ (cross-platform); individual scripts support PS 5.1 on Windows |
 | Permissions | Microsoft 365 admin permissions for the target workload |
+| Sign-in | Every M365 script signs in through [`Connect-M365.ps1`](scripts/Startup/readme.md#connect-m365ps1): Microsoft Graph first, **delegated by default** (device code and GDAP customer from `load.config.ps1`), app-only with `-ClientId`/`-CertificateThumbprint` or `-AppOnly` (`graph.appid.json`). Exchange Online, Teams and PnP only where Graph has no API |
 | Execution Policy | Windows only: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
 
 ---
@@ -1000,6 +1001,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-08 (8)
+| Change |
+|--------|
+| **New [`Connect-M365.ps1`](scripts/Startup/Connect-M365.ps1): one sign-in for every script, Graph first and delegated by default.** An audit of every M365 script showed that each one signed in its own way: only the startup of `functies.ps1` honoured `useDeviceCodeAuth` from `load.config.ps1`, no Exchange script reached a GDAP customer (they passed `-Organization`, which Exchange only applies to app-only sign-in; a partner needs `-DelegatedOrganization`), about a dozen scripts could only run app-only and some 35 only in the browser. The new file gives `Connect-M365Graph`, `Connect-M365Exchange` (with `-IncludeCompliance`), `Connect-M365Teams` and `Connect-M365PnP` the same rules: delegated by default, device code when `load.config.ps1` says so, the GDAP customer from `$global:cid` / `Connect-Tenant`, app-only with `-ClientId` + `-CertificateThumbprint` or `-AppOnly` from `graph.appid.json`; an existing session is reused when it fits, and `Disconnect-M365Graph` / `Disconnect-M365Exchange` only close what the script opened itself. Exchange, Teams and PnP are only for work Graph has no API for. The scripts move to it in the commits that follow |
+| Verified: syntax check; the tenant resolution (no setting, GDAP with `cid`, explicit `-TenantId`, Direct), the Exchange customer domain under GDAP, the device-code choice (`useDeviceCodeAuth`, `-Interactive` overriding it) and the `graph.appid.json` lookup (by tenant, the only entry, an unknown tenant with a clear error) were run locally; parameter names were checked against ExchangeOnlineManagement 3.10.1 and Microsoft.Graph.Authentication 2.41.1. **Not** verified: an actual sign-in against a tenant |
 
 ### 2026-10-08 (7)
 | Change |

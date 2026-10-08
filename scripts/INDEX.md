@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-189 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+190 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -27,6 +27,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Clear-TempFiles.ps1`](Device/Clear-TempFiles.ps1) | [`Device/`](Device/readme.md) | Clears the shared script temp folder. |
 | [`Compare-IntuneConfig.ps1`](Intune/Compare-IntuneConfig.ps1) | [`Intune/`](Intune/readme.md) | Compare a customer tenant's Intune configuration against an MSP baseline backup. |
 | [`Connect-AzureFileShareDrive.ps1`](LegacyUtilities/Network/Connect-AzureFileShareDrive.ps1) | [`LegacyUtilities/Network/`](LegacyUtilities/Network/readme.md) | Mount an Azure Files SMB share as a persistent drive letter. |
+| [`Connect-M365.ps1`](Startup/Connect-M365.ps1) | [`Startup/`](Startup/readme.md) | One way to sign in to Microsoft 365 for every script in this repo: Graph first, delegated by default, app-only on request. |
 | [`Convert-MarkdownToHtml.ps1`](Startup/Convert-MarkdownToHtml.ps1) | [`Startup/`](Startup/readme.md) | Turn a repository markdown document into one self-contained, styled HTML page - made to paste into IT Glue or to print. Supports -WhatIf. |
 | [`Convert-SharedCalendarToResource.ps1`](Exchange/Convert-SharedCalendarToResource.ps1) | [`Exchange/`](Exchange/readme.md) | Move a shared calendar out of a user's mailbox into a resource mailbox of its own - every item and every permission along with it - and then remove the origina… |
 | [`Copy-GroupMember.ps1`](Entra/Copy-GroupMember.ps1) | [`Entra/`](Entra/readme.md) | Copy the members of one Entra ID group into another group via Microsoft Graph. |

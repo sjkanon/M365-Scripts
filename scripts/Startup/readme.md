@@ -15,6 +15,7 @@ Entry-point scripts and the core M365 function library.
 | [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365 function library — dot-sourced by `menu.ps1` on first use |
 | [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | The one list of modules this repo needs — read by `load.ps1`, `Install-Modules.ps1` and `Update-Modules.ps1` |
 | [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Reports modules that scripts load but `RequiredModules.psd1` does not list — run by the docs hook after every edit |
+| [`Connect-M365.ps1`](Connect-M365.ps1) ([docs](#connect-m365ps1)) | The one way scripts sign in: Graph first, delegated by default (device code and GDAP from `load.config.ps1`), app-only on request — dot-sourced by the scripts |
 | [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrap script — installs and imports all required PowerShell modules |
 | [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Checks the required modules (missing, too old, update available) and installs/updates them; optionally updates every other installed module too |
 | [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
@@ -180,6 +181,53 @@ pwsh -File scripts/Startup/Test-RequiredModules.ps1
 ```
 
 Exit codes: `0` = every module a script loads is listed, `1` = something is missing.
+
+---
+
+## Connect-M365.ps1
+
+The sign-in every script uses. **Microsoft Graph is the standard**; Exchange Online, Teams
+and PnP are only connected for work Graph has no API for (mailbox and SendAs permissions,
+message trace, DKIM, EOP policies, Teams `Cs*` policies, SharePoint role assignments, ...).
+
+```powershell
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')   # depth depends on the script's folder
+$graph = Connect-M365Graph -Scopes 'User.Read.All' -TenantId $TenantId
+# ... work ...
+Disconnect-M365Graph $graph    # disconnects only what this call connected
+```
+
+| Function | What it does |
+|----------|--------------|
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
+| `Disconnect-M365Graph` | Disconnects only when `Connect-M365Graph` opened the session |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` adds Security & Compliance (`Connect-IPPSSession`) |
+| `Disconnect-M365Exchange` | Disconnects only when `Connect-M365Exchange` opened the session |
+| `Connect-M365Teams` | Microsoft Teams PowerShell |
+| `Connect-M365PnP` | PnP.PowerShell to a site; returns the connection. ClientId from `-ClientId` or `pnp.appid.json` |
+| `Resolve-M365TenantId` | The tenant to use: `-TenantId`, else the GDAP customer, else your own tenant |
+
+**How it signs in**
+
+- **Delegated, the default.** You sign in as yourself, with a device code when
+  `useDeviceCodeAuth` is set in `load.config.ps1` (or `-DeviceCode` is passed), otherwise in
+  the browser with your `upn` pre-filled. Under GDAP (`authMode = 'GDAP'`) the customer
+  tenant is `$global:cid` / `$global:connectmsoldomain` from `Connect-Tenant`, or
+  `$env:M365_CUSTOMER_TENANTID`. Exchange reaches the customer with `-DelegatedOrganization`;
+  `-Organization` only works for app-only sign-in.
+- **App-only, on request.** `-ClientId` with `-CertificateThumbprint` (or `-ClientSecret`,
+  Graph only), or `-AppOnly` to read ClientId and thumbprint for the tenant from
+  `graph.appid.json` in the repo root (gitignored). The app must be consented in that
+  tenant: GDAP gives delegated rights, not app-only access.
+- **Existing sessions are reused** when they are the right kind, for the right tenant and
+  (delegated) already hold every requested scope. A delegated reconnect keeps the scopes
+  the earlier session had, so a second script in the same window does not take them away.
+
+**Notes**
+
+- Requires PowerShell 7. Each `Connect-*` throws with an install hint when its module is missing.
+- Run from the repo: scripts dot-source this file by relative path, so a script copied on
+  its own needs this file next to it.
 
 ---
 

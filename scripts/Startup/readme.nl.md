@@ -15,6 +15,7 @@ Startscripts en de centrale M365-functiebibliotheek.
 | [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365-functiebibliotheek — bij eerste gebruik door `menu.ps1` gedot-sourced |
 | [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | De ene lijst met modules die deze repo nodig heeft — gelezen door `load.ps1`, `Install-Modules.ps1` en `Update-Modules.ps1` |
 | [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Meldt modules die scripts laden maar die niet in `RequiredModules.psd1` staan — de docs-hook draait het na elke wijziging |
+| [`Connect-M365.ps1`](Connect-M365.ps1) ([docs](#connect-m365ps1)) | De ene manier waarop scripts aanmelden: Graph eerst, standaard delegated (device code en GDAP uit `load.config.ps1`), app-only op verzoek — door de scripts gedot-sourcet |
 | [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrapscript — installeert en importeert alle benodigde PowerShell-modules |
 | [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Controleert de vereiste modules (ontbrekend, te oud, update beschikbaar) en installeert/updatet ze; werkt desgewenst ook alle andere geïnstalleerde modules bij |
 | [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Controleert `.ps1`-bestanden in de repo op syntaxfouten door ze te parsen, zonder ze uit te voeren |
@@ -181,6 +182,53 @@ pwsh -File scripts/Startup/Test-RequiredModules.ps1
 ```
 
 Exitcodes: `0` = elke module die een script laadt staat in de lijst, `1` = er ontbreekt iets.
+
+---
+
+## Connect-M365.ps1
+
+De aanmelding die elk script gebruikt. **Microsoft Graph is de standaard**; Exchange Online,
+Teams en PnP worden alleen verbonden voor werk waar Graph geen API voor heeft (mailbox- en
+SendAs-rechten, message trace, DKIM, EOP-beleid, Teams `Cs*`-beleid, SharePoint-rolverdeling, ...).
+
+```powershell
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')   # diepte hangt af van de map van het script
+$graph = Connect-M365Graph -Scopes 'User.Read.All' -TenantId $TenantId
+# ... werk ...
+Disconnect-M365Graph $graph    # verbreekt alleen wat deze aanroep verbond
+```
+
+| Functie | Wat het doet |
+|---------|--------------|
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
+| `Disconnect-M365Graph` | Verbreekt alleen als `Connect-M365Graph` de sessie opende |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` voegt Security & Compliance toe (`Connect-IPPSSession`) |
+| `Disconnect-M365Exchange` | Verbreekt alleen als `Connect-M365Exchange` de sessie opende |
+| `Connect-M365Teams` | Microsoft Teams PowerShell |
+| `Connect-M365PnP` | PnP.PowerShell naar een site; geeft de verbinding terug. ClientId uit `-ClientId` of `pnp.appid.json` |
+| `Resolve-M365TenantId` | De tenant: `-TenantId`, anders de GDAP-klant, anders je eigen tenant |
+
+**Hoe het aanmeldt**
+
+- **Delegated, de standaard.** Je meldt je aan als jezelf, met een device code als
+  `useDeviceCodeAuth` in `load.config.ps1` aan staat (of `-DeviceCode` is meegegeven), anders
+  in de browser met je `upn` al ingevuld. Onder GDAP (`authMode = 'GDAP'`) is de klanttenant
+  `$global:cid` / `$global:connectmsoldomain` uit `Connect-Tenant`, of
+  `$env:M365_CUSTOMER_TENANTID`. Exchange bereikt de klant met `-DelegatedOrganization`;
+  `-Organization` werkt alleen bij app-only aanmelden.
+- **App-only, op verzoek.** `-ClientId` met `-CertificateThumbprint` (of `-ClientSecret`,
+  alleen Graph), of `-AppOnly` om ClientId en thumbprint voor de tenant uit `graph.appid.json`
+  in de root van de repo te lezen (gitignored). De app moet in die tenant toestemming hebben:
+  GDAP geeft delegated rechten, geen app-only toegang.
+- **Bestaande sessies worden hergebruikt** als ze van de juiste soort zijn, voor de juiste
+  tenant, en (delegated) alle gevraagde scopes al hebben. Een delegated herverbinding houdt
+  de scopes van de eerdere sessie, zodat een tweede script in hetzelfde venster ze niet afneemt.
+
+**Opmerkingen**
+
+- Vereist PowerShell 7. Elke `Connect-*` stopt met een installatietip als de module ontbreekt.
+- Draai vanuit de repo: scripts dot-sourcen dit bestand via een relatief pad, dus een los
+  gekopieerd script heeft dit bestand ernaast nodig.
 
 ---
 

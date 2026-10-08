@@ -15,6 +15,7 @@ Scripts de démarrage et bibliothèque de fonctions M365 centrale.
 | [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | Bibliothèque de fonctions M365 — chargée par dot-sourcing par `menu.ps1` à la première utilisation |
 | [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | La liste unique des modules dont ce dépôt a besoin — lue par `load.ps1`, `Install-Modules.ps1` et `Update-Modules.ps1` |
 | [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Signale les modules que chargent des scripts mais que `RequiredModules.psd1` ne liste pas — exécuté par le hook de docs après chaque modification |
+| [`Connect-M365.ps1`](Connect-M365.ps1) ([docs](#connect-m365ps1)) | La seule façon dont les scripts se connectent : Graph d'abord, délégué par défaut (code d'appareil et GDAP depuis `load.config.ps1`), app-only sur demande — dot-sourcé par les scripts |
 | [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Script d'amorçage — installe et importe tous les modules PowerShell nécessaires |
 | [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Vérifie les modules requis (manquant, trop ancien, mise à jour disponible) et les installe/met à jour ; met aussi à jour, au choix, tous les autres modules installés |
 | [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Vérifie par analyse syntaxique les fichiers `.ps1` du dépôt, sans les exécuter |
@@ -181,6 +182,55 @@ pwsh -File scripts/Startup/Test-RequiredModules.ps1
 ```
 
 Codes de sortie : `0` = chaque module chargé par un script est listé, `1` = il manque quelque chose.
+
+---
+
+## Connect-M365.ps1
+
+La connexion qu'utilise chaque script. **Microsoft Graph est la norme** ; Exchange Online,
+Teams et PnP ne sont connectés que pour le travail que Graph ne couvre pas (droits de boîte
+aux lettres et SendAs, suivi des messages, DKIM, stratégies EOP, stratégies Teams `Cs*`,
+attributions de rôles SharePoint, ...).
+
+```powershell
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')   # la profondeur dépend du dossier du script
+$graph = Connect-M365Graph -Scopes 'User.Read.All' -TenantId $TenantId
+# ... travail ...
+Disconnect-M365Graph $graph    # ne déconnecte que ce que cet appel a connecté
+```
+
+| Fonction | Ce qu'elle fait |
+|----------|-----------------|
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive` |
+| `Disconnect-M365Graph` | Ne déconnecte que si `Connect-M365Graph` a ouvert la session |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` ajoute Security & Compliance (`Connect-IPPSSession`) |
+| `Disconnect-M365Exchange` | Ne déconnecte que si `Connect-M365Exchange` a ouvert la session |
+| `Connect-M365Teams` | Microsoft Teams PowerShell |
+| `Connect-M365PnP` | PnP.PowerShell vers un site ; renvoie la connexion. ClientId depuis `-ClientId` ou `pnp.appid.json` |
+| `Resolve-M365TenantId` | Le tenant : `-TenantId`, sinon le client GDAP, sinon votre propre tenant |
+
+**Comment il se connecte**
+
+- **Délégué, par défaut.** Vous vous connectez en votre nom, avec un code d'appareil quand
+  `useDeviceCodeAuth` est activé dans `load.config.ps1` (ou que `-DeviceCode` est passé),
+  sinon dans le navigateur avec votre `upn` prérempli. Sous GDAP (`authMode = 'GDAP'`), le
+  tenant client est `$global:cid` / `$global:connectmsoldomain` issu de `Connect-Tenant`, ou
+  `$env:M365_CUSTOMER_TENANTID`. Exchange atteint le client avec `-DelegatedOrganization` ;
+  `-Organization` ne fonctionne qu'en connexion app-only.
+- **App-only, sur demande.** `-ClientId` avec `-CertificateThumbprint` (ou `-ClientSecret`,
+  Graph uniquement), ou `-AppOnly` pour lire ClientId et empreinte du tenant dans
+  `graph.appid.json` à la racine du dépôt (gitignored). L'application doit être consentie dans
+  ce tenant : GDAP donne des droits délégués, pas un accès app-only.
+- **Les sessions existantes sont réutilisées** quand elles sont du bon type, pour le bon
+  tenant et (en délégué) ont déjà toutes les étendues demandées. Une reconnexion déléguée
+  garde les étendues de la session précédente, afin qu'un second script dans la même fenêtre
+  ne les retire pas.
+
+**Remarques**
+
+- Nécessite PowerShell 7. Chaque `Connect-*` s'arrête avec une indication d'installation si son module manque.
+- À exécuter depuis le dépôt : les scripts dot-sourcent ce fichier par chemin relatif, un
+  script copié seul a donc besoin de ce fichier à côté de lui.
 
 ---
 
