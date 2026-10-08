@@ -14,6 +14,7 @@ Startscripts en de centrale M365-functiebibliotheek.
 |------|-------------|
 | [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365-functiebibliotheek — bij eerste gebruik door `menu.ps1` gedot-sourced |
 | [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | De ene lijst met modules die deze repo nodig heeft — gelezen door `load.ps1`, `Install-Modules.ps1` en `Update-Modules.ps1` |
+| [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Meldt modules die scripts laden maar die niet in `RequiredModules.psd1` staan — de docs-hook draait het na elke wijziging |
 | [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrapscript — installeert en importeert alle benodigde PowerShell-modules |
 | [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Controleert de vereiste modules (ontbrekend, te oud, update beschikbaar) en installeert/updatet ze; werkt desgewenst ook alle andere geïnstalleerde modules bij |
 | [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Controleert `.ps1`-bestanden in de repo op syntaxfouten door ze te parsen, zonder ze uit te voeren |
@@ -46,7 +47,7 @@ Weer verwijderen:
 .\load.ps1 -RemoveStartup
 ```
 
-Bij elke start, voordat het menu opent, controleert `load.ps1` de modules uit [`RequiredModules.psd1`](#requiredmodulespsd1) met [`Update-Modules.ps1`](#update-modulesps1): het toont wat ontbreekt, ouder is dan het minimum of achterloopt op de PowerShell Gallery, en vraagt `Deze n module(s) nu installeren/updaten? [J/n]`. De gallery wordt hooguit eens per 24 uur bevraagd, dus een normale start kost minder dan een seconde. De controle één keer overslaan:
+Bij elke start, voordat het menu opent, controleert `load.ps1` de modules uit [`RequiredModules.psd1`](#requiredmodulespsd1) met [`Update-Modules.ps1`](#update-modulesps1): het toont wat ontbreekt, ouder is dan het minimum of achterloopt op de PowerShell Gallery, en installeert of updatet dat meteen, zonder te vragen. De gallery wordt hooguit eens per 24 uur bevraagd, dus een normale start kost minder dan een seconde. De controle één keer overslaan:
 
 ```powershell
 .\load.ps1 -SkipModuleCheck
@@ -132,8 +133,9 @@ De modules waar deze repository van afhangt, in één PowerShell-databestand. `l
 oneens kunnen zijn — voorheen had elk een eigen lijst, en `load.ps1` controleerde er maar zeven.
 
 **Een module toevoegen:** voeg hier een regel toe. Bij de volgende start van `load.ps1` ziet
-elke machine hem als ontbrekend en biedt aan hem te installeren. Een `MinimumVersion`
-verhogen werkt op dezelfde manier.
+elke machine hem als ontbrekend en installeert hem. Een `MinimumVersion` verhogen werkt op
+dezelfde manier. Vergeten is lastig: [`Test-RequiredModules.ps1`](#test-requiredmodulesps1)
+draait na elke wijziging en meldt een module die een script laadt maar die niet in dit bestand staat.
 
 | Sleutel | Betekenis |
 |---------|-----------|
@@ -143,10 +145,42 @@ verhogen werkt op dezelfde manier.
 | `MinimumPSVersion` | Overgeslagen op een oudere PowerShell — `PnP.PowerShell` 3 vereist 7.4 |
 | `ImportAtStartup` | Door `load.ps1` geïmporteerd voordat het menu opent |
 
+Naast `Modules` staat `NotManaged`: modules die scripts laden maar die bewust niet uit de gallery worden geïnstalleerd, elk met de reden — `ActiveDirectory` en `WebAdministration` (Windows-onderdelen), `AzureAD` (uitgefaseerd), `Microsoft.Graph` (de hele SDK, alleen genoemd in installatietips).
+
 Huidige lijst: `ExchangeOnlineManagement`, de Graph-submodules `Authentication`, `Sites`,
 `Identity.DirectoryManagement`, `Identity.SignIns`, `Identity.Governance`, `Applications`,
-`Calendar`, `Groups`, `Users`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`, en
-op Windows `WindowsAutopilotIntune` en `IntuneWin32App`.
+`Calendar`, `Groups`, `Users`, `Reports`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`,
+`Az.Accounts`, `Az.OperationalInsights`, `DCToolbox`, `IntuneBackupAndRestore`, en op Windows
+`WindowsAutopilotIntune` en `IntuneWin32App`.
+
+---
+
+## Test-RequiredModules.ps1
+
+Een script dat een nieuwe module gaat gebruiken werkt op de machine waarop het geschreven is,
+en faalt overal anders tot de module in [`RequiredModules.psd1`](#requiredmodulespsd1) staat.
+Dit script doorzoekt elke `.ps1`/`.psm1` op `#Requires -Modules`, `Import-Module` en
+`Install-Module` met een letterlijke naam, en meldt elke naam die niet in `Modules` of
+`NotManaged` staat, met de bestanden die hem gebruiken. Een naam in een variabele (`$mod`) kan
+het niet controleren.
+
+De docs-hook (`.claude/hooks/sync-docs.ps1`) draait het na elke wijziging van een `.ps1`, `.psd1`
+of `.md`, en de git pre-commit-hook waarschuwt ermee, zodat een nieuwe module opvalt zodra het
+script wordt opgeslagen, niet pas als het bij iemand anders faalt.
+
+**Parameters**
+
+| Parameter | Beschrijving |
+|-----------|--------------|
+| `-Root` | Root van de repository (standaard: twee niveaus boven dit script) |
+
+**Voorbeelden**
+
+```powershell
+pwsh -File scripts/Startup/Test-RequiredModules.ps1
+```
+
+Exitcodes: `0` = elke module die een script laadt staat in de lijst, `1` = er ontbreekt iets.
 
 ---
 
@@ -180,7 +214,7 @@ Controleert elke module uit [`RequiredModules.psd1`](#requiredmodulespsd1) en ge
 | `Unknown` | Gallery niet bereikbaar, of de module staat er niet meer op | — |
 | `Skipped` | Niet voor dit platform of deze PowerShell-versie | — |
 
-Daarna werkt het, tenzij `-RequiredOnly`, zoals altijd ook elke andere via PowerShellGet geïnstalleerde module bij. `load.ps1` draait het bij het starten als `-RequiredOnly -Prompt -MaxAgeHours 24`.
+Daarna werkt het, tenzij `-RequiredOnly`, zoals altijd ook elke andere via PowerShellGet geïnstalleerde module bij. `load.ps1` draait het bij het starten als `-RequiredOnly -Auto -MaxAgeHours 24`.
 
 **Parameters**
 
@@ -192,7 +226,8 @@ Daarna werkt het, tenzij `-RequiredOnly`, zoals altijd ook elke andere via Power
 | `-Scope` | Scope voor nieuw geïnstalleerde modules: `CurrentUser` (standaard) of `AllUsers` |
 | `-Quiet` | Geen regel per module, alleen fouten |
 | `-PassThru` | Geeft per vereiste module een statusobject terug (`Name`, `Installed`, `Minimum`, `Latest`, `Status`, `Reason`) |
-| `-Prompt` | Voor bij het starten: toont alleen wat ontbreekt of verouderd is en vraagt dan of het geïnstalleerd/geüpdatet moet worden. Alles in orde geeft één regel, `Modules OK` |
+| `-Auto` | Voor bij het starten: installeert wat ontbreekt en updatet wat verouderd is zonder te vragen, en toont alleen wat het doet. Alles in orde geeft één regel, `Modules OK` |
+| `-Prompt` | Als `-Auto`, maar toont eerst wat het zou doen en vraagt het dan |
 
 **Voorbeelden**
 
@@ -210,7 +245,7 @@ Daarna werkt het, tenzij `-RequiredOnly`, zoals altijd ook elke andere via Power
 **In je PowerShell-profiel.** Start je PowerShell met je eigen profiel (`$PROFILE`) in plaats van met `load.ps1`, zet dan de regel erin die `load.ps1` gebruikt, zodat de controle bij elke start van PowerShell draait:
 
 ```powershell
-& "C:\pad\naar\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Prompt -MaxAgeHours 24
+& "C:\pad\naar\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Auto -MaxAgeHours 24
 ```
 
 Als alles actueel is geeft dat één regel en kost het ruim minder dan een seconde; de gallery wordt hooguit eens per dag bevraagd.

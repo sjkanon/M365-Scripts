@@ -14,6 +14,7 @@ Entry-point scripts and the core M365 function library.
 |------|-------------|
 | [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365 function library — dot-sourced by `menu.ps1` on first use |
 | [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | The one list of modules this repo needs — read by `load.ps1`, `Install-Modules.ps1` and `Update-Modules.ps1` |
+| [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Reports modules that scripts load but `RequiredModules.psd1` does not list — run by the docs hook after every edit |
 | [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrap script — installs and imports all required PowerShell modules |
 | [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Checks the required modules (missing, too old, update available) and installs/updates them; optionally updates every other installed module too |
 | [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
@@ -46,7 +47,7 @@ To remove it:
 .\load.ps1 -RemoveStartup
 ```
 
-At every start, before the menu opens, `load.ps1` checks the modules in [`RequiredModules.psd1`](#requiredmodulespsd1) with [`Update-Modules.ps1`](#update-modulesps1): it lists what is missing, older than its minimum, or behind the PowerShell Gallery, and asks `Deze n module(s) nu installeren/updaten? [J/n]`. The gallery is asked at most once every 24 hours, so a normal start costs under a second. Skip the check once with:
+At every start, before the menu opens, `load.ps1` checks the modules in [`RequiredModules.psd1`](#requiredmodulespsd1) with [`Update-Modules.ps1`](#update-modulesps1): it lists what is missing, older than its minimum, or behind the PowerShell Gallery, and installs or updates it right away, without asking. The gallery is asked at most once every 24 hours, so a normal start costs under a second. Skip the check once with:
 
 ```powershell
 .\load.ps1 -SkipModuleCheck
@@ -132,7 +133,9 @@ The modules this repository depends on, in one PowerShell data file. `load.ps1`,
 — before, each had its own list, and `load.ps1` only checked seven modules.
 
 **To add a module:** add a line here. The next start of `load.ps1` on every machine sees it
-as missing and offers to install it. Raising a `MinimumVersion` works the same way.
+as missing and installs it. Raising a `MinimumVersion` works the same way. Forgetting is
+hard: [`Test-RequiredModules.ps1`](#test-requiredmodulesps1) runs after every edit and reports
+a module a script loads that is not in this file.
 
 | Key | Meaning |
 |-----|---------|
@@ -142,10 +145,41 @@ as missing and offers to install it. Raising a `MinimumVersion` works the same w
 | `MinimumPSVersion` | Skipped on an older PowerShell — `PnP.PowerShell` 3 needs 7.4 |
 | `ImportAtStartup` | Imported by `load.ps1` before the menu opens |
 
+Next to `Modules` there is `NotManaged`: modules scripts load that are deliberately not installed from the gallery, each with its reason — `ActiveDirectory` and `WebAdministration` (Windows features), `AzureAD` (retired), `Microsoft.Graph` (the whole SDK, only named in install hints).
+
 Current list: `ExchangeOnlineManagement`, the Graph submodules `Authentication`, `Sites`,
 `Identity.DirectoryManagement`, `Identity.SignIns`, `Identity.Governance`, `Applications`,
-`Calendar`, `Groups`, `Users`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`, and
-on Windows `WindowsAutopilotIntune` and `IntuneWin32App`.
+`Calendar`, `Groups`, `Users`, `Reports`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`,
+`Az.Accounts`, `Az.OperationalInsights`, `DCToolbox`, `IntuneBackupAndRestore`, and on Windows
+`WindowsAutopilotIntune` and `IntuneWin32App`.
+
+---
+
+## Test-RequiredModules.ps1
+
+A script that starts using a new module works on the machine it was written on and fails
+everywhere else until the module is in [`RequiredModules.psd1`](#requiredmodulespsd1). This
+script searches every `.ps1`/`.psm1` for `#Requires -Modules`, `Import-Module` and
+`Install-Module` with a literal name, and reports each name that is in neither `Modules` nor
+`NotManaged`, with the files that use it. A name in a variable (`$mod`) cannot be checked.
+
+The docs hook (`.claude/hooks/sync-docs.ps1`) runs it after every edit of a `.ps1`, `.psd1` or
+`.md`, and the git pre-commit hook warns with it, so a new module is caught when the script is
+saved, not when someone else's run fails.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Root` | Repository root (default: two levels above this script) |
+
+**Examples**
+
+```powershell
+pwsh -File scripts/Startup/Test-RequiredModules.ps1
+```
+
+Exit codes: `0` = every module a script loads is listed, `1` = something is missing.
 
 ---
 
@@ -179,7 +213,7 @@ Checks every module in [`RequiredModules.psd1`](#requiredmodulespsd1) and gives 
 | `Unknown` | Gallery unreachable, or the module is no longer on it | — |
 | `Skipped` | Not for this platform or PowerShell version | — |
 
-Then, unless `-RequiredOnly`, it updates every other module installed through PowerShellGet, as it always did. `load.ps1` runs it at startup as `-RequiredOnly -Prompt -MaxAgeHours 24`.
+Then, unless `-RequiredOnly`, it updates every other module installed through PowerShellGet, as it always did. `load.ps1` runs it at startup as `-RequiredOnly -Auto -MaxAgeHours 24`.
 
 **Parameters**
 
@@ -191,7 +225,8 @@ Then, unless `-RequiredOnly`, it updates every other module installed through Po
 | `-Scope` | Scope for newly installed modules: `CurrentUser` (default) or `AllUsers` |
 | `-Quiet` | No line per module, only errors |
 | `-PassThru` | Return a status object per required module (`Name`, `Installed`, `Minimum`, `Latest`, `Status`, `Reason`) |
-| `-Prompt` | For startup: show only what is missing or outdated, then ask before installing/updating. All in order gives one line, `Modules OK` |
+| `-Auto` | For startup: install what is missing and update what is outdated without asking, showing only what it does. All in order gives one line, `Modules OK` |
+| `-Prompt` | As `-Auto`, but lists what it would do and asks first |
 
 **Examples**
 
@@ -209,7 +244,7 @@ Then, unless `-RequiredOnly`, it updates every other module installed through Po
 **In your PowerShell profile.** If you start PowerShell with your own profile (`$PROFILE`) instead of `load.ps1`, add the line `load.ps1` uses, so the check runs at every PowerShell start:
 
 ```powershell
-& "C:\path\to\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Prompt -MaxAgeHours 24
+& "C:\path\to\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Auto -MaxAgeHours 24
 ```
 
 With everything current it prints one line and costs well under a second; the gallery is asked at most once a day.

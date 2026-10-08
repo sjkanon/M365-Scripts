@@ -11,7 +11,7 @@
 
     Before the menu opens, every module in scripts\Startup\RequiredModules.psd1 is checked
     with Update-Modules.ps1 — missing, older than its minimum, or behind the PowerShell
-    Gallery (asked at most once every 24 hours) — and it offers to install or update them.
+    Gallery (asked at most once every 24 hours) — and installs or updates what it finds.
 
 .PARAMETER SetupStartup
     Create a shortcut that starts this launcher at Windows sign-in.
@@ -116,15 +116,15 @@ if (-not (Test-Path $configFile)) {
 
 # ── Check and import required modules ────────────────────────────────────────
 # The list lives in scripts\Startup\RequiredModules.psd1; Update-Modules.ps1 checks each
-# module for missing / older than its minimum / behind the PowerShell Gallery and asks
-# before changing anything. The gallery is asked at most once a day (cached), so a normal
-# start stays quick. The same line works in a PowerShell profile.
+# module for missing / older than its minimum / behind the PowerShell Gallery and installs
+# or updates it without asking. The gallery is asked at most once a day (cached), so a
+# normal start stays quick. The same line works in a PowerShell profile.
 $moduleScript = Join-Path $PSScriptRoot 'scripts\Startup\Update-Modules.ps1'
 $moduleList   = Join-Path $PSScriptRoot 'scripts\Startup\RequiredModules.psd1'
 
 if (-not $SkipModuleCheck) {
     Write-Host ""
-    & $moduleScript -RequiredOnly -Prompt -MaxAgeHours 24
+    & $moduleScript -RequiredOnly -Auto -MaxAgeHours 24
 }
 
 Write-Host "  Loading modules..." -ForegroundColor DarkGray
