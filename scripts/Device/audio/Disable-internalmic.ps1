@@ -1,4 +1,4 @@
-# ============================================
+﻿# ============================================
 # Disable Internal Microphone Script
 # Ticket: #0250981 - Best Next Contact BVBA
 # Auteur: Sjoerd Kanon

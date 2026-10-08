@@ -1008,6 +1008,19 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (20)
+| Change |
+|--------|
+| **The 23 scripts that did not parse in Windows PowerShell 5.1 now do, and the 5.1 CI job blocks again.** 22 were UTF-8 without BOM containing a character such as `—` or `é`: 5.1 reads such a file as ANSI, a byte of that character becomes a stray quote, and the script stops with errors like "string is missing the terminator" - on exactly the machines that run 5.1: Intune, GPO, scheduled tasks. Each got a UTF-8 BOM and nothing else; the content is byte for byte the same. Among them are [`load.ps1`](load.ps1), [`Remove-OemBloatware.ps1`](scripts/Device/Remove-OemBloatware.ps1), both audio scripts, [`New-CloudDriveMapping.ps1`](scripts/Device/DriveMapping/New-CloudDriveMapping.ps1), the CoworkPrerequisites Intune scripts, the SAS and SMTP scripts and [`Invoke-TeamsArchive.ps1`](scripts/Teams/Invoke-TeamsArchive.ps1). [`create_scheduled_task.ps1`](scripts/Reporting/Licensing/create_scheduled_task.ps1) says `#Requires -Version 5.1` but used `?.Source`, PowerShell 7 syntax; that is now `Select-Object -ExpandProperty Source` |
+| [`ci.yml`](.github/workflows/ci.yml): the Windows PowerShell 5.1 job is no longer `continue-on-error`, so a new script saved as UTF-8 without BOM with a non-ASCII character fails the run |
+| Verified: every `.ps1`/`.psm1` without `#Requires -Version 7` parses with `powershell.exe` 5.1 on this machine (0 errors, it was 23), and [`Test-PowerShellSyntax.ps1`](scripts/Startup/Test-PowerShellSyntax.ps1) under PowerShell 7 is still clean. **Not** verified: the scripts themselves were not run - parsing is what changed, their logic did not |
+
+### 2026-10-08 (19)
+| Change |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) could not run its helpers: it started Repair-AppxPackageStore.ps1 and Update-TeamsClient.ps1 with `powershell.exe -File ... -Confirm:$false`, and `-File` hands every argument over as text, so `-Confirm:$false` arrived as the string `'$false'` and both stopped at once with *Cannot convert 'System.String' to the type SwitchParameter* - no app was ever updated. Its own relaunch from PowerShell 7 into Windows PowerShell had the same flaw. Both now go through `-Command` with the parameters written out (strings single-quoted, arrays as lists, switches as `-Name:$true/$false`) and pass the exit code on |
+| Verified: syntax check; the command builder run against a test script in Windows PowerShell 5.1 with an array (including a quote), switches on and off and `-Confirm:$false` on a `ConfirmImpact = 'High'` script - every value arrived as meant, no prompt, exit code passed through. **Not** verified: a run on a session host |
+
 ### 2026-10-08 (18)
 | Change |
 |--------|

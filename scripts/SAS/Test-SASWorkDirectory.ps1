@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Test SAS WORK directory health and permissions
 

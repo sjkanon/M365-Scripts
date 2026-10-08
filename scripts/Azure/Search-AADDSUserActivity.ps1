@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 #Requires -Modules Az.Accounts, Az.OperationalInsights
 <#
 .SYNOPSIS

@@ -1008,6 +1008,19 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (20)
+| Wijziging |
+|--------|
+| **De 23 scripts die niet parsten in Windows PowerShell 5.1 doen dat nu wel, en de 5.1-job in CI blokkeert weer.** 22 waren UTF-8 zonder BOM met een teken als `—` of `é`: 5.1 leest zo'n bestand als ANSI, een byte van dat teken wordt een losse quote, en het script stopt met fouten als "string is missing the terminator" - precies op de machines die 5.1 draaien: Intune, GPO, geplande taken. Elk kreeg een UTF-8-BOM en verder niets; de inhoud is byte voor byte gelijk. Daaronder [`load.ps1`](load.ps1), [`Remove-OemBloatware.ps1`](scripts/Device/Remove-OemBloatware.ps1), beide audioscripts, [`New-CloudDriveMapping.ps1`](scripts/Device/DriveMapping/New-CloudDriveMapping.ps1), de CoworkPrerequisites-Intunescripts, de SAS- en SMTP-scripts en [`Invoke-TeamsArchive.ps1`](scripts/Teams/Invoke-TeamsArchive.ps1). [`create_scheduled_task.ps1`](scripts/Reporting/Licensing/create_scheduled_task.ps1) zegt `#Requires -Version 5.1` maar gebruikte `?.Source`, PowerShell 7-syntax; dat is nu `Select-Object -ExpandProperty Source` |
+| [`ci.yml`](.github/workflows/ci.yml): de Windows PowerShell 5.1-job is niet langer `continue-on-error`, dus een nieuw script dat als UTF-8 zonder BOM is opgeslagen met een niet-ASCII-teken laat de run falen |
+| Geverifieerd: elk `.ps1`/`.psm1` zonder `#Requires -Version 7` parset met `powershell.exe` 5.1 op deze machine (0 fouten, het waren er 23), en [`Test-PowerShellSyntax.ps1`](scripts/Startup/Test-PowerShellSyntax.ps1) onder PowerShell 7 is nog steeds schoon. **Niet** geverifieerd: de scripts zelf zijn niet gedraaid - het parsen veranderde, hun logica niet |
+
+### 2026-10-08 (19)
+| Wijziging |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) kon zijn hulpscripts niet draaien: het startte Repair-AppxPackageStore.ps1 en Update-TeamsClient.ps1 met `powershell.exe -File ... -Confirm:$false`, en `-File` geeft elk argument als tekst door, dus `-Confirm:$false` kwam aan als de string `'$false'` en beide stopten meteen met *Cannot convert 'System.String' to the type SwitchParameter* - er werd nooit een app bijgewerkt. De eigen herstart van PowerShell 7 naar Windows PowerShell had dezelfde fout. Beide gaan nu via `-Command` met de parameters uitgeschreven (strings tussen enkele aanhalingstekens, arrays als lijst, switches als `-Naam:$true/$false`) en geven de exitcode door |
+| Geverifieerd: syntaxcontrole; de opbouw van de opdracht is gedraaid tegen een testscript in Windows PowerShell 5.1 met een array (inclusief een aanhalingsteken), switches aan en uit en `-Confirm:$false` op een script met `ConfirmImpact = 'High'` - elke waarde kwam goed aan, geen vraag, exitcode doorgegeven. **Niet** geverifieerd: een run op een sessiehost |
+
 ### 2026-10-08 (18)
 | Wijziging |
 |--------|

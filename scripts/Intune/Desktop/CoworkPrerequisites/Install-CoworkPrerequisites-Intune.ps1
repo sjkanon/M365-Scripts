@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Intune Win32-app install script voor de Windows-vereisten van Claude Cowork
     (VirtualMachinePlatform + Fast Startup), los van de Claude Desktop-app zelf.
