@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-187 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+188 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -83,6 +83,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Install-ClaudeDesktop-Intune.ps1`](Intune/Desktop/ClaudeDesktop/Install-ClaudeDesktop-Intune.ps1) | [`Intune/Desktop/ClaudeDesktop/`](Intune/Desktop/ClaudeDesktop/readme.md) | Intune Win32-app install script voor Claude Desktop (machine-breed). |
 | [`Install-CoworkPrerequisites-Intune.ps1`](Intune/Desktop/CoworkPrerequisites/Install-CoworkPrerequisites-Intune.ps1) | [`Intune/Desktop/CoworkPrerequisites/`](Intune/Desktop/CoworkPrerequisites/readme.md) | Intune Win32-app install script voor de Windows-vereisten van Claude Cowork (VirtualMachinePlatform + Fast Startup), los van de Claude Desktop-app zelf. |
 | [`Install-Modules.ps1`](Startup/Install-Modules.ps1) | [`Startup/`](Startup/readme.md) | Bootstrap script to install and import all required modules for M365-Scripts. |
+| [`Install-Printer.ps1`](Device/Printer/Install-Printer.ps1) | [`Device/Printer/`](Device/Printer/readme.md) | Install printer drivers and printers as described in a JSON file, with the drivers downloaded from a GitHub repository. Supports -WhatIf and -CheckOnly. |
 | [`Install-ScheduledTask.ps1`](Intune/iOS-Compliance-Updater/Install-ScheduledTask.ps1) | [`Intune/iOS-Compliance-Updater/`](Intune/iOS-Compliance-Updater/readme.md) | Registers the Intune iOS Compliance Updater as a Windows scheduled task. |
 | [`Install-SharePointStructure.ps1`](SharePoint/Provisioning/Install-SharePointStructure.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Build the whole SharePoint structure in one run: app registration, metadata model, libraries, permissions, views and a verification pass. Supports -WhatIf. |
 | [`Install-Win32AppPackage.ps1`](TenantOnboarding/AppDeployment/Install-Win32AppPackage.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Download a zipped PSAppDeployToolkit (or similar) package and run its silent install. |

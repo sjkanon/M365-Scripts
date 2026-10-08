@@ -16,6 +16,7 @@ Scripts pour gérer et entretenir les postes Windows. Tous les scripts nécessit
 | [`audio/`](audio/readme.fr.md) | Détecter et désactiver le microphone interne des ordinateurs portables |
 | [`DriveMapping/`](DriveMapping/readme.fr.md) | Mapper des bibliothèques de documents SharePoint/OneDrive sur des lettres de lecteur à l'ouverture de session |
 | [`TempDisk/`](TempDisk/readme.fr.md) | Rétablir le disque temporaire éphémère en `D:` à chaque démarrage et y conserver le fichier d'échange |
+| [`Printer/`](Printer/readme.fr.md) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes TCP/IP à partir d'un fichier JSON — conçu pour un serveur tout juste issu d'une golden image |
 
 ## Scripts
 

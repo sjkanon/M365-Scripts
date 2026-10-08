@@ -706,6 +706,20 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='N'; FKey=$null; Category='Device'
+        Label='Install-Printer     — install printer drivers (from GitHub) and printers from a JSON file'
+        Script="$ROOT\scripts\Device\Printer\Install-Printer.ps1"
+        Params={
+            $cfg = Read-Host "  JSON file or https URL"
+            $a = @{ ConfigPath = $cfg }
+            $sel = Read-Host "  Only these printers, comma separated (empty = all)"
+            if ($sel) { $a['Printer'] = @($sel -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+            $apply = Read-Host "  Install now (not just check)? [y/N]"
+            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'
         Script="$ROOT\scripts\Startup\Install-Modules.ps1"

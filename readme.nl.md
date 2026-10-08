@@ -46,7 +46,7 @@ Elke workload heeft een eigen map onder [`scripts/`](scripts/readme.nl.md), en e
 | [`Intune/`](scripts/Intune/readme.nl.md) | Autopilot-inschrijving, updater voor het iOS-compliancebeleid, uitrol van bedrijfsachtergrond/-vergrendelscherm |
 | [`SharePoint/`](scripts/SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak terugzetten per site of tenantbreed (PnP PowerShell, automatische app-registratie), en waar een bestand gebleven is: hernoemd, verplaatst of verwijderd (auditlog) |
 | [`Reporting/`](scripts/Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
-| [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD |
+| [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD, printerdrivers + printers vanuit een JSON-bestand |
 | [`Network/`](scripts/Network/readme.nl.md) | Controle van TCP-poorten, diagnose van authenticatie/netwerk, stresstest van bestands-I/O |
 | [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access, live monitoring van sessies, diagnose en verkleining van FSLogix-profielschijven |
 | [`SMTP/`](scripts/SMTP/readme.nl.md) | Connectiviteitstests voor een SMTP-relay (eenmalig en terugkerend) |
@@ -190,6 +190,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `T` | Device | [Update-TeamsClient](scripts/Device/Update-TeamsClient.ps1) — de nieuwe Teams en de Outlook-invoegtoepassing voor vergaderingen bijwerken als ze verouderd zijn |
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — AppX-pakketten repareren die falen met 0x80070490 (Teams, nieuwe Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
+| `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `X` | Startup | [Update-ScriptIndex](scripts/Startup/Update-ScriptIndex.ps1) — [`scripts/INDEX.md`](scripts/INDEX.md) opnieuw opbouwen, de A–Z-lijst van alle scripts |
 | `L` | Startup | [Test-MarkdownLinks](scripts/Startup/Test-MarkdownLinks.ps1) — elke readme-link controleren: bestanden en ankers binnen de pagina |
@@ -599,6 +600,19 @@ Twee scripts die de vluchtige tijdelijke schijf (`D:`) van een Azure-VM of AVD-s
 - Windows leest die configuratie alleen bij het opstarten, dus `-RestartIfNeeded` (wat de opstarttaak gebruikt) herstart de machine één keer als dat het enige is wat nog rest - nooit na een mislukte run, nooit terwijl er iemand is aangemeld, en hooguit één keer per uur. Het aftellen geldt alleen als er iemand is aangemeld om het te zien; bij het opstarten herstart het binnen enkele seconden
 - `-CheckOnly` rapporteert zonder iets te wijzigen (exitcode `2` = er is werk te doen); `-WhatIf` doorloopt de hele flow; `-Quiet` houdt een gezonde opstart stil
 
+#### Printers vanuit JSON
+
+📂 Map: [`Device/Printer/`](scripts/Device/Printer/readme.nl.md)
+
+| Script | Doel |
+|---|---|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Printerdrivers (gedownload van GitHub) en printers installeren zoals beschreven in een JSON-bestand |
+
+- Eén JSON zegt welke drivers er zijn, waar elk vandaan komt — een GitHub-release-asset, een map in een GitHub-repository, een willekeurige https-URL of een share — en welke TCP/IP-printers ze gebruiken. `-Printer` kiest een deel ervan
+- Downloadt alleen wat ontbreekt of ouder is dan de `version` in de JSON; optionele `sha256`, controle van de catalogushandtekening, daarna `pnputil /add-driver /install` + `Add-PrinterDriver`, poort, printer en afdrukstandaarden (duplex, kleur, papierformaat). `"ensure": "absent"` verwijdert een printer
+- Gemaakt voor de eerste opstart van een server of sessiehost uit een golden image: wacht op de Print Spooler en probeert downloads opnieuw terwijl het netwerk opkomt (`-WaitSeconds`), start zichzelf opnieuw als 64-bit, en is idempotent zodat het ook bij elke opstart kan draaien
+- `-CheckOnly` rapporteert zonder iets te wijzigen (exitcode `2` = er is werk te doen); `-WhatIf` doorloopt de hele flow; `-Quiet` houdt een host die in orde is stil
+
 ---
 
 ### 🔧 Eigen tools
@@ -799,6 +813,10 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/Device/DriveMapping/readme.nl.md">DriveMapping/</a>
     │   │   ├── <a href="scripts/Device/DriveMapping/readme.nl.md">readme.md</a>
     │   │   └── <a href="scripts/Device/DriveMapping/New-CloudDriveMapping.ps1">New-CloudDriveMapping.ps1</a>   ← SharePoint-/OneDrive-bibliotheken aan stationsletters koppelen (WebDAV)
+    │   ├── <a href="scripts/Device/Printer/readme.nl.md">Printer/</a>
+    │   │   ├── <a href="scripts/Device/Printer/readme.nl.md">readme.md</a>
+    │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printerdrivers (van GitHub) + printers vanuit een JSON-bestand
+    │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← elk veld en elke driverbron
     │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/TempDisk/Init-TempDisk.ps1">Init-TempDisk.ps1</a>              ← de vluchtige tijdelijke schijf herstellen als D: en de pagefile erop zetten
@@ -965,6 +983,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-08
+| Wijziging |
+|-----------|
+| **Nieuw: [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) in de nieuwe map [`Device/Printer/`](scripts/Device/Printer/readme.nl.md).** Installeert printerdrivers en TCP/IP-printers zoals beschreven in één JSON-bestand ([`printers.example.json`](scripts/Device/Printer/printers.example.json)). Drivers komen van een GitHub-release-asset, een map in een GitHub-repository (via de API, zodat een privé-repository werkt met `-GitHubToken` / `GITHUB_TOKEN`; het token gaat alleen naar GitHubs eigen hosts), een willekeurige https-URL of een share. Alleen een ontbrekende driver, of een die ouder is dan de `version` in de JSON, wordt gedownload; een optionele `sha256` en de catalogushandtekening worden gecontroleerd vóór `pnputil /add-driver /install` en `Add-PrinterDriver`. Daarna poort, printer, locatie/opmerking/delen en afdrukstandaarden; `"ensure": "absent"` verwijdert een printer. Het bestaande [`Add-NetworkPrinterConnection.ps1`](scripts/TenantOnboarding/AppDeployment/Add-NetworkPrinterConnection.ps1) voegt alleen een printer toe voor een driver die er al is |
+| Gemaakt om zonder toezicht te draaien op een server of sessiehost die net uit een golden image komt: een Print Spooler die nog niet gestart is wordt gestart en afgewacht, downloads die falen op DNS of een time-out worden opnieuw geprobeerd binnen `-WaitSeconds` (een 401/403/404 faalt meteen), het start zichzelf opnieuw als 64-bit omdat `pnputil` niet bestaat onder SysWOW64, en elke run is idempotent zodat het ook bij elke opstart kan draaien. Werkwijzen overgenomen uit gepubliceerde Intune/RMM-printerhandleidingen: pnputil-exitcodes `259`/`3010`/`1641` als succes met een verwijzing naar `setupapi.dev.log`, SNMP uit op nieuwe poorten tenzij `"snmp": true`, `Set-PrintConfiguration` in een job met een time-out van 2 minuten omdat sommige universele drivers erin blijven hangen. Menutoets `N` |
+| Geverifieerd: syntaxcontrole; onder Windows PowerShell 5.1 en PowerShell 7 de functies afzonderlijk — een echte release-asset van `cli/cli` (en de weigering als een patroon 5 assets oplevert), een map van 7 bestanden uit `actions/checkout` en een los bestand via de API, een 404 met de tokenhint, `sha256` die klopt en niet klopt, INF-zoeken in een UTF-16-pakket met x86/x64-mappen, de catalogushandtekening van Windows' eigen `prnms009.inf` (Microsoft Print To PDF) en de versie ervan gedecodeerd als `10.0.26100.8951`, opnieuw proberen bij een tijdelijke fout, niet opnieuw bij een 404, opgeven binnen het budget; het hele script met `-CheckOnly` (exit `2`), `-WhatIf`, `-Printer` met één treffer, `-Quiet` op een apparaat dat in orde is (geen uitvoer, exit `0`), RMM-variabelen, een onvolledige JSON en de 32-bit-herstart. Bij die runs was de controle op verhoogde rechten omzeild, omdat deze sessie niet verhoogd was. **Niet** geverifieerd: een verhoogde run die echt een driver en een printer installeert, en een eerste opstart uit een golden image |
 
 ### 2026-10-07
 | Wijziging |

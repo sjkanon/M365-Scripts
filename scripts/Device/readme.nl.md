@@ -16,6 +16,7 @@ Scripts voor het beheren en onderhouden van Windows-endpoints. Alle scripts vere
 | [`audio/`](audio/readme.nl.md) | De interne microfoon op laptops detecteren en uitschakelen |
 | [`DriveMapping/`](DriveMapping/readme.nl.md) | SharePoint-/OneDrive-documentbibliotheken bij aanmelden aan stationsletters koppelen |
 | [`TempDisk/`](TempDisk/readme.nl.md) | De tijdelijke (ephemeral) schijf bij elke start herstellen als `D:` en de pagefile erop houden |
+| [`Printer/`](Printer/readme.nl.md) | Printerdrivers (gedownload van GitHub) en TCP/IP-printers installeren vanuit een JSON-bestand — gemaakt voor een server die net uit een golden image komt |
 
 ## Scripts
 

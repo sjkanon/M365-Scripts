@@ -46,7 +46,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`Intune/`](scripts/Intune/readme.fr.md) | Inscription Autopilot, mise à jour de la stratégie de conformité iOS, déploiement du fond d'écran/écran de verrouillage de l'entreprise |
 | [`SharePoint/`](scripts/SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique), et où est passé un fichier : renommé, déplacé ou supprimé (journal d'audit) |
 | [`Reporting/`](scripts/Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
-| [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD |
+| [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD, pilotes d'imprimante + imprimantes depuis un fichier JSON |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
 | [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix |
 | [`SMTP/`](scripts/SMTP/readme.fr.md) | Tests de connectivité d'un relais SMTP (ponctuels et récurrents) |
@@ -190,6 +190,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `T` | Device | [Update-TeamsClient](scripts/Device/Update-TeamsClient.ps1) — mettre à jour le nouveau Teams + le complément de réunion Outlook s'ils sont obsolètes |
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — réparer les paquets AppX qui échouent avec 0x80070490 (Teams, nouvel Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
+| `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — installer des pilotes d'imprimante (depuis GitHub) et des imprimantes à partir d'un fichier JSON |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `X` | Startup | [Update-ScriptIndex](scripts/Startup/Update-ScriptIndex.ps1) — reconstruire [`scripts/INDEX.md`](scripts/INDEX.md), la liste A–Z de tous les scripts |
 | `L` | Startup | [Test-MarkdownLinks](scripts/Startup/Test-MarkdownLinks.ps1) — vérifier chaque lien des readmes : fichiers et ancres internes à la page |
@@ -599,6 +600,19 @@ Deux scripts qui maintiennent en place le disque temporaire éphémère (`D:`) d
 - Windows ne lit cette configuration qu'au démarrage, donc `-RestartIfNeeded` (utilisé par la tâche de démarrage) redémarre la machine une fois lorsque c'est la seule chose qui reste - jamais après une exécution en échec, jamais tant que quelqu'un est connecté, et au plus une fois par heure. Le compte à rebours ne s'applique que si quelqu'un est connecté pour le voir ; au démarrage, le redémarrage a lieu en quelques secondes
 - `-CheckOnly` produit un rapport sans rien modifier (code de sortie `2` = travail à faire) ; `-WhatIf` parcourt tout le flux ; `-Quiet` garde silencieux un démarrage sans problème
 
+#### Imprimantes depuis JSON
+
+📂 Dossier : [`Device/Printer/`](scripts/Device/Printer/readme.fr.md)
+
+| Script | Doel |
+|---|---|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
+
+- Un seul JSON indique quels pilotes existent, d'où chacun est téléchargé — un asset de release GitHub, un dossier d'un dépôt GitHub, une URL https quelconque ou un partage — et quelles imprimantes TCP/IP les utilisent. `-Printer` en retient une partie
+- Ne télécharge que ce qui manque ou est plus ancien que la `version` du JSON ; `sha256` facultatif, vérification de la signature du catalogue, puis `pnputil /add-driver /install` + `Add-PrinterDriver`, port, imprimante et paramètres d'impression par défaut (recto verso, couleur, format de papier). `"ensure": "absent"` supprime une imprimante
+- Conçu pour le premier démarrage d'un serveur ou d'un hôte de session provisionné depuis une golden image : attend le spouleur d'impression et retente les téléchargements pendant que le réseau se met en place (`-WaitSeconds`), se relance en 64 bits, et est idempotent pour pouvoir aussi s'exécuter à chaque démarrage
+- `-CheckOnly` produit un rapport sans rien modifier (code de sortie `2` = travail à faire) ; `-WhatIf` parcourt tout le flux ; `-Quiet` garde silencieux un hôte conforme
+
 ---
 
 ### 🔧 Outils maison
@@ -799,6 +813,10 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/Device/DriveMapping/readme.fr.md">DriveMapping/</a>
     │   │   ├── <a href="scripts/Device/DriveMapping/readme.fr.md">readme.md</a>
     │   │   └── <a href="scripts/Device/DriveMapping/New-CloudDriveMapping.ps1">New-CloudDriveMapping.ps1</a>   ← mapper des bibliothèques SharePoint/OneDrive sur des lettres de lecteur (WebDAV)
+    │   ├── <a href="scripts/Device/Printer/readme.fr.md">Printer/</a>
+    │   │   ├── <a href="scripts/Device/Printer/readme.fr.md">readme.md</a>
+    │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← pilotes d'imprimante (depuis GitHub) + imprimantes depuis un fichier JSON
+    │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← chaque champ et chaque source de pilote
     │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/TempDisk/Init-TempDisk.ps1">Init-TempDisk.ps1</a>              ← rétablir le disque temporaire éphémère en D: et y placer le fichier d'échange
@@ -965,6 +983,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-08
+| Modification |
+|--------------|
+| **Nouveau : [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) dans le nouveau dossier [`Device/Printer/`](scripts/Device/Printer/readme.fr.md).** Installe des pilotes d'imprimante et des imprimantes TCP/IP décrits dans un seul fichier JSON ([`printers.example.json`](scripts/Device/Printer/printers.example.json)). Les pilotes proviennent d'un asset de release GitHub, d'un dossier d'un dépôt GitHub (via l'API, donc un dépôt privé fonctionne avec `-GitHubToken` / `GITHUB_TOKEN` ; le jeton n'est envoyé qu'aux hôtes de GitHub), d'une URL https quelconque ou d'un partage. Seul un pilote absent, ou plus ancien que la `version` du JSON, est téléchargé ; un `sha256` facultatif et la signature du catalogue sont vérifiés avant `pnputil /add-driver /install` et `Add-PrinterDriver`. Puis port, imprimante, emplacement/commentaire/partage et paramètres d'impression par défaut ; `"ensure": "absent"` supprime une imprimante. Le script existant [`Add-NetworkPrinterConnection.ps1`](scripts/TenantOnboarding/AppDeployment/Add-NetworkPrinterConnection.ps1) n'ajoute une imprimante que pour un pilote déjà présent |
+| Conçu pour s'exécuter sans surveillance sur un serveur ou un hôte de session tout juste issu d'une golden image : un spouleur d'impression pas encore démarré est démarré et attendu, les téléchargements qui échouent sur le DNS ou un délai d'attente sont retentés dans la limite de `-WaitSeconds` (un 401/403/404 échoue aussitôt), il se relance en 64 bits car `pnputil` n'existe pas sous SysWOW64, et chaque exécution est idempotente pour pouvoir aussi s'exécuter à chaque démarrage. Pratiques reprises de guides publiés pour imprimantes via Intune/RMM : codes de sortie pnputil `259`/`3010`/`1641` comptés comme réussite avec un renvoi vers `setupapi.dev.log`, SNMP désactivé sur les nouveaux ports sauf `"snmp": true`, `Set-PrintConfiguration` dans un job avec un délai de 2 minutes car certains pilotes universels s'y bloquent. Touche de menu `N` |
+| Vérifié : contrôle de syntaxe ; sous Windows PowerShell 5.1 et PowerShell 7, les fonctions seules — un vrai asset de release de `cli/cli` (et le refus quand un motif correspond à 5 assets), un dossier de 7 fichiers de `actions/checkout` et un fichier seul via l'API, un 404 avec l'indication sur le jeton, `sha256` correct et incorrect, recherche d'INF dans un paquet UTF-16 avec dossiers x86/x64, la signature du catalogue du `prnms009.inf` de Windows (Microsoft Print To PDF) et sa version décodée en `10.0.26100.8951`, nouvelle tentative sur une erreur passagère, aucune sur un 404, abandon dans le délai imparti ; le script complet avec `-CheckOnly` (sortie `2`), `-WhatIf`, `-Printer` avec une seule correspondance, `-Quiet` sur un appareil conforme (aucune sortie, sortie `0`), les variables RMM, un JSON incomplet et la relance 32 bits. Lors de ces exécutions, la vérification d'élévation était contournée, car cette session n'était pas élevée. **Non** vérifié : une exécution élevée qui installe réellement un pilote et une imprimante, et un premier démarrage depuis une golden image |
 
 ### 2026-10-07
 | Modification |

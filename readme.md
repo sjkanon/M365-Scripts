@@ -46,7 +46,7 @@ Every workload has its own folder under [`scripts/`](scripts/readme.md), and eve
 | [`Intune/`](scripts/Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
 | [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration), and where a file went: renamed, moved or deleted (audit log) |
 | [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
-| [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile |
+| [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile, printer drivers + printers from a JSON file |
 | [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
 | [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking |
 | [`SMTP/`](scripts/SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
@@ -190,6 +190,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `T` | Device | [Update-TeamsClient](scripts/Device/Update-TeamsClient.ps1) — update new Teams + the Outlook meeting add-in when outdated |
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
+| `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `X` | Startup | [Update-ScriptIndex](scripts/Startup/Update-ScriptIndex.ps1) — rebuild [`scripts/INDEX.md`](scripts/INDEX.md), the A–Z list of every script |
 | `L` | Startup | [Test-MarkdownLinks](scripts/Startup/Test-MarkdownLinks.ps1) — check every readme link: files and in-page anchors |
@@ -599,6 +600,19 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 - Windows only reads that configuration at boot, so `-RestartIfNeeded` (what the boot task uses) restarts the machine once when that is the only thing left - never after a failed run, never while someone is signed in, and at most once an hour. The countdown only applies when someone is signed in to see it; at boot it restarts within seconds
 - `-CheckOnly` reports without changing anything (exit code `2` = work is due); `-WhatIf` walks the whole flow; `-Quiet` keeps a healthy boot silent
 
+#### Printers from JSON
+
+📂 Folder: [`Device/Printer/`](scripts/Device/Printer/readme.md)
+
+| Script | Doel |
+|---|---|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
+
+- One JSON says which drivers exist, where each is downloaded from — a GitHub release asset, a folder in a GitHub repository, any https URL or a share — and which TCP/IP printers use them. `-Printer` picks a subset
+- Downloads only what is missing or older than the JSON's `version`; optional `sha256`, catalog signature check, then `pnputil /add-driver /install` + `Add-PrinterDriver`, port, printer and print defaults (duplex, colour, paper size). `"ensure": "absent"` removes a printer
+- Made for the first boot of a server or session host provisioned from a golden image: waits for the Print Spooler and retries downloads while the network comes up (`-WaitSeconds`), relaunches itself 64-bit, and is idempotent so it can also run at every startup
+- `-CheckOnly` reports without changing anything (exit code `2` = work is due); `-WhatIf` walks the whole flow; `-Quiet` keeps a host that is in order silent
+
 ---
 
 ### 🔧 Custom Tools
@@ -799,6 +813,10 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/Device/DriveMapping/readme.md">DriveMapping/</a>
     │   │   ├── <a href="scripts/Device/DriveMapping/readme.md">readme.md</a>
     │   │   └── <a href="scripts/Device/DriveMapping/New-CloudDriveMapping.ps1">New-CloudDriveMapping.ps1</a>   ← map SharePoint/OneDrive libraries to drive letters (WebDAV)
+    │   ├── <a href="scripts/Device/Printer/readme.md">Printer/</a>
+    │   │   ├── <a href="scripts/Device/Printer/readme.md">readme.md</a>
+    │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printer drivers (from GitHub) + printers from a JSON file
+    │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← every field and every driver source
     │   ├── <a href="scripts/Device/TempDisk/readme.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/TempDisk/Init-TempDisk.ps1">Init-TempDisk.ps1</a>              ← restore the ephemeral temp disk as D: and put the pagefile on it
@@ -965,6 +983,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-08
+| Change |
+|--------|
+| **New [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) in the new folder [`Device/Printer/`](scripts/Device/Printer/readme.md).** Installs printer drivers and TCP/IP printers as described in one JSON file ([`printers.example.json`](scripts/Device/Printer/printers.example.json)). Drivers come from a GitHub release asset, a folder in a GitHub repository (through the API, so a private repository works with `-GitHubToken` / `GITHUB_TOKEN`; the token is only ever sent to GitHub's own hosts), any https URL or a share. Only a missing driver, or one older than the JSON's `version`, is downloaded; an optional `sha256` and the catalog signature are checked before `pnputil /add-driver /install` and `Add-PrinterDriver`. Then port, printer, location/comment/sharing and print defaults; `"ensure": "absent"` removes a printer. The existing [`Add-NetworkPrinterConnection.ps1`](scripts/TenantOnboarding/AppDeployment/Add-NetworkPrinterConnection.ps1) only adds a printer for a driver that is already there |
+| Built to run unattended on a server or session host fresh from a golden image: a Print Spooler that has not started yet is started and waited for, downloads that fail on DNS or a timeout are retried within `-WaitSeconds` (a 401/403/404 fails at once), it relaunches itself 64-bit because `pnputil` does not exist under SysWOW64, and every run is idempotent so it can also run at every startup. Practices taken from published Intune/RMM printer guides: pnputil exit codes `259`/`3010`/`1641` as success with a pointer to `setupapi.dev.log`, SNMP off on new ports unless `"snmp": true`, `Set-PrintConfiguration` in a job with a 2-minute timeout because some universal drivers hang in it. Menu key `N` |
+| Verified: syntax check; on Windows PowerShell 5.1 and PowerShell 7, the functions on their own — a real release asset from `cli/cli` (and the refusal when a pattern matches 5 assets), a 7-file folder from `actions/checkout` and a single file through the API, a 404 with the token hint, `sha256` match and mismatch, INF lookup in a UTF-16 package with x86/x64 folders, the catalog signature of Windows' own `prnms009.inf` (Microsoft Print To PDF) and its version decoded as `10.0.26100.8951`, retry on a transient error, no retry on a 404, giving up within the budget; the whole script with `-CheckOnly` (exit `2`), `-WhatIf`, `-Printer` with one match, `-Quiet` on a device in order (no output, exit `0`), RMM variables, an incomplete JSON, and the 32-bit relaunch. Those runs had the elevation check bypassed, because this session was not elevated. **Not** verified: an elevated run that actually installs a driver and a printer, and a first boot from a golden image |
 
 ### 2026-10-07
 | Change |

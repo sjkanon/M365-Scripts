@@ -16,6 +16,7 @@ Scripts for managing and maintaining Windows endpoints. All scripts require admi
 | [`audio/`](audio/readme.md) | Detect and disable the internal microphone on laptops |
 | [`DriveMapping/`](DriveMapping/readme.md) | Map SharePoint/OneDrive document libraries to drive letters at logon |
 | [`TempDisk/`](TempDisk/readme.md) | Restore the ephemeral temp disk as `D:` at every boot and keep the pagefile on it |
+| [`Printer/`](Printer/readme.md) | Install printer drivers (downloaded from GitHub) and TCP/IP printers from a JSON file — built for a server fresh from a golden image |
 
 ## Scripts
 
