@@ -262,6 +262,9 @@ Daarna wordt alles opnieuw uitgelezen.
 
 **Opmerkingen**
 
+- Het script herstart de machine nooit, en de scripts en installers die het aanroept ook
+  niet (elke msiexec draait met `/norestart`). Een openstaande herstart wordt gemeld en aan
+  jou overgelaten.
 - Verhoogd of als System uitvoeren. Het script start zichzelf opnieuw in 64-bits Windows
   PowerShell, omdat de AppX-cmdlets dat nodig hebben.
 - Met de rem aan worden Teams en Outlook alleen bijgewerkt door dit script (of een nieuwe

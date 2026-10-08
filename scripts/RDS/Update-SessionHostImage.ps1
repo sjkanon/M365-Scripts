@@ -53,6 +53,9 @@
     IsWVDEnvironment, the WebRTC redirector and the meeting add-in. Everything is
     read back afterwards; a framework still too old then stays a finding.
 
+    It never restarts the machine, and neither do the scripts and installers it calls
+    (every msiexec runs with /norestart). A pending reboot is reported and left to you.
+
     Run it on the image VM before capture, or on every session host - -ComputerName
     does the latter and ends with one table across the pool, because "is every host
     on the same build?" is the question that matters on a pooled host.

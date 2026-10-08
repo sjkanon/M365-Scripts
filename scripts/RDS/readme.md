@@ -262,6 +262,8 @@ Everything is read back afterwards.
 
 **Notes**
 
+- It never restarts the machine, and neither do the scripts and installers it calls (every
+  msiexec runs with `/norestart`). A pending reboot is reported and left to you.
 - Run elevated or as System. It relaunches itself in 64-bit Windows PowerShell, because
   the AppX cmdlets need it.
 - With the hold-back on, Teams and Outlook only update when this script (or a new image)

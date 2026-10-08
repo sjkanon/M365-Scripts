@@ -264,6 +264,9 @@ Tout est relu ensuite.
 
 **Remarques**
 
+- Le script ne redémarre jamais la machine, pas plus que les scripts et programmes
+  d'installation qu'il appelle (chaque msiexec s'exécute avec `/norestart`). Un redémarrage
+  en attente est signalé et vous est laissé.
 - À exécuter en mode élevé ou en tant que System. Le script se relance dans Windows
   PowerShell 64 bits, dont les cmdlets AppX ont besoin.
 - Avec le blocage actif, Teams et Outlook ne sont mis à jour que par ce script (ou une
