@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Audit Outlook inbox rules and Sweep rules across mailboxes for
@@ -15,6 +15,15 @@
 
     Read-only — this script only reports, it never removes rules.
 
+    Sign-in: delegated (you sign in as the admin) by default, through
+    scripts\Startup\Connect-M365.ps1 — device code and the GDAP customer come
+    from load.config.ps1; under GDAP the customer is reached with
+    -DelegatedOrganization (earlier versions passed -Organization, which only
+    applies to app-only sign-in, so they landed in the partner's own tenant).
+    App-only with -ClientId + -CertificateThumbprint, or -AppOnly
+    (graph.appid.json). An existing Exchange session for the tenant is reused
+    and left connected.
+
 .PARAMETER Mailbox
     UPN of a single mailbox to check. If omitted, all mailboxes are checked.
 
@@ -27,7 +36,19 @@
     CSV report path. Defaults to C:\Temp\ (Windows) or ~/Downloads (macOS/Linux).
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1),
+    else the tenant you sign in to. App-only needs the domain form
+    (contoso.onmicrosoft.com).
+
+.PARAMETER ClientId
+    App registration for app-only Exchange Online sign-in (with
+    -CertificateThumbprint).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Test-MailboxForwardingRisk.ps1
@@ -48,6 +69,10 @@
     and Internal/Unknown otherwise (some rule actions target a folder or
     non-SMTP recipient and can't be classified this way).
 
+    Exchange Online only: Graph can read inbox rules (messageRules) of other
+    users only with an app-only Mail permission, and has no API for Sweep
+    rules, so the delegated default stays on Get-InboxRule / Get-SweepRule.
+
     Required module: ExchangeOnlineManagement
 #>
 [CmdletBinding()]
@@ -55,23 +80,20 @@ param(
     [string] $Mailbox,
     [switch] $IncludeDisabledRules,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -98,11 +120,16 @@ Write-Host ""
 function Get-RuleRecipientClassification {
     param([string[]] $Recipients, [string[]] $AcceptedDomains)
     if (-not $Recipients) { return $null }
-    $addresses = $Recipients | ForEach-Object {
+    $Recipients = @($Recipients | Where-Object { $_ })
+    if (-not $Recipients) { return 'N/A' }   # move/copy + delete rule, no recipient
+    # "Name" [EX:/o=...] is a recipient inside this Exchange organization; it has no
+    # domain to split, and splitting it on '@' used to flag it as External.
+    $hasExchangeRecipient = [bool]($Recipients | Where-Object { $_ -match '\[EX:' })
+    $addresses = $Recipients | Where-Object { $_ -notmatch '\[EX:' } | ForEach-Object {
         if ($_ -match '\[SMTP:([^\]]+)\]') { $Matches[1] } else { $_ }
     }
-    $domains = $addresses | ForEach-Object { ($_ -split '@')[-1] } | Where-Object { $_ }
-    if (-not $domains) { return 'Unknown' }
+    $domains = $addresses | Where-Object { $_ -like '*@*' } | ForEach-Object { ($_ -split '@')[-1].Trim().TrimEnd(']') } | Where-Object { $_ }
+    if (-not $domains) { return $(if ($hasExchangeRecipient) { 'Internal' } else { 'Unknown' }) }
     if ($domains | Where-Object { $AcceptedDomains -notcontains $_ }) { return 'External' }
     return 'Internal'
 }
@@ -190,4 +217,4 @@ Write-Host "  Checked $($mailboxes.Count) mailbox(es)." -ForegroundColor Cyan
 Write-Host ""
 
 # ── Disconnect if we connected ──────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+Disconnect-M365Exchange $exo

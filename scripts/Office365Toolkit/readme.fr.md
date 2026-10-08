@@ -28,7 +28,7 @@ implémentation nouvelle, dans le style propre à ce dépôt, et non une copie d
 | Dossier | Description |
 |--------|-------------|
 | [`Security/`](Security/readme.fr.md) | Rapports Secure Score, nettoyage des consentements d'applications d'entreprise, verrouillage de la connexion aux boîtes aux lettres partagées, base de référence EOP anti-spam/anti-malware |
-| [`Exchange/`](Exchange/readme.fr.md) | Base de référence d'hygiène des boîtes aux lettres, risque de transfert via les règles de boîte de réception, compléments de boîte aux lettres, recherche dans l'Unified Audit Log, suivi des messages |
+| [`Exchange/`](Exchange/readme.fr.md) | Base de référence d'hygiène des boîtes aux lettres, risque de transfert via les règles de boîte de réception, compléments de boîte aux lettres, recherche dans l'Unified Audit Log (Graph) |
 | [`Intune/`](Intune/readme.fr.md) | Inventaire à l'échelle du tenant des stratégies Intune/Endpoint Manager |
 
 ---
@@ -46,10 +46,10 @@ implémentation nouvelle, dans le style propre à ce dépôt, et non une copie d
 **Aides de connexion/infrastructure, pas des fonctionnalités** (`*-connect*.ps1`,
 `graph-connect.ps1`, `msgraph-connect.ps1`, `Intune-connect.ps1`, `az-connect*.ps1`,
 `o365-setup.ps1`, `o365-update.ps1`, `o365-getrepo.ps1`, `save-cred-file.ps1`,
-`c.ps1`, `r.ps1`, `sc-config.ps1`, `text-colour.ps1`) : ce dépôt se connecte déjà
-automatiquement et réutilise les sessions existantes dans chaque script (voir le style maison dans
-`scripts/Entra/Test-M365GroupMembership.ps1`), les scripts de connexion autonomes n'apportent donc
-rien. `o365-setup.ps1` codait en outre en dur le chemin OneDrive d'un vrai client et
+`c.ps1`, `r.ps1`, `sc-config.ps1`, `text-colour.ps1`) : ce dépôt se connecte de la même façon dans chaque script via
+[`scripts/Startup/Connect-M365.ps1`](../Startup/readme.fr.md#connect-m365ps1) (Graph d'abord,
+délégué par défaut, app-only sur demande, compatible GDAP, avec réutilisation des sessions
+existantes), les scripts de connexion autonomes n'apportent donc rien. `o365-setup.ps1` codait en outre en dur le chemin OneDrive d'un vrai client et
 installe les modules retirés `MSOnline`/`AzureAD` ; `save-cred-file.ps1` stocke
 des identifiants dans un fichier XML local — tous deux hors périmètre selon les règles de sécurité de ce projet.
 
