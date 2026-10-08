@@ -467,7 +467,7 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
 
 - Image d'hôte de session ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — rend une image Windows 11 multisession ou un hôte AVD apte au nouveau Teams, au nouvel Outlook et à Copilot avec FSLogix, sans modifier FSLogix :
   - Vérifie WebView2, les frameworks AppX dont dépendent les applications, les builds provisionnées et les écarts par utilisateur, Teams sur AVD (SlimCore, le redirecteur WebRTC retiré le 1er octobre 2026), Shared Computer Activation et le broker de connexion
-  - Bloque les mises à jour du Store et de Teams et corrige les applications via `Repair-AppxPackageStore.ps1` et `Update-TeamsClient.ps1` ; `-ComputerName` compare tout le pool, `-ForCapture` vérifie que Sysprep peut passer
+  - Met à jour Teams, Outlook, Copilot, le complément de réunion et WebView2 vers leur build la plus récente à chaque exécution (mise à jour automatique de Teams désactivée seulement si FSLogix l'exige) et corrige les applications via `Repair-AppxPackageStore.ps1` et `Update-TeamsClient.ps1` ; `-ComputerName` compare tout le pool, `-ForCapture` vérifie que Sysprep peut passer
 
 ---
 
@@ -1008,6 +1008,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (17)
+| Modification |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) s'exécute seul : si Update-TeamsClient.ps1 et Repair-AppxPackageStore.ps1 ne sont pas à côté (le dépôt, ou le dossier où `-ComputerName` les copie), il les télécharge depuis ce dépôt sur GitHub à un commit épinglé de `main` (`746541e`, 2026-10-05) et les refuse si le SHA-256 ne correspond pas. Auparavant, une copie de ce seul fichier sur la VM d'image sautait toutes les corrections d'applications. Épinglé plutôt que le dernier `main`, pour qu'un script modifié ne s'exécute jamais en tant que System sans avoir été relu ; monter de version demande un nouveau commit et deux empreintes, après lecture du diff |
+| **[`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) maintient les applications à leur build la plus récente au lieu de les bloquer.** Il définissait Microsoft Store `AutoDownload = 2` pour empêcher Outlook de s'écarter, mais le nouvel Outlook se met à jour chaque semaine depuis le CDN Office, pas via le Store, et Microsoft ne documente aucun réglage pour l'en empêcher ([Manage updates in new Outlook](https://learn.microsoft.com/microsoft-365-apps/outlook/manage/manage-updates-new-outlook-windows)) — le réglage ne bloquait que les mises à jour Store des frameworks et de Copilot. Il est désormais affiché, pas défini. La mise à jour automatique de Teams n'est désactivée que si FSLogix est antérieur à 2210 HF4 et rejoue des versions exactes. Chaque exécution sans `-CheckOnly` met désormais à jour Teams, Outlook, Copilot, le complément de réunion et WebView2 vers leur build la plus récente, avec ou sans constat, et WebView2 est en retard dès qu'une version est inférieure à Edge Stable, et non plus seulement d'une version majeure. Les readmes conseillent une exécution hebdomadaire sur chaque hôte |
+| Vérifié : contrôle de syntaxe ; les deux empreintes ont été calculées avec `git show` à ce commit et correspondent à ce que raw.githubusercontent.com fournit. **Non** vérifié : une exécution sur un hôte de session qui les télécharge réellement |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; le canal de mise à jour d'Outlook vient de Microsoft Learn (Manage updates in new Outlook for Windows). **Non** vérifié : une exécution sur un hôte de session - le rythme hebdomadaire, Teams désactivé seulement sous 2210 HF4, et la reprise de la build Outlook la plus récente des utilisateurs |
+
 ### 2026-10-08 (16)
 | Modification |
 |--------|
@@ -1020,12 +1028,6 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 |--------|
 | **[`Connect-M365.ps1`](scripts/Startup/readme.fr.md#connect-m365ps1) : recherche d'application sous GDAP, pas d'étendues du partenaire chez un client, et connexion déléguée via votre propre application.** `graph.appid.json` et `pnp.appid.json` sont indexés par le domaine onmicrosoft, alors que sous GDAP le tenant est le GUID du client : `-AppOnly` et la recherche du ClientId PnP échouaient ; ils essaient maintenant aussi le domaine client issu de `Connect-Tenant` et le tenant de l'URL SharePoint. Une reconnexion déléguée gardait les étendues de la session précédente même en changeant de tenant, si bien que des étendues du partenaire comme `Domain.ReadWrite.All` étaient demandées chez le client ; elles ne sont plus reprises qu'au sein du même tenant. Nouveau `-DelegatedClient` : `-ClientId` désigne alors votre propre client public pour une connexion déléguée au lieu de signifier app-only (nécessaire au provisionnement SharePoint) |
 | Vérifié : contrôle de syntaxe ; sous `Set-StrictMode` : le GUID GDAP donne la clé de domaine du client, une URL d'administration SharePoint la clé de son tenant, un tenant inconnu rien, et `graph.appid.json` est trouvé à partir d'une URL de site ; avec des cmdlets Graph simulées, un passage du tenant partenaire au tenant client ne demande que les nouvelles étendues, et `-DelegatedClient` transmet le ClientId à une connexion déléguée. **Non** vérifié : sur un tenant |
-
-### 2026-10-08 (15)
-| Modification |
-|--------|
-| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) s'exécute seul : si Update-TeamsClient.ps1 et Repair-AppxPackageStore.ps1 ne sont pas à côté (le dépôt, ou le dossier où `-ComputerName` les copie), il les télécharge depuis ce dépôt sur GitHub à un commit épinglé de `main` (`746541e`, 2026-10-05) et les refuse si le SHA-256 ne correspond pas. Auparavant, une copie de ce seul fichier sur la VM d'image sautait toutes les corrections d'applications. Épinglé plutôt que le dernier `main`, pour qu'un script modifié ne s'exécute jamais en tant que System sans avoir été relu ; monter de version demande un nouveau commit et deux empreintes, après lecture du diff |
-| Vérifié : contrôle de syntaxe ; les deux empreintes ont été calculées avec `git show` à ce commit et correspondent à ce que raw.githubusercontent.com fournit. **Non** vérifié : une exécution sur un hôte de session qui les télécharge réellement |
 
 ### 2026-10-08 (14)
 | Modification |

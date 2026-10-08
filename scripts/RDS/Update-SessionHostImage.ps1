@@ -12,15 +12,19 @@
     host B - which does not have that version - registering it fails with 0x80070490.
     FSLogix 2210 HF4 (Teams) and 25.06 (Outlook) register by package family instead,
     but this script deliberately leaves the FSLogix build alone. What it does instead
-    is make the image carry everything the apps need, at one build, and stop the apps
-    from drifting away from it per user:
+    is keep every host at the newest build of the apps and of everything they need,
+    the same on every host:
 
       1. Windows      Edition (multi-session), build, pending reboot.
-      2. FSLogix      Build and InstallAppxPackages, read only. Below 25.06 the
-                      hold-back in step 3 is what keeps Outlook working.
-      3. Hold-back    Microsoft Store AutoDownload = 2 and Teams disableAutoUpdate = 1,
-                      so apps only change when the image (or this script) changes them.
-                      Edge Update policies that block WebView2 or Edge are reported.
+      2. FSLogix      Build and InstallAppxPackages, read only.
+      3. Updates      New Outlook updates itself weekly from the Office CDN, not
+                      through the Store, and has no switch to stop it - so with
+                      FSLogix below 25.06 the cure is running this script weekly on
+                      every host. Teams: below 2210 HF4 its self-update is turned off
+                      (disableAutoUpdate = 1) and every run updates it centrally;
+                      on a newer FSLogix it may update itself. The Store setting is
+                      shown, not changed. Edge Update policies that block WebView2 or
+                      Edge are reported.
       4. WebView2     The Evergreen runtime all three apps render with, against the
                       current Edge Stable build. Behind or missing: the Evergreen
                       Standalone installer (signature-checked) is run.
@@ -45,13 +49,25 @@
      10. Capture      With -ForCapture: packages a user installed that are not
                       provisioned (Sysprep fails on them) and a pending reboot.
 
-    Without -CheckOnly the fixes run in this order: hold-back policies, Shared
-    Computer Activation, WebView2, then the apps through the existing repo scripts -
+    Without -CheckOnly every run updates, whether a check found something or not:
+    Teams' self-update setting where FSLogix needs it, Shared Computer Activation,
+    WebView2, then the apps to their newest build through the existing repo scripts -
     Repair-AppxPackageStore.ps1 (-Name teams,outlook -Latest -Provision -RemoveOld,
     then -Name copilot -Provision), whose Microsoft installers bring the frameworks
-    their package depends on, and Update-TeamsClient.ps1 -AvdOptimizations for
-    IsWVDEnvironment, the WebRTC redirector and the meeting add-in. Everything is
-    read back afterwards; a framework still too old then stays a finding.
+    their package depends on, and Update-TeamsClient.ps1 -AvdOptimizations for the
+    newest Teams, IsWVDEnvironment, the WebRTC redirector and the meeting add-in.
+    They only change what is behind. Everything is read back afterwards; a framework
+    still too old then stays a finding.
+
+    Newest Outlook: Microsoft publishes no version feed for it, so -Latest takes the
+    newest build users on the host already updated to (and Microsoft's installer
+    otherwise). On a pool that means every host provisions what the most recent user
+    got - which is exactly the build FSLogix will ask the others for.
+
+    The two scripts are taken from the repo when this one runs from it (or from the
+    folder -ComputerName copies them to). Run on its own - only this file on the
+    image VM - it fetches them from GitHub at a pinned commit of main and runs them
+    only when their SHA-256 matches; see $HelperCommit / $HelperHashes.
 
     It never restarts the machine, and neither do the scripts and installers it calls
     (every msiexec runs with /norestart). A pending reboot is reported and left to you.
@@ -79,7 +95,8 @@
     Credential for -ComputerName.
 
 .PARAMETER WorkingDir
-    Folder for downloads (default: C:\IT\SessionHostImage).
+    Folder for downloads - WebView2 and, when they are not next to this script,
+    the two helper scripts (default: C:\IT\SessionHostImage).
 
 .PARAMETER LogPath
     Folder for the transcript of a run that changes something (default: C:\Temp).
@@ -141,6 +158,15 @@ $EdgeGuid       = '{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}'
 $CopilotGuid    = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
 $WebView2Url    = 'https://go.microsoft.com/fwlink/?linkid=2124701'   # Evergreen Standalone x64
 $EdgeReleaseApi = 'https://edgeupdates.microsoft.com/api/products'
+# The two scripts this one calls, when they are not next to it: fetched from this
+# repo at a pinned commit of main and refused unless the SHA-256 matches. A newer
+# version is never run unseen - to move up, put the new commit and the hashes of
+# both files at that commit here, after reading the diff.
+$HelperCommit = '746541e4b3bb47fd54867dc3b79c40a629c7fea6'   # main, 2026-10-05
+$HelperHashes = @{
+    'Update-TeamsClient.ps1'      = 'CC6D97EA9ADBEF12E3614FA482A219CE04E5AB421ECFAF5D11F86AEEC0397E7D'
+    'Repair-AppxPackageStore.ps1' = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C'
+}
 $WebRtcEndOfSupport      = [datetime] '2026-10-01'
 $WebRtcEndOfAvailability = [datetime] '2027-04-01'
 $OfficeChannels = @{
@@ -390,25 +416,32 @@ function Invoke-Check {
         Write-Ok "FSLogix $fslogix"
         $replay = Get-PropertyValue (Get-ItemProperty $FslogixProfiles -ErrorAction SilentlyContinue) 'InstallAppxPackages'
         if ($null -eq $replay -or $replay -eq 1) { Write-Skip '  InstallAppxPackages on (default): packages saved in the profile are re-registered at sign-in' }
-        foreach ($pkg in $FslogixFamilyBuild.Keys) {
-            if ($fslogix -lt $FslogixFamilyBuild[$pkg]) {
-                Write-Warn "  Below $($FslogixFamilyBuild[$pkg]): $pkg is re-registered at its exact saved version - every host needs the same build and self-updates must stay off (step 3)"
-            }
+        if ($fslogix -lt $FslogixFamilyBuild['MSTeams']) {
+            Write-Warn "  Below $($FslogixFamilyBuild['MSTeams']): Teams is re-registered at its exact saved version - its self-update must stay off and every run updates it centrally (step 3)"
+        }
+        if ($fslogix -lt $FslogixFamilyBuild['Microsoft.OutlookForWindows']) {
+            Write-Warn "  Below $($FslogixFamilyBuild['Microsoft.OutlookForWindows']): Outlook is re-registered at its exact saved version, and it updates itself weekly - run this script weekly on every host so they provision the newest build users have"
         }
     }
 
-    Write-Step '3. Hold-back: apps change only with the image'
+    Write-Step '3. Updates'
+    # New Outlook updates itself weekly from the Office CDN, not through the Store,
+    # and Microsoft documents no switch to stop it. The Store setting is shown only.
     $store = Get-PropertyValue (Get-ItemProperty $StorePolicyPath -ErrorAction SilentlyContinue) 'AutoDownload'
-    if ($store -eq 2) { Write-Ok 'Microsoft Store automatic app updates are off (AutoDownload = 2)' }
-    else { Add-Finding 'Hold-back' "Microsoft Store updates apps per user (AutoDownload = $(if ($null -eq $store) { 'not set' } else { $store })) - Outlook drifts away from the image" 'Warn' 'store' }
-    $teamsKey = Get-ItemProperty $TeamsPath -ErrorAction SilentlyContinue
-    if ((Get-PropertyValue $teamsKey 'disableAutoUpdate') -eq 1) { Write-Ok 'Teams self-update is off (disableAutoUpdate = 1)' }
-    else { Add-Finding 'Hold-back' 'Teams updates itself per user (disableAutoUpdate not 1) - Teams drifts away from the image' 'Warn' 'teamsupdate' }
+    Write-Skip ("Microsoft Store automatic app updates: {0} (Outlook does not update through the Store)" -f $(if ($store -eq 2) { 'off (AutoDownload = 2)' } elseif ($null -eq $store) { 'on (not set)' } else { "AutoDownload = $store" }))
+    $teamsKey  = Get-ItemProperty $TeamsPath -ErrorAction SilentlyContinue
+    $teamsSelf = (Get-PropertyValue $teamsKey 'disableAutoUpdate') -ne 1
+    if ($fslogix -and $fslogix -lt $FslogixFamilyBuild['MSTeams']) {
+        if ($teamsSelf) { Add-Finding 'Updates' "Teams updates itself per user, and this FSLogix build replays exact versions - hosts drift apart" 'Warn' 'teamsupdate' }
+        else { Write-Ok 'Teams self-update is off (disableAutoUpdate = 1); every run of this script updates it to the newest build' }
+    } else {
+        Write-Ok ("Teams self-update is {0}; FSLogix registers Teams by family, so that is safe" -f $(if ($teamsSelf) { 'on' } else { 'off (disableAutoUpdate = 1)' }))
+    }
     $edgePolicy = Get-ItemProperty $EdgeUpdatePolicy -ErrorAction SilentlyContinue
     foreach ($item in @(@{ Name = 'WebView2'; Guid = $WebView2Guid }, @{ Name = 'Edge'; Guid = $EdgeGuid })) {
         $value = Get-PropertyValue $edgePolicy "Update$($item.Guid)"
         if ($null -eq $value) { $value = Get-PropertyValue $edgePolicy 'UpdateDefault' }
-        if ($value -eq 0) { Add-Finding 'Hold-back' "Edge Update policy blocks $($item.Name) updates ($EdgeUpdatePolicy) - reported, not changed" }
+        if ($value -eq 0) { Add-Finding 'Updates' "Edge Update policy blocks $($item.Name) updates ($EdgeUpdatePolicy) - reported, not changed" }
     }
 
     Write-Step '4. WebView2 runtime'
@@ -416,7 +449,7 @@ function Invoke-Check {
     $edge     = Get-EdgeUpdateClientVersion $EdgeGuid
     $stable   = Get-EdgeStableVersion
     if (-not $webView2) { Add-Finding 'WebView2' 'WebView2 Runtime is not installed - Teams, Outlook and Copilot cannot render' 'Fail' 'webview2' }
-    elseif ($stable -and $webView2.Major -lt $stable.Major) { Add-Finding 'WebView2' "WebView2 $webView2 is behind Edge Stable $stable" 'Warn' 'webview2' }
+    elseif ($stable -and $webView2 -lt $stable) { Add-Finding 'WebView2' "WebView2 $webView2 is behind Edge Stable $stable" 'Warn' 'webview2' }
     else { Write-Ok ("WebView2 {0}{1}" -f $webView2, $(if ($stable) { " (Edge Stable: $stable)" } else { ' (Edge Stable could not be looked up)' })) }
     if ($edge) {
         if ($stable -and $edge.Major -lt $stable.Major) { Add-Finding 'WebView2' "Edge $edge is behind Edge Stable $stable - Edge Update keeps it current unless a policy blocks it" }
@@ -565,19 +598,41 @@ function Install-WebView2 {
 }
 
 function Find-Helper {
-    <# The repo layout (..\Device) or the flat folder -ComputerName copies to. #>
+    <#
+        The repo layout (..\Device) or the flat folder -ComputerName copies to.
+        Neither there: this script runs on its own, so the helper is fetched from
+        GitHub at $HelperCommit and only used when its SHA-256 matches.
+    #>
     param([string] $Name)
     foreach ($path in (Join-Path (Join-Path (Split-Path $PSScriptRoot) 'Device') $Name), (Join-Path $PSScriptRoot $Name)) {
         if (Test-Path $path) { return $path }
     }
-    return $null
+    if (-not $HelperHashes.ContainsKey($Name)) { return $null }
+
+    $url    = 'https://raw.githubusercontent.com/sjkanon/M365-Scripts/{0}/scripts/Device/{1}' -f $HelperCommit, $Name
+    $target = Join-Path $WorkingDir $Name
+    try {
+        New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing
+        $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash
+        if ($hash -ne $HelperHashes[$Name]) {
+            throw "SHA-256 is $hash, expected $($HelperHashes[$Name]) - not used"
+        }
+        Write-Ok "$Name fetched from GitHub at $($HelperCommit.Substring(0, 7)), SHA-256 verified"
+        return $target
+    } catch {
+        Remove-Item $target -Force -ErrorAction SilentlyContinue
+        Write-Bad "$Name from $url - $($_.Exception.Message)"
+        return $null
+    }
 }
 
 function Invoke-Helper {
     <# Run a repo script in its own process, so its exit does not end this one. #>
     param([string] $Name, [string[]] $Arguments)
     $path = Find-Helper $Name
-    if (-not $path) { Write-Bad "$Name not found next to this script or in ..\Device - skipped"; return 1 }
+    if (-not $path) { Write-Bad "$Name not found locally and not verified from GitHub - skipped"; return 1 }
     Write-Step "$Name $($Arguments -join ' ')"
     # To the host, not the pipeline: the return value is the exit code alone.
     & $nativeShell -NoProfile -ExecutionPolicy Bypass -File $path @Arguments | Out-Host
@@ -595,13 +650,14 @@ try {
     $state = Invoke-Check
     $work  = @($Findings)
 
-    if ($changing -and $work.Count -gt 0) {
+    # A prepare run always brings the apps to the newest build, finding or not: the
+    # helpers only change what is behind, so an up-to-date host costs a check.
+    if ($changing) {
         Write-Host ''
-        Write-Host '  ==== Fixing '.PadRight(80, '=') -ForegroundColor Cyan
-        $fixes = @($work | ForEach-Object { $_.Fix } | Where-Object { $_ } | Sort-Object -Unique)
+        Write-Host '  ==== Updating '.PadRight(80, '=') -ForegroundColor Cyan
+        $fixes = @(@($work | ForEach-Object { $_.Fix }) + @('apps') | Where-Object { $_ } | Sort-Object -Unique)
 
-        if ('store' -in $fixes) { Set-RegistryDword $StorePolicyPath 'AutoDownload' 2 'no per-user Store updates' }
-        if ('teamsupdate' -in $fixes) { Set-RegistryDword $TeamsPath 'disableAutoUpdate' 1 'Teams updates with the image' }
+        if ('teamsupdate' -in $fixes) { Set-RegistryDword $TeamsPath 'disableAutoUpdate' 1 'Teams updates centrally, at one build on every host' }
         if ('sca' -in $fixes) {
             if ($PSCmdlet.ShouldProcess("$C2RConfigPath\SharedComputerLicensing", 'set to 1')) {
                 New-ItemProperty -Path $C2RConfigPath -Name 'SharedComputerLicensing' -Value '1' -PropertyType String -Force | Out-Null

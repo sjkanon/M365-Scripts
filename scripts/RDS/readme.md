@@ -205,16 +205,16 @@ break in one recurring way: a user's app updates itself on host A, FSLogix saves
 exact version in the profile at sign-out, and at the next sign-in on host B — which does
 not have that version — registering it fails with `0x80070490`. FSLogix 2210 HF4 (Teams)
 and 25.06 (Outlook) register by package family instead, but this script deliberately
-leaves FSLogix alone. It makes the image carry everything the apps need at one build,
-and stops the apps from drifting away from it per user.
+leaves FSLogix alone. It keeps every host at the newest build of the apps and of
+everything they need, the same on every host.
 
 **What it checks**
 
 | Step | Details |
 |------|---------|
 | Windows | Edition (Enterprise multi-session), build, pending reboot |
-| FSLogix | Build and `InstallAppxPackages` — read only. Below 25.06 Outlook is re-registered at its exact saved version, so the hold-back below is what keeps it working |
-| Hold-back | Microsoft Store `AutoDownload = 2` and Teams `disableAutoUpdate = 1`, so the apps only change with the image. Edge Update policies that block WebView2 or Edge are reported |
+| FSLogix | Build and `InstallAppxPackages` — read only |
+| Updates | New Outlook updates itself **weekly from the Office CDN**, not through the Store, and has no switch to stop it: below FSLogix 25.06 the cure is running this script weekly on every host. Teams: below 2210 HF4 its self-update is turned off (`disableAutoUpdate = 1`) and every run updates it centrally; on a newer FSLogix it may update itself. The Store setting is shown, not changed. Edge Update policies that block WebView2 or Edge are reported |
 | WebView2 | The Evergreen runtime all three apps render with, against the current Edge Stable build (`edgeupdates.microsoft.com`) |
 | Apps | Teams, new Outlook, the Microsoft 365 Copilot app and the unified Copilot app: provisioned build, and users holding a newer build than the image provisions |
 | Frameworks | Every `PackageDependency` in those apps' manifests (VCLibs, UI.Xaml, WindowsAppRuntime, …) must be on the machine at the `MinVersion` the manifest asks for — typically too old on an image from 2024 |
@@ -223,13 +223,20 @@ and stops the apps from drifting away from it per user.
 | Sign-in | `Microsoft.AAD.BrokerPlugin` present, and no FSLogix `redirections.xml` exclusion of `AppData\Local\Packages` or the app folders |
 | Capture | With `-ForCapture`: packages installed for a user but not provisioned (Sysprep stops on them) and a pending reboot fail the check |
 
-**What it fixes** (without `-CheckOnly`, in this order): the two hold-back policies,
-Shared Computer Activation, WebView2 (Evergreen Standalone installer, signature-checked),
-then the apps through the existing scripts —
+**What it updates** (every run without `-CheckOnly`, finding or not, in this order):
+Teams' self-update setting where FSLogix needs it, Shared Computer Activation, WebView2
+(Evergreen Standalone installer, signature-checked), then the apps to their newest build
+through the existing scripts —
 [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1)
 `-Name teams,outlook -Latest -Provision -RemoveOld` and `-Name copilot -Provision`, and
-[`Update-TeamsClient.ps1`](../Device/readme.md#update-teamsclientps1) `-AvdOptimizations`.
-Everything is read back afterwards.
+[`Update-TeamsClient.ps1`](../Device/readme.md#update-teamsclientps1) `-AvdOptimizations`
+(newest Teams, meeting add-in, IsWVDEnvironment, WebRTC redirector). They only change what
+is behind. Everything is read back afterwards.
+
+The newest Outlook: Microsoft publishes no version feed for it, so `-Latest` takes the newest
+build users on the host already updated to (Microsoft's installer otherwise). On a pool every
+host then provisions what the most recent user got — exactly the build FSLogix will ask the
+other hosts for.
 
 **Parameters**
 
@@ -240,7 +247,7 @@ Everything is read back afterwards.
 | `-SkipApps` | Do not call Repair-AppxPackageStore / Update-TeamsClient; only policies, Shared Computer Activation and WebView2 |
 | `-ComputerName` | Session hosts to run on over PowerShell remoting; ends with one table across the pool and names every column that differs between hosts |
 | `-Credential` | Credential for `-ComputerName` |
-| `-WorkingDir` | Folder for downloads (default: `C:\IT\SessionHostImage`) |
+| `-WorkingDir` | Folder for downloads — WebView2 and, when they are not next to this script, the two helper scripts (default: `C:\IT\SessionHostImage`) |
 | `-LogPath` | Folder for the transcript of a run that changes something (default: `C:\Temp`) |
 
 **Examples**
@@ -266,11 +273,17 @@ Everything is read back afterwards.
   msiexec runs with `/norestart`). A pending reboot is reported and left to you.
 - Run elevated or as System. It relaunches itself in 64-bit Windows PowerShell, because
   the AppX cmdlets need it.
-- With the hold-back on, Teams and Outlook only update when this script (or a new image)
-  updates them: run it monthly, on every host at once, after the Windows update.
+- Run it **weekly** on every host at once (a scheduled task as System works), and after each
+  Windows update: Outlook moves weekly, and every host has to keep up with it.
 - SlimCore also needs the tenant side: Teams VDI policy `VDI2Optimization` enabled, and
   Windows App 2.0.352.0 or newer on the endpoints. Neither can be checked from the host;
   `Update-TeamsClient.ps1 -CheckOnly` reads the session host's Teams VDI events, which do
   show whether users are really on SlimCore.
+- The two scripts it calls come from the repo when it runs from there, or from the folder
+  `-ComputerName` copies them to. Run on its own — only this file on the image VM — it fetches
+  them from GitHub at a **pinned commit** of `main` and runs them only when their SHA-256
+  matches, the same way [`Invoke-FSLogixShrink.ps1`](#invoke-fslogixshrinkps1) handles Invoke-FslShrinkDisk. To
+  move up: put the new commit and the hashes of both files in `$HelperCommit` /
+  `$HelperHashes` at the top of the script, after reading the diff.
 - `-ComputerName` copies this script and the two it calls to `C:\IT\SessionHostImage`
   on each host.

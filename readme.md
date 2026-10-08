@@ -467,7 +467,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 
 - Session host image ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — makes a Windows 11 multi-session image or AVD host fit for new Teams, new Outlook and Copilot with FSLogix, without changing FSLogix:
   - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
-  - Sets the Store and Teams update hold-back and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
+  - Updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build on every run (Teams' self-update off only where FSLogix needs it) and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
 
 ---
 
@@ -1008,6 +1008,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (17)
+| Change |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) runs on its own: when Update-TeamsClient.ps1 and Repair-AppxPackageStore.ps1 are not next to it (the repo, or the folder `-ComputerName` copies to), it fetches them from this repo on GitHub at a pinned commit of `main` (`746541e`, 2026-10-05) and refuses them unless the SHA-256 matches. Before, a copy of only this file on the image VM skipped every app fix. Pinned rather than the latest `main`, so a changed script is never run as System unseen; moving up means a new commit and two hashes, after reading the diff |
+| **[`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) keeps the apps at their newest build instead of holding them back.** It set Microsoft Store `AutoDownload = 2` to stop Outlook drifting, but new Outlook updates itself weekly from the Office CDN, not through the Store, and Microsoft documents no switch to stop it ([Manage updates in new Outlook](https://learn.microsoft.com/microsoft-365-apps/outlook/manage/manage-updates-new-outlook-windows)) — the setting only blocked Store updates of frameworks and Copilot. It is now shown, not set. Teams' self-update is only turned off where FSLogix is older than 2210 HF4 and replays exact versions. Every run without `-CheckOnly` now updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build, finding or not, and WebView2 counts as behind on any version below Edge Stable instead of only a lower major. The readmes advise a weekly run on every host |
+| Verified: syntax check; both hashes were computed from `git show` at that commit and match what raw.githubusercontent.com serves for it. **Not** verified: a run on a session host that actually downloads them |
+| Verified: syntax check; link check; the Outlook update channel taken from Microsoft Learn (Manage updates in new Outlook for Windows). **Not** verified: a run on a session host - the weekly cadence, Teams staying off only below 2210 HF4, and the newest Outlook build being picked up from users |
+
 ### 2026-10-08 (16)
 | Change |
 |--------|
@@ -1020,12 +1028,6 @@ These scripts are provided as-is. Always test in a non-production environment be
 |--------|
 | **[`Connect-M365.ps1`](scripts/Startup/readme.md#connect-m365ps1): GDAP app lookups, no partner scopes in a customer, and delegated sign-in through your own app.** `graph.appid.json` and `pnp.appid.json` are keyed by the onmicrosoft domain, while under GDAP the tenant is the customer GUID, so `-AppOnly` and the PnP ClientId lookup missed; they now also try the customer domain from `Connect-Tenant` and the tenant in the SharePoint URL. A delegated reconnect kept the scopes of the previous session even when it switched tenant, so partner scopes such as `Domain.ReadWrite.All` were requested in the customer; scopes are only carried over within the same tenant. New `-DelegatedClient`: `-ClientId` then names a public client of your own for a delegated sign-in instead of meaning app-only (SharePoint provisioning needs that) |
 | Verified: syntax check; under `Set-StrictMode`: the GDAP GUID resolves to the customer's domain key, a SharePoint admin URL to its tenant key, an unknown tenant to nothing, and `graph.appid.json` is found from a site URL; with mocked Graph cmdlets a switch from the partner to a customer tenant asks only for the new scopes, and `-DelegatedClient` passes the ClientId to a delegated sign-in. **Not** verified: against a tenant |
-
-### 2026-10-08 (15)
-| Change |
-|--------|
-| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) runs on its own: when Update-TeamsClient.ps1 and Repair-AppxPackageStore.ps1 are not next to it (the repo, or the folder `-ComputerName` copies to), it fetches them from this repo on GitHub at a pinned commit of `main` (`746541e`, 2026-10-05) and refuses them unless the SHA-256 matches. Before, a copy of only this file on the image VM skipped every app fix. Pinned rather than the latest `main`, so a changed script is never run as System unseen; moving up means a new commit and two hashes, after reading the diff |
-| Verified: syntax check; both hashes were computed from `git show` at that commit and match what raw.githubusercontent.com serves for it. **Not** verified: a run on a session host that actually downloads them |
 
 ### 2026-10-08 (14)
 | Change |
