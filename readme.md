@@ -49,7 +49,7 @@ Every workload has its own folder under [`scripts/`](scripts/readme.md), and eve
 | [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile, printer drivers + printers from a JSON file |
 | [`Linux/`](scripts/Linux/readme.md) | Linux servers (Debian/Ubuntu, 3CX Phone System) — bash disk cleanup: packages, journal, logs, temp, user caches, Docker, 3CX logs and backups |
 | [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
-| [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking |
+| [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking, session host image preparation (Teams, Outlook, Copilot) |
 | [`SMTP/`](scripts/SMTP/readme.md) | SMTP relay connectivity tests (one-time and recurring) |
 | [`Deployment/`](scripts/Deployment/readme.md) | USB toolkit for Windows setup and Autopilot enrollment during OOBE |
 | [`DNS/`](scripts/DNS/readme.md) | Resolve and import DNS records into AD-integrated DNS zones |
@@ -192,6 +192,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `T` | Device | [Update-TeamsClient](scripts/Device/Update-TeamsClient.ps1) — update new Teams + the Outlook meeting add-in when outdated |
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
+| `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -463,6 +464,10 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Downloads Invoke-FslShrinkDisk (FSLogix team) at a pinned commit and verifies its SHA-256
   - `-ReportOnly` lists every container on the share, largest first; otherwise shrinks them and summarises GB recovered and disks not processed (in use)
   - `-CheckHost` checks whether FSLogix's built-in compaction at sign-out can run (version, `VHDCompactDisk`, `defragsvc`, dynamic disks)
+
+- Session host image ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — makes a Windows 11 multi-session image or AVD host fit for new Teams, new Outlook and Copilot with FSLogix, without changing FSLogix:
+  - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
+  - Sets the Store and Teams update hold-back and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
 
 ---
 
@@ -854,6 +859,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← FSLogix / Azure Files profile diagnostics
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← shrink FSLogix profile disks, check compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← RDP/RDWeb login failure diagnostics
+    │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot fit for FSLogix on the image
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← real-time session + licensing monitor
     ├── <a href="scripts/SMTP/readme.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.md">readme.md</a>
@@ -1009,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 | **Scripts that silently returned too little.** [`Get-IntunePolicyInventory.ps1`](scripts/Office365Toolkit/Intune/readme.md#get-intunepolicyinventoryps1) called `Get-MgDeviceManagementConfigurationPolicy` and `Get-MgDeviceManagementIntent`, which do not exist in Microsoft.Graph v2: Settings Catalog and Endpoint Security were always missing. It now reads all five policy types through Graph with paging. [`Get-SecureScoreReport.ps1`](scripts/Office365Toolkit/Security/readme.md#get-securescorereportps1) always printed an empty control table (it read typed properties from `AdditionalProperties`); it now joins each control on its control profile for the maximum points and title |
 | **More Graph, fewer bugs.** [`Search-MailboxAuditLog.ps1`](scripts/Office365Toolkit/Exchange/readme.md#search-mailboxauditlogps1) now uses the Graph Audit Log Query API (create, poll, page) with new `-TimeoutMinutes`; `-UseExchange` keeps `Search-UnifiedAuditLog`, now one paged search per record type. [`Remove-EnterpriseAppConsent.ps1`](scripts/Office365Toolkit/Security/readme.md#remove-enterpriseappconsentps1) filters grants server-side instead of reading every grant in the tenant, stops on a failed read instead of reporting "no grants", escapes apostrophes in filters, shows role names instead of GUIDs and asks for write scopes only with `-Apply`. [`Test-MailboxForwardingRisk.ps1`](scripts/Office365Toolkit/Exchange/readme.md#test-mailboxforwardingriskps1) no longer calls an `[EX:/o=...]` recipient external. What stays on Exchange (add-ins, forwarding and sweep rules, CAS settings, EOP policies, the shared-mailbox list) has no Graph API; each readme says so |
 | Verified: syntax check; link check; every Mg cmdlet used exists in Microsoft.Graph 2.41.1 and the two removed ones do not; offline runs with mocked Graph calls of the Secure Score, Intune inventory (paging, assignment counts), audit query (request body, two pages, failed status) and app-consent logic (filters, escaping, role lookup); the forwarding recipient classifier unit-tested. **Not** verified: any run against a tenant - the real audit-query status values and record fields, `$expand=assignments` on beta `configurationPolicies`, whether the preview scopes suffice, and the GDAP path in practice |
+
+### 2026-10-08 (9)
+| Change |
+|--------|
+| **New [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1): a Windows 11 multi-session image (or AVD host) that keeps new Teams, new Outlook and Copilot working with FSLogix, without updating FSLogix.** Three pooled hosts built from a 2024 image (24H2, 26100) kept breaking the same way: an app updates itself per user on one host, FSLogix replays that exact version on another host that does not have it, and registration fails with `0x80070490`. Repair-AppxPackageStore and Update-TeamsClient fix the apps, but nothing checked what the image carries around them, or stopped the drift. The script checks the edition and pending reboot, the FSLogix build (read only), the Store / Teams update hold-back, WebView2 against Edge Stable, the provisioned builds and users holding a newer one, every framework the apps' manifests depend on, Teams on AVD (IsWVDEnvironment, SlimCore minimum build, the meeting add-in, the WebRTC redirector out of support since 1 October 2026 and gone 1 April 2027), Shared Computer Activation, the sign-in broker and `redirections.xml`; `-ForCapture` adds Sysprep readiness. It fixes the policies, SCA and WebView2 itself, the apps through the two existing scripts, reads everything back, and with `-ComputerName` compares the pool. Menu entry `J` |
+| Verified: syntax check; the Edge Stable lookup, the WebView2 / Edge / Office channel registry readers and the package-family regex were run locally on Windows 11 (not multi-session, not elevated). **Not** verified: a full run, the fixes, `-ComputerName` or `-ForCapture` on a real session host or image VM |
 
 ### 2026-10-08 (8)
 | Change |

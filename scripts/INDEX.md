@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-190 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+191 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -90,12 +90,12 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Install-Win32AppPackage.ps1`](TenantOnboarding/AppDeployment/Install-Win32AppPackage.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Download a zipped PSAppDeployToolkit (or similar) package and run its silent install. |
 | [`Invoke-DiskCleanupIntune.ps1`](Intune/DiskCleanup/Invoke-DiskCleanupIntune.ps1) | [`Intune/DiskCleanup/`](Intune/DiskCleanup/readme.md) | Intune Win32-app install command: schoont C:\ op en herstart het apparaat. |
 | [`Invoke-FSLogixShrink.ps1`](RDS/Invoke-FSLogixShrink.ps1) | [`RDS/`](RDS/readme.md) | Shrinks FSLogix profile / ODFC containers on a share with Invoke-FslShrinkDisk, and checks whether FSLogix's own compaction at sign-out is doing that job. |
-| [`Invoke-TeamsArchive.ps1`](Teams/Invoke-TeamsArchive.ps1) | [`Teams/`](Teams/readme.md) | Teams Archivering - Volledig Automatisch Script v8.19 |
+| [`Invoke-TeamsArchive.ps1`](Teams/Invoke-TeamsArchive.ps1) | [`Teams/`](Teams/readme.md) | Teams Archivering - Volledig Automatisch Script v9.0 |
 | [`Invoke-WindowsActivation.ps1`](Device/Invoke-WindowsActivation.ps1) | [`Device/`](Device/readme.md) | Activate Windows or manage product key and KMS settings. |
 | [`Invoke-WindowsCleanup.ps1`](Device/Invoke-WindowsCleanup.ps1) | [`Device/`](Device/readme.md) | Clean up temporary files, caches, and reclaimable disk space on Windows. |
 | [`logic-permissies.ps1`](Graph/logic-permissies.ps1) | [`Graph/`](Graph/readme.md) | Grant a Microsoft Graph application permission to a Logic App's managed identity. Supports -WhatIf. |
 | [`Make-lockscreen.ps1`](Intune/Desktop/Background/Lockscreen/Make-lockscreen.ps1) | [`Intune/Desktop/Background/Lockscreen/`](Intune/Desktop/Background/Lockscreen/readme.md) | Make-lockscreen.ps1 |
-| [`Migrate-Calendar.ps1`](Exchange/Migrate-Calendar.ps1) | [`Exchange/`](Exchange/readme.md) | Migrates an M365 Group calendar to a Room or Shared Mailbox. Automatically creates an App Registration if no ClientId/ClientSecret is provided. |
+| [`Migrate-Calendar.ps1`](Exchange/Migrate-Calendar.ps1) | [`Exchange/`](Exchange/readme.md) | Migrates an M365 Group calendar to a Room or Shared Mailbox. Writes with a temporary App Registration that is removed again at the end, unless your own app is… |
 | [`Monitor-SASBatchErrors.ps1`](SAS/Monitor-SASBatchErrors.ps1) | [`SAS/`](SAS/readme.md) | Comprehensive SAS batch job monitoring with Event Viewer integration |
 | [`Move-InboxToArchive.ps1`](Exchange/Move-InboxToArchive.ps1) | [`Exchange/`](Exchange/readme.md) | Archive all Inbox messages of a mailbox to the Archive folder via Microsoft Graph. |
 | [`Move-SharedCalendar.ps1`](Exchange/Move-SharedCalendar.ps1) | [`Exchange/`](Exchange/readme.md) | All in one: find a shared calendar by keyword, move it into a resource mailbox with every item and permission, and list who has to switch. One sign-in. |
@@ -142,8 +142,8 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Rollback-InternalMic.ps1`](Device/audio/Rollback-InternalMic.ps1) | [`Device/audio/`](Device/audio/readme.md) | Rollback: Re-enable Internal Microphone |
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |
 | [`Search-MailboxAuditLog.ps1`](Office365Toolkit/Exchange/Search-MailboxAuditLog.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Search the Microsoft 365 Unified Audit Log for sign-in and mailbox access events. |
-| [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content tenant-wide through Microsoft Graph - app-only, no interactive sign-in - and report the permissions on every hit. |
-| [`Set-Calendar-rights.ps1`](Exchange/Set-Calendar-rights.ps1) | [`Exchange/`](Exchange/readme.md) | Geeft een gebruiker toegangsrechten op de agenda van een andere gebruiker. |
+| [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content through Microsoft Graph - signed in as you by default, or app-only tenant-wide - and report the permissions on every hit. |
+| [`Set-Calendar-rights.ps1`](Exchange/Set-Calendar-rights.ps1) | [`Exchange/`](Exchange/readme.md) | Give a user access rights on another user's calendar. |
 | [`Set-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Set-CorporateWallpaper.ps1 |
 | [`Set-DefaultFileAssociation.ps1`](TenantOnboarding/AppDeployment/Set-DefaultFileAssociation.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Set the default application for a file extension, bypassing Windows' UserChoice hash protection. |
 | [`Set-Distributionlist-dynamic-static.ps1`](Exchange/Set-Distributionlist-dynamic-static.ps1) | [`Exchange/`](Exchange/readme.md) | Resolves members of a dynamic distribution group and copies them into a regular distribution group. |
@@ -199,6 +199,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Update-Modules.ps1`](Startup/Update-Modules.ps1) | [`Startup/`](Startup/readme.md) | Controleert en update de PowerShell modules van deze repo, en daarna desgewenst alle andere. |
 | [`Update-ReadmeHeader.ps1`](Startup/Update-ReadmeHeader.ps1) | [`Startup/`](Startup/readme.md) | Put the language switcher and the breadcrumb at the top of every readme, in all three languages. Supports -WhatIf. |
 | [`Update-ScriptIndex.ps1`](Startup/Update-ScriptIndex.ps1) | [`Startup/`](Startup/readme.md) | Build scripts/INDEX.md - one searchable A-Z table of every script in the repo, with a link to the file, its folder readme and what it does. Supports -WhatIf. |
+| [`Update-SessionHostImage.ps1`](RDS/Update-SessionHostImage.ps1) | [`RDS/`](RDS/readme.md) | Check and prepare a Windows 11 multi-session image (or a running AVD session host) so new Teams, new Outlook and Copilot keep working with FSLogix profile cont… |
 | [`Update-SharePointShareStatus.ps1`](SharePoint/Provisioning/Update-SharePointShareStatus.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Work out how every document is actually shared and write that back to the Deelstatus column. Reports files shared wider than their Vertrouwelijkheid tag allows… |
 | [`Update-TeamsClient.ps1`](Device/Update-TeamsClient.ps1) | [`Device/`](Device/readme.md) | Update the new Microsoft Teams client, including the Teams Meeting Add-in for Outlook, only when Microsoft publishes a newer build. Supports -WhatIf. |
 | [`Update-UnifiFirmware.ps1`](Network/UniFi/Update-UnifiFirmware.ps1) | [`Network/UniFi/`](Network/UniFi/readme.md) | List and optionally trigger firmware upgrades for UniFi devices across one or all sites. |

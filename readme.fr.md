@@ -49,7 +49,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD, pilotes d'imprimante + imprimantes depuis un fichier JSON |
 | [`Linux/`](scripts/Linux/readme.fr.md) | Serveurs Linux (Debian/Ubuntu, 3CX Phone System) — nettoyage du disque en bash : paquets, journal, journaux, fichiers temporaires, caches utilisateur, Docker, journaux et sauvegardes 3CX |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
-| [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix |
+| [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix, préparation de l'image des hôtes de session (Teams, Outlook, Copilot) |
 | [`SMTP/`](scripts/SMTP/readme.fr.md) | Tests de connectivité d'un relais SMTP (ponctuels et récurrents) |
 | [`Deployment/`](scripts/Deployment/readme.fr.md) | Boîte à outils USB pour l'installation de Windows et l'inscription Autopilot pendant l'OOBE |
 | [`DNS/`](scripts/DNS/readme.fr.md) | Résoudre des enregistrements DNS et les importer dans des zones DNS intégrées à AD |
@@ -192,6 +192,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `T` | Device | [Update-TeamsClient](scripts/Device/Update-TeamsClient.ps1) — mettre à jour le nouveau Teams + le complément de réunion Outlook s'ils sont obsolètes |
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — réparer les paquets AppX qui échouent avec 0x80070490 (Teams, nouvel Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
+| `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — installer des pilotes d'imprimante (depuis GitHub) et des imprimantes à partir d'un fichier JSON |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
@@ -463,6 +464,10 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Télécharge Invoke-FslShrinkDisk (équipe FSLogix) à un commit épinglé et vérifie son SHA-256
   - `-ReportOnly` liste chaque conteneur du partage, du plus grand au plus petit ; sinon les réduit et résume les Go récupérés et les disques non traités (en cours d'utilisation)
   - `-CheckHost` vérifie si la compaction intégrée de FSLogix à la déconnexion peut s'exécuter (version, `VHDCompactDisk`, `defragsvc`, disques dynamiques)
+
+- Image d'hôte de session ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — rend une image Windows 11 multisession ou un hôte AVD apte au nouveau Teams, au nouvel Outlook et à Copilot avec FSLogix, sans modifier FSLogix :
+  - Vérifie WebView2, les frameworks AppX dont dépendent les applications, les builds provisionnées et les écarts par utilisateur, Teams sur AVD (SlimCore, le redirecteur WebRTC retiré le 1er octobre 2026), Shared Computer Activation et le broker de connexion
+  - Bloque les mises à jour du Store et de Teams et corrige les applications via `Repair-AppxPackageStore.ps1` et `Update-TeamsClient.ps1` ; `-ComputerName` compare tout le pool, `-ForCapture` vérifie que Sysprep peut passer
 
 ---
 
@@ -854,6 +859,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← diagnostic des profils FSLogix / Azure Files
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← réduire les disques FSLogix, vérifier la compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnostic des échecs de connexion RDP/RDWeb
+    │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot compatibles FSLogix sur l'image
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← surveillance en temps réel des sessions + licences
     ├── <a href="scripts/SMTP/readme.fr.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.fr.md">readme.md</a>
@@ -1009,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 | **Des scripts qui renvoyaient silencieusement trop peu.** [`Get-IntunePolicyInventory.ps1`](scripts/Office365Toolkit/Intune/readme.fr.md#get-intunepolicyinventoryps1) appelait `Get-MgDeviceManagementConfigurationPolicy` et `Get-MgDeviceManagementIntent`, qui n'existent pas dans Microsoft.Graph v2 : Settings Catalog et Endpoint Security manquaient toujours. Il lit maintenant les cinq types de stratégies via Graph, avec pagination. [`Get-SecureScoreReport.ps1`](scripts/Office365Toolkit/Security/readme.fr.md#get-securescorereportps1) affichait toujours un tableau de contrôles vide (il lisait des propriétés typées dans `AdditionalProperties`) ; il relie maintenant chaque contrôle à son profil pour le maximum de points et le titre |
 | **Plus de Graph, moins de bugs.** [`Search-MailboxAuditLog.ps1`](scripts/Office365Toolkit/Exchange/readme.fr.md#search-mailboxauditlogps1) utilise maintenant l'API Graph Audit Log Query (créer, attendre, paginer) avec le nouveau `-TimeoutMinutes` ; `-UseExchange` garde `Search-UnifiedAuditLog`, désormais une recherche paginée par type d'enregistrement. [`Remove-EnterpriseAppConsent.ps1`](scripts/Office365Toolkit/Security/readme.fr.md#remove-enterpriseappconsentps1) filtre les autorisations côté serveur au lieu de lire toutes celles du tenant, s'arrête sur une lecture échouée au lieu d'annoncer « aucune autorisation », échappe les apostrophes dans les filtres, affiche les noms de rôles au lieu des GUID et ne demande les étendues d'écriture qu'avec `-Apply`. [`Test-MailboxForwardingRisk.ps1`](scripts/Office365Toolkit/Exchange/readme.fr.md#test-mailboxforwardingriskps1) ne qualifie plus d'externe un destinataire `[EX:/o=...]`. Ce qui reste sur Exchange (compléments, règles de transfert et de balayage, paramètres CAS, stratégies EOP, la liste des boîtes partagées) n'a pas d'API Graph ; chaque readme le dit |
 | Vérifié : contrôle de syntaxe ; contrôle des liens ; chaque cmdlet Mg utilisée existe dans Microsoft.Graph 2.41.1 et les deux supprimées non ; exécutions hors ligne avec des appels Graph simulés de la logique Secure Score, de l'inventaire Intune (pagination, nombre d'attributions), de la requête d'audit (corps, deux pages, statut en échec) et du consentement d'applications (filtres, échappement, recherche des rôles) ; le classement des destinataires de transfert testé unitairement. **Non** vérifié : toute exécution sur un tenant - les vraies valeurs de statut et champs d'enregistrement de la requête d'audit, `$expand=assignments` sur `configurationPolicies` en beta, la suffisance des étendues d'aperçu, et le chemin GDAP en pratique |
+
+### 2026-10-08 (9)
+| Modification |
+|--------|
+| **Nouveau [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) : une image Windows 11 multisession (ou un hôte AVD) sur laquelle le nouveau Teams, le nouvel Outlook et Copilot continuent de fonctionner avec FSLogix, sans mettre FSLogix à jour.** Trois hôtes mutualisés construits à partir d'une image de 2024 (24H2, 26100) cassaient toujours de la même façon : une application se met à jour par utilisateur sur un hôte, FSLogix rejoue cette version exacte sur un autre hôte qui ne l'a pas, et l'inscription échoue avec `0x80070490`. Repair-AppxPackageStore et Update-TeamsClient réparent les applications, mais rien ne vérifiait ce que l'image fournit autour d'elles, ni n'empêchait l'écart. Le script vérifie l'édition et un redémarrage en attente, la build FSLogix (lecture seule), le blocage des mises à jour du Store et de Teams, WebView2 par rapport à Edge Stable, les builds provisionnées et les utilisateurs qui en ont une plus récente, chaque framework dont dépendent les manifestes des applications, Teams sur AVD (IsWVDEnvironment, la build minimale pour SlimCore, le complément de réunion, le redirecteur WebRTC plus pris en charge depuis le 1er octobre 2026 et supprimé le 1er avril 2027), Shared Computer Activation, le broker de connexion et `redirections.xml` ; `-ForCapture` ajoute la vérification Sysprep. Il corrige lui-même les stratégies, SCA et WebView2, les applications via les deux scripts existants, relit tout et, avec `-ComputerName`, compare le pool. Entrée de menu `J` |
+| Vérifié : contrôle de syntaxe ; la recherche d'Edge Stable, la lecture de WebView2 / Edge / du canal Office dans le registre et l'expression régulière des familles de packages ont été exécutées localement sous Windows 11 (pas multisession, pas en mode élevé). **Non** vérifié : une exécution complète, les corrections, `-ComputerName` ou `-ForCapture` sur un vrai hôte de session ou une VM d'image |
 
 ### 2026-10-08 (8)
 | Modification |

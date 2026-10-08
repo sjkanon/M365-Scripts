@@ -49,7 +49,7 @@ Elke workload heeft een eigen map onder [`scripts/`](scripts/readme.nl.md), en e
 | [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD, printerdrivers + printers vanuit een JSON-bestand |
 | [`Linux/`](scripts/Linux/readme.nl.md) | Linux-servers (Debian/Ubuntu, 3CX Phone System) — schijfopschoning in bash: pakketten, journal, logs, temp, gebruikerscaches, Docker, 3CX-logs en -back-ups |
 | [`Network/`](scripts/Network/readme.nl.md) | Controle van TCP-poorten, diagnose van authenticatie/netwerk, stresstest van bestands-I/O |
-| [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access, live monitoring van sessies, diagnose en verkleining van FSLogix-profielschijven |
+| [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access, live monitoring van sessies, diagnose en verkleining van FSLogix-profielschijven, sessiehost-image klaarmaken (Teams, Outlook, Copilot) |
 | [`SMTP/`](scripts/SMTP/readme.nl.md) | Connectiviteitstests voor een SMTP-relay (eenmalig en terugkerend) |
 | [`Deployment/`](scripts/Deployment/readme.nl.md) | USB-toolkit voor Windows-installatie en Autopilot-inschrijving tijdens OOBE |
 | [`DNS/`](scripts/DNS/readme.nl.md) | DNS-records opzoeken en importeren in AD-geïntegreerde DNS-zones |
@@ -192,6 +192,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `T` | Device | [Update-TeamsClient](scripts/Device/Update-TeamsClient.ps1) — de nieuwe Teams en de Outlook-invoegtoepassing voor vergaderingen bijwerken als ze verouderd zijn |
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — AppX-pakketten repareren die falen met 0x80070490 (Teams, nieuwe Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
+| `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
@@ -463,6 +464,10 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Downloadt Invoke-FslShrinkDisk (FSLogix-team) op een vastgezette commit en controleert de SHA-256
   - `-ReportOnly` toont elke container op de share, grootste eerst; anders verkleint het ze en vat het teruggewonnen GB en niet-verwerkte (gekoppelde) schijven samen
   - `-CheckHost` controleert of de ingebouwde compressie van FSLogix bij afmelden kan draaien (versie, `VHDCompactDisk`, `defragsvc`, dynamische schijven)
+
+- Sessiehost-image ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — maakt een Windows 11 multi-session-image of AVD-host geschikt voor de nieuwe Teams, de nieuwe Outlook en Copilot met FSLogix, zonder FSLogix te wijzigen:
+  - Controleert WebView2, de AppX-frameworks waar de apps van afhangen, klaargezette builds en afwijkingen per gebruiker, Teams op AVD (SlimCore, de WebRTC-redirector die op 1 oktober 2026 met pensioen ging), Shared Computer Activation en de aanmeldbroker
+  - Zet de rem op updates voor de Store en Teams en herstelt de apps via `Repair-AppxPackageStore.ps1` en `Update-TeamsClient.ps1`; `-ComputerName` vergelijkt de hele pool, `-ForCapture` controleert of Sysprep kan
 
 ---
 
@@ -854,6 +859,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← diagnose van FSLogix- / Azure Files-profielen
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← FSLogix-profielschijven verkleinen, compressie controleren
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnose van mislukte RDP-/RDWeb-aanmeldingen
+    │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot geschikt voor FSLogix op de image
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← realtime monitor van sessies + licenties
     ├── <a href="scripts/SMTP/readme.nl.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.nl.md">readme.md</a>
@@ -1009,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 | **Scripts die stilletjes te weinig teruggaven.** [`Get-IntunePolicyInventory.ps1`](scripts/Office365Toolkit/Intune/readme.nl.md#get-intunepolicyinventoryps1) riep `Get-MgDeviceManagementConfigurationPolicy` en `Get-MgDeviceManagementIntent` aan, die in Microsoft.Graph v2 niet bestaan: Settings Catalog en Endpoint Security ontbraken altijd. Het leest nu alle vijf beleidstypen via Graph, met paging. [`Get-SecureScoreReport.ps1`](scripts/Office365Toolkit/Security/readme.nl.md#get-securescorereportps1) toonde altijd een lege controltabel (het las getypeerde eigenschappen uit `AdditionalProperties`); het koppelt elke control nu aan zijn controlprofiel voor de maximale punten en de titel |
 | **Meer Graph, minder bugs.** [`Search-MailboxAuditLog.ps1`](scripts/Office365Toolkit/Exchange/readme.nl.md#search-mailboxauditlogps1) gebruikt nu de Graph Audit Log Query API (aanmaken, wachten, pagineren) met nieuw `-TimeoutMinutes`; `-UseExchange` houdt `Search-UnifiedAuditLog`, nu één gepagineerde zoekopdracht per recordtype. [`Remove-EnterpriseAppConsent.ps1`](scripts/Office365Toolkit/Security/readme.nl.md#remove-enterpriseappconsentps1) filtert grants op de server in plaats van alle grants van de tenant te lezen, stopt bij een mislukte leesactie in plaats van "geen grants" te melden, escapet apostroffen in filters, toont rolnamen in plaats van GUID's en vraagt schrijfscopes alleen met `-Apply`. [`Test-MailboxForwardingRisk.ps1`](scripts/Office365Toolkit/Exchange/readme.nl.md#test-mailboxforwardingriskps1) noemt een ontvanger `[EX:/o=...]` niet langer extern. Wat op Exchange blijft (add-ins, doorstuur- en sweepregels, CAS-instellingen, EOP-beleid, de lijst met gedeelde mailboxen) heeft geen Graph-API; elke readme zegt dat |
 | Geverifieerd: syntaxcheck; linkcheck; elke gebruikte Mg-cmdlet bestaat in Microsoft.Graph 2.41.1 en de twee verdwenen niet; offline runs met gemockte Graph-aanroepen van de logica voor Secure Score, de Intune-inventaris (paging, aantallen toewijzingen), de auditquery (request body, twee pagina's, mislukte status) en app-consent (filters, escaping, rolopzoeking); de classificatie van doorstuurontvangers met een unittest. **Niet** geverifieerd: een run tegen een tenant - de echte statuswaarden en recordvelden van de auditquery, `$expand=assignments` op beta `configurationPolicies`, of de previewscopes volstaan, en het GDAP-pad in de praktijk |
+
+### 2026-10-08 (9)
+| Wijziging |
+|--------|
+| **Nieuw [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1): een Windows 11 multi-session-image (of AVD-host) waarop de nieuwe Teams, de nieuwe Outlook en Copilot blijven werken met FSLogix, zonder FSLogix bij te werken.** Drie gedeelde hosts, gebouwd van een image uit 2024 (24H2, 26100), gingen steeds op dezelfde manier stuk: een app werkt zichzelf per gebruiker bij op één host, FSLogix speelt die exacte versie opnieuw af op een andere host die hem niet heeft, en de registratie mislukt met `0x80070490`. Repair-AppxPackageStore en Update-TeamsClient herstellen de apps, maar niets controleerde wat de image eromheen meedraagt, of hield het weglopen tegen. Het script controleert de editie en een openstaande herstart, de FSLogix-build (alleen lezen), de rem op updates voor de Store en Teams, WebView2 tegenover Edge Stable, de klaargezette builds en gebruikers met een nieuwere, elk framework waar de manifests van de apps van afhangen, Teams op AVD (IsWVDEnvironment, de minimale build voor SlimCore, de vergaderinvoegtoepassing, de WebRTC-redirector die sinds 1 oktober 2026 niet meer ondersteund wordt en op 1 april 2027 verdwijnt), Shared Computer Activation, de aanmeldbroker en `redirections.xml`; `-ForCapture` voegt de Sysprep-controle toe. Het herstelt het beleid, SCA en WebView2 zelf, de apps via de twee bestaande scripts, leest alles opnieuw uit en vergelijkt met `-ComputerName` de pool. Menu-item `J` |
+| Geverifieerd: syntaxcontrole; het opvragen van Edge Stable, het uitlezen van WebView2 / Edge / het Office-kanaal uit het register en de regex voor pakketfamilies zijn lokaal gedraaid op Windows 11 (niet multi-session, niet verhoogd). **Niet** geverifieerd: een volledige run, de herstelacties, `-ComputerName` of `-ForCapture` op een echte sessiehost of image-VM |
 
 ### 2026-10-08 (8)
 | Wijziging |
