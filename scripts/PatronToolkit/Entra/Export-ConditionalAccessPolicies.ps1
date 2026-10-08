@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Back up all Conditional Access policies and named locations to JSON/CSV.
@@ -22,7 +22,18 @@
     -IncludeNamedLocations:$false to skip.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1) or
+    your own tenant. Required for app-only sign-in.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Export-ConditionalAccessPolicies.ps1
@@ -30,18 +41,31 @@
 .EXAMPLE
     .\Export-ConditionalAccessPolicies.ps1 -OutputPath "C:\Backups\ContosoCA"
 
+.EXAMPLE
+    .\Export-ConditionalAccessPolicies.ps1 -TenantId contoso.onmicrosoft.com -AppOnly
+
 .NOTES
     Inspired by the capability list of the retired directorcia/patron toolkit
     (ca-policy-get.ps1 / ca-location-get.ps1), rewritten from scratch against the
     Microsoft.Graph.Identity.SignIns module — the originals used the deprecated
     Microsoft.Graph.Intune module and Connect-MSGraph.
+
+    Sign-in: Microsoft Graph through scripts\Startup\Connect-M365.ps1 - delegated by
+    default (scope Policy.Read.All; device code / GDAP customer per load.config.ps1),
+    app-only with -ClientId/-CertificateThumbprint or -AppOnly (application permission
+    Policy.Read.All). An existing fitting Graph session is reused and left connected.
 #>
 [CmdletBinding()]
 param(
     [string] $OutputPath,
     [switch] $IncludeNamedLocations = $true,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -60,16 +84,8 @@ function ConvertTo-SafeFileName {
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Policy.Read.All') }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+$graph = Connect-M365Graph -Scopes 'Policy.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -86,7 +102,7 @@ try {
     $policies = @(Get-MgIdentityConditionalAccessPolicy -All -ErrorAction Stop)
 } catch {
     Write-Host "  [ERROR] Could not retrieve Conditional Access policies: $($_.Exception.Message)" -ForegroundColor Red
-    if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
 }
 
@@ -135,4 +151,4 @@ Write-Host "  Backup complete: $OutputPath" -ForegroundColor Cyan
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

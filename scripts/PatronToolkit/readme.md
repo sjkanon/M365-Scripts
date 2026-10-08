@@ -18,6 +18,12 @@ overlap, this toolkit consolidates ~70 of those single-purpose scripts into 13
 well-parameterized ones, grouped by capability rather than ported 1:1. See each script's
 `.NOTES` section for exactly which upstream scripts it replaces.
 
+Every script signs in through [`Connect-M365.ps1`](../Startup/readme.md#connect-m365ps1):
+Microsoft Graph wherever Graph has an API, **delegated by default** (you sign in as the
+admin; device code and the GDAP customer from `load.config.ps1`), app-only with `-ClientId`
++ `-CertificateThumbprint` or `-AppOnly`. Exchange Online, Teams PowerShell and PnP are only
+used for the work Graph cannot do — each script's notes say which and why.
+
 ---
 
 ## Folders

@@ -32,7 +32,10 @@ finding.
 | `-AdminsOnly` | No | Only report on directory role holders |
 | `-NotRegisteredOnly` | No | Only include users who are not MFA-registered |
 | `-OutputPath` | No | CSV report path (default: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -49,7 +52,11 @@ finding.
 
 **Notes**
 - Requires an Entra ID P1/P2 license (the underlying report is a Premium feature)
-- Required scope: `Reports.Read.All` (or `AuditLog.Read.All`)
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Microsoft
+  Graph, delegated by default (scopes `AuditLog.Read.All`, `Reports.Read.All` plus a
+  Reports Reader / Security Reader / Global Reader role); app-only with `-ClientId` +
+  `-CertificateThumbprint` or `-AppOnly` (application permission `AuditLog.Read.All`)
+- `-UserList` matching is now case-insensitive and also works when only one user matches
 
 ---
 
@@ -67,7 +74,10 @@ community baseline. Read-only.
 |-----------|----------|-------------|
 | `-OutputPath` | No | Backup folder (default: `.\CAPolicyBackup_<timestamp>\` under `C:\Temp\` / `~/Downloads\`) |
 | `-IncludeNamedLocations` | No | Also export named locations (default: on) |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Tenant ID or domain. Defaults to the GDAP customer (`load.config.ps1`) or your own tenant; required for app-only |
+| `-ClientId` | No | App registration for app-only sign-in (with `-CertificateThumbprint`). Without it the script signs in delegated, as you |
+| `-CertificateThumbprint` | No | Certificate thumbprint for app-only sign-in with `-ClientId` |
+| `-AppOnly` | No | App-only sign-in with the ClientId and thumbprint for the tenant from `graph.appid.json` |
 
 **Examples**
 
@@ -75,13 +85,19 @@ community baseline. Read-only.
 .\Export-ConditionalAccessPolicies.ps1
 
 .\Export-ConditionalAccessPolicies.ps1 -OutputPath "C:\Backups\ContosoCA"
+
+# App-only, with the app registration from graph.appid.json
+.\Export-ConditionalAccessPolicies.ps1 -TenantId contoso.onmicrosoft.com -AppOnly
 ```
 
 **Notes**
 - Generic CA policy JSON re-import was intentionally not built — treat the JSON as a
   backup/diff artifact, not an importable format; use
   `scripts/Entra/Import-ConditionalAccessBaseline.ps1` for a maintained import flow
-- Required scope: `Policy.Read.All`
+- Sign-in via [`Connect-M365.ps1`](../../Startup/readme.md#connect-m365ps1): Microsoft
+  Graph, delegated by default (scope `Policy.Read.All`); app-only with `-ClientId` +
+  `-CertificateThumbprint` or `-AppOnly` (application permission `Policy.Read.All`). A
+  fitting Graph session that is already open is reused and left connected
 
 **Required module**
 ```powershell

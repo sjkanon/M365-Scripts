@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report MFA and SSPR registration status for all (or selected) users via Microsoft Graph.
@@ -27,7 +27,18 @@
     CSV report path. Defaults to .\MfaRegistrationReport_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1) or
+    your own tenant. Required for app-only sign-in.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-MfaRegistrationReport.ps1
@@ -45,8 +56,13 @@
     Inspired by the capability list of the retired directorcia/patron toolkit
     (graph-usrreg-read.ps1), rewritten from scratch against the modern Graph reports API —
     the original used the deprecated beta credentialUserRegistrationDetails endpoint and
-    stored app credentials in local XML files. This script uses the current v1.0 endpoint
-    and an interactive/delegated Graph session (or -TenantId for app-only elsewhere).
+    stored app credentials in local XML files. This script uses the current v1.0 endpoint.
+
+    Sign-in: Microsoft Graph through scripts\Startup\Connect-M365.ps1 - delegated by
+    default (scopes AuditLog.Read.All, Reports.Read.All; device code / GDAP customer per
+    load.config.ps1), app-only with -ClientId/-CertificateThumbprint or -AppOnly
+    (application permission AuditLog.Read.All). An existing fitting Graph session is
+    reused and left connected.
 #>
 [CmdletBinding()]
 param(
@@ -54,24 +70,21 @@ param(
     [switch] $AdminsOnly,
     [switch] $NotRegisteredOnly,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Reports.Read.All', 'AuditLog.Read.All') }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+$graph = Connect-M365Graph -Scopes 'AuditLog.Read.All', 'Reports.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -99,14 +112,14 @@ try {
     }
 } catch {
     Write-Host "  [ERROR] Could not retrieve registration details: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "  [HINT] Requires an Entra ID P1/P2 license and Reports.Read.All (or AuditLog.Read.All) permission." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    Write-Host "  [HINT] Requires an Entra ID P1/P2 license, AuditLog.Read.All and (delegated) a Reports Reader / Security Reader / Global Reader role." -ForegroundColor Yellow
+    Disconnect-M365Graph $graph
     exit 1
 }
 
 if ($UserList) {
-    $userSet = $UserList | ForEach-Object { $_.ToLowerInvariant() }
-    $records = $records | Where-Object { $userSet -contains $_.userPrincipalName.ToLowerInvariant() }
+    # -contains compares case-insensitively; @() keeps .Count right for 0 or 1 match.
+    $records = @($records | Where-Object { $UserList -contains $_.userPrincipalName })
 }
 
 Write-Host "  Retrieved $($records.Count) user registration record(s)." -ForegroundColor DarkGray
@@ -162,4 +175,4 @@ Write-Host ("  {0} user(s) reported — {1} not MFA-registered ({2} admin{3})" -
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph
