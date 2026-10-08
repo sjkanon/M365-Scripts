@@ -209,7 +209,7 @@ Disconnect-M365Graph $graph    # disconnects only what this call connected
 
 | Function | What it does |
 |----------|--------------|
-| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive`, `-Force`; `-Force` signs in again even when the session would fit. Safe under `Set-StrictMode`, also without `load.ps1` |
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive`, `-Force`; `-Force` signs in again even when the session would fit. Safe under `Set-StrictMode`, also without `load.ps1`; `-DelegatedClient` signs in delegated through your own app (`-ClientId`) instead of app-only |
 | `Disconnect-M365Graph` | Disconnects only when `Connect-M365Graph` opened the session |
 | `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` adds Security & Compliance (`Connect-IPPSSession`), `-EnableSearchOnlySession` for Content Search |
 | `Disconnect-M365Exchange` | Closes only the sessions `Connect-M365Exchange` opened (by connection id), never the caller's |
