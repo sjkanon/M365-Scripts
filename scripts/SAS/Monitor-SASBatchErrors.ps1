@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Comprehensive SAS batch job monitoring with Event Viewer integration
 

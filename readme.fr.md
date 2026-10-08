@@ -1008,6 +1008,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (20)
+| Modification |
+|--------|
+| **Les 23 scripts qui ne s'analysaient pas sous Windows PowerShell 5.1 passent maintenant, et le job 5.1 de la CI bloque à nouveau.** 22 étaient en UTF-8 sans BOM avec un caractère comme `—` ou `é` : 5.1 lit un tel fichier en ANSI, un octet de ce caractère devient un guillemet isolé, et le script s'arrête sur des erreurs comme « string is missing the terminator » - précisément sur les machines qui utilisent 5.1 : Intune, GPO, tâches planifiées. Chacun a reçu un BOM UTF-8 et rien d'autre ; le contenu est identique octet pour octet. Parmi eux [`load.ps1`](load.ps1), [`Remove-OemBloatware.ps1`](scripts/Device/Remove-OemBloatware.ps1), les deux scripts audio, [`New-CloudDriveMapping.ps1`](scripts/Device/DriveMapping/New-CloudDriveMapping.ps1), les scripts Intune CoworkPrerequisites, les scripts SAS et SMTP et [`Invoke-TeamsArchive.ps1`](scripts/Teams/Invoke-TeamsArchive.ps1). [`create_scheduled_task.ps1`](scripts/Reporting/Licensing/create_scheduled_task.ps1) indique `#Requires -Version 5.1` mais utilisait `?.Source`, une syntaxe PowerShell 7 ; c'est maintenant `Select-Object -ExpandProperty Source` |
+| [`ci.yml`](.github/workflows/ci.yml) : le job Windows PowerShell 5.1 n'est plus `continue-on-error`, donc un nouveau script enregistré en UTF-8 sans BOM avec un caractère non ASCII fait échouer l'exécution |
+| Vérifié : chaque `.ps1`/`.psm1` sans `#Requires -Version 7` s'analyse avec `powershell.exe` 5.1 sur cette machine (0 erreur, il y en avait 23), et [`Test-PowerShellSyntax.ps1`](scripts/Startup/Test-PowerShellSyntax.ps1) sous PowerShell 7 reste propre. **Non** vérifié : les scripts eux-mêmes n'ont pas été exécutés - c'est l'analyse qui a changé, pas leur logique |
+
 ### 2026-10-08 (19)
 | Modification |
 |--------|

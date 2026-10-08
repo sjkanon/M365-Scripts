@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Setup script for SAS batch error monitoring
 

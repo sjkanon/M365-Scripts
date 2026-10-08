@@ -49,12 +49,11 @@ jobs:
   # Windows PowerShell 5.1 reads a .ps1 without BOM as ANSI, so a "—" or "é" in a UTF-8 file
   # becomes a stray quote and the script no longer parses. PowerShell 7 does not have this
   # problem, which is why it goes unnoticed - until the script runs on a device through Intune,
-  # a GPO or a scheduled task. Scripts with #Requires -Version 7 are skipped.
+  # a GPO or a scheduled task. The cure is saving the file as UTF-8 with BOM.
+# Scripts with #Requires -Version 7 are skipped.
   windows-powershell:
     name: Windows PowerShell 5.1 - syntax
     runs-on: windows-latest
-    # Many scripts still fail here; reported, not blocking, until they are fixed.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
 
