@@ -116,7 +116,7 @@ Site-specific settings that do not belong in the repo. `start.bat` loads it from
 
 ### Autopilot online (option 4)
 
-Runs `Get-WindowsAutoPilotInfo.ps1 -Online` — uploads the hardware hash directly to Intune without generating a CSV file. Prompts for Microsoft 365 admin credentials. Device appears in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** within a few minutes.
+Runs `Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode` — uploads the hardware hash directly to Intune through Microsoft Graph without generating a CSV file. Sign in with a Microsoft 365 admin account by device code: open the address shown on a phone or another PC and enter the code, so no browser is needed during OOBE. Device appears in **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** within a few minutes.
 
 > Windows Update Settings panel is not available in OOBE, but `UsoClient` triggers updates directly from the command line and works fine.
 
@@ -129,7 +129,7 @@ Uses `winget install Microsoft.PowerShell`. Requires internet. If `winget` is no
 For Intune/cloud-managed environments. Runs in sequence:
 1. Renames the device — prompts for prefix, appends serial number (`PREFIX-SERIALNUMBER`)
 2. Removes existing `compHash.csv`
-3. Runs Autopilot enrollment online (`Get-WindowsAutoPilotInfo.ps1 -Online`)
+3. Runs Autopilot enrollment online (`Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode`)
 4. Installs Windows updates via `PSWindowsUpdate`
 5. Restarts after 30 seconds (Ctrl+C to cancel)
 
@@ -158,6 +158,7 @@ Sets the USB drive label to `Setup Toolkit` when plugged in. Does **not** auto-e
 
 | Date | Version | Change |
 |---|---|---|
+| 2026-10-08 | 2.9 | Autopilot online signs in by device code (`-DeviceCode`): the script now talks to Microsoft Graph instead of the retired AzureAD/WindowsAutopilotIntune modules, and a browser sign-in may not open during OOBE |
 | 2026-03-20 | 2.8 | Split Do it all into A (Intune) and C (Active Directory); AD variant skips Autopilot |
 | 2026-03-20 | 2.7 | Do it all updated: AD domain join added as step 3 |
 | 2026-03-20 | 2.6 | Do it all updated: device rename added as first step |

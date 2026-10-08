@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Draait Deploy-CoworkPrerequisitesIntune.ps1 en Deploy-ClaudeDesktopIntune.ps1 na elkaar, in
@@ -20,8 +20,20 @@
     Entra ID-groep, doorgegeven aan beide deelscripts.
 
 .PARAMETER TenantId
-    Optioneel, doorgegeven aan beide deelscripts. Standaard automatisch bepaald uit de
-    delegated sessie (per deelscript apart).
+    Optioneel, doorgegeven aan beide deelscripts. Standaard de GDAP-klanttenant, anders de
+    tenant waarbij je je aanmeldt (per deelscript apart, via scripts\Startup\Connect-M365.ps1).
+
+.PARAMETER ClientId
+    Optioneel, doorgegeven aan beide deelscripts: eigen permanente app voor app-only (met
+    -CertificateThumbprint), in plaats van de standaard gedelegeerde aanmelding met tijdelijke
+    App Registration.
+
+.PARAMETER CertificateThumbprint
+    Certificaat voor -ClientId, doorgegeven aan beide deelscripts.
+
+.PARAMETER AppOnly
+    App-only met ClientId en CertificateThumbprint uit graph.appid.json, doorgegeven aan beide
+    deelscripts.
 
 .PARAMETER Force
     Slaat de "typ JA om door te gaan"-bevestiging over voor beide deelscripts.
@@ -52,6 +64,12 @@ param(
 
     [string]$TenantId,
 
+    [string]$ClientId,
+
+    [string]$CertificateThumbprint,
+
+    [switch]$AppOnly,
+
     [switch]$Force,
 
     [switch]$SkipCoworkPrerequisites,
@@ -61,6 +79,9 @@ param(
 
 $sharedParams = @{ AssignmentGroupName = $AssignmentGroupName }
 if ($TenantId) { $sharedParams['TenantId'] = $TenantId }
+if ($ClientId) { $sharedParams['ClientId'] = $ClientId }
+if ($CertificateThumbprint) { $sharedParams['CertificateThumbprint'] = $CertificateThumbprint }
+if ($AppOnly) { $sharedParams['AppOnly'] = $true }
 if ($Force) { $sharedParams['Force'] = $true }
 
 $coworkScript = Join-Path $PSScriptRoot 'CoworkPrerequisites\Deploy-CoworkPrerequisitesIntune.ps1'

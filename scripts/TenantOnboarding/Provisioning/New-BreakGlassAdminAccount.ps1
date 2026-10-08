@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Create a break-glass (emergency access) Global Administrator account in a new tenant.
@@ -15,8 +15,13 @@
     password manager / sealed envelope process — it is never saved to a file.
 
     Default behavior is a dry run — pass -Apply to actually create the account and
-    assign the role. Connects to Microsoft Graph automatically if no session is active;
-    reuses an existing session if already connected.
+    assign the role.
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated by default (you
+    sign in as an admin; device code when $global:useDeviceCodeAuth is set, the GDAP
+    customer tenant from $global:cid), app-only with -ClientId and
+    -CertificateThumbprint, or -AppOnly. An existing Graph session is reused only when
+    it is for the right tenant and already holds the scopes below.
 
 .PARAMETER UserPrincipalName
     UPN for the new break-glass account, e.g. "breakglass-admin@contoso.onmicrosoft.com".
@@ -35,14 +40,24 @@
     Use -AssignGlobalAdmin:$false to create the account without a role assignment.
 
 .PARAMETER ExcludeFromGroupId
-    Object ID of a group (e.g. a Conditional Access exclusion group created by
-    New-TenantBaselineGroups.ps1) to add the break-glass account to, so it can be
-    excluded from Conditional Access policies and MFA enforcement per Microsoft's
-    break-glass guidance.
+    Object ID of a STATIC security group that your Conditional Access policies
+    exclude, to add the break-glass account to. Do not pass the dynamic "all users
+    except break glass" group from New-TenantBaselineGroups.ps1: that group already
+    leaves the account out through its UPN rule, and a dynamic group takes no direct
+    members.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected, or resolvable from a
-    GDAP customer tenant context ($global:cid / $env:M365_CUSTOMER_TENANTID).
+    Entra ID tenant ID or domain. Defaults to the GDAP customer tenant ($global:cid /
+    $env:M365_CUSTOMER_TENANTID), else the tenant you sign in to.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in, with -CertificateThumbprint.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER Apply
     Actually create the account and assign roles. Without this switch, the script only
@@ -61,7 +76,11 @@
 
 .NOTES
     Required scopes : User.ReadWrite.All, RoleManagement.ReadWrite.Directory, GroupMember.ReadWrite.All
-    Required module : Microsoft.Graph.Users, Microsoft.Graph.Identity.DirectoryManagement, Microsoft.Graph.Groups
+    Required module : Microsoft.Graph.Users, Microsoft.Graph.Identity.Governance, Microsoft.Graph.Groups
+
+    Global Administrator is assigned through roleManagement/directory/roleAssignments
+    (role definition 62e90394-69f5-4237-9190-012177145e10), which does not need the
+    directoryRole to be activated in the tenant first.
 
     Microsoft recommends at least two break-glass accounts per tenant, permanently
     excluded from Conditional Access, with MFA disabled on the account and strong,
@@ -77,8 +96,15 @@ param(
     [switch] $AssignGlobalAdmin = $true,
     [string] $ExcludeFromGroupId,
     [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [switch] $Apply
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
+$globalAdminRoleId = '62e90394-69f5-4237-9190-012177145e10'   # Global Administrator role template / definition
 
 function New-RandomPassword {
     param([int] $Length = 24)
@@ -101,24 +127,10 @@ function New-RandomPassword {
     -join $shuffled
 }
 
-# ── Tenant resolution (GDAP-aware) ──────────────────────────────────────────────
-$effectiveTenantId = $TenantId
-if (-not $effectiveTenantId) {
-    try {
-        if ($global:authMode -eq 'GDAP' -and $global:cid) { $effectiveTenantId = [string]$global:cid }
-        elseif ($env:M365_CUSTOMER_TENANTID) { $effectiveTenantId = [string]$env:M365_CUSTOMER_TENANTID }
-    } catch {}
-}
-
-# ── Connection (reuse existing session if present) ──────────────────────────────
-$script:ConnectedHere = $false
+# ── Connection (delegated by default; reuses a session that fits) ───────────────
 try {
-    if (-not (Get-MgContext)) {
-        $connectParams = @{ Scopes = @('User.ReadWrite.All', 'RoleManagement.ReadWrite.Directory', 'GroupMember.ReadWrite.All') }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams -NoWelcome -ErrorAction Stop
-        $script:ConnectedHere = $true
-    }
+    $graph = Connect-M365Graph -Scopes 'User.ReadWrite.All', 'RoleManagement.ReadWrite.Directory', 'GroupMember.ReadWrite.All' `
+        -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 } catch {
     Write-Host "  [ERROR] Could not connect to Microsoft Graph: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
@@ -134,10 +146,11 @@ Write-Host "  DisplayName : $DisplayName"
 Write-Host "  Mode        : $(if ($Apply) { 'Apply' } else { 'Preview only' })" -ForegroundColor $(if ($Apply) { 'Yellow' } else { 'DarkGray' })
 Write-Host ""
 
-$existing = Get-MgUser -Filter "userPrincipalName eq '$UserPrincipalName'" -ErrorAction SilentlyContinue
+$upnFilter = $UserPrincipalName -replace "'", "''"
+$existing = Get-MgUser -Filter "userPrincipalName eq '$upnFilter'" -ErrorAction SilentlyContinue
 if ($existing) {
     Write-Host "  [WARN] A user with UPN '$UserPrincipalName' already exists (Id: $($existing.Id)). Nothing to create." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 0
 }
 
@@ -146,9 +159,9 @@ $password = New-RandomPassword -Length $PasswordLength
 if (-not $Apply) {
     Write-Host "  Would create cloud-only user '$UserPrincipalName' with a random $PasswordLength-character password." -ForegroundColor Yellow
     if ($AssignGlobalAdmin) { Write-Host "  Would assign directory role: Global Administrator." -ForegroundColor Yellow }
-    if ($ExcludeFromGroupId) { Write-Host "  Would add the account to group $ExcludeFromGroupId (e.g. a CA-exclusion group)." -ForegroundColor Yellow }
+    if ($ExcludeFromGroupId) { Write-Host "  Would add the account to group $ExcludeFromGroupId (a static CA-exclusion group)." -ForegroundColor Yellow }
     Write-Host "  Re-run with -Apply to perform these actions." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 0
 }
 
@@ -166,14 +179,12 @@ if ($PSCmdlet.ShouldProcess($UserPrincipalName, "Create break-glass admin accoun
     Write-Host "  [OK]   Account created (Id: $($newUser.Id))." -ForegroundColor Green
 
     if ($AssignGlobalAdmin) {
-        $role = Get-MgDirectoryRole -Filter "displayName eq 'Global Administrator'" -ErrorAction SilentlyContinue
-        if (-not $role) {
-            $template = Get-MgDirectoryRoleTemplate -ErrorAction Stop | Where-Object { $_.DisplayName -eq 'Global Administrator' }
-            $role = New-MgDirectoryRoleTemplate -RoleTemplateId $template.Id -ErrorAction Stop
-        }
-        New-MgDirectoryRoleMemberByRef -DirectoryRoleId $role.Id -BodyParameter @{
-            '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($newUser.Id)"
-        } -ErrorAction Stop
+        # A unified role assignment works whether or not the Global Administrator
+        # directoryRole was ever activated in this tenant. (The old code tried to
+        # activate it with New-MgDirectoryRoleTemplate -RoleTemplateId; that cmdlet creates
+        # a role template, has no -RoleTemplateId parameter and failed every time.)
+        New-MgRoleManagementDirectoryRoleAssignment -PrincipalId $newUser.Id `
+            -RoleDefinitionId $globalAdminRoleId -DirectoryScopeId '/' -ErrorAction Stop | Out-Null
         Write-Host "  [OK]   Global Administrator role assigned." -ForegroundColor Green
     }
 
@@ -194,4 +205,4 @@ if ($PSCmdlet.ShouldProcess($UserPrincipalName, "Create break-glass admin accoun
     Write-Host "  envelope process, disable MFA on this account, and monitor sign-ins." -ForegroundColor DarkGray
 }
 
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

@@ -49,6 +49,8 @@ Remplacez-les avec `-Table` pour en ajouter d'autres (par ex. `AADDomainServices
 | `-Table` | Non | Tables à inclure dans l'union (voir les valeurs par défaut ci-dessus) |
 | `-MaxRows` | Non | Nombre maximal de lignes renvoyées, les plus récentes en premier (par défaut : `5000`) |
 | `-ExportPath` | Non | Dossier du rapport CSV (par défaut : `C:\Temp`) |
+| `-TenantId` | Non | Tenant contenant l'abonnement ; nouvelle connexion si le contexte Az actuel porte sur un autre tenant |
+| `-SubscriptionId` | Non | Abonnement contenant l'espace de travail (bascule le contexte Az dessus) |
 
 *Si `-WorkspaceId` est omis, le script tente de résoudre automatiquement un espace de travail unique via `-WorkspaceName`/`-ResourceGroupName`, ou l'unique espace de travail de l'abonnement s'il n'y en a qu'un.
 
@@ -67,9 +69,9 @@ Remplacez-les avec `-Table` pour en ajouter d'autres (par ex. `AADDomainServices
 ```
 
 **Remarques**
-- Se connecte automatiquement avec `Connect-AzAccount` si aucune session Az n'est active
+- Se connecte avec Az, et non Microsoft Graph : Log Analytics est une ressource Azure Resource Manager / de l'API Log Analytics que Graph ne couvre pas. Un contexte Az existant est réutilisé s'il porte sur `-TenantId` (ou sur n'importe quel tenant si celui-ci est omis) ; sinon `Connect-AzAccount` vous connecte en délégué — avec un code d'appareil si `$global:useDeviceCodeAuth` est défini dans `load.config.ps1`. La session Az reste ouverte (Az l'enregistre pour les exécutions suivantes).
 - Le jeu de résultats est plafonné à `-MaxRows` (5000 par défaut) — le script avertit si ce plafond a été atteint, pour que vous sachiez qu'il faut réduire la fenêtre ou relever le plafond
-- Le CSV est exporté dans `-ExportPath` sous le nom `AADDSUserActivity_<username>_<timestamp>.csv`
+- Le CSV est exporté dans `-ExportPath` sous le nom `AADDSUserActivity_<username>_<timestamp>.csv` (les caractères interdits dans un nom de fichier, comme le `\` de `DOMAIN\user`, deviennent `_`)
 
 **Modules requis**
 ```powershell

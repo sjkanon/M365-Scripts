@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Compare a customer tenant's Intune configuration against an MSP baseline backup.
@@ -16,9 +16,18 @@
     Two ways to get the "customer" side of the comparison:
       - Pass -CustomerBackupPath to an existing backup folder (from a previous
         Start-IntuneBackup run), or
-      - Omit it and the script runs Start-IntuneBackup itself against the currently
-        connected tenant (reuses an existing Graph session; GDAP-aware like the other
-        scripts in this repo — resolves the customer tenant from $global:cid if set).
+      - Omit it and the script signs in and runs Start-IntuneBackup itself.
+
+    Sign-in (only when -CustomerBackupPath is omitted) goes through
+    scripts\Startup\Connect-M365.ps1: delegated by default (you sign in as an Intune
+    admin; device code when $global:useDeviceCodeAuth is set; under GDAP the customer
+    tenant from $global:cid), app-only with -ClientId and -CertificateThumbprint, or
+    -AppOnly. The backup itself stays with the IntuneBackupAndRestore module, which
+    reads Intune through Microsoft Graph (Invoke-MgGraphRequest) on this session.
+    Start-IntuneBackup checks for five ReadWrite scopes and, when one is missing,
+    calls Connect-MgGraph on its own - without a tenant, so a GDAP session would land
+    in your own tenant. The script therefore asks for exactly those scopes, although
+    it only reads.
 
 .PARAMETER BaselinePath
     Path to the MSP reference backup folder (created previously with
@@ -29,9 +38,18 @@
     a fresh backup of the currently connected tenant into -OutputPath first.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain to connect to before backing up the customer tenant.
-    Only used when -CustomerBackupPath is omitted. Optional if already connected or
-    resolvable from a GDAP customer tenant context.
+    Entra ID tenant ID or domain to back up. Only used when -CustomerBackupPath is
+    omitted. Defaults to the GDAP customer tenant, else the tenant you sign in to.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in, with -CertificateThumbprint. The app needs
+    the five DeviceManagement*.ReadWrite.All application permissions listed below.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER OutputPath
     Folder for the auto-backup (when -CustomerBackupPath is omitted) and the diff
@@ -42,20 +60,28 @@
     .\Compare-IntuneConfig.ps1 -BaselinePath C:\IntuneBaseline -CustomerBackupPath C:\Temp\CustomerBackup
 
 .EXAMPLE
-    # Back up the currently connected (GDAP) customer tenant and compare it live
+    # Back up the (GDAP) customer tenant and compare it live; delegated sign-in
     .\Compare-IntuneConfig.ps1 -BaselinePath C:\IntuneBaseline
 
 .NOTES
     Author  : Sjoerd Kanon
-    Required module: IntuneBackupAndRestore
+    Required module: IntuneBackupAndRestore (4.x, Microsoft.Graph based), Microsoft.Graph.Authentication
+    Scopes (live backup): DeviceManagementApps.ReadWrite.All, DeviceManagementConfiguration.ReadWrite.All,
+                          DeviceManagementServiceConfig.ReadWrite.All, DeviceManagementManagedDevices.ReadWrite.All,
+                          DeviceManagementScripts.ReadWrite.All
 #>
 [CmdletBinding()]
 param (
     [Parameter(Mandatory)] [string] $BaselinePath,
     [string] $CustomerBackupPath,
     [string] $TenantId,
-    [string] $OutputPath = $(if ($IsWindows -or -not $PSVersionTable.PSVersion) { 'C:\Temp' } else { "$HOME/Downloads" })
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly,
+    [string] $OutputPath = $(if ($IsWindows) { 'C:\Temp' } else { "$HOME/Downloads" })
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -74,22 +100,22 @@ $ts        = Get-Date -Format 'yyyyMMdd_HHmmss'
 $reportCsv = Join-Path $OutputPath "IntuneConfigDrift_$ts.csv"
 
 if (-not $CustomerBackupPath) {
-    # Reuse an existing Graph session if one is active; otherwise connect, GDAP-aware.
-    if (-not (Get-MgContext)) {
-        $connectParams = @{}
-        $resolvedTenant = $TenantId
-        if (-not $resolvedTenant -and $global:authMode -eq 'GDAP' -and $global:cid) {
-            $resolvedTenant = $global:cid
-            Write-Host "  Resolved tenant from GDAP customer context: $resolvedTenant" -ForegroundColor DarkGray
-        }
-        if ($resolvedTenant) { $connectParams['TenantId'] = $resolvedTenant }
-        Connect-MgGraph @connectParams -Scopes 'DeviceManagementConfiguration.Read.All', 'DeviceManagementApps.Read.All' | Out-Null
-    }
+    # Exactly the scopes Start-IntuneBackup checks for; with fewer it reconnects on its
+    # own, without -TenantId (see .DESCRIPTION).
+    $scopes = 'DeviceManagementApps.ReadWrite.All', 'DeviceManagementConfiguration.ReadWrite.All',
+              'DeviceManagementServiceConfig.ReadWrite.All', 'DeviceManagementManagedDevices.ReadWrite.All',
+              'DeviceManagementScripts.ReadWrite.All'
+    $graph = Connect-M365Graph -Scopes $scopes -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+    Write-Host "  Connected to tenant $($graph.TenantId) ($($graph.AuthType))." -ForegroundColor DarkGray
 
     $CustomerBackupPath = Join-Path $OutputPath "IntuneBackup_$ts"
     New-Item -ItemType Directory -Path $CustomerBackupPath | Out-Null
     Write-Host "  Backing up connected tenant to $CustomerBackupPath ..." -ForegroundColor Cyan
-    Start-IntuneBackup -Path $CustomerBackupPath | Out-Null
+    try {
+        Start-IntuneBackup -Path $CustomerBackupPath | Out-Null
+    } finally {
+        Disconnect-M365Graph $graph
+    }
 }
 
 Write-Host ''

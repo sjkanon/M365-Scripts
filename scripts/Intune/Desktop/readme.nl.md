@@ -29,7 +29,7 @@ Desktopaanpassingen die via Intune worden uitgerold: bedrijfsachtergrond + vergr
 
 ### Deploy-AllIntune.ps1
 
-Een dunne orchestrator zonder eigen Intune-/Graph-logica — voert `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` en daarna `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1` uit, en geeft `-AssignmentGroupName`/`-TenantId`/`-Force` aan beide door. Elke uitrol beheert nog steeds zelfstandig zijn eigen Graph-sessie en tijdelijke App Registration — dit bespaart je alleen dat je twee opdrachten met de hand moet uitvoeren.
+Een dunne orchestrator zonder eigen Intune-/Graph-logica — voert `CoworkPrerequisites/Deploy-CoworkPrerequisitesIntune.ps1` en daarna `ClaudeDesktop/Deploy-ClaudeDesktopIntune.ps1` uit, en geeft `-AssignmentGroupName`/`-TenantId`/`-ClientId`/`-CertificateThumbprint`/`-AppOnly`/`-Force` aan beide door. Vereist PowerShell 7, net als de twee deploy-scripts. Elke uitrol beheert nog steeds zelfstandig zijn eigen Graph-sessie en tijdelijke App Registration — dit bespaart je alleen dat je twee opdrachten met de hand moet uitvoeren.
 
 ```powershell
 # Beide apps, één opdracht

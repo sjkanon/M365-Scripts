@@ -12,14 +12,20 @@ Collecte des hachages matériels Windows Autopilot — pour l'inscription via US
 
 | Fichier | Description |
 |------|-------------|
-| [`Get-WindowsAutoPilotInfo.ps1`](Get-WindowsAutoPilotInfo.ps1) ([docs](#get-windowsautopilotinfops1)) | Script communautaire (Michael Niehaus) — récupère le hachage matériel Autopilot |
+| [`Get-WindowsAutoPilotInfo.ps1`](Get-WindowsAutoPilotInfo.ps1) ([docs](#get-windowsautopilotinfops1)) | Script Microsoft (Michael Niehaus, v3.5) dont la partie en ligne a été réécrite pour Microsoft Graph — récupère le hachage matériel Autopilot |
 | [`GetAutoPilot.CMD`](GetAutoPilot.CMD) ([docs](#getautopilotcmd)) | Wrapper à double-cliquer — active WinRM et exécute le script, avec enregistrement dans `compHash.csv` |
 
 ---
 
 ### Get-WindowsAutoPilotInfo.ps1
 
-Le script communautaire bien connu pour collecter les informations d'appareil Windows Autopilot (hachage matériel, numéro de série, Windows Product ID) et éventuellement les charger directement dans Intune. Actuellement en v3.5, par Michael Niehaus (Microsoft) — voir la [page PowerShell Gallery](https://www.powershellgallery.com/packages/Get-WindowsAutoPilotInfo) pour les notes de version complètes.
+Le script communautaire bien connu pour collecter les informations d'appareil Windows Autopilot (hachage matériel, numéro de série, Windows Product ID) et éventuellement les charger directement dans Intune. Basé sur la v3.5 de Michael Niehaus (Microsoft, licence MIT) — voir la [page PowerShell Gallery](https://www.powershellgallery.com/packages/Get-WindowsAutoPilotInfo) pour les notes de version d'origine.
+
+Cette copie est la **v3.5.1** : la partie `-Online` dialogue directement avec Microsoft Graph (`Invoke-MgGraphRequest` sur `deviceManagement/importedWindowsAutopilotDeviceIdentities`, `windowsAutopilotDeviceIdentities`, `/devices` et `/groups/{id}/members/$ref`). La v3.5 exigeait les modules retirés **AzureAD** (`-AddToGroup`) et **Microsoft.Graph.Intune** (`Connect-MSGraph`), si bien que l'import en ligne ne fonctionnait plus ; la dernière version de la galerie (3.9) dépend encore du module WindowsAutopilotIntune. Seul `Microsoft.Graph.Authentication` est désormais nécessaire (installé pour l'utilisateur courant s'il manque).
+
+**Connexion (`-Online`)** — **déléguée par défaut** : vous vous connectez en tant qu'administrateur Intune (`-DeviceCode` lorsqu'aucun navigateur ne peut s'ouvrir, par ex. en OOBE). Scopes : `DeviceManagementServiceConfig.ReadWrite.All`, plus `GroupMember.ReadWrite.All` et `Device.Read.All` avec `-AddToGroup`. **L'application seule** est une option : `-AppId` avec `-CertificateThumbprint` (recommandé) ou `-AppSecret`, et `-TenantId` ; l'application a besoin des mêmes droits en autorisations d'application.
+
+Le script reste volontairement autonome et compatible Windows PowerShell 5.1 : il est copié sur une clé USB et lancé par `GetAutoPilot.CMD` / [`Deployment/start.bat`](../../Deployment/readme.fr.md) avec `powershell.exe`, il ne charge donc pas le `Connect-M365.ps1` du dépôt.
 
 **Paramètres principaux**
 
@@ -32,7 +38,9 @@ Le script communautaire bien connu pour collecter les informations d'appareil Wi
 | `-Partner` | Utiliser le processus d'enregistrement via le CSP Partner Center |
 | `-GroupTag` | Balise de groupe Autopilot à attribuer |
 | `-Online` | Charger le hachage directement dans Intune au lieu (ou en plus) d'écrire un CSV |
-| `-TenantId` / `-AppId` / `-AppSecret` | Authentification par application pour le mode `-Online` |
+| `-TenantId` | Tenant pour `-Online` (obligatoire en application seule ; en délégué, par défaut le tenant de connexion) |
+| `-AppId` / `-CertificateThumbprint` / `-AppSecret` | Connexion en application seule pour le mode `-Online` (certificat recommandé) |
+| `-DeviceCode` | Connexion déléguée avec un code d'appareil (OOBE) |
 | `-AssignedUser` | Pré-attribuer un utilisateur à l'appareil dans Intune |
 | `-AssignedComputerName` | Pré-attribuer un nom d'ordinateur (mode `-Online`) |
 | `-AddToGroup` | Ajouter l'appareil à un groupe Entra ID après l'import (mode `-Online`) |
@@ -48,9 +56,17 @@ Le script communautaire bien connu pour collecter les informations d'appareil Wi
 # Charger directement dans Intune (connexion interactive)
 .\Get-WindowsAutoPilotInfo.ps1 -Online
 
-# Charger avec une balise de groupe et une authentification par application
-.\Get-WindowsAutoPilotInfo.ps1 -Online -GroupTag "Corporate" -TenantId "..." -AppId "..." -AppSecret "..."
+# Depuis l'OOBE : code d'appareil, ajout à un groupe, attente du profil, redémarrage
+.\Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode -GroupTag "Corporate" -AddToGroup "Autopilot Devices" -Assign -Reboot
+
+# Charger avec une balise de groupe et une connexion en application seule (certificat)
+.\Get-WindowsAutoPilotInfo.ps1 -Online -GroupTag "Corporate" -TenantId "..." -AppId "..." -CertificateThumbprint "..."
 ```
+
+**Remarques**
+- Le CSV contient désormais exactement les colonnes acceptées par l'import Intune (`Device Serial Number`, `Windows Product ID`, `Hardware Hash`, plus `Group Tag` / `Assigned User` lorsqu'ils sont fournis). L'ancienne copie ajoutait fabricant/modèle et une seconde colonne `Hardware Hash`, que `Select-Object` refuse.
+- Les boucles d'import et de synchronisation affichaient le dernier appareil pour chaque appareil et pouvaient se bloquer sur un appareil dont l'import avait échoué ; chaque appareil est désormais vérifié individuellement.
+- La lecture du hachage matériel nécessite une session élevée.
 
 ---
 

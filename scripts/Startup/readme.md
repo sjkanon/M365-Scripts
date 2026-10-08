@@ -162,7 +162,7 @@ Current list: `ExchangeOnlineManagement`, the Graph submodules `Authentication`,
 `Identity.DirectoryManagement`, `Identity.SignIns`, `Identity.Governance`, `Applications`,
 `Calendar`, `Groups`, `Users`, `Reports`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`,
 `Az.Accounts`, `Az.OperationalInsights`, `DCToolbox`, `IntuneBackupAndRestore`, and on Windows
-`WindowsAutopilotIntune` and `IntuneWin32App`.
+`IntuneWin32App`.
 
 ---
 

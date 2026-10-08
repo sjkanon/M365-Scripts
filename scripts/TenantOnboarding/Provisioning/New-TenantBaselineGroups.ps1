@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Create the baseline Entra ID security groups used to bootstrap a newly onboarded tenant.
@@ -17,8 +17,12 @@
         Conditional Access or Intune assignment filters.
 
     Default behavior is a dry run — pass -Apply to actually create the groups.
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected.
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated by default (you
+    sign in as an admin; device code when $global:useDeviceCodeAuth is set, the GDAP
+    customer tenant from $global:cid), app-only with -ClientId and
+    -CertificateThumbprint, or -AppOnly. An existing Graph session is reused only when
+    it is for the right tenant and already holds Group.ReadWrite.All.
 
 .PARAMETER BreakGlassUpnPattern
     A substring/pattern matched against userPrincipalName to build the dynamic
@@ -37,8 +41,17 @@
     your own). Example: "SG - Enable Password Manager", "SG - Enable Windows 365".
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected, or resolvable from a
-    GDAP customer tenant context.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer tenant ($global:cid /
+    $env:M365_CUSTOMER_TENANTID), else the tenant you sign in to.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in, with -CertificateThumbprint.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER Apply
     Actually create the groups. Without this switch, the script only reports what it
@@ -63,29 +76,21 @@ param(
     [switch] $SkipExclusionGroup,
     [string[]] $AdditionalGroupNames = @(),
     [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [switch] $Apply
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 if (-not $SkipExclusionGroup -and -not $BreakGlassUpnPattern) {
     throw "-BreakGlassUpnPattern is required unless -SkipExclusionGroup is specified."
 }
 
-$effectiveTenantId = $TenantId
-if (-not $effectiveTenantId) {
-    try {
-        if ($global:authMode -eq 'GDAP' -and $global:cid) { $effectiveTenantId = [string]$global:cid }
-        elseif ($env:M365_CUSTOMER_TENANTID) { $effectiveTenantId = [string]$env:M365_CUSTOMER_TENANTID }
-    } catch {}
-}
-
-$script:ConnectedHere = $false
 try {
-    if (-not (Get-MgContext)) {
-        $connectParams = @{ Scopes = @('Group.ReadWrite.All') }
-        if ($effectiveTenantId) { $connectParams['TenantId'] = $effectiveTenantId }
-        Connect-MgGraph @connectParams -NoWelcome -ErrorAction Stop
-        $script:ConnectedHere = $true
-    }
+    $graph = Connect-M365Graph -Scopes 'Group.ReadWrite.All' -TenantId $TenantId `
+        -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 } catch {
     Write-Host "  [ERROR] Could not connect to Microsoft Graph: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
@@ -105,7 +110,7 @@ function New-BaselineGroup {
     )
 
     $mailNickname = ($DisplayName -replace '[^a-zA-Z0-9]', '')
-    $existing = Get-MgGroup -Filter "displayName eq '$DisplayName'" -ErrorAction SilentlyContinue
+    $existing = Get-MgGroup -Filter "displayName eq '$($DisplayName -replace "'", "''")'" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($existing) {
         Write-Host "  [SKIP] '$DisplayName' already exists (Id: $($existing.Id))." -ForegroundColor DarkGray
         return $existing
@@ -148,4 +153,4 @@ Write-Host ""
 if (-not $Apply) { Write-Host "  Re-run with -Apply to create these groups." -ForegroundColor Yellow }
 Write-Host ""
 
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Create a Dynamic Distribution Group from a job title (or other recipient) filter.
@@ -6,9 +6,16 @@
 .DESCRIPTION
     Previews the recipients matched by an Exchange Online recipient filter (by job
     title by default, or a custom -RecipientFilter) and, after confirmation, creates
-    a Dynamic Distribution Group using that filter. Requires an active Exchange
-    Online session (Connect-ExchangeOnline); Dynamic Distribution Groups are an
-    Exchange feature, not a Graph one.
+    a Dynamic Distribution Group using that filter.
+
+    Exchange Online only: Microsoft Graph has no API for Dynamic Distribution Groups or
+    for previewing a recipient filter, so this script uses ExchangeOnlineManagement.
+    Sign-in goes through scripts\Startup\Connect-M365.ps1 (Connect-M365Exchange):
+    delegated by default (you sign in as an Exchange admin; device code when
+    $global:useDeviceCodeAuth is set, the GDAP customer through -DelegatedOrganization),
+    app-only with -ClientId and -CertificateThumbprint (and -TenantId as the
+    *.onmicrosoft.com domain), or -AppOnly. An existing Exchange session for the same
+    tenant is reused and left open.
 
 .PARAMETER JobTitle
     Job title to filter on. Builds the filter:
@@ -24,8 +31,21 @@
     -RecipientFilter).
 
 .PARAMETER PrimarySmtpAddress
-    Primary SMTP address for the new group. Default: derived from -Name and the
-    tenant's default accepted domain.
+    Primary SMTP address for the new group. Default: Exchange derives it from the
+    alias and the tenant's default accepted domain.
+
+.PARAMETER TenantId
+    Tenant domain (contoso.onmicrosoft.com) or ID. Defaults to the GDAP customer
+    tenant, else the tenant you sign in to. App-only needs the domain form.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in, with -CertificateThumbprint.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER Apply
     Actually create the group. Without this switch, the script only previews the
@@ -43,6 +63,7 @@
         -RecipientFilter "((Department -eq 'Finance') -and (ExchangeUserAccountControl -ne 'AccountDisabled'))" -Apply
 
 .NOTES
+    Required role   : Exchange Administrator (or Recipient Management)
     Required module : ExchangeOnlineManagement
 #>
 [CmdletBinding(SupportsShouldProcess)]
@@ -51,13 +72,20 @@ param(
     [string] $RecipientFilter,
     [string] $Name,
     [string] $PrimarySmtpAddress,
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [switch] $Apply
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 if (-not $JobTitle -and -not $RecipientFilter) { throw "Provide either -JobTitle or -RecipientFilter." }
 if ($RecipientFilter -and -not $Name) { throw "-Name is required when using -RecipientFilter." }
 
-$filter = if ($RecipientFilter) { $RecipientFilter } else { "((Title -eq '$JobTitle') -and (ExchangeUserAccountControl -ne 'AccountDisabled'))" }
+# A quote in the job title would end the OPATH string early; double it.
+$filter = if ($RecipientFilter) { $RecipientFilter } else { "((Title -eq '$($JobTitle -replace "'", "''")') -and (ExchangeUserAccountControl -ne 'AccountDisabled'))" }
 if (-not $Name) { $Name = $JobTitle }
 
 Write-Host ""
@@ -66,32 +94,41 @@ Write-Host "  Filter : $filter"
 Write-Host "  Mode   : $(if ($Apply) { 'Apply' } else { 'Preview only' })" -ForegroundColor $(if ($Apply) { 'Yellow' } else { 'DarkGray' })
 Write-Host ""
 
-if (-not (Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
-    Write-Host "  [ERROR] No active Exchange Online session. Run Connect-ExchangeOnline first." -ForegroundColor Red
+try {
+    $exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+} catch {
+    Write-Host "  [ERROR] Could not connect to Exchange Online: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
-$matches = Get-Recipient -RecipientPreviewFilter $filter -ResultSize Unlimited
-Write-Host "  $($matches.Count) matching recipient(s):" -ForegroundColor DarkGray
-$matches | Select-Object DisplayName, Title, PrimarySmtpAddress | Format-Table -AutoSize | Out-Host
+$recipients = @(Get-Recipient -RecipientPreviewFilter $filter -ResultSize Unlimited)
+Write-Host "  $($recipients.Count) matching recipient(s):" -ForegroundColor DarkGray
+$recipients | Select-Object DisplayName, Title, PrimarySmtpAddress | Format-Table -AutoSize | Out-Host
 
 if (-not $Apply) {
     Write-Host "  Would create Dynamic Distribution Group '$Name' with the filter above." -ForegroundColor Yellow
     Write-Host "  Re-run with -Apply to create it." -ForegroundColor Yellow
     Write-Host ""
+    Disconnect-M365Exchange $exo
     exit 0
 }
 
-if (-not $PSCmdlet.ShouldProcess($Name, "Create Dynamic Distribution Group")) { exit 0 }
+if (-not $PSCmdlet.ShouldProcess($Name, "Create Dynamic Distribution Group")) { Disconnect-M365Exchange $exo; exit 0 }
 
 $newGroupParams = @{
     Name            = $Name
     DisplayName     = "$Name group"
-    Alias           = ($Name -replace '\s', '')
+    Alias           = ($Name -replace '[^a-zA-Z0-9._-]', '')
     RecipientFilter = $filter
 }
 if ($PrimarySmtpAddress) { $newGroupParams['PrimarySmtpAddress'] = $PrimarySmtpAddress }
 
-New-DynamicDistributionGroup @newGroupParams -ErrorAction Stop | Out-Null
-Write-Host "  [OK]   Dynamic Distribution Group '$Name' created." -ForegroundColor Green
+try {
+    New-DynamicDistributionGroup @newGroupParams -ErrorAction Stop | Out-Null
+    Write-Host "  [OK]   Dynamic Distribution Group '$Name' created." -ForegroundColor Green
+} catch {
+    Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+}
 Write-Host ""
+
+Disconnect-M365Exchange $exo

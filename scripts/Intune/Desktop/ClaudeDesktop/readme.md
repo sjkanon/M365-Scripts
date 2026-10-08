@@ -34,7 +34,7 @@ What it does:
 1. Downloads the latest Claude Desktop x64 MSIX from Anthropic's official "latest" redirect URL.
 2. Reads the version out of `AppxManifest.xml` inside the MSIX.
 3. Copies the install/uninstall scripts next to the MSIX and builds a `.intunewin` package (`IntuneWin32App` module — `IntuneWinAppUtil.exe` is downloaded automatically if not already present).
-4. Connects to Microsoft Graph delegated (interactive sign-in) and creates a short-lived **temporary App Registration** — same pattern as [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.md) — with only the `DeviceManagementApps.ReadWrite.All` application permission. Used to authenticate the `IntuneWin32App` module, then deleted at the end of the run. Nothing persists between runs except the Intune app itself.
+4. Connects to Microsoft Graph delegated (interactive sign-in) and creates a short-lived **temporary App Registration** — same pattern as [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.md) — with only the `DeviceManagementApps.ReadWrite.All` application permission. Used to authenticate the `IntuneWin32App` module, then deleted at the end of the run. Nothing persists between runs except the Intune app itself. Sign-in goes through [`Connect-M365.ps1`](../../../Startup/Connect-M365.ps1): delegated by default (device code per `$global:useDeviceCodeAuth`, GDAP customer from `$global:cid`). The upload itself stays with the `IntuneWin32App` module: `Connect-MSIntuneGraph` fetches its own token and cannot use the Microsoft Graph PowerShell session, and rewriting the chunked `.intunewin` upload to Azure Storage plus the encryption-info commit as raw Graph calls is a lot of risk for little gain. With `-ClientId` + `-CertificateThumbprint` (or `-AppOnly`) you use a permanent app of your own instead: nothing temporary is created and `Connect-MSIntuneGraph` signs in with the same certificate (`-ClientCert`).
 5. First run: creates the Win32 app "Claude Desktop (Machine-wide)" in Intune with detection/requirement rules and assigns it **Required** to the Entra ID group you pass in.
 6. Later runs: pushes an updated package via `Update-IntuneWin32AppPackageFile` (existing assignment left untouched, devices just get the new content) if **either** the downloaded MSIX version is newer, **or** the Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 scripts themselves changed since the last run — both tracked in the app's Notes field (`ClaudeMsixVersion=...; ScriptsHash=...`), no local state file needed. Detection **and requirement rules are rebuilt and resubmitted on every run**, not just at first creation (see "Known issue" below). If neither the version nor the scripts changed, only the rules get refreshed.
 
@@ -79,7 +79,10 @@ You'll get an interactive sign-in prompt and a "type JA to continue" confirmatio
 | `-AppDisplayName` | `Claude Desktop (Machine-wide)` | Used to find the existing app on later runs — don't change without renaming in Intune too |
 | `-MsixDownloadUrl` | Anthropic's official x64 "latest" redirect | Override for testing |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Requirement rule |
-| `-TenantId` | auto-detected | Entra ID tenant ID |
+| `-TenantId` | GDAP customer, else your sign-in tenant | Entra ID tenant ID or domain |
+| `-ClientId` | — | Optional permanent app for app-only (with `-CertificateThumbprint`); no temporary App Registration is created |
+| `-CertificateThumbprint` | — | Certificate for `-ClientId` (CurrentUser\My or LocalMachine\My); used for Graph and for `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | off | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | auto-download | Use an already-downloaded `IntuneWinAppUtil.exe` |
 | `-Force` | off | Skip the confirmation prompt(s) |
 | `-RequireCoworkPrerequisites` | off | Add a real Intune dependency on the Cowork Prerequisites app — see below |
@@ -126,5 +129,6 @@ Both content scripts are written so a device where Claude has never been present
 
 ## Prerequisites
 
+- PowerShell 7 (the deploy scripts dot-source `scripts\Startup\Connect-M365.ps1`). The deploy script itself is part of `ScriptsHash`, so the first run after updating this script re-uploads the package once.
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
 - Run from Windows (the packaging tool and MSIX/AppX cmdlets are Windows-only)

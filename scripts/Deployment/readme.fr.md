@@ -116,7 +116,7 @@ Réglages propres au site qui n'ont pas leur place dans le dépôt. `start.bat` 
 
 ### Autopilot en ligne (option 4)
 
-Exécute `Get-WindowsAutoPilotInfo.ps1 -Online` — téléverse le hachage matériel directement dans Intune sans générer de fichier CSV. Demande des identifiants d'administrateur Microsoft 365. L'appareil apparaît dans **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** en quelques minutes.
+Exécute `Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode` — téléverse le hachage matériel directement dans Intune via Microsoft Graph sans générer de fichier CSV. Connectez-vous avec un compte d'administrateur Microsoft 365 par code d'appareil : ouvrez l'adresse affichée sur un téléphone ou un autre PC et saisissez le code, aucun navigateur n'est nécessaire pendant l'OOBE. L'appareil apparaît dans **Intune → Devices → Enroll devices → Windows enrollment → Autopilot devices** en quelques minutes.
 
 > Le panneau des paramètres de Windows Update n'est pas disponible en OOBE, mais `UsoClient` déclenche les mises à jour directement depuis la ligne de commande et fonctionne très bien.
 
@@ -129,7 +129,7 @@ Utilise `winget install Microsoft.PowerShell`. Nécessite Internet. Si `winget` 
 Pour les environnements gérés par Intune/dans le cloud. Exécute dans l'ordre :
 1. Renomme l'appareil — demande un préfixe, ajoute le numéro de série (`PREFIX-SERIALNUMBER`)
 2. Supprime le `compHash.csv` existant
-3. Lance l'inscription Autopilot en ligne (`Get-WindowsAutoPilotInfo.ps1 -Online`)
+3. Lance l'inscription Autopilot en ligne (`Get-WindowsAutoPilotInfo.ps1 -Online -DeviceCode`)
 4. Installe les mises à jour Windows via `PSWindowsUpdate`
 5. Redémarre après 30 secondes (Ctrl+C pour annuler)
 
@@ -158,6 +158,7 @@ Définit le nom de volume de la clé USB sur `Setup Toolkit` lorsqu'elle est bra
 
 | Date | Version | Modification |
 |---|---|---|
+| 2026-10-08 | 2.9 | Autopilot en ligne se connecte par code d'appareil (`-DeviceCode`) : le script dialogue maintenant avec Microsoft Graph au lieu des modules retirés AzureAD/WindowsAutopilotIntune, et une connexion par navigateur peut ne pas s'ouvrir pendant l'OOBE |
 | 2026-03-20 | 2.8 | Tout en un scindé en A (Intune) et C (Active Directory) ; la variante AD ignore Autopilot |
 | 2026-03-20 | 2.7 | Tout en un mis à jour : jonction au domaine AD ajoutée comme étape 3 |
 | 2026-03-20 | 2.6 | Tout en un mis à jour : renommage de l'appareil ajouté comme première étape |
