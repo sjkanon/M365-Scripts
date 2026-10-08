@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Exhaustive SharePoint Online permissions report — every site, sub-site, list/library, folder

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Intune Win32-app uninstall script voor de Cowork Windows-vereisten.
 

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # ================================================
 # Create-LicensingReportTask.ps1
 # Registers a monthly scheduled task that runs the
@@ -43,7 +43,7 @@ if (-not (Test-Path $ScriptPath)) {
 }
 
 # ── Locate python.exe ─────────────────────────────────────────────────────────
-$PythonExe = (Get-Command python.exe -ErrorAction SilentlyContinue)?.Source
+$PythonExe = Get-Command python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
 
 if (-not $PythonExe) {
     # Fallback: check common install locations
