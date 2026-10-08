@@ -1008,6 +1008,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (19)
+| Modification |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) ne pouvait pas exécuter ses scripts auxiliaires : il lançait Repair-AppxPackageStore.ps1 et Update-TeamsClient.ps1 avec `powershell.exe -File ... -Confirm:$false`, et `-File` transmet chaque argument comme texte, donc `-Confirm:$false` arrivait comme la chaîne `'$false'` et les deux s'arrêtaient aussitôt avec *Cannot convert 'System.String' to the type SwitchParameter* - aucune application n'était jamais mise à jour. Son propre relancement de PowerShell 7 vers Windows PowerShell avait le même défaut. Les deux passent désormais par `-Command` avec les paramètres écrits en clair (chaînes entre apostrophes, tableaux en liste, commutateurs en `-Nom:$true/$false`) et transmettent le code de sortie |
+| Vérifié : contrôle de syntaxe ; la construction de la commande a été exécutée contre un script de test dans Windows PowerShell 5.1 avec un tableau (contenant une apostrophe), des commutateurs activés et désactivés et `-Confirm:$false` sur un script `ConfirmImpact = 'High'` - chaque valeur est arrivée correctement, sans invite, code de sortie transmis. **Non** vérifié : une exécution sur un hôte de session |
+
 ### 2026-10-08 (18)
 | Modification |
 |--------|

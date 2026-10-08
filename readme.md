@@ -1008,6 +1008,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (19)
+| Change |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) could not run its helpers: it started Repair-AppxPackageStore.ps1 and Update-TeamsClient.ps1 with `powershell.exe -File ... -Confirm:$false`, and `-File` hands every argument over as text, so `-Confirm:$false` arrived as the string `'$false'` and both stopped at once with *Cannot convert 'System.String' to the type SwitchParameter* - no app was ever updated. Its own relaunch from PowerShell 7 into Windows PowerShell had the same flaw. Both now go through `-Command` with the parameters written out (strings single-quoted, arrays as lists, switches as `-Name:$true/$false`) and pass the exit code on |
+| Verified: syntax check; the command builder run against a test script in Windows PowerShell 5.1 with an array (including a quote), switches on and off and `-Confirm:$false` on a `ConfirmImpact = 'High'` script - every value arrived as meant, no prompt, exit code passed through. **Not** verified: a run on a session host |
+
 ### 2026-10-08 (18)
 | Change |
 |--------|

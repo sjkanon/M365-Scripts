@@ -1008,6 +1008,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (19)
+| Wijziging |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) kon zijn hulpscripts niet draaien: het startte Repair-AppxPackageStore.ps1 en Update-TeamsClient.ps1 met `powershell.exe -File ... -Confirm:$false`, en `-File` geeft elk argument als tekst door, dus `-Confirm:$false` kwam aan als de string `'$false'` en beide stopten meteen met *Cannot convert 'System.String' to the type SwitchParameter* - er werd nooit een app bijgewerkt. De eigen herstart van PowerShell 7 naar Windows PowerShell had dezelfde fout. Beide gaan nu via `-Command` met de parameters uitgeschreven (strings tussen enkele aanhalingstekens, arrays als lijst, switches als `-Naam:$true/$false`) en geven de exitcode door |
+| Geverifieerd: syntaxcontrole; de opbouw van de opdracht is gedraaid tegen een testscript in Windows PowerShell 5.1 met een array (inclusief een aanhalingsteken), switches aan en uit en `-Confirm:$false` op een script met `ConfirmImpact = 'High'` - elke waarde kwam goed aan, geen vraag, exitcode doorgegeven. **Niet** geverifieerd: een run op een sessiehost |
+
 ### 2026-10-08 (18)
 | Wijziging |
 |--------|
