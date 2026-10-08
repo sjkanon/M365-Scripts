@@ -32,7 +32,10 @@ prioriteit is.
 | `-AdminsOnly` | Nee | Alleen rapporteren over houders van een directoryrol |
 | `-NotRegisteredOnly` | Nee | Alleen gebruikers opnemen die niet voor MFA zijn geregistreerd |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -49,7 +52,11 @@ prioriteit is.
 
 **Opmerkingen**
 - Vereist een Entra ID P1/P2-licentie (het onderliggende rapport is een Premium-functie)
-- Vereiste scope: `Reports.Read.All` (of `AuditLog.Read.All`)
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Microsoft
+  Graph, standaard gedelegeerd (scopes `AuditLog.Read.All`, `Reports.Read.All` plus een
+  rol Reports Reader / Security Reader / Global Reader); app-only met `-ClientId` +
+  `-CertificateThumbprint` of `-AppOnly` (toepassingsmachtiging `AuditLog.Read.All`)
+- `-UserList` vergelijkt nu hoofdletterongevoelig en werkt ook als maar één gebruiker overeenkomt
 
 ---
 
@@ -67,7 +74,10 @@ community-basislijn importeert. Alleen-lezen.
 |-----------|----------|-------------|
 | `-OutputPath` | Nee | Back-upmap (standaard: `.\CAPolicyBackup_<timestamp>\` onder `C:\Temp\` / `~/Downloads\`) |
 | `-IncludeNamedLocations` | Nee | Ook benoemde locaties exporteren (standaard: aan) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -75,13 +85,19 @@ community-basislijn importeert. Alleen-lezen.
 .\Export-ConditionalAccessPolicies.ps1
 
 .\Export-ConditionalAccessPolicies.ps1 -OutputPath "C:\Backups\ContosoCA"
+
+# App-only, met de app-registratie uit graph.appid.json
+.\Export-ConditionalAccessPolicies.ps1 -TenantId contoso.onmicrosoft.com -AppOnly
 ```
 
 **Opmerkingen**
 - Een generieke herimport van CA-beleid uit JSON is bewust niet gebouwd — behandel de JSON als
   back-up/vergelijkingsmateriaal, niet als importeerbaar formaat; gebruik
   `scripts/Entra/Import-ConditionalAccessBaseline.ps1` voor een onderhouden importflow
-- Vereiste scope: `Policy.Read.All`
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Microsoft
+  Graph, standaard gedelegeerd (scope `Policy.Read.All`); app-only met `-ClientId` +
+  `-CertificateThumbprint` of `-AppOnly` (toepassingsmachtiging `Policy.Read.All`). Een
+  passende Graph-sessie die al open is, wordt hergebruikt en blijft verbonden
 
 **Vereiste module**
 ```powershell

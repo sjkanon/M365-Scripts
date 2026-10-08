@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Audit Microsoft 365 group owners and members via Microsoft Graph.
@@ -8,7 +8,14 @@
     Teams-backed groups). For each group it lists:
       - Owners
       - Members
-    Results are exported to CSV.
+    Results are exported to CSV. Owners and members come from one paged Graph call
+    per group each (with $select), not one Get-MgUser per member.
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused and left
+    connected; only a session this script opened is disconnected.
+    Delegated scopes: Group.Read.All, Directory.Read.All.
 
 .PARAMETER Group
     Display name or Object ID of a single group. If omitted, all M365 groups are audited.
@@ -17,7 +24,16 @@
     Path to write the CSV report. Defaults to .\M365GroupMembership_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Test-M365GroupMembership.ps1
@@ -32,25 +48,30 @@
 param(
     [string] $Group,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
-# ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{
-        Scopes = @('Group.Read.All', 'Directory.Read.All')
+# ── Connection (reuses a fitting session) ─────────────────────────────────────
+$graph = Connect-M365Graph -Scopes 'Group.Read.All', 'Directory.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+
+# Owners/members of a group in pages, with only the properties we report.
+function Get-GroupRelation([string] $GroupId, [string] $Relation) {
+    $next = "v1.0/groups/$GroupId/$Relation`?`$select=id,displayName,userPrincipalName&`$top=999"
+    while ($next) {
+        $page = Invoke-MgGraphRequest -Method GET -Uri $next -OutputType Hashtable -ErrorAction Stop
+        $page['value']
+        $next = $page['@odata.nextLink']
     }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -66,7 +87,8 @@ if ($Group) {
     try {
         $groups = @(Get-MgGroup -GroupId $Group -ErrorAction Stop)
     } catch {
-        $groups = @(Get-MgGroup -Filter "displayName eq '$Group' and groupTypes/any(c:c eq 'Unified')" -ErrorAction Stop)
+        $escaped = $Group -replace "'", "''"
+        $groups = @(Get-MgGroup -Filter "displayName eq '$escaped' and groupTypes/any(c:c eq 'Unified')" -All -ErrorAction Stop)
     }
 } else {
     Write-Host "  Retrieving M365 groups..." -ForegroundColor DarkGray
@@ -80,40 +102,22 @@ Write-Host ""
 $results = [System.Collections.Generic.List[PSObject]]::new()
 
 foreach ($grp in $groups) {
-    # Owners
-    try {
-        $owners = Get-MgGroupOwner -GroupId $grp.Id -All -ErrorAction SilentlyContinue
-        foreach ($owner in $owners) {
-            $ownerDetail = Get-MgUser -UserId $owner.Id -ErrorAction SilentlyContinue
-            $results.Add([PSCustomObject]@{
-                GroupName  = $grp.DisplayName
-                GroupEmail = $grp.Mail
-                GroupId    = $grp.Id
-                Role       = 'Owner'
-                DisplayName = $ownerDetail.DisplayName
-                UPN        = $ownerDetail.UserPrincipalName
-            })
+    foreach ($rel in @(@{ Name = 'owners'; Role = 'Owner' }, @{ Name = 'members'; Role = 'Member' })) {
+        try {
+            foreach ($obj in Get-GroupRelation -GroupId $grp.Id -Relation $rel.Name) {
+                $results.Add([PSCustomObject]@{
+                    GroupName   = $grp.DisplayName
+                    GroupEmail  = $grp.Mail
+                    GroupId     = $grp.Id
+                    Role        = $rel.Role
+                    ObjectType  = (([string]$obj['@odata.type']) -replace '^#microsoft\.graph\.', '')
+                    DisplayName = $obj['displayName']
+                    UPN         = $obj['userPrincipalName']
+                })
+            }
+        } catch {
+            Write-Host "  [WARN] $($rel.Role)s — $($grp.DisplayName) : $($_.Exception.Message)" -ForegroundColor Yellow
         }
-    } catch {
-        Write-Host "  [WARN] Owners — $($grp.DisplayName) : $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-
-    # Members
-    try {
-        $members = Get-MgGroupMember -GroupId $grp.Id -All -ErrorAction SilentlyContinue
-        foreach ($member in $members) {
-            $memberDetail = Get-MgUser -UserId $member.Id -ErrorAction SilentlyContinue
-            $results.Add([PSCustomObject]@{
-                GroupName   = $grp.DisplayName
-                GroupEmail  = $grp.Mail
-                GroupId     = $grp.Id
-                Role        = 'Member'
-                DisplayName = $memberDetail.DisplayName
-                UPN         = $memberDetail.UserPrincipalName
-            })
-        }
-    } catch {
-        Write-Host "  [WARN] Members — $($grp.DisplayName) : $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
@@ -136,5 +140,5 @@ Write-Host ""
 Write-Host "  Audited $($groups.Count) group(s) — $($results.Count) entries written." -ForegroundColor Cyan
 Write-Host ""
 
-# ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+# ── Disconnect only if this script connected ──────────────────────────────────
+Disconnect-M365Graph $graph

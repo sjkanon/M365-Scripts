@@ -19,7 +19,7 @@ Scripts that generate reports on Active Directory, SharePoint Online and licensi
 | Script | Description |
 |--------|-------------|
 | [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Last logon date of computer objects in one or more OUs, exported to CSV |
-| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenant-wide storage report: sites, libraries, version history and recycle bin |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Tenant-wide storage report: sites, libraries, version history, recycle bin and long paths |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Who has access where, through which group and at what level — every site, list, folder and file with its own permissions. Read-only, to CSV and a single Excel workbook |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Deletes file versions older than a date; the current version is always kept. Reports only by default |
 
@@ -112,7 +112,7 @@ See [Licensing/](Licensing/) for the monthly licensing report.
 
 ## Get-SharePointStorageReport.ps1
 
-Reports storage usage across SharePoint Online with a tenant-wide scan. By default the script connects delegated and temporarily creates an App Registration (`Sites.Read.All`) for site enumeration; that app is deleted again afterwards.
+Reports storage usage across SharePoint Online with a tenant-wide scan. By default the script signs in delegated through [`Connect-M365.ps1`](../Startup/readme.md#connect-m365ps1) (device code and GDAP customer per `load.config.ps1`) and temporarily creates an App Registration (`Sites.Read.All`) for site enumeration; that app is deleted again afterwards. `-AppOnly` uses the app for the tenant in `graph.appid.json` instead. Everything is read through Microsoft Graph — sites, libraries (hidden ones such as the Preservation Hold Library included, found through Graph `/lists` with the `system`/`hidden` facets), files and versions. The file walk used to have a SharePoint REST variant for hidden libraries, fed by a client-secret token that SharePoint Online always rejects; it is gone, and a hidden library Graph will not open is now reported instead of silently skipped. Requires PowerShell 7.
 
 
 ### Coverage
@@ -130,7 +130,7 @@ Reports storage usage across SharePoint Online with a tenant-wide scan. By defau
 
 ### Recycle bin
 
-The recycle bin (stage 1 + stage 2) counts towards the tenant storage quota, so it is collected **separately** from the library scan, and only for real SharePoint site collections (not OneDrive):
+The recycle bin (stage 1 + stage 2) counts towards the tenant storage quota, so it is collected **separately** from the library scan, and only for real SharePoint site collections (not OneDrive). Graph has no recycle bin API for SharePoint sites, so this part still uses SharePoint REST with a token minted from the temporary app's client secret (or `-ClientSecret`) — and SharePoint Online rejects secret-based app-only tokens, so expect empty recycle bin figures until that moves to a certificate (not verified on a tenant):
 
 - By default (`-Apply`, as Phase 2b) or on its own with **`-RecycleBinOnly`** (skips the library scan entirely, recycle bin only)
 - Only root site collections have a recycle bin of their own (sub-webs share the root's)
@@ -146,7 +146,7 @@ The recycle bin (stage 1 + stage 2) counts towards the tenant storage quota, so 
 
 ### Resuming after an interruption (checkpoints) and progress
 
-With `-Apply` (or `-RecycleBinOnly`) a checkpoint is written to the output folder after every completed library (or site recycle bin): `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. The `<hash>` is derived from all scan parameters (site, mode, output folder, etc.), so:
+With `-Apply` (or `-RecycleBinOnly`) a checkpoint is written to the output folder after every completed library (or site recycle bin): `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv` + `.longpaths.partial.csv`. The `<hash>` is derived from all scan parameters (site, mode, output folder, etc.), so:
 
 - **Starting again with the same parameters** resumes automatically from the last completed library — libraries already done are skipped (`[SKIP] Already completed in a previous run.`).
 - **`-Restart`** discards an existing checkpoint and starts the scan from scratch, even when the parameters are the same.
@@ -176,6 +176,23 @@ If `GrandTotalGB` for a site still differs from the admin portal figure, the mos
 - **Failed version lookups** — fall back to "0 versions" after repeated Graph errors (rare, only after 3 failed retries)
 - Compare without `-Apply` first (quick mode) — that uses the same official `quota.used` figure as the admin portal, so if that already differs, the difference is not in the `-Apply` count itself
 
+### Long paths (Windows limits)
+
+A library that is fine in SharePoint can still fail once it is synced with the OneDrive client or opened from Windows: the local path is longer than the SharePoint path, because the profile folder and the sync folder come in front of it. With `-Apply` (also with `-FastMode`) every file and folder is therefore measured twice:
+
+| Path | Example | Limit |
+|---|---|---|
+| SharePoint (server-relative, decoded) | `/sites/Finance/Shared Documents/<folders>/<file>` | **400** characters — SharePoint refuses anything longer |
+| Local OneDrive sync path | `C:\Users\<user>\<Organisation>\<Site> - <Library>\<folders>\<file>` | **260** (Windows `MAX_PATH`, 259 usable) — Explorer, many applications and older tools fail beyond it |
+| Same, for Excel workbooks (`.xls*`, `.xlt*`) | | **218** — Excel will not open or save the workbook |
+| Same, for PDFs (`.pdf`) | | **255** — Adobe Acrobat/Reader cannot open the file, notably from a synced or network folder |
+
+The local path is an estimate, because its length depends on who syncs it. By default the script measures for the **enabled member account with the longest UPN** in the tenant: the profile folder is named after the UPN prefix (the part before the `@`), so a path that fits for that user fits for everyone. That needs `User.Read.All` (added to the interactive sign-in); when the users cannot be read it falls back to `C:\Users\firstname.lastname`. The organisation name is the tenant's display name from Graph, or the tenant name from the SharePoint URL when that cannot be read. `-SyncProfilePath` and `-OrganizationName` override both. A OneDrive personal site (`-IncludeOneDriveUsers`) is measured as `C:\Users\<user>\OneDrive - <Organisation>\...`.
+
+Output: `SharePoint_LongPaths_<timestamp>.csv`, longest first, with every item whose local path is `-LongPathThreshold` (default `200`) characters or more, or that is over a limit — columns `LocalPathLength`, `SharePointPathLength`, `OverLimit` (`SharePoint (400)`, `Windows (260)`, `Excel (218)`, `Adobe (255)` or empty) and the estimated `LocalPath`. The console shows per library how many long paths it has, and at the end the count per limit and the 10 longest paths; the Markdown report gets the same top 10.
+
+> Windows may shorten the profile folder name (for example to 20 characters for an on-premises account, or with a suffix when the name already exists). Measuring with the full UPN prefix is the cautious side: it can report a path as too long that just fits, never the other way round.
+
 ### Performance (version history lookups)
 
 Version history is the most expensive step: by nature 1 Graph call per file. Three optimisations limit that:
@@ -190,7 +207,7 @@ In addition, `-SiteUrl` (1 specific site) is optimised: in normal mode the scrip
 
 For GDAP reliability the script automatically switches to an app-only bootstrap for single-site scans when `authMode=GDAP` is detected (from `load.config.ps1`/launcher context). To always force that, use `-ForceAppOnlySingleSite`.
 
-For full-site scans under GDAP the script uses the same customer-tenant context (`$global:cid`/`-TenantId`) for both `Connect-MgGraph` and the temporary app bootstrap, so consent and site enumeration always happen in the right tenant.
+For full-site scans under GDAP the script uses the same customer-tenant context (`$global:cid`/`-TenantId`) for both the delegated sign-in (`Connect-M365Graph`) and the temporary app bootstrap, so consent and site enumeration always happen in the right tenant. A Graph session that already holds the scopes is reused, and then left open at the end.
 
 ### Parameters
 
@@ -203,6 +220,7 @@ For full-site scans under GDAP the script uses the same customer-tenant context 
 | `-ClientId` | Existing App Registration client ID — skips auto-create; use together with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
 | `-ClientSecret` | Client secret for an existing app registration |
 | `-CertificateThumbprint` | Certificate thumbprint for an existing app registration |
+| `-AppOnly` | App-only with ClientId and CertificateThumbprint for the tenant from `graph.appid.json` — no sign-in, no temporary app. Needs `Sites.Read.All` (and `User.Read.All` for the profile path) as application permissions |
 | `-Apply` | Full recursive scan of libraries, folders and files. Without this switch, quota summary only |
 | `-UseHighPrivilege` | Auto mode: temporarily grants `Sites.FullControl.All` instead of `Sites.Read.All` when read-only permissions turn out to be insufficient |
 | `-RecycleBinOnly` | Skips storage/library scanning — reads only recycle bin items (stage 1 + stage 2) per site collection |
@@ -212,6 +230,9 @@ For full-site scans under GDAP the script uses the same customer-tenant context 
 | `-VersionBatchConcurrency` | Number of parallel `$batch` workers for fetching version history, 1-8 (default: `4`) |
 | `-MaxVersionRetryPasses` | Maximum number of retry passes for version history under sustained throttling. `0` (default) scales automatically with the number of files — SharePoint enforces a hard activity ceiling of ~1500-2500 resolved version lookups per pass, so on tenants with hundreds of thousands of files a fixed low value (previously hardcoded at 8) gave up early for most of the scan. Set it higher/lower explicitly to override the auto-scaling |
 | `-Restart` | Discards an existing checkpoint for this parameter combination and starts the scan from scratch |
+| `-SyncProfilePath` | Profile folder used for the local path estimate (default: `C:\Users\<prefix>` of the enabled member account with the longest UPN; fallback `C:\Users\firstname.lastname`) |
+| `-OrganizationName` | Organisation name in the OneDrive sync folder (default: the tenant's display name, fallback the tenant name from the URL) |
+| `-LongPathThreshold` | Local path length from which an item goes into the long paths CSV, 1-1000 (default: `200`). Anything over a limit is always listed |
 
 ### Examples
 
@@ -233,6 +254,9 @@ For full-site scans under GDAP the script uses the same customer-tenant context 
 
 # Ignore an interrupted run and start over from scratch
 .\Get-SharePointStorageReport.ps1 -Apply -Restart
+
+# Long paths only, fast (no versions, no detail CSV), measured for a specific user
+.\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 ```
 
 ---
@@ -258,7 +282,7 @@ Inheritance is followed the way SharePoint models it itself: an item only shows 
 
 ### Authentication
 
-Reading role assignments is **not** possible through Microsoft Graph, and is not covered by SharePoint's Read/Write/Manage roles either: it needs the application role `Sites.FullControl.All`. The script therefore signs you in interactively once and then creates a short-lived App Registration of its own with:
+Reading role assignments is **not** possible through Microsoft Graph, and is not covered by SharePoint's Read/Write/Manage roles either: it needs the application role `Sites.FullControl.All`. The script therefore signs you in once — delegated, through [`Connect-M365Graph`](../Startup/readme.md#connect-m365ps1): a device code when `useDeviceCodeAuth` is set in `load.config.ps1`, the GDAP customer from `Connect-Tenant`, and an existing Graph session with the scopes is reused — and then creates a short-lived App Registration of its own with:
 
 | Resource | Role | Used for |
 |---|---|---|
@@ -266,7 +290,7 @@ Reading role assignments is **not** possible through Microsoft Graph, and is not
 | Graph | `Sites.Read.All` | Tenant-wide site enumeration |
 | Graph | `GroupMember.Read.All` | Resolving Entra group membership |
 
-That app is deleted again afterwards. Despite the Full Control role, the script never writes anything. If you don't want a temporary app, pass `-ClientId` + `-TenantId` + `-CertificateThumbprint` of an existing registration that already has these roles.
+That app is deleted again afterwards. Despite the Full Control role, the script never writes anything. If you don't want a temporary app, pass `-ClientId` + `-TenantId` + `-CertificateThumbprint` of an existing registration that already has these roles, or `-AppOnly` to take them from `graph.appid.json` (PowerShell 7). The scan itself stays app-only on purpose: SharePoint REST accepts neither a delegated Graph token (wrong audience) nor a secret-based app-only token.
 
 > **Certificate, not secret — and that is not a preference.** SharePoint Online rejects every app-only token obtained with a client secret: you get `401` with `x-ms-diagnostics: ... Unsupported app only token`. Only certificate-based app-only authentication works against `_api`. The temporary app therefore gets a certificate that the script creates **in memory** and registers on the app; it never goes into the certificate store or onto disk, so there is nothing to clean up afterwards. If you pass `-ClientSecret` with your own app, the script warns you: the Graph half will work, the SharePoint half will not.
 
@@ -403,6 +427,7 @@ A tenant-wide run takes hours and touches thousands of objects, so the failures 
 | `-ClientId` | string | — | Existing App Registration; skips the temporary app |
 | `-ClientSecret` | string | — | Secret for `-ClientId`. **Does not work against SharePoint** (see Authentication); the script warns you |
 | `-CertificateThumbprint` | string | — | Certificate for `-ClientId`, from `Cert:\CurrentUser\My` or `Cert:\LocalMachine\My`. This is the variant that works |
+| `-AppOnly` | switch | off | ClientId and CertificateThumbprint for the tenant from `graph.appid.json` instead of a temporary app. That app needs the roles above, SharePoint `Sites.FullControl.All` included (PowerShell 7) |
 | `-OutputPath` | string | `C:\Temp` | Output folder |
 | `-IncludeOneDriveSites` | switch | off | Also includes personal OneDrive sites (one site per user) |
 | `-IncludeHiddenLists` | switch | off | Includes hidden and system lists (Form Templates, Style Library, workflow history, …) |
@@ -456,9 +481,9 @@ Reports or deletes **old file versions** in SharePoint Online document libraries
 
 ### Authentication
 
-By default the script connects interactively (delegated) with `Sites.ReadWrite.All` + `Files.ReadWrite.All` through `Connect-MgGraph` — that uses Microsoft's own pre-consented app, so no App Registration or `-ClientId` of your own. Only a **tenant-wide scan** (no `-SiteUrl`) additionally needs a short-lived, read-only temporary App Registration (`Sites.Read.All`) for site/library enumeration *and* fetching version history — Microsoft does not support tenant-wide site enumeration delegated. With `-VersionBatchConcurrency` above `1` (the default) a **second** temporary App Registration is also created, purely to double the throughput of version lookups: SharePoint's "activityLimitReached" throttle applies per app registration, so two apps each get their own throttle budget (same approach as `Get-SharePointStorageReport.ps1`). Both temporary apps are deleted again afterwards. Version **deletes** always go through your own delegated permissions, never through a temporary app.
+By default the script signs in delegated with `Sites.ReadWrite.All` + `Files.ReadWrite.All` through [`Connect-M365Graph`](../Startup/readme.md#connect-m365ps1) — a device code when `useDeviceCodeAuth` is set in `load.config.ps1`, the GDAP customer from `Connect-Tenant`, Microsoft's own pre-consented app, so no App Registration or `-ClientId` of your own; a Graph session that already holds the scopes is reused and left open. Requires PowerShell 7. Only a **tenant-wide scan** (no `-SiteUrl`) additionally needs a short-lived, read-only temporary App Registration (`Sites.Read.All`) for site/library enumeration *and* fetching version history — Microsoft does not support tenant-wide site enumeration delegated. With `-VersionBatchConcurrency` above `1` (the default) a **second** temporary App Registration is also created, purely to double the throughput of version lookups: SharePoint's "activityLimitReached" throttle applies per app registration, so two apps each get their own throttle budget (same approach as `Get-SharePointStorageReport.ps1`). Both temporary apps are deleted again afterwards. Version **deletes** always go through your own delegated permissions, never through a temporary app.
 
-Want to skip the temporary app(s) and use your own existing app registration? Then pass `-ClientId` + `-TenantId` + `-ClientSecret` (or `-CertificateThumbprint`); that app must already have the `Sites.ReadWrite.All` application permission.
+Want to skip the temporary app(s) and use your own existing app registration? Then pass `-ClientId` + `-TenantId` + `-ClientSecret` (or `-CertificateThumbprint`), or `-AppOnly` to take ClientId and CertificateThumbprint from `graph.appid.json`; that app must already have the `Sites.ReadWrite.All` application permission.
 
 > **Note:** deleting a specific version (`DELETE .../versions/{id}`) is not in Microsoft's official Graph API reference, but it is a widely used operation that is confirmed to work (for both OneDrive and SharePoint document libraries). The current/latest version cannot be deleted this way — Graph refuses that, which is exactly the keep-the-current-version guarantee.
 
@@ -485,6 +510,7 @@ During the scan the script shows nested progress bars (sites → libraries → s
 | `-ClientId` | `string` | Existing App Registration client ID — skips the temporary app; use together with `-TenantId` and `-ClientSecret` or `-CertificateThumbprint` |
 | `-ClientSecret` | `string` | Client secret for an existing app registration |
 | `-CertificateThumbprint` | `string` | Certificate thumbprint for an existing app registration |
+| `-AppOnly` | `switch` | App-only with ClientId and CertificateThumbprint for the tenant from `graph.appid.json` (needs `Sites.ReadWrite.All` as application permission) |
 | `-Apply` | `switch` | Actually performs the deletion |
 | `-IncludeOneDriveSites` | `switch` | Includes OneDrive sites in the tenant scan |
 | `-IncludeHiddenLibraries` | `switch` | Includes hidden document libraries |

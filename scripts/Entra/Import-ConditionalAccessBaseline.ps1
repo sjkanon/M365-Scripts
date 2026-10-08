@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Import the latest Conditional Access Baseline into a tenant.
@@ -14,6 +14,14 @@
     Default import state is OFF (disabled), so you can review and enable later.
 
     Includes a second action to change policy state later (Enable/ReportOnly/Off).
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A Graph session for the right tenant that
+    already has the scopes is reused and left connected; only a session this script
+    opened is disconnected. Delegated scopes: Policy.ReadWrite.ConditionalAccess,
+    Policy.Read.All, Group.ReadWrite.All, Directory.ReadWrite.All,
+    Application.ReadWrite.All. The Daniel provider runs DCToolbox on that same session.
 
 .PARAMETER Action
     Import   : download + import baseline (default)
@@ -32,7 +40,16 @@
     Config/ConditionalAccess, Config/Groups, Config/NamedLocations.
 
 .PARAMETER TenantId
-    Optional tenant ID or domain for Connect-MgGraph.
+    Optional tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .PARAMETER UpdateExisting
     If set, existing policies are updated. If not set, existing policies are skipped.
@@ -158,8 +175,16 @@ param (
 
     [switch]$RemoveAssociatedNamedLocations,
 
-    [switch]$Force
+    [switch]$Force,
+
+    [string]$ClientId,
+
+    [string]$CertificateThumbprint,
+
+    [switch]$AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 $ErrorActionPreference = 'Stop'
 
@@ -537,27 +562,18 @@ function Get-JsonFileObject {
 function Connect-GraphIfNeeded {
     param([string]$Tenant)
 
-    $script:ConnectedHere = $false
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
-    if (-not $ctx) {
-        $connectParams = @{
-            Scopes = @(
-                'Policy.ReadWrite.ConditionalAccess',
-                'Policy.Read.All',
-                'Group.ReadWrite.All',
-                'Directory.ReadWrite.All',
-                'Application.ReadWrite.All'
-            )
-            NoWelcome = $true
-        }
-        if ($Tenant) { $connectParams['TenantId'] = $Tenant }
+    # The old check reused any session, whatever its tenant or scopes; the helper
+    # reuses only one that fits and reports whether it connected.
+    $script:Graph = Connect-M365Graph -TenantId $Tenant -ClientId $ClientId `
+        -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly -Scopes @(
+            'Policy.ReadWrite.ConditionalAccess',
+            'Policy.Read.All',
+            'Group.ReadWrite.All',
+            'Directory.ReadWrite.All',
+            'Application.ReadWrite.All'
+        )
 
-        Connect-MgGraph @connectParams
-        $script:ConnectedHere = $true
-        $ctx = Get-MgContext
-    }
-
-    Write-Ok "Connected as $($ctx.Account) to tenant $($ctx.TenantId)"
+    Write-Ok "Connected as $(if ($script:Graph.Account) { $script:Graph.Account } else { $script:Graph.AuthType }) to tenant $($script:Graph.TenantId)"
 }
 
 function Resolve-BaselinePath {
@@ -593,7 +609,7 @@ function Resolve-BaselinePath {
 
 function Ensure-IntuneEnrollmentSp {
     $appId = 'd4ebce55-015a-49b5-a083-c84d1797ae8c'
-    $sp = Get-MgServicePrincipal -Filter "appId eq '$appId'" -ConsistencyLevel eventual | Select-Object -First 1
+    $sp = Get-MgServicePrincipal -Filter "appId eq '$appId'" | Select-Object -First 1
     if ($sp) {
         Write-Ok 'Microsoft Intune Enrollment service principal exists'
         return
@@ -631,7 +647,7 @@ function Import-BaselineGroups {
         }
 
         $safeDisplayName = $displayName.Replace("'", "''")
-        $existing = Get-MgGroup -Filter "displayName eq '$safeDisplayName'" -ConsistencyLevel eventual | Select-Object -First 1
+        $existing = Get-MgGroup -Filter "displayName eq '$safeDisplayName'" | Select-Object -First 1
 
         if ($existing) {
             Write-Ok "Group exists: $displayName"
@@ -798,7 +814,7 @@ function Ensure-ServicePrincipalsFromPolicies {
     }
 
     foreach ($appId in $allIds) {
-        $sp = Get-MgServicePrincipal -Filter "appId eq '$appId'" -ConsistencyLevel eventual | Select-Object -First 1
+        $sp = Get-MgServicePrincipal -Filter "appId eq '$appId'" | Select-Object -First 1
         if ($sp) {
             Write-Ok "Service principal exists for AppId $appId"
             continue
@@ -1303,7 +1319,5 @@ catch {
     exit 1
 }
 finally {
-    if ($script:ConnectedHere) {
-        Disconnect-MgGraph | Out-Null
-    }
+    Disconnect-M365Graph $script:Graph
 }

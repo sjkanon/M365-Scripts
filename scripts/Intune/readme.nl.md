@@ -6,7 +6,7 @@
 
 Autopilot-enrollment, automatisering van compliancebeleid, detectie van configuratiedrift en desktopuitrol bij klanten (achtergrond, vergrendelscherm, snelkoppeling om te vergrendelen via de taakbalk).
 
-> De uitrol van Office-thema's en -kleuren staat in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.nl.md) — die scripts hebben hun download-URL hard naar dat pad gecodeerd.
+> De uitrol van Office-thema's en -kleuren staat in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.nl.md) — die scripts krijgen de download-URL van het thema als parameter.
 
 ---
 
@@ -39,7 +39,9 @@ Een wrapper rond de communitymodule `IntuneBackupAndRestore` om Intune-configura
 |-----------|----------|-------------|
 | `-BaselinePath` | Ja | Map met de MSP-referentieback-up (van een eerdere `Start-IntuneBackup -Path <path>`-run) |
 | `-CustomerBackupPath` | Nee | Bestaande back-up van de klanttenant. Laat je deze weg, dan maakt het script eerst een back-up van de tenant waarmee je nu verbonden bent |
-| `-TenantId` | Nee | Tenant-ID of domein om mee te verbinden (alleen gebruikt als `-CustomerBackupPath` is weggelaten) |
+| `-TenantId` | Nee | Tenant-ID of domein waarvan een back-up wordt gemaakt (alleen gebruikt als `-CustomerBackupPath` is weggelaten; standaard: GDAP-klant, anders je aanmeldtenant) |
+| `-ClientId` / `-CertificateThumbprint` | Nee | App-only aanmelden (de app heeft de vijf scopes hieronder als toepassingsmachtigingen nodig) |
+| `-AppOnly` | Nee | App-only met ClientId en vingerafdruk uit `graph.appid.json` |
 | `-OutputPath` | Nee | Map voor de automatische back-up en het verschillenrapport (standaard: `C:\Temp\` / `~/Downloads`) |
 
 **Voorbeelden**
@@ -53,7 +55,8 @@ Een wrapper rond de communitymodule `IntuneBackupAndRestore` om Intune-configura
 ```
 
 **Opmerkingen**
-- GDAP-bewust: als je `-TenantId` weglaat, wordt die automatisch bepaald uit de geselecteerde klanttenant (`$global:cid`), net als bij `Move-InboxToArchive.ps1` / `Get-SharePointStorageReport.ps1`
+- Aanmelden (alleen bij een live back-up) gaat via [`Connect-M365.ps1`](../Startup/Connect-M365.ps1): **standaard gedelegeerd** (apparaatcode volgens `$global:useDeviceCodeAuth`; GDAP-klant uit `$global:cid` als `-TenantId` ontbreekt), **app-only** met `-ClientId` + `-CertificateThumbprint` of `-AppOnly`. Het script verbreekt alleen een sessie die het zelf heeft geopend.
+- De back-up en de vergelijking blijven bij `IntuneBackupAndRestore` (4.x leest Intune via Microsoft Graph, `Invoke-MgGraphRequest`, op dezelfde sessie). `Start-IntuneBackup` controleert op `DeviceManagementApps`, `DeviceManagementConfiguration`, `DeviceManagementServiceConfig`, `DeviceManagementManagedDevices` en `DeviceManagementScripts` `.ReadWrite.All` en roept, als er een ontbreekt, zelf `Connect-MgGraph` aan zonder tenant — een GDAP-run maakte dan ongemerkt een back-up van je eigen tenant. Het script vraagt nu precies die vijf scopes (ook al leest het alleen), waar het eerst twee `.Read.All`-scopes vroeg.
 - Niet opgenomen in `menu.ps1` — werkt met paden naar back-upmappen en een tenantbrede export, dus voer het rechtstreeks uit
 
 **Vereiste module**

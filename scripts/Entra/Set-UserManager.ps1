@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report and optionally bulk-set the manager for a set of Entra ID users.
@@ -41,7 +41,23 @@
     Path to export results as CSV. Optional.
 
 .PARAMETER TenantId
-    Optional tenant ID or domain for Connect-MgGraph.
+    Optional tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
+
+.NOTES
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only on request.
+    A fitting Graph session is reused and left connected; only a session this script
+    opened is disconnected. Delegated scopes: User.Read.All + GroupMember.Read.All,
+    User.ReadWrite.All when -NewManager is given.
 
 .EXAMPLE
     # Show managers for all members of a group
@@ -89,70 +105,102 @@ param (
 
     [string] $OutputPath,
 
-    [string] $TenantId
+    [string] $TenantId,
+
+    [string] $ClientId,
+
+    [string] $CertificateThumbprint,
+
+    [switch] $AppOnly
 )
 
 begin {
-    Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
 
-    # ── Connect ───────────────────────────────────────────────────────────────
+    . (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+
+    # ── Connect (delegated by default; reuses a fitting session) ──────────────
     $scopes = if ($NewManager) {
-        @('User.Read.All', 'User.ReadWrite.All', 'GroupMember.Read.All')
+        @('User.ReadWrite.All', 'GroupMember.Read.All')
     } else {
         @('User.Read.All', 'GroupMember.Read.All')
     }
-    $connectParams = @{ Scopes = $scopes }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+    $script:Graph = Connect-M365Graph -Scopes $scopes -TenantId $TenantId `
+        -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
-    Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
-    Connect-MgGraph @connectParams -NoWelcome
+    # Strict mode only after connecting: the helper reads optional globals
+    # ($global:authMode, $global:cid, ...) that strict mode treats as errors when
+    # load.ps1 has not set them.
+    Set-StrictMode -Version Latest
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+    $userSelect = 'id,displayName,userPrincipalName,department'
+
+    function ConvertTo-UserRow($u) {
+        [PSCustomObject]@{
+            Id                = $u['id']
+            DisplayName       = $u['displayName']
+            UserPrincipalName = $u['userPrincipalName']
+            Department        = $u['department']
+        }
+    }
+
+    # GET with paging; the /microsoft.graph.user cast returns only users, with the
+    # selected properties, so there is no Get-MgUser per member.
+    function Get-GraphUserPage([string] $Uri) {
+        $next = $Uri
+        while ($next) {
+            $page = Invoke-MgGraphRequest -Method GET -Uri $next -OutputType Hashtable
+            foreach ($u in $page['value']) { ConvertTo-UserRow $u }
+            $next = $page['@odata.nextLink']
+        }
+    }
 
     # ── Resolve users from Entra ID ───────────────────────────────────────────
-    $resolvedUsers = [System.Collections.Generic.List[Microsoft.Graph.PowerShell.Models.IMicrosoftGraphUser]]::new()
+    $resolvedUsers = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     switch ($PSCmdlet.ParameterSetName) {
         'ByGroup' {
             Write-Host "Searching for group: $GroupName" -ForegroundColor Cyan
-            $groups = Get-MgGroup -Filter "displayName eq '$GroupName'" -Property Id, DisplayName
+            $escaped = $GroupName -replace "'", "''"
+            $groups = @(Get-MgGroup -Filter "displayName eq '$escaped'" -Property Id, DisplayName -All)
             if ($groups.Count -eq 0) { throw "No group found with display name '$GroupName'." }
             if ($groups.Count -gt 1) { throw "Multiple groups match '$GroupName'. Use -GroupId instead." }
             $GroupId = $groups[0].Id
             Write-Host "  -> Group ID: $GroupId" -ForegroundColor Green
-            # fall through to ByGroupId logic
-            $members = Get-MgGroupMember -GroupId $GroupId -All | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.user' }
-            foreach ($m in $members) {
-                $resolvedUsers.Add((Get-MgUser -UserId $m.Id -Property Id, DisplayName, UserPrincipalName, Department))
+            foreach ($u in Get-GraphUserPage "v1.0/groups/$GroupId/members/microsoft.graph.user?`$select=$userSelect&`$top=999") {
+                $resolvedUsers.Add($u)
             }
         }
         'ByGroupId' {
             Write-Host "Fetching members of group $GroupId..." -ForegroundColor Cyan
-            $members = Get-MgGroupMember -GroupId $GroupId -All | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.user' }
-            foreach ($m in $members) {
-                $resolvedUsers.Add((Get-MgUser -UserId $m.Id -Property Id, DisplayName, UserPrincipalName, Department))
+            foreach ($u in Get-GraphUserPage "v1.0/groups/$GroupId/members/microsoft.graph.user?`$select=$userSelect&`$top=999") {
+                $resolvedUsers.Add($u)
             }
         }
         'ByDepartment' {
             Write-Host "Fetching users in department: $Department" -ForegroundColor Cyan
-            $deptUsers = Get-MgUser -Filter "department eq '$Department'" -Property Id, DisplayName, UserPrincipalName, Department -All
-            foreach ($u in $deptUsers) { $resolvedUsers.Add($u) }
+            $escaped = $Department -replace "'", "''"
+            $deptUsers = Get-MgUser -Filter "department eq '$escaped'" -Property Id, DisplayName, UserPrincipalName, Department -All
+            foreach ($u in $deptUsers) {
+                $resolvedUsers.Add([PSCustomObject]@{ Id = $u.Id; DisplayName = $u.DisplayName; UserPrincipalName = $u.UserPrincipalName; Department = $u.Department })
+            }
         }
         'ByCurrentManager' {
             Write-Host "Resolving manager: $CurrentManager" -ForegroundColor Cyan
             $mgr = Get-MgUser -UserId $CurrentManager -Property Id, DisplayName, UserPrincipalName
             Write-Host "  -> $($mgr.DisplayName) — fetching direct reports from all of Entra ID..." -ForegroundColor Green
-            $reports = Get-MgUserDirectReport -UserId $mgr.Id -All
+            $reports = @(Get-GraphUserPage "v1.0/users/$($mgr.Id)/directReports/microsoft.graph.user?`$select=$userSelect")
             if ($reports.Count -eq 0) {
                 Write-Warning "No direct reports found for $($mgr.DisplayName)."
             }
-            foreach ($r in $reports) {
-                $resolvedUsers.Add((Get-MgUser -UserId $r.Id -Property Id, DisplayName, UserPrincipalName, Department))
-            }
+            foreach ($r in $reports) { $resolvedUsers.Add($r) }
         }
         'ByList' {
             Write-Host "Resolving $($UserList.Count) user(s) from list..." -ForegroundColor Cyan
             foreach ($entry in $UserList) {
-                $resolvedUsers.Add((Get-MgUser -UserId $entry.Trim() -Property Id, DisplayName, UserPrincipalName, Department))
+                $u = Get-MgUser -UserId $entry.Trim() -Property Id, DisplayName, UserPrincipalName, Department
+                $resolvedUsers.Add([PSCustomObject]@{ Id = $u.Id; DisplayName = $u.DisplayName; UserPrincipalName = $u.UserPrincipalName; Department = $u.Department })
             }
         }
     }
@@ -182,10 +230,11 @@ process {
             $currentManagerName = '(none)'
             $currentManagerUpn  = ''
             try {
-                $mgr = Get-MgUserManager -UserId $user.Id
-                $mgrDetails = Get-MgUser -UserId $mgr.Id -Property DisplayName, UserPrincipalName
-                $currentManagerName = $mgrDetails.DisplayName
-                $currentManagerUpn  = $mgrDetails.UserPrincipalName
+                # One call: the manager with the properties we show (404 when none is set)
+                $mgrDetails = Invoke-MgGraphRequest -Method GET -OutputType Hashtable `
+                    -Uri "v1.0/users/$($user.Id)/manager?`$select=displayName,userPrincipalName"
+                $currentManagerName = $mgrDetails['displayName']
+                $currentManagerUpn  = $mgrDetails['userPrincipalName']
             }
             catch {
                 # No manager set — keep defaults
@@ -244,5 +293,6 @@ end {
         Write-Host "Report exported to: $OutputPath" -ForegroundColor Green
     }
 
-    Disconnect-MgGraph | Out-Null
+    # Only disconnect a session this script opened, never the caller's.
+    Disconnect-M365Graph $script:Graph
 }

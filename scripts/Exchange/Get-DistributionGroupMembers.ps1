@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Export the members of every distribution list to a customer-readable Excel workbook.
@@ -93,7 +93,19 @@
     Write CSV instead of Excel, even when ImportExcel is available.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Tenant ID or domain. Defaults to the GDAP customer when load.config.ps1 sets
+    authMode GDAP; otherwise you land in your own tenant. App-only needs a domain.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it
+    you sign in delegated as yourself (device code per load.config.ps1).
+
+.PARAMETER CertificateThumbprint
+    Certificate for -ClientId.
+
+.PARAMETER AppOnly
+    App-only with ClientId and CertificateThumbprint for the tenant from
+    graph.appid.json in the repo root.
 
 .EXAMPLE
     .\Get-DistributionGroupMembers.ps1
@@ -136,7 +148,10 @@ param(
     [switch] $IncludeM365Groups,
     [string] $OutputPath,
     [switch] $Csv,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
 
 # ── Output folder ─────────────────────────────────────────────────────────────
@@ -144,15 +159,12 @@ $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+# Delegated by default (device code and GDAP customer per load.config.ps1),
+# app-only with -ClientId/-CertificateThumbprint or -AppOnly. Exchange Online
+# PowerShell: Graph can list group members, but not dynamic distribution groups,
+# ManagedBy owners or mail contacts the way this report shows them.
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -419,7 +431,7 @@ if ($Group) {
 if ($lists.Count -eq 0) {
     if ($filterMode -eq 'Address') { Write-Host "  $Member is not a direct member of any distribution list." -ForegroundColor Yellow }
     else                           { Write-Host "  No distribution lists found." -ForegroundColor Yellow }
-    if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+    Disconnect-M365Exchange $exo
     return
 }
 
@@ -552,7 +564,7 @@ if ($overviewSorted.Count -eq 0) {
     # "the report failed" rather than as the answer it is.
     Write-Host "  No distribution list has a member on $filterLabel." -ForegroundColor Yellow
     Write-Host ""
-    if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+    Disconnect-M365Exchange $exo
     return
 }
 
@@ -572,17 +584,11 @@ $stem = switch ($filterMode) {
 
 $useExcel = -not $Csv
 if ($useExcel -and -not (Get-Module -ListAvailable -Name ImportExcel)) {
-    Write-Host "  ImportExcel is not installed - it is what writes the .xlsx." -ForegroundColor Yellow
-    if ((Read-Host "  Install it now (CurrentUser)? [Y/n]") -notmatch '^[Nn]') {
-        try {
-            Install-Module ImportExcel -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
-        } catch {
-            Write-Host "  [WARN] Install failed: $($_.Exception.Message)" -ForegroundColor Yellow
-            $useExcel = $false
-        }
-    } else {
-        $useExcel = $false
-    }
+    # Modules are installed in one place (scripts\Startup\Install-Modules.ps1, from
+    # RequiredModules.psd1), not on the fly by individual scripts.
+    Write-Host "  [WARN] ImportExcel is not installed - writing CSV instead of .xlsx." -ForegroundColor Yellow
+    Write-Host "         Run scripts\Startup\Install-Modules.ps1 to get the Excel workbook." -ForegroundColor DarkGray
+    $useExcel = $false
 }
 
 if ($useExcel) {
@@ -641,4 +647,4 @@ switch ($filterMode) {
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false | Out-Null }
+Disconnect-M365Exchange $exo

@@ -4,9 +4,7 @@
 
 # Legacy Utilities — Teams
 
-Utilitaires de provisionnement d'équipes et de Planner via Microsoft Graph (et Microsoft Teams
-PowerShell pour la création en masse d'équipes et de canaux). Ils se connectent automatiquement
-si aucune session n'est active, et réutilisent la session existante si vous êtes déjà connecté.
+Utilitaires de provisionnement d'équipes et de Planner, entièrement via Microsoft Graph — le module MicrosoftTeams n'est plus nécessaire. Ils se connectent via [`Connect-M365.ps1`](../../Startup/readme.fr.md) : en délégué en tant qu'administrateur par défaut (navigateur, ou code d'appareil / client GDAP selon `load.config.ps1`), en app-only avec `-ClientId` + `-CertificateThumbprint` ou `-AppOnly` (application de `graph.appid.json`). Une session adaptée pour le bon tenant est réutilisée et reste connectée ; seule une session ouverte par le script est fermée. Chaque script accepte `-TenantId`, `-ClientId`, `-CertificateThumbprint` et `-AppOnly`.
 
 ---
 
@@ -40,6 +38,10 @@ jusqu'à ce que la nouvelle équipe apparaisse. Essai à blanc par défaut.
 .\Copy-Team.ps1 -SourceTeamId "Project Template" -NewTeamName "Project 1234" -Apply
 ```
 
+**Remarques**
+- Interroge l'opération de clonage indiquée dans l'en-tête `Location` et affiche l'ID de la nouvelle équipe, ou l'erreur si le clonage a échoué ; auparavant, il attendait n'importe quel groupe portant le nouveau nom, condition qu'un groupe existant du même nom remplissait aussi
+- Les apostrophes dans un nom d'affichage `-SourceTeamId` sont échappées pour le filtre
+
 ---
 
 ### Copy-PlannerPlan.ps1
@@ -52,6 +54,11 @@ Microsoft.Graph.Planner, sans dépendance à PnP. Essai à blanc par défaut.
 ```powershell
 .\Copy-PlannerPlan.ps1 -SourcePlanId "xqQg5FS2LkCp935s-FIFm2QAFkHM" -DestinationGroupId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -Apply
 ```
+
+**Remarques**
+- Lit tous les compartiments et toutes les tâches page par page (un plan dépassant une page perdait le reste)
+- Les listes de contrôle sont à nouveau copiées — les éléments étaient lus dans les mauvaises propriétés — y compris pour les tâches avec une liste de contrôle mais sans description
+- En délégué, l'administrateur doit être membre des deux groupes ; l'app-only fonctionne avec l'autorisation d'application `Tasks.ReadWrite.All`
 
 ---
 
@@ -84,5 +91,13 @@ ChannelName,Description
 
 ```powershell
 Install-Module Microsoft.Graph -Scope CurrentUser
-Install-Module MicrosoftTeams -Scope CurrentUser
 ```
+
+**Fonctionnement**
+
+1. `POST /groups` crée le groupe Microsoft 365 avec le `MailNickname` du CSV, le propriétaire étant propriétaire et membre
+2. `POST /teams` avec `group@odata.bind` et le modèle `standard` en fait une équipe (les 404 sont retentés pendant la réplication du nouveau groupe)
+3. L'opération asynchrone de l'en-tête `Location` est interrogée jusqu'à ce que l'équipe soit provisionnée
+4. `POST /teams/{id}/channels` ajoute chaque canal
+
+Étendues déléguées : `Group.ReadWrite.All`, `User.Read.All`, `Team.Create`, `Channel.Create`. App-only : `Group.ReadWrite.All`, `User.Read.All` (autorisations d'application). Un CSV sans `TeamName` ou `ChannelName` est désormais refusé (ce contrôle ne se déclenchait jamais auparavant).

@@ -18,6 +18,13 @@ de recoupements, cette boîte à outils regroupe environ 70 de ces scripts à us
 scripts bien paramétrés, organisés par fonctionnalité plutôt que portés à l'identique. Voir la section
 `.NOTES` de chaque script pour savoir exactement quels scripts d'origine il remplace.
 
+Chaque script se connecte via [`Connect-M365.ps1`](../Startup/readme.fr.md#connect-m365ps1) :
+Microsoft Graph partout où Graph a une API, **en délégué par défaut** (vous vous connectez en
+tant qu'administrateur ; code d'appareil et client GDAP depuis `load.config.ps1`), app-only
+avec `-ClientId` + `-CertificateThumbprint` ou `-AppOnly`. Exchange Online, Teams PowerShell et
+PnP ne servent qu'au travail que Graph ne sait pas faire — les remarques de chaque script
+précisent lequel et pourquoi.
+
 ---
 
 ## Dossiers

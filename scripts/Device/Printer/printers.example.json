@@ -1,0 +1,69 @@
+{
+  "drivers": [
+    {
+      "name": "HP Universal Printing PCL 6",
+      "version": "7.2.0.25780",
+      "inf": "hpcu270u.inf",
+      "source": {
+        "type": "githubRelease",
+        "repository": "contoso/printer-drivers",
+        "tag": "latest",
+        "asset": "hp-upd-pcl6-x64-*.zip",
+        "sha256": ""
+      }
+    },
+    {
+      "name": "KONICA MINOLTA Universal V4 PCL",
+      "source": {
+        "type": "github",
+        "repository": "contoso/printer-drivers",
+        "ref": "main",
+        "path": "drivers/konica-minolta-v4"
+      }
+    },
+    {
+      "name": "Brother Laser Type1 Class Driver",
+      "source": {
+        "type": "url",
+        "url": "https://downloads.contoso.com/drivers/brother-type1.zip"
+      }
+    },
+    {
+      "name": "Xerox Global Print Driver PCL6",
+      "source": {
+        "type": "path",
+        "path": "drivers\\xerox-gpd"
+      }
+    }
+  ],
+  "printers": [
+    {
+      "name": "Office 1st floor",
+      "driver": "HP Universal Printing PCL 6",
+      "address": "10.0.5.20",
+      "location": "1st floor, near the kitchen",
+      "comment": "Colour A4/A3",
+      "duplex": "TwoSidedLongEdge",
+      "color": false,
+      "paperSize": "A4"
+    },
+    {
+      "name": "Office 2nd floor",
+      "driver": "KONICA MINOLTA Universal V4 PCL",
+      "address": "printer-2f.contoso.local",
+      "portName": "IP_printer-2f",
+      "portNumber": 9100
+    },
+    {
+      "name": "Warehouse labels",
+      "driver": "Brother Laser Type1 Class Driver",
+      "address": "10.0.7.15",
+      "lprQueue": "BINARY_P1",
+      "snmp": true
+    },
+    {
+      "name": "Old office printer",
+      "ensure": "absent"
+    }
+  ]
+}

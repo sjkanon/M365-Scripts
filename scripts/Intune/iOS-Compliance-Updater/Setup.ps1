@@ -1,17 +1,36 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     One-time setup for the Intune iOS Compliance Updater.
 
 .DESCRIPTION
     Automates the full setup:
-    1. Installs required PowerShell modules (Microsoft.Graph)
-    2. Creates an App Registration in Entra ID
-    3. Assigns the required Graph API permissions
-    4. Grants admin consent
-    5. Creates a Client Secret
-    6. Looks up the Intune iOS compliance policy
+    1. Installs required PowerShell modules (Microsoft.Graph.Authentication, .Applications)
+    2. Signs you in (delegated) as an administrator
+    3. Creates (or reuses) an App Registration in Entra ID
+    4. Assigns the Graph application permission DeviceManagementConfiguration.ReadWrite.All
+       and grants admin consent
+    5. Creates the app's credential: a self-signed certificate (default) whose public
+       key is uploaded to the app, or - with -CredentialType Secret - a client secret
+    6. Looks up the Intune iOS compliance policy (all pages)
     7. Writes config.json
+
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated (you, as an
+    admin; device code when $global:useDeviceCodeAuth is set; under GDAP the customer
+    tenant from $global:cid unless -TenantId names one). The updater itself then runs
+    app-only with the credential created here.
+
+    Certificate (default): the private key stays in the Windows certificate store and
+    config.json holds only its thumbprint. When this setup runs elevated the
+    certificate goes to LocalMachine\My, so the scheduled task (SYSTEM) can use it;
+    otherwise to CurrentUser\My - then run the task as that user.
+    Secret: config.json holds the secret in plaintext. Anyone who can read the file
+    can change Intune configuration in the tenant. Use it only where a certificate
+    is not possible, and protect the file.
+
+.PARAMETER TenantId
+    Tenant ID or domain to set up. Defaults to the GDAP customer tenant, else the tenant
+    you sign in to.
 
 .PARAMETER CompliancePolicyName
     Name of the Intune compliance policy to update.
@@ -20,28 +39,54 @@
 .PARAMETER AppName
     Name of the App Registration (default: "Intune iOS Compliance Updater").
 
+.PARAMETER CredentialType
+    Certificate (default) or Secret.
+
+.PARAMETER CertificateStoreLocation
+    LocalMachine or CurrentUser. Default: LocalMachine when running elevated, else CurrentUser.
+
+.PARAMETER CertificateExpiryYears
+    Validity of the self-signed certificate in years (default: 2).
+
 .PARAMETER SecretExpiryYears
-    Validity of the client secret in years (default: 2).
+    Validity of the client secret in years (default: 2). Only with -CredentialType Secret.
 
 .PARAMETER ConfigPath
     Where to save config.json (default: script directory).
 
 .EXAMPLE
+    # Run elevated so the certificate lands in LocalMachine\My for the SYSTEM task
     .\Setup.ps1
 
 .EXAMPLE
-    .\Setup.ps1 -CompliancePolicyName "iOS - Minimum version compliance"
+    .\Setup.ps1 -TenantId "contoso.onmicrosoft.com" -CompliancePolicyName "iOS - Minimum version compliance"
+
+.EXAMPLE
+    # Old behaviour: a client secret in config.json
+    .\Setup.ps1 -CredentialType Secret
 
 .NOTES
-    Required role: Global Administrator or Application Administrator + Intune Administrator
+    Required role: Global Administrator, or Application Administrator + Privileged Role
+    Administrator (for the admin consent) + Intune Administrator
+    Scopes: Application.ReadWrite.All, AppRoleAssignment.ReadWrite.All,
+            DeviceManagementConfiguration.Read.All
+    Windows only (New-SelfSignedCertificate, certificate store).
 #>
 [CmdletBinding()]
 param (
+    [string] $TenantId,
     [string] $CompliancePolicyName = '',
     [string] $AppName              = 'Intune iOS Compliance Updater',
+    [ValidateSet('Certificate', 'Secret')]
+    [string] $CredentialType       = 'Certificate',
+    [ValidateSet('LocalMachine', 'CurrentUser')]
+    [string] $CertificateStoreLocation,
+    [int]    $CertificateExpiryYears = 2,
     [int]    $SecretExpiryYears    = 2,
     [string] $ConfigPath           = "$PSScriptRoot\config.json"
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 function Write-Step { param([string]$m) Write-Host "`n  === $m ===" -ForegroundColor Magenta }
@@ -50,28 +95,32 @@ function Write-Warn { param([string]$m) Write-Host "  [WARN] $m" -ForegroundColo
 function Write-Err  { param([string]$m) Write-Host "  [ERR]  $m" -ForegroundColor Red }
 function Write-Info { param([string]$m) Write-Host "  [INFO] $m" -ForegroundColor Cyan }
 
+$isAdmin = $IsWindows -and ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $CertificateStoreLocation) { $CertificateStoreLocation = if ($isAdmin) { 'LocalMachine' } else { 'CurrentUser' } }
+
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 function Test-Prerequisites {
     Write-Step "Checking prerequisites"
 
     $allOk = $true
 
-    # PowerShell version
-    $psv = $PSVersionTable.PSVersion
-    if ($psv.Major -gt 5 -or ($psv.Major -eq 5 -and $psv.Minor -ge 1)) {
-        Write-Ok "PowerShell $($psv)"
-    } else {
-        Write-Err "PowerShell 5.1 or later required (current: $psv)"
+    Write-Ok "PowerShell $($PSVersionTable.PSVersion)"
+
+    if (-not $IsWindows) {
+        Write-Err "Windows is required (certificate store, scheduled task)."
         $allOk = $false
     }
 
-    # Administrator check
-    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)
     if ($isAdmin) {
         Write-Ok "Running as Administrator"
     } else {
-        Write-Warn "Not running as Administrator — modules will be installed for CurrentUser only"
+        Write-Warn "Not running as Administrator — modules install for CurrentUser and the certificate goes to CurrentUser\My"
+    }
+
+    if ($CredentialType -eq 'Certificate' -and $CertificateStoreLocation -eq 'LocalMachine' -and -not $isAdmin) {
+        Write-Err "-CertificateStoreLocation LocalMachine needs an elevated session."
+        $allOk = $false
     }
 
     # Execution policy
@@ -102,8 +151,9 @@ function Test-Prerequisites {
             $null = Invoke-WebRequest -Uri $_.Url -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
             Write-Ok "Reachable: $($_.Name)"
         } catch {
-            Write-Err "Not reachable: $($_.Name) ($($_.Url))"
-            $allOk = $false
+            # Graph answers its root with 4xx; any HTTP response means it is reachable.
+            if ($_.Exception.Response) { Write-Ok "Reachable: $($_.Name)" }
+            else { Write-Err "Not reachable: $($_.Name) ($($_.Url))"; $allOk = $false }
         }
     }
 
@@ -117,41 +167,12 @@ function Test-Prerequisites {
 function Install-RequiredModules {
     Write-Step "Installing PowerShell modules"
 
-    # NuGet provider
-    $nuget = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
-    if (-not $nuget -or $nuget.Version -lt [Version]'2.8.5.201') {
-        Write-Info "Installing NuGet package provider..."
-        try {
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ErrorAction Stop | Out-Null
-            Write-Ok "NuGet provider installed"
-        } catch {
-            Write-Err "Could not install NuGet provider: $($_.Exception.Message)"; exit 1
-        }
-    } else {
-        Write-Ok "NuGet provider present (v$($nuget.Version))"
-    }
-
-    # Trust PSGallery
-    if ((Get-PSRepository -Name PSGallery).InstallationPolicy -ne 'Trusted') {
-        try {
-            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction Stop
-            Write-Ok "PSGallery set as trusted"
-        } catch {
-            Write-Warn "Could not trust PSGallery: $($_.Exception.Message)"
-        }
-    } else {
-        Write-Ok "PSGallery already trusted"
-    }
-
-    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator)
-    $scope   = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
+    $scope = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
     Write-Info "Install scope: $scope"
 
     @(
-        @{ Name = 'Microsoft.Graph.Authentication';    MinVersion = '2.0.0' }
-        @{ Name = 'Microsoft.Graph.Applications';      MinVersion = '2.0.0' }
-        @{ Name = 'Microsoft.Graph.DeviceManagement';  MinVersion = '2.0.0' }
+        @{ Name = 'Microsoft.Graph.Authentication'; MinVersion = '2.0.0' }
+        @{ Name = 'Microsoft.Graph.Applications';   MinVersion = '2.0.0' }
     ) | ForEach-Object {
         $mod       = $_
         $installed = Get-Module -ListAvailable -Name $mod.Name | Sort-Object Version -Descending | Select-Object -First 1
@@ -178,21 +199,17 @@ function Install-RequiredModules {
 # ── Authentication ────────────────────────────────────────────────────────────
 function Connect-ToGraph {
     Write-Step "Connecting to Microsoft Graph"
-    Write-Info "A browser window will open for authentication."
-    Write-Info "Required role: Global Administrator or Application Administrator + Intune Administrator"
+    Write-Info "Required role: Global Administrator, or Application Administrator + Privileged Role Administrator + Intune Administrator"
 
     try {
-        Connect-MgGraph -Scopes @(
+        $script:graph = Connect-M365Graph -TenantId $TenantId -Scopes @(
             'Application.ReadWrite.All'
             'AppRoleAssignment.ReadWrite.All'
-            'Directory.ReadWrite.All'
-            'DeviceManagementConfiguration.ReadWrite.All'
-        ) -NoWelcome -ErrorAction Stop
-
-        $ctx = Get-MgContext
-        Write-Ok "Signed in as: $($ctx.Account)"
-        Write-Ok "Tenant: $($ctx.TenantId)"
-        return $ctx.TenantId
+            'DeviceManagementConfiguration.Read.All'
+        )
+        Write-Ok "Signed in as: $($script:graph.Account)"
+        Write-Ok "Tenant: $($script:graph.TenantId)"
+        return $script:graph.TenantId
     } catch {
         Write-Err "Authentication failed: $($_.Exception.Message)"; exit 1
     }
@@ -203,7 +220,7 @@ function New-AppRegistration {
     param ([string] $Name)
     Write-Step "Creating App Registration"
 
-    $existing = Get-MgApplication -Filter "displayName eq '$Name'" -ErrorAction SilentlyContinue
+    $existing = Get-MgApplication -Filter "displayName eq '$($Name -replace "'", "''")'" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($existing) {
         Write-Warn "App Registration '$Name' already exists (ID: $($existing.AppId))"
         $choice = Read-Host "  Reuse existing app? (y/n)"
@@ -275,7 +292,53 @@ function Set-GraphPermissions {
     }
 }
 
-# ── Client Secret ─────────────────────────────────────────────────────────────
+# ── Credential: certificate (default) ─────────────────────────────────────────
+function New-AppCertificate {
+    param ([string] $AppObjectId, [string] $Name, [int] $ExpiryYears, [string] $StoreLocation)
+    Write-Step "Creating certificate ($StoreLocation\My)"
+
+    try {
+        $cert = New-SelfSignedCertificate `
+            -Subject           "CN=$Name" `
+            -CertStoreLocation "Cert:\$StoreLocation\My" `
+            -KeyExportPolicy   NonExportable `
+            -KeySpec           Signature `
+            -KeyAlgorithm      RSA `
+            -KeyLength         2048 `
+            -HashAlgorithm     SHA256 `
+            -NotAfter          (Get-Date).AddYears($ExpiryYears) `
+            -ErrorAction Stop
+        Write-Ok "Certificate created: $($cert.Thumbprint) (valid until $($cert.NotAfter.ToString('yyyy-MM-dd')))"
+    } catch {
+        Write-Err "Could not create certificate: $($_.Exception.Message)"; exit 1
+    }
+
+    try {
+        # keyCredentials is replaced as a whole on PATCH. The existing keys (with their
+        # public key bytes, which Graph only returns on $select) are sent back so a
+        # reused app keeps working on other machines.
+        $current = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/applications/$AppObjectId`?`$select=keyCredentials" -ErrorAction Stop
+        $keys = @($current.keyCredentials | Where-Object { $_.key } | ForEach-Object {
+            @{ keyId = $_.keyId; type = $_.type; usage = $_.usage; key = $_.key; displayName = $_.displayName }
+        })
+        $keys += @{
+            type        = 'AsymmetricX509Cert'
+            usage       = 'Verify'
+            key         = [Convert]::ToBase64String($cert.RawData)
+            displayName = "iOS Compliance Updater - $env:COMPUTERNAME - $(Get-Date -Format 'yyyy-MM-dd')"
+        }
+        Invoke-MgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/applications/$AppObjectId" `
+            -Body (@{ keyCredentials = $keys } | ConvertTo-Json -Depth 5) -ContentType 'application/json' -ErrorAction Stop | Out-Null
+        Write-Ok "Certificate uploaded to the App Registration"
+        return $cert.Thumbprint
+    } catch {
+        Write-Err "Could not upload the certificate: $($_.Exception.Message)"
+        Write-Info "Upload the .cer manually in Entra ID > App registrations > Certificates & secrets."
+        exit 1
+    }
+}
+
+# ── Credential: client secret (-CredentialType Secret) ────────────────────────
 function New-AppClientSecret {
     param ([string] $AppObjectId, [int] $ExpiryYears)
     Write-Step "Creating Client Secret"
@@ -292,8 +355,7 @@ function New-AppClientSecret {
             -ErrorAction Stop
 
         Write-Ok "Client Secret created (valid until: $($endDate.ToString('yyyy-MM-dd')))"
-        Write-Warn "Store this value securely — it is only shown once!"
-        Write-Host "  Secret: $($secret.SecretText)" -ForegroundColor Yellow
+        Write-Warn "The secret is written to config.json in plaintext — protect that file."
         return $secret.SecretText
     } catch {
         Write-Err "Could not create Client Secret: $($_.Exception.Message)"; exit 1
@@ -306,15 +368,21 @@ function Get-CompliancePolicyId {
     Write-Step "Looking up Intune compliance policy"
 
     try {
-        $policies    = Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies' -ErrorAction Stop
-        $iosPolicies = $policies.value | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.iosCompliancePolicy' }
+        $all = [System.Collections.Generic.List[object]]::new()
+        $uri = 'https://graph.microsoft.com/v1.0/deviceManagement/deviceCompliancePolicies'
+        while ($uri) {
+            $page = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+            foreach ($p in @($page.value)) { $all.Add($p) }
+            $uri = $page.'@odata.nextLink'
+        }
+        $iosPolicies = @($all | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.iosCompliancePolicy' })
 
         if (-not $iosPolicies) {
             Write-Err "No iOS compliance policies found in Intune"; exit 1
         }
 
         if ($PolicyName) {
-            $match = $iosPolicies | Where-Object { $_.displayName -eq $PolicyName }
+            $match = $iosPolicies | Where-Object { $_.displayName -eq $PolicyName } | Select-Object -First 1
             if ($match) {
                 Write-Ok "Policy found: '$($match.displayName)' (ID: $($match.id))"
                 return $match.id
@@ -342,20 +410,19 @@ function Get-CompliancePolicyId {
 
 # ── Write config ──────────────────────────────────────────────────────────────
 function Save-Config {
-    param ([string] $TenantId, [string] $ClientId, [string] $ClientSecret, [string] $PolicyId, [string] $Path)
+    param ([string] $TenantId, [string] $ClientId, [string] $CertificateThumbprint, [string] $ClientSecret, [string] $PolicyId, [string] $Path)
     Write-Step "Writing config.json"
 
-    $config = @{
-        TenantId           = $TenantId
-        ClientId           = $ClientId
-        ClientSecret       = $ClientSecret
-        CompliancePolicyId = $PolicyId
-    } | ConvertTo-Json -Depth 3
+    $values = [ordered]@{ TenantId = $TenantId; ClientId = $ClientId }
+    if ($CertificateThumbprint) { $values['CertificateThumbprint'] = $CertificateThumbprint }
+    if ($ClientSecret)          { $values['ClientSecret'] = $ClientSecret }
+    $values['CompliancePolicyId'] = $PolicyId
+    $config = $values | ConvertTo-Json -Depth 3
 
     try {
         $config | Set-Content -Path $Path -Encoding UTF8 -ErrorAction Stop
         Write-Ok "config.json saved to: $Path"
-        Write-Warn "Never commit config.json to Git — it contains secrets!"
+        if ($ClientSecret) { Write-Warn "Never commit config.json to Git — it contains a secret!" }
     } catch {
         Write-Err "Could not write config.json: $($_.Exception.Message)"
         Write-Info "Create config.json manually with these values:"
@@ -374,13 +441,23 @@ Write-Host ""
 Test-Prerequisites
 Install-RequiredModules
 
-$tenantId     = Connect-ToGraph
-$app          = New-AppRegistration -Name $AppName
-$sp           = New-AppServicePrincipal -AppId $app.AppId
+$tenantId = Connect-ToGraph
+$app      = New-AppRegistration -Name $AppName
+$sp       = New-AppServicePrincipal -AppId $app.AppId
 Set-GraphPermissions -AppObjectId $app.Id -ServicePrincipalId $sp.Id
-$clientSecret = New-AppClientSecret -AppObjectId $app.Id -ExpiryYears $SecretExpiryYears
-$policyId     = Get-CompliancePolicyId -PolicyName $CompliancePolicyName
-Save-Config -TenantId $tenantId -ClientId $app.AppId -ClientSecret $clientSecret -PolicyId $policyId -Path $ConfigPath
+
+$thumbprint   = $null
+$clientSecret = $null
+if ($CredentialType -eq 'Certificate') {
+    $thumbprint = New-AppCertificate -AppObjectId $app.Id -Name $AppName -ExpiryYears $CertificateExpiryYears -StoreLocation $CertificateStoreLocation
+} else {
+    $clientSecret = New-AppClientSecret -AppObjectId $app.Id -ExpiryYears $SecretExpiryYears
+}
+
+$policyId = Get-CompliancePolicyId -PolicyName $CompliancePolicyName
+Save-Config -TenantId $tenantId -ClientId $app.AppId -CertificateThumbprint $thumbprint -ClientSecret $clientSecret -PolicyId $policyId -Path $ConfigPath
+
+Disconnect-M365Graph $script:graph
 
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Green
@@ -389,6 +466,10 @@ Write-Host "  ================================================" -ForegroundColor
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor White
 Write-Host "  1. Test: .\Update-iOSCompliancePolicy.ps1 -WhatIf" -ForegroundColor Cyan
-Write-Host "  2. Register scheduled task: .\Install-ScheduledTask.ps1" -ForegroundColor Cyan
+Write-Host "     (new app permissions can take a few minutes to apply)" -ForegroundColor DarkGray
+Write-Host "  2. Register scheduled task: .\Install-ScheduledTask.ps1 (elevated)" -ForegroundColor Cyan
+if ($thumbprint -and $CertificateStoreLocation -eq 'CurrentUser') {
+    Write-Warn "The certificate is in CurrentUser\My: the SYSTEM task cannot use it. Re-run Setup.ps1 elevated, or run the task as this user with a stored password."
+}
 Write-Host "  3. Check logs in the logs\ folder" -ForegroundColor Cyan
 Write-Host ""

@@ -21,15 +21,17 @@ Si votre environnement considère Cowork comme une exigence stricte plutôt qu'u
 
 | Script | Rôle dans Intune |
 |---|---|
-| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) | **Celui que vous exécutez** pour la voie application Win32. Empaquette les scripts ci-dessous et crée/met à jour l'application Win32. |
-| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) | Script de contenu de la commande d'installation de l'application Win32 |
-| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) | Script de contenu de la commande de désinstallation de l'application Win32 |
-| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) | Script de détection personnalisé de l'application Win32 |
-| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) | Voie **alternative** autonome — pas de script Deploy, pas d'empaquetage, chargé directement comme « Platform script » Intune. Voir « Alternative : script de plateforme » ci-dessous. |
+| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) ([docs](#deploy-coworkprerequisitesintuneps1)) | **Celui que vous exécutez** pour la voie application Win32. Empaquette les scripts ci-dessous et crée/met à jour l'application Win32. |
+| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) ([docs](#install-coworkprerequisites-intuneps1)) | Script de contenu de la commande d'installation de l'application Win32 |
+| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) ([docs](#uninstall-coworkprerequisites-intuneps1)) | Script de contenu de la commande de désinstallation de l'application Win32 |
+| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) ([docs](#detect-coworkprerequisites-intuneps1)) | Script de détection personnalisé de l'application Win32 |
+| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) ([docs](#coworkprerequisites-platformscriptps1)) | Voie **alternative** autonome — pas de script Deploy, pas d'empaquetage, chargé directement comme « Platform script » Intune. |
 
 Il n'y a pas de MSIX ici — contrairement à Claude Desktop, le « contenu » se limite à ces trois scripts ; une nouvelle exécution ne fait donc quelque chose que si vous avez réellement modifié l'un d'eux (suivi via un `ScriptsHash` dans le champ Notes de l'application, même modèle que `Deploy-ClaudeDesktopIntune.ps1`).
 
-## Ce que fait le script d'installation
+## Install-CoworkPrerequisites-Intune.ps1
+
+Commande d'installation de l'application Win32. Ce qu'il fait :
 
 1. **VirtualMachinePlatform** : `Enable-WindowsOptionalFeature`, avec nouvelles tentatives en cas d'échecs DISM transitoires. Ne fait rien si la fonctionnalité est déjà activée.
 2. **Démarrage rapide** : définit `HiberbootEnabled = 0` sous `HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power` à chaque exécution (pas seulement lorsque VMP vient d'être activé). La documentation Cowork d'Anthropic avertit explicitement : *"Restart the machine using Restart, not shut down and power on. With Windows Fast Startup enabled, a shutdown cycle can leave the virtualization services uninitialized."* Le démarrage rapide est activé par défaut sur presque toutes les images Windows — sans le désactiver, un utilisateur qui se contente d'« arrêter » au lieu de « redémarrer » (le cas courant) n'obtient jamais de services Cowork fonctionnels, quel que soit le nombre de cycles d'alimentation, alors même qu'Intune affiche l'application comme installée.
@@ -37,7 +39,9 @@ Il n'y a pas de MSIX ici — contrairement à Claude Desktop, le « contenu » s
 
    La notification n'est **pas** envoyée en appelant `msg.exe` directement depuis ce script en contexte SYSTEM — cela produit une boîte de dialogue dont le bouton OK ne réagit pas aux clics (une bizarrerie connue de `msg.exe` pour les messages inter-sessions émis par un expéditeur non interactif). À la place, `Show-UserRestartNotification` enregistre une tâche planifiée de courte durée (`LogonType Interactive`, principal = l'utilisateur de la session console) qui exécute `msg.exe` *dans la session de l'utilisateur*, puis la désinscrit une fois le message envoyé — la boîte de dialogue appartient alors à un bureau réellement interactif et se ferme normalement.
 
-## Ce que vérifie le script de détection
+## Detect-CoworkPrerequisites-Intune.ps1
+
+Script de détection personnalisé de l'application Win32.
 
 Signale « installed » uniquement si **à la fois** `VirtualMachinePlatform` est `Enabled` **et** les services HCS sous-jacents (`vmcompute`, `HNS`, `vfpext`) sont présents — le fait que VMP apparaisse `Enabled` dans DISM ne garantit pas que ces services existent déjà (voir le dépannage Cowork d'Anthropic : *"Missing HCS services: HNS, vmcompute, vfpext"*), en particulier juste après l'activation de VMP mais avant le redémarrage requis.
 
@@ -53,7 +57,9 @@ Corrigé de la même manière : la branche de mise à jour ne transmet plus `-Re
 
 `-CompanyPortalFeaturedApp $true` est défini à chaque exécution (à la création comme lors des mises à jour), de sorte que l'application apparaît mise en avant dans le Portail d'entreprise au lieu de rester invisible comme simple prérequis d'arrière-plan. Il n'y a pas de MSIX dont extraire un logo ; l'icône par défaut des applications Win32 d'Intune est donc utilisée — définissez ensuite `-Icon` manuellement dans le portail Intune si vous voulez une icône personnalisée.
 
-## Exécution mensuelle / selon les besoins
+## Deploy-CoworkPrerequisitesIntune.ps1
+
+À exécuter chaque mois, ou dès qu'un script de contenu a changé :
 
 ```powershell
 .\Deploy-CoworkPrerequisitesIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
@@ -67,20 +73,30 @@ Même comportement de confirmation/`-Force` que `Deploy-ClaudeDesktopIntune.ps1`
 | `-WorkingDirectory` | `C:\Temp\CoworkPrereqDeploy` | Dossier de préparation de la construction (`Source/`, `Output/`) |
 | `-AppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Sert à retrouver l'application existante lors des exécutions suivantes — ne le modifiez pas sans renommer aussi l'application dans Intune |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Règle de configuration requise |
-| `-TenantId` | détecté automatiquement | ID du tenant Entra ID |
+| `-TenantId` | client GDAP, sinon le tenant de connexion | ID ou domaine du tenant Entra ID |
+| `-ClientId` | — | Application permanente facultative pour l'application seule (avec `-CertificateThumbprint`) ; aucune App Registration temporaire n'est créée |
+| `-CertificateThumbprint` | — | Certificat pour `-ClientId` (CurrentUser\My ou LocalMachine\My) ; utilisé pour Graph et pour `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | désactivé | Application seule avec le ClientId et l'empreinte de `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | téléchargement automatique | Utiliser un `IntuneWinAppUtil.exe` déjà téléchargé |
 | `-Force` | désactivé | Ignorer la ou les invites de confirmation |
 
-## Désinstallation
+## Uninstall-CoworkPrerequisites-Intune.ps1
+
+Commande de désinstallation de l'application Win32.
+
+| Paramètre | Obligatoire | Description |
+|-----------|-------------|-------------|
+| `-DisableVirtualMachinePlatform` | Non | Désactive aussi la fonctionnalité Windows `VirtualMachinePlatform` — uniquement si rien d'autre sur l'appareil n'en a besoin |
 
 `VirtualMachinePlatform` n'est **pas** désactivé par défaut (d'autres applications — WSL, outils basés sur Hyper-V, autres applications de type Cowork — peuvent aussi en dépendre). Passez `-DisableVirtualMachinePlatform` au script de désinstallation si vous êtes certain que rien d'autre sur l'appareil n'en a besoin. Le démarrage rapide reste désactivé dans tous les cas — c'est un paramètre anodin, à l'échelle de l'appareil, et non quelque chose de propre à Cowork.
 
 ## Prérequis
 
+- PowerShell 7. La connexion fonctionne comme pour `Deploy-ClaudeDesktopIntune.ps1` (voir [ClaudeDesktop](../ClaudeDesktop/readme.fr.md#deploy-claudedesktopintuneps1)) : déléguée par défaut avec une App Registration temporaire pour le module `IntuneWin32App`, ou application seule avec `-ClientId` + `-CertificateThumbprint` / `-AppOnly`. Le script de déploiement fait partie de `ScriptsHash` : la première exécution après sa mise à jour téléverse donc le paquet une fois de plus.
 - Les modules PowerShell `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` et `IntuneWin32App` — à installer avec `.\scripts\Startup\Install-Modules.ps1`
 - Exécution depuis Windows (l'outil d'empaquetage et les cmdlets DISM n'existent que sous Windows)
 
-## Alternative : script de plateforme
+## CoworkPrerequisites-PlatformScript.ps1
 
 `CoworkPrerequisites-PlatformScript.ps1` reprend la même logique d'activation de VMP et de désactivation du démarrage rapide, adaptée pour être chargée directement comme **Platform script** Intune (Devices → Scripts and remediations → Platform scripts) au lieu de passer par la mécanique d'application Win32 ci-dessus. Pas d'empaquetage `.intunewin`, pas de règle de détection/configuration requise, pas de `Deploy-*.ps1` — chargez simplement ce fichier unique.
 

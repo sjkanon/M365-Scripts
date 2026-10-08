@@ -79,7 +79,10 @@ function ConvertTo-GitHubAnchor {
     $text = $Heading
     $text = Remove-InvisibleCharacter -Text $text
     $text = [regex]::Replace($text, '!?\[([^\]]*)\]\([^)]*\)', '$1')   # links -> their text
-    $text = $text -replace '[`*_~]', ''                                # code, bold, italic
+    $text = $text -replace '[`*~]', ''                                 # code, bold, italic
+    # An underscore is emphasis only at a word edge; inside a word (testsmtp_5min) GitHub
+    # keeps it, so the anchor is "testsmtp_5minps1", not "testsmtp5minps1".
+    $text = $text -replace '(?<![\p{L}\p{Nd}])_+|_+(?![\p{L}\p{Nd}])', ''
     $text = $text.Trim().ToLowerInvariant()
     $text = [regex]::Replace($text, '[^\p{L}\p{Nd} _-]', '')           # keep letters/digits/space/_/-
     return ($text -replace ' ', '-')

@@ -10,6 +10,12 @@ Scripts om DNS-records te resolven en te importeren in Active Directory-geïnteg
 
 ## Scripts
 
+| Script | Omschrijving |
+|--------|--------------|
+| [`Import-DnsRecords.ps1`](Import-DnsRecords.ps1) ([docs](#import-dnsrecordsps1)) | FQDN's uit een CSV resolven via Google DNS en de records optioneel importeren in een AD-geïntegreerde DNS-zone (voorbeeldinvoer: [`example-records.csv`](example-records.csv)) |
+
+---
+
 ### Import-DnsRecords.ps1
 
 Leest een lijst FQDN's uit een CSV, resolvet elk ervan via Google DNS (8.8.8.8) met `dig`, en importeert de resultaten optioneel in een Active Directory-DNS-zone.

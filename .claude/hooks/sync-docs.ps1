@@ -9,8 +9,10 @@
     One script, three callers:
 
       -Mode PostEdit   Claude Code PostToolUse hook (Edit/Write), run in the background
-                       (asyncRewake). When the touched file is a .ps1 or .md in this repo it
-                       regenerates INDEX.md and the readme headers and runs the link check.
+                       (asyncRewake). When the touched file is a .ps1, .psd1 or .md in this
+                       repo it regenerates INDEX.md and the readme headers, runs the link
+                       check, and checks that every module a script loads is listed in
+                       scripts/Startup/RequiredModules.psd1.
                        Silent when all is well; on a problem it writes it to stderr and
                        exits 2, which wakes Claude to fix it.
       -Mode Stop       Claude Code Stop hook. Blocks the stop once when a readme.md was
@@ -62,6 +64,8 @@ function Sync-Generated {
     if (-not $header.Ok) { $problems += "Update-ReadmeHeader.ps1 reports a problem (missing language version?):`n$($header.Output)" }
     $links = Invoke-Tool 'Test-MarkdownLinks.ps1'
     if (-not $links.Ok) { $problems += "Broken markdown links:`n$($links.Output)" }
+    $modules = Invoke-Tool 'Test-RequiredModules.ps1'
+    if (-not $modules.Ok) { $problems += "Modules used by a script but missing from scripts/Startup/RequiredModules.psd1 (load.ps1 would never install them):`n$($modules.Output)" }
     , $problems
 }
 
@@ -72,7 +76,7 @@ switch ($Mode) {
         if (-not $path) { exit 0 }
         $full = [System.IO.Path]::GetFullPath($path)
         if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { exit 0 }
-        if ($full -notmatch '\.(ps1|md)$' -or $full -match '[\\/]\.claude[\\/]') { exit 0 }
+        if ($full -notmatch '\.(ps1|psd1|md)$' -or $full -match '[\\/]\.claude[\\/]') { exit 0 }
 
         # Edits arrive in bursts and each run rewrites INDEX.md: one run at a time.
         $mutex = [System.Threading.Mutex]::new($false, 'Global\M365-Scripts-sync-docs')
@@ -133,6 +137,10 @@ switch ($Mode) {
         if ($behind.Count) {
             Write-Host "WARNING: English readme changed without its Dutch/French version: $($behind -join ', ')" -ForegroundColor Yellow
             Write-Host "         Ask Claude to update the translations." -ForegroundColor Yellow
+        }
+        $unlisted = @($problems | Where-Object { $_ -like 'Modules used by a script*' })
+        if ($unlisted.Count) {
+            Write-Host "WARNING: $($unlisted -join "`n")" -ForegroundColor Yellow
         }
         $blocking = @($problems | Where-Object { $_ -like 'Broken markdown links*' })
         if ($blocking.Count) {

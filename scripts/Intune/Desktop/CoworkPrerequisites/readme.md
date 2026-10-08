@@ -21,15 +21,17 @@ If your environment treats Cowork as a hard requirement rather than optional, de
 
 | Script | Role in Intune |
 |---|---|
-| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) | **The one you run** for the Win32-app route. Packages the scripts below and creates/updates the Win32 app. |
-| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) | Win32-app install command content script |
-| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) | Win32-app uninstall command content script |
-| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) | Win32-app custom detection script |
-| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) | **Alternative**, standalone route — no Deploy script, no packaging, uploaded directly as an Intune "Platform script". See "Platform script alternative" below. |
+| [`Deploy-CoworkPrerequisitesIntune.ps1`](Deploy-CoworkPrerequisitesIntune.ps1) ([docs](#deploy-coworkprerequisitesintuneps1)) | **The one you run** for the Win32-app route. Packages the scripts below and creates/updates the Win32 app. |
+| [`Install-CoworkPrerequisites-Intune.ps1`](Install-CoworkPrerequisites-Intune.ps1) ([docs](#install-coworkprerequisites-intuneps1)) | Win32-app install command content script |
+| [`Uninstall-CoworkPrerequisites-Intune.ps1`](Uninstall-CoworkPrerequisites-Intune.ps1) ([docs](#uninstall-coworkprerequisites-intuneps1)) | Win32-app uninstall command content script |
+| [`Detect-CoworkPrerequisites-Intune.ps1`](Detect-CoworkPrerequisites-Intune.ps1) ([docs](#detect-coworkprerequisites-intuneps1)) | Win32-app custom detection script |
+| [`CoworkPrerequisites-PlatformScript.ps1`](CoworkPrerequisites-PlatformScript.ps1) ([docs](#coworkprerequisites-platformscriptps1)) | **Alternative**, standalone route — no Deploy script, no packaging, uploaded directly as an Intune "Platform script". |
 
 There's no MSIX here — unlike Claude Desktop, the "content" is just these three scripts, so a re-run only does something if you've actually edited one of them (tracked via a `ScriptsHash` in the app's Notes field, same pattern as `Deploy-ClaudeDesktopIntune.ps1`).
 
-## What the install script does
+## Install-CoworkPrerequisites-Intune.ps1
+
+Win32-app install command. What it does:
 
 1. **VirtualMachinePlatform**: `Enable-WindowsOptionalFeature`, with retry against transient DISM failures. No-op if already enabled.
 2. **Fast Startup**: sets `HiberbootEnabled = 0` under `HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power`, on every run (not just when VMP was just enabled). Anthropic's own Cowork documentation explicitly warns: *"Restart the machine using Restart, not shut down and power on. With Windows Fast Startup enabled, a shutdown cycle can leave the virtualization services uninitialized."* Fast Startup is on by default on nearly every Windows image — without disabling it, a user who just "shuts down" instead of "restarts" (the common case) never gets working Cowork services, no matter how many power cycles happen, even though Intune shows the app as installed.
@@ -37,7 +39,9 @@ There's no MSIX here — unlike Claude Desktop, the "content" is just these thre
 
    The notification is **not** sent by calling `msg.exe` directly from this SYSTEM-context script — that produces a dialog whose OK button doesn't respond to clicks (a known `msg.exe` quirk with cross-session messages from a non-interactive sender). Instead, `Show-UserRestartNotification` registers a short-lived scheduled task (`LogonType Interactive`, principal = the console session's own user) that runs `msg.exe` *inside the user's own session*, then unregisters it again once sent — the dialog then belongs to a genuinely interactive desktop and closes normally.
 
-## What the detection script checks
+## Detect-CoworkPrerequisites-Intune.ps1
+
+Win32-app custom detection script.
 
 Reports "installed" only if **both** `VirtualMachinePlatform` is `Enabled` **and** the underlying HCS services (`vmcompute`, `HNS`, `vfpext`) are present — VMP showing `Enabled` in DISM doesn't guarantee these services already exist (see Anthropic's own Cowork troubleshooting: *"Missing HCS services: HNS, vmcompute, vfpext"*), particularly right after enabling VMP but before the required restart.
 
@@ -53,7 +57,9 @@ Fixed the same way: the update branch no longer passes `-RequirementRule` to `Se
 
 `-CompanyPortalFeaturedApp $true` is set on every run (both first creation and updates), so this shows up featured in Company Portal instead of staying invisible as a background-only prerequisite. There's no MSIX here to extract a logo from, so it uses Intune's default Win32 app icon — set `-Icon` manually in the Intune portal afterward if you want a custom one.
 
-## Monthly / as-needed run
+## Deploy-CoworkPrerequisitesIntune.ps1
+
+Run it monthly or whenever a content script changed:
 
 ```powershell
 .\Deploy-CoworkPrerequisitesIntune.ps1 -AssignmentGroupName "SG-Apps-ClaudeDesktop"
@@ -67,20 +73,30 @@ Same confirmation/`-Force` behavior as `Deploy-ClaudeDesktopIntune.ps1`. Since t
 | `-WorkingDirectory` | `C:\Temp\CoworkPrereqDeploy` | Build staging folder (`Source/`, `Output/`) |
 | `-AppDisplayName` | `Cowork Windows Prerequisites (Machine-wide)` | Used to find the existing app on later runs — don't change without renaming in Intune too |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Requirement rule |
-| `-TenantId` | auto-detected | Entra ID tenant ID |
+| `-TenantId` | GDAP customer, else your sign-in tenant | Entra ID tenant ID or domain |
+| `-ClientId` | — | Optional permanent app for app-only (with `-CertificateThumbprint`); no temporary App Registration is created |
+| `-CertificateThumbprint` | — | Certificate for `-ClientId` (CurrentUser\My or LocalMachine\My); used for Graph and for `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | off | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | auto-download | Use an already-downloaded `IntuneWinAppUtil.exe` |
 | `-Force` | off | Skip the confirmation prompt(s) |
 
-## Uninstall
+## Uninstall-CoworkPrerequisites-Intune.ps1
+
+Win32-app uninstall command.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-DisableVirtualMachinePlatform` | No | Also disable the `VirtualMachinePlatform` Windows feature — only when nothing else on the device needs it |
 
 `VirtualMachinePlatform` is **not** disabled by default (other applications — WSL, Hyper-V-based tools, other Cowork-like apps — may depend on it too). Pass `-DisableVirtualMachinePlatform` to the uninstall script if you're certain nothing else on the device needs it. Fast Startup is left disabled either way — it's a harmless, device-wide setting, not something specific to Cowork.
 
 ## Prerequisites
 
+- PowerShell 7. Sign-in works like `Deploy-ClaudeDesktopIntune.ps1` (see [ClaudeDesktop](../ClaudeDesktop/readme.md#deploy-claudedesktopintuneps1)): delegated by default with a temporary App Registration for the `IntuneWin32App` module, or app-only with `-ClientId` + `-CertificateThumbprint` / `-AppOnly`. The deploy script is part of `ScriptsHash`, so the first run after updating it re-uploads the package once.
 - `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `IntuneWin32App` PowerShell modules — install with `.\scripts\Startup\Install-Modules.ps1`
 - Run from Windows (the packaging tool and DISM cmdlets are Windows-only)
 
-## Platform script alternative
+## CoworkPrerequisites-PlatformScript.ps1
 
 `CoworkPrerequisites-PlatformScript.ps1` is the same enable-VMP-and-disable-Fast-Startup logic, adapted to be uploaded directly as an Intune **Platform script** (Devices → Scripts and remediations → Platform scripts) instead of going through the Win32-app machinery above. No `.intunewin` packaging, no detection/requirement rule, no `Deploy-*.ps1` — just upload the one file.
 

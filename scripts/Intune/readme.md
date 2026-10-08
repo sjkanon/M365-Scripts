@@ -6,7 +6,7 @@
 
 Autopilot enrollment, compliance policy automation, configuration drift detection, and customer desktop deployment (wallpaper, lockscreen, taskbar lock shortcut).
 
-> Office theme/color deployment lives in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.md) — those scripts hardcode their download URL to that path.
+> Office theme/color deployment lives in [`Custom Scripts/Intune/Desktop/`](../Custom%20Scripts/Intune/readme.md) — they take the theme's download URL as a parameter.
 
 ---
 
@@ -39,7 +39,9 @@ Wraps the community `IntuneBackupAndRestore` module to detect Intune configurati
 |-----------|----------|-------------|
 | `-BaselinePath` | Yes | MSP reference backup folder (from a previous `Start-IntuneBackup -Path <path>` run) |
 | `-CustomerBackupPath` | No | Existing backup of the customer tenant. If omitted, the script backs up the currently connected tenant first |
-| `-TenantId` | No | Tenant ID or domain to connect to (only used when `-CustomerBackupPath` is omitted) |
+| `-TenantId` | No | Tenant ID or domain to back up (only used when `-CustomerBackupPath` is omitted; default: GDAP customer, else your sign-in tenant) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in (the app needs the five scopes below as application permissions) |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-OutputPath` | No | Folder for the auto-backup and diff report (default: `C:\Temp\` / `~/Downloads`) |
 
 **Examples**
@@ -53,7 +55,8 @@ Wraps the community `IntuneBackupAndRestore` module to detect Intune configurati
 ```
 
 **Notes**
-- GDAP-aware: resolves `-TenantId` automatically from the selected customer tenant (`$global:cid`) if omitted, same as `Move-InboxToArchive.ps1` / `Get-SharePointStorageReport.ps1`
+- Sign-in (live backup only) goes through [`Connect-M365.ps1`](../Startup/Connect-M365.ps1): **delegated by default** (device code per `$global:useDeviceCodeAuth`; GDAP customer from `$global:cid` when `-TenantId` is omitted), **app-only** with `-ClientId` + `-CertificateThumbprint` or `-AppOnly`. The script disconnects only a session it opened.
+- The backup and the comparison stay with `IntuneBackupAndRestore` (4.x reads Intune through Microsoft Graph, `Invoke-MgGraphRequest`, on the same session). `Start-IntuneBackup` checks for `DeviceManagementApps`, `DeviceManagementConfiguration`, `DeviceManagementServiceConfig`, `DeviceManagementManagedDevices` and `DeviceManagementScripts` `.ReadWrite.All` and, when one is missing, calls `Connect-MgGraph` itself without a tenant — a GDAP run then silently backed up your own tenant. The script now asks for exactly those five scopes (although it only reads), where it used to ask for two `.Read.All` scopes.
 - Not wired into `menu.ps1` — works with backup folder paths and a tenant-wide export, run it directly
 
 **Required module**

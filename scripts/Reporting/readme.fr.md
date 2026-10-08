@@ -19,7 +19,7 @@ Scripts qui génèrent des rapports sur Active Directory, SharePoint Online et l
 | Script | Description |
 |--------|-------------|
 | [`Get-ComputerLastLogon.ps1`](Get-ComputerLastLogon.ps1) ([docs](#get-computerlastlogonps1)) | Date de dernière connexion des objets ordinateur d'une ou plusieurs OU, avec export CSV |
-| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Rapport de stockage à l'échelle du tenant : sites, bibliothèques, historique des versions et corbeille |
+| [`Get-SharePointStorageReport.ps1`](Get-SharePointStorageReport.ps1) ([docs](#get-sharepointstoragereportps1)) | Rapport de stockage à l'échelle du tenant : sites, bibliothèques, historique des versions, corbeille et chemins longs |
 | [`Get-SharePointPermissionsReport.ps1`](Get-SharePointPermissionsReport.ps1) ([docs](#get-sharepointpermissionsreportps1)) | Qui a accès à quoi, via quel groupe et à quel niveau — chaque site, liste, dossier et fichier doté de ses propres autorisations. Lecture seule, vers CSV et un unique classeur Excel |
 | [`Remove-SharePointFileVersionsByDate.ps1`](Remove-SharePointFileVersionsByDate.ps1) ([docs](#remove-sharepointfileversionsbydateps1)) | Supprime les versions de fichiers antérieures à une date ; la version actuelle est toujours conservée. Rapport uniquement par défaut |
 
@@ -112,7 +112,7 @@ Voir [Licensing/](Licensing/) pour le rapport mensuel des licences.
 
 ## Get-SharePointStorageReport.ps1
 
-Rend compte de l'utilisation du stockage dans SharePoint Online grâce à une analyse de tout le tenant. Par défaut, le script se connecte en mode délégué et crée temporairement une App Registration (`Sites.Read.All`) pour l'énumération des sites ; cette application est supprimée à la fin.
+Rend compte de l'utilisation du stockage dans SharePoint Online grâce à une analyse de tout le tenant. Par défaut, le script se connecte en mode délégué via [`Connect-M365.ps1`](../Startup/readme.fr.md#connect-m365ps1) (code d'appareil et client GDAP selon `load.config.ps1`) et crée temporairement une App Registration (`Sites.Read.All`) pour l'énumération des sites ; cette application est supprimée à la fin. `-AppOnly` utilise à la place l'application du tenant dans `graph.appid.json`. Tout est lu via Microsoft Graph — sites, bibliothèques (y compris masquées, comme la Preservation Hold Library, trouvées via Graph `/lists` avec les facettes `system`/`hidden`), fichiers et versions. Le parcours des fichiers avait une variante SharePoint REST pour les bibliothèques masquées, alimentée par un jeton basé sur un client secret que SharePoint Online refuse toujours ; elle a disparu, et une bibliothèque masquée que Graph n'ouvre pas est désormais signalée au lieu d'être ignorée en silence. Nécessite PowerShell 7.
 
 
 ### Couverture
@@ -130,7 +130,7 @@ Rend compte de l'utilisation du stockage dans SharePoint Online grâce à une an
 
 ### Corbeille (recycle bin)
 
-La corbeille (stage 1 + stage 2) compte dans le quota de stockage du tenant ; elle est donc récupérée **séparément** de l'analyse des bibliothèques, et uniquement pour les véritables site collections SharePoint (pas OneDrive) :
+La corbeille (stage 1 + stage 2) compte dans le quota de stockage du tenant ; elle est donc récupérée **séparément** de l'analyse des bibliothèques, et uniquement pour les véritables site collections SharePoint (pas OneDrive). Graph n'a pas d'API de corbeille pour les sites SharePoint ; cette partie utilise donc encore SharePoint REST avec un jeton issu du client secret de l'application temporaire (ou de `-ClientSecret`) — or SharePoint Online refuse les jetons app-only basés sur un secret : attendez-vous à des chiffres de corbeille vides tant que cela ne passe pas à un certificat (non vérifié sur un tenant) :
 
 - Par défaut (`-Apply`, en Phase 2b) ou seule avec **`-RecycleBinOnly`** (ignore entièrement l'analyse des bibliothèques, corbeille uniquement)
 - Seules les site collections racines ont leur propre corbeille (les sous-webs partagent celle de la racine)
@@ -146,7 +146,7 @@ La corbeille (stage 1 + stage 2) compte dans le quota de stockage du tenant ; el
 
 ### Reprise après interruption (checkpoints) et progression
 
-Avec `-Apply` (ou `-RecycleBinOnly`), un checkpoint est écrit dans le dossier de sortie après chaque bibliothèque (ou corbeille de site) terminée : `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv`. Le `<hash>` est dérivé de tous les paramètres d'analyse (site, mode, dossier de sortie, etc.), donc :
+Avec `-Apply` (ou `-RecycleBinOnly`), un checkpoint est écrit dans le dossier de sortie après chaque bibliothèque (ou corbeille de site) terminée : `SharePoint_StorageReport_<hash>.state.json` + `.summary.partial.csv` + `.detail.partial.csv` + `.longpaths.partial.csv`. Le `<hash>` est dérivé de tous les paramètres d'analyse (site, mode, dossier de sortie, etc.), donc :
 
 - **Relancer avec les mêmes paramètres** reprend automatiquement à partir de la dernière bibliothèque terminée — les bibliothèques déjà traitées sont ignorées (`[SKIP] Already completed in a previous run.`).
 - **`-Restart`** supprime un checkpoint existant et relance l'analyse depuis le début, même si les paramètres sont identiques.
@@ -176,6 +176,23 @@ Si `GrandTotalGB` pour un site diffère encore du chiffre du portail d'administr
 - **Recherches de versions échouées** — elles se rabattent sur « 0 version » après des erreurs Graph répétées (rare, seulement après 3 tentatives échouées)
 - Comparez d'abord sans `-Apply` (mode rapide) — il utilise le même chiffre officiel `quota.used` que le portail d'administration ; si celui-ci diffère déjà, l'écart ne vient pas du comptage de `-Apply` lui-même
 
+### Chemins longs (limites Windows)
+
+Une bibliothèque sans problème dans SharePoint peut quand même échouer une fois synchronisée avec le client OneDrive ou ouverte depuis Windows : le chemin local est plus long que le chemin SharePoint, car le dossier de profil et le dossier de synchronisation le précèdent. Avec `-Apply` (y compris avec `-FastMode`), chaque fichier et dossier est donc mesuré deux fois :
+
+| Chemin | Exemple | Limite |
+|---|---|---|
+| SharePoint (relatif au serveur, décodé) | `/sites/Finance/Shared Documents/<dossiers>/<fichier>` | **400** caractères — SharePoint refuse tout chemin plus long |
+| Chemin local de synchronisation OneDrive | `C:\Users\<utilisateur>\<Organisation>\<Site> - <Bibliothèque>\<dossiers>\<fichier>` | **260** (`MAX_PATH` de Windows, 259 utilisables) — l'Explorateur, de nombreuses applications et les outils plus anciens échouent au-delà |
+| Idem, pour les classeurs Excel (`.xls*`, `.xlt*`) | | **218** — Excel n'ouvre ni n'enregistre le classeur |
+| Idem, pour les PDF (`.pdf`) | | **255** — Adobe Acrobat/Reader ne peut pas ouvrir le fichier, notamment depuis un dossier synchronisé ou réseau |
+
+Le chemin local est une estimation, car sa longueur dépend de la personne qui synchronise. Par défaut, le script mesure pour le **compte membre activé dont l'UPN est le plus long** dans le tenant : le dossier de profil porte le nom du préfixe de l'UPN (la partie avant le `@`), donc un chemin qui convient à cet utilisateur convient à tous. Cela nécessite `User.Read.All` (ajouté à la connexion interactive) ; si les utilisateurs ne peuvent pas être lus, le script se rabat sur `C:\Users\firstname.lastname`. Le nom de l'organisation est le nom d'affichage du tenant issu de Graph, ou le nom du tenant tiré de l'URL SharePoint s'il ne peut pas être lu. `-SyncProfilePath` et `-OrganizationName` remplacent les deux. Un site personnel OneDrive (`-IncludeOneDriveUsers`) est mesuré comme `C:\Users\<utilisateur>\OneDrive - <Organisation>\...`.
+
+Sortie : `SharePoint_LongPaths_<timestamp>.csv`, du plus long au plus court, avec chaque élément dont le chemin local compte `-LongPathThreshold` (défaut `200`) caractères ou plus, ou qui dépasse une limite — colonnes `LocalPathLength`, `SharePointPathLength`, `OverLimit` (`SharePoint (400)`, `Windows (260)`, `Excel (218)`, `Adobe (255)` ou vide) et le `LocalPath` estimé. La console indique par bibliothèque le nombre de chemins longs, puis à la fin le nombre par limite et les 10 chemins les plus longs ; le rapport Markdown reprend ce même top 10.
+
+> Windows peut raccourcir le nom du dossier de profil (par exemple à 20 caractères pour un compte Active Directory local, ou avec un suffixe si le nom existe déjà). Mesurer avec le préfixe complet de l'UPN est le choix prudent : un chemin qui tient tout juste peut être signalé comme trop long, jamais l'inverse.
+
 ### Performances (recherches d'historique des versions)
 
 L'historique des versions est l'étape la plus coûteuse : par nature, 1 appel Graph par fichier. Trois optimisations limitent ce coût :
@@ -190,7 +207,7 @@ Par ailleurs, `-SiteUrl` (1 site précis) est optimisé : en mode normal, le scr
 
 Pour la fiabilité avec GDAP, le script bascule automatiquement vers un bootstrap app-only pour les analyses d'un seul site lorsque `authMode=GDAP` est détecté (depuis `load.config.ps1`/le contexte du lanceur). Pour toujours le forcer, utilisez `-ForceAppOnlySingleSite`.
 
-Pour les analyses complètes sous GDAP, le script utilise le même contexte de tenant client (`$global:cid`/`-TenantId`) pour `Connect-MgGraph` et pour le bootstrap de l'application temporaire, afin que le consentement et l'énumération des sites aient toujours lieu dans le bon tenant.
+Pour les analyses complètes sous GDAP, le script utilise le même contexte de tenant client (`$global:cid`/`-TenantId`) pour la connexion déléguée (`Connect-M365Graph`) et pour le bootstrap de l'application temporaire, afin que le consentement et l'énumération des sites aient toujours lieu dans le bon tenant. Une session Graph qui possède déjà les étendues est réutilisée et reste ouverte à la fin.
 
 ### Paramètres
 
@@ -203,6 +220,7 @@ Pour les analyses complètes sous GDAP, le script utilise le même contexte de t
 | `-ClientId` | Client ID d'une App Registration existante — évite la création automatique ; à utiliser avec `-TenantId` et `-ClientSecret` ou `-CertificateThumbprint` |
 | `-ClientSecret` | Client secret d'une app registration existante |
 | `-CertificateThumbprint` | Empreinte du certificat d'une app registration existante |
+| `-AppOnly` | App-only avec ClientId et CertificateThumbprint du tenant dans `graph.appid.json` — ni connexion, ni application temporaire. Nécessite `Sites.Read.All` (et `User.Read.All` pour le chemin de profil) en autorisations d'application |
 | `-Apply` | Analyse récursive complète des bibliothèques, dossiers et fichiers. Sans ce switch, synthèse des quotas uniquement |
 | `-UseHighPrivilege` | Mode auto : accorde temporairement `Sites.FullControl.All` au lieu de `Sites.Read.All` lorsque les droits en lecture seule s'avèrent insuffisants |
 | `-RecycleBinOnly` | Ignore l'analyse du stockage/des bibliothèques — lit uniquement les éléments de la corbeille (stage 1 + stage 2) par site collection |
@@ -212,6 +230,9 @@ Pour les analyses complètes sous GDAP, le script utilise le même contexte de t
 | `-VersionBatchConcurrency` | Nombre de workers `$batch` parallèles pour récupérer l'historique des versions, 1-8 (défaut : `4`) |
 | `-MaxVersionRetryPasses` | Nombre maximal de passes de nouvelles tentatives pour l'historique des versions en cas de throttling persistant. `0` (défaut) s'adapte automatiquement au nombre de fichiers — SharePoint applique un plafond d'activité strict d'environ 1500-2500 recherches de versions résolues par passe, de sorte que sur des tenants comptant des centaines de milliers de fichiers, une valeur basse fixe (auparavant codée en dur à 8) abandonnait prématurément pour la majeure partie de l'analyse. Indiquez explicitement une valeur plus haute/basse pour remplacer l'ajustement automatique |
 | `-Restart` | Supprime un checkpoint existant pour cette combinaison de paramètres et relance l'analyse depuis le début |
+| `-SyncProfilePath` | Dossier de profil utilisé pour estimer le chemin local (défaut : `C:\Users\<préfixe>` du compte membre activé dont l'UPN est le plus long ; repli `C:\Users\firstname.lastname`) |
+| `-OrganizationName` | Nom de l'organisation dans le dossier de synchronisation OneDrive (défaut : le nom d'affichage du tenant, repli le nom du tenant tiré de l'URL) |
+| `-LongPathThreshold` | Longueur du chemin local à partir de laquelle un élément figure dans le CSV des chemins longs, 1-1000 (défaut : `200`). Tout dépassement de limite y figure toujours |
 
 ### Exemples
 
@@ -233,6 +254,9 @@ Pour les analyses complètes sous GDAP, le script utilise le même contexte de t
 
 # Ignorer une exécution interrompue et recommencer depuis le début
 .\Get-SharePointStorageReport.ps1 -Apply -Restart
+
+# Chemins longs uniquement, rapide (sans versions ni CSV de détail), mesurés pour un utilisateur donné
+.\Get-SharePointStorageReport.ps1 -Apply -FastMode -SyncProfilePath 'C:\Users\annemarie.vandenberg' -OrganizationName 'Contoso Nederland B.V.'
 ```
 
 ---
@@ -258,7 +282,7 @@ L'héritage est suivi tel que SharePoint le modélise lui-même : un élément n
 
 ### Authentification
 
-La lecture des attributions de rôles n'est **pas** possible via Microsoft Graph et n'est pas non plus couverte par les rôles Read/Write/Manage de SharePoint : elle nécessite le rôle d'application `Sites.FullControl.All`. Le script vous connecte donc une fois de manière interactive, puis crée lui-même une App Registration de courte durée avec :
+La lecture des attributions de rôles n'est **pas** possible via Microsoft Graph et n'est pas non plus couverte par les rôles Read/Write/Manage de SharePoint : elle nécessite le rôle d'application `Sites.FullControl.All`. Le script vous connecte donc une fois — en délégué, via [`Connect-M365Graph`](../Startup/readme.fr.md#connect-m365ps1) : un code d'appareil quand `useDeviceCodeAuth` est activé dans `load.config.ps1`, le client GDAP issu de `Connect-Tenant`, et une session Graph existante avec les étendues est réutilisée — puis crée lui-même une App Registration de courte durée avec :
 
 | Ressource | Rôle | Usage |
 |---|---|---|
@@ -266,7 +290,7 @@ La lecture des attributions de rôles n'est **pas** possible via Microsoft Graph
 | Graph | `Sites.Read.All` | Énumération des sites à l'échelle du tenant |
 | Graph | `GroupMember.Read.All` | Résolution de l'appartenance aux groupes Entra |
 
-Cette application est supprimée à la fin. Malgré le rôle Full Control, le script n'écrit jamais rien. Si vous ne voulez pas d'application temporaire, indiquez `-ClientId` + `-TenantId` + `-CertificateThumbprint` d'une inscription existante qui possède déjà ces rôles.
+Cette application est supprimée à la fin. Malgré le rôle Full Control, le script n'écrit jamais rien. Si vous ne voulez pas d'application temporaire, indiquez `-ClientId` + `-TenantId` + `-CertificateThumbprint` d'une inscription existante qui possède déjà ces rôles, ou `-AppOnly` pour les prendre dans `graph.appid.json` (PowerShell 7). L'analyse elle-même reste volontairement en app-only : SharePoint REST n'accepte ni un jeton Graph délégué (mauvaise audience) ni un jeton app-only basé sur un secret.
 
 > **Certificat, pas de secret — et ce n'est pas une préférence.** SharePoint Online refuse tout jeton app-only obtenu avec un client secret : vous obtenez `401` avec `x-ms-diagnostics: ... Unsupported app only token`. Seule l'authentification app-only par certificat fonctionne contre `_api`. L'application temporaire reçoit donc un certificat que le script crée **en mémoire** et enregistre sur l'application ; il ne va ni dans le magasin de certificats ni sur le disque, il n'y a donc rien à nettoyer ensuite. Si vous passez `-ClientSecret` avec votre propre application, le script vous avertit : la partie Graph fonctionnera, la partie SharePoint non.
 
@@ -403,6 +427,7 @@ Une exécution à l'échelle du tenant dure des heures et touche des milliers d'
 | `-ClientId` | string | — | App Registration existante ; évite l'application temporaire |
 | `-ClientSecret` | string | — | Secret pour `-ClientId`. **Ne fonctionne pas contre SharePoint** (voir Authentification) ; le script vous avertit |
 | `-CertificateThumbprint` | string | — | Certificat pour `-ClientId`, depuis `Cert:\CurrentUser\My` ou `Cert:\LocalMachine\My`. C'est la variante qui fonctionne |
+| `-AppOnly` | switch | désactivé | ClientId et CertificateThumbprint du tenant dans `graph.appid.json` au lieu d'une application temporaire. Cette application a besoin des rôles ci-dessus, SharePoint `Sites.FullControl.All` compris (PowerShell 7) |
 | `-OutputPath` | string | `C:\Temp` | Dossier de sortie |
 | `-IncludeOneDriveSites` | switch | désactivé | Inclut aussi les sites OneDrive personnels (un site par utilisateur) |
 | `-IncludeHiddenLists` | switch | désactivé | Inclut les listes masquées et système (Form Templates, Style Library, historique de workflow, …) |
@@ -456,9 +481,9 @@ Signale ou supprime les **anciennes versions de fichiers** dans les bibliothèqu
 
 ### Authentification
 
-Par défaut, le script se connecte de manière interactive (déléguée) avec `Sites.ReadWrite.All` + `Files.ReadWrite.All` via `Connect-MgGraph` — qui utilise l'application pré-consentie de Microsoft, donc sans App Registration ni `-ClientId` propres. Seule une **analyse à l'échelle du tenant** (sans `-SiteUrl`) nécessite en plus une App Registration temporaire, en lecture seule et de courte durée (`Sites.Read.All`) pour l'énumération des sites/bibliothèques *et* la récupération de l'historique des versions — Microsoft ne prend pas en charge l'énumération des sites du tenant en mode délégué. Avec `-VersionBatchConcurrency` supérieur à `1` (le défaut), une **deuxième** App Registration temporaire est également créée, uniquement pour doubler le débit des recherches de versions : le throttling « activityLimitReached » de SharePoint s'applique par app registration, donc deux applications disposent chacune de leur propre budget (même approche que `Get-SharePointStorageReport.ps1`). Les deux applications temporaires sont supprimées à la fin. Les **suppressions** de versions passent toujours par vos propres autorisations déléguées, jamais par une application temporaire.
+Par défaut, le script se connecte en délégué avec `Sites.ReadWrite.All` + `Files.ReadWrite.All` via [`Connect-M365Graph`](../Startup/readme.fr.md#connect-m365ps1) — un code d'appareil quand `useDeviceCodeAuth` est activé dans `load.config.ps1`, le client GDAP issu de `Connect-Tenant`, l'application pré-consentie de Microsoft, donc sans App Registration ni `-ClientId` propres ; une session Graph qui possède déjà les étendues est réutilisée et reste ouverte. Nécessite PowerShell 7. Seule une **analyse à l'échelle du tenant** (sans `-SiteUrl`) nécessite en plus une App Registration temporaire, en lecture seule et de courte durée (`Sites.Read.All`) pour l'énumération des sites/bibliothèques *et* la récupération de l'historique des versions — Microsoft ne prend pas en charge l'énumération des sites du tenant en mode délégué. Avec `-VersionBatchConcurrency` supérieur à `1` (le défaut), une **deuxième** App Registration temporaire est également créée, uniquement pour doubler le débit des recherches de versions : le throttling « activityLimitReached » de SharePoint s'applique par app registration, donc deux applications disposent chacune de leur propre budget (même approche que `Get-SharePointStorageReport.ps1`). Les deux applications temporaires sont supprimées à la fin. Les **suppressions** de versions passent toujours par vos propres autorisations déléguées, jamais par une application temporaire.
 
-Vous voulez vous passer de la ou des applications temporaires et utiliser votre propre app registration existante ? Indiquez alors `-ClientId` + `-TenantId` + `-ClientSecret` (ou `-CertificateThumbprint`) ; cette application doit déjà disposer de l'autorisation d'application `Sites.ReadWrite.All`.
+Vous voulez vous passer de la ou des applications temporaires et utiliser votre propre app registration existante ? Indiquez alors `-ClientId` + `-TenantId` + `-ClientSecret` (ou `-CertificateThumbprint`), ou `-AppOnly` pour prendre ClientId et CertificateThumbprint dans `graph.appid.json` ; cette application doit déjà disposer de l'autorisation d'application `Sites.ReadWrite.All`.
 
 > **Attention :** la suppression d'une version précise (`DELETE .../versions/{id}`) ne figure pas dans la référence officielle de l'API Graph de Microsoft, mais c'est une opération largement utilisée et dont le fonctionnement est confirmé (pour les bibliothèques de documents OneDrive comme SharePoint). La version actuelle/la plus récente ne peut pas être supprimée ainsi — Graph le refuse, ce qui constitue précisément la garantie de conservation de la version actuelle.
 
@@ -485,6 +510,7 @@ Pendant l'analyse, le script affiche des barres de progression imbriquées (site
 | `-ClientId` | `string` | Client ID d'une App Registration existante — évite l'application temporaire ; à utiliser avec `-TenantId` et `-ClientSecret` ou `-CertificateThumbprint` |
 | `-ClientSecret` | `string` | Client secret d'une app registration existante |
 | `-CertificateThumbprint` | `string` | Empreinte du certificat d'une app registration existante |
+| `-AppOnly` | `switch` | App-only avec ClientId et CertificateThumbprint du tenant dans `graph.appid.json` (nécessite `Sites.ReadWrite.All` en autorisation d'application) |
 | `-Apply` | `switch` | Effectue réellement la suppression |
 | `-IncludeOneDriveSites` | `switch` | Inclut les sites OneDrive dans l'analyse du tenant |
 | `-IncludeHiddenLibraries` | `switch` | Inclut les bibliothèques de documents masquées |

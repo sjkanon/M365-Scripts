@@ -36,7 +36,10 @@ derden.
 |-----------|----------|-------------|
 | `-RiskyOnly` | Nee | Alleen toekenningen opnemen die als High risk zijn gemarkeerd |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -49,7 +52,12 @@ derden.
 **Opmerkingen**
 - De risicomarkering is een heuristiek (tekstvergelijking met een lijst van bekende risicovolle scopes) — beoordeel
   gemarkeerde items handmatig en zie "Normal" niet als garantie dat iets veilig is
-- Vereiste scopes: `Application.Read.All`, `Directory.Read.All`
+- Toekenningen met hoog risico staan nu bovenaan in de consoletabel (sorteren op de tekst van
+  de markering zette `Normal` vóór `High`)
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Microsoft
+  Graph, standaard gedelegeerd (scopes `Application.Read.All`, `Directory.Read.All`);
+  app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (dezelfde
+  toepassingsmachtigingen)
 
 ---
 
@@ -67,7 +75,10 @@ rapport dat alleen leest; `-Apply` schakelt overeenkomsten met hoge zekerheid ui
 | `-Mailbox` | Nee | UPN van één mailbox. Zonder deze parameter worden alle mailboxen gecontroleerd |
 | `-Apply` | Nee | Gemarkeerde regels met hoge zekerheid uitschakelen (standaard: alleen rapport) |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -86,8 +97,19 @@ Ondersteunt `-WhatIf` (`SupportsShouldProcess`).
 
 **Opmerkingen**
 - "Extern" wordt bepaald aan de hand van de geaccepteerde domeinen van de tenant (`Get-AcceptedDomain`)
+- Doorstuurdoelen naar interne ontvangers (`EX:/o=ExchangeLabs/...`) tellen niet langer als
+  extern — alleen SMTP-adressen buiten de geaccepteerde domeinen
 - Uitschakelen (niet verwijderen) is bewust — het is terug te draaien en de regel blijft bewaard voor
   onderzoek bij incidentrespons
+- Blijft bewust op Exchange Online. Graph heeft `messageRules`, maar gedelegeerd bereikt dat
+  alleen mailboxen waartoe de aangemelde beheerder toegang heeft gekregen (een Exchange-
+  beheerdersrol opent daar niet de regels van andere gebruikers), en het geeft nooit verborgen
+  regels terug — `Get-InboxRule -IncludeHidden` wel, en een regel verbergen is een bekende
+  aanvalstechniek
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Exchange
+  Online, standaard gedelegeerd (device code en de GDAP-klant via `-DelegatedOrganization`);
+  app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (`Exchange.ManageAsApp`
+  plus een Exchange-rol; `-TenantId` als domein)
 
 ---
 
@@ -105,7 +127,10 @@ Cloud Apps en Entra ID Protection omvat.
 | `-Severity` | Nee | Filter: `informational`, `low`, `medium`, `high` |
 | `-Status` | Nee | Filter: `new`, `inProgress`, `resolved` |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -116,7 +141,12 @@ Cloud Apps en Entra ID Protection omvat.
 ```
 
 **Opmerkingen**
-- Vereiste scope: `SecurityAlert.Read.All`
+- Waarschuwingen worden gesorteerd high → medium → low → informational, nieuwste eerst (de
+  eerdere alfabetische sortering zette `medium` eerst en `high` als laatste)
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Microsoft
+  Graph, standaard gedelegeerd (scope `SecurityAlert.Read.All` plus een rol Security
+  Reader); app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly`
+  (toepassingsmachtiging `SecurityAlert.Read.All`)
 
 ---
 
@@ -134,7 +164,10 @@ per mailbox of POP/IMAP is ingeschakeld en of er een litigation hold is.
 |-----------|----------|-------------|
 | `-IncludeMailboxDetail` | Nee | Ook per mailbox verouderde protocollen + litigation hold controleren (trager) |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -150,6 +183,16 @@ per mailbox of POP/IMAP is ingeschakeld en of er een litigation hold is.
 - De wijzigende tegenhangers `*-set.ps1` / `*-del.ps1` uit het bronproject zijn
   bewust niet overgezet — elk ervan hardcodeerde de specifieke "aanbevolen" waarden van één MSP, zonder
   mogelijkheid om per tenant af te wijken
+- Security & Compliance PowerShell (DLP, waarschuwingsbeleid) wordt nu geopend voor dezelfde
+  tenant en aanmelding als Exchange (`Connect-M365Exchange -IncludeCompliance`); de eerdere
+  kale `Connect-IPPSSession` negeerde `-TenantId` en las onder GDAP dus je eigen tenant
+- `-IncludeMailboxDetail` leest POP/IMAP met één bulkaanroep `Get-EXOCASMailbox` in plaats
+  van één `Get-CASMailbox` per mailbox
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1), standaard
+  gedelegeerd (device code en de GDAP-klant via `-DelegatedOrganization`); app-only met
+  `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (`-TenantId` als domein). Blijft op
+  Exchange Online / Security & Compliance: Graph heeft geen API voor EOP/Defender for Office
+  365-beleid, externe domeinen, CAS-protocollen, DLP of waarschuwingsbeleid
 
 **Vereiste modules**
 ```powershell
@@ -161,7 +204,8 @@ Install-Module ExchangeOnlineManagement -Scope CurrentUser
 ### Test-MailboxAuditingConfig.ps1
 
 Rapporteert (en herstelt met `-Apply`) hiaten in het Unified Audit Log en in de auditlogging per mailbox:
-of het organisatiebrede Unified Audit Log is ingeschakeld, en of bij elke mailbox
+of het organisatiebrede Unified Audit Log is ingeschakeld, of mailboxauditing voor de hele
+organisatie is uitgezet (`AuditDisabled`, alleen gerapporteerd), en of bij elke mailbox
 `AuditEnabled` aan staat met een voldoende hoge `AuditLogAgeLimit`.
 
 **Parameters**
@@ -171,7 +215,10 @@ of het organisatiebrede Unified Audit Log is ingeschakeld, en of bij elke mailbo
 | `-MinimumAuditLogAgeDays` | Nee | Minimaal aanvaardbare bewaartermijn in dagen (standaard: `180`) |
 | `-Apply` | Nee | Het Unified Audit Log inschakelen en gemarkeerde mailboxen herstellen (standaard: alleen rapport) |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Tenant-ID of domein van Entra ID |
+| `-TenantId` | Nee | Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -184,6 +231,16 @@ of het organisatiebrede Unified Audit Log is ingeschakeld, en of bij elke mailbo
 ```
 
 Ondersteunt `-WhatIf` (`SupportsShouldProcess`).
+
+**Opmerkingen**
+- Met `AuditDisabled = True` (`Get-OrganizationConfig`) wordt geen enkele mailbox
+  geaudit, wat de eigen `AuditEnabled` ook zegt. Het script rapporteert dit maar wijzigt het
+  niet — dat is een bewuste organisatiekeuze (`Set-OrganizationConfig -AuditDisabled $false`)
+- Aanmelden via [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Exchange
+  Online, standaard gedelegeerd (device code en de GDAP-klant via `-DelegatedOrganization`);
+  app-only met `-ClientId` + `-CertificateThumbprint` of `-AppOnly` (`-TenantId` als
+  domein). Blijft op Exchange Online: Graph heeft geen API voor de auditlogschakelaar of de
+  auditinstellingen per mailbox
 
 ---
 
@@ -201,7 +258,10 @@ aggregate-rapporten is ingesteld. DKIM valt bewust buiten scope — gebruik daar
 |-----------|----------|-------------|
 | `-Domain` | Nee | Een of meer domeinen. Zonder deze parameter worden ze automatisch opgehaald via Microsoft Graph |
 | `-OutputPath` | Nee | Pad voor het CSV-rapport (standaard: `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Nee | Alleen gebruikt om domeinen automatisch op te halen via Graph |
+| `-TenantId` | Nee | Alleen gebruikt om domeinen via Graph op te halen als `-Domain` ontbreekt. Tenant-ID of domein. Standaard de GDAP-klant (`load.config.ps1`) of je eigen tenant; verplicht voor app-only |
+| `-ClientId` | Nee | App-registratie voor app-only aanmelden (met `-CertificateThumbprint`). Zonder meldt het script gedelegeerd aan, als jezelf |
+| `-CertificateThumbprint` | Nee | Certificaatvingerafdruk voor app-only aanmelden met `-ClientId` |
+| `-AppOnly` | Nee | App-only aanmelden met de ClientId en vingerafdruk voor de tenant uit `graph.appid.json` |
 
 **Voorbeelden**
 
@@ -213,3 +273,9 @@ aggregate-rapporten is ingesteld. DKIM valt bewust buiten scope — gebruik daar
 
 **Opmerkingen**
 - Alleen voor Windows (gebruikt `Resolve-DnsName`)
+- Het DMARC-beleid wordt uit de tag `p=` zelf gelezen; een record met `sp=` vóór `p=`
+  rapporteerde voorheen het subdomeinbeleid
+- Meldt alleen aan als `-Domain` ontbreekt, via
+  [`Connect-M365.ps1`](../../Startup/readme.nl.md#connect-m365ps1): Microsoft Graph,
+  standaard gedelegeerd (scope `Domain.Read.All`); app-only met `-ClientId` +
+  `-CertificateThumbprint` of `-AppOnly`

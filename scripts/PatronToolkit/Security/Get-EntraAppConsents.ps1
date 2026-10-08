@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Audit OAuth app consent grants (delegated and application permissions) across the tenant.
@@ -24,7 +24,18 @@
     CSV report path. Defaults to .\EntraAppConsents_<timestamp>.csv.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1) or
+    your own tenant. Required for app-only sign-in.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint). Without it the
+    script signs in delegated, as you.
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-EntraAppConsents.ps1
@@ -38,14 +49,23 @@
     against Microsoft Graph — the originals used the deprecated AzureAD module
     (Get-AzureADOAuth2PermissionGrant / Connect-AzureAD), which is retired.
 
-    Required scopes: Application.Read.All, Directory.Read.All
+    Sign-in: Microsoft Graph through scripts\Startup\Connect-M365.ps1 - delegated by
+    default (scopes Application.Read.All, Directory.Read.All; device code / GDAP customer
+    per load.config.ps1), app-only with -ClientId/-CertificateThumbprint or -AppOnly
+    (application permissions Application.Read.All, Directory.Read.All). An existing
+    fitting Graph session is reused and left connected.
 #>
 [CmdletBinding()]
 param(
     [switch] $RiskyOnly,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -69,16 +89,8 @@ function Test-RiskyScope {
 }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Application.Read.All', 'Directory.Read.All') }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+$graph = Connect-M365Graph -Scopes 'Application.Read.All', 'Directory.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -87,13 +99,18 @@ Write-Host "   Entra App Consent Audit" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
 
-Write-Host "  Retrieving service principals..." -ForegroundColor DarkGray
-$servicePrincipals = @(Get-MgServicePrincipal -All -ErrorAction Stop)
+try {
+    Write-Host "  Retrieving service principals..." -ForegroundColor DarkGray
+    $servicePrincipals = @(Get-MgServicePrincipal -All -ErrorAction Stop)
+    Write-Host "  Retrieving delegated permission grants..." -ForegroundColor DarkGray
+    $oauthGrants = @(Get-MgOauth2PermissionGrant -All -ErrorAction Stop)
+} catch {
+    Write-Host "  [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    Disconnect-M365Graph $graph
+    exit 1
+}
 $spById = @{}
 foreach ($sp in $servicePrincipals) { $spById[$sp.Id] = $sp }
-
-Write-Host "  Retrieving delegated permission grants..." -ForegroundColor DarkGray
-$oauthGrants = @(Get-MgOauth2PermissionGrant -All -ErrorAction Stop)
 
 Write-Host "  Auditing $($servicePrincipals.Count) service principal(s)..." -ForegroundColor DarkGray
 Write-Host ""
@@ -168,14 +185,15 @@ foreach ($sp in $servicePrincipals) {
 }
 
 if ($RiskyOnly) {
-    $results = $results | Where-Object { $_.RiskFlag -eq 'High' }
+    $results = @($results | Where-Object { $_.RiskFlag -eq 'High' })
 }
 
 # ── Output ────────────────────────────────────────────────────────────────────
 if ($results.Count -eq 0) {
     Write-Host "  No matching grants found." -ForegroundColor DarkGray
 } else {
-    $results | Sort-Object RiskFlag -Descending | Format-Table AppDisplayName, PermissionType, Permission, RiskFlag, GrantedTo -AutoSize
+    # 'Normal' sorts after 'High' alphabetically, so sort on the flag itself: High first.
+    $results | Sort-Object @{ Expression = { $_.RiskFlag -eq 'High' }; Descending = $true }, AppDisplayName | Format-Table AppDisplayName, PermissionType, Permission, RiskFlag, GrantedTo -AutoSize
 
     if (-not $OutputPath) {
         $ts = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -191,4 +209,4 @@ Write-Host ("  {0} grant(s) reviewed — {1} flagged High risk" -f $results.Coun
 Write-Host ""
 
 # ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+Disconnect-M365Graph $graph

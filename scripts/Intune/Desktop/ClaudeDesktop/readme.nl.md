@@ -20,19 +20,21 @@ Intune installeert LOB-MSIX-apps per gebruiker. Dat mislukt voor standaardgebrui
 
 | Script | Rol in Intune |
 |---|---|
-| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) | **Het script dat je uitvoert.** Regelt alles hieronder — zie de sectie "Maandelijkse run". |
-| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) | Contentscript voor de installatieopdracht |
-| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) | Contentscript voor de verwijderopdracht |
-| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) | Aangepast detectiescript |
+| [`Deploy-ClaudeDesktopIntune.ps1`](Deploy-ClaudeDesktopIntune.ps1) ([docs](#deploy-claudedesktopintuneps1)) | **Het script dat je uitvoert.** Regelt alles hieronder — zie de sectie "Maandelijkse run". |
+| [`Install-ClaudeDesktop-Intune.ps1`](Install-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Contentscript voor de installatieopdracht |
+| [`Uninstall-ClaudeDesktop-Intune.ps1`](Uninstall-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Contentscript voor de verwijderopdracht |
+| [`Detect-ClaudeDesktop-Intune.ps1`](Detect-ClaudeDesktop-Intune.ps1) ([docs](#install---uninstall---detect-claudedesktop-intuneps1)) | Aangepast detectiescript |
 
 `Install-`/`Uninstall-`/`Detect-ClaudeDesktop-Intune.ps1` voer je nooit handmatig uit — `Deploy-ClaudeDesktopIntune.ps1` verpakt ze automatisch in de `.intunewin` (of uploadt het detectiescript als onderdeel van de detectieregel).
 
-## Wat `Deploy-ClaudeDesktopIntune.ps1` doet
+## Deploy-ClaudeDesktopIntune.ps1
+
+Wat het doet:
 
 1. Downloadt de nieuwste x64-MSIX van Claude Desktop via de officiële "latest"-redirect-URL van Anthropic.
 2. Leest de versie uit `AppxManifest.xml` in de MSIX.
 3. Kopieert de installatie-/verwijderscripts naast de MSIX en bouwt een `.intunewin`-pakket (module `IntuneWin32App` — `IntuneWinAppUtil.exe` wordt automatisch gedownload als die er nog niet is).
-4. Maakt gedelegeerd verbinding met Microsoft Graph (interactieve aanmelding) en maakt een kortlevende **tijdelijke App Registration** aan — hetzelfde patroon als [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.nl.md) — met alleen de applicatiemachtiging `DeviceManagementApps.ReadWrite.All`. Die wordt gebruikt om de module `IntuneWin32App` te authenticeren en aan het eind van de run weer verwijderd. Tussen runs blijft niets bestaan behalve de Intune-app zelf.
+4. Maakt gedelegeerd verbinding met Microsoft Graph (interactieve aanmelding) en maakt een kortlevende **tijdelijke App Registration** aan — hetzelfde patroon als [`Remove-SharePointFileVersionsByDate.ps1`](../../../Reporting/readme.nl.md) — met alleen de applicatiemachtiging `DeviceManagementApps.ReadWrite.All`. Die wordt gebruikt om de module `IntuneWin32App` te authenticeren en aan het eind van de run weer verwijderd. Tussen runs blijft niets bestaan behalve de Intune-app zelf. Aanmelden gaat via [`Connect-M365.ps1`](../../../Startup/Connect-M365.ps1): standaard gedelegeerd (apparaatcode volgens `$global:useDeviceCodeAuth`, GDAP-klant uit `$global:cid`). De upload zelf blijft bij de module `IntuneWin32App`: `Connect-MSIntuneGraph` haalt een eigen token op en kan de Microsoft Graph PowerShell-sessie niet gebruiken, en het in blokken uploaden van de `.intunewin` naar Azure Storage plus de commit van de versleutelingsgegevens herschrijven als losse Graph-calls is veel risico voor weinig winst. Met `-ClientId` + `-CertificateThumbprint` (of `-AppOnly`) gebruik je in plaats daarvan een eigen permanente app: er wordt niets tijdelijks aangemaakt en `Connect-MSIntuneGraph` meldt zich aan met hetzelfde certificaat (`-ClientCert`).
 5. Eerste run: maakt in Intune de Win32-app "Claude Desktop (Machine-wide)" aan met detectie- en vereistenregels, en wijst die als **Required** toe aan de Entra ID-groep die je meegeeft.
 6. Latere runs: pusht een bijgewerkt pakket via `Update-IntuneWin32AppPackageFile` (bestaande toewijzing blijft ongemoeid, apparaten krijgen gewoon de nieuwe content) als **ofwel** de gedownloade MSIX-versie nieuwer is, **ofwel** de scripts Install-/Uninstall-/Detect-ClaudeDesktop-Intune.ps1 zelf sinds de vorige run zijn gewijzigd — beide bijgehouden in het veld Notes van de app (`ClaudeMsixVersion=...; ScriptsHash=...`), dus geen lokaal statusbestand nodig. Detectie- **en vereistenregels worden bij elke run opnieuw opgebouwd en ingediend**, niet alleen bij het aanmaken (zie "Bekend probleem" hieronder). Is de versie noch zijn de scripts gewijzigd, dan worden alleen de regels ververst.
 
@@ -77,7 +79,10 @@ Je krijgt een interactieve aanmeldprompt en een bevestiging "type JA to continue
 | `-AppDisplayName` | `Claude Desktop (Machine-wide)` | Wordt gebruikt om de bestaande app bij latere runs te vinden — niet wijzigen zonder de app ook in Intune te hernoemen |
 | `-MsixDownloadUrl` | Officiële x64-"latest"-redirect van Anthropic | Overschrijven om te testen |
 | `-MinimumSupportedWindowsRelease` | `W10_21H2` | Vereistenregel |
-| `-TenantId` | automatisch gedetecteerd | Tenant-ID van Entra ID |
+| `-TenantId` | GDAP-klant, anders je aanmeldtenant | Tenant-ID of domein van Entra ID |
+| `-ClientId` | — | Optionele permanente app voor app-only (met `-CertificateThumbprint`); er wordt geen tijdelijke App Registration aangemaakt |
+| `-CertificateThumbprint` | — | Certificaat voor `-ClientId` (CurrentUser\My of LocalMachine\My); gebruikt voor Graph en voor `Connect-MSIntuneGraph -ClientCert` |
+| `-AppOnly` | uit | App-only met ClientId en vingerafdruk uit `graph.appid.json` |
 | `-IntuneWinAppUtilPath` | automatische download | Gebruik een al gedownloade `IntuneWinAppUtil.exe` |
 | `-Force` | uit | Sla de bevestigingsprompt(s) over |
 | `-RequireCoworkPrerequisites` | uit | Voeg een echte Intune-afhankelijkheid van de app Cowork Prerequisites toe — zie hieronder |
@@ -92,6 +97,14 @@ Standaard zijn Claude Desktop en Cowork Prerequisites onafhankelijk — er is ge
 ```
 
 Dit zoekt de app Cowork Prerequisites op (rol die **eerst** uit — `Deploy-CoworkPrerequisitesIntune.ps1`) en roept `Add-IntuneWin32AppDependency` aan met `DependencyType 'Detect'` (niet `'AutoInstall'`): de vereistenapp moet nog steeds zelfstandig als Required zijn toegewezen en al op het apparaat zijn gedetecteerd — deze afhankelijkheid installeert hem niet automatisch namens Claude Desktop, maar laat Intune er alleen op wachten. De afweging ten opzichte van de standaard: een apparaat dat vastzit op de Cowork-vereisten (bijv. midden in een herstart, of omdat het echt faalt) krijgt dan ook geen Claude Desktop tot dat is opgelost, in plaats van direct Claude Desktop en later Cowork.
+
+## Install- / Uninstall- / Detect-ClaudeDesktop-Intune.ps1
+
+De contentscripts van de Win32-app. `Deploy-ClaudeDesktopIntune.ps1` verpakt en uploadt ze; je voert ze nooit handmatig uit.
+
+- **`Install-ClaudeDesktop-Intune.ps1`** (installatieopdracht): verwijdert elke bestaande Claude Desktop volledig, provisioneert de MSIX machinebreed met `Add-AppxProvisionedPackage` en schakelt de eigen auto-updater van Claude uit — zie de secties hieronder. Parameter `-MsixFileName` (standaard `Claude.msix`): bestandsnaam van de MSIX naast het script. Logt naar `%ProgramData%\ClaudeDeploy\install.log`.
+- **`Uninstall-ClaudeDesktop-Intune.ps1`** (verwijderopdracht): verwijdert het machinebreed geprovisioneerde pakket en, als terugvaloptie, per-user Appx-installaties van profielen die al hebben aangemeld. Laat de Windows-vereisten van Cowork ongemoeid. Logt naar `%ProgramData%\ClaudeDeploy\uninstall.log`.
+- **`Detect-ClaudeDesktop-Intune.ps1`** (aangepast detectiescript, 64-bit): meldt "installed" als het machinebreed geprovisioneerde pakket aanwezig is. Bewust versie-onafhankelijk, en probeert alleen opnieuw bij een tijdelijke DISM-exception.
 
 ### Beleid voor automatische updates
 
@@ -114,7 +127,8 @@ Beide contentscripts zijn zo geschreven dat een apparaat waarop Claude nooit hee
 - **Installatiescript**: elke verwijderronde (proces stoppen, Appx, klassieke verwijdering per gebruiker) controleert eerst op een leeg/`$null`-resultaat, zodat een volledig schone machine bij elke stap alleen "none found" logt in plaats van een fout te geven.
 - **Detectiescript**: een leeg/negatief resultaat van `Get-AppxProvisionedPackage` (de verwachte uitkomst op een apparaat waar het nooit geïnstalleerd was) meldt direct "not installed" (exit 1), zonder nieuwe poging — nieuwe pogingen starten alleen bij een echte **exception** (bijv. een tijdelijke DISM-vergrendeling, aannemelijk vlak na de zware Appx-activiteit van het installatiescript zelf op hetzelfde apparaat), zodat een echt schone machine nooit wordt opgehouden door nieuwe pogingen die de uitkomst toch niet kunnen veranderen.
 
-### Vereisten
+## Vereisten
 
+- PowerShell 7 (de deploy-scripts laden `scripts\Startup\Connect-M365.ps1`). Het deploy-script zelf telt mee in `ScriptsHash`, dus de eerste run na het bijwerken van dit script uploadt het pakket één keer opnieuw.
 - De PowerShell-modules `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups` en `IntuneWin32App` — installeer ze met `.\scripts\Startup\Install-Modules.ps1`
 - Uitvoeren vanaf Windows (de verpakkingstool en de MSIX-/AppX-cmdlets werken alleen op Windows)

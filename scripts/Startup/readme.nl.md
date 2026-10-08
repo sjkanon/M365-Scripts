@@ -12,14 +12,17 @@ Startscripts en de centrale M365-functiebibliotheek.
 
 | Bestand | Omschrijving |
 |------|-------------|
-| [`functies.ps1`](functies.ps1) | M365-functiebibliotheek — bij eerste gebruik door `menu.ps1` gedot-sourced |
-| [`Install-Modules.ps1`](Install-Modules.ps1) | Bootstrapscript — installeert en importeert alle benodigde PowerShell-modules |
-| [`Update-Modules.ps1`](Update-Modules.ps1) | Werkt elke geïnstalleerde PowerShell-module bij naar de nieuwste versie |
-| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) | Controleert `.ps1`-bestanden in de repo op syntaxfouten door ze te parsen, zonder ze uit te voeren |
-| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Genereert [`scripts/INDEX.md`](../INDEX.md) opnieuw — de doorzoekbare A–Z-lijst van alle scripts |
-| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Controleert elke link in elke readme — bestanden die moeten bestaan, anchors die met een kop moeten overeenkomen |
-| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Bouwt van een markdowndocument een op zichzelf staande, opgemaakte HTML-pagina — om in IT Glue te plakken of af te drukken |
-| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) | Zet de taalwissel en het kruimelpad bovenaan elke readme, in het Engels, Nederlands en Frans |
+| [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365-functiebibliotheek — bij eerste gebruik door `menu.ps1` gedot-sourced |
+| [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | De ene lijst met modules die deze repo nodig heeft — gelezen door `load.ps1`, `Install-Modules.ps1` en `Update-Modules.ps1` |
+| [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Meldt modules die scripts laden maar die niet in `RequiredModules.psd1` staan — de docs-hook draait het na elke wijziging |
+| [`Connect-M365.ps1`](Connect-M365.ps1) ([docs](#connect-m365ps1)) | De ene manier waarop scripts aanmelden: Graph eerst, standaard delegated (device code en GDAP uit `load.config.ps1`), app-only op verzoek — door de scripts gedot-sourcet |
+| [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrapscript — installeert en importeert alle benodigde PowerShell-modules |
+| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Controleert de vereiste modules (ontbrekend, te oud, update beschikbaar) en installeert/updatet ze; werkt desgewenst ook alle andere geïnstalleerde modules bij |
+| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Controleert `.ps1`-bestanden in de repo op syntaxfouten door ze te parsen, zonder ze uit te voeren |
+| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) ([docs](#update-scriptindexps1)) | Genereert [`scripts/INDEX.md`](../INDEX.md) opnieuw — de doorzoekbare A–Z-lijst van alle scripts |
+| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) ([docs](#test-markdownlinksps1)) | Controleert elke link in elke readme — bestanden die moeten bestaan, anchors die met een kop moeten overeenkomen |
+| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) ([docs](#convert-markdowntohtmlps1)) | Bouwt van een markdowndocument een op zichzelf staande, opgemaakte HTML-pagina — om in IT Glue te plakken of af te drukken |
+| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) ([docs](#update-readmeheaderps1)) | Zet de taalwissel en het kruimelpad bovenaan elke readme, in het Engels, Nederlands en Frans |
 
 ---
 
@@ -43,6 +46,12 @@ Weer verwijderen:
 
 ```powershell
 .\load.ps1 -RemoveStartup
+```
+
+Bij elke start, voordat het menu opent, controleert `load.ps1` de modules uit [`RequiredModules.psd1`](#requiredmodulespsd1) met [`Update-Modules.ps1`](#update-modulesps1): het toont wat ontbreekt, ouder is dan het minimum of achterloopt op de PowerShell Gallery, en installeert of updatet dat meteen, zonder te vragen. De gallery wordt hooguit eens per 24 uur bevraagd, dus een normale start kost minder dan een seconde. De controle één keer overslaan:
+
+```powershell
+.\load.ps1 -SkipModuleCheck
 ```
 
 Je kunt het automatisch starten ook in het launchermenu aan- en uitzetten:
@@ -70,8 +79,17 @@ $script:MspAdminDisplayName = 'MSP - Admin Account'
 ```powershell
 Connect-Tenant -Domain "customer.com"
 # Zet $global:cid en $global:connectmsoldomain
-# Alle volgende functies richten zich automatisch op de geselecteerde tenant
+# Onder GDAP richten alle volgende functies zich op de geselecteerde tenant
 ```
+
+### Aanmelden
+
+Elke functie meldt zich aan via [`Connect-M365.ps1`](#connect-m365ps1), dat `functies.ps1` dot-sourcet: Microsoft Graph, gedelegeerd, met een apparaatcode als `useDeviceCodeAuth` in `load.config.ps1` aan staat, anders in de browser. Een sessie die de scopes van een functie al heeft, wordt hergebruikt.
+
+- **GDAP** (`authMode = 'GDAP'`): na `Connect-Tenant` verbindt elke Graph- en Exchange-functie met die klant (`$cid`, Exchange via `-DelegatedOrganization`).
+- **Direct**: de functies blijven in je eigen tenant; `$cid` wordt niet gebruikt.
+- De partnersessie die `Connect-Tenant` en `Test-GdapConnection` nodig hebben voor `Get-MgContract`, opent `Connect-PartnerGraph`. Die onthoudt bij de eerste start je eigen tenant (`$global:partnerTenantId`), zodat een andere klant kiezen ook nog werkt nadat een functie naar de huidige klant is overgeschakeld.
+- Teams (`Invoke-Menu` optie 3) loopt via `Connect-M365Teams`, Exchange via `Connect-M365Exchange`.
 
 ### Functies
 
@@ -80,8 +98,9 @@ Connect-Tenant -Domain "customer.com"
 | Functie | Omschrijving |
 |----------|-------------|
 | `Connect-Tenant` | Selecteert een CSP-klant op domein, vult `$cid` en `$connectmsoldomain` |
-| `Test-GdapConnection` | Valideert het gedelegeerde GDAP/CSP-contract + probeert een gedelegeerde Exchange-verbinding |
-| `Test-ExoConnection` | Controleert / herstelt de Exchange Online-verbinding |
+| `Test-GdapConnection` | Valideert het gedelegeerde GDAP/CSP-contract en probeert daarna een gedelegeerde Graph-verbinding met de klant (`Get-MgOrganization`) en een gedelegeerde Exchange-verbinding |
+| `Test-ExoConnection` | Verbindt met Exchange Online, of hergebruikt een sessie met de juiste organisatie |
+| `Connect-PartnerGraph` | Graph in je eigen (partner)tenant, voor `Get-MgContract` |
 
 **Exchange Online**
 
@@ -118,30 +137,186 @@ Connect-Tenant -Domain "customer.com"
 
 ---
 
+## RequiredModules.psd1
+
+De modules waar deze repository van afhangt, in één PowerShell-databestand. `load.ps1`,
+`Install-Modules.ps1` en `Update-Modules.ps1` lezen het allemaal, zodat ze het niet meer
+oneens kunnen zijn — voorheen had elk een eigen lijst, en `load.ps1` controleerde er maar zeven.
+
+**Een module toevoegen:** voeg hier een regel toe. Bij de volgende start van `load.ps1` ziet
+elke machine hem als ontbrekend en installeert hem. Een `MinimumVersion` verhogen werkt op
+dezelfde manier. Vergeten is lastig: [`Test-RequiredModules.ps1`](#test-requiredmodulesps1)
+draait na elke wijziging en meldt een module die een script laadt maar die niet in dit bestand staat.
+
+| Sleutel | Betekenis |
+|---------|-----------|
+| `Name` | Modulenaam op de PowerShell Gallery |
+| `MinimumVersion` | Ouder dan dit telt als *te oud* (niet alleen *update beschikbaar*) |
+| `WindowsOnly` | Overgeslagen op macOS en Linux |
+| `MinimumPSVersion` | Overgeslagen op een oudere PowerShell — `PnP.PowerShell` 3 vereist 7.4 |
+| `ImportAtStartup` | Door `load.ps1` geïmporteerd voordat het menu opent |
+
+Naast `Modules` staat `NotManaged`: modules die scripts laden maar die bewust niet uit de gallery worden geïnstalleerd, elk met de reden — `ActiveDirectory` en `WebAdministration` (Windows-onderdelen), `AzureAD` (uitgefaseerd), `Microsoft.Graph` (de hele SDK, alleen genoemd in installatietips).
+
+Huidige lijst: `ExchangeOnlineManagement`, de Graph-submodules `Authentication`, `Sites`,
+`Identity.DirectoryManagement`, `Identity.SignIns`, `Identity.Governance`, `Applications`,
+`Calendar`, `Groups`, `Users`, `Reports`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`,
+`Az.Accounts`, `Az.OperationalInsights`, `DCToolbox`, `IntuneBackupAndRestore`, en op Windows
+`IntuneWin32App`.
+
+---
+
+## Test-RequiredModules.ps1
+
+Een script dat een nieuwe module gaat gebruiken werkt op de machine waarop het geschreven is,
+en faalt overal anders tot de module in [`RequiredModules.psd1`](#requiredmodulespsd1) staat.
+Dit script doorzoekt elke `.ps1`/`.psm1` op `#Requires -Modules`, `Import-Module` en
+`Install-Module` met een letterlijke naam, en meldt elke naam die niet in `Modules` of
+`NotManaged` staat, met de bestanden die hem gebruiken. Een naam in een variabele (`$mod`) kan
+het niet controleren.
+
+De docs-hook (`.claude/hooks/sync-docs.ps1`) draait het na elke wijziging van een `.ps1`, `.psd1`
+of `.md`, en de git pre-commit-hook waarschuwt ermee, zodat een nieuwe module opvalt zodra het
+script wordt opgeslagen, niet pas als het bij iemand anders faalt.
+
+**Parameters**
+
+| Parameter | Beschrijving |
+|-----------|--------------|
+| `-Root` | Root van de repository (standaard: twee niveaus boven dit script) |
+
+**Voorbeelden**
+
+```powershell
+pwsh -File scripts/Startup/Test-RequiredModules.ps1
+```
+
+Exitcodes: `0` = elke module die een script laadt staat in de lijst, `1` = er ontbreekt iets.
+
+---
+
+## Connect-M365.ps1
+
+De aanmelding die elk script gebruikt. **Microsoft Graph is de standaard**; Exchange Online,
+Teams en PnP worden alleen verbonden voor werk waar Graph geen API voor heeft (mailbox- en
+SendAs-rechten, message trace, DKIM, EOP-beleid, Teams `Cs*`-beleid, SharePoint-rolverdeling, ...).
+
+```powershell
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')   # diepte hangt af van de map van het script
+$graph = Connect-M365Graph -Scopes 'User.Read.All' -TenantId $TenantId
+# ... werk ...
+Disconnect-M365Graph $graph    # verbreekt alleen wat deze aanroep verbond
+```
+
+| Functie | Wat het doet |
+|---------|--------------|
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive`, `-Force`; `-Force` meldt opnieuw aan ook als de sessie zou passen. Veilig onder `Set-StrictMode`, ook zonder `load.ps1`; `-DelegatedClient` meldt delegated aan via je eigen app (`-ClientId`) in plaats van app-only |
+| `Disconnect-M365Graph` | Verbreekt alleen als `Connect-M365Graph` de sessie opende |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` voegt Security & Compliance toe (`Connect-IPPSSession`), `-EnableSearchOnlySession` voor Content Search |
+| `Disconnect-M365Exchange` | Sluit alleen de sessies die `Connect-M365Exchange` opende (op connection id), nooit die van de aanroeper |
+| `Connect-M365Teams` / `Disconnect-M365Teams` | Microsoft Teams PowerShell, voor het `Cs*`-beleid |
+| `Connect-M365PnP` | PnP.PowerShell naar een site; geeft de verbinding terug. ClientId uit `-ClientId` of `pnp.appid.json`; `-AppOnly` gebruikt de certificaat-app uit `graph.appid.json` |
+| `Invoke-M365GraphPaged` | Een Graph-collectie ophalen en `@odata.nextLink` tot het einde volgen |
+| `Resolve-M365TenantId` | De tenant: `-TenantId`, anders de GDAP-klant, anders je eigen tenant |
+
+**Hoe het aanmeldt**
+
+- **Delegated, de standaard.** Je meldt je aan als jezelf, met een device code als
+  `useDeviceCodeAuth` in `load.config.ps1` aan staat (of `-DeviceCode` is meegegeven), anders
+  in de browser met je `upn` al ingevuld. Onder GDAP (`authMode = 'GDAP'`) is de klanttenant
+  `$global:cid` / `$global:connectmsoldomain` uit `Connect-Tenant`, of
+  `$env:M365_CUSTOMER_TENANTID`. Exchange bereikt de klant met `-DelegatedOrganization`;
+  `-Organization` werkt alleen bij app-only aanmelden. Buiten GDAP komt een delegated
+  Exchange-aanmelding uit in de tenant van het account waarmee je aanmeldt.
+- **App-only, op verzoek.** `-ClientId` met `-CertificateThumbprint` (of `-ClientSecret`,
+  alleen Graph), of `-AppOnly` om ClientId en thumbprint voor de tenant uit `graph.appid.json`
+  in de root van de repo te lezen (gitignored). De app moet in die tenant toestemming hebben:
+  GDAP geeft delegated rechten, geen app-only toegang.
+- **Bestaande sessies worden hergebruikt** als ze van de juiste soort zijn, voor de juiste
+  tenant, en (delegated) alle gevraagde scopes al hebben. Een delegated herverbinding houdt
+  de scopes van de eerdere sessie, zodat een tweede script in hetzelfde venster ze niet afneemt.
+
+**Opmerkingen**
+
+- Vereist PowerShell 7. Elke `Connect-*` stopt met een installatietip als de module ontbreekt.
+- Draai vanuit de repo: scripts dot-sourcen dit bestand via een relatief pad, dus een los
+  gekopieerd script heeft dit bestand ernaast nodig.
+
+---
+
 ## Install-Modules.ps1
 
-Installeert en importeert alle PowerShell-modules die deze repository nodig heeft. Draai het één keer op een nieuwe machine of na een schone PowerShell-installatie.
+Installeert en importeert elke module uit [`RequiredModules.psd1`](#requiredmodulespsd1). Draai het één keer op een nieuwe machine of na een schone PowerShell-installatie. Modules die al geïnstalleerd zijn blijven ongemoeid — bijwerken doet [`Update-Modules.ps1`](#update-modulesps1).
 
 ```powershell
 .\scripts\Startup\Install-Modules.ps1
 ```
 
-De geïnstalleerde kernmodules zijn onder meer `ExchangeOnlineManagement` en de benodigde Microsoft Graph-submodules (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Identity.Governance`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Users`, `Microsoft.Graph.Calendar`).
-Waar van toepassing worden ook compatibiliteitsmodules die alleen op Windows werken meegenomen (`WindowsAutopilotIntune`, `AzureAD`).
+**Parameters**
+
+| Parameter | Beschrijving |
+|-----------|--------------|
+| `-Force` | Modules opnieuw installeren, ook als ze er al zijn |
+| `-Scope` | `CurrentUser` (standaard) of `AllUsers` (als administrator) |
 
 ---
 
 ## Update-Modules.ps1
 
-Werkt elke geïnstalleerde PowerShell-module bij naar de nieuwste versie. Draai het als administrator voor modules die systeembreed zijn geïnstalleerd.
+Controleert elke module uit [`RequiredModules.psd1`](#requiredmodulespsd1) en geeft elke module een status:
 
-Zorgt daarnaast voor een minimumversie van de specifieke Graph-submodules waar deze repo van afhangt (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Identity.SignIns`, `Identity.Governance`, `Applications`, `Groups`), voordat al het andere wat op de machine is geïnstalleerd wordt bijgewerkt.
+| Status | Betekenis | Zonder `-CheckOnly` |
+|--------|-----------|---------------------|
+| `Missing` | Niet geïnstalleerd | Wordt geïnstalleerd |
+| `BelowMinimum` | Ouder dan de `MinimumVersion` | Wordt geüpdatet |
+| `UpdateAvailable` | Er staat een nieuwere versie op de PowerShell Gallery | Wordt geüpdatet |
+| `OK` | Actueel | — |
+| `Unknown` | Gallery niet bereikbaar, of de module staat er niet meer op | — |
+| `Skipped` | Niet voor dit platform of deze PowerShell-versie | — |
+
+Daarna werkt het, tenzij `-RequiredOnly`, zoals altijd ook elke andere via PowerShellGet geïnstalleerde module bij. `load.ps1` draait het bij het starten als `-RequiredOnly -Auto -MaxAgeHours 24`.
+
+**Parameters**
+
+| Parameter | Beschrijving |
+|-----------|--------------|
+| `-CheckOnly` | Alleen rapporteren; niets installeren of updaten |
+| `-RequiredOnly` | Alleen de modules uit `RequiredModules.psd1`, niet al het andere dat geïnstalleerd is |
+| `-MaxAgeHours` | Gallery-versies uit de cache hergebruiken als die jonger is dan dit aantal uur (standaard `0` = altijd de gallery bevragen) |
+| `-Scope` | Scope voor nieuw geïnstalleerde modules: `CurrentUser` (standaard) of `AllUsers` |
+| `-Quiet` | Geen regel per module, alleen fouten |
+| `-PassThru` | Geeft per vereiste module een statusobject terug (`Name`, `Installed`, `Minimum`, `Latest`, `Status`, `Reason`) |
+| `-Auto` | Voor bij het starten: installeert wat ontbreekt en updatet wat verouderd is zonder te vragen, en toont alleen wat het doet. Alles in orde geeft één regel, `Modules OK` |
+| `-Prompt` | Als `-Auto`, maar toont eerst wat het zou doen en vraagt het dan |
+
+**Voorbeelden**
 
 ```powershell
+# Wat ontbreekt of is verouderd? Verandert niets
+.\scripts\Startup\Update-Modules.ps1 -RequiredOnly -CheckOnly
+
+# Ontbrekende installeren en achterlopende updaten, alleen de modules van de repo
+.\scripts\Startup\Update-Modules.ps1 -RequiredOnly
+
+# Hetzelfde, en daarna ook alle andere geïnstalleerde modules bijwerken
 .\scripts\Startup\Update-Modules.ps1
 ```
 
-> Geen parameters. Loopt elke module langs die `Get-InstalledModule` teruggeeft, dus op een machine met veel geïnstalleerde modules kan het even duren.
+**In je PowerShell-profiel.** Start je PowerShell met je eigen profiel (`$PROFILE`) in plaats van met `load.ps1`, zet dan de regel erin die `load.ps1` gebruikt, zodat de controle bij elke start van PowerShell draait:
+
+```powershell
+& "C:\pad\naar\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Auto -MaxAgeHours 24
+```
+
+Als alles actueel is geeft dat één regel en kost het ruim minder dan een seconde; de gallery wordt hooguit eens per dag bevraagd.
+
+**Opmerkingen**
+
+- De geïnstalleerde versie wordt gelezen met `Get-Module -ListAvailable`, dus een module die niet via PowerShellGet is geïnstalleerd (handmatig gekopieerd, een MSI) telt ook als geïnstalleerd. Zo'n module krijgt de nieuwe versie ernaast via `Install-Module`, omdat `Update-Module` modules weigert die het niet zelf installeerde.
+- Gallery-versies komen van `Find-PSResource` als PSResourceGet aanwezig is (ongeveer 3 s voor de hele lijst), anders van `Find-Module` (ongeveer 9 s). Ze worden gecachet in `%LOCALAPPDATA%\M365-Scripts\module-gallery-cache.json`; `-MaxAgeHours` bepaalt hoe oud die cache mag zijn.
+- Offline mislukt het opvragen van de gallery stil: ontbrekende en te oude modules worden nog steeds gemeld, *update beschikbaar* niet.
+- PowerShell 7 en Windows PowerShell 5.1 hebben aparte modulemappen, dus op dezelfde machine kunnen ze een ander resultaat geven. Dat klopt, het is geen fout.
+- Oude versies worden niet verwijderd. Draai als administrator om modules bij te werken die voor alle gebruikers zijn geïnstalleerd.
 
 ---
 

@@ -80,7 +80,7 @@ enregistré sans Regio.
 | [`Sync-SharePointChannelMember.ps1`](Sync-SharePointChannelMember.ps1) ([docs](#canaux-privés-et-groupes)) | Fait d'un groupe de sécurité la source de vérité pour les membres d'un canal privé | liste des membres du canal |
 | [`Add-SharePointHelpPage.ps1`](Add-SharePointHelpPage.ps1) ([docs](#remise-au-client)) | Écrit l'explication destinée aux utilisateurs finaux sur le site d'équipe, générée à partir de la configuration | oui |
 | [`Remove-SharePointStructure.ps1`](Remove-SharePointStructure.ps1) ([docs](#revenir-en-arrière)) | Supprime ce qui a été construit — se contente d'un rapport tant que vous ne passez pas `-Apply` | oui, volontairement |
-| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) | Fonctions d'aide partagées — chargées par dot-sourcing, pas exécutées seules | — |
+| [`SharePointStructure.Common.ps1`](SharePointStructure.Common.ps1) ([docs](#sharepointstructurecommonps1)) | Fonctions d'aide partagées — chargées par dot-sourcing, pas exécutées seules | — |
 | [`SharePoint-Handleiding.md`](SharePoint-Handleiding.md) | **Guide utilisateur, en néerlandais** — à remettre au client : téléverser, étiqueter, retrouver les documents | — |
 | [`example.config.json`](example.config.json) | Le modèle, comme exemple à copier — encore sur `CHANGEME`. Les configurations client (`<client>.config.json`) se trouvent à côté et sont ignorées par git | — |
 
@@ -106,7 +106,7 @@ crée et met en cache dans `pnp.appid.json`, ou inscrivez-en une :
 
 | Connexion | Nécessite | À utiliser pour |
 |---|---|---|
-| **Interactive** (`-Interactive -ClientId <app-id>`) | `AllSites.FullControl` déléguée, connecté en tant qu'administrateur autorisé à modifier le site | le provisionnement, les exécutions ponctuelles |
+| **Déléguée** (`-Interactive`, avec `-ClientId <app-id>` ou l'application du tenant dans `pnp.appid.json`) | `AllSites.FullControl` déléguée, connecté en tant qu'administrateur autorisé à modifier le site — avec un code d'appareil quand `useDeviceCodeAuth` est activé dans `load.config.ps1`, sinon dans le navigateur | le provisionnement, les exécutions ponctuelles |
 | **App-only** (`-ClientId <app-id> -Thumbprint <thumb>`) | `Sites.FullControl.All` d'application, certificat téléversé sur l'application | l'audit planifié du statut de partage |
 
 Deux exigences supplémentaires faciles à manquer :
@@ -118,6 +118,18 @@ Deux exigences supplémentaires faciles à manquer :
   en interactif et laissez le reste à l'app-only.
 - **Groupes.** `-EnsureGroups` nécessite `Group.ReadWrite.All` ; le `-IncludeGroups` du
   contrôle de dérive se contente de `Group.Read.All`.
+
+La connexion déléguée passe par [`Connect-M365.ps1`](../../Startup/readme.fr.md#connect-m365ps1)
+(`Connect-M365PnP`, `Connect-M365Graph`) : code d'appareil ou navigateur selon
+`load.config.ps1`, et `-ClientId` peut être omis quand `pnp.appid.json` connaît le tenant — on
+répond alors par Entrée à la question « ClientId of the PnP app registration » du lanceur. Les
+connexions Graph (groupes, équipe, canaux) réutilisent une session qui possède déjà les
+étendues. Graph n'a pas d'API pour l'essentiel de ce que fait cet ensemble — ensembles de
+termes, types de contenu et leurs liens de champ, affichages, valeurs de colonne par défaut,
+navigation, rupture d'héritage sur les listes et les dossiers — cela reste donc en PnP/CSOM.
+`New-SharePointTeam.ps1` crée lui aussi ses dossiers de canal via PnP : la bibliothèque est
+désignée par son titre dans la configuration, et traduire ce titre en lecteur Graph comme le
+fait `Get-PnPList` (titre, URL ou id) n'est pas un simple remplacement.
 
 ### 3. Compléter la configuration
 
@@ -410,6 +422,19 @@ Le code de sortie 2 signifie une dérive, il s'intègre donc directement dans un
 supervision. Le contrôle qui se rentabilise le plus souvent est l'**indicateur obligatoire
 sur un champ de type de contenu** — quelqu'un le décoche dans le navigateur et rien ne
 semble anormal jusqu'à ce que la moitié d'une bibliothèque n'ait plus de Taal.
+
+### SharePointStructure.Common.ps1
+
+Fonctions d'aide partagées, chargées par dot-sourcing par chaque script de ce dossier —
+jamais exécutées seules, sans paramètres. Elles contiennent ce dont tous ont besoin : le
+chargement et la validation de la configuration (`Import-StructureConfig`), les connexions
+PnP et Graph qui fonctionnent en délégué (via `Connect-M365PnP` / `Connect-M365Graph`,
+appelés avec StrictMode désactivé par `Invoke-M365Helper`) comme en app-only
+(`Connect-Structure`, `Connect-StructureGraph`),
+l'inscription d'application (`New-StructureApp`,
+`Remove-StructureApp`), les primitives CSOM que PnP n'expose pas directement (indicateur
+obligatoire sur un lien de champ, rupture d'héritage et attribution de rôles sur un objet
+sécurisable) et le vocabulaire de sortie commun `[ OK ]` / `[ >> ]` / `[DIFF]`.
 
 ---
 
@@ -707,9 +732,9 @@ Des omissions délibérées, chacune pour une raison :
 ## Remarques
 
 - Auteur : Sjoerd Kanon
-- `SharePointStructure.Common.ps1` est chargé par dot-sourcing par les quatre scripts.
+- `SharePointStructure.Common.ps1` est chargé par dot-sourcing par chaque script de ce dossier.
   C'est une exception délibérée à la règle « chaque script est autonome » appliquée
-  ailleurs dans ce dépôt : ces quatre scripts partagent un même schéma de configuration, et
-  trois copies du code d'autorisations divergeraient en moins d'un mois.
+  ailleurs dans ce dépôt : ils partagent tous un même schéma de configuration, et
+  une copie du code d'autorisations dans chacun divergerait en moins d'un mois.
 - Testez d'abord sur un tenant hors production. Les scripts de provisionnement modifient
   les autorisations d'une équipe en production.

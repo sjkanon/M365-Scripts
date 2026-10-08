@@ -8,6 +8,11 @@
     Removes one policy by ID, or scans all TEMP-CA policies and removes the
     ones that are expired based on the Expires= timestamp in the description.
 
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A fitting Graph session is reused and left
+    open, as before. Delegated scopes: Policy.ReadWrite.ConditionalAccess, Policy.Read.All.
+
 .PARAMETER PolicyId
     Remove one specific Conditional Access policy by ID.
 
@@ -18,7 +23,16 @@
     With scan mode, also remove temporary policies that are not expired yet.
 
 .PARAMETER TenantId
-    Optional tenant ID/domain for Connect-MgGraph.
+    Optional tenant ID/domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Remove-TemporaryConditionalAccessPolicies.ps1
@@ -34,42 +48,19 @@ param(
     [string]$PolicyId,
     [switch]$RemoveAllTempPolicies,
     [switch]$IncludeNotYetExpired,
-    [string]$TenantId
+    [string]$TenantId,
+    [string]$ClientId,
+    [string]$CertificateThumbprint,
+    [switch]$AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')
 
 $ErrorActionPreference = 'Stop'
 
 function Write-Step { param([string]$Message) Write-Host "`n=== $Message ===" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$Message) Write-Host "[OK]   $Message" -ForegroundColor Green }
 function Write-Warn { param([string]$Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow }
-
-function Connect-GraphForConditionalAccess {
-    param([string]$Tenant)
-
-    $requiredScopes = @(
-        'Policy.ReadWrite.ConditionalAccess',
-        'Policy.Read.All'
-    )
-
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
-    $missingScope = $true
-
-    if ($ctx -and $ctx.Scopes) {
-        $missingScope = ($requiredScopes | Where-Object { $_ -notin $ctx.Scopes }).Count -gt 0
-    }
-
-    if (-not $ctx -or $missingScope) {
-        $params = @{
-            Scopes       = $requiredScopes
-            ContextScope = 'Process'
-            NoWelcome    = $true
-        }
-        if ($Tenant) {
-            $params['TenantId'] = $Tenant
-        }
-        Connect-MgGraph @params | Out-Null
-    }
-}
 
 function Get-ExpiresUtcFromDescription {
     param([string]$Description)
@@ -86,7 +77,9 @@ function Get-ExpiresUtcFromDescription {
     }
 }
 
-Connect-GraphForConditionalAccess -Tenant $TenantId
+# Reuses a session for the right tenant that has the scopes; connects otherwise.
+$null = Connect-M365Graph -Scopes 'Policy.ReadWrite.ConditionalAccess', 'Policy.Read.All' `
+    -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 if ($PolicyId) {
     Write-Step 'Removing policy by ID'
@@ -100,7 +93,7 @@ if ($PolicyId) {
 
 Write-Step 'Scanning temporary Conditional Access policies'
 $all = Get-MgIdentityConditionalAccessPolicy -All
-$tempPolicies = $all | Where-Object { $_.DisplayName -like 'TEMP-CA -*' }
+$tempPolicies = @($all | Where-Object { $_.DisplayName -like 'TEMP-CA -*' })
 
 if (-not $tempPolicies -or $tempPolicies.Count -eq 0) {
     Write-Warn 'No temporary CA policies found.'

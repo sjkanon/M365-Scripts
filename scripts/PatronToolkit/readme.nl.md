@@ -18,6 +18,12 @@ overlap, voegt deze toolkit ~70 van die scripts met één doel samen tot 13
 goed te parametriseren scripts, gegroepeerd per functie in plaats van 1-op-1 overgezet. Zie de sectie
 `.NOTES` van elk script voor precies welke upstream-scripts het vervangt.
 
+Elk script meldt aan via [`Connect-M365.ps1`](../Startup/readme.nl.md#connect-m365ps1):
+Microsoft Graph waar Graph een API heeft, **standaard gedelegeerd** (je meldt aan als de
+beheerder; device code en de GDAP-klant uit `load.config.ps1`), app-only met `-ClientId` +
+`-CertificateThumbprint` of `-AppOnly`. Exchange Online, Teams PowerShell en PnP worden alleen
+gebruikt voor werk dat Graph niet kan — de opmerkingen bij elk script zeggen welk en waarom.
+
 ---
 
 ## Mappen

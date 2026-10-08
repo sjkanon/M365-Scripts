@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Clone an existing Team (apps, tabs, settings, channels, and/or members) into
@@ -10,8 +10,11 @@
     operation status until it reports success or failure. Modernized rewrite of
     an old sample-derived script; house-style dry-run/-Apply and reporting added.
 
-    Connects to Microsoft Graph automatically if no session is active; reuses an
-    existing session if already connected.
+    Sign-in goes through scripts\Startup\Connect-M365.ps1: delegated as the admin by
+    default (device code / GDAP customer per load.config.ps1), app-only with -ClientId
+    and -CertificateThumbprint or -AppOnly. A Graph session for the right tenant that
+    already has the scopes is reused and left connected; only a session this script
+    opened is disconnected. Delegated scopes: Group.ReadWrite.All, Directory.Read.All.
 
 .PARAMETER SourceTeamId
     Object ID (group ID) or display name of the Team to clone. If a display name
@@ -39,7 +42,16 @@
     reports what it would do.
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer when authMode is GDAP.
+
+.PARAMETER ClientId
+    App registration for app-only sign-in (with -CertificateThumbprint and -TenantId).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     # Preview
@@ -53,8 +65,9 @@
     .\Copy-Team.ps1 -SourceTeamId "Project Template" -NewTeamName "Project 1234" -PartsToClone Channels,Settings -Apply
 
 .NOTES
-    Cloning is a long-running Graph operation; this script polls every 10
-    seconds for up to 10 minutes by default.
+    Cloning is a long-running Graph operation; this script polls the
+    teamsAsyncOperation from the Location header every 15 seconds for up to 10
+    minutes (falling back to a display-name lookup when no Location comes back).
 
     Required module: Microsoft.Graph.Authentication (Group.ReadWrite.All / Team.Create)
 #>
@@ -76,23 +89,20 @@ param(
     [string[]] $PartsToClone = @('Apps', 'Tabs', 'Settings', 'Channels', 'Members'),
 
     [switch] $Apply,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 if (-not $NewTeamDescription) { $NewTeamDescription = $NewTeamName }
 if (-not $NewMailNickname) { $NewMailNickname = ($NewTeamName -replace '\s', '').ToLower() }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-MgContext -ErrorAction Stop
-    if (-not (Get-MgContext)) { throw }
-} catch {
-    $connectParams = @{ Scopes = @('Group.ReadWrite.All', 'Directory.Read.All'); NoWelcome = $true }
-    if ($TenantId) { $connectParams['TenantId'] = $TenantId }
-    Connect-MgGraph @connectParams
-    $script:ConnectedHere = $true
-}
+$graph = Connect-M365Graph -Scopes 'Group.ReadWrite.All', 'Directory.Read.All' -TenantId $TenantId `
+    -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 function Invoke-Graph {
     param([string] $Method = 'GET', [string] $Uri, [string] $Body)
@@ -105,14 +115,16 @@ function Invoke-Graph {
 try {
     $source = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/groups/$SourceTeamId`?`$select=id,displayName"
 } catch {
-    $matches = (Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$SourceTeamId' and resourceProvisioningOptions/Any(x:x eq 'Team')").value
-    if (-not $matches) {
+    # Quotes escaped for OData; not $matches, that is an automatic variable.
+    $escaped = $SourceTeamId -replace "'", "''"
+    $found = @((Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$escaped' and resourceProvisioningOptions/Any(x:x eq 'Team')").value)
+    if ($found.Count -eq 0) {
         Write-Error "Team '$SourceTeamId' not found by ID or display name."
-        if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+        Disconnect-M365Graph $graph
         exit 1
     }
-    if ($matches.Count -gt 1) { Write-Host "  [WARN] Multiple teams named '$SourceTeamId' — using the first match." -ForegroundColor Yellow }
-    $source = $matches[0]
+    if ($found.Count -gt 1) { Write-Host "  [WARN] Multiple teams named '$SourceTeamId' — using the first match." -ForegroundColor Yellow }
+    $source = $found[0]
 }
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -129,12 +141,12 @@ Write-Host ""
 
 if (-not $Apply) {
     Write-Host "  Would clone '$($source.displayName)' into '$NewTeamName'. Re-run with -Apply to perform the clone." -ForegroundColor Yellow
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     return
 }
 
 if (-not $PSCmdlet.ShouldProcess($NewTeamName, "Clone team '$($source.displayName)'")) {
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     return
 }
 
@@ -150,35 +162,57 @@ $body = @{
 Write-Host "  Submitting clone operation..." -ForegroundColor Cyan
 
 try {
-    # POST /teams/{id}/clone is asynchronous — the call itself just enqueues the
-    # operation, the new Team shows up under its display name once provisioning
-    # finishes, which we poll for below.
-    Invoke-Graph -Method POST -Uri "https://graph.microsoft.com/v1.0/teams/$($source.id)/clone" -Body $body | Out-Null
+    # POST /teams/{id}/clone is asynchronous — it answers 202 with a Location of
+    # the teamsAsyncOperation, which we poll below.
+    Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/teams/$($source.id)/clone" `
+        -Body $body -ContentType 'application/json' -ResponseHeadersVariable cloneHeaders -ErrorAction Stop | Out-Null
 } catch {
     Write-Host "  [ERROR] Clone request failed: $($_.Exception.Message)" -ForegroundColor Red
-    if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+    Disconnect-M365Graph $graph
     exit 1
+}
+$operationUri = $null
+if ($cloneHeaders -and $cloneHeaders['Location']) {
+    $loc = @($cloneHeaders['Location'])[0]
+    $operationUri = if ($loc -match '^https://') { $loc } else { "https://graph.microsoft.com/v1.0$loc" }
 }
 
 Write-Host "  Clone submitted. Waiting for the new Team to appear (this can take a few minutes)..." -ForegroundColor DarkGray
 
 $deadline = (Get-Date).AddMinutes(10)
 $newTeam  = $null
-while ((Get-Date) -lt $deadline -and -not $newTeam) {
+$failed   = $null
+while ((Get-Date) -lt $deadline -and -not $newTeam -and -not $failed) {
     Start-Sleep -Seconds 15
-    $candidates = (Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$NewTeamName'").value
-    if ($candidates) { $newTeam = $candidates[0] }
-    Write-Host "  ...still waiting" -ForegroundColor DarkGray
+    if ($operationUri) {
+        # The operation says when it is done and which team it made; the old
+        # display-name lookup also matched an existing group with the same name.
+        try {
+            $op = Invoke-Graph -Uri $operationUri
+            if ($op.status -eq 'succeeded' -and $op.targetResourceId) {
+                $newTeam = Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/groups/$($op.targetResourceId)?`$select=id,displayName"
+            } elseif ($op.status -eq 'failed') {
+                $failed = $op.error | ConvertTo-Json -Compress
+            }
+        } catch { }
+    } else {
+        $escapedNew = $NewTeamName -replace "'", "''"
+        $candidates = @((Invoke-Graph -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=displayName eq '$escapedNew'").value)
+        if ($candidates.Count) { $newTeam = $candidates[0] }
+    }
+    if (-not $newTeam -and -not $failed) { Write-Host "  ...still waiting" -ForegroundColor DarkGray }
 }
 
 Write-Host ""
 if ($newTeam) {
     Write-Host "  [OK]   New Team created: $($newTeam.displayName) ($($newTeam.id))" -ForegroundColor Green
+} elseif ($failed) {
+    Write-Host "  [ERROR] Clone failed: $failed" -ForegroundColor Red
 } else {
     Write-Host "  [WARN] Clone submitted but the new Team did not appear within 10 minutes." -ForegroundColor Yellow
     Write-Host "         It may still be provisioning — check Teams admin center shortly." -ForegroundColor Yellow
 }
 Write-Host ""
 
-# ── Disconnect if we connected ────────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-MgGraph | Out-Null }
+# ── Disconnect only if this script connected ──────────────────────────────────
+Disconnect-M365Graph $graph

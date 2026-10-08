@@ -12,14 +12,17 @@ Entry-point scripts and the core M365 function library.
 
 | File | Description |
 |------|-------------|
-| [`functies.ps1`](functies.ps1) | M365 function library — dot-sourced by `menu.ps1` on first use |
-| [`Install-Modules.ps1`](Install-Modules.ps1) | Bootstrap script — installs and imports all required PowerShell modules |
-| [`Update-Modules.ps1`](Update-Modules.ps1) | Updates every installed PowerShell module to its latest version |
-| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
-| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
-| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) | Checks every link in every readme — files that must exist, anchors that must match a heading |
-| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) | Builds a self-contained, styled HTML page from a markdown document — for pasting into IT Glue or printing |
-| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) | Writes the language switcher and breadcrumb at the top of every readme, in English, Dutch and French |
+| [`functies.ps1`](functies.ps1) ([docs](#functiesps1)) | M365 function library — dot-sourced by `menu.ps1` on first use |
+| [`RequiredModules.psd1`](RequiredModules.psd1) ([docs](#requiredmodulespsd1)) | The one list of modules this repo needs — read by `load.ps1`, `Install-Modules.ps1` and `Update-Modules.ps1` |
+| [`Test-RequiredModules.ps1`](Test-RequiredModules.ps1) ([docs](#test-requiredmodulesps1)) | Reports modules that scripts load but `RequiredModules.psd1` does not list — run by the docs hook after every edit |
+| [`Connect-M365.ps1`](Connect-M365.ps1) ([docs](#connect-m365ps1)) | The one way scripts sign in: Graph first, delegated by default (device code and GDAP from `load.config.ps1`), app-only on request — dot-sourced by the scripts |
+| [`Install-Modules.ps1`](Install-Modules.ps1) ([docs](#install-modulesps1)) | Bootstrap script — installs and imports all required PowerShell modules |
+| [`Update-Modules.ps1`](Update-Modules.ps1) ([docs](#update-modulesps1)) | Checks the required modules (missing, too old, update available) and installs/updates them; optionally updates every other installed module too |
+| [`Test-PowerShellSyntax.ps1`](Test-PowerShellSyntax.ps1) ([docs](#test-powershellsyntaxps1)) | Parse-checks `.ps1` files in the repo for syntax errors, no execution |
+| [`Update-ScriptIndex.ps1`](Update-ScriptIndex.ps1) ([docs](#update-scriptindexps1)) | Regenerates [`scripts/INDEX.md`](../INDEX.md) — the searchable A–Z list of every script |
+| [`Test-MarkdownLinks.ps1`](Test-MarkdownLinks.ps1) ([docs](#test-markdownlinksps1)) | Checks every link in every readme — files that must exist, anchors that must match a heading |
+| [`Convert-MarkdownToHtml.ps1`](Convert-MarkdownToHtml.ps1) ([docs](#convert-markdowntohtmlps1)) | Builds a self-contained, styled HTML page from a markdown document — for pasting into IT Glue or printing |
+| [`Update-ReadmeHeader.ps1`](Update-ReadmeHeader.ps1) ([docs](#update-readmeheaderps1)) | Writes the language switcher and breadcrumb at the top of every readme, in English, Dutch and French |
 
 ---
 
@@ -43,6 +46,12 @@ To remove it:
 
 ```powershell
 .\load.ps1 -RemoveStartup
+```
+
+At every start, before the menu opens, `load.ps1` checks the modules in [`RequiredModules.psd1`](#requiredmodulespsd1) with [`Update-Modules.ps1`](#update-modulesps1): it lists what is missing, older than its minimum, or behind the PowerShell Gallery, and installs or updates it right away, without asking. The gallery is asked at most once every 24 hours, so a normal start costs under a second. Skip the check once with:
+
+```powershell
+.\load.ps1 -SkipModuleCheck
 ```
 
 You can also toggle startup from the launcher menu:
@@ -70,8 +79,17 @@ $script:MspAdminDisplayName = 'MSP - Admin Account'
 ```powershell
 Connect-Tenant -Domain "customer.com"
 # Sets $global:cid and $global:connectmsoldomain
-# All subsequent functions automatically target the selected tenant
+# Under GDAP, all subsequent functions target the selected tenant
 ```
+
+### Sign-in
+
+Every function signs in through [`Connect-M365.ps1`](#connect-m365ps1), which `functies.ps1` dot-sources: Microsoft Graph, delegated, with a device code when `useDeviceCodeAuth` is set in `load.config.ps1`, otherwise in the browser. A session that already holds the scopes a function needs is reused.
+
+- **GDAP** (`authMode = 'GDAP'`): after `Connect-Tenant`, every Graph and Exchange function connects to that customer (`$cid`, Exchange through `-DelegatedOrganization`).
+- **Direct**: the functions stay in your own tenant; `$cid` is not used.
+- The partner session that `Connect-Tenant` and `Test-GdapConnection` need for `Get-MgContract` is opened by `Connect-PartnerGraph`, which remembers your own tenant (`$global:partnerTenantId`) at the first start, so selecting another customer still works after a function has switched to the current one.
+- Teams (`Invoke-Menu` option 3) goes through `Connect-M365Teams`, Exchange through `Connect-M365Exchange`.
 
 ### Functions
 
@@ -80,8 +98,9 @@ Connect-Tenant -Domain "customer.com"
 | Function | Description |
 |----------|-------------|
 | `Connect-Tenant` | Select a CSP customer by domain, populates `$cid` and `$connectmsoldomain` |
-| `Test-GdapConnection` | Validates delegated GDAP/CSP contract + tries delegated Exchange connection |
-| `Test-ExoConnection` | Checks / restores the Exchange Online connection |
+| `Test-GdapConnection` | Validates the delegated GDAP/CSP contract, then tries a delegated Graph connection to the customer (`Get-MgOrganization`) and a delegated Exchange connection |
+| `Test-ExoConnection` | Connects to Exchange Online, or reuses a session to the right organisation |
+| `Connect-PartnerGraph` | Graph in your own (partner) tenant, for `Get-MgContract` |
 
 **Exchange Online**
 
@@ -118,30 +137,185 @@ Connect-Tenant -Domain "customer.com"
 
 ---
 
+## RequiredModules.psd1
+
+The modules this repository depends on, in one PowerShell data file. `load.ps1`,
+`Install-Modules.ps1` and `Update-Modules.ps1` all read it, so they can no longer disagree
+— before, each had its own list, and `load.ps1` only checked seven modules.
+
+**To add a module:** add a line here. The next start of `load.ps1` on every machine sees it
+as missing and installs it. Raising a `MinimumVersion` works the same way. Forgetting is
+hard: [`Test-RequiredModules.ps1`](#test-requiredmodulesps1) runs after every edit and reports
+a module a script loads that is not in this file.
+
+| Key | Meaning |
+|-----|---------|
+| `Name` | Module name on the PowerShell Gallery |
+| `MinimumVersion` | Older than this counts as *too old* (not just *update available*) |
+| `WindowsOnly` | Skipped on macOS and Linux |
+| `MinimumPSVersion` | Skipped on an older PowerShell — `PnP.PowerShell` 3 needs 7.4 |
+| `ImportAtStartup` | Imported by `load.ps1` before the menu opens |
+
+Next to `Modules` there is `NotManaged`: modules scripts load that are deliberately not installed from the gallery, each with its reason — `ActiveDirectory` and `WebAdministration` (Windows features), `AzureAD` (retired), `Microsoft.Graph` (the whole SDK, only named in install hints).
+
+Current list: `ExchangeOnlineManagement`, the Graph submodules `Authentication`, `Sites`,
+`Identity.DirectoryManagement`, `Identity.SignIns`, `Identity.Governance`, `Applications`,
+`Calendar`, `Groups`, `Users`, `Reports`, plus `PnP.PowerShell`, `MicrosoftTeams`, `ImportExcel`,
+`Az.Accounts`, `Az.OperationalInsights`, `DCToolbox`, `IntuneBackupAndRestore`, and on Windows
+`IntuneWin32App`.
+
+---
+
+## Test-RequiredModules.ps1
+
+A script that starts using a new module works on the machine it was written on and fails
+everywhere else until the module is in [`RequiredModules.psd1`](#requiredmodulespsd1). This
+script searches every `.ps1`/`.psm1` for `#Requires -Modules`, `Import-Module` and
+`Install-Module` with a literal name, and reports each name that is in neither `Modules` nor
+`NotManaged`, with the files that use it. A name in a variable (`$mod`) cannot be checked.
+
+The docs hook (`.claude/hooks/sync-docs.ps1`) runs it after every edit of a `.ps1`, `.psd1` or
+`.md`, and the git pre-commit hook warns with it, so a new module is caught when the script is
+saved, not when someone else's run fails.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Root` | Repository root (default: two levels above this script) |
+
+**Examples**
+
+```powershell
+pwsh -File scripts/Startup/Test-RequiredModules.ps1
+```
+
+Exit codes: `0` = every module a script loads is listed, `1` = something is missing.
+
+---
+
+## Connect-M365.ps1
+
+The sign-in every script uses. **Microsoft Graph is the standard**; Exchange Online, Teams
+and PnP are only connected for work Graph has no API for (mailbox and SendAs permissions,
+message trace, DKIM, EOP policies, Teams `Cs*` policies, SharePoint role assignments, ...).
+
+```powershell
+. (Join-Path $PSScriptRoot '..\Startup\Connect-M365.ps1')   # depth depends on the script's folder
+$graph = Connect-M365Graph -Scopes 'User.Read.All' -TenantId $TenantId
+# ... work ...
+Disconnect-M365Graph $graph    # disconnects only what this call connected
+```
+
+| Function | What it does |
+|----------|--------------|
+| `Connect-M365Graph` | Microsoft Graph. `-Scopes`, `-TenantId`, `-ClientId` + `-CertificateThumbprint`/`-ClientSecret`, `-AppOnly`, `-DeviceCode`, `-Interactive`, `-Force`; `-Force` signs in again even when the session would fit. Safe under `Set-StrictMode`, also without `load.ps1`; `-DelegatedClient` signs in delegated through your own app (`-ClientId`) instead of app-only |
+| `Disconnect-M365Graph` | Disconnects only when `Connect-M365Graph` opened the session |
+| `Connect-M365Exchange` | Exchange Online, `-IncludeCompliance` adds Security & Compliance (`Connect-IPPSSession`), `-EnableSearchOnlySession` for Content Search |
+| `Disconnect-M365Exchange` | Closes only the sessions `Connect-M365Exchange` opened (by connection id), never the caller's |
+| `Connect-M365Teams` / `Disconnect-M365Teams` | Microsoft Teams PowerShell, for the `Cs*` policies |
+| `Connect-M365PnP` | PnP.PowerShell to a site; returns the connection. ClientId from `-ClientId` or `pnp.appid.json`; `-AppOnly` uses the certificate app from `graph.appid.json` |
+| `Invoke-M365GraphPaged` | GET a Graph collection and follow `@odata.nextLink` to the end |
+| `Resolve-M365TenantId` | The tenant to use: `-TenantId`, else the GDAP customer, else your own tenant |
+
+**How it signs in**
+
+- **Delegated, the default.** You sign in as yourself, with a device code when
+  `useDeviceCodeAuth` is set in `load.config.ps1` (or `-DeviceCode` is passed), otherwise in
+  the browser with your `upn` pre-filled. Under GDAP (`authMode = 'GDAP'`) the customer
+  tenant is `$global:cid` / `$global:connectmsoldomain` from `Connect-Tenant`, or
+  `$env:M365_CUSTOMER_TENANTID`. Exchange reaches the customer with `-DelegatedOrganization`;
+  `-Organization` only works for app-only sign-in. Outside GDAP a delegated Exchange sign-in
+  lands in the tenant of the account you sign in with.
+- **App-only, on request.** `-ClientId` with `-CertificateThumbprint` (or `-ClientSecret`,
+  Graph only), or `-AppOnly` to read ClientId and thumbprint for the tenant from
+  `graph.appid.json` in the repo root (gitignored). The app must be consented in that
+  tenant: GDAP gives delegated rights, not app-only access.
+- **Existing sessions are reused** when they are the right kind, for the right tenant and
+  (delegated) already hold every requested scope. A delegated reconnect keeps the scopes
+  the earlier session had, so a second script in the same window does not take them away.
+
+**Notes**
+
+- Requires PowerShell 7. Each `Connect-*` throws with an install hint when its module is missing.
+- Run from the repo: scripts dot-source this file by relative path, so a script copied on
+  its own needs this file next to it.
+
+---
+
 ## Install-Modules.ps1
 
-Installs and imports all PowerShell modules required by this repository. Run once on a new machine or after a clean PowerShell install.
+Installs and imports every module in [`RequiredModules.psd1`](#requiredmodulespsd1). Run once on a new machine or after a clean PowerShell install. Modules that are already installed are left alone — updating is [`Update-Modules.ps1`](#update-modulesps1)'s job.
 
 ```powershell
 .\scripts\Startup\Install-Modules.ps1
 ```
 
-Core modules installed include `ExchangeOnlineManagement` and required Microsoft Graph submodules (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Microsoft.Graph.Identity.DirectoryManagement`, `Microsoft.Graph.Identity.SignIns`, `Microsoft.Graph.Identity.Governance`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Users`, `Microsoft.Graph.Calendar`).
-Windows-only compatibility modules are also included when applicable (`WindowsAutopilotIntune`, `AzureAD`).
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Force` | Reinstall modules even if already present |
+| `-Scope` | `CurrentUser` (default) or `AllUsers` (elevated) |
 
 ---
 
 ## Update-Modules.ps1
 
-Updates every installed PowerShell module to its latest version. Run as administrator for system-wide modules.
+Checks every module in [`RequiredModules.psd1`](#requiredmodulespsd1) and gives each a status:
 
-Also ensures a minimum version for the specific Graph submodules this repo depends on (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Sites`, `Identity.SignIns`, `Identity.Governance`, `Applications`, `Groups`) before updating everything else installed on the machine.
+| Status | Meaning | Without `-CheckOnly` |
+|--------|---------|----------------------|
+| `Missing` | Not installed | Installed |
+| `BelowMinimum` | Older than its `MinimumVersion` | Updated |
+| `UpdateAvailable` | A newer version is on the PowerShell Gallery | Updated |
+| `OK` | Current | — |
+| `Unknown` | Gallery unreachable, or the module is no longer on it | — |
+| `Skipped` | Not for this platform or PowerShell version | — |
+
+Then, unless `-RequiredOnly`, it updates every other module installed through PowerShellGet, as it always did. `load.ps1` runs it at startup as `-RequiredOnly -Auto -MaxAgeHours 24`.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-CheckOnly` | Report only; install or update nothing |
+| `-RequiredOnly` | Only the modules in `RequiredModules.psd1`, not everything else installed |
+| `-MaxAgeHours` | Reuse gallery versions cached within this many hours (default `0` = always ask the gallery) |
+| `-Scope` | Scope for newly installed modules: `CurrentUser` (default) or `AllUsers` |
+| `-Quiet` | No line per module, only errors |
+| `-PassThru` | Return a status object per required module (`Name`, `Installed`, `Minimum`, `Latest`, `Status`, `Reason`) |
+| `-Auto` | For startup: install what is missing and update what is outdated without asking, showing only what it does. All in order gives one line, `Modules OK` |
+| `-Prompt` | As `-Auto`, but lists what it would do and asks first |
+
+**Examples**
 
 ```powershell
+# What is missing or outdated? Changes nothing
+.\scripts\Startup\Update-Modules.ps1 -RequiredOnly -CheckOnly
+
+# Install what is missing and update what is behind, only the repo's modules
+.\scripts\Startup\Update-Modules.ps1 -RequiredOnly
+
+# The above, then update every other installed module as well
 .\scripts\Startup\Update-Modules.ps1
 ```
 
-> No parameters. Iterates every module returned by `Get-InstalledModule`, so it can take a while on a machine with many modules installed.
+**In your PowerShell profile.** If you start PowerShell with your own profile (`$PROFILE`) instead of `load.ps1`, add the line `load.ps1` uses, so the check runs at every PowerShell start:
+
+```powershell
+& "C:\path\to\M365-Scripts\scripts\Startup\Update-Modules.ps1" -RequiredOnly -Auto -MaxAgeHours 24
+```
+
+With everything current it prints one line and costs well under a second; the gallery is asked at most once a day.
+
+**Notes**
+
+- The installed version is read with `Get-Module -ListAvailable`, so a module that was not installed through PowerShellGet (a manual copy, an MSI) still counts as installed. Such a module gets the new version side by side through `Install-Module`, because `Update-Module` refuses modules it did not install.
+- Gallery versions come from `Find-PSResource` when PSResourceGet is present (about 3 s for the whole list), otherwise `Find-Module` (about 9 s). They are cached in `%LOCALAPPDATA%\M365-Scripts\module-gallery-cache.json`; `-MaxAgeHours` decides how old that cache may be.
+- Offline, the gallery lookup fails quietly: missing and too-old modules are still reported, *update available* is not.
+- PowerShell 7 and Windows PowerShell 5.1 have separate module folders, so the two can report different results on the same machine. That is correct, not a bug.
+- Old versions are not removed. Run as administrator to update modules installed for all users.
 
 ---
 

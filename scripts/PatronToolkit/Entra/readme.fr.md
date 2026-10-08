@@ -32,7 +32,10 @@ prioritaire.
 | `-AdminsOnly` | Non | Ne rapporter que les titulaires d'un rôle d'annuaire |
 | `-NotRegisteredOnly` | Non | N'inclure que les utilisateurs non inscrits à la MFA |
 | `-OutputPath` | Non | Chemin du rapport CSV (par défaut : `C:\Temp\` / `~/Downloads\`) |
-| `-TenantId` | Non | ID de tenant ou domaine Entra ID |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut le client GDAP (`load.config.ps1`) ou votre propre tenant ; obligatoire en app-only |
+| `-ClientId` | Non | Inscription d'application pour la connexion app-only (avec `-CertificateThumbprint`). Sans lui, le script se connecte en délégué, en votre nom |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour la connexion app-only avec `-ClientId` |
+| `-AppOnly` | Non | Connexion app-only avec le ClientId et l'empreinte du tenant depuis `graph.appid.json` |
 
 **Exemples**
 
@@ -49,7 +52,11 @@ prioritaire.
 
 **Remarques**
 - Nécessite une licence Entra ID P1/P2 (le rapport sous-jacent est une fonctionnalité Premium)
-- Étendue requise : `Reports.Read.All` (ou `AuditLog.Read.All`)
+- Connexion via [`Connect-M365.ps1`](../../Startup/readme.fr.md#connect-m365ps1) : Microsoft
+  Graph, en délégué par défaut (étendues `AuditLog.Read.All`, `Reports.Read.All` plus un
+  rôle Reports Reader / Security Reader / Global Reader) ; app-only avec `-ClientId` +
+  `-CertificateThumbprint` ou `-AppOnly` (autorisation d'application `AuditLog.Read.All`)
+- `-UserList` compare désormais sans tenir compte de la casse et fonctionne aussi quand un seul utilisateur correspond
 
 ---
 
@@ -67,7 +74,10 @@ communautaire précise. Lecture seule.
 |-----------|----------|-------------|
 | `-OutputPath` | Non | Dossier de sauvegarde (par défaut : `.\CAPolicyBackup_<timestamp>\` sous `C:\Temp\` / `~/Downloads\`) |
 | `-IncludeNamedLocations` | Non | Exporter aussi les emplacements nommés (par défaut : activé) |
-| `-TenantId` | Non | ID de tenant ou domaine Entra ID |
+| `-TenantId` | Non | ID de tenant ou domaine. Par défaut le client GDAP (`load.config.ps1`) ou votre propre tenant ; obligatoire en app-only |
+| `-ClientId` | Non | Inscription d'application pour la connexion app-only (avec `-CertificateThumbprint`). Sans lui, le script se connecte en délégué, en votre nom |
+| `-CertificateThumbprint` | Non | Empreinte du certificat pour la connexion app-only avec `-ClientId` |
+| `-AppOnly` | Non | Connexion app-only avec le ClientId et l'empreinte du tenant depuis `graph.appid.json` |
 
 **Exemples**
 
@@ -75,13 +85,19 @@ communautaire précise. Lecture seule.
 .\Export-ConditionalAccessPolicies.ps1
 
 .\Export-ConditionalAccessPolicies.ps1 -OutputPath "C:\Backups\ContosoCA"
+
+# App-only, avec l'inscription d'application de graph.appid.json
+.\Export-ConditionalAccessPolicies.ps1 -TenantId contoso.onmicrosoft.com -AppOnly
 ```
 
 **Remarques**
 - La réimportation générique de stratégies CA depuis le JSON n'a volontairement pas été développée — considérez le JSON comme
   un artefact de sauvegarde/comparaison, pas comme un format importable ; utilisez
   `scripts/Entra/Import-ConditionalAccessBaseline.ps1` pour un flux d'import maintenu
-- Étendue requise : `Policy.Read.All`
+- Connexion via [`Connect-M365.ps1`](../../Startup/readme.fr.md#connect-m365ps1) : Microsoft
+  Graph, en délégué par défaut (étendue `Policy.Read.All`) ; app-only avec `-ClientId` +
+  `-CertificateThumbprint` ou `-AppOnly` (autorisation d'application `Policy.Read.All`).
+  Une session Graph adaptée déjà ouverte est réutilisée et reste connectée
 
 **Module requis**
 ```powershell

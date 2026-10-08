@@ -4,7 +4,7 @@
 
 # RDS
 
-Scripts de diagnostic et de supervision pour l'infrastructure RDP / RD Web Access. Exécutez-les directement sur le serveur RDS/RDWeb pour obtenir des résultats complets — les cibles distantes ne bénéficient que de vérifications au niveau de la connectivité.
+Scripts de diagnostic, de supervision et de préparation pour l'infrastructure RDP / RD Web Access et les hôtes de session AVD. Exécutez-les directement sur le serveur RDS/RDWeb pour obtenir des résultats complets — les cibles distantes ne bénéficient que de vérifications au niveau de la connectivité.
 
 ---
 
@@ -16,6 +16,7 @@ Scripts de diagnostic et de supervision pour l'infrastructure RDP / RD Web Acces
 | [`Watch-RDSLive.ps1`](Watch-RDSLive.ps1) ([docs](#watch-rdsliveps1)) | Surveillance en temps réel des événements de session et de licences |
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | Diagnostic des profils FSLogix / Azure Files sur un hôte de session AVD |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Réduire les disques de profil FSLogix d'un partage (Invoke-FslShrinkDisk), ou vérifier si FSLogix les compacte lui-même à la déconnexion |
+| [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Vérifier et préparer une image Windows 11 multisession ou un hôte de session AVD pour que le nouveau Teams, le nouvel Outlook et Copilot continuent de fonctionner avec FSLogix — FSLogix lui-même n'est pas modifié |
 
 ---
 
@@ -195,3 +196,99 @@ et alternatives sur GitHub font la même chose avec moins de garanties.
 - Pour passer à une version plus récente d'Invoke-FslShrinkDisk : mettez le nouveau commit
   et le SHA-256 de son `Invoke-FslShrinkDisk.ps1` dans `$ToolCommit` / `$ToolHash` en haut
   du script, après avoir lu le diff.
+
+---
+
+### Update-SessionHostImage.ps1
+
+Teams, le nouvel Outlook et Copilot sont des applications MSIX, et sur un hôte AVD mutualisé
+avec FSLogix elles cassent toujours de la même façon : l'application d'un utilisateur se met
+à jour sur l'hôte A, FSLogix enregistre cette version exacte dans le profil à la
+déconnexion, et à la connexion suivante sur l'hôte B — qui n'a pas cette version —
+l'inscription échoue avec `0x80070490`. FSLogix 2210 HF4 (Teams) et 25.06 (Outlook)
+inscrivent par famille de packages, mais ce script laisse volontairement FSLogix tel quel.
+Il maintient chaque hôte à la build la plus récente des applications et de tout ce dont
+elles ont besoin, identique sur chaque hôte.
+
+**Ce qu'il vérifie**
+
+| Étape | Détails |
+|------|---------|
+| Windows | Édition (Enterprise multisession), build, redémarrage en attente |
+| FSLogix | Build et `InstallAppxPackages` — lecture seule |
+| Mises à jour | Le nouvel Outlook se met à jour **chaque semaine depuis le CDN Office**, pas via le Store, et n'a aucun réglage pour l'en empêcher : sous FSLogix 25.06, le remède est d'exécuter ce script chaque semaine sur chaque hôte. Teams : sous 2210 HF4, sa mise à jour automatique est désactivée (`disableAutoUpdate = 1`) et chaque exécution le met à jour de façon centralisée ; avec un FSLogix plus récent, il peut se mettre à jour lui-même. Le réglage du Store est affiché, pas modifié. Les stratégies Edge Update qui bloquent WebView2 ou Edge sont signalées |
+| WebView2 | Le runtime Evergreen utilisé par les trois applications, comparé à la build Edge Stable actuelle (`edgeupdates.microsoft.com`) |
+| Applications | Teams, le nouvel Outlook, l'application Microsoft 365 Copilot et l'application Copilot unifiée : build provisionnée, et utilisateurs qui ont une build plus récente que celle de l'image |
+| Frameworks | Chaque `PackageDependency` des manifestes de ces applications (VCLibs, UI.Xaml, WindowsAppRuntime, …) doit être présent sur la machine à la `MinVersion` demandée — souvent trop ancien sur une image de 2024 |
+| Teams sur AVD | `IsWVDEnvironment`, une build Teams assez récente pour SlimCore (`24193.1805.3040.8975`), le complément Teams Meeting, et le redirecteur WebRTC : plus pris en charge depuis le **1er octobre 2026**, cesse de fonctionner le **1er avril 2027**, conservé uniquement comme solution de repli pour les postes qui ne gèrent pas encore SlimCore |
+| Office | Shared Computer Activation (obligatoire en multisession) et le canal de mise à jour |
+| Connexion | `Microsoft.AAD.BrokerPlugin` présent, et aucune exclusion de `AppData\Local\Packages` ou des dossiers des applications dans le `redirections.xml` de FSLogix |
+| Capture | Avec `-ForCapture` : les packages installés pour un utilisateur mais non provisionnés (Sysprep s'arrête dessus) et un redémarrage en attente font échouer la vérification |
+
+**Ce qu'il met à jour** (chaque exécution sans `-CheckOnly`, avec ou sans constat, dans cet
+ordre) : le réglage de mise à jour automatique de Teams là où FSLogix l'exige, Shared Computer
+Activation, WebView2 (programme d'installation Evergreen Standalone, signature vérifiée),
+puis les applications vers leur build la plus récente via les scripts existants —
+[`Repair-AppxPackageStore.ps1`](../Device/readme.fr.md#repair-appxpackagestoreps1)
+`-Name teams,outlook -Latest -Provision -RemoveOld` et `-Name copilot -Provision`, et
+[`Update-TeamsClient.ps1`](../Device/readme.fr.md#update-teamsclientps1) `-AvdOptimizations`
+(Teams le plus récent, complément de réunion, IsWVDEnvironment, redirecteur WebRTC). Ils ne
+modifient que ce qui est en retard. Tout est relu ensuite.
+
+Le nouvel Outlook le plus récent : Microsoft ne publie pas de flux de versions, donc `-Latest`
+prend la build la plus récente vers laquelle les utilisateurs de l'hôte se sont déjà mis à
+jour (sinon le programme d'installation de Microsoft). Dans un pool, chaque hôte provisionne
+alors ce que le dernier utilisateur a reçu — exactement la build que FSLogix demandera aux
+autres hôtes.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-CheckOnly` | Rapport uniquement, rien n'est modifié. Le code de sortie `2` signifie qu'il reste du travail |
+| `-ForCapture` | La machine est la VM d'image sur le point d'être sysprepée : échoue aussi sur un redémarrage en attente et sur les packages par utilisateur non provisionnés |
+| `-SkipApps` | Ne pas appeler Repair-AppxPackageStore / Update-TeamsClient ; seulement les stratégies, Shared Computer Activation et WebView2 |
+| `-ComputerName` | Hôtes de session sur lesquels s'exécuter via PowerShell remoting ; se termine par un tableau pour tout le pool et nomme chaque colonne qui diffère entre les hôtes |
+| `-Credential` | Identifiants pour `-ComputerName` |
+| `-WorkingDir` | Dossier des téléchargements — WebView2 et, s'ils ne sont pas à côté de ce script, les deux scripts auxiliaires (par défaut : `C:\IT\SessionHostImage`) |
+| `-LogPath` | Dossier de la transcription d'une exécution qui modifie quelque chose (par défaut : `C:\Temp`) |
+
+**Exemples**
+
+```powershell
+# De quoi cet hôte ou cette image a-t-il besoin ? Ne modifie rien.
+.\Update-SessionHostImage.ps1 -CheckOnly
+
+# Les trois hôtes de session côte à côte, en lecture seule
+.\Update-SessionHostImage.ps1 -ComputerName avd-0,avd-1,avd-2 -CheckOnly
+
+# Préparer la VM d'image, puis vérifier qu'elle est prête pour la capture
+.\Update-SessionHostImage.ps1 -Confirm:$false
+.\Update-SessionHostImage.ps1 -CheckOnly -ForCapture
+
+# Mettre les trois hôtes au même niveau (les passer d'abord en mode drainage)
+.\Update-SessionHostImage.ps1 -ComputerName avd-0,avd-1,avd-2 -Confirm:$false
+```
+
+**Remarques**
+
+- Le script ne redémarre jamais la machine, pas plus que les scripts et programmes
+  d'installation qu'il appelle (chaque msiexec s'exécute avec `/norestart`). Un redémarrage
+  en attente est signalé et vous est laissé.
+- À exécuter en mode élevé ou en tant que System. Le script se relance dans Windows
+  PowerShell 64 bits, dont les cmdlets AppX ont besoin.
+- Exécutez-le **chaque semaine** sur tous les hôtes en même temps (une tâche planifiée en
+  tant que System convient), et après chaque mise à jour Windows : Outlook change chaque
+  semaine, et chaque hôte doit suivre.
+- SlimCore nécessite aussi le côté locataire : la stratégie Teams VDI `VDI2Optimization`
+  activée, et Windows App 2.0.352.0 ou plus récent sur les postes. Aucun des deux ne se
+  vérifie depuis l'hôte ; `Update-TeamsClient.ps1 -CheckOnly` lit les événements Teams VDI
+  de l'hôte de session, qui montrent si les utilisateurs sont réellement sur SlimCore.
+- Les deux scripts qu'il appelle viennent du dépôt quand il s'exécute depuis celui-ci, ou du
+  dossier où `-ComputerName` les copie. Exécuté seul — uniquement ce fichier sur la VM d'image —
+  il les télécharge depuis GitHub à un **commit épinglé** de `main` et ne les exécute que si
+  leur SHA-256 correspond, comme [`Invoke-FSLogixShrink.ps1`](#invoke-fslogixshrinkps1) le fait pour
+  Invoke-FslShrinkDisk. Pour monter de version : mettez le nouveau commit et les empreintes
+  des deux fichiers dans `$HelperCommit` / `$HelperHashes` en haut du script, après avoir lu le diff.
+- `-ComputerName` copie ce script et les deux qu'il appelle dans
+  `C:\IT\SessionHostImage` sur chaque hôte.

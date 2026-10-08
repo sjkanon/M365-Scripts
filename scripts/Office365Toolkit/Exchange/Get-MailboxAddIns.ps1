@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report Outlook add-ins installed per mailbox.
@@ -10,6 +10,15 @@
     phishing/consent-grant vector (a malicious add-in can read mail the same
     way a malicious OAuth app can). Results are exported to CSV.
 
+    Sign-in: delegated (you sign in as the admin) by default, through
+    scripts\Startup\Connect-M365.ps1 — device code and the GDAP customer come
+    from load.config.ps1; under GDAP the customer is reached with
+    -DelegatedOrganization (earlier versions passed -Organization, which only
+    applies to app-only sign-in, so they landed in the partner's own tenant).
+    App-only with -ClientId + -CertificateThumbprint, or -AppOnly
+    (graph.appid.json). An existing Exchange session for the tenant is reused
+    and left connected.
+
 .PARAMETER Mailbox
     UPN of a single mailbox to check. If omitted, all user and shared mailboxes
     are checked.
@@ -18,7 +27,19 @@
     CSV report path. Defaults to C:\Temp\ (Windows) or ~/Downloads (macOS/Linux).
 
 .PARAMETER TenantId
-    Entra ID tenant ID or domain. Optional if already connected.
+    Entra ID tenant ID or domain. Defaults to the GDAP customer (load.config.ps1),
+    else the tenant you sign in to. App-only needs the domain form
+    (contoso.onmicrosoft.com).
+
+.PARAMETER ClientId
+    App registration for app-only Exchange Online sign-in (with
+    -CertificateThumbprint).
+
+.PARAMETER CertificateThumbprint
+    Certificate thumbprint for app-only sign-in with -ClientId.
+
+.PARAMETER AppOnly
+    App-only sign-in with ClientId and CertificateThumbprint from graph.appid.json.
 
 .EXAMPLE
     .\Get-MailboxAddIns.ps1
@@ -37,29 +58,29 @@
     context; some organizations restrict what it can enumerate for other
     users' mailboxes depending on RBAC scope.
 
+    Exchange Online only: Outlook add-ins per mailbox (Get-App) have no
+    Microsoft Graph API.
+
     Required module: ExchangeOnlineManagement
 #>
 [CmdletBinding()]
 param(
     [string] $Mailbox,
     [string] $OutputPath,
-    [string] $TenantId
+    [string] $TenantId,
+    [string] $ClientId,
+    [string] $CertificateThumbprint,
+    [switch] $AppOnly
 )
+
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
 
 # ── Output folder ─────────────────────────────────────────────────────────────
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
 if (-not (Test-Path $outputDir)) { New-Item -ItemType Directory -Path $outputDir | Out-Null }
 
 # ── Connection ────────────────────────────────────────────────────────────────
-$script:ConnectedHere = $false
-try {
-    $null = Get-EXOMailbox -ResultSize 1 -ErrorAction Stop
-} catch {
-    $connectParams = @{ ShowBanner = $false }
-    if ($TenantId) { $connectParams['Organization'] = $TenantId }
-    Connect-ExchangeOnline @connectParams
-    $script:ConnectedHere = $true
-}
+$exo = Connect-M365Exchange -TenantId $TenantId -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
 
 # ── Header ────────────────────────────────────────────────────────────────────
 Write-Host ""
@@ -124,4 +145,4 @@ Write-Host ("  {0} mailbox(es) checked — {1} add-in installation(s) found." -f
 Write-Host ""
 
 # ── Disconnect if we connected ──────────────────────────────────────────────
-if ($script:ConnectedHere) { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue | Out-Null }
+Disconnect-M365Exchange $exo

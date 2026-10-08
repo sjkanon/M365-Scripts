@@ -19,14 +19,17 @@ Small Entra ID / Exchange Online user and group management helpers used during t
 
 ### New-DynamicDistributionGroupByFilter.ps1
 
-Previews recipients matching a job-title (or custom) Exchange filter, then creates a Dynamic Distribution Group using that filter after confirmation. Requires an active Exchange Online session — Dynamic Distribution Groups are an Exchange feature, not a Graph one.
+Previews recipients matching a job-title (or custom) Exchange filter, then creates a Dynamic Distribution Group using that filter after confirmation. Exchange Online only: Microsoft Graph has no API for Dynamic Distribution Groups or recipient-filter previews. Connects through `Connect-M365Exchange` ([`Connect-M365.ps1`](../../Startup/Connect-M365.ps1)): delegated by default (Exchange admin; device code per `$global:useDeviceCodeAuth`; the GDAP customer through `-DelegatedOrganization`), app-only with `-ClientId` + `-CertificateThumbprint` and `-TenantId` as the `*.onmicrosoft.com` domain. An existing Exchange session for the tenant is reused and left open.
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `-JobTitle` | * | Job title to filter on |
 | `-RecipientFilter` | * | Custom Exchange recipient filter string |
 | `-Name` | No | Group name (default: the job title; required with `-RecipientFilter`) |
-| `-PrimarySmtpAddress` | No | SMTP address for the new group |
+| `-PrimarySmtpAddress` | No | SMTP address for the new group (default: derived by Exchange) |
+| `-TenantId` | No | Tenant domain or ID (default: GDAP customer, else the tenant you sign in to; app-only needs the domain) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-Apply` | No | Actually create the group (default: preview only) |
 
 *One of `-JobTitle` / `-RecipientFilter` is required.
@@ -56,7 +59,9 @@ Adds or removes a user as a direct member of an Entra ID security group — the 
 | `-GroupId` | * | Target group object ID |
 | `-GroupName` | * | Target group display name (resolved automatically) |
 | `-Remove` | No | Remove instead of add |
-| `-TenantId` | No | Entra ID tenant ID or domain |
+| `-TenantId` | No | Entra ID tenant ID or domain (default: GDAP customer, else the tenant you sign in to) |
+| `-ClientId` / `-CertificateThumbprint` | No | App-only sign-in |
+| `-AppOnly` | No | App-only with ClientId and thumbprint from `graph.appid.json` |
 | `-Apply` | No | Actually change membership (default: preview only) |
 
 *One of `-GroupId` / `-GroupName` is required.
@@ -71,4 +76,4 @@ Adds or removes a user as a direct member of an Entra ID security group — the 
 
 ---
 
-Connects to Microsoft Graph automatically if no session is active; reuses an existing session if already connected — consistent with `Test-M365GroupMembership.ps1` in `scripts/Entra/`.
+`Add-UserToFeatureGroup.ps1` signs in through [`Connect-M365.ps1`](../../Startup/Connect-M365.ps1): **delegated by default** (you sign in as an admin; device code when `$global:useDeviceCodeAuth` is set; under GDAP the customer from `$global:cid`), **app-only** with `-ClientId` + `-CertificateThumbprint` or `-AppOnly`. An existing Graph session is reused only when it is for the right tenant and holds the scopes above; the script disconnects only a session it opened itself.

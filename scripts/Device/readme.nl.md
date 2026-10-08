@@ -16,6 +16,7 @@ Scripts voor het beheren en onderhouden van Windows-endpoints. Alle scripts vere
 | [`audio/`](audio/readme.nl.md) | De interne microfoon op laptops detecteren en uitschakelen |
 | [`DriveMapping/`](DriveMapping/readme.nl.md) | SharePoint-/OneDrive-documentbibliotheken bij aanmelden aan stationsletters koppelen |
 | [`TempDisk/`](TempDisk/readme.nl.md) | De tijdelijke (ephemeral) schijf bij elke start herstellen als `D:` en de pagefile erop houden |
+| [`Printer/`](Printer/readme.nl.md) | Printerdrivers (gedownload van GitHub) en TCP/IP-printers installeren vanuit een JSON-bestand — gemaakt voor een server die net uit een golden image komt |
 
 ## Scripts
 
@@ -324,7 +325,7 @@ De resultaten worden op het scherm getoond, met aan het eind een samenvatting va
 >
 > Servicedeskversie voor IT Glue (Nederlands, per supportniveau): [Update-TeamsClient-ITGlue.md](Update-TeamsClient-ITGlue.md).
 
-Houdt de nieuwe Teams-client en de Outlook-vergaderinvoegtoepassing actueel op een endpoint of AVD-sessiehost. Het vraagt de Teams-configservice welke build Microsoft voor deze architectuur publiceert en **doet alleen iets als die build nieuwer is dan wat er geïnstalleerd is** — een apparaat dat bij is, blijft volledig ongemoeid. Als er een update nodig is, downloadt het `teamsbootstrapper.exe` en controleert de handtekening, verwijdert de vergaderinvoegtoepassing, verwijdert en deprovisiont het AppX-pakket `MSTeams`, provisiont de nieuwe build voor alle gebruikers en installeert de MSI van de invoegtoepassing die erin meekomt opnieuw.
+Houdt de nieuwe Teams-client en de Outlook-vergaderinvoegtoepassing actueel op een endpoint of AVD-sessiehost. Het vraagt de Teams-configservice welke build Microsoft voor deze architectuur publiceert en **doet alleen iets als die build nieuwer is dan wat er geïnstalleerd is** — een apparaat dat bij is, blijft volledig ongemoeid. Als er een update nodig is, downloadt het `teamsbootstrapper.exe` en de MSIX van precies die gepubliceerde build en controleert beide handtekeningen, verwijdert de vergaderinvoegtoepassing, verwijdert en deprovisiont het AppX-pakket `MSTeams`, provisiont dat pakket voor alle gebruikers en installeert de MSI van de invoegtoepassing die erin meekomt opnieuw.
 
 "Invoegtoepassing aanwezig" betekent dat de bestanden aanwezig zijn, niet dat een registersleutel ernaar verwijst: een machinebrede registratie die wijst naar een loader-DLL die weg is, telt als ontbrekend, en `-CheckOnly` zegt dat ook (`the machine-wide add-in registration points at files that are gone`). Alleen op de sleutel vertrouwen is precies hoe een apparaat waarvan de invoegtoepassing is verwijderd, te horen krijgt dat er niets te doen is.
 
@@ -338,9 +339,9 @@ Elke stap die iets wijzigt, loopt via `ShouldProcess`, dus `-WhatIf` doorloopt d
 | 2 | Versiecontrole — gepubliceerde build vs geïnstalleerde build | alleen-lezen |
 | 3 | Alleen AVD (`-AvdOptimizations`): vlag `IsWVDEnvironment` + WebRTC-redirector. Of (`-RemoveWebRtcRedirector`): die redirector verwijderen | ja |
 | 4 | Alleen classic Teams (`-RemoveClassicTeams`): machinebrede installer + installaties per profiel verwijderen | ja |
-| 5 | Werkmap aanmaken, bootstrapper downloaden, Microsoft-handtekening controleren | ja |
+| 5 | Werkmap aanmaken, de bootstrapper en de MSIX van de gepubliceerde build downloaden (de `buildLink` van de configservice), beide Microsoft-handtekeningen controleren. Lukt het pakket niet, dan kiest de bootstrapper zelf | ja |
 | 6 | `MSTeams`-AppX voor alle gebruikers verwijderen en deprovisionen; een pakket dat de AppX-stack weigert te verwijderen, wordt gemeld, niet fataal. De invoegtoepassing blijft hier ongemoeid | ja |
-| 7 | Nieuwe Teams provisionen (`teamsbootstrapper.exe -p`) | ja |
+| 7 | Dat pakket provisionen (`teamsbootstrapper.exe -p -o`); kale `-p` met `-UseBootstrapperBuild` of als er geen pakket kon worden opgehaald | ja |
 | 8 | De volledige vervanging van de invoegtoepassing, zodra de MSI binnen is: de geregistreerde verwijderen (`1612` opnieuw geprobeerd vanuit de gecachte kopie), controleren dat er niets is overgebleven, elke andere kopie opruimen, installeren (`ALLUSERS=1`) | ja |
 | 9 | Controleren: registratie van de invoegtoepassing (machinebreed + per aangemelde gebruiker in Outlook), verwijdering van classic, geprovisiond pakket en AVD-componenten | gemeld als overgeslagen onder `-WhatIf` |
 
@@ -389,16 +390,17 @@ Op een endpoint controleert preflight ook de drie beleidsinstellingen die het kl
 | `-RemoveWebRtcRedirector` | De oude WebRTC-media-optimalisatie verwijderen, uitgefaseerd op 1 oktober 2026. Niet te combineren met `-AvdOptimizations`; laat `IsWVDEnvironment` staan, omdat SlimCore die ook nodig heeft |
 | `-ClearOrphanedAddInRegistration` | Laatste redmiddel: Windows Installer een vergaderinvoegtoepassing laten vergeten die het niet meer kan verwijderen (`1612` met de gecachte MSI weg), wat een herinstallatie steeds met `1638` laat weigeren |
 | `-RepairAppxStore` | Laatste redmiddel voor de AppX-kant: een pakket waarvan de bestanden er nog zijn opnieuw registreren, en daarna de `AppxAllUserStore`-vermeldingen opruimen die Windows niet meer kan herleiden — registraties voor SID's zonder profiel, een machinebrede vermelding waarvan het manifest weg is, en de `Deprovisioned`-markering. Beperkt tot MSTeams; preflight benoemt ze, of de switch nu is opgegeven of niet |
-| `-UseWinget` | De Teams-MSIX met winget ophalen en precies dat bestand provisionen (`teamsbootstrapper.exe -p -o`) in plaats van de bootstrapper er tijdens de run een te laten downloaden |
+| `-UseWinget` | De Teams-MSIX uit winget halen in plaats van via de `buildLink` van de configservice, en dat bestand provisionen (`teamsbootstrapper.exe -p -o`). winget controleert daarbij zelf de SHA256, maar zijn manifest loopt een build of twee achter |
+| `-UseBootstrapperBuild` | `teamsbootstrapper.exe -p` zelf de build laten kiezen, zoals vroeger: Microsofts gefaseerde uitrol beslist, en het resultaat kan wekenlang achterlopen op de versiecontrole. Niet te combineren met `-UseWinget` |
 | `-RepairOutlookAddIn` | Een Outlook-registratie per gebruiker opruimen die wijst naar een invoegtoepassings-DLL die niet meer bestaat, zodat de machinebrede het weer overneemt |
 | `-Confirm:$false` | Nooit om bevestiging vragen (gebruik dit voor onbeheerde runs) |
 | `-Ring` | Updatering die bij de configservice wordt opgevraagd (standaard: `general`) |
-| `-WorkingDir` | Downloadmap voor de bootstrapper (standaard: `C:\IT\AVD\Teams`) |
+| `-WorkingDir` | Downloadmap voor de bootstrapper en de Teams-MSIX (standaard: `C:\IT\AVD\Teams`) |
 | `-LogPath` | Map voor het transcript (standaard: `C:\Temp`) |
 | `-BootstrapperUrl` | De download-URL van `teamsbootstrapper.exe` overschrijven (alleen https) |
 | `-WebRtcUrl` | De MSI-URL van de WebRTC-redirector overschrijven (alleen https) |
 | `-SkipMeetingAddIn` | De vergaderinvoegtoepassing met rust laten, en een ontbrekende invoegtoepassing niet als werk zien. Verdedigbaar op gewone endpoints, waar de Teams-client de invoegtoepassing zelf per gebruiker actueel houdt |
-| `-SkipSignatureCheck` | Een installer accepteren die niet door Microsoft is ondertekend (interne mirror) |
+| `-SkipSignatureCheck` | Een installer of pakket accepteren dat niet door Microsoft is ondertekend (interne mirror) |
 | `-TimeoutSeconds` | Time-out per proces voor msiexec/bootstrapper (standaard: `900`) |
 | `-Force` | Opnieuw installeren ook als Teams actueel is, en doorgaan zonder Teams- of versie-informatie |
 

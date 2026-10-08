@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Report licensed users across all (or selected) GDAP/delegated-admin customer tenants.
@@ -10,13 +10,32 @@
     MSOnline-based "loop over Get-MsolPartnerContract -All" pattern (MSOnline/AzureAD
     are retired and no longer function).
 
-    For each customer tenant, the script connects app-only using the partner's own
-    multi-tenant app registration (the same one used for GDAP admin-on-behalf-of
-    access) and reads licensed users via Microsoft Graph.
+    Customers come from tenantRelationships/delegatedAdminCustomers in your partner
+    tenant; when that list cannot be read, the script falls back to /contracts.
+
+    Two ways to sign in (both through scripts\Startup\Connect-M365.ps1):
+
+    Delegated (default)
+        You sign in once as a partner admin in your own tenant to list the customers,
+        then the script connects to each customer tenant as you, through GDAP. Your
+        GDAP relationship must include a role that can read users (Global Reader,
+        Directory Readers or User Administrator). Each customer is a separate sign-in:
+        with the browser it usually completes from the cached account, with device code
+        ($global:useDeviceCodeAuth) you enter a code per customer. The first time,
+        Microsoft Graph Command Line Tools may need consent in the customer tenant.
+
+    App-only (-ClientId with -CertificateThumbprint or -ClientSecret, or -AppOnly)
+        A multi-tenant app registration of your own that is consented in every
+        customer tenant (with User.Read.All as an application permission). GDAP alone
+        does NOT give an app access: GDAP grants delegated rights to your users only.
+        Needs -TenantId (your partner tenant).
+
+.PARAMETER TenantId
+    Your partner (home) tenant ID or domain. Required for app-only. For delegated it
+    defaults to the tenant of the account you sign in with.
 
 .PARAMETER ClientId
-    App registration (multi-tenant, GDAP-enabled) Client ID used to connect to each
-    customer tenant on your behalf.
+    Multi-tenant app registration for app-only sign-in. Omit for delegated sign-in.
 
 .PARAMETER ClientSecret
     Client secret for -ClientId. Use -CertificateThumbprint instead where possible.
@@ -24,41 +43,89 @@
 .PARAMETER CertificateThumbprint
     Certificate thumbprint for -ClientId (preferred over a client secret).
 
+.PARAMETER AppOnly
+    App-only sign-in with the ClientId and CertificateThumbprint from graph.appid.json
+    (the entry for -TenantId, your partner tenant), used for every customer.
+
 .PARAMETER CustomerTenantId
     Restrict the report to one or more specific customer tenant IDs. If omitted, all
-    delegatedAdminCustomers returned by Microsoft Graph are processed.
+    customers returned by Microsoft Graph are processed.
 
 .PARAMETER OutputPath
     CSV report path. Default: C:\Temp\MultiTenantLicenseReport_<timestamp>.csv
 
 .EXAMPLE
-    .\Get-MultiTenantLicenseReport.ps1 -ClientId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-        -CertificateThumbprint "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    # Delegated: sign in as a partner admin, report every GDAP customer
+    .\Get-MultiTenantLicenseReport.ps1
 
 .EXAMPLE
-    # Only two specific customer tenants
-    .\Get-MultiTenantLicenseReport.ps1 -ClientId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" `
-        -ClientSecret "your-client-secret" `
+    # App-only with a certificate
+    .\Get-MultiTenantLicenseReport.ps1 -TenantId "partner.onmicrosoft.com" `
+        -ClientId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -CertificateThumbprint "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+.EXAMPLE
+    # Only two specific customer tenants, delegated
+    .\Get-MultiTenantLicenseReport.ps1 `
         -CustomerTenantId "cccccccc-cccc-cccc-cccc-cccccccccccc","dddddddd-dddd-dddd-dddd-dddddddddddd"
 
 .NOTES
-    Required Graph permission (on the partner tenant's app) : DelegatedAdminRelationship.Read.All
-    Required Graph permission (application, per customer via GDAP) : User.Read.All, Organization.Read.All
+    Partner tenant, delegated scopes  : DelegatedAdminRelationship.Read.All, Directory.Read.All (for the /contracts fallback)
+    Partner tenant, app permission    : DelegatedAdminRelationship.Read.All (or Directory.Read.All for /contracts)
+    Customer tenant, delegated scope  : User.Read.All (plus a GDAP role that can read users)
+    Customer tenant, app permission   : User.Read.All, consented in that tenant
     Required module : Microsoft.Graph.Authentication
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
+    [string] $TenantId,
     [string] $ClientId,
-
     [string] $ClientSecret,
     [string] $CertificateThumbprint,
+    [switch] $AppOnly,
     [string[]] $CustomerTenantId,
     [string] $OutputPath
 )
 
-if (-not $ClientSecret -and -not $CertificateThumbprint) {
-    throw "Provide either -ClientSecret or -CertificateThumbprint."
+. (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+
+# ── Sign-in mode ────────────────────────────────────────────────────────────────
+if ($AppOnly -and -not $ClientId) {
+    $reg = Get-M365AppRegistration -TenantId $TenantId
+    $ClientId = $reg.ClientId
+    $CertificateThumbprint = $reg.CertificateThumbprint
+    if (-not $TenantId) { $TenantId = $reg.Tenant }
+}
+$secret = if ($ClientSecret) { ConvertTo-SecureString $ClientSecret -AsPlainText -Force } else { $null }
+if ($ClientId -and -not $CertificateThumbprint -and -not $secret) { throw "Provide -CertificateThumbprint or -ClientSecret with -ClientId." }
+if ($ClientId -and -not $TenantId) { throw "App-only sign-in needs -TenantId (your partner tenant)." }
+
+# The partner tenant. Without -TenantId, 'organizations' signs in to the tenant of the
+# account you use - otherwise the helper would pick the GDAP customer from $global:cid.
+$homeTenant = if ($TenantId) { $TenantId } elseif (Resolve-M365TenantId) { 'organizations' } else { $null }
+$auth = @{ ClientId = $ClientId; CertificateThumbprint = $CertificateThumbprint; ClientSecret = $secret }
+
+function Get-PartnerCustomer {
+    # GDAP customers; /contracts (DAP/reseller relationships) when that list cannot be read.
+    $list = [System.Collections.Generic.List[object]]::new()
+    try {
+        $uri = 'https://graph.microsoft.com/v1.0/tenantRelationships/delegatedAdminCustomers'
+        while ($uri) {
+            $resp = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+            foreach ($c in @($resp.value)) { $list.Add([pscustomobject]@{ TenantId = $c.tenantId; DisplayName = $c.displayName }) }
+            $uri = $resp.'@odata.nextLink'
+        }
+        return $list
+    } catch {
+        Write-Host "  [WARN] Could not read delegatedAdminCustomers ($($_.Exception.Message)); trying /contracts." -ForegroundColor Yellow
+    }
+    $list.Clear()
+    $uri = 'https://graph.microsoft.com/v1.0/contracts?$top=999'
+    while ($uri) {
+        $resp = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        foreach ($c in @($resp.value)) { $list.Add([pscustomobject]@{ TenantId = $c.customerId; DisplayName = $c.displayName }) }
+        $uri = $resp.'@odata.nextLink'
+    }
+    return $list
 }
 
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -68,76 +135,59 @@ if (-not $OutputPath) {
     $OutputPath = Join-Path $outputDir "MultiTenantLicenseReport_$ts.csv"
 }
 
-# ── Connect to the HOME/partner tenant to enumerate delegated customers ────────
-$homeConnectParams = @{ ClientId = $ClientId; NoWelcome = $true }
-if ($CertificateThumbprint) { $homeConnectParams['CertificateThumbprint'] = $CertificateThumbprint }
-else {
-    $secure = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-    $homeConnectParams['ClientSecretCredential'] = [System.Management.Automation.PSCredential]::new($ClientId, $secure)
-}
-
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host "   Multi-Tenant License Report" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host "  Sign-in : $(if ($ClientId) { "app-only ($ClientId)" } else { 'delegated (GDAP)' })" -ForegroundColor DarkGray
 Write-Host ""
 
+# ── List the customers from the partner tenant ──────────────────────────────────
 try {
-    Connect-MgGraph @homeConnectParams -ErrorAction Stop
+    $homeConn = Connect-M365Graph -Scopes 'DelegatedAdminRelationship.Read.All', 'Directory.Read.All' -TenantId $homeTenant @auth
 } catch {
     Write-Host "  [ERROR] Could not connect to the partner (home) tenant: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
 try {
-    $customers = @()
-    $uri = 'https://graph.microsoft.com/v1.0/tenantRelationships/delegatedAdminCustomers'
-    while ($uri) {
-        $resp = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-        $customers += $resp.value
-        $uri = $resp.'@odata.nextLink'
-    }
+    $customers = @(Get-PartnerCustomer)
 } catch {
-    Write-Host "  [ERROR] Could not list delegated admin customers: $($_.Exception.Message)" -ForegroundColor Red
-    Disconnect-MgGraph | Out-Null
+    Write-Host "  [ERROR] Could not list customers: $($_.Exception.Message)" -ForegroundColor Red
+    Disconnect-M365Graph $homeConn
     exit 1
 }
+Disconnect-M365Graph $homeConn
 
 if ($CustomerTenantId) {
-    $customers = $customers | Where-Object { $_.tenantId -in $CustomerTenantId }
+    $customers = @($customers | Where-Object { $_.TenantId -in $CustomerTenantId })
 }
 
 Write-Host "  Found $($customers.Count) customer tenant(s) to process." -ForegroundColor DarkGray
 Write-Host ""
 
-Disconnect-MgGraph | Out-Null
-
 $results = [System.Collections.Generic.List[PSObject]]::new()
 
 foreach ($customer in $customers) {
-    Write-Host "  Processing $($customer.displayName) ($($customer.tenantId))..." -ForegroundColor Cyan
+    Write-Host "  Processing $($customer.DisplayName) ($($customer.TenantId))..." -ForegroundColor Cyan
 
+    $conn = $null
     try {
-        $custParams = @{ ClientId = $ClientId; TenantId = $customer.tenantId; NoWelcome = $true }
-        if ($CertificateThumbprint) { $custParams['CertificateThumbprint'] = $CertificateThumbprint }
-        else {
-            $secure = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-            $custParams['ClientSecretCredential'] = [System.Management.Automation.PSCredential]::new($ClientId, $secure)
-        }
-        Connect-MgGraph @custParams -ErrorAction Stop
+        $conn = Connect-M365Graph -Scopes 'User.Read.All' -TenantId $customer.TenantId @auth
 
-        $users = @()
+        $users = [System.Collections.Generic.List[object]]::new()
         $uri = 'https://graph.microsoft.com/v1.0/users?$select=displayName,userPrincipalName,assignedLicenses,accountEnabled&$top=999'
         while ($uri) {
             $resp = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-            $users += $resp.value
+            foreach ($u in @($resp.value)) { $users.Add($u) }
             $uri = $resp.'@odata.nextLink'
         }
 
-        foreach ($user in ($users | Where-Object { $_.assignedLicenses.Count -gt 0 })) {
+        $licensed = @($users | Where-Object { $_.assignedLicenses.Count -gt 0 })
+        foreach ($user in $licensed) {
             $results.Add([PSCustomObject]@{
-                CustomerName      = $customer.displayName
-                TenantId          = $customer.tenantId
+                CustomerName      = $customer.DisplayName
+                TenantId          = $customer.TenantId
                 DisplayName       = $user.displayName
                 UserPrincipalName = $user.userPrincipalName
                 AccountEnabled    = $user.accountEnabled
@@ -145,10 +195,11 @@ foreach ($customer in $customers) {
                 LicenseSkuIds     = ($user.assignedLicenses.skuId -join ', ')
             })
         }
-        Write-Host "    [OK]   $($users.Count) user(s), $((($users | Where-Object { $_.assignedLicenses.Count -gt 0 })).Count) licensed." -ForegroundColor DarkGray
-        Disconnect-MgGraph | Out-Null
+        Write-Host "    [OK]   $($users.Count) user(s), $($licensed.Count) licensed." -ForegroundColor DarkGray
     } catch {
         Write-Host "    [WARN] Skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+    } finally {
+        Disconnect-M365Graph $conn
     }
 }
 

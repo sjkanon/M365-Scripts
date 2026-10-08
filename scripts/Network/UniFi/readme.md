@@ -14,7 +14,7 @@ Tooling for a UniFi Network Controller or UniFi OS console (UDM/UDM-Pro/UDR). Ta
 |--------|-------------|
 | [`Get-UnifiNetworkReport.ps1`](Get-UnifiNetworkReport.ps1) ([docs](#get-unifinetworkreportps1)) | Generate an HTML network documentation report (devices, firmware, uptime) |
 | [`Update-UnifiFirmware.ps1`](Update-UnifiFirmware.ps1) ([docs](#update-unififirmwareps1)) | List and optionally trigger firmware upgrades across sites |
-| [`UnifiApi.ps1`](UnifiApi.ps1) | Shared login/session helper, dot-sourced automatically by the two scripts above — not meant to be run directly |
+| [`UnifiApi.ps1`](UnifiApi.ps1) ([docs](#unifiapips1)) | Shared login/session helper, dot-sourced automatically by the two scripts above — not meant to be run directly |
 
 ---
 
@@ -74,3 +74,11 @@ Lists devices per site with a firmware upgrade available (per the controller's o
 - Both scripts support the classic self-hosted UniFi Network Controller (`/api/login`) and UniFi OS consoles (`/api/auth/login` + `/proxy/network/...`) — login auto-detects which one is in front of it.
 - `-SkipCertificateCheck` is implemented for both PowerShell 7+ (native parameter) and Windows PowerShell 5.1 (temporary certificate validation callback, reset immediately after the request).
 - A CSV/HTML report is always written after each run, even for a dry run.
+
+---
+
+### UnifiApi.ps1
+
+Shared helper functions for both scripts above, dot-sourced automatically — not meant to be run on its own, and it has no parameters. It handles the login (classic self-hosted controller and UniFi OS consoles such as UDM/UDM-Pro/UDR, which use a different auth endpoint, a CSRF header and the `/proxy/network/...` path), the session cookies, and self-signed certificate handling for both Windows PowerShell 5.1 and PowerShell 7+. Functions: `Connect-UnifiController`, `Disconnect-UnifiController`, `Invoke-UnifiApi`, `Invoke-UnifiRestMethod`, `Get-UnifiSite`, `Get-UnifiDevice`.
+
+Credentials always come from `Get-Credential` (interactively or from the calling script) — never hardcoded.
