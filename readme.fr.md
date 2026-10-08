@@ -996,6 +996,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-08 (5)
+| Modification |
+|--------|
+| **[`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) après sa première exécution sur un vrai serveur 3CX.** L'essai à blanc y a révélé trois problèmes. Il affichait `apt/dpkg is running` et ignorait toutes les étapes des paquets, alors qu'`apt-get` fonctionnait normalement : la vérification cherchait un processus nommé `unattended-upgr`, et `unattended-upgrades` en maintient un en permanence. Elle lit désormais le verrou de dpkg lui-même dans `/proc/locks`. Le journal (3,2 Go sur ce serveur) ne figurait pas dans l'estimation ; l'essai à blanc calcule désormais ce que `journalctl --vacuum-time/--vacuum-size` libérera, comme journald en décide : uniquement les fichiers archivés, les plus anciens d'abord, d'après l'heure inscrite dans le nom du fichier. Enfin, une sauvegarde de 1,2 Go datant de 2020 dans `/var/lib/3cxpbx/Data/Backups`, le dossier antérieur à `Instance1`, n'apparaissait pas comme sauvegarde. Ce dossier et son `Logs` sont désormais pris en compte, et chaque sauvegarde est listée avec sa date et sa taille, afin que `--keep-backups` soit un choix éclairé |
+| Vérifié : `bash -n` ; dans un conteneur Debian 12 avec un `systemd-journald` en cours d'exécution et des journaux ayant subi une rotation, l'estimation de l'essai à blanc (74,2 Mo) correspondait à ce que `--apply` a libéré (74,2 Mo), et un faux fichier archivé dont le nom le date de 60 jours a été compté puis supprimé ; avec `--keep-backups 3`, les sauvegardes de 2020 (ancien dossier) et celle de la v18 ont été supprimées et les 3 plus récentes conservées ; un processus nommé `unattended-upgr` ne bloque plus les étapes des paquets, tandis qu'un verrou dpkg détenu (`fcntl`) les bloque toujours. **Non** vérifié : `--apply` sur le vrai serveur 3CX |
+
 ### 2026-10-08 (4)
 | Modification |
 |--------------|

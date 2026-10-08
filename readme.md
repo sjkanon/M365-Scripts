@@ -996,6 +996,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-08 (5)
+| Change |
+|--------|
+| **[`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) after its first run on a live 3CX server.** The dry run there showed three problems. It said `apt/dpkg is running` and skipped every package step, while `apt-get` worked fine: the check looked for a process named `unattended-upgr`, and `unattended-upgrades` keeps one running all the time. It now reads dpkg's own lock from `/proc/locks`. The journal (3.2 GB there) was left out of the estimate; the dry run now works out what `journalctl --vacuum-time/--vacuum-size` frees, the way journald decides: only archived files, oldest first, by the time in the file name. And a 1.2 GB backup from 2020 in `/var/lib/3cxpbx/Data/Backups`, the folder from before `Instance1`, did not show up as a backup. That folder and its `Logs` are now included, and every backup is listed with date and size, so `--keep-backups` is an informed choice |
+| Verified: `bash -n`; in a Debian 12 container with a running `systemd-journald` and rotated journals, the dry-run estimate (74.2 MB) matched what `--apply` freed (74.2 MB), and a fake archived file whose name dates it 60 days back was counted and removed; with `--keep-backups 3` the backups from 2020 (old folder) and the v18 one were removed and the 3 newest kept; a process named `unattended-upgr` no longer blocks the package steps, while a held dpkg lock (`fcntl`) still does. **Not** verified: `--apply` on the live 3CX server |
+
 ### 2026-10-08 (4)
 | Change |
 |--------|

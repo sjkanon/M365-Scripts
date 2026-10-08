@@ -996,6 +996,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-08 (5)
+| Wijziging |
+|--------|
+| **[`Invoke-LinuxCleanup.sh`](scripts/Linux/Invoke-LinuxCleanup.sh) na de eerste run op een echte 3CX-server.** De proefdraai daar liet drie problemen zien. Hij meldde `apt/dpkg is running` en sloeg elke pakketstap over, terwijl `apt-get` gewoon werkte: de controle zocht naar een proces `unattended-upgr`, en `unattended-upgrades` houdt er altijd een draaiende. Nu wordt de eigen lock van dpkg in `/proc/locks` gelezen. De journal (daar 3,2 GB) zat niet in de schatting; de proefdraai rekent nu uit wat `journalctl --vacuum-time/--vacuum-size` vrijmaakt, zoals journald het beslist: alleen gearchiveerde bestanden, de oudste eerst, op de tijd in de bestandsnaam. En een back-up van 1,2 GB uit 2020 in `/var/lib/3cxpbx/Data/Backups`, de map van vóór `Instance1`, verscheen niet als back-up. Die map en de bijbehorende `Logs` doen nu mee, en elke back-up wordt met datum en grootte getoond, zodat `--keep-backups` een bewuste keuze is |
+| Geverifieerd: `bash -n`; in een Debian 12-container met een draaiende `systemd-journald` en geroteerde journals kwam de schatting van de proefdraai (74,2 MB) overeen met wat `--apply` vrijmaakte (74,2 MB), en een nagemaakt gearchiveerd bestand dat volgens zijn naam 60 dagen oud is, werd meegeteld en verwijderd; met `--keep-backups 3` werden de back-ups uit 2020 (oude map) en die van v18 verwijderd en de 3 nieuwste gehouden; een proces `unattended-upgr` blokkeert de pakketstappen niet meer, een vastgehouden dpkg-lock (`fcntl`) nog wel. **Niet** geverifieerd: `--apply` op de echte 3CX-server |
+
 ### 2026-10-08 (4)
 | Wijziging |
 |-----------|
