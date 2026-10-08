@@ -26,14 +26,14 @@ The Linux counterpart of [`Invoke-WindowsCleanup.ps1`](../Device/readme.md#invok
 |----------|---------|
 | Packages | APT cache (`apt-get clean`); packages nobody needs any more, old kernels included (`apt-get autoremove --purge`), the list shown in the dry run; leftover configuration of removed packages (dpkg state `rc`) |
 | Snap | Disabled snap revisions, when snap is installed |
-| Journal | systemd journal, vacuumed to `--days` and `--journal-size` |
+| Journal | systemd journal, vacuumed to `--days` and `--journal-size`. The dry run works out what that vacuum frees, the way journald decides it: only archived files, the oldest first, by the time in the file name |
 | System logs | Rotated logs in `/var/log` (`*.1`, `*.gz`, `*.xz`, `*.old`, ...), PostgreSQL and nginx included — active logs stay |
 | Crash dumps | `/var/lib/systemd/coredump`, `/var/crash` |
 | Temp | `/tmp`, `/var/tmp` |
 | User cache | `~/.cache`, `~/.npm/_cacache` and `~/.local/share/Trash` of root and every home under `/home` |
 | Docker | Only with `--docker`: `docker system prune -f` (stopped containers, unused networks, dangling images, build cache). Without it, Docker's own reclaimable figure is shown |
-| 3CX logs | `<data-dir>/Logs` and 3CX's nginx logs (`/var/lib/3cxpbx/Bin/nginx/logs`) — only when 3CX is installed |
-| 3CX backups | `*.zip` in `<data-dir>/Backups` beyond the newest N — only with `--keep-backups N` |
+| 3CX logs | `<data-dir>/Logs`, 3CX's nginx logs (`/var/lib/3cxpbx/Bin/nginx/logs`) and `/var/lib/3cxpbx/Data/Logs`, left over on servers upgraded from the layout before `Instance1` — only when 3CX is installed |
+| 3CX backups | Every `*.zip` in `<data-dir>/Backups` and the old `/var/lib/3cxpbx/Data/Backups` is listed with date and size, newest first, as one list. With `--keep-backups N` everything beyond the newest N is deleted |
 
 Reported, never deleted: call recordings (with their size), 3CX backups without `--keep-backups`, the largest folders in the 3CX data folder, and the 10 largest files over 500 MB on the server.
 
@@ -89,9 +89,9 @@ curl -fsSL https://raw.githubusercontent.com/sjkanon/M365-Scripts/main/scripts/L
 
 - Requires root (`sudo`). Works on Debian and Ubuntu; on a distribution without `apt-get` the package section is skipped and the rest still runs.
 - 3CX is detected by the `3cxpbx` package or the data folder; without 3CX the 3CX sections are left out. `--skip-3cx` leaves them out on a 3CX server.
-- **Safety:** when `apt`/`dpkg` is already running (an OS or 3CX update), the package section is skipped for that run. `autoremove` is refused when its list contains a 3CX package. In `/tmp`, `systemd-private-*` (owned by running services) and PostgreSQL's socket lock file `.s.PGSQL.*` are left alone.
+- **Safety:** when `apt`/`dpkg` is already running (an OS or 3CX update), the package section is skipped for that run. That is read from dpkg's own lock (`/proc/locks`), not from process names: `unattended-upgrades` keeps a process called `unattended-upgr` running all the time, which made the first version skip the packages on every run. `autoremove` is refused when its list contains a 3CX package. In `/tmp`, `systemd-private-*` (owned by running services) and PostgreSQL's socket lock file `.s.PGSQL.*` are left alone.
 - Call recordings are never deleted: 3CX has its own retention setting for them in the management console. The same goes for the database, voicemail, prompts and configuration.
-- "Total freed (measured)" compares the used space of `/`, `/var`, `/tmp`, `/home` and the 3CX data folder before and after; "reported" adds up the categories. The journal and Docker are not in the dry-run estimate, because what a vacuum or prune frees cannot be known beforehand.
+- "Total freed (measured)" compares the used space of `/`, `/var`, `/tmp`, `/home` and the 3CX data folder before and after; "reported" adds up the categories. Docker is not in the dry-run estimate, because what a prune frees cannot be known beforehand.
 - A log file in the 3CX log folders that a service still holds open but has not written to for `--days` days is removed too. Its space is only freed once that service restarts.
 - The 3CX paths (`/var/lib/3cxpbx/Instance1/Data`, `Logs`, `Backups`, `Recordings`, `Bin/nginx/logs`) follow 3CX's Linux layout; use `--data-dir` when an installation differs.
-- Not verified on a live 3CX server yet. Tested on Debian 12 (bookworm) with a recreated 3CX folder layout: dry run, `--check-only`, `--apply` and a second `--apply`.
+- Run as a dry run on a live 3CX server (Debian 12, 3CX from `repo.3cx.com`); `--apply` has not run on one yet. Tested on Debian 12 (bookworm) with a recreated 3CX folder layout and a running `systemd-journald`: dry run, `--check-only`, `--apply` and a second `--apply`.

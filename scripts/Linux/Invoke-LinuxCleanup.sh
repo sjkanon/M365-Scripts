@@ -22,8 +22,10 @@
 #       - Stopped containers, unused networks, dangling images, build cache (docker system prune);
 #         volumes are never pruned
 #     3CX, automatically when 3CX is installed (skip with --skip-3cx)
-#       - 3CX's own logs (<data-dir>/Logs, 3CX's nginx logs)
-#       - 3CX backups beyond the newest N, only with --keep-backups N
+#       - 3CX's own logs (<data-dir>/Logs, 3CX's nginx logs, and /var/lib/3cxpbx/Data/Logs
+#         left over from the layout before Instance1)
+#       - 3CX backups beyond the newest N, only with --keep-backups N - <data-dir>/Backups and
+#         the old /var/lib/3cxpbx/Data/Backups together, every backup listed with date and size
 #       - Recordings and backups are reported with their size, recordings are never deleted
 #
 #     Never touched: databases, call recordings, voicemail, configuration, Docker volumes,
@@ -156,7 +158,16 @@ clean_files() {
     fi
 }
 
-apt_busy() { pgrep -x 'apt|apt-get|aptitude|dpkg|unattended-upgr' >/dev/null 2>&1; }
+# apt/dpkg holds a POSIX lock on these files while it works. Checking the lock, not process
+# names: unattended-upgrades keeps a process called "unattended-upgr" running all the time.
+apt_busy() {
+    local f ino
+    for f in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock; do
+        ino=$(stat -c %i "$f" 2>/dev/null) || continue
+        grep -qE "^[0-9]+: +POSIX .* [0-9a-f]+:[0-9a-f]+:${ino} " /proc/locks 2>/dev/null && return 0
+    done
+    return 1
+}
 
 AGE=(-mmin "+$((DAYS * 1440))")
 DAYS_MIN1=$((DAYS > 0 ? DAYS : 1))   # journald, /tmp and user caches never get "everything"
@@ -278,17 +289,43 @@ section 'systemd journal'
 mapfile -t JOURNAL_DIRS < <(existing /var/log/journal /run/log/journal)
 journal_size() { ((${#JOURNAL_DIRS[@]})) && du -scb "${JOURNAL_DIRS[@]}" 2>/dev/null | tail -1 | cut -f1 || echo 0; }
 
+# What journalctl --vacuum-time/--vacuum-size would delete. Like journald, only archived files
+# count (system@...journal, user-1000@...journal~); active ones stay. Oldest first: a file goes
+# when its time is past the cutoff, or while the journal is still over the size limit.
+# The time is the one journald writes into the name (hex microseconds), else the mtime.
+journal_estimate() {
+    local total=$1 cutoff limit freed=0 ts size path name hex
+    ((${#JOURNAL_DIRS[@]})) || { echo 0; return; }
+    cutoff=$(( $(date +%s) - DAYS_MIN1 * 86400 ))
+    limit=$(numfmt --from=iec "$JOURNAL_SIZE" 2>/dev/null || echo 0)
+    while IFS=$'\t' read -r ts size path; do
+        name=${path##*/}
+        # Archived: name@<seqnum id>-<seqnum>-<realtime>.journal. Dirty: name@<realtime>-<random>.journal~
+        if [[ $name =~ @[0-9a-f]{32}-[0-9a-f]{16}-([0-9a-f]{16})\.journal$ || $name =~ @([0-9a-f]{16})-[0-9a-f]{16}\.journal~$ ]]; then
+            hex=${BASH_REMATCH[1]}
+            ts=$(( 16#$hex / 1000000 ))
+        else
+            ts=${ts%.*}
+        fi
+        if ((ts < cutoff || total > limit)); then
+            freed=$((freed + size)); total=$((total - size))
+        fi
+    done < <(find "${JOURNAL_DIRS[@]}" -type f -name '*@*.journal*' -printf '%T@\t%s\t%p\n' 2>/dev/null | sort -n)
+    echo "$freed"
+}
+
 if ((SKIP_JOURNAL)); then
     add_result 'Journal' 'systemd journal' 0 Skipped
 elif ! command -v journalctl >/dev/null 2>&1; then
     add_result 'Journal' 'systemd journal (no journalctl)' 0 Skipped
 else
     before=$(journal_size)
+    note "Journal now: $(fmt "$before") - vacuum to ${DAYS_MIN1}d / $JOURNAL_SIZE"
     if ((APPLY)); then
         journalctl --vacuum-time="${DAYS_MIN1}d" --vacuum-size="$JOURNAL_SIZE" >/dev/null 2>&1 || warn 'journalctl --vacuum failed'
         add_result 'Journal' "Journal (to ${DAYS_MIN1}d / $JOURNAL_SIZE)" $((before - $(journal_size))) Run
     else
-        add_result 'Journal' "Journal now - vacuum to ${DAYS_MIN1}d / $JOURNAL_SIZE" "$before" Info
+        add_result 'Journal' "Journal (to ${DAYS_MIN1}d / $JOURNAL_SIZE)" "$(journal_estimate "$before")" Run
     fi
 fi
 
@@ -368,7 +405,9 @@ if ((HAS_3CX)); then
     fi
 
     section '3CX logs'
-    mapfile -t PBX_LOG_DIRS < <(existing "$DATA_DIR/Logs" /var/lib/3cxpbx/Bin/nginx/logs)
+    # /var/lib/3cxpbx/Data is the layout from before Instance1 (v16 and older); upgraded
+    # servers still carry it.
+    mapfile -t PBX_LOG_DIRS < <(existing "$DATA_DIR/Logs" /var/lib/3cxpbx/Data/Logs /var/lib/3cxpbx/Bin/nginx/logs)
     if ((${#PBX_LOG_DIRS[@]} == 0)); then
         add_result '3CX logs' 'No 3CX log folder found' 0 Run
     fi
@@ -376,21 +415,27 @@ if ((HAS_3CX)); then
         clean_files '3CX logs' "${dir#/var/lib/3cxpbx/} (> ${DAYS}d)" "$dir" -xdev -type f "${AGE[@]}"
     done
 
-    BACKUP_DIR=$DATA_DIR/Backups
-    if [[ -d $BACKUP_DIR ]]; then
+    # Both the current and the pre-Instance1 backup folder, newest first, as one list.
+    mapfile -t BACKUP_DIRS < <(existing "$DATA_DIR/Backups" /var/lib/3cxpbx/Data/Backups)
+    if ((${#BACKUP_DIRS[@]})); then
         section '3CX backups'
-        mapfile -t BACKUPS < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.zip' -printf '%T@\t%s\t%p\n' 2>/dev/null | sort -rn)
+        mapfile -t BACKUPS < <(find "${BACKUP_DIRS[@]}" -maxdepth 1 -type f -name '*.zip' -printf '%T@\t%s\t%p\n' 2>/dev/null | sort -rn)
         total=$( ((${#BACKUPS[@]})) && printf '%s\n' "${BACKUPS[@]}" | cut -f2 | sum_sizes || echo 0 )
+        bytes=0; count=0
+        for i in "${!BACKUPS[@]}"; do
+            IFS=$'\t' read -r ts size path <<<"${BACKUPS[i]}"
+            line=$(printf '%s %-10s %s' "$(date -d "@${ts%.*}" '+%Y-%m-%d')" "$(fmt "$size")" "${path#/var/lib/3cxpbx/}")
+            if [[ -z $KEEP_BACKUPS ]] || ((i < KEEP_BACKUPS)); then
+                note "  $line"
+                continue
+            fi
+            note "$( ((APPLY)) && echo 'x ' || echo '- ' )$line$( ((APPLY)) && echo '  (removed)' || echo '  (would be removed)' )"
+            if ((APPLY)); then rm -f -- "$path" || { warn "could not remove $path"; continue; }; fi
+            bytes=$((bytes + size)); count=$((count + 1))
+        done
         if [[ -z $KEEP_BACKUPS ]]; then
             add_result '3CX backups' "${#BACKUPS[@]} backup(s) - add --keep-backups N" "$total" Info
         else
-            bytes=0; count=0
-            for ((i = KEEP_BACKUPS; i < ${#BACKUPS[@]}; i++)); do
-                IFS=$'\t' read -r _ size path <<<"${BACKUPS[i]}"
-                note "$( ((APPLY)) && echo 'Removed' || echo 'Would remove' ): ${path##*/}"
-                if ((APPLY)); then rm -f -- "$path" || { warn "could not remove $path"; continue; }; fi
-                bytes=$((bytes + size)); count=$((count + 1))
-            done
             add_result '3CX backups' "Beyond newest $KEEP_BACKUPS of ${#BACKUPS[@]} ($count file(s))" "$bytes" Run
         fi
     fi
@@ -439,7 +484,7 @@ if ((APPLY)); then
     printf '  %s%-30s %10s%s\n' "$C_GRN" 'Total freed (measured)' "$(fmt $((DISK_BEFORE - DISK_AFTER)))" "$C_OFF"
 else
     printf '  %s%-30s %10s%s\n' "$C_YEL" 'Reclaimable (estimate)' "$(fmt "$TOTAL")" "$C_OFF"
-    printf '\n  %sThe journal and Docker are not in the estimate. Run with --apply to perform the cleanup.%s\n' "$C_YEL" "$C_OFF"
+    printf '\n  %sDocker is not in the estimate. Run with --apply to perform the cleanup.%s\n' "$C_YEL" "$C_OFF"
 fi
 printf '\n'
 
