@@ -205,16 +205,16 @@ FSLogix gaan ze steeds op dezelfde manier stuk: de app van een gebruiker werkt z
 op host A, FSLogix bewaart die exacte versie bij afmelden in het profiel, en bij de volgende
 aanmelding op host B — die die versie niet heeft — mislukt de registratie met `0x80070490`.
 FSLogix 2210 HF4 (Teams) en 25.06 (Outlook) registreren op pakketfamilie, maar dit script
-laat FSLogix bewust ongemoeid. Het zorgt dat de image alles bevat wat de apps nodig hebben,
-op één build, en voorkomt dat de apps per gebruiker daarvan weglopen.
+laat FSLogix bewust ongemoeid. Het houdt elke host op de nieuwste build van de apps en van
+alles wat ze nodig hebben, op elke host gelijk.
 
 **Wat het controleert**
 
 | Stap | Details |
 |------|---------|
 | Windows | Editie (Enterprise multi-session), build, openstaande herstart |
-| FSLogix | Build en `InstallAppxPackages` — alleen lezen. Onder 25.06 wordt Outlook opnieuw geregistreerd op de exact bewaarde versie, dus de rem hieronder houdt het werkend |
-| Rem op updates | Microsoft Store `AutoDownload = 2` en Teams `disableAutoUpdate = 1`, zodat de apps alleen met de image veranderen. Edge Update-beleid dat WebView2 of Edge blokkeert wordt gemeld |
+| FSLogix | Build en `InstallAppxPackages` — alleen lezen |
+| Updates | De nieuwe Outlook werkt zichzelf **wekelijks bij via het Office CDN**, niet via de Store, en heeft geen schakelaar om dat te stoppen: onder FSLogix 25.06 is de remedie dit script wekelijks op elke host draaien. Teams: onder 2210 HF4 gaat de zelfupdate uit (`disableAutoUpdate = 1`) en werkt elke run Teams centraal bij; op een nieuwere FSLogix mag het zichzelf bijwerken. De Store-instelling wordt getoond, niet gewijzigd. Edge Update-beleid dat WebView2 of Edge blokkeert wordt gemeld |
 | WebView2 | De Evergreen-runtime waar alle drie de apps mee tekenen, vergeleken met de huidige Edge Stable-build (`edgeupdates.microsoft.com`) |
 | Apps | Teams, de nieuwe Outlook, de Microsoft 365 Copilot-app en de unified Copilot-app: de klaargezette build, en gebruikers met een nieuwere build dan de image klaarzet |
 | Frameworks | Elke `PackageDependency` in de manifests van die apps (VCLibs, UI.Xaml, WindowsAppRuntime, …) moet op de machine staan in de `MinVersion` die het manifest vraagt — op een image uit 2024 meestal te oud |
@@ -223,13 +223,20 @@ op één build, en voorkomt dat de apps per gebruiker daarvan weglopen.
 | Aanmelden | `Microsoft.AAD.BrokerPlugin` aanwezig, en geen uitsluiting in de FSLogix-`redirections.xml` van `AppData\Local\Packages` of de app-mappen |
 | Capture | Met `-ForCapture`: pakketten die voor een gebruiker zijn geïnstalleerd maar niet klaargezet (Sysprep stopt erop) en een openstaande herstart laten de controle falen |
 
-**Wat het herstelt** (zonder `-CheckOnly`, in deze volgorde): de twee beleidsregels voor
-de rem op updates, Shared Computer Activation, WebView2 (Evergreen Standalone-installer,
-handtekening gecontroleerd), daarna de apps via de bestaande scripts —
+**Wat het bijwerkt** (elke run zonder `-CheckOnly`, met of zonder bevinding, in deze
+volgorde): de zelfupdate-instelling van Teams waar FSLogix dat nodig heeft, Shared Computer
+Activation, WebView2 (Evergreen Standalone-installer, handtekening gecontroleerd), daarna
+de apps naar hun nieuwste build via de bestaande scripts —
 [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1)
 `-Name teams,outlook -Latest -Provision -RemoveOld` en `-Name copilot -Provision`, en
-[`Update-TeamsClient.ps1`](../Device/readme.nl.md#update-teamsclientps1) `-AvdOptimizations`.
-Daarna wordt alles opnieuw uitgelezen.
+[`Update-TeamsClient.ps1`](../Device/readme.nl.md#update-teamsclientps1) `-AvdOptimizations`
+(nieuwste Teams, vergaderinvoegtoepassing, IsWVDEnvironment, WebRTC-redirector). Ze wijzigen
+alleen wat achterloopt. Daarna wordt alles opnieuw uitgelezen.
+
+De nieuwste Outlook: Microsoft publiceert er geen versiefeed voor, dus `-Latest` neemt de
+nieuwste build waarnaar gebruikers op de host al zijn bijgewerkt (anders de installer van
+Microsoft). In een pool zet elke host dan klaar wat de laatste gebruiker kreeg — precies de
+build waar FSLogix de andere hosts om zal vragen.
 
 **Parameters**
 
@@ -240,7 +247,7 @@ Daarna wordt alles opnieuw uitgelezen.
 | `-SkipApps` | Repair-AppxPackageStore / Update-TeamsClient niet aanroepen; alleen beleid, Shared Computer Activation en WebView2 |
 | `-ComputerName` | Sessiehosts om via PowerShell remoting op te draaien; eindigt met één tabel over de pool en noemt elke kolom die tussen hosts verschilt |
 | `-Credential` | Referenties voor `-ComputerName` |
-| `-WorkingDir` | Map voor downloads (standaard: `C:\IT\SessionHostImage`) |
+| `-WorkingDir` | Map voor downloads — WebView2 en, als ze niet naast dit script staan, de twee hulpscripts (standaard: `C:\IT\SessionHostImage`) |
 | `-LogPath` | Map voor het transcript van een run die iets wijzigt (standaard: `C:\Temp`) |
 
 **Voorbeelden**
@@ -267,11 +274,17 @@ Daarna wordt alles opnieuw uitgelezen.
   jou overgelaten.
 - Verhoogd of als System uitvoeren. Het script start zichzelf opnieuw in 64-bits Windows
   PowerShell, omdat de AppX-cmdlets dat nodig hebben.
-- Met de rem aan worden Teams en Outlook alleen bijgewerkt door dit script (of een nieuwe
-  image): draai het maandelijks, op alle hosts tegelijk, na de Windows-update.
+- Draai het **wekelijks** op alle hosts tegelijk (een geplande taak als System werkt), en na
+  elke Windows-update: Outlook verandert wekelijks, en elke host moet dat bijhouden.
 - SlimCore heeft ook de tenantkant nodig: het Teams VDI-beleid `VDI2Optimization` aan, en
   Windows App 2.0.352.0 of nieuwer op de eindpunten. Geen van beide is vanaf de host te
   controleren; `Update-TeamsClient.ps1 -CheckOnly` leest de Teams VDI-events van de
   sessiehost, en die laten wel zien of gebruikers echt op SlimCore zitten.
+- De twee scripts die het aanroept komen uit de repo als het daaruit draait, of uit de map
+  waar `-ComputerName` ze neerzet. Draait het los — alleen dit bestand op de image-VM — dan
+  haalt het ze van GitHub op een **vastgepinde commit** van `main` en voert het ze alleen
+  uit als de SHA-256 klopt, zoals [`Invoke-FSLogixShrink.ps1`](#invoke-fslogixshrinkps1) dat met Invoke-FslShrinkDisk
+  doet. Bijwerken: zet de nieuwe commit en de hashes van beide bestanden in `$HelperCommit` /
+  `$HelperHashes` bovenin het script, nadat je de diff hebt gelezen.
 - `-ComputerName` kopieert dit script en de twee die het aanroept naar
   `C:\IT\SessionHostImage` op elke host.
