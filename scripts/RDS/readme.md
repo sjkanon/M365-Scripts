@@ -295,8 +295,9 @@ other hosts for.
 
 A watchdog for new Teams, new Outlook and Copilot on a session host. It runs as a
 scheduled task under System and uses **our own account** — `itceadmin` by default — as a
-canary: when an app does not start for it, it will not start for a customer either. The watchdog repairs the host before a customer notices, and reports
-to an n8n webhook.
+canary: when an app does not start for it, it will not start for a customer either. It also checks every other signed-in user and every app a user could not open,
+repairs it on the host and in that user's own session before they call, and reports to
+an n8n webhook — naming the user each finding and each repair belongs to.
 
 **Each run**
 
@@ -305,12 +306,16 @@ to an n8n webhook.
 | 0. Crashes | Every crash (Application Error `1000`) and every hang that ended in a close (Application Hang `1002`) of Teams, new Outlook or Copilot since the previous run, from the Application log — for **every user on the host**, customers included — grouped per app, module and exception code. Reported, not repaired: a customer's app is never restarted for them |
 | 1. Host | Teams and new Outlook are provisioned for all users; Copilot is there (provisioned MicrosoftOfficeHub / Copilot, or the unified app Edge Update installs) |
 | 2. Accounts | For each watched account signed in on this host: the package is registered for that user, its files are there and its status is `Ok`. Then the app has to run in that session — if it does not, it is started there (`shell:AppsFolder\<AUMID>`, through a one-off task in that user's own session) and has to still be running 15 seconds later |
-| 3. Repair | Host problems and packages whose files are gone: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then, in **our own account only**: a package that is not registered is registered by family name, an app that does not start is reset (`Reset-AppxPackage`) |
-| 4. Read back | Steps 1 and 2 again |
+| 2b. Users | Every other signed-in user (customers), once signed in for 10 minutes: the same registration check, **without starting anything**. Plus every attempt since the previous run, by any user, to open one of the apps that Windows refused (TWinUI `5961`), and every failed registration of their packages (AppXDeploymentServer `401`/`404`; "close the app first" and "already installed" are left out), with the user it happened to |
+| 3. Repair | Host problems, packages whose files are gone, and anything a user ran into: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then **per user, in their own session**: the package is registered again by family name (`Add-AppxPackage -RegisterByFamilyName`) through a one-off task running a headless console, so no window appears. For a customer only while the app is not running for them, at most once per `-RepairCooldownHours` per user and app, and never a reset. In our own account an app that does not start is reset (`Reset-AppxPackage`) |
+| 4. Read back | Steps 1, 2 and the registration check of 2b again; a user's problem counts as repaired when the package is registered and `Ok` for them afterwards (or the app is running for them) |
 | 5. Report | A JSON POST to the webhook when something is wrong, was repaired, recovered on its own, or crashed at least `-CrashThreshold` times — not on every healthy run. A problem that stays is reported again after `-RenotifyHours` |
 
-Nothing is closed, removed or reset for any other user: no `-RemoveOld`, no `-Latest`,
-no stopping of customers' processes.
+Nothing is closed or removed for anyone, and a customer's app is never reset: no
+`-RemoveOld`, no `-Latest`, no stopping of customers' processes. Every report lists, per
+finding, the user (`Account`, with `Customer` true for a customer) and, under `before`,
+whether it was repaired for them (`Fixed`); the Teams card shows *hersteld bij deze
+gebruiker* next to each one.
 
 **Parameters**
 
@@ -325,6 +330,7 @@ no stopping of customers' processes.
 | `-RenotifyHours` | Report a problem that stays the same again after this many hours (default: `12`) |
 | `-CrashThreshold` | Report the crashes and hangs of one app once there are this many since the previous run (default: `1`, every crash; `0` turns crash reporting off) |
 | `-NoRepair` | Test and report only, change nothing |
+| `-NoUserRepair` | Repair the host and our own account, but never run anything in a customer's session — their problems are still reported, with their name |
 | `-SkipLaunchTest` | Do not start an app that is not running; only check its registration |
 | `-Install` | Copy the watchdog to `-WorkingDir` and register the task **M365 App Watchdog**, with the other parameters as its settings |
 | `-Uninstall` | Remove the task and `-WorkingDir` |
@@ -368,7 +374,8 @@ no stopping of customers' processes.
 `event` is `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `crashed` (only
 crashes this run), `recovered`, `error` (the run itself failed) or `test`; `crashes` rides
 along with any of them. `Problem` is `NotProvisioned` (host), `NotRegistered`,
-`Broken` (files gone or status not `Ok`) or `WontStart`. In n8n: a **Webhook** node (POST,
+`Broken` (files gone or status not `Ok`) or `WontStart` (our account),
+`WontOpen` (Windows refused to open it for a user) or `RegisterFailed`. In n8n: a **Webhook** node (POST,
 Header Auth on `X-Watchdog-Token`), then route on `{{$json.body.event}}` to Teams, mail or
 a ticket.
 
@@ -382,8 +389,8 @@ elevated PowerShell on the host:
 
 ```powershell
 # Watch-M365Apps.ps1 at a fixed commit - move both lines together
-$commit = '960576b2119a4ac147366f136a6bd1fcbff5726c'
-$sha256 = '38EECD24C9EDD6BC3D52128619CDA2A40E8FEA8ADB80BB4C18CAB02E725D7F7B'
+$commit = 'abfad94ff3b29f4f40d6a48a1c5e0a8c279c1936'
+$sha256 = '2FFBF34C3BB6610612162E17AF124A8AA4B362F9D076A347395D2C87E610A665'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -397,8 +404,8 @@ On several hosts at once, from your own machine over PowerShell remoting:
 ```powershell
 # Same download on every host, in parallel
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = '960576b2119a4ac147366f136a6bd1fcbff5726c'
-    $sha256 = '38EECD24C9EDD6BC3D52128619CDA2A40E8FEA8ADB80BB4C18CAB02E725D7F7B'
+    $commit = 'abfad94ff3b29f4f40d6a48a1c5e0a8c279c1936'
+    $sha256 = '2FFBF34C3BB6610612162E17AF124A8AA4B362F9D076A347395D2C87E610A665'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -422,6 +429,11 @@ it is public.
 - Crash events name no user, so a crash can be a customer's or ours. A crash of our own
   account's app is followed up in step 2: the app is no longer running, so it is started
   again. On a busy pool where the odd Teams crash is noise, raise `-CrashThreshold`.
+- Repairing in a customer's session uses `conhost --headless`, so no console or Windows
+  Terminal window should appear; that was checked to wait for the command and to drop its
+  exit code (hence the read-back), but **not** yet looked at in a real customer session.
+- `Get-AppxPackage -User` is given `DOMAIN\user`, not a SID: with an Entra ID SID
+  (`S-1-12-1-…`) it answers *No valid SID could be determined*.
 - The launch test starts an app that is not running in our own session. A window can
   appear there, and a reset Teams asks our account to sign in again. `-SkipLaunchTest`
   turns it off.

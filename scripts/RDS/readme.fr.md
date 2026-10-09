@@ -301,8 +301,10 @@ autres hôtes.
 Un watchdog pour le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de session. Il
 s'exécute en tâche planifiée sous System et utilise **notre propre compte** — par défaut
 `itceadmin` — comme canari : si une application ne démarre pas pour lui, elle ne démarrera
-pas non plus pour un client. Le watchdog répare l'hôte avant que le
-client ne s'en aperçoive, et le signale à un webhook n8n.
+pas non plus pour un client. Il vérifie aussi chaque autre utilisateur connecté et chaque application qu'un
+utilisateur n'a pas pu ouvrir, répare cela sur l'hôte et dans la session de cet
+utilisateur avant qu'il n'appelle, et le signale à un webhook n8n — en nommant
+l'utilisateur de chaque constat et de chaque réparation.
 
 **À chaque exécution**
 
@@ -311,12 +313,16 @@ client ne s'en aperçoive, et le signale à un webhook n8n.
 | 0. Plantages | Chaque plantage (Application Error `1000`) et chaque blocage terminé par une fermeture (Application Hang `1002`) de Teams, du nouvel Outlook ou de Copilot depuis l'exécution précédente, depuis le journal Application — pour **chaque utilisateur de l'hôte**, clients compris — regroupés par application, module et code d'exception. Signalés, pas réparés : l'application d'un client n'est jamais relancée à sa place |
 | 1. Hôte | Teams et le nouvel Outlook sont provisionnés pour tous les utilisateurs ; Copilot est présent (MicrosoftOfficeHub / Copilot provisionné, ou l'application unifiée qu'installe Edge Update) |
 | 2. Comptes | Pour chaque compte surveillé connecté à cet hôte : le package est inscrit pour cet utilisateur, ses fichiers sont présents et son état est `Ok`. Ensuite l'application doit tourner dans cette session — sinon elle y est lancée (`shell:AppsFolder\<AUMID>`, via une tâche ponctuelle dans la session de cet utilisateur) et doit toujours tourner 15 secondes plus tard |
-| 3. Réparation | Problèmes de l'hôte et packages dont les fichiers ont disparu : [`Repair-AppxPackageStore.ps1`](../Device/readme.fr.md#repair-appxpackagestoreps1) `-Provision` (installeurs Microsoft, signature vérifiée), au plus une fois par `-RepairCooldownHours`. Ensuite, **dans notre propre compte uniquement** : un package non inscrit est inscrit par nom de famille, une application qui ne démarre pas est réinitialisée (`Reset-AppxPackage`) |
-| 4. Relecture | Étapes 1 et 2 à nouveau |
+| 2b. Utilisateurs | Chaque autre utilisateur connecté (clients), une fois connecté depuis 10 minutes : la même vérification d'inscription, **sans rien lancer**. Plus chaque tentative depuis l'exécution précédente, par n'importe quel utilisateur, d'ouvrir l'une des applications que Windows a refusée (TWinUI `5961`), et chaque inscription échouée de leurs packages (AppXDeploymentServer `401`/`404` ; « fermez d'abord l'application » et « déjà installé » sont exclus), avec l'utilisateur concerné |
+| 3. Réparation | Problèmes de l'hôte, packages dont les fichiers ont disparu, et tout ce qu'un utilisateur a rencontré : [`Repair-AppxPackageStore.ps1`](../Device/readme.fr.md#repair-appxpackagestoreps1) `-Provision` (installeurs Microsoft, signature vérifiée), au plus une fois par `-RepairCooldownHours`. Ensuite **par utilisateur, dans sa propre session** : le package est réinscrit par nom de famille (`Add-AppxPackage -RegisterByFamilyName`) via une tâche ponctuelle qui lance une console sans fenêtre, pour que rien n'apparaisse. Pour un client seulement si l'application ne tourne pas chez lui à ce moment, au plus une fois par `-RepairCooldownHours` par utilisateur et application, et jamais de réinitialisation. Dans notre propre compte, une application qui ne démarre pas est réinitialisée (`Reset-AppxPackage`) |
+| 4. Relecture | Étapes 1, 2 et la vérification d'inscription de 2b à nouveau ; le problème d'un utilisateur compte comme réparé quand le package est ensuite inscrit et `Ok` pour lui (ou que l'application tourne chez lui) |
 | 5. Signalement | Un POST JSON vers le webhook quand quelque chose ne va pas, a été réparé, est rentré dans l'ordre de lui-même, ou a planté au moins `-CrashThreshold` fois — pas à chaque exécution saine. Un problème qui persiste est signalé à nouveau après `-RenotifyHours` |
 
-Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas de
-`-RemoveOld`, pas de `-Latest`, aucun processus de client arrêté.
+Rien n'est fermé ni supprimé pour personne, et l'application d'un client n'est jamais
+réinitialisée : pas de `-RemoveOld`, pas de `-Latest`, aucun processus de client arrêté.
+Chaque rapport indique, par constat, l'utilisateur (`Account`, avec `Customer` à true pour
+un client) et, sous `before`, si cela a été réparé pour lui (`Fixed`) ; la carte Teams
+affiche *hersteld bij deze gebruiker* à côté de chacun.
 
 **Paramètres**
 
@@ -331,6 +337,7 @@ Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas d
 | `-RenotifyHours` | Signaler à nouveau un problème inchangé après ce nombre d'heures (par défaut : `12`) |
 | `-CrashThreshold` | Signaler les plantages et blocages d'une application dès qu'il y en a autant depuis l'exécution précédente (par défaut : `1`, chaque plantage ; `0` désactive le signalement des plantages) |
 | `-NoRepair` | Tester et signaler uniquement, ne rien modifier |
+| `-NoUserRepair` | Réparer l'hôte et notre propre compte, mais ne jamais rien exécuter dans la session d'un client — leurs problèmes sont toujours signalés, avec leur nom |
 | `-SkipLaunchTest` | Ne pas lancer une application qui ne tourne pas ; vérifier seulement son inscription |
 | `-Install` | Copier le watchdog dans `-WorkingDir` et inscrire la tâche **M365 App Watchdog**, avec les autres paramètres comme réglages |
 | `-Uninstall` | Supprimer la tâche et `-WorkingDir` |
@@ -374,7 +381,8 @@ Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas d
 `event` vaut `repaired`, `repair-failed`, `failing` (avec `-NoRepair`), `crashed`
 (uniquement des plantages lors de cette exécution), `recovered`, `error` (l'exécution
 elle-même a échoué) ou `test` ; `crashes` accompagne chacun d'eux. `Problem` vaut `NotProvisioned` (hôte),
-`NotRegistered`, `Broken` (fichiers disparus ou état différent de `Ok`) ou `WontStart`.
+`NotRegistered`, `Broken` (fichiers disparus ou état différent de `Ok`) ou `WontStart` (notre compte),
+`WontOpen` (Windows a refusé de l'ouvrir pour un utilisateur) ou `RegisterFailed`.
 Dans n8n : un nœud **Webhook** (POST, Header Auth sur `X-Watchdog-Token`), puis un
 aiguillage sur `{{$json.body.event}}` vers Teams, un e-mail ou un ticket.
 
@@ -389,8 +397,8 @@ sur l'hôte :
 
 ```powershell
 # Watch-M365Apps.ps1 à un commit fixe - mettre les deux lignes à jour ensemble
-$commit = '960576b2119a4ac147366f136a6bd1fcbff5726c'
-$sha256 = '38EECD24C9EDD6BC3D52128619CDA2A40E8FEA8ADB80BB4C18CAB02E725D7F7B'
+$commit = 'abfad94ff3b29f4f40d6a48a1c5e0a8c279c1936'
+$sha256 = '2FFBF34C3BB6610612162E17AF124A8AA4B362F9D076A347395D2C87E610A665'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -404,8 +412,8 @@ Sur plusieurs hôtes à la fois, depuis votre propre poste via PowerShell remoti
 ```powershell
 # Le même téléchargement sur chaque hôte, en parallèle
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = '960576b2119a4ac147366f136a6bd1fcbff5726c'
-    $sha256 = '38EECD24C9EDD6BC3D52128619CDA2A40E8FEA8ADB80BB4C18CAB02E725D7F7B'
+    $commit = 'abfad94ff3b29f4f40d6a48a1c5e0a8c279c1936'
+    $sha256 = '2FFBF34C3BB6610612162E17AF124A8AA4B362F9D076A347395D2C87E610A665'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -431,6 +439,12 @@ ne vont jamais dans ce dépôt : il est public.
   client ou de nous. Un plantage de l'application dans notre propre compte est rattrapé à
   l'étape 2 : l'application ne tourne plus, elle est donc relancée. Sur un pool chargé où
   un plantage isolé de Teams est du bruit, augmentez `-CrashThreshold`.
+- La réparation dans la session d'un client utilise `conhost --headless`, pour qu'aucune
+  fenêtre de console ni de Windows Terminal n'apparaisse ; il a été vérifié qu'il attend la
+  commande et ne transmet pas son code de sortie (d'où la relecture), mais **pas encore**
+  observé dans une vraie session client.
+- `Get-AppxPackage -User` reçoit `DOMAINE\utilisateur`, pas un SID : avec un SID Entra ID
+  (`S-1-12-1-…`), il répond *No valid SID could be determined*.
 - Le test de lancement démarre une application qui ne tourne pas dans notre propre
   session. Une fenêtre peut y apparaître, et un Teams réinitialisé demande à notre compte
   de se reconnecter. `-SkipLaunchTest` le désactive.

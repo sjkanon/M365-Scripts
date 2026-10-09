@@ -296,8 +296,10 @@ build waar FSLogix de andere hosts om zal vragen.
 
 Een watchdog voor de nieuwe Teams, de nieuwe Outlook en Copilot op een sessiehost. Hij
 draait als geplande taak onder System en gebruikt **ons eigen account** — standaard
-`itceadmin` — als kanarie: start een app daar niet, dan start hij voor een klant ook niet. De watchdog herstelt de host voordat een klant het merkt, en meldt
-het aan een n8n-webhook.
+`itceadmin` — als kanarie: start een app daar niet, dan start hij voor een klant ook niet. Hij controleert ook elke andere aangemelde gebruiker en elke app die een gebruiker niet
+kon openen, herstelt dat op de host en in de eigen sessie van die gebruiker voordat die
+belt, en meldt het aan een n8n-webhook — met de gebruiker bij elke bevinding en elk
+herstel.
 
 **Elke run**
 
@@ -306,12 +308,16 @@ het aan een n8n-webhook.
 | 0. Crashes | Elke crash (Application Error `1000`) en elke hang die eindigde in afsluiten (Application Hang `1002`) van Teams, de nieuwe Outlook of Copilot sinds de vorige run, uit het Application-logboek — voor **elke gebruiker op de host**, klanten inbegrepen — gegroepeerd per app, module en foutcode. Gemeld, niet hersteld: de app van een klant wordt nooit voor hem herstart |
 | 1. Host | Teams en de nieuwe Outlook zijn klaargezet (provisioned) voor alle gebruikers; Copilot is er (MicrosoftOfficeHub / Copilot klaargezet, of de unified app die Edge Update installeert) |
 | 2. Accounts | Voor elk bewaakt account dat op deze host is aangemeld: het pakket is voor die gebruiker geregistreerd, de bestanden zijn er en de status is `Ok`. Daarna moet de app in die sessie draaien — zo niet, dan wordt hij daar gestart (`shell:AppsFolder\<AUMID>`, via een eenmalige taak in de eigen sessie van die gebruiker) en moet hij 15 seconden later nog draaien |
-| 3. Herstel | Hostproblemen en pakketten waarvan de bestanden weg zijn: [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1) `-Provision` (installers van Microsoft, handtekening gecontroleerd), hooguit één keer per `-RepairCooldownHours`. Daarna, **alleen in ons eigen account**: een pakket dat niet geregistreerd is wordt op familienaam geregistreerd, een app die niet start wordt gereset (`Reset-AppxPackage`) |
-| 4. Teruglezen | Stap 1 en 2 opnieuw |
+| 2b. Gebruikers | Elke andere aangemelde gebruiker (klanten), zodra die 10 minuten is aangemeld: dezelfde registratiecontrole, **zonder iets te starten**. Plus elke poging sinds de vorige run, door welke gebruiker ook, om een van de apps te openen die Windows weigerde (TWinUI `5961`), en elke mislukte registratie van hun pakketten (AppXDeploymentServer `401`/`404`; "sluit eerst de app" en "al geïnstalleerd" tellen niet mee), met de gebruiker bij wie het gebeurde |
+| 3. Herstel | Hostproblemen, pakketten waarvan de bestanden weg zijn, en alles waar een gebruiker tegenaan liep: [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1) `-Provision` (installers van Microsoft, handtekening gecontroleerd), hooguit één keer per `-RepairCooldownHours`. Daarna **per gebruiker, in diens eigen sessie**: het pakket wordt opnieuw op familienaam geregistreerd (`Add-AppxPackage -RegisterByFamilyName`) via een eenmalige taak met een console zonder venster, zodat er niets verschijnt. Bij een klant alleen als de app op dat moment niet bij hem draait, hooguit één keer per `-RepairCooldownHours` per gebruiker en app, en nooit een reset. In ons eigen account wordt een app die niet start gereset (`Reset-AppxPackage`) |
+| 4. Teruglezen | Stap 1, 2 en de registratiecontrole van 2b opnieuw; het probleem van een gebruiker telt als hersteld als het pakket daarna voor hem geregistreerd en `Ok` is (of de app bij hem draait) |
 | 5. Melden | Een JSON-POST naar de webhook als er iets mis is, iets hersteld is, iets vanzelf weer werkt, of een app minstens `-CrashThreshold` keer crashte — niet bij elke gezonde run. Een probleem dat blijft wordt na `-RenotifyHours` opnieuw gemeld |
 
-Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: geen
-`-RemoveOld`, geen `-Latest`, geen processen van klanten die worden gestopt.
+Voor niemand wordt iets gesloten of verwijderd, en de app van een klant wordt nooit
+gereset: geen `-RemoveOld`, geen `-Latest`, geen processen van klanten die worden gestopt.
+Elke melding noemt per bevinding de gebruiker (`Account`, met `Customer` op true voor een
+klant) en onder `before` of het bij hem hersteld is (`Fixed`); de Teams-kaart zet
+*hersteld bij deze gebruiker* bij elke regel.
 
 **Parameters**
 
@@ -326,6 +332,7 @@ Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: ge
 | `-RenotifyHours` | Een probleem dat gelijk blijft na zoveel uur opnieuw melden (standaard: `12`) |
 | `-CrashThreshold` | De crashes en hangs van een app melden zodra het er sinds de vorige run zoveel zijn (standaard: `1`, elke crash; `0` zet crashmeldingen uit) |
 | `-NoRepair` | Alleen testen en melden, niets wijzigen |
+| `-NoUserRepair` | De host en ons eigen account herstellen, maar nooit iets in de sessie van een klant draaien — hun problemen worden nog steeds gemeld, met hun naam |
 | `-SkipLaunchTest` | Een app die niet draait niet starten; alleen de registratie controleren |
 | `-Install` | De watchdog naar `-WorkingDir` kopiëren en de taak **M365 App Watchdog** registreren, met de overige parameters als instellingen |
 | `-Uninstall` | De taak en `-WorkingDir` verwijderen |
@@ -369,7 +376,8 @@ Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: ge
 `event` is `repaired`, `repair-failed`, `failing` (met `-NoRepair`), `crashed` (alleen
 crashes deze run), `recovered`, `error` (de run zelf mislukte) of `test`; `crashes` gaat
 met elk daarvan mee. `Problem` is `NotProvisioned` (host), `NotRegistered`,
-`Broken` (bestanden weg of status niet `Ok`) of `WontStart`. In n8n: een **Webhook**-node
+`Broken` (bestanden weg of status niet `Ok`) of `WontStart` (ons account),
+`WontOpen` (Windows weigerde hem te openen voor een gebruiker) of `RegisterFailed`. In n8n: een **Webhook**-node
 (POST, Header Auth op `X-Watchdog-Token`), daarna routeren op `{{$json.body.event}}` naar
 Teams, mail of een ticket.
 
@@ -383,8 +391,8 @@ draait. Draai het in een verhoogde PowerShell op de host:
 
 ```powershell
 # Watch-M365Apps.ps1 op een vaste commit - beide regels samen bijwerken
-$commit = '960576b2119a4ac147366f136a6bd1fcbff5726c'
-$sha256 = '38EECD24C9EDD6BC3D52128619CDA2A40E8FEA8ADB80BB4C18CAB02E725D7F7B'
+$commit = 'abfad94ff3b29f4f40d6a48a1c5e0a8c279c1936'
+$sha256 = '2FFBF34C3BB6610612162E17AF124A8AA4B362F9D076A347395D2C87E610A665'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -398,8 +406,8 @@ Op meerdere hosts tegelijk, vanaf je eigen pc via PowerShell remoting:
 ```powershell
 # Dezelfde download op elke host, parallel
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = '960576b2119a4ac147366f136a6bd1fcbff5726c'
-    $sha256 = '38EECD24C9EDD6BC3D52128619CDA2A40E8FEA8ADB80BB4C18CAB02E725D7F7B'
+    $commit = 'abfad94ff3b29f4f40d6a48a1c5e0a8c279c1936'
+    $sha256 = '2FFBF34C3BB6610612162E17AF124A8AA4B362F9D076A347395D2C87E610A665'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -425,6 +433,12 @@ deze repo: die is openbaar.
   crash van de app in ons eigen account wordt in stap 2 opgevangen: de app draait niet meer,
   dus hij wordt opnieuw gestart. Op een drukke pool waar een losse Teams-crash ruis is:
   `-CrashThreshold` verhogen.
+- Herstellen in de sessie van een klant gebruikt `conhost --headless`, zodat er geen
+  console- of Windows Terminal-venster zou moeten verschijnen; gecontroleerd is dat het op de
+  opdracht wacht en de exitcode niet doorgeeft (vandaar het teruglezen), maar **nog niet**
+  bekeken in een echte klantsessie.
+- `Get-AppxPackage -User` krijgt `DOMEIN\gebruiker`, geen SID: met een Entra ID-SID
+  (`S-1-12-1-…`) antwoordt het *No valid SID could be determined*.
 - De starttest start een app die niet draait in onze eigen sessie. Daar kan een venster
   verschijnen, en een gereset Teams vraagt ons account opnieuw aan te melden.
   `-SkipLaunchTest` zet dat uit.
