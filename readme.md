@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-09 (7)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-TestNotification` stopped on the first session host it was run on with *The variable '$script:logFile' cannot be retrieved because it has not been set*: the report carries the log path, and that variable was only set once a run opened its log - after `-TestNotification` had already gone its own way. Under StrictMode an unset variable is an error, not `$null`. It is now set at the top with the other constants. Scheduled runs were not affected. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to `960576b` and that file's SHA-256 |
+| Verified: syntax check; `Send-Notification` taken out of the script and run under StrictMode against an unreachable address threw the reported error without the line and, with it, went on to three connection attempts and returned `$false`; the raw URL at `960576b` serves the file with the documented SHA-256. **Not** verified: a test message from the session host to n8n |
+
 ### 2026-10-09 (6)
 | Change |
 |--------|

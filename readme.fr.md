@@ -1015,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-09 (7)
+| Modification |
+|--------------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-TestNotification` s'arrêtait sur le premier hôte de session où il a été lancé avec *The variable '$script:logFile' cannot be retrieved because it has not been set* : le rapport contient le chemin du journal, et cette variable n'était définie qu'à l'ouverture du journal d'une exécution - après que `-TestNotification` avait déjà pris son propre chemin. Sous StrictMode, une variable non définie est une erreur, pas `$null`. Elle est désormais définie en tête avec les autres constantes. Les exécutions planifiées n'étaient pas touchées. Le téléchargement du [readme RDS](scripts/RDS/readme.fr.md#watch-m365appsps1) passe à `960576b` et au SHA-256 de ce fichier |
+| Vérifié : contrôle de syntaxe ; `Send-Notification` extrait du script et exécuté sous StrictMode vers une adresse injoignable a levé l'erreur signalée sans la ligne et, avec elle, est allé jusqu'à trois tentatives de connexion et a renvoyé `$false` ; l'URL raw à `960576b` sert le fichier avec le SHA-256 documenté. **Non** vérifié : un message de test de l'hôte de session vers n8n |
+
 ### 2026-10-09 (6)
 | Modification |
 |--------------|

@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-09 (7)
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-TestNotification` stopte op de eerste sessiehost waar het werd gedraaid met *The variable '$script:logFile' cannot be retrieved because it has not been set*: de melding bevat het logpad, en die variabele werd pas gezet zodra een run zijn log opende - nadat `-TestNotification` al zijn eigen weg was gegaan. Onder StrictMode is een niet-gezette variabele een fout, geen `$null`. Hij wordt nu bovenaan gezet bij de andere constanten. Geplande runs hadden er geen last van. De download in de [RDS-readme](scripts/RDS/readme.nl.md#watch-m365appsps1) gaat naar `960576b` en de SHA-256 van dat bestand |
+| Geverifieerd: syntaxcontrole; `Send-Notification` uit het script gehaald en onder StrictMode tegen een onbereikbaar adres gedraaid gaf zonder de regel de gemelde fout en ging er met de regel door naar drie verbindingspogingen en gaf `$false` terug; de raw-URL op `960576b` levert het bestand met de gedocumenteerde SHA-256. **Niet** geverifieerd: een testbericht van de sessiehost naar n8n |
+
 ### 2026-10-09 (6)
 | Wijziging |
 |-----------|
