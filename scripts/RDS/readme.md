@@ -303,11 +303,12 @@ to an n8n webhook.
 
 | Step | What happens |
 |------|--------------|
+| 0. Crashes | Every crash (Application Error `1000`) and every hang that ended in a close (Application Hang `1002`) of Teams, new Outlook or Copilot since the previous run, from the Application log — for **every user on the host**, customers included — grouped per app, module and exception code. Reported, not repaired: a customer's app is never restarted for them |
 | 1. Host | Teams and new Outlook are provisioned for all users; Copilot is there (provisioned MicrosoftOfficeHub / Copilot, or the unified app Edge Update installs) |
 | 2. Accounts | For each watched account signed in on this host: the package is registered for that user, its files are there and its status is `Ok`. Then the app has to run in that session — if it does not, it is started there (`shell:AppsFolder\<AUMID>`, through a one-off task in that user's own session) and has to still be running 15 seconds later |
 | 3. Repair | Host problems and packages whose files are gone: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then, in **our own account only**: a package that is not registered is registered by family name, an app that does not start is reset (`Reset-AppxPackage`) |
 | 4. Read back | Steps 1 and 2 again |
-| 5. Report | A JSON POST to the webhook when something is wrong, was repaired, or recovered on its own — not on every healthy run. A problem that stays is reported again after `-RenotifyHours` |
+| 5. Report | A JSON POST to the webhook when something is wrong, was repaired, recovered on its own, or crashed at least `-CrashThreshold` times — not on every healthy run. A problem that stays is reported again after `-RenotifyHours` |
 
 Nothing is closed, removed or reset for any other user: no `-RemoveOld`, no `-Latest`,
 no stopping of customers' processes.
@@ -323,6 +324,7 @@ no stopping of customers' processes.
 | `-IntervalMinutes` | How often the task runs (default: `30`) |
 | `-RepairCooldownHours` | Minimum time between two host repairs, so a problem it cannot fix is not retried every run (default: `4`) |
 | `-RenotifyHours` | Report a problem that stays the same again after this many hours (default: `12`) |
+| `-CrashThreshold` | Report the crashes and hangs of one app once there are this many since the previous run (default: `1`, every crash; `0` turns crash reporting off) |
 | `-NoRepair` | Test and report only, change nothing |
 | `-SkipLaunchTest` | Do not start an app that is not running; only check its registration |
 | `-Install` | Copy the watchdog to `-WorkingDir` and register the task **M365 App Watchdog**, with the other parameters as its settings |
@@ -359,12 +361,14 @@ no stopping of customers' processes.
   "findings": [],
   "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
   "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
   "log": "C:\IT\AppWatchdog\Logs\Watch-M365Apps_20261009.log"
 }
 ```
 
-`event` is `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `recovered`, `error`
-(the run itself failed) or `test`. `Problem` is `NotProvisioned` (host), `NotRegistered`,
+`event` is `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `crashed` (only
+crashes this run), `recovered`, `error` (the run itself failed) or `test`; `crashes` rides
+along with any of them. `Problem` is `NotProvisioned` (host), `NotRegistered`,
 `Broken` (files gone or status not `Ok`) or `WontStart`. In n8n: a **Webhook** node (POST,
 Header Auth on `X-Watchdog-Token`), then route on `{{$json.body.event}}` to Teams, mail or
 a ticket.
@@ -374,6 +378,9 @@ a ticket.
 - **Keep a session of each watched account open on every host** (disconnected is fine). An
   account that is not signed in is skipped: its packages live in its FSLogix container
   and cannot be tested without it. Without any session the host check (step 1) still runs.
+- Crash events name no user, so a crash can be a customer's or ours. A crash of our own
+  account's app is followed up in step 2: the app is no longer running, so it is started
+  again. On a busy pool where the odd Teams crash is noise, raise `-CrashThreshold`.
 - The launch test starts an app that is not running in our own session. A window can
   appear there, and a reset Teams asks our account to sign in again. `-SkipLaunchTest`
   turns it off.

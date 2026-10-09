@@ -308,11 +308,12 @@ client ne s'en aperçoive, et le signale à un webhook n8n.
 
 | Étape | Ce qui se passe |
 |-------|-----------------|
+| 0. Plantages | Chaque plantage (Application Error `1000`) et chaque blocage terminé par une fermeture (Application Hang `1002`) de Teams, du nouvel Outlook ou de Copilot depuis l'exécution précédente, depuis le journal Application — pour **chaque utilisateur de l'hôte**, clients compris — regroupés par application, module et code d'exception. Signalés, pas réparés : l'application d'un client n'est jamais relancée à sa place |
 | 1. Hôte | Teams et le nouvel Outlook sont provisionnés pour tous les utilisateurs ; Copilot est présent (MicrosoftOfficeHub / Copilot provisionné, ou l'application unifiée qu'installe Edge Update) |
 | 2. Comptes | Pour chaque compte surveillé connecté à cet hôte : le package est inscrit pour cet utilisateur, ses fichiers sont présents et son état est `Ok`. Ensuite l'application doit tourner dans cette session — sinon elle y est lancée (`shell:AppsFolder\<AUMID>`, via une tâche ponctuelle dans la session de cet utilisateur) et doit toujours tourner 15 secondes plus tard |
 | 3. Réparation | Problèmes de l'hôte et packages dont les fichiers ont disparu : [`Repair-AppxPackageStore.ps1`](../Device/readme.fr.md#repair-appxpackagestoreps1) `-Provision` (installeurs Microsoft, signature vérifiée), au plus une fois par `-RepairCooldownHours`. Ensuite, **dans notre propre compte uniquement** : un package non inscrit est inscrit par nom de famille, une application qui ne démarre pas est réinitialisée (`Reset-AppxPackage`) |
 | 4. Relecture | Étapes 1 et 2 à nouveau |
-| 5. Signalement | Un POST JSON vers le webhook quand quelque chose ne va pas, a été réparé ou est rentré dans l'ordre de lui-même — pas à chaque exécution saine. Un problème qui persiste est signalé à nouveau après `-RenotifyHours` |
+| 5. Signalement | Un POST JSON vers le webhook quand quelque chose ne va pas, a été réparé, est rentré dans l'ordre de lui-même, ou a planté au moins `-CrashThreshold` fois — pas à chaque exécution saine. Un problème qui persiste est signalé à nouveau après `-RenotifyHours` |
 
 Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas de
 `-RemoveOld`, pas de `-Latest`, aucun processus de client arrêté.
@@ -328,6 +329,7 @@ Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas d
 | `-IntervalMinutes` | Fréquence d'exécution de la tâche (par défaut : `30`) |
 | `-RepairCooldownHours` | Délai minimal entre deux réparations de l'hôte, pour qu'un problème qu'il ne sait pas résoudre ne soit pas retenté à chaque exécution (par défaut : `4`) |
 | `-RenotifyHours` | Signaler à nouveau un problème inchangé après ce nombre d'heures (par défaut : `12`) |
+| `-CrashThreshold` | Signaler les plantages et blocages d'une application dès qu'il y en a autant depuis l'exécution précédente (par défaut : `1`, chaque plantage ; `0` désactive le signalement des plantages) |
 | `-NoRepair` | Tester et signaler uniquement, ne rien modifier |
 | `-SkipLaunchTest` | Ne pas lancer une application qui ne tourne pas ; vérifier seulement son inscription |
 | `-Install` | Copier le watchdog dans `-WorkingDir` et inscrire la tâche **M365 App Watchdog**, avec les autres paramètres comme réglages |
@@ -364,12 +366,14 @@ Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas d
   "findings": [],
   "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
   "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
   "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log"
 }
 ```
 
-`event` vaut `repaired`, `repair-failed`, `failing` (avec `-NoRepair`), `recovered`, `error`
-(l'exécution elle-même a échoué) ou `test`. `Problem` vaut `NotProvisioned` (hôte),
+`event` vaut `repaired`, `repair-failed`, `failing` (avec `-NoRepair`), `crashed`
+(uniquement des plantages lors de cette exécution), `recovered`, `error` (l'exécution
+elle-même a échoué) ou `test` ; `crashes` accompagne chacun d'eux. `Problem` vaut `NotProvisioned` (hôte),
 `NotRegistered`, `Broken` (fichiers disparus ou état différent de `Ok`) ou `WontStart`.
 Dans n8n : un nœud **Webhook** (POST, Header Auth sur `X-Watchdog-Token`), puis un
 aiguillage sur `{{$json.body.event}}` vers Teams, un e-mail ou un ticket.
@@ -380,6 +384,10 @@ aiguillage sur `{{$json.body.event}}` vers Teams, un e-mail ou un ticket.
   c'est bien). Un compte non connecté est ignoré : ses packages se trouvent dans son
   conteneur FSLogix et ne peuvent pas être testés sans lui. Sans aucune session, la
   vérification de l'hôte (étape 1) s'exécute quand même.
+- Les événements de plantage ne nomment aucun utilisateur : un plantage peut venir d'un
+  client ou de nous. Un plantage de l'application dans notre propre compte est rattrapé à
+  l'étape 2 : l'application ne tourne plus, elle est donc relancée. Sur un pool chargé où
+  un plantage isolé de Teams est du bruit, augmentez `-CrashThreshold`.
 - Le test de lancement démarre une application qui ne tourne pas dans notre propre
   session. Une fenêtre peut y apparaître, et un Teams réinitialisé demande à notre compte
   de se reconnecter. `-SkipLaunchTest` le désactive.

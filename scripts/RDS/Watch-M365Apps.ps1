@@ -8,6 +8,13 @@
 .DESCRIPTION
     Runs as a scheduled task under System (install it with -Install). Each run:
 
+      0. Crashes     Every crash (Application Error 1000) and every hang that ended in
+                     a close (Application Hang 1002) of Teams, new Outlook or Copilot
+                     since the last run, from the Application log - for every user on
+                     the host, customers included. Grouped per app, module and
+                     exception code. Reported, not repaired: a customer's app is never
+                     restarted for them. Our own account's app is started again in
+                     step 2 when it is no longer running.
       1. Host        Teams and new Outlook are provisioned for all users, and Copilot
                      is there - provisioned (MicrosoftOfficeHub / Copilot) or the
                      unified app Edge Update installs. Without that no new profile,
@@ -26,8 +33,9 @@
                      removed or reset for any other user - no -RemoveOld, no -Latest.
       4. Read back   Steps 1 and 2 again.
       5. Report      A JSON POST to -WebhookUrl when something is wrong, was repaired,
-                     or recovered on its own - not on every healthy run. A problem that
-                     stays is reported again after -RenotifyHours.
+                     recovered on its own, or crashed at least -CrashThreshold times -
+                     not on every healthy run. A problem that stays is reported again
+                     after -RenotifyHours.
 
     An account that is not signed in on this host is skipped: its packages live in its
     FSLogix container and cannot be tested without it. The watched accounts are
@@ -60,6 +68,11 @@
 
 .PARAMETER RenotifyHours
     A problem that stays the same is reported again after this many hours. Default 12.
+
+.PARAMETER CrashThreshold
+    Report crashes and hangs of one app once it reaches this many since the last run.
+    Default 1 (every crash); 0 turns crash reporting off. Raise it on a busy pool where
+    the odd crash is noise.
 
 .PARAMETER NoRepair
     Test and report only, change nothing.
@@ -114,6 +127,8 @@ param (
     [int]      $RepairCooldownHours = 4,
     [ValidateRange(1, 168)]
     [int]      $RenotifyHours = 12,
+    [ValidateRange(0, 1000)]
+    [int]      $CrashThreshold = 1,
     [switch]   $NoRepair,
     [switch]   $SkipLaunchTest,
     [switch]   $Install,
@@ -126,10 +141,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # -- Constants -------------------------------------------------------------------
+# Exe: the process name in a crash event. Packaged apps are also matched on the
+# package name the event carries, which covers a Copilot executable not listed here.
 $Apps = @(
-    [PSCustomObject]@{ App = 'Teams';   Packages = @('MSTeams');                                         Repair = 'teams' }
-    [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows');                     Repair = 'outlook' }
-    [PSCustomObject]@{ App = 'Copilot'; Packages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot'); Repair = 'copilot' }
+    [PSCustomObject]@{ App = 'Teams';   Packages = @('MSTeams');                                         Exe = @('ms-teams.exe');    Repair = 'teams' }
+    [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows');                     Exe = @('olk.exe');         Repair = 'outlook' }
+    [PSCustomObject]@{ App = 'Copilot'; Packages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot'); Exe = @('M365Copilot.exe'); Repair = 'copilot' }
 )
 $PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for all four packages
 $CopilotGuid   = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
@@ -209,7 +226,7 @@ $StatePath  = Join-Path $WorkingDir 'state.json'
 $Installed  = (Test-Path $PSScriptRoot) -and ((Resolve-Path $PSScriptRoot).Path.TrimEnd('\') -eq ([IO.Path]::GetFullPath($WorkingDir)).TrimEnd('\'))
 if (-not $Install -and (Test-Path $ConfigPath)) {
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'NoRepair', 'SkipLaunchTest') {
+    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'CrashThreshold', 'NoRepair', 'SkipLaunchTest') {
         if ($PSBoundParameters.ContainsKey($name)) { continue }
         $value = Get-PropertyValue $config $name
         if ($null -ne $value) { Set-Variable -Name $name -Value $value }
@@ -369,6 +386,53 @@ function Test-AppStart {
     return @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
 }
 
+# -- Crashes -------------------------------------------------------------------------
+function Get-AppCrash {
+    <#
+        Crashes (Application Error 1000) and hangs that ended in a close (Application
+        Hang 1002) of the watched apps since $Since, grouped per app, kind, module and
+        exception code. Field positions as Windows writes them: 1000 has the app at 0,
+        its version at 1, the module at 3, the exception code at 6 and the package at
+        13; 1002 has the package at 7 and the hang type at 9. The events name no user.
+    #>
+    param([datetime] $Since)
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error', 'Application Hang'; Id = 1000, 1002; StartTime = $Since } -ErrorAction SilentlyContinue)
+    $rows = @(foreach ($record in $events) {
+        $values = @($record.Properties | ForEach-Object { [string] $_.Value })
+        $field  = { param($i) if ($i -lt $values.Count) { $values[$i] } else { '' } }
+        $exe    = & $field 0
+        $crash  = $record.Id -eq 1000
+        $pkg    = if ($crash) { & $field 13 } else { & $field 7 }
+        $entry  = @($Apps | Where-Object {
+                      $exe -in $_.Exe -or ($pkg -and @($_.Packages | Where-Object { $pkg -like "$($_)_*" }).Count -gt 0)
+                  }) | Select-Object -First 1
+        if (-not $entry) { continue }
+        [PSCustomObject]@{
+            App     = $entry.App
+            Kind    = if ($crash) { 'Crash' } else { 'Hang' }
+            Time    = $record.TimeCreated
+            Exe     = $exe
+            Version = & $field 1
+            Module  = if ($crash) { & $field 3 } else { 'hang: ' + (& $field 9) }
+            Code    = if ($crash) { '0x' + (& $field 6) } else { '' }
+        }
+    })
+    if ($rows.Count -eq 0) { return }
+    foreach ($group in @($rows | Group-Object App, Kind, Module, Code)) {
+        $newest = $group.Group | Sort-Object Time -Descending | Select-Object -First 1
+        [PSCustomObject]@{
+            App     = $newest.App
+            Kind    = $newest.Kind
+            Count   = $group.Count
+            Last    = $newest.Time.ToString('o')
+            Exe     = $newest.Exe
+            Version = $newest.Version
+            Module  = $newest.Module
+            Code    = $newest.Code
+        }
+    }
+}
+
 # -- Checks --------------------------------------------------------------------------
 function New-Finding {
     param([string] $Account, [string] $App, [string] $Problem, [string] $Detail, [string] $Package)
@@ -491,7 +555,7 @@ function Invoke-Repair {
 
 # -- Report --------------------------------------------------------------------------
 function Send-Notification {
-    param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @())
+    param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @(), $Crashes = @())
     if (-not $WebhookUrl) { Write-Skip "No -WebhookUrl - not reported ($Kind)"; return $false }
     $payload = [ordered]@{
         source   = 'Watch-M365Apps'
@@ -503,6 +567,7 @@ function Send-Notification {
         findings = @($Found  | Select-Object Account, App, Problem, Detail)
         before   = @($Before | Select-Object Account, App, Problem, Detail)
         actions  = @($Actions)
+        crashes  = @($Crashes | Select-Object App, Kind, Count, Last, Exe, Version, Module, Code)
         log      = $script:logFile
     }
     $headers = @{}
@@ -563,6 +628,7 @@ if ($Install) {
         WebhookToken        = $WebhookToken
         RepairCooldownHours = $RepairCooldownHours
         RenotifyHours       = $RenotifyHours
+        CrashThreshold      = $CrashThreshold
         NoRepair            = [bool] $NoRepair
         SkipLaunchTest      = [bool] $SkipLaunchTest
     } | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
@@ -602,11 +668,27 @@ try {
     Write-Host ''
     Write-Host ("  M365 app watchdog - {0} - {1:yyyy-MM-dd HH:mm}" -f $env:COMPUTERNAME, (Get-Date)) -ForegroundColor Cyan
 
-    $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null }
+    $runStart = Get-Date
+    $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null }
     if (Test-Path $StatePath) {
         $saved = Get-Content -Path $StatePath -Raw | ConvertFrom-Json
-        foreach ($name in 'Signature', 'LastNotified', 'LastRepair') { $state.$name = Get-PropertyValue $saved $name }
+        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun') { $state.$name = Get-PropertyValue $saved $name }
         if ($null -eq $state.Signature) { $state.Signature = '' }
+    }
+
+    # Crashes since the previous run; the first run looks back one hour, and a long
+    # gap (host off, task disabled) no more than a day.
+    $crashes = @()
+    if ($CrashThreshold -gt 0) {
+        $since = $runStart.AddHours(-1)
+        if ($state.LastRun) { $since = [datetime]::Parse($state.LastRun, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
+        if ($since -lt $runStart.AddDays(-1)) { $since = $runStart.AddDays(-1) }
+        Write-Step ('Crashes and hangs since {0:yyyy-MM-dd HH:mm}' -f $since)
+        $crashes = @(Get-AppCrash -Since $since | Where-Object { $_.Count -ge $CrashThreshold })
+        if ($crashes.Count -eq 0) { Write-Ok 'None' }
+        foreach ($c in $crashes) {
+            Write-Warn ('{0} {1} {2}x ({3} {4}, {5}{6}) - last at {7:HH:mm}' -f $c.App, $c.Kind.ToLower(), $c.Count, $c.Exe, $c.Version, $c.Module, $(if ($c.Code) { ', ' + $c.Code } else { '' }), [datetime] $c.Last)
+        }
     }
 
     $before  = @(Get-Finding)
@@ -641,12 +723,24 @@ try {
         $summary = '{0}: healthy again without a repair (was: {1})' -f $env:COMPUTERNAME, $state.Signature
     }
 
+    # Crashes are events, not a state: they ride along with any report of this run,
+    # or are a report of their own.
+    if ($crashes.Count -gt 0) {
+        $crashText = (@($crashes | ForEach-Object { '{0} {1} {2}x' -f $_.App, $_.Kind.ToLower(), $_.Count })) -join ', '
+        if ($kind) { $summary += " - also: $crashText" }
+        else {
+            $kind    = 'crashed'
+            $summary = '{0}: {1} since the last check' -f $env:COMPUTERNAME, $crashText
+        }
+    }
+
     if ($kind) {
-        if (Send-Notification -Kind $kind -Summary $summary -Found $after -Before $before -Actions $actions) {
-            $state.LastNotified = (Get-Date).ToString('o')
+        if (Send-Notification -Kind $kind -Summary $summary -Found $after -Before $before -Actions $actions -Crashes $crashes) {
+            if ($kind -ne 'crashed') { $state.LastNotified = (Get-Date).ToString('o') }
         }
     }
     $state.Signature = $signature
+    $state.LastRun   = $runStart.ToString('o')
     if (Test-Path $WorkingDir) { $state | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8 }
 
     Write-Host ''

@@ -304,11 +304,12 @@ het aan een n8n-webhook.
 
 | Stap | Wat er gebeurt |
 |------|----------------|
+| 0. Crashes | Elke crash (Application Error `1000`) en elke hang die eindigde in afsluiten (Application Hang `1002`) van Teams, de nieuwe Outlook of Copilot sinds de vorige run, uit het Application-logboek — voor **elke gebruiker op de host**, klanten inbegrepen — gegroepeerd per app, module en foutcode. Gemeld, niet hersteld: de app van een klant wordt nooit voor hem herstart |
 | 1. Host | Teams en de nieuwe Outlook zijn klaargezet (provisioned) voor alle gebruikers; Copilot is er (MicrosoftOfficeHub / Copilot klaargezet, of de unified app die Edge Update installeert) |
 | 2. Accounts | Voor elk bewaakt account dat op deze host is aangemeld: het pakket is voor die gebruiker geregistreerd, de bestanden zijn er en de status is `Ok`. Daarna moet de app in die sessie draaien — zo niet, dan wordt hij daar gestart (`shell:AppsFolder\<AUMID>`, via een eenmalige taak in de eigen sessie van die gebruiker) en moet hij 15 seconden later nog draaien |
 | 3. Herstel | Hostproblemen en pakketten waarvan de bestanden weg zijn: [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1) `-Provision` (installers van Microsoft, handtekening gecontroleerd), hooguit één keer per `-RepairCooldownHours`. Daarna, **alleen in ons eigen account**: een pakket dat niet geregistreerd is wordt op familienaam geregistreerd, een app die niet start wordt gereset (`Reset-AppxPackage`) |
 | 4. Teruglezen | Stap 1 en 2 opnieuw |
-| 5. Melden | Een JSON-POST naar de webhook als er iets mis is, iets hersteld is, of iets vanzelf weer werkt — niet bij elke gezonde run. Een probleem dat blijft wordt na `-RenotifyHours` opnieuw gemeld |
+| 5. Melden | Een JSON-POST naar de webhook als er iets mis is, iets hersteld is, iets vanzelf weer werkt, of een app minstens `-CrashThreshold` keer crashte — niet bij elke gezonde run. Een probleem dat blijft wordt na `-RenotifyHours` opnieuw gemeld |
 
 Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: geen
 `-RemoveOld`, geen `-Latest`, geen processen van klanten die worden gestopt.
@@ -324,6 +325,7 @@ Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: ge
 | `-IntervalMinutes` | Hoe vaak de taak draait (standaard: `30`) |
 | `-RepairCooldownHours` | Minimale tijd tussen twee hostherstellingen, zodat een probleem dat hij niet kan oplossen niet elke run opnieuw wordt geprobeerd (standaard: `4`) |
 | `-RenotifyHours` | Een probleem dat gelijk blijft na zoveel uur opnieuw melden (standaard: `12`) |
+| `-CrashThreshold` | De crashes en hangs van een app melden zodra het er sinds de vorige run zoveel zijn (standaard: `1`, elke crash; `0` zet crashmeldingen uit) |
 | `-NoRepair` | Alleen testen en melden, niets wijzigen |
 | `-SkipLaunchTest` | Een app die niet draait niet starten; alleen de registratie controleren |
 | `-Install` | De watchdog naar `-WorkingDir` kopiëren en de taak **M365 App Watchdog** registreren, met de overige parameters als instellingen |
@@ -360,12 +362,14 @@ Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: ge
   "findings": [],
   "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
   "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
   "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log"
 }
 ```
 
-`event` is `repaired`, `repair-failed`, `failing` (met `-NoRepair`), `recovered`, `error`
-(de run zelf mislukte) of `test`. `Problem` is `NotProvisioned` (host), `NotRegistered`,
+`event` is `repaired`, `repair-failed`, `failing` (met `-NoRepair`), `crashed` (alleen
+crashes deze run), `recovered`, `error` (de run zelf mislukte) of `test`; `crashes` gaat
+met elk daarvan mee. `Problem` is `NotProvisioned` (host), `NotRegistered`,
 `Broken` (bestanden weg of status niet `Ok`) of `WontStart`. In n8n: een **Webhook**-node
 (POST, Header Auth op `X-Watchdog-Token`), daarna routeren op `{{$json.body.event}}` naar
 Teams, mail of een ticket.
@@ -376,6 +380,10 @@ Teams, mail of een ticket.
   account dat niet is aangemeld wordt overgeslagen: zijn pakketten staan in zijn
   FSLogix-container en zijn zonder die container niet te testen. Zonder enige sessie draait
   de hostcontrole (stap 1) nog wel.
+- Crash-events noemen geen gebruiker, dus een crash kan van een klant of van ons zijn. Een
+  crash van de app in ons eigen account wordt in stap 2 opgevangen: de app draait niet meer,
+  dus hij wordt opnieuw gestart. Op een drukke pool waar een losse Teams-crash ruis is:
+  `-CrashThreshold` verhogen.
 - De starttest start een app die niet draait in onze eigen sessie. Daar kan een venster
   verschijnen, en een gereset Teams vraagt ons account opnieuw aan te melden.
   `-SkipLaunchTest` zet dat uit.
