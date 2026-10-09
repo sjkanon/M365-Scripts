@@ -373,6 +373,48 @@ along with any of them. `Problem` is `NotProvisioned` (host), `NotRegistered`,
 Header Auth on `X-Watchdog-Token`), then route on `{{$json.body.event}}` to Teams, mail or
 a ticket.
 
+**Installing from GitHub**
+
+A session host needs no copy of the repo: download this one file and run `-Install`.
+The helper comes along by itself — `-Install` fetches `Repair-AppxPackageStore.ps1` from
+GitHub at the pinned commit and checks its SHA-256. The download below is pinned the same
+way, to a commit and a hash, because what it installs runs as System. Run it in an
+elevated PowerShell on the host:
+
+```powershell
+# Watch-M365Apps.ps1 at a fixed commit - move both lines together
+$commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
+$sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+$file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
+# then, as in the examples: first -NoRepair to look, then install
+& $file -Install -WebhookUrl '<n8n webhook URL>' -WebhookToken '<token>' -Confirm:$false
+```
+
+On several hosts at once, from your own machine over PowerShell remoting:
+
+```powershell
+# Same download on every host, in parallel
+Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
+    $commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
+    $sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+    $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
+    if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw "SHA-256 mismatch on $env:COMPUTERNAME" }
+    & $file -Install -WebhookUrl '<n8n webhook URL>' -WebhookToken '<token>' -Confirm:$false
+}
+```
+
+Afterwards check one host with `-TestNotification`. To move to a newer version: put that
+commit and the file's SHA-256 at that commit
+(`(Get-FileHash .\scripts\RDS\Watch-M365Apps.ps1).Hash` in a checkout of it) in the two
+lines, after reading the diff, and run `-Install` again — the task keeps running its own
+copy in `C:\IT\AppWatchdog` until then. The webhook URL and token never go in this repo:
+it is public.
+
 **Notes**
 
 - **Keep a session of each watched account open on every host** (disconnected is fine). An
@@ -386,7 +428,8 @@ a ticket.
   turns it off.
 - `-Install` locks `-WorkingDir` to System and Administrators (the task runs what is in it
   as System), copies this script and `Repair-AppxPackageStore.ps1` there — from
-  `..\Device`, or from GitHub at the same pinned commit and SHA-256 as
+  `..\Device` in a checkout of the repo, otherwise always from GitHub (never from beside a
+  downloaded copy, a folder any user may have written to) at the same pinned commit and SHA-256 as
   [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — and keeps the webhook URL and
   token only in `config.json` there, not in the task's command line. Change a setting by
   running `-Install` again with all parameters.

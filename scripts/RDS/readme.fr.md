@@ -378,6 +378,49 @@ elle-même a échoué) ou `test` ; `crashes` accompagne chacun d'eux. `Problem` 
 Dans n8n : un nœud **Webhook** (POST, Header Auth sur `X-Watchdog-Token`), puis un
 aiguillage sur `{{$json.body.event}}` vers Teams, un e-mail ou un ticket.
 
+**Installer depuis GitHub**
+
+Un hôte de session n'a pas besoin d'une copie du dépôt : téléchargez ce seul fichier et
+lancez `-Install`. Le script auxiliaire suit tout seul — `-Install` récupère
+`Repair-AppxPackageStore.ps1` sur GitHub au commit épinglé et vérifie son SHA-256. Le
+téléchargement ci-dessous est épinglé de la même façon, sur un commit et une empreinte,
+parce que ce qu'il installe s'exécute en tant que System. À lancer dans un PowerShell élevé
+sur l'hôte :
+
+```powershell
+# Watch-M365Apps.ps1 à un commit fixe - mettre les deux lignes à jour ensemble
+$commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
+$sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+$file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'Le SHA-256 ne correspond pas - non exécuté' }
+# ensuite, comme dans les exemples : d'abord -NoRepair pour regarder, puis installer
+& $file -Install -WebhookUrl '<n8n webhook URL>' -WebhookToken '<token>' -Confirm:$false
+```
+
+Sur plusieurs hôtes à la fois, depuis votre propre poste via PowerShell remoting :
+
+```powershell
+# Le même téléchargement sur chaque hôte, en parallèle
+Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
+    $commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
+    $sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+    $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
+    if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw "SHA-256 mismatch on $env:COMPUTERNAME" }
+    & $file -Install -WebhookUrl '<n8n webhook URL>' -WebhookToken '<token>' -Confirm:$false
+}
+```
+
+Vérifiez ensuite un hôte avec `-TestNotification`. Pour passer à une version plus récente :
+mettez ce commit et le SHA-256 du fichier à ce commit
+(`(Get-FileHash .\scripts\RDS\Watch-M365Apps.ps1).Hash` dans une extraction de celui-ci)
+dans les deux lignes, après lecture du diff, et relancez `-Install` — d'ici là, la tâche
+continue d'exécuter sa propre copie dans `C:\IT\AppWatchdog`. L'URL du webhook et le jeton
+ne vont jamais dans ce dépôt : il est public.
+
 **Remarques**
 
 - **Gardez une session de chaque compte surveillé ouverte sur chaque hôte** (déconnectée,
@@ -393,7 +436,8 @@ aiguillage sur `{{$json.body.event}}` vers Teams, un e-mail ou un ticket.
   de se reconnecter. `-SkipLaunchTest` le désactive.
 - `-Install` restreint `-WorkingDir` à System et Administrateurs (la tâche exécute son
   contenu en tant que System), y copie ce script et `Repair-AppxPackageStore.ps1` — depuis
-  `..\Device`, ou depuis GitHub au même commit épinglé et SHA-256 que
+  `..\Device` dans une extraction du dépôt, sinon toujours depuis GitHub (jamais depuis
+  l'emplacement d'une copie téléchargée, un dossier où tout utilisateur a pu écrire) au même commit épinglé et SHA-256 que
   [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — et ne conserve l'URL du webhook
   et le jeton que dans `config.json` à cet endroit, pas dans la ligne de commande de la
   tâche. Pour modifier un réglage : relancer `-Install` avec tous les paramètres.
