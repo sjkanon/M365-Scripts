@@ -735,7 +735,7 @@ $menu = @(
                     if ($url) { $a['WebhookUrl'] = $url }
                     $token = Read-Host '  Webhook token (X-Watchdog-Token, empty = none)'
                     if ($token) { $a['WebhookToken'] = $token }
-                    $accounts = Read-Host '  Accounts to test with [itceadmin,itce.user]'
+                    $accounts = Read-Host '  Accounts to test with [itceadmin]'
                     if ($accounts) { $a['Account'] = @($accounts -split '[,;\s]' | Where-Object { $_ }) }
                     return $a
                 }
