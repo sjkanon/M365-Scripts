@@ -156,6 +156,9 @@ $ProbeTaskPath = '\M365AppWatchdog\'
 $HostAccount   = '(host)'
 $LaunchSeconds = 60
 $LogDays       = 14
+# Set before anything can report: Send-Notification reads it, and -TestNotification
+# reports before a run has opened its log.
+$script:logFile = $null
 # The repair helper, when it is not next to this script: fetched from this repo at a
 # pinned commit of main and refused unless the SHA-256 matches - the same pin as
 # Update-SessionHostImage.ps1. Move both together.
@@ -661,7 +664,6 @@ if ($TestNotification) {
 }
 
 # -- One run -------------------------------------------------------------------------
-$script:logFile = $null
 $transcribing   = $false
 $logDir = Join-Path $WorkingDir 'Logs'
 # A run before -Install would otherwise create the folder - where the helper is
