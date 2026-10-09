@@ -17,7 +17,7 @@ Scripts voor diagnose, monitoring en het klaarmaken van RDP- / RD Web Access-inf
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | Diagnose van FSLogix- / Azure Files-profielen op een AVD-sessiehost |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | FSLogix-profielschijven op een share verkleinen (Invoke-FslShrinkDisk), of controleren of FSLogix ze zelf comprimeert bij afmelden |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Een Windows 11 multi-session-image of AVD-sessiehost controleren en klaarmaken, zodat de nieuwe Teams, de nieuwe Outlook en Copilot blijven werken met FSLogix — FSLogix zelf blijft ongemoeid |
-| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (geplande taak) — test de nieuwe Teams, de nieuwe Outlook en Copilot met onze eigen accounts (`itceadmin`, `itce.user`) op een sessiehost, herstelt wat stuk is voordat een klant er last van heeft, en meldt het aan n8n |
+| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (geplande taak) — test de nieuwe Teams, de nieuwe Outlook en Copilot met ons eigen account (`itceadmin`) op een sessiehost, herstelt wat stuk is voordat een klant er last van heeft, en meldt het aan n8n |
 
 ---
 
@@ -295,9 +295,8 @@ build waar FSLogix de andere hosts om zal vragen.
 ### Watch-M365Apps.ps1
 
 Een watchdog voor de nieuwe Teams, de nieuwe Outlook en Copilot op een sessiehost. Hij
-draait als geplande taak onder System en gebruikt **onze eigen accounts** — standaard
-`itceadmin` en `itce.user` — als kanarie: start een app voor hen niet, dan start hij voor
-een klant ook niet. De watchdog herstelt de host voordat een klant het merkt, en meldt
+draait als geplande taak onder System en gebruikt **ons eigen account** — standaard
+`itceadmin` — als kanarie: start een app daar niet, dan start hij voor een klant ook niet. De watchdog herstelt de host voordat een klant het merkt, en meldt
 het aan een n8n-webhook.
 
 **Elke run**
@@ -318,7 +317,7 @@ Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: ge
 
 | Parameter | Beschrijving |
 |-----------|--------------|
-| `-Account` | Accounts om mee te testen — gebruikersnaam, UPN of `DOMEIN\gebruiker` (standaard: `itceadmin`, `itce.user`) |
+| `-Account` | Accounts om mee te testen — gebruikersnaam, UPN of `DOMEIN\gebruiker` (standaard: `itceadmin`; met meer accounts wordt elk getest, bv. `itceadmin,itce.user`) |
 | `-App` | `Teams`, `Outlook`, `Copilot` (standaard: alle drie) |
 | `-WebhookUrl` | n8n-webhook (productie-URL) waar het rapport naartoe wordt gePOST. Zonder deze logt de run alleen |
 | `-WebhookToken` | Wordt meegestuurd als header `X-Watchdog-Token`; stel dezelfde waarde in als Header Auth op de n8n Webhook-node |
@@ -357,11 +356,11 @@ Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: ge
   "event": "repaired",
   "host": "AVD-0",
   "time": "2026-10-09T14:30:02.1234567+02:00",
-  "summary": "AVD-0: 1 problem(s) found and repaired - itce.user Outlook NotRegistered",
-  "accounts": ["itceadmin", "itce.user"],
+  "summary": "AVD-0: 1 problem(s) found and repaired - itceadmin Outlook NotRegistered",
+  "accounts": ["itceadmin"],
   "findings": [],
-  "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
-  "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "before": [{ "Account": "itceadmin", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
+  "actions": ["itceadmin Outlook: re-registered as the user - result 0"],
   "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
   "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log"
 }
@@ -384,8 +383,8 @@ draait. Draai het in een verhoogde PowerShell op de host:
 
 ```powershell
 # Watch-M365Apps.ps1 op een vaste commit - beide regels samen bijwerken
-$commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
-$sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+$commit = '1182c3a169ac798d0d5fbbe699ad5db72f82067f'
+$sha256 = '34283756084B5042D444D883916CB3B36417114C9C5E915559F551623DF9AFC0'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -399,8 +398,8 @@ Op meerdere hosts tegelijk, vanaf je eigen pc via PowerShell remoting:
 ```powershell
 # Dezelfde download op elke host, parallel
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
-    $sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+    $commit = '1182c3a169ac798d0d5fbbe699ad5db72f82067f'
+    $sha256 = '34283756084B5042D444D883916CB3B36417114C9C5E915559F551623DF9AFC0'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -418,7 +417,7 @@ deze repo: die is openbaar.
 
 **Opmerkingen**
 
-- **Houd op elke host een sessie van elk bewaakt account open** (verbroken is prima). Een
+- **Houd op elke host een sessie van `itceadmin` (en elk ander bewaakt account) open** (verbroken is prima). Een
   account dat niet is aangemeld wordt overgeslagen: zijn pakketten staan in zijn
   FSLogix-container en zijn zonder die container niet te testen. Zonder enige sessie draait
   de hostcontrole (stap 1) nog wel.
