@@ -1008,6 +1008,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-09 (2)
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) stelt per wachtrij een **standaardlade** in: het nieuwe printerveld `inputBin`. Lades zijn geen parameter van Set-PrintConfiguration; ze staan in het Print Schema als opties van `psk:JobInputBin` / `DocumentInputBin` / `PageInputBin`, met namen van de fabrikant zoals `ns0000:Tray2`. Het script leest de PrintCapabilities van de driver, vergelijkt de naam uit de JSON met de weergavenaam of de Print Schema-naam (spaties en hoofdletters tellen niet, dus `Tray 2`, `tray2` en `ns0000:Tray2` zijn één lade), en schrijft die in het standaard printticket van de wachtrij voor elke ladefunctie die hem aanbiedt - in een job met time-out, net als de andere afdrukstandaarden. Een naam die de driver niet kent geeft een waarschuwing met wat hij wel aanbiedt, geen wijziging bij elke run |
+| Eén apparaat met meerdere wachtrijen - `Office` op lade 1, `Office - letterhead` op lade 2 - staat beschreven in de [printer-readme](scripts/Device/Printer/readme.nl.md#install-printerps1) en in `printers.example.json`: hetzelfde adres, gedeelde poort `IP_<address>`, eigen lade en standaarden |
+| Geverifieerd: syntaxcontrole; linkcontrole; in Windows PowerShell 5.1 het uitlezen van de lades bij de drivers op deze machine (AnyDesk: `Automatically Select`, `Upper Paper Tray`; Fax: één lade; PDF en OneNote: geen, zo gemeld), het matchen van namen inclusief een mislukte, en het herschrijven van het ticket met een nagebootste Set-PrintConfiguration (namespace van de fabrikant gedeclareerd, sub-eigenschappen van de oude optie weg, PageInputBin toegevoegd); de voorbeeld-JSON doorstaat de eigen controle van het script en een foute geeft beide fouten. **Niet** geverifieerd: een lade instellen bij een echte printerdriver (vereist verhoging en een apparaat met meerdere lades) |
+
 ### 2026-10-09
 | Wijziging |
 |--------|

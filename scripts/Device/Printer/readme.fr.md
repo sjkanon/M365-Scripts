@@ -85,7 +85,22 @@ Un appareil déjà conforme ne coûte qu'une lecture du JSON. Rien n'est téléc
 | `duplex` | `OneSided`, `TwoSidedLongEdge` ou `TwoSidedShortEdge` |
 | `color` | `true` / `false` |
 | `paperSize` | p. ex. `A4`, `Letter` |
+| `inputBin` | Bac par défaut, par le nom qu'affiche le pilote (`Tray 2`, `Manual Feed`) ou son nom Print Schema (`ns0000:Tray2`) ; espaces et casse sans importance. Un nom inconnu du pilote donne un avertissement qui liste les bacs qu'il propose |
 | `ensure` | `absent` supprime l'imprimante (et son port si aucune autre imprimante ne l'utilise). Le pilote reste toujours |
+
+**Un appareil, plusieurs files (bacs)**
+
+Les utilisateurs choisissent une file, pas un bac. Donnez à chaque file sa propre entrée avec **la même adresse** : elles partagent le port `IP_<address>`, et chacune a son propre bac par défaut, recto verso ou couleur :
+
+```json
+"printers": [
+  { "name": "Office",            "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 1" },
+  { "name": "Office - letterhead", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 2", "duplex": "OneSided" },
+  { "name": "Office - envelopes", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Manual Feed" }
+]
+```
+
+Le bac est défini dans le ticket d'impression par défaut de la file : c'est le point de départ de chaque utilisateur de cette file, qui peut toujours choisir un autre bac pour une impression. Les noms de bacs varient selon le pilote - exécutez le script une fois avec le nom attendu, et un nom erroné reçoit en réponse la liste que propose le pilote. Les pilotes universels n'affichent les bacs réels de l'appareil qu'une fois ses options connues ; si seul `Auto Select` revient, configurez d'abord les options installables dans les propriétés de l'imprimante, ou utilisez le pilote spécifique au modèle du fabricant.
 
 **Paramètres**
 

@@ -1008,6 +1008,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-09 (2)
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) définit un **bac par défaut** par file : le nouveau champ d'imprimante `inputBin`. Les bacs ne sont pas un paramètre de Set-PrintConfiguration ; ils se trouvent dans le Print Schema comme options de `psk:JobInputBin` / `DocumentInputBin` / `PageInputBin`, avec des noms du fabricant comme `ns0000:Tray2`. Le script lit les PrintCapabilities du pilote, compare le nom du JSON au nom affiché ou au nom Print Schema (espaces et casse ignorés, donc `Tray 2`, `tray2` et `ns0000:Tray2` sont un seul bac), et l'écrit dans le ticket d'impression par défaut de la file pour chaque fonction de bac qui le propose - dans un job avec délai, comme les autres paramètres d'impression. Un nom inconnu du pilote donne un avertissement listant ce qu'il propose, pas une modification à chaque exécution |
+| Un appareil avec plusieurs files - `Office` sur le bac 1, `Office - letterhead` sur le bac 2 - est documenté dans le [readme des imprimantes](scripts/Device/Printer/readme.fr.md#install-printerps1) et montré dans `printers.example.json` : même adresse, port `IP_<address>` partagé, bac et paramètres propres |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; dans Windows PowerShell 5.1, la lecture des bacs avec les pilotes de cette machine (AnyDesk : `Automatically Select`, `Upper Paper Tray` ; Fax : un bac ; PDF et OneNote : aucun, signalé comme tel), la correspondance des noms y compris un échec, et la réécriture du ticket avec Set-PrintConfiguration simulé (espace de noms du fabricant déclaré, sous-propriétés de l'ancienne option supprimées, PageInputBin ajouté) ; le JSON d'exemple passe la validation du script et un JSON erroné donne les deux erreurs. **Non** vérifié : définir un bac sur un vrai pilote d'imprimante (nécessite l'élévation et un appareil à plusieurs bacs) |
+
 ### 2026-10-09
 | Modification |
 |--------|

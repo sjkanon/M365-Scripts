@@ -1008,6 +1008,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-09 (2)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) sets a **default tray** per queue: the new printer field `inputBin`. Trays are not a parameter of Set-PrintConfiguration; they live in the Print Schema as the options of `psk:JobInputBin` / `DocumentInputBin` / `PageInputBin`, with vendor names such as `ns0000:Tray2`. The script reads the driver's PrintCapabilities, matches the JSON's name against the display name or the Print Schema name (spaces and case ignored, so `Tray 2`, `tray2` and `ns0000:Tray2` are one tray), and writes it into the queue's default print ticket for every bin feature that offers it - in a job with a timeout, like the other print defaults. A name the driver does not have is a warning listing what it does offer, not a change on every run |
+| One device with several queues - `Office` on tray 1, `Office - letterhead` on tray 2 - is documented in the [printer readme](scripts/Device/Printer/readme.md#install-printerps1) and shown in `printers.example.json`: same address, shared `IP_<address>` port, own tray and defaults |
+| Verified: syntax check; link check; in Windows PowerShell 5.1 the tray reading against this machine's drivers (AnyDesk: `Automatically Select`, `Upper Paper Tray`; Fax: one tray; PDF and OneNote: none, reported as such), name matching including a miss, and the ticket rewrite with Set-PrintConfiguration mocked (vendor namespace declared, old option's sub-properties dropped, PageInputBin added); the example JSON passes the script's own validation and a wrong one gives both errors. **Not** verified: setting a tray on a real printer driver (needs elevation and a multi-tray device) |
+
 ### 2026-10-09
 | Change |
 |--------|
