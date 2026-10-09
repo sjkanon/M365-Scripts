@@ -306,6 +306,8 @@ utilisateur n'a pas pu ouvrir, répare cela sur l'hôte et dans la session de ce
 utilisateur avant qu'il n'appelle, et le signale à un webhook n8n — en nommant
 l'utilisateur de chaque constat et de chaque réparation.
 
+> Version service desk pour IT Glue (en néerlandais, par niveau de support — que faire quand un utilisateur appelle, comment lire les cartes Teams) : [Watch-M365Apps-ITGlue.md](Watch-M365Apps-ITGlue.md), ou la page mise en forme [Watch-M365Apps-ITGlue.html](Watch-M365Apps-ITGlue.html) à coller.
+
 **À chaque exécution**
 
 | Étape | Ce qui se passe |

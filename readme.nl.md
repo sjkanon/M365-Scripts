@@ -868,6 +868,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnose van mislukte RDP-/RDWeb-aanmeldingen
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot geschikt voor FSLogix op de image
     │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog: Teams / Outlook / Copilot, herstel, n8n
+    │   ├── <a href="scripts/RDS/Watch-M365Apps-ITGlue.md">Watch-M365Apps-ITGlue.md</a>    ← servicedeskversie (NL) om in IT Glue te plakken
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← realtime monitor van sessies + licenties
     ├── <a href="scripts/SMTP/readme.nl.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.nl.md">readme.md</a>
@@ -1015,6 +1016,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-09 (9)
+| Wijziging |
+|-----------|
+| Nieuw [`scripts/RDS/Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) - de servicedeskprocedure voor de watchdog, in het Nederlands, om in IT Glue te plakken, met een opgemaakte [HTML-versie](scripts/RDS/Watch-M365Apps-ITGlue.html) uit `Convert-MarkdownToHtml.ps1`. Ze legt uit welke scripts meedoen (de watchdog, Repair-AppxPackageStore, Update-SessionHostImage, Update-TeamsClient, de n8n-flow) en hoe ze samenhangen; wat elke Teams-kaart betekent en wat je ermee doet; voor level 1 wat je een gebruiker die belt vraagt, waar je kijkt, wat je per klacht doet, wat je zegt en wanneer je escaleert; voor level 2 de opdrachten op de host (de watchdog nu draaien, het log volgen, kijken zonder herstellen, laatste herstel, de host onderzoeken) en wat je niet doet (geen reset bij een gebruiker); wat de watchdog niet ziet; de veelvoorkomende foutcodes; en voor level 3 installeren, instellingen, de n8n-flow en het wekelijkse onderhoud. Ze volgt de vorm van de bestaande Teams-procedure. De webhook-URL en het token staan er niet in - de repo is openbaar |
+| Geverifieerd: de HTML is gemaakt door de converter van de repo en is geldige XML; de interne link naar *Als een gebruiker belt* klopt; geen webhook-URL of token in beide bestanden; linkcontrole van de repo. **Niet** geverifieerd: het plakken in IT Glue, en de procedure tegen een echt gesprek |
 
 ### 2026-10-09 (8)
 | Wijziging |

@@ -868,6 +868,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnostic des échecs de connexion RDP/RDWeb
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot compatibles FSLogix sur l'image
     │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog : Teams / Outlook / Copilot, réparation, n8n
+    │   ├── <a href="scripts/RDS/Watch-M365Apps-ITGlue.md">Watch-M365Apps-ITGlue.md</a>    ← version service desk (NL) à coller dans IT Glue
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← surveillance en temps réel des sessions + licences
     ├── <a href="scripts/SMTP/readme.fr.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.fr.md">readme.md</a>
@@ -1015,6 +1016,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-09 (9)
+| Modification |
+|--------------|
+| Nouveau [`scripts/RDS/Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) - la procédure service desk du watchdog, en néerlandais, à coller dans IT Glue, avec une [version HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) mise en forme par `Convert-MarkdownToHtml.ps1`. Elle explique quels scripts interviennent (le watchdog, Repair-AppxPackageStore, Update-SessionHostImage, Update-TeamsClient, le flux n8n) et comment ils s'articulent ; ce que signifie chaque carte Teams et quoi en faire ; pour le niveau 1, quoi demander à un utilisateur qui appelle, où regarder, quoi faire par plainte, quoi dire et quand escalader ; pour le niveau 2, les commandes sur l'hôte (lancer le watchdog maintenant, suivre le journal, regarder sans réparer, dernière réparation, examiner l'hôte) et ce qu'il ne faut pas faire (pas de réinitialisation chez un utilisateur) ; ce que le watchdog ne voit pas ; les codes d'erreur courants ; et pour le niveau 3 l'installation, les réglages, le flux n8n et la maintenance hebdomadaire. Elle suit la forme de la procédure Teams existante. L'URL du webhook et le jeton n'y figurent pas - le dépôt est public |
+| Vérifié : le HTML a été généré par le convertisseur du dépôt et s'analyse comme du XML ; le lien interne vers *Als een gebruiker belt* aboutit ; aucune URL de webhook ni jeton dans les deux fichiers ; contrôle des liens du dépôt. **Non** vérifié : le collage dans IT Glue, et la procédure face à un vrai appel |
 
 ### 2026-10-09 (8)
 | Modification |
