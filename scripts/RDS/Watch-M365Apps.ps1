@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Watchdog for new Teams, new Outlook and Copilot on a session host: tests them with
-    our own accounts (itceadmin, itce.user), repairs what is broken before a customer
+    our own account (itceadmin), repairs what is broken before a customer
     runs into it, and reports to an n8n webhook.
 
 .DESCRIPTION
@@ -47,7 +47,8 @@
     the task "M365 App Watchdog". The webhook URL and token live only in that file.
 
 .PARAMETER Account
-    Accounts to test with, by user name, UPN or DOMAIN\user. Default: itceadmin, itce.user.
+    Accounts to test with, by user name, UPN or DOMAIN\user. Default: itceadmin.
+    More than one tests each of them, e.g. -Account itceadmin,itce.user.
 
 .PARAMETER App
     Apps to watch: Teams, Outlook, Copilot. Default: all three.
@@ -116,7 +117,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param (
-    [string[]] $Account = @('itceadmin', 'itce.user'),
+    [string[]] $Account = @('itceadmin'),
     [ValidateSet('Teams', 'Outlook', 'Copilot')]
     [string[]] $App = @('Teams', 'Outlook', 'Copilot'),
     [string]   $WebhookUrl,
