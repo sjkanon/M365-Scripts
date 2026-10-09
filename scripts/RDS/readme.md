@@ -299,6 +299,8 @@ canary: when an app does not start for it, it will not start for a customer eith
 repairs it on the host and in that user's own session before they call, and reports to
 an n8n webhook — naming the user each finding and each repair belongs to.
 
+> Service desk version for IT Glue (Dutch, per support level — what to do when a user calls, how to read the Teams cards): [Watch-M365Apps-ITGlue.md](Watch-M365Apps-ITGlue.md), or the styled [Watch-M365Apps-ITGlue.html](Watch-M365Apps-ITGlue.html) to paste in.
+
 **Each run**
 
 | Step | What happens |

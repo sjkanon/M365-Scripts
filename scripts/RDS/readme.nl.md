@@ -301,6 +301,8 @@ kon openen, herstelt dat op de host en in de eigen sessie van die gebruiker voor
 belt, en meldt het aan een n8n-webhook — met de gebruiker bij elke bevinding en elk
 herstel.
 
+> Servicedeskversie voor IT Glue (Nederlands, per supportniveau — wat te doen als een gebruiker belt, hoe je de Teams-kaarten leest): [Watch-M365Apps-ITGlue.md](Watch-M365Apps-ITGlue.md), of de opgemaakte [Watch-M365Apps-ITGlue.html](Watch-M365Apps-ITGlue.html) om te plakken.
+
 **Elke run**
 
 | Stap | Wat er gebeurt |
