@@ -46,10 +46,10 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-09 14:12. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-09 14:22. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-nieuwe-outlook-en-copilot-op-avd-watchdog-en-herstel">Teams, nieuwe Outlook en Copilot op AVD — watchdog en herstel</h1>
 <p>Deze procedure beschrijft wat er automatisch gebeurt als de nieuwe Teams, de nieuwe Outlook of Copilot niet werkt op een AVD-sessiehost, welke meldingen daaruit komen, en wat je doet als een gebruiker belt.</p>
-<p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 neemt het gesprek aan en leest de meldingen, level 2 kijkt op de host, level 3 beheert de scripts.</p>
+<p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 neemt het gesprek aan, helpt met de eerste stappen en zet door; level 2 leest de meldingen in het CIPP Teams-kanaal en kijkt op de host; level 3 beheert de scripts.</p>
 <p>Technische referentie voor beheerders: de sectie <em>Watch-M365Apps.ps1</em> in <code>scripts/RDS/readme.md</code> in de scriptrepo.</p>
 <hr/>
 <h2 id="in-het-kort">In het kort</h2>
@@ -58,7 +58,7 @@ li > p { margin: .4rem 0; }
 <tbody>
 <tr><td>Wat is het?</td><td>Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account <code>itceadmin</code> én bij elke aangemelde gebruiker</td></tr>
 <tr><td>Wat doet hij als iets stuk is?</td><td>Hij herstelt het zelf: eerst de host, daarna de app in de sessie van de gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat</td></tr>
-<tr><td>Hoe weten wij het?</td><td>Elke bevinding en elk herstel komt als kaart in het <strong>CIPP Teams-kanaal</strong> (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker</td></tr>
+<tr><td>Hoe weten wij het?</td><td>Elke bevinding en elk herstel komt als kaart in het <strong>CIPP Teams-kanaal</strong> (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker. <strong>Alleen level 2 en 3</strong> hebben toegang tot dat kanaal</td></tr>
 <tr><td>Wat merkt de gebruiker?</td><td>Normaal niets. Bij de volgende keer openen werkt de app weer</td></tr>
 <tr><td>Gaan er gegevens verloren?</td><td>Nee. Bij gebruikers wordt een app alleen opnieuw geregistreerd, nooit gereset of verwijderd</td></tr>
 <tr><td>Wat doet hij níet?</td><td>Een gecrashte app opnieuw starten bij een gebruiker, inlogproblemen, licenties, mailbox- of agendaproblemen oplossen</td></tr>
@@ -110,16 +110,17 @@ li > p { margin: .4rem 0; }
 </ol>
 <hr/>
 <h2 id="de-kaarten-in-het-cipp-teams-kanaal">De kaarten in het CIPP Teams-kanaal</h2>
+<blockquote><strong>Alleen level 2 en 3</strong> hebben toegang tot het CIPP Teams-kanaal. Level 1 ziet de kaarten niet en werkt met <a href="#als-een-gebruiker-belt-level-1">Als een gebruiker belt (level 1)</a>.</blockquote>
 <p>Elke kaart noemt de <strong>host</strong> (bijvoorbeeld <code>LEM-AVD-4</code>), het tijdstip en de betrokken <strong>gebruikers</strong>. Achter een gebruiker staat <code>(gebruiker)</code>; <code>itceadmin</code> is ons eigen testaccount.</p>
 <div class="table-scroll"><table>
-<thead><tr><th>Kaart</th><th>Kleur</th><th>Betekenis</th><th>Wat doe je?</th></tr></thead>
+<thead><tr><th>Kaart</th><th>Kleur</th><th>Betekenis</th><th>Wat doet level 2?</th></tr></thead>
 <tbody>
-<tr><td>✅ <strong>HERSTELD</strong></td><td>Groen</td><td>Er was iets stuk en het is opgelost. Per regel: welke app, bij wie, en <em>✅ hersteld bij deze gebruiker</em></td><td>Niets. Belt die gebruiker toch, zie <a href="#als-een-gebruiker-belt">Als een gebruiker belt</a></td></tr>
-<tr><td>🚨 <strong>NIET HERSTELD</strong></td><td>Rood</td><td>Herstel geprobeerd, maar (een deel) is nog stuk. <em>Nog stuk na herstel</em> en <em>Wel hersteld</em> staan apart</td><td>Ticket aanmaken, doorzetten naar <strong>level 2</strong></td></tr>
-<tr><td>⚠️ <strong>PROBLEEM</strong></td><td>Rood</td><td>Probleem gevonden, maar herstel staat uit op deze host (<code>-NoRepair</code>)</td><td>Ticket, <strong>level 2</strong></td></tr>
-<tr><td>💥 <strong>CRASH</strong></td><td>Oranje</td><td>Teams, Outlook of Copilot is gecrasht of vastgelopen (bij iemand op de host — Windows zegt niet bij wie)</td><td>Eén crash: niets. Steeds dezelfde app en foutcode, of meerdere kaarten per dag: ticket, <strong>level 2</strong></td></tr>
+<tr><td>✅ <strong>HERSTELD</strong></td><td>Groen</td><td>Er was iets stuk en het is opgelost. Per regel: welke app, bij wie, en <em>✅ hersteld bij deze gebruiker</em></td><td>Niets. Ligt er een ticket van die gebruiker: laat de app opnieuw openen en sluit het ticket als het werkt</td></tr>
+<tr><td>🚨 <strong>NIET HERSTELD</strong></td><td>Rood</td><td>Herstel geprobeerd, maar (een deel) is nog stuk. <em>Nog stuk na herstel</em> en <em>Wel hersteld</em> staan apart</td><td>Oppakken, ook zonder ticket — de gebruiker heeft er waarschijnlijk al last van. Zie <a href="#level-2-de-kaart-zoeken-en-op-de-host-kijken">Level 2</a></td></tr>
+<tr><td>⚠️ <strong>PROBLEEM</strong></td><td>Rood</td><td>Probleem gevonden, maar herstel staat uit op deze host (<code>-NoRepair</code>)</td><td>Oppakken, zie <a href="#level-2-de-kaart-zoeken-en-op-de-host-kijken">Level 2</a></td></tr>
+<tr><td>💥 <strong>CRASH</strong></td><td>Oranje</td><td>Teams, Outlook of Copilot is gecrasht of vastgelopen (bij iemand op de host — Windows zegt niet bij wie)</td><td>Eén crash: niets. Steeds dezelfde app en foutcode, of meerdere kaarten per dag: onderzoeken</td></tr>
 <tr><td>✅ <strong>WEER GOED</strong></td><td>Groen</td><td>Een eerder gemeld probleem is vanzelf verdwenen</td><td>Niets; sluit een openstaand ticket als de gebruiker het bevestigt</td></tr>
-<tr><td>⚠️ <strong>FOUT</strong></td><td>Oranje</td><td>De watchdog zelf liep vast</td><td>Ticket, <strong>level 3</strong></td></tr>
+<tr><td>⚠️ <strong>FOUT</strong></td><td>Oranje</td><td>De watchdog zelf liep vast</td><td>Doorzetten naar <strong>level 3</strong></td></tr>
 <tr><td>🧪 <strong>TEST</strong></td><td>Blauw</td><td>Testmelding na installatie</td><td>Niets</td></tr>
 </tbody>
 </table></div>
@@ -142,68 +143,77 @@ li > p { margin: .4rem 0; }
 AzureAD\jan.peeters Outlook: running for them now - nothing to do
 AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</code></pre>
 <hr/>
-<h2 id="als-een-gebruiker-belt">Als een gebruiker belt</h2>
-<p><strong>Level 1.</strong> Je hoeft niets op de host te doen. Je leest de kaarten en helpt de gebruiker met één van de stappen hieronder.</p>
-<h3 id="stap-1-vraag-uit">Stap 1 — vraag uit</h3>
+<h2 id="als-een-gebruiker-belt-level-1">Als een gebruiker belt (level 1)</h2>
+<p><strong>Level 1.</strong> Je ziet de meldingen van de watchdog niet en hoeft niets op de host te doen. Je stelt een paar vragen, helpt met de eerste stappen, en zet door naar level 2 als dat niet helpt. Goed om te weten: de watchdog herstelt de meeste gevallen al zelf, vaak voordat de gebruiker belt — opnieuw openen of afmelden en opnieuw aanmelden is dan genoeg.</p>
+<h3 id="stap-1-vraag-uit">Stap 1: vraag uit</h3>
 <div class="table-scroll"><table>
 <thead><tr><th>Vraag</th><th>Waarom</th></tr></thead>
 <tbody>
 <tr><td>Welke app: Teams, nieuwe Outlook of Copilot?</td><td>Andere apps vallen hier niet onder</td></tr>
-<tr><td>Wat gebeurt er precies: opent niet, sluit af, blijft hangen, foutmelding?</td><td>Bepaalt welke kaart je zoekt</td></tr>
-<tr><td>Sinds wanneer, en net na het aanmelden of halverwege de dag?</td><td>Net na aanmelden wijst op FSLogix — de watchdog kijkt pas na 10 minuten</td></tr>
-<tr><td>Werkt hij in de browser wel (teams.microsoft.com, outlook.office.com)?</td><td>Werkt het daar ook niet, dan is het een account- of dienstprobleem, geen app-probleem</td></tr>
+<tr><td>Wat gebeurt er precies: opent niet, sluit af, blijft hangen, wit scherm, foutmelding?</td><td>Bepaalt welke eerste stap je doet</td></tr>
+<tr><td>Sinds wanneer, en net na het aanmelden of halverwege de dag?</td><td>Net na aanmelden wijst op het klaarzetten van de apps — dat duurt soms een kwartier</td></tr>
+<tr><td>Werkt het in de browser wel (teams.microsoft.com, outlook.office.com)?</td><td>Werkt het daar ook niet, dan is het een account- of dienstprobleem, geen app-probleem</td></tr>
 </tbody>
 </table></div>
-<h3 id="stap-2-zoek-de-kaart">Stap 2 — zoek de kaart</h3>
-<p>Zoek in het CIPP Teams-kanaal op de <strong>naam van de gebruiker</strong> van de laatste uren. Weet je niet op welke host de gebruiker zit: level 2 ziet dat in de Azure Portal bij de hostpool onder <em>Sessies</em>.</p>
-<h3 id="stap-3-handel-af">Stap 3 — handel af</h3>
+<h3 id="stap-2-eerste-hulp">Stap 2: eerste hulp</h3>
 <div class="table-scroll"><table>
-<thead><tr><th>Wat de gebruiker zegt</th><th>Wat je op de kaarten ziet</th><th>Wat je doet</th></tr></thead>
+<thead><tr><th>Wat de gebruiker zegt</th><th>Wat je doet</th></tr></thead>
 <tbody>
-<tr><td>"Teams / Outlook opent niet, er gebeurt niets"</td><td><strong>HERSTELD</strong> met de naam van de gebruiker</td><td>Vraag de app opnieuw te openen. Werkt het niet: laat de gebruiker <strong>afmelden</strong> (Start → profiel → <em>Afmelden</em>, niet alleen het venster sluiten) en opnieuw aanmelden</td></tr>
-<tr><td></td><td><strong>NIET HERSTELD</strong> met de naam van de gebruiker</td><td>Laat de gebruiker afmelden en opnieuw aanmelden. Werkt het daarna nog niet: ticket naar <strong>level 2</strong>, met de kaart erbij</td></tr>
-<tr><td></td><td>Geen kaart, gebruiker is net aangemeld</td><td>Laat de gebruiker 10–15 minuten wachten en het opnieuw proberen; de watchdog kijkt pas na 10 minuten</td></tr>
-<tr><td></td><td>Geen kaart, langer dan een half uur aangemeld</td><td>Laat de gebruiker afmelden en opnieuw aanmelden. Helpt dat niet: ticket naar <strong>level 2</strong> (<em>watchdog zag niets</em>)</td></tr>
-<tr><td>"Teams / Outlook sluit steeds vanzelf af"</td><td><strong>CRASH</strong> van die app</td><td>Vraag de app opnieuw te starten. Gebeurt het vaker vandaag, of zie je meerdere CRASH-kaarten voor dezelfde app: ticket naar <strong>level 2</strong></td></tr>
-<tr><td>"Outlook / Teams reageert niet meer"</td><td><strong>CRASH</strong> met <em>hing en werd gesloten</em></td><td>Als hierboven</td></tr>
-<tr><td></td><td>Geen kaart</td><td>Kort vastlopen dat vanzelf herstelt wordt niet gelogd. App sluiten (ook in de taakbalk) en opnieuw openen</td></tr>
-<tr><td>"Het scherm van Teams / Outlook blijft wit of laadt opnieuw"</td><td>Meestal geen kaart</td><td>Dat is vaak het ingebouwde browseronderdeel (WebView2), dat de watchdog niet ziet. App afsluiten en opnieuw openen; blijft het: ticket naar <strong>level 2</strong></td></tr>
-<tr><td>"Copilot staat er niet"</td><td><strong>niet klaargezet op de host</strong> voor Copilot</td><td>Ticket naar <strong>level 2</strong> — ligt aan de host, niet aan de gebruiker</td></tr>
-<tr><td>"Ik kan niet inloggen in Teams / Outlook"</td><td>—</td><td>Valt hier <strong>niet</strong> onder: account, MFA of licentie. Volg de inlogprocedure</td></tr>
-<tr><td>"Mijn mail / agenda / chat ontbreekt"</td><td>—</td><td>Valt hier <strong>niet</strong> onder: dienstprobleem, geen app-probleem</td></tr>
+<tr><td>"Teams / Outlook opent niet, er gebeurt niets"</td><td>1. App helemaal afsluiten — ook rechtsonder in de taakbalk — en opnieuw openen. 2. Net aangemeld (minder dan een kwartier)? 10–15 minuten wachten en opnieuw proberen. 3. Lukt het niet: laten <strong>afmelden</strong> (Start → profiel → <em>Afmelden</em>, niet alleen het venster sluiten) en opnieuw aanmelden. 4. Werkt het dan nog niet: ticket naar <strong>level 2</strong></td></tr>
+<tr><td>"Teams / Outlook sluit steeds vanzelf af"</td><td>App opnieuw laten starten. Gebeurt het vandaag vaker: ticket naar <strong>level 2</strong></td></tr>
+<tr><td>"Outlook / Teams reageert niet meer"</td><td>App sluiten (ook in de taakbalk) en opnieuw openen. Bij herhaling: ticket naar <strong>level 2</strong></td></tr>
+<tr><td>"Het scherm van Teams / Outlook blijft wit of laadt opnieuw"</td><td>App afsluiten en opnieuw openen. Blijft het: ticket naar <strong>level 2</strong></td></tr>
+<tr><td>"Copilot staat er niet"</td><td>Ticket naar <strong>level 2</strong> — ligt meestal aan de host, niet aan de gebruiker</td></tr>
+<tr><td>"Ik kan niet inloggen in Teams / Outlook"</td><td>Valt hier <strong>niet</strong> onder: account, MFA of licentie. Volg de inlogprocedure</td></tr>
+<tr><td>"Mijn mail / agenda / chat ontbreekt"</td><td>Valt hier <strong>niet</strong> onder: dienstprobleem, geen app-probleem</td></tr>
 </tbody>
 </table></div>
 <h3 id="wat-vertel-je-de-gebruiker">Wat vertel je de gebruiker?</h3>
-<p>Bij <strong>HERSTELD</strong>:</p>
-<blockquote>"Ik zie dat Teams bij jou niet goed geregistreerd was; dat is intussen automatisch hersteld. Wil je hem opnieuw openen? Lukt het niet, meld je dan even af en opnieuw aan — je bestanden en chats blijven gewoon staan."</blockquote>
-<p>Bij <strong>NIET HERSTELD</strong> of geen kaart:</p>
-<blockquote>"Wil je je even afmelden — via Start, je profiel, <em>Afmelden</em> — en opnieuw aanmelden? Dan wordt de app opnieuw klaargezet. Werkt het daarna nog niet, dan kijkt een collega op de server; je hoort van ons."</blockquote>
-<p>Bij <strong>CRASH</strong>:</p>
-<blockquote>"Ik zie dat Teams bij je is vastgelopen. Start hem gerust opnieuw. Gebeurt het vaker, laat het ons weten, dan zoeken we de oorzaak."</blockquote>
-<h3 id="wanneer-escaleer-je-naar-level-2">Wanneer escaleer je naar level 2?</h3>
+<p>Als een app niet opent:</p>
+<blockquote>"Kun je de app helemaal afsluiten, ook rechtsonder in de taakbalk, en opnieuw openen? Helpt dat niet, meld je dan even af — via Start, je profiel, <em>Afmelden</em> — en meld je opnieuw aan. Dan wordt de app opnieuw klaargezet. Je bestanden en chats blijven gewoon staan."</blockquote>
+<p>Als je doorzet naar level 2:</p>
+<blockquote>"Ik zet het door naar een collega die op de server meekijkt. Vaak is het dan al automatisch hersteld; je hoort van ons."</blockquote>
+<p>Als een app vastliep of afsloot:</p>
+<blockquote>"Start de app gerust opnieuw. Gebeurt het vandaag vaker, laat het ons dan weten, dan zoeken we de oorzaak."</blockquote>
+<h3 id="wanneer-zet-je-door-naar-level-2">Wanneer zet je door naar level 2?</h3>
 <ul>
-<li>Bij elke <strong>NIET HERSTELD</strong>-kaart.
-</li>
 <li>Als afmelden en opnieuw aanmelden niet helpt.
 </li>
-<li>Bij meerdere <strong>CRASH</strong>-kaarten voor dezelfde app op een dag, of dezelfde foutcode op meerdere hosts.
+<li>Als een app vandaag meerdere keren vanzelf afsluit of vastloopt.
 </li>
-<li>Als meerdere gebruikers op dezelfde host hetzelfde melden.
+<li>Als meerdere gebruikers hetzelfde melden.
 </li>
-<li>Bij elke <strong>FOUT</strong>-kaart (meteen door naar level 3).
+<li>Bij <em>Copilot staat er niet</em>, of een wit scherm dat blijft.
 </li>
 </ul>
-<p>Zet in het ticket: gebruiker, host, app, wat de gebruiker ziet, sinds wanneer, en de kaart (schermafbeelding of link).</p>
+<p>Zet in het ticket: naam van de gebruiker, app, wat de gebruiker ziet, sinds wanneer, wat al geprobeerd is (opnieuw openen, afmelden en aanmelden) en het tijdstip van de melding.</p>
 <hr/>
-<h2 id="level-2-op-de-host-kijken">Level 2 — op de host kijken</h2>
+<h2 id="level-2-de-kaart-zoeken-en-op-de-host-kijken">Level 2: de kaart zoeken en op de host kijken</h2>
+<h3 id="stap-1-de-kaart-van-de-gebruiker-zoeken">Stap 1: de kaart van de gebruiker zoeken</h3>
+<p>Zoek in het CIPP Teams-kanaal op de <strong>naam van de gebruiker</strong>, de laatste uren. De host staat op de kaart. Is er geen kaart, zoek de host dan in de Azure Portal bij de hostpool onder <em>Sessies</em>.</p>
+<div class="table-scroll"><table>
+<thead><tr><th>Wat je ziet</th><th>Wat je doet</th></tr></thead>
+<tbody>
+<tr><td><strong>HERSTELD</strong> met de naam van de gebruiker</td><td>Laat de app opnieuw openen; lukt het niet, laten afmelden en opnieuw aanmelden. Werkt het: ticket sluiten</td></tr>
+<tr><td><strong>NIET HERSTELD</strong> met de naam van de gebruiker</td><td>Laat de gebruiker afmelden en opnieuw aanmelden — de host is meestal wel hersteld, en bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: <a href="#stap-2-op-de-host">Stap 2</a></td></tr>
+<tr><td>Geen kaart, gebruiker net aangemeld</td><td>De watchdog kijkt pas na 10 minuten. Laat hem nu draaien (stap 2) en kijk wat hij vindt</td></tr>
+<tr><td>Geen kaart, langer aangemeld</td><td>Laat de watchdog nu draaien (stap 2). Ziet hij niets, dan ligt het niet aan de registratie: Teams bijwerken of herinstalleren volgens <em>Teams-update op een werkplek</em>, of doorzetten naar <strong>level 3</strong></td></tr>
+<tr><td>Een of meer <strong>CRASH</strong>-kaarten</td><td>Kijk naar het patroon: steeds dezelfde app, module en foutcode? Op meerdere hosts? Dan <strong>level 3</strong> — dan ligt het aan een versie of de image</td></tr>
+<tr><td><em>niet klaargezet op de host</em> (bijvoorbeeld Copilot)</td><td>De host onderzoeken (stap 2, <em>De host zelf onderzoeken</em>); lukt herstel niet, <strong>level 3</strong></td></tr>
+<tr><td><strong>FOUT</strong></td><td>Doorzetten naar <strong>level 3</strong></td></tr>
+</tbody>
+</table></div>
+<p>Wat je de gebruiker vertelt bij <strong>HERSTELD</strong>:</p>
+<blockquote>"Ik zie dat Teams bij jou niet goed geregistreerd was; dat is intussen automatisch hersteld. Wil je hem opnieuw openen? Lukt het niet, meld je dan even af en opnieuw aan — je bestanden en chats blijven gewoon staan."</blockquote>
+<h3 id="stap-2-op-de-host">Stap 2: op de host</h3>
 <p>Alles hieronder in een <strong>verhoogde PowerShell op de sessiehost</strong> (als administrator).</p>
-<h3 id="de-watchdog-nu-laten-draaien">De watchdog nu laten draaien</h3>
+<h4 id="de-watchdog-nu-laten-draaien">De watchdog nu laten draaien</h4>
 <p>Niet wachten op de volgende halve uur:</p>
 <pre><code>Start-ScheduledTask -TaskName 'M365 App Watchdog'</code></pre>
 <p>Na een paar minuten staat het resultaat in het log en, als er iets was, als kaart in het kanaal. Volg het log terwijl hij draait:</p>
 <pre><code>Get-Content "C:\IT\AppWatchdog\Logs\Watch-M365Apps_$(Get-Date -Format yyyyMMdd).log" -Tail 60 -Wait</code></pre>
 <p>Stoppen met meekijken: <code>Ctrl+C</code>.</p>
-<h3 id="het-log-lezen">Het log lezen</h3>
+<h4 id="het-log-lezen">Het log lezen</h4>
 <p>Elke regel begint met een label:</p>
 <div class="table-scroll"><table>
 <thead><tr><th>Label</th><th>Betekenis</th></tr></thead>
@@ -217,10 +227,10 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <p>De run heeft vaste stappen: <em>Apps users could not open</em>, <em>Crashes and hangs</em>, <em>Host</em>, <code>itceadmin</code>, <em>Users</em>, en bij een probleem <em>Repairing</em> en <em>Read back</em>. Een regel als</p>
 <pre><code>  [FAIL] AzureAD\jan.peeters - Outlook - Windows could not open it 2x since 09-10 15:00, last at 15:21, error 0x80070490</code></pre>
 <p>betekent: Jan kon Outlook twee keer niet openen, met de bekende FSLogix-fout.</p>
-<h3 id="alleen-kijken-niets-wijzigen">Alleen kijken, niets wijzigen</h3>
+<h4 id="alleen-kijken-niets-wijzigen">Alleen kijken, niets wijzigen</h4>
 <pre><code>&amp; 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -NoRepair</code></pre>
 <p>Laat alles zien wat hij zou vinden, zonder iets te herstellen of te melden als herstel.</p>
-<h3 id="wanneer-was-het-laatste-herstel">Wanneer was het laatste herstel?</h3>
+<h4 id="wanneer-was-het-laatste-herstel">Wanneer was het laatste herstel?</h4>
 <pre><code>Get-Content C:\IT\AppWatchdog\state.json</code></pre>
 <div class="table-scroll"><table>
 <thead><tr><th>Veld</th><th>Betekenis</th></tr></thead>
@@ -230,10 +240,10 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <tr><td><code>UserRepairs</code></td><td>Per gebruiker en app wanneer die laatst opnieuw geregistreerd is (vergeten na een dag)</td></tr>
 </tbody>
 </table></div>
-<h3 id="de-host-zelf-onderzoeken">De host zelf onderzoeken</h3>
+<h4 id="de-host-zelf-onderzoeken">De host zelf onderzoeken</h4>
 <pre><code>&amp; 'C:\IT\AppWatchdog\Repair-AppxPackageStore.ps1' -Name teams,outlook,copilot -CheckOnly</code></pre>
 <p>Wijzigt niets. Laat zien welke versie FSLogix bij aanmelden vroeg, welke de host heeft, en welke apps de laatste dagen faalden en met welke foutcode.</p>
-<h3 id="wat-je-net-doet">Wat je níet doet</h3>
+<h4 id="wat-je-net-doet">Wat je níet doet</h4>
 <ul>
 <li><strong>Geen reset van de app bij een gebruiker</strong> (<code>Reset-AppxPackage</code>, of <em>Herstellen/Opnieuw instellen</em> in Instellingen): dan moet de gebruiker opnieuw aanmelden in Teams en Outlook en is de lokale cache weg.
 </li>
@@ -242,7 +252,7 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <li><strong>De watchdog niet uitschakelen</strong> om een probleem "stil" te krijgen — meld het aan level 3.
 </li>
 </ul>
-<h3 id="na-afloop">Na afloop</h3>
+<h4 id="na-afloop">Na afloop</h4>
 <ul>
 <li>Laat de gebruiker de app openen en bevestigen dat het werkt.
 </li>
@@ -277,7 +287,7 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 </tbody>
 </table></div>
 <hr/>
-<h2 id="level-3-beheer-van-de-watchdog">Level 3 — beheer van de watchdog</h2>
+<h2 id="level-3-beheer-van-de-watchdog">Level 3: beheer van de watchdog</h2>
 <h3 id="installeren-bijwerken-verwijderen">Installeren, bijwerken, verwijderen</h3>
 <p>De installatie gebeurt per host, vanaf GitHub, vastgezet op een commit en een SHA-256-hash. Het volledige commando met de actuele commit en hash staat in <code>scripts/RDS/readme.md</code> bij <em>Installing from GitHub</em>.</p>
 <pre><code>&amp; $file -NoRepair                                     # eerst kijken

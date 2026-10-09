@@ -1017,6 +1017,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-09 (10)
+| Change |
+|--------|
+| [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) had level 1 reading the watchdog's cards in the CIPP Teams channel, but only level 2 and 3 have access to that channel. Level 1 now asks, gives first help without the cards (close the app fully and reopen, wait a quarter of an hour after signing in, sign out and back in) and escalates with what was tried; level 2 gets a first step to find the user's card and act on it, then the host commands as before. The card table says what level 2 does, and the sentences for the user are split by level. Headings that are linked to use a colon instead of a dash, so the anchors are the same for GitHub and the HTML converter. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) regenerated |
+| Verified: every in-page link of the HTML points at an existing id, and the repository link check passes for the markdown. **Not** verified: pasting into IT Glue |
+
 ### 2026-10-09 (9)
 | Change |
 |--------|

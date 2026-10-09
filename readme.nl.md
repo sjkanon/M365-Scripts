@@ -1017,6 +1017,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-09 (10)
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) liet level 1 de kaarten van de watchdog in het CIPP Teams-kanaal lezen, maar alleen level 2 en 3 hebben toegang tot dat kanaal. Level 1 vraagt nu uit, geeft eerste hulp zonder de kaarten (app helemaal afsluiten en opnieuw openen, een kwartier wachten na aanmelden, afmelden en opnieuw aanmelden) en zet door met wat er geprobeerd is; level 2 krijgt een eerste stap om de kaart van de gebruiker te zoeken en ernaar te handelen, daarna de opdrachten op de host zoals voorheen. De kaartentabel zegt wat level 2 doet, en de zinnen voor de gebruiker zijn per niveau gesplitst. Koppen waarnaar gelinkt wordt gebruiken een dubbele punt in plaats van een streep, zodat de ankers voor GitHub en de HTML-converter gelijk zijn. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) opnieuw gemaakt |
+| Geverifieerd: elke interne link in de HTML wijst naar een bestaand id, en de linkcontrole van de repo slaagt voor de markdown. **Niet** geverifieerd: het plakken in IT Glue |
+
 ### 2026-10-09 (9)
 | Wijziging |
 |-----------|

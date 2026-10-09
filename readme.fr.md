@@ -1017,6 +1017,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-09 (10)
+| Modification |
+|--------------|
+| [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) faisait lire au niveau 1 les cartes du watchdog dans le canal Teams CIPP, mais seuls les niveaux 2 et 3 ont accès à ce canal. Le niveau 1 interroge désormais, apporte une première aide sans les cartes (fermer complètement l'application et la rouvrir, attendre un quart d'heure après la connexion, se déconnecter et se reconnecter) et escalade avec ce qui a été tenté ; le niveau 2 reçoit une première étape pour trouver la carte de l'utilisateur et agir en conséquence, puis les commandes sur l'hôte comme avant. Le tableau des cartes dit ce que fait le niveau 2, et les phrases pour l'utilisateur sont réparties par niveau. Les titres vers lesquels pointent des liens utilisent deux-points au lieu d'un tiret, pour que les ancres soient identiques pour GitHub et le convertisseur HTML. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) régénéré |
+| Vérifié : chaque lien interne du HTML pointe vers un id existant, et le contrôle des liens du dépôt passe pour le markdown. **Non** vérifié : le collage dans IT Glue |
+
 ### 2026-10-09 (9)
 | Modification |
 |--------------|
