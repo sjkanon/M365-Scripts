@@ -86,6 +86,7 @@ Een apparaat dat al in orde is, kost één keer de JSON lezen. Er wordt niets ge
 | `color` | `true` / `false` |
 | `paperSize` | bv. `A4`, `Letter` |
 | `inputBin` | Standaardlade, met de naam die de driver toont (`Tray 2`, `Manual Feed`) of de Print Schema-naam (`ns0000:Tray2`); spaties en hoofdletters maken niet uit. Een naam die de driver niet kent geeft een waarschuwing met de lades die hij wel aanbiedt |
+| `permissions` | Wie deze wachtrij mag gebruiken: een lijst van `{ "principal": "CONTOSO\\Finance", "access": "print" }` — zie *Beveiligingsgroepen per wachtrij* hieronder. Zonder dit veld blijven de rechten ongemoeid |
 | `ensure` | `absent` verwijdert de printer (en de poort als geen andere printer die gebruikt). De driver blijft altijd staan |
 
 **Eén apparaat, meerdere wachtrijen (lades)**
@@ -101,6 +102,31 @@ Gebruikers kiezen een wachtrij, geen lade. Geef elke wachtrij een eigen regel me
 ```
 
 De lade wordt ingesteld in het standaard printticket van de wachtrij, dus elke gebruiker van die wachtrij begint daarmee; een gebruiker kan in één afdrukvenster nog steeds een andere lade kiezen. Ladenamen verschillen per driver - draai het script één keer met de naam die je verwacht, en een verkeerde naam wordt beantwoord met de lijst die de driver aanbiedt. Universele drivers tonen pas de lades die het apparaat echt heeft als de opties van het apparaat bekend zijn; komt alleen `Auto Select` terug, stel dan eerst de installeerbare opties in bij de printereigenschappen, of gebruik de modelspecifieke driver van de fabrikant.
+
+**Beveiligingsgroepen per wachtrij**
+
+Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade met cheques waar alleen Finance op mag afdrukken:
+
+```json
+{ "name": "Office - cheques", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 3",
+  "permissions": [
+    { "principal": "CONTOSO\\Finance",          "access": "print" },
+    { "principal": "CONTOSO\\Office Managers",  "access": "manageDocuments" },
+    { "principal": "S-1-12-1-1111-2222-3333-4444", "access": "print" }
+  ] }
+```
+
+| `access` | Betekent |
+|----------|----------|
+| `print` | Afdrukken en de eigen afdruktaken beheren — wat Everyone standaard heeft |
+| `manageDocuments` | Ook afdruktaken van anderen onderbreken, herstarten en verwijderen |
+| `manage` | Ook de printer zelf wijzigen (instellingen, delen, rechten) |
+
+- `principal` is `DOMEIN\Groep`, een lokale gebruiker of groep, of een **SID**. Een Entra ID-groep kan alleen via de SID worden opgegeven (`S-1-12-1-…`, uit Entra ID of uit `whoami /groups` van een lid). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` en `SYSTEM` worden in het Engels begrepen, op Windows in elke taal
+- Wie in de lijst staat krijgt die toegang; **Everyone en elke andere gebruiker of groep verliest de zijne**, ook het account dat de printer toevallig heeft geïnstalleerd. Administrators, SYSTEM, CREATOR OWNER, app-pakketten en service-identiteiten houden altijd hun toegang — afdrukken vanuit apps zoals de nieuwe Outlook hangt van die vermeldingen af, dus die worden nooit verwijderd. `[]` betekent alleen beheerders
+- **Faalt veilig:** een groep die niet gevonden wordt houdt die wachtrij tegen (`-CheckOnly` meldt dat vooraf), en een nieuwe wachtrij waarvan de rechten niet ingesteld kunnen worden wordt weer verwijderd in plaats van open te blijven staan voor iedereen. Een bestaande wachtrij houdt zijn oude rechten en de run faalt. Bij een eerste opstart wordt een onbekende naam tot 2 minuten opnieuw geprobeerd, voor een domeincontroller die nog niet bereikbaar is
+- Vergeleken op betekenis, niet op tekst: Windows mag een vermelding anders opslaan dan ze werd opgegeven, en dat telt niet als wijziging. De rechten worden bij elke run gecontroleerd, dus een groep die met de hand in de printereigenschappen is toegevoegd wordt weer weggehaald — de JSON is leidend
+- De rechten bepalen wie op de wachtrij mag afdrukken. Of een gebruiker zonder toegang hem nog wel *ziet* in de lijst hangt van de applicatie af en valt buiten dit script
 
 **Parameters**
 
