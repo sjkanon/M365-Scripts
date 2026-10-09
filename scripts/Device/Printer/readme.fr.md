@@ -112,13 +112,53 @@ Un appareil déjà conforme ne coûte qu'une lecture du JSON. Rien n'est téléc
 # Uniquement les imprimantes Office, en simulation, JSON directement depuis GitHub
 .\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Printer 'Office*' -WhatIf
 
-# Premier démarrage d'un serveur issu d'une golden image (Custom Script Extension / tâche de démarrage en SYSTEM)
-powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet -Confirm:$false
+# Premier démarrage ou déploiement (Custom Script Extension, Run Command, tâche de démarrage en SYSTEM)
+powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet
 
 # Dépôt privé
 $env:GITHUB_TOKEN = '<fine-grained token, Contents: read>'
 .\Install-Printer.ps1 -ConfigPath \\fs01\it$\printers.json -Confirm:$false
 ```
+
+**Installer au déploiement plutôt que dans l'image**
+
+L'image reste sans pilotes ni imprimantes ; chaque nouvel hôte de session les reçoit lors de son déploiement, de sorte qu'une imprimante modifiée est une modification du JSON et non une nouvelle image. Exécutez le script une fois en SYSTEM via l'extension Azure Custom Script dans le Bicep de la VM (chaque hôte ajouté au pool l'exécute automatiquement), ou via Run Command sur un hôte qui existe déjà :
+
+```bicep
+// Custom Script Extension: runs once, as SYSTEM, when the VM is deployed
+resource installPrinters 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = {
+  parent: vm
+  name: 'InstallPrinters'
+  location: location
+  properties: {
+    publisher: 'Microsoft.Compute'
+    type: 'CustomScriptExtension'
+    typeHandlerVersion: '1.10'
+    autoUpgradeMinorVersion: true
+    settings: {
+      fileUris: [
+        'https://raw.githubusercontent.com/sjkanon/M365-Scripts/<commit>/scripts/Device/Printer/Install-Printer.ps1'
+      ]
+    }
+    protectedSettings: {
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet'
+    }
+  }
+}
+```
+
+```powershell
+# Run Command: afterwards, on a VM that is already running
+az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellScript `
+  --scripts '@Install-Printer.ps1' `
+  --parameters 'ConfigPath=https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json'
+```
+
+- Faites pointer `fileUris` vers un **commit** plutôt que `main`, pour qu'un hôte déployé le mois prochain exécute le script que vous avez testé. Le JSON peut rester sur une branche : ce sont des données, entièrement validées avant tout changement.
+- **Pas de `-Confirm:$false`** sur ces lignes de commande : une exécution sans console ne demande jamais rien, et via `-File` le commutateur arriverait comme le texte `'$false'` et arrêterait le script avant son démarrage.
+- Une VM n'a qu'**une** extension Custom Script. Si le déploiement l'utilise déjà pour autre chose, utilisez plutôt un Run Command managé (`Microsoft.Compute/virtualMachines/runCommands`).
+- Un jeton GitHub pour un dépôt de pilotes privé va dans `protectedSettings` (`-GitHubToken`), jamais dans `settings`, lisible sur la VM.
+- Le code de sortie `1` fait échouer l'extension, si bien qu'un déploiement avec une imprimante non installée est visible dans le portail ; `Install-Printer.log` dans `-LogPath` indique laquelle.
 
 **Codes de sortie**
 

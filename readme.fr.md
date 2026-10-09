@@ -1008,6 +1008,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-09
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) démarre au déploiement comme documenté. La ligne de commande que le readme et l'aide donnaient pour l'extension Custom Script et une tâche de démarrage, `powershell.exe -File Install-Printer.ps1 ... -Confirm:$false`, s'arrêtait avant le début du script : `-File` transmet chaque argument comme texte, donc `-Confirm:$false` arrivait comme la chaîne `'$false'` (*Cannot convert 'System.String' to the type SwitchParameter*) et aucune imprimante n'était installée. Ces exécutions n'ont pas de console et ne demandent jamais rien, le commutateur est donc retiré des exemples. Le relancement du script lui-même - en 64 bits quand Intune ou un RMM le lance en 32 bits, et pour l'élévation - transmettait `-Switch:$false` de la même façon ; il passe désormais ses paramètres via `-Command` (élévation : `-EncodedCommand`, car Start-Process perd les guillemets) |
+| Nouveau dans le [readme des imprimantes](scripts/Device/Printer/readme.fr.md#install-printerps1) : installer au déploiement plutôt que dans l'image - un exemple Bicep avec Custom Script Extension et un exemple `az vm run-command`, `fileUris` épinglé sur un commit, une seule extension Custom Script par VM (sinon un Run Command managé), le jeton GitHub dans `protectedSettings`, et le code de sortie `1` qui fait échouer l'extension |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; depuis Windows PowerShell 5.1 32 bits, le relancement est arrivé en 64 bits avec un chemin UNC contenant `$`, deux noms d'imprimante, `-Quiet`, `-WaitSeconds` et `-Confirm:$false` intacts et le code de sortie renvoyé ; l'ancienne ligne `-File ... -Confirm:$false` a reproduit l'erreur. **Non** vérifié : le relancement pour l'élévation (il ouvre une invite UAC), et un vrai déploiement par Custom Script Extension ou Run Command |
+
 ### 2026-10-08 (21)
 | Modification |
 |--------|

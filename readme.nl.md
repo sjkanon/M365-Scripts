@@ -1008,6 +1008,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-09
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) start bij de deployment zoals beschreven. De opdrachtregel die de readme en de help gaven voor de Custom Script Extension en een opstarttaak, `powershell.exe -File Install-Printer.ps1 ... -Confirm:$false`, stopte voordat het script begon: `-File` geeft elk argument als tekst door, dus `-Confirm:$false` kwam aan als de string `'$false'` (*Cannot convert 'System.String' to the type SwitchParameter*) en er werd geen printer geïnstalleerd. Die runs hebben geen console en krijgen nooit een vraag, dus de switch is uit de voorbeelden gehaald. De eigen herstart van het script - naar 64-bits als Intune of een RMM het 32-bits start, en voor verhoging - gaf `-Switch:$false` op dezelfde manier door; die geeft zijn parameters nu door via `-Command` (verhoging: `-EncodedCommand`, omdat Start-Process de aanhalingstekens verliest) |
+| Nieuw in de [printer-readme](scripts/Device/Printer/readme.nl.md#install-printerps1): installeren bij de deployment in plaats van in de image - een Bicep-voorbeeld met Custom Script Extension en een `az vm run-command`-voorbeeld, `fileUris` vastpinnen op een commit, één Custom Script Extension per VM (anders een managed Run Command), het GitHub-token in `protectedSettings`, en exitcode `1` die de extensie laat falen |
+| Geverifieerd: syntaxcontrole; linkcontrole; vanuit 32-bits Windows PowerShell 5.1 kwam de herstart in 64-bits aan met een UNC-pad met `$`, twee printernamen, `-Quiet`, `-WaitSeconds` en `-Confirm:$false` intact en de exitcode teruggegeven; de oude regel `-File ... -Confirm:$false` gaf dezelfde fout. **Niet** geverifieerd: de herstart voor verhoging (die opent een UAC-vraag), en een echte deployment met Custom Script Extension of Run Command |
+
 ### 2026-10-08 (21)
 | Wijziging |
 |--------|

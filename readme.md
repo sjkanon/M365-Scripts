@@ -1008,6 +1008,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-09
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) starts at deployment as documented. The command line the readme and help gave for the Custom Script Extension and a startup task, `powershell.exe -File Install-Printer.ps1 ... -Confirm:$false`, stopped before the script began: `-File` passes every argument as text, so `-Confirm:$false` arrived as the string `'$false'` (*Cannot convert 'System.String' to the type SwitchParameter*) and no printer was installed. Those runs have no console and are never asked anything, so the switch is dropped from the examples. The script's own relaunch - to 64-bit when Intune or an RMM starts it 32-bit, and for elevation - forwarded `-Switch:$false` the same way; it now passes its parameters through `-Command` (elevation: `-EncodedCommand`, because Start-Process loses the quoting) |
+| New in the [printer readme](scripts/Device/Printer/readme.md#install-printerps1): installing at deployment instead of in the image - a Bicep Custom Script Extension and an `az vm run-command` example, pinning `fileUris` to a commit, one Custom Script Extension per VM (managed Run Command otherwise), the GitHub token in `protectedSettings`, and exit code `1` failing the extension |
+| Verified: syntax check; link check; from 32-bit Windows PowerShell 5.1 the relaunch reached 64-bit with a UNC path containing `$`, two printer names, `-Quiet`, `-WaitSeconds` and `-Confirm:$false` intact and the exit code passed back; the old `-File ... -Confirm:$false` line reproduced the error. **Not** verified: the elevation relaunch (it opens a UAC prompt), and a real Custom Script Extension or Run Command deployment |
+
 ### 2026-10-08 (21)
 | Change |
 |--------|
