@@ -235,15 +235,28 @@ if (-not $Install -and (Test-Path $ConfigPath)) {
 $Apps = @($Apps | Where-Object { $_.App -in $App })
 
 # -- Helper --------------------------------------------------------------------------
+function Protect-WorkingDir {
+    <# System runs what is in -WorkingDir, so only System and Administrators may write to it. #>
+    New-Item -ItemType Directory -Path $WorkingDir -Force -WhatIf:$false | Out-Null
+    & icacls.exe $WorkingDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
 function Find-Helper {
     <#
-        Next to this script (the installed copy), the repo layout (..\Device) when run
-        from the repo, or GitHub at $HelperCommit when its SHA-256 matches. The
-        installed copy runs as System, so it never looks outside its locked folder.
+        Next to this script in the installed copy (its locked folder), ..\Device in a
+        checkout of the repo, and otherwise GitHub at $HelperCommit when its SHA-256
+        matches. Not "next to this script" anywhere else: downloaded to a folder such
+        as C:\IT\Setup, whatever sits beside it - or in C:\IT\Device - could have been
+        put there by any user, and -Install would hand it to System.
     #>
     param([string] $Name)
-    $candidates = @(Join-Path $PSScriptRoot $Name)
-    if (-not $Installed) { $candidates += Join-Path (Join-Path (Split-Path $PSScriptRoot) 'Device') $Name }
+    $candidates = @()
+    if ($Installed) {
+        $candidates += Join-Path $PSScriptRoot $Name
+    } elseif (Test-Path (Join-Path $PSScriptRoot '..\..\menu.ps1')) {
+        $candidates += Join-Path (Join-Path (Split-Path $PSScriptRoot) 'Device') $Name
+    }
     foreach ($path in $candidates) {
         if (Test-Path $path) { return $path }
     }
@@ -607,10 +620,7 @@ if ($Install) {
     if (-not $WebhookUrl) { Write-Warn 'No -WebhookUrl: the watchdog will repair and log, but report nothing' }
     if (-not $PSCmdlet.ShouldProcess("$env:COMPUTERNAME - task '$TaskName' every $IntervalMinutes min as System, in $WorkingDir", 'Install')) { exit 0 }
 
-    # System runs what is in this folder, so nobody else may write to it.
-    New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
-    & icacls.exe $WorkingDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Bad "Could not lock $WorkingDir (icacls exit $LASTEXITCODE) - not installed"; exit 1 }
+    if (-not (Protect-WorkingDir)) { Write-Bad "Could not lock $WorkingDir - not installed"; exit 1 }
     Write-Ok "$WorkingDir - System and Administrators only"
 
     $self = Join-Path $WorkingDir 'Watch-M365Apps.ps1'
@@ -653,6 +663,9 @@ if ($TestNotification) {
 $script:logFile = $null
 $transcribing   = $false
 $logDir = Join-Path $WorkingDir 'Logs'
+# A run before -Install would otherwise create the folder - where the helper is
+# downloaded and run from - with whatever C:\IT lets users do.
+if (-not (Protect-WorkingDir)) { Write-Bad "Could not lock $WorkingDir - stopped"; exit 1 }
 try {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     Get-ChildItem -Path $logDir -Filter '*.log' | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$LogDays) } | Remove-Item -Force
