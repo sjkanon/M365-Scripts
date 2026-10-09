@@ -57,7 +57,11 @@
       "duplex": "OneSided",
       "color": false,
       "paperSize": "A4",
-      "inputBin": "Tray 2"
+      "inputBin": "Tray 2",
+      "permissions": [
+        { "principal": "CONTOSO\\Management", "access": "print" },
+        { "principal": "CONTOSO\\Office Managers", "access": "manageDocuments" }
+      ]
     },
     {
       "name": "Office 2nd floor",

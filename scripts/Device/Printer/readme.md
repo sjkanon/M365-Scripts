@@ -86,6 +86,7 @@ A device that is already in order costs one read of the JSON. Nothing is downloa
 | `color` | `true` / `false` |
 | `paperSize` | e.g. `A4`, `Letter` |
 | `inputBin` | Default tray, by the name the driver shows (`Tray 2`, `Manual Feed`) or its Print Schema name (`ns0000:Tray2`); spaces and case do not matter. A name the driver does not have is a warning that lists the trays it does offer |
+| `permissions` | Who may use this queue: a list of `{ "principal": "CONTOSO\\Finance", "access": "print" }` — see *Security groups per queue* below. Without the field the permissions are left alone |
 | `ensure` | `absent` removes the printer (and its port when no other printer uses it). The driver always stays |
 
 **One device, several queues (trays)**
@@ -101,6 +102,31 @@ Users pick a queue, not a tray. Give each queue its own entry with the **same ad
 ```
 
 The tray is set in the queue's default print ticket, so it is what every user of that queue starts from; a user can still pick another tray in a single print dialog. Tray names differ per driver - run the script once with a name you expect, and a wrong one is answered with the list the driver offers. Universal drivers only show the trays they know the device has once the device's options are known; if only `Auto Select` comes back, set the installable options in the printer's properties first, or use the vendor's model-specific driver.
+
+**Security groups per queue**
+
+A queue can be limited to one or more groups, for example a cheque tray only Finance may print to:
+
+```json
+{ "name": "Office - cheques", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 3",
+  "permissions": [
+    { "principal": "CONTOSO\\Finance",          "access": "print" },
+    { "principal": "CONTOSO\\Office Managers",  "access": "manageDocuments" },
+    { "principal": "S-1-12-1-1111-2222-3333-4444", "access": "print" }
+  ] }
+```
+
+| `access` | Means |
+|----------|-------|
+| `print` | Print and manage one's own jobs — what Everyone has by default |
+| `manageDocuments` | Also pause, restart and delete other people's jobs |
+| `manage` | Also change the printer itself (settings, sharing, permissions) |
+
+- `principal` is `DOMAIN\Group`, a local user or group, or a **SID**. An Entra ID group can only be given by its SID (`S-1-12-1-…`, from Entra ID or `whoami /groups` of a member). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` and `SYSTEM` are understood in English on a Windows of any language
+- Listed principals get that access; **Everyone and every other user or group lose theirs**, including the account that happened to install the printer. Administrators, SYSTEM, CREATOR OWNER, app packages and service identities always keep their access — printing from packaged apps such as new Outlook depends on those entries, so they are never removed. `[]` means administrators only
+- **Fails closed:** a group that does not resolve stops that queue from being created (`-CheckOnly` reports it in advance), and a new queue whose permissions cannot be set is removed again rather than left open to everyone. An existing queue keeps its old permissions and the run fails. On a first boot an unresolved name is retried for up to 2 minutes, for a domain controller that is not reachable yet
+- Compared by meaning, not by text: Windows may store an entry differently from how it was given, and that does not count as a change. The permissions are checked on every run, so a group added by hand in the printer's properties is taken away again — the JSON is the source of truth
+- The permissions decide who may print to the queue. Whether a user without access still *sees* it in the list depends on the application and is not something this script controls
 
 **Parameters**
 

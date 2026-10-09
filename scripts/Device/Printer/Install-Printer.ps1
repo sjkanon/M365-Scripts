@@ -69,6 +69,17 @@
     color. "Office - letterhead" on tray 2 next to "Office" on tray 1 is the
     usual case: users pick the queue, not the tray.
 
+    Who may use a queue: "permissions": [ { "principal": "CONTOSO\\Finance",
+    "access": "print" } ], with access print, manageDocuments or manage, and the
+    principal as DOMAIN\Group, a local name, or a SID (the only way to name an
+    Entra ID group). Listed principals get that access; Everyone and every other
+    user or group lose it. Administrators, SYSTEM, CREATOR OWNER, app packages and
+    service identities always keep theirs - printing from packaged apps such as
+    new Outlook depends on them. Without the field the ACL is left alone; [] means
+    administrators only. This fails closed: a group that does not resolve stops
+    that queue from being created, and a new queue whose permissions cannot be
+    set is removed again rather than left open to everyone.
+
     After a golden image
     --------------------
     Made to run unattended on a server or session host that was just provisioned
@@ -349,7 +360,29 @@ $KnownSourceFields  = @{
     path          = @('type', 'path', 'sha256')
 }
 $KnownPrinterFields = @('name', 'driver', 'address', 'portName', 'portNumber', 'lprQueue', 'snmp', 'location',
-                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'inputBin', 'ensure', 'description')
+                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'inputBin', 'permissions',
+                        'ensure', 'description')
+$KnownPermissionFields = @('principal', 'access')
+
+# Who may use a queue, per access level, as the ACEs Windows itself writes for
+# it ({0} = the SID). "print" is what Everyone has by default; manageDocuments
+# adds control over other people's jobs; manage is the printer itself.
+$PrinterAccessAces = [ordered]@{
+    print           = @('(A;;SWRC;;;{0})', '(A;CIIO;GX;;;{0})')
+    manageDocuments = @('(A;;SWRC;;;{0})', '(A;CIIO;GX;;;{0})', '(A;OIIO;RPWPSDRCWDWO;;;{0})')
+    manage          = @('(A;;LCSWSDRCWDWO;;;{0})', '(A;OIIO;RPWPSDRCWDWO;;;{0})')
+}
+
+# Names that mean the same SID on every Windows, in any language: "Everyone" is
+# "Iedereen" on a Dutch server, and translating the English name there fails.
+$WellKnownPrincipals = @{
+    'everyone'            = 'S-1-1-0'
+    'authenticated users' = 'S-1-5-11'
+    'users'               = 'S-1-5-32-545'
+    'interactive'         = 'S-1-5-4'
+    'administrators'      = 'S-1-5-32-544'
+    'system'              = 'S-1-5-18'
+}
 $DuplexValues       = @('OneSided', 'TwoSidedLongEdge', 'TwoSidedShortEdge')
 
 # Written after every clean run, for detection rules - see Set-SuccessMarker.
@@ -1291,6 +1324,167 @@ function Set-InputBin {
     }
 }
 
+function Test-ProtectedSid {
+    <#
+        Identities a permissions list never takes away. The machine's own
+        administration (SYSTEM, Administrators, CREATOR OWNER, print operators),
+        and what printing from Store apps and services depends on: a default
+        printer ACL also grants ALL APPLICATION PACKAGES, a print capability SID
+        (S-1-15-3-...) and service SIDs. Removing those breaks printing from new
+        Outlook and other packaged apps without any error saying why.
+    #>
+    param([Parameter(Mandatory)] [string] $Sid)
+
+    if ($Sid -in @('S-1-5-18', 'S-1-5-19', 'S-1-5-20', 'S-1-3-0', 'S-1-3-1',
+                   'S-1-5-32-544', 'S-1-5-32-549', 'S-1-5-32-550')) { return $true }
+    return ($Sid -like 'S-1-15-*' -or $Sid -like 'S-1-5-99-*' -or $Sid -like 'S-1-5-80-*')
+}
+
+function Resolve-PrincipalName {
+    <# SID to a readable name for the output, the SID itself when it does not translate. #>
+    param([Parameter(Mandatory)] [string] $Sid)
+    try { return ([Security.Principal.SecurityIdentifier]::new($Sid)).Translate([Security.Principal.NTAccount]).Value }
+    catch { return $Sid }
+}
+
+$script:principalCache = @{}
+
+function Resolve-Principal {
+    <#
+        A user or group from the JSON to its SID. Accepted: a SID (the only way to
+        name an Entra ID group, S-1-12-1-...), DOMAIN\Group, a local name, or one of
+        the well-known names above in English. On a first boot the domain can be
+        unreachable for a while after the join, so a name that does not translate
+        is retried for -RetrySeconds before it counts as wrong.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [int] $RetrySeconds = 0)
+
+    $key = $Name.Trim().ToLowerInvariant()
+    if ($script:principalCache.ContainsKey($key)) { return $script:principalCache[$key] }
+    if ($WellKnownPrincipals.ContainsKey($key)) { return $WellKnownPrincipals[$key] }
+    if ($Name -match '^S-1-[\d-]+$') {
+        try { $sid = ([Security.Principal.SecurityIdentifier]::new($Name)).Value }
+        catch { throw "'$Name' is not a valid SID" }
+        $script:principalCache[$key] = $sid
+        return $sid
+    }
+
+    $deadline = (Get-Date).AddSeconds($RetrySeconds)
+    $warned   = $false
+    while ($true) {
+        try {
+            $sid = ([Security.Principal.NTAccount]::new($Name.Trim())).Translate([Security.Principal.SecurityIdentifier]).Value
+            $script:principalCache[$key] = $sid
+            return $sid
+        } catch {
+            if ((Get-Date).AddSeconds(15) -gt $deadline) {
+                throw ("'$Name' cannot be resolved to a user or group on this machine. Check the spelling (DOMAIN\Group), " +
+                       "whether this machine can reach a domain controller, or give the SID instead - an Entra ID group " +
+                       "is only known here by its SID (S-1-12-1-...)")
+            }
+            if (-not $warned) { Write-Warn "'$Name' cannot be resolved yet - waiting for the domain"; $warned = $true }
+            Start-Sleep -Seconds 15
+        }
+    }
+}
+
+function Resolve-PrinterGrant {
+    <#
+        The JSON's permissions as { Principal, Sid, Access }. Identities that are
+        protected anyway (Administrators, SYSTEM) are dropped with a note: they
+        always keep full control, and granting them twice would make the ACL look
+        different from the plan on every run.
+    #>
+    param([Parameter(Mandatory)] $Spec, [int] $RetrySeconds = 0)
+
+    $grants = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in @(Get-PropertyValue $Spec 'permissions')) {
+        if ($null -eq $entry) { continue }
+        $sid = Resolve-Principal -Name ([string] $entry.principal) -RetrySeconds $RetrySeconds
+        if (Test-ProtectedSid $sid) {
+            Write-Skip "  '$($entry.principal)' always keeps full control of '$($Spec.name)' - no need to list it"
+            continue
+        }
+        $grants.Add([PSCustomObject]@{ Principal = [string] $entry.principal; Sid = $sid; Access = [string] $entry.access })
+    }
+    return ,$grants
+}
+
+function Get-PrinterAccessMap {
+    <#
+        Who may do what on a printer, per SID, as one of print / manageDocuments /
+        manage - read from the meaning of the access masks rather than from the
+        SDDL text. Windows is free to store an ACE in another form than the one it
+        was given, and comparing text would then call the ACL changed on every run.
+        PRINTER_ACCESS_ADMINISTER (0x4) is manage, JOB_ACCESS_ADMINISTER (0x10) on
+        the inherit-only job ACE is manageDocuments, PRINTER_ACCESS_USE (0x8) print.
+    #>
+    param([Parameter(Mandatory)] [Security.AccessControl.RawAcl] $Acl)
+
+    $rank = @{ print = 1; manageDocuments = 2; manage = 3 }
+    $map  = @{}
+    foreach ($ace in $Acl) {
+        if ($ace -isnot [Security.AccessControl.KnownAce] -or $ace.AceQualifier -ne 'AccessAllowed') { continue }
+        $sid = $ace.SecurityIdentifier.Value
+        if (Test-ProtectedSid $sid) { continue }
+        # AceFlags is a byte-sized enum, and Windows PowerShell 5.1 throws
+        # "Specified cast is not valid" on -band with it unless both are ints.
+        $flags       = [int] $ace.AceFlags
+        $inheritOnly = ($flags -band [int] [Security.AccessControl.AceFlags]::InheritOnly) -ne 0
+        $objInherit  = ($flags -band [int] [Security.AccessControl.AceFlags]::ObjectInherit) -ne 0
+        $level = if (-not $inheritOnly -and ($ace.AccessMask -band 0x4)) { 'manage' }
+                 elseif ($inheritOnly -and $objInherit -and ($ace.AccessMask -band 0x10)) { 'manageDocuments' }
+                 elseif (-not $inheritOnly -and ($ace.AccessMask -band 0x8)) { 'print' }
+                 else { $null }
+        if (-not $level) { continue }
+        if (-not $map.ContainsKey($sid) -or $rank[$level] -gt $rank[$map[$sid]]) { $map[$sid] = $level }
+    }
+    return $map
+}
+
+function Get-PrinterAclPlan {
+    <#
+        The printer's ACL as the JSON wants it, starting from the one it has: every
+        protected entry stays exactly as Windows wrote it, every other user or group
+        goes, and the JSON's grants are added. Returns whether that differs from
+        now, the SDDL to set, and a summary of who gains and loses what.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] [AllowEmptyCollection()] $Grants)
+
+    $printer = Get-Printer -Name $Name -Full -ErrorAction Stop
+    $sddl    = [string] (Get-PropertyValue $printer 'PermissionSDDL')
+    if (-not $sddl) { throw "Windows returns no permissions for '$Name'" }
+
+    $current = [Security.AccessControl.RawSecurityDescriptor]::new($sddl)
+    $acl     = [Security.AccessControl.RawAcl]::new([Security.AccessControl.RawAcl]::AclRevision, 0)
+    foreach ($ace in $current.DiscretionaryAcl) {
+        $keep = $ace -isnot [Security.AccessControl.KnownAce] -or (Test-ProtectedSid $ace.SecurityIdentifier.Value)
+        if ($keep) { $acl.InsertAce($acl.Count, $ace) }
+    }
+    foreach ($grant in $Grants) {
+        $fragment = 'D:' + (($PrinterAccessAces[$grant.Access] | ForEach-Object { $_ -f $grant.Sid }) -join '')
+        foreach ($ace in ([Security.AccessControl.RawSecurityDescriptor]::new($fragment)).DiscretionaryAcl) { $acl.InsertAce($acl.Count, $ace) }
+    }
+
+    $before = Get-PrinterAccessMap -Acl $current.DiscretionaryAcl
+    $after  = Get-PrinterAccessMap -Acl $acl
+    $notes  = [System.Collections.Generic.List[string]]::new()
+    foreach ($sid in $before.Keys) {
+        if (-not $after.ContainsKey($sid)) { $notes.Add("-$(Resolve-PrincipalName $sid) ($($before[$sid]))") }
+        elseif ($after[$sid] -ne $before[$sid]) { $notes.Add("$(Resolve-PrincipalName $sid) $($before[$sid]) -> $($after[$sid])") }
+    }
+    foreach ($sid in $after.Keys) {
+        if (-not $before.ContainsKey($sid)) { $notes.Add("+$(Resolve-PrincipalName $sid) ($($after[$sid]))") }
+    }
+
+    $current.DiscretionaryAcl = $acl
+    return [PSCustomObject]@{
+        Changed = $notes.Count -gt 0
+        Sddl    = $current.GetSddlForm([Security.AccessControl.AccessControlSections]::All)
+        Summary = $notes -join ', '
+    }
+}
+
 function Get-PrinterState {
     <# What differs between the printer as it is and as the JSON wants it. #>
     param([Parameter(Mandatory)] $Spec)
@@ -1303,6 +1497,7 @@ function Get-PrinterState {
         Exists      = [bool] $existing
         PortExists  = [bool] $port
         PortDrift   = $false
+        PropertyDrift = $false
         PortName    = $portName
         CurrentPort = if ($existing) { $existing.PortName } else { $null }
         Changes     = $changes
@@ -1322,9 +1517,16 @@ function Get-PrinterState {
 
     if (-not $existing) {
         $changes.Add('printer does not exist')
+        # A group that does not resolve stops the install later on (fail closed),
+        # so a check run should say so now rather than report a plain install.
+        if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+            try { $null = Resolve-PrinterGrant -Spec $Spec }
+            catch { Write-Bad "'$($Spec.name)' will not be installed: $($_.Exception.Message)" }
+        }
         return $state
     }
 
+    $countBefore = $changes.Count
     if ($existing.DriverName -ne $Spec.driver) { $changes.Add("driver is '$($existing.DriverName)'") }
     if ($existing.PortName -ne $portName)      { $changes.Add("port is '$($existing.PortName)'") }
     foreach ($field in 'Location', 'Comment') {
@@ -1341,6 +1543,9 @@ function Get-PrinterState {
         $shareName = if (Get-PropertyValue $Spec 'shareName') { [string] $Spec.shareName } else { [string] $Spec.name }
         if ($existing.Shared -and [string] $existing.ShareName -ne $shareName) { $changes.Add("share name is '$($existing.ShareName)'") }
     }
+    # Only these need Set-Printer; a queue that differs only in its tray, print
+    # defaults or permissions is left alone by it.
+    $state.PropertyDrift = $changes.Count -gt $countBefore
 
     $duplex = Get-PropertyValue $Spec 'duplex'
     $color  = Get-PropertyValue $Spec 'color'
@@ -1369,6 +1574,19 @@ function Get-PrinterState {
             elseif (-not (Test-InputBinCurrent -Info $info -Bin $bin)) { $changes.Add("default tray is not '$($bin.Display)'") }
         } catch {
             Write-Warn "Could not read the trays of '$($Spec.name)': $($_.Exception.Message)"
+        }
+    }
+
+    # Who may use the queue. Unlike the print defaults, a permission that cannot
+    # be checked is reported loudly: a queue meant for one group that is open to
+    # everyone is a security problem, not a cosmetic one.
+    if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+        try {
+            $plan = Get-PrinterAclPlan -Name $Spec.name -Grants (Resolve-PrinterGrant -Spec $Spec)
+            if ($plan.Changed) { $changes.Add("permissions: $($plan.Summary)") }
+        } catch {
+            Write-Bad "Could not check the permissions of '$($Spec.name)': $($_.Exception.Message)"
+            $changes.Add('permissions could not be checked')
         }
     }
     return $state
@@ -1441,6 +1659,15 @@ function Remove-PrinterFromSpec {
 function Set-PrinterFromSpec {
     param([Parameter(Mandatory)] $Spec, [Parameter(Mandatory)] $State)
 
+    # Groups are resolved before anything is created: a queue meant for Finance
+    # that cannot be restricted to Finance is better not created at all than
+    # created open to everyone. On a first boot the domain gets time to answer.
+    $grants = $null
+    if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+        $retry  = if ($simulate) { 0 } else { [math]::Min($WaitSeconds, 120) }
+        $grants = Resolve-PrinterGrant -Spec $Spec -RetrySeconds $retry
+    }
+
     $portName = $State.PortName
     if (-not $State.PortExists) {
         if ($PSCmdlet.ShouldProcess("$portName -> $($Spec.address)", 'Add-PrinterPort')) {
@@ -1479,14 +1706,16 @@ function Set-PrinterFromSpec {
         if ($shared) { $extra['ShareName'] = if (Get-PropertyValue $Spec 'shareName') { [string] $Spec.shareName } else { [string] $Spec.name } }
     }
 
+    $createdNow = $false
     if (-not $State.Exists) {
         if ($PSCmdlet.ShouldProcess($Spec.name, "Add-Printer (driver '$($Spec.driver)', port $portName)")) {
             Invoke-SpoolerAction -What 'Add-Printer' -Action {
                 Add-Printer -Name $Spec.name -DriverName $Spec.driver -PortName $portName @extra -ErrorAction Stop
             }
+            $createdNow = $true
             Write-Ok "Printer '$($Spec.name)' added"
         }
-    } elseif ($PSCmdlet.ShouldProcess($Spec.name, "Set-Printer ($($State.Changes -join '; '))")) {
+    } elseif (($State.PropertyDrift -or $State.PortDrift) -and $PSCmdlet.ShouldProcess($Spec.name, "Set-Printer ($($State.Changes -join '; '))")) {
         Invoke-SpoolerAction -What 'Set-Printer' -Action {
             Set-Printer -Name $Spec.name -DriverName $Spec.driver -PortName $portName @extra -ErrorAction Stop
         }
@@ -1494,6 +1723,36 @@ function Set-PrinterFromSpec {
         # With default port names a new address is a new port; the old one is
         # left without a printer and would otherwise linger forever.
         if ($State.CurrentPort -and $State.CurrentPort -ne $portName) { Remove-UnusedPort -PortName $State.CurrentPort }
+    }
+
+    # Permissions straight after the printer exists, before anything that can be
+    # slow or hang. A new queue that cannot be restricted is removed again: left
+    # standing it would be open to everyone, which is the one outcome the JSON
+    # ruled out. An existing queue keeps its old ACL and the run fails loudly.
+    if ($null -ne $grants) {
+        $who = if ($grants.Count -gt 0) { ($grants | ForEach-Object { "$($_.Principal) ($($_.Access))" }) -join ', ' } else { 'administrators only' }
+        if (-not (Get-Printer -Name $Spec.name -ErrorAction SilentlyContinue)) {
+            $null = $PSCmdlet.ShouldProcess($Spec.name, "Restrict to $who")
+        } else {
+            try {
+                $plan = Get-PrinterAclPlan -Name $Spec.name -Grants $grants
+                if (-not $plan.Changed) {
+                    Write-Skip "  Permissions of '$($Spec.name)' are already as configured"
+                } elseif ($PSCmdlet.ShouldProcess($Spec.name, "Set permissions ($($plan.Summary))")) {
+                    Invoke-SpoolerAction -What 'Set-Printer -PermissionSDDL' -Action {
+                        Set-Printer -Name $Spec.name -PermissionSDDL $plan.Sddl -ErrorAction Stop
+                    }
+                    Write-Ok "Permissions of '$($Spec.name)': $($plan.Summary)"
+                }
+            } catch {
+                $reason = $_.Exception.Message
+                if ($createdNow) {
+                    try { Remove-Printer -Name $Spec.name -ErrorAction Stop } catch { }
+                    throw "Could not restrict '$($Spec.name)' to $who ($reason) - the new printer was removed again rather than left open to everyone"
+                }
+                throw "Could not set the permissions of '$($Spec.name)' ($reason) - its previous permissions are still in place"
+            }
+        }
     }
 
     # Print defaults for every user of this printer. Only what the JSON sets is
@@ -1722,6 +1981,32 @@ function Test-Configuration {
             if ($null -ne $value -and $value -isnot [string]) { $problems.Add("$who '$text' must be text") }
         }
         if ((Get-PropertyValue $p 'lprQueue') -and $null -ne $portNumber) { $warnings.Add("$who has lprQueue, so portNumber is ignored (LPR always uses 515)") }
+
+        # Permissions: a list of { principal, access }. [] is allowed and means
+        # "administrators only"; leaving the field out leaves the ACL alone.
+        $permissions = Get-PropertyValue $p 'permissions'
+        if ($null -ne $permissions) {
+            if ($permissions -isnot [array] -and -not (Test-JsonObject $permissions)) {
+                $problems.Add("$who 'permissions' must be a list of { `"principal`": ..., `"access`": ... }")
+            } else {
+                $seen = @{}
+                foreach ($entry in @($permissions)) {
+                    if (-not (Test-JsonObject $entry)) { $problems.Add("$who has a permissions entry that is not an object"); continue }
+                    foreach ($field in Get-FieldName $entry) {
+                        if ($field -notin $KnownPermissionFields) { $problems.Add("$who has a permissions entry with an unknown field '$field' (typo?)") }
+                    }
+                    $principal = Get-PropertyValue $entry 'principal'
+                    $access    = Get-PropertyValue $entry 'access'
+                    if (-not $principal -or $principal -isnot [string]) { $problems.Add("$who has a permissions entry without a 'principal'"); continue }
+                    if ($access -notin $PrinterAccessAces.Keys) {
+                        $problems.Add("$who permission for '$principal' must have access $(@($PrinterAccessAces.Keys) -join ', '), not '$access'")
+                    }
+                    if ($seen.ContainsKey($principal.ToLowerInvariant())) { $problems.Add("$who lists '$principal' twice in permissions") }
+                    $seen[$principal.ToLowerInvariant()] = $true
+                }
+                if (@($permissions).Count -eq 0) { $warnings.Add("$who has an empty permissions list - only administrators will be able to print to it") }
+            }
+        }
 
         # Two printers may share a port - but not with two different addresses,
         # because the second would silently print to the first one's printer.
