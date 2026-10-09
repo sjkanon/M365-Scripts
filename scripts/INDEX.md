@@ -204,6 +204,6 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Update-TeamsClient.ps1`](Device/Update-TeamsClient.ps1) | [`Device/`](Device/readme.md) | Update the new Microsoft Teams client, including the Teams Meeting Add-in for Outlook, only when Microsoft publishes a newer build. Supports -WhatIf. |
 | [`Update-UnifiFirmware.ps1`](Network/UniFi/Update-UnifiFirmware.ps1) | [`Network/UniFi/`](Network/UniFi/readme.md) | List and optionally trigger firmware upgrades for UniFi devices across one or all sites. |
 | [`Watch-ADAccountLockouts.ps1`](ActiveDirectory/Watch-ADAccountLockouts.ps1) | [`ActiveDirectory/`](ActiveDirectory/readme.md) | Monitor on-prem Active Directory for locked-out user accounts and log new lockouts. |
-| [`Watch-M365Apps.ps1`](RDS/Watch-M365Apps.ps1) | [`RDS/`](RDS/readme.md) | Watchdog for new Teams, new Outlook and Copilot on a session host: tests them with our own account (itceadmin), repairs what is broken before a customer runs i… |
+| [`Watch-M365Apps.ps1`](RDS/Watch-M365Apps.ps1) | [`RDS/`](RDS/readme.md) | Watchdog for new Teams, new Outlook and Copilot on a session host: tests them with our own account (itceadmin) and for every signed-in user, repairs what is br… |
 | [`Watch-RDSLive.ps1`](RDS/Watch-RDSLive.ps1) | [`RDS/`](RDS/readme.md) | Real-time RDS session and licensing monitor. |
 

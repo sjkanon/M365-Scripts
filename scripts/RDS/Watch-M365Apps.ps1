@@ -2,8 +2,8 @@
 <#
 .SYNOPSIS
     Watchdog for new Teams, new Outlook and Copilot on a session host: tests them with
-    our own account (itceadmin), repairs what is broken before a customer
-    runs into it, and reports to an n8n webhook.
+    our own account (itceadmin) and for every signed-in user, repairs what is broken -
+    on the host and in that user's own session - and reports to an n8n webhook.
 
 .DESCRIPTION
     Runs as a scheduled task under System (install it with -Install). Each run:
@@ -25,13 +25,27 @@
                      running in that session; when it is not, it is started there
                      (shell:AppsFolder\<AUMID>, through a one-off task in the user's
                      own session) and must still be running 15 seconds later.
-      3. Repair      Host problems and packages whose files are gone: Repair-AppxPackageStore.ps1
-                     -Provision (Microsoft's installers, signature-checked), at most once
-                     per -RepairCooldownHours. Then, in our own account only: a package
-                     that is not registered is registered by family name, an app that
-                     does not start is reset (Reset-AppxPackage). Nothing is closed,
-                     removed or reset for any other user - no -RemoveOld, no -Latest.
-      4. Read back   Steps 1 and 2 again.
+      2b. Users      Every other signed-in user (customers), once signed in for 10
+                     minutes: the same registration check, without starting anything.
+                     And every attempt since the last run, by any user, to open one of
+                     the apps that Windows refused (TWinUI 5961), and every failed
+                     registration of their packages (AppXDeploymentServer 401/404,
+                     minus "close the app first" and "already installed"), with the
+                     user it happened to.
+      3. Repair      Host problems, packages whose files are gone, and anything a user
+                     ran into: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
+                     installers, signature-checked), at most once per
+                     -RepairCooldownHours. Then per user, in that user's own session
+                     (a one-off task running a headless console, so nothing appears):
+                     a package that is not registered, is broken or would not open is
+                     registered again by family name - for a customer only while the
+                     app is not running for them, at most once per -RepairCooldownHours
+                     per user and app, and never reset. In our own account an app that
+                     does not start is reset (Reset-AppxPackage). Nothing is closed or
+                     removed for anyone - no -RemoveOld, no -Latest.
+      4. Read back   Steps 1, 2 and 2b's registration check again; a user's failure
+                     counts as repaired when the package is registered and Ok for them
+                     afterwards.
       5. Report      A JSON POST to -WebhookUrl when something is wrong, was repaired,
                      recovered on its own, or crashed at least -CrashThreshold times -
                      not on every healthy run. A problem that stays is reported again
@@ -39,7 +53,8 @@
 
     An account that is not signed in on this host is skipped: its packages live in its
     FSLogix container and cannot be tested without it. The watched accounts are
-    canaries - keep a session of each open (disconnected is fine) on every host.
+    canaries - keep a session of each open (disconnected is fine) on every host. Every
+    report names the user each finding and each repair belongs to.
 
     -Install copies this script and Repair-AppxPackageStore.ps1 (from ..\Device, or from
     GitHub at the commit and SHA-256 pinned below) to -WorkingDir, locks that folder to
@@ -77,6 +92,10 @@
 
 .PARAMETER NoRepair
     Test and report only, change nothing.
+
+.PARAMETER NoUserRepair
+    Repair the host and our own account, but never run anything in a customer's
+    session; their problems are still reported, with their name.
 
 .PARAMETER SkipLaunchTest
     Do not start an app that is not running; only check its registration.
@@ -131,6 +150,7 @@ param (
     [ValidateRange(0, 1000)]
     [int]      $CrashThreshold = 1,
     [switch]   $NoRepair,
+    [switch]   $NoUserRepair,
     [switch]   $SkipLaunchTest,
     [switch]   $Install,
     [switch]   $Uninstall,
@@ -155,6 +175,10 @@ $TaskName      = 'M365 App Watchdog'
 $ProbeTaskPath = '\M365AppWatchdog\'
 $HostAccount   = '(host)'
 $LaunchSeconds = 60
+$UserGraceMinutes = 10   # a fresh sign-in is still registering its apps; leave it alone until then
+# Deployment results that are not a fault: an update waiting for the app to close
+# (0x80073D02), and asking for what is already there (0x80073CFB, 0x80073D06).
+$BenignAppxCodes = @('0x80073D02', '0x80073CFB', '0x80073D06')
 $LogDays       = 14
 # Set before anything can report: Send-Notification reads it, and -TestNotification
 # reports before a run has opened its log.
@@ -230,7 +254,7 @@ $StatePath  = Join-Path $WorkingDir 'state.json'
 $Installed  = (Test-Path $PSScriptRoot) -and ((Resolve-Path $PSScriptRoot).Path.TrimEnd('\') -eq ([IO.Path]::GetFullPath($WorkingDir)).TrimEnd('\'))
 if (-not $Install -and (Test-Path $ConfigPath)) {
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'CrashThreshold', 'NoRepair', 'SkipLaunchTest') {
+    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'CrashThreshold', 'NoRepair', 'NoUserRepair', 'SkipLaunchTest') {
         if ($PSBoundParameters.ContainsKey($name)) { continue }
         $value = Get-PropertyValue $config $name
         if ($null -ne $value) { Set-Variable -Name $name -Value $value }
@@ -308,25 +332,46 @@ function Get-EdgeUpdateClientVersion {
     return $null
 }
 
-function Get-AccountSession {
+function Get-UserSession {
     <#
-        Where a watched account is signed in on this host: the owner of each
-        explorer.exe, matched on the user name alone, so AD, Entra (AzureAD\) and
-        local accounts all count. One row per account.
+        Everyone signed in on this host: the owner of each explorer.exe, one row per
+        user. Watched marks our own accounts, matched on the user name alone, so AD,
+        Entra (AzureAD\) and local accounts all count; their Account is the name from
+        -Account, a customer's is DOMAIN\user. Since is when that explorer started.
     #>
     $seen = @{}
     foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
         $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction SilentlyContinue
         if (-not $owner -or $owner.ReturnValue -ne 0) { continue }
-        foreach ($name in $Account) {
-            $short = (($name -split '\\')[-1] -split '@')[0]
-            if ($owner.User -ine $short -or $seen.ContainsKey($name)) { continue }
-            $sid = (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid
-            if (-not $sid) { continue }
-            $seen[$name] = $true
-            [PSCustomObject]@{ Account = $name; User = '{0}\{1}' -f $owner.Domain, $owner.User; Sid = $sid; SessionId = $proc.SessionId }
+        $sid = (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid
+        if (-not $sid -or $seen.ContainsKey($sid)) { continue }
+        $seen[$sid] = $true
+        $user    = '{0}\{1}' -f $owner.Domain, $owner.User
+        $watched = @($Account | Where-Object { (($_ -split '\\')[-1] -split '@')[0] -ieq $owner.User }) | Select-Object -First 1
+        [PSCustomObject]@{
+            Account   = if ($watched) { $watched } else { $user }
+            User      = $user
+            Sid       = $sid
+            SessionId = $proc.SessionId
+            Since     = $proc.CreationDate
+            Watched   = [bool] $watched
         }
     }
+}
+
+function Get-AccountSession {
+    <# Where a watched account is signed in on this host. #>
+    return @(Get-UserSession | Where-Object { $_.Watched })
+}
+
+function Resolve-UserName {
+    <# A SID from an event as a name: a signed-in user, else the profile folder, else the SID. #>
+    param([string] $Sid, $Sessions)
+    $session = @($Sessions | Where-Object { $_.Sid -eq $Sid }) | Select-Object -First 1
+    if ($session) { return $session.Account }
+    $profilePath = Get-PropertyValue (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$Sid" -ErrorAction SilentlyContinue) 'ProfileImagePath'
+    if ($profilePath) { return Split-Path $profilePath -Leaf }
+    try { return ([Security.Principal.SecurityIdentifier] $Sid).Translate([Security.Principal.NTAccount]).Value } catch { return $Sid }
 }
 
 function Get-AppEntry {
@@ -392,6 +437,31 @@ function Invoke-AsUser {
     }
 }
 
+function Invoke-PowerShellAsUser {
+    <#
+        A PowerShell command in the user's session without a window: through conhost
+        --headless, which on Windows 11 also keeps Windows Terminal from opening. It
+        waits for the command, but does not pass its exit code on - check the result
+        afterwards instead.
+    #>
+    param($Session, [string] $Command, [int] $WaitSeconds = 300)
+    $argument = '--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{1}"' -f $nativeShell, $Command
+    return Invoke-AsUser -Session $Session -Execute (Join-Path $env:WINDIR 'System32\conhost.exe') -Argument $argument -WaitSeconds $WaitSeconds
+}
+
+function Test-UserPackage {
+    <# Whether one of the app's packages is registered, present and Ok for this user (DOMAIN\user, not a SID - see Test-UserApp). #>
+    param([string] $User, [string[]] $Packages)
+    foreach ($name in $Packages) {
+        foreach ($pkg in @(Get-AppxPackage -User $User -Name $name -ErrorAction SilentlyContinue)) {
+            $location = Get-PropertyValue $pkg 'InstallLocation'
+            $status   = [string] (Get-PropertyValue $pkg 'Status')
+            if ($location -and (Test-Path -LiteralPath $location) -and (-not $status -or $status -eq 'Ok')) { return $true }
+        }
+    }
+    return $false
+}
+
 function Test-AppStart {
     <# Start the app in the user's session; it has to come up and still be there 15 seconds later. #>
     param($Session, $Entry)
@@ -450,11 +520,75 @@ function Get-AppCrash {
     }
 }
 
+# -- Apps users could not open ---------------------------------------------------------
+function Format-HResult {
+    <# An HRESULT as 0x80070490, whether the event stored it signed or unsigned. #>
+    param($Value)
+    return '0x{0:X8}' -f ([long] $Value -band [long] 4294967295)
+}
+
+function Get-OpenFailure {
+    <#
+        Since $Since, for any user: Windows refusing to open one of the apps (TWinUI
+        5961 - AUMID at 0, HRESULT at 1), and a registration of one of their packages
+        that failed (AppXDeploymentServer 401 - package at 1, HRESULT at 3; 404 -
+        package at 1, HRESULT at 2), minus $BenignAppxCodes. Fields, not message text:
+        the text is translated on a Dutch or French Windows. One failure writes both
+        401 and 404, so they are counted once per user, package, code and second. The
+        user is the event's own SID; System (FSLogix registering at sign-in) becomes
+        the host. One finding per user, app, kind and code.
+    #>
+    param([datetime] $Since, $Sessions)
+    $rows = @(
+        foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TWinUI/Operational'; Id = 5961; StartTime = $Since } -ErrorAction SilentlyContinue)) {
+            $values = @($record.Properties | ForEach-Object { $_.Value })
+            if ($values.Count -lt 2) { continue }
+            [PSCustomObject]@{ Kind = 'WontOpen'; Target = [string] $values[0]; Code = Format-HResult $values[1]; Record = $record }
+        }
+        foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Id = 401, 404; StartTime = $Since } -ErrorAction SilentlyContinue)) {
+            $values = @($record.Properties | ForEach-Object { $_.Value })
+            $codeAt = if ($record.Id -eq 401) { 3 } else { 2 }
+            if ($values.Count -le $codeAt) { continue }
+            [PSCustomObject]@{ Kind = 'RegisterFailed'; Target = [string] $values[1]; Code = Format-HResult $values[$codeAt]; Record = $record }
+        }
+    )
+    $seen  = @{}
+    $found = @(foreach ($row in $rows) {
+        if ($row.Code -in $BenignAppxCodes) { continue }
+        $entry = $null; $package = $null
+        foreach ($candidate in $Apps) {
+            $package = @($candidate.Packages | Where-Object { $row.Target -like "$($_)_*" }) | Select-Object -First 1
+            if ($package) { $entry = $candidate; break }
+        }
+        if (-not $entry) { continue }
+        $sid = [string] $row.Record.UserId
+        $key = '{0}|{1}|{2}|{3:yyyyMMddHHmmss}' -f $sid, $row.Target, $row.Code, $row.Record.TimeCreated
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        [PSCustomObject]@{ Sid = $sid; App = $entry.App; Package = $package; Kind = $row.Kind; Code = $row.Code; Time = $row.Record.TimeCreated }
+    })
+    if ($found.Count -eq 0) { return }
+    foreach ($group in @($found | Group-Object Sid, App, Kind, Code)) {
+        $first   = $group.Group[0]
+        $last    = ($group.Group | Sort-Object Time -Descending | Select-Object -First 1).Time
+        $system  = -not $first.Sid -or $first.Sid -eq 'S-1-5-18'
+        $session = @($Sessions | Where-Object { $_.Sid -eq $first.Sid }) | Select-Object -First 1
+        $name    = if ($system) { $HostAccount } else { Resolve-UserName $first.Sid $Sessions }
+        $what    = if ($first.Kind -eq 'WontOpen') { 'Windows could not open it' } else { 'its registration failed' }
+        $detail  = '{0} {1}x since {2:dd-MM HH:mm}, last at {3:HH:mm}, error {4}' -f $what, $group.Count, $Since, $last, $first.Code
+        New-Finding -Account $name -App $first.App -Problem $first.Kind -Detail $detail -Package $first.Package `
+            -Sid $(if ($system) { '' } else { $first.Sid }) -Customer:(-not $system -and -not ($session -and $session.Watched)) -FromEvent
+    }
+}
+
 # -- Checks --------------------------------------------------------------------------
 function New-Finding {
-    param([string] $Account, [string] $App, [string] $Problem, [string] $Detail, [string] $Package)
-    Write-Bad "$App - $Detail"
-    [PSCustomObject]@{ Account = $Account; App = $App; Problem = $Problem; Detail = $Detail; Package = $Package }
+    param([string] $Account, [string] $App, [string] $Problem, [string] $Detail, [string] $Package,
+          [string] $Sid = '', [switch] $Customer, [switch] $FromEvent)
+    $who = if ($Account -eq $HostAccount) { '' } else { "$Account - " }
+    Write-Bad "$who$App - $Detail"
+    [PSCustomObject]@{ Account = $Account; App = $App; Problem = $Problem; Detail = $Detail; Package = $Package
+                       Sid = $Sid; Customer = [bool] $Customer; FromEvent = [bool] $FromEvent; Fixed = $false }
 }
 
 function Test-HostApp {
@@ -469,67 +603,82 @@ function Test-HostApp {
 }
 
 function Test-UserApp {
-    param($Session, $Entry, [string[]] $Provisioned)
+    <# -NoLaunch for customers: registration only, nothing is started in their session, and no OK lines. #>
+    param($Session, $Entry, [string[]] $Provisioned, [switch] $NoLaunch)
+    $customer = -not $Session.Watched
     $pkg = $null
     foreach ($name in $Entry.Packages) {
-        $pkg = @(Get-AppxPackage -User $Session.Sid -Name $name -ErrorAction SilentlyContinue) |
+        # By name, not SID: Get-AppxPackage answers "No valid SID could be determined"
+        # for an Entra ID SID (S-1-12-1-...), in Windows PowerShell 5.1 as well.
+        $pkg = @(Get-AppxPackage -User $Session.User -Name $name -ErrorAction SilentlyContinue) |
                Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
         if ($pkg) { break }
     }
     if (-not $pkg) {
         if ($Entry.App -eq 'Copilot' -and (Get-EdgeUpdateClientVersion $CopilotGuid)) {
-            Write-Ok 'Copilot: unified app (Edge Update, machine-wide) - not started by this test'
+            if (-not $NoLaunch) { Write-Ok 'Copilot: unified app (Edge Update, machine-wide) - not started by this test' }
             return
         }
         $target = @($Entry.Packages | Where-Object { $_ -in $Provisioned }) | Select-Object -First 1
         if (-not $target) { $target = $Entry.Packages[0] }
-        New-Finding $Session.Account $Entry.App 'NotRegistered' 'not registered for this user' $target
+        New-Finding $Session.Account $Entry.App 'NotRegistered' 'not registered for this user' $target -Sid $Session.Sid -Customer:$customer
         return
     }
 
     $location = Get-PropertyValue $pkg 'InstallLocation'
     if (-not $location -or -not (Test-Path -LiteralPath $location)) {
-        New-Finding $Session.Account $Entry.App 'Broken' "$($pkg.PackageFullName): its files are gone" $pkg.Name
+        New-Finding $Session.Account $Entry.App 'Broken' "$($pkg.PackageFullName): its files are gone" $pkg.Name -Sid $Session.Sid -Customer:$customer
         return
     }
     $status = [string] (Get-PropertyValue $pkg 'Status')
     if ($status -and $status -ne 'Ok') {
-        New-Finding $Session.Account $Entry.App 'Broken' "$($pkg.PackageFullName): status is $status" $pkg.Name
+        New-Finding $Session.Account $Entry.App 'Broken' "$($pkg.PackageFullName): status is $status" $pkg.Name -Sid $Session.Sid -Customer:$customer
         return
     }
+    if ($NoLaunch) { return }
 
     $appEntry = Get-AppEntry $pkg
     if (-not $appEntry) { Write-Warn "$($Entry.App) $($pkg.Version) registered, but its manifest names no executable - not started"; return }
     if (@(Get-SessionProcess $Session $appEntry.Exe).Count -gt 0) { Write-Ok "$($Entry.App) $($pkg.Version) running"; return }
     if ($SkipLaunchTest) { Write-Ok "$($Entry.App) $($pkg.Version) registered (not running, launch test off)"; return }
     if (Test-AppStart $Session $appEntry) { Write-Ok "$($Entry.App) $($pkg.Version) started"; return }
-    New-Finding $Session.Account $Entry.App 'WontStart' "$($pkg.Version) is registered but $($appEntry.Exe).exe did not start or did not stay up" $pkg.Name
+    New-Finding $Session.Account $Entry.App 'WontStart' "$($pkg.Version) is registered but $($appEntry.Exe).exe did not start or did not stay up" $pkg.Name -Sid $Session.Sid
 }
 
 function Get-Finding {
     <# Every check, read only - apart from starting an app that is not running in our own session. #>
+    param($Sessions)
     $provisioned = @(Get-AppxProvisionedPackage -Online | ForEach-Object { $_.DisplayName })
-    $sessions    = @(Get-AccountSession)
     Write-Step 'Host'
     foreach ($entry in $Apps) { Test-HostApp $entry $provisioned }
     foreach ($name in $Account) {
-        $session = @($sessions | Where-Object { $_.Account -eq $name }) | Select-Object -First 1
+        $session = @($Sessions | Where-Object { $_.Watched -and $_.Account -eq $name }) | Select-Object -First 1
         if (-not $session) { Write-Step $name; Write-Skip 'Not signed in on this host - nothing to test'; continue }
         Write-Step ('{0} (session {1})' -f $session.User, $session.SessionId)
         foreach ($entry in $Apps) { Test-UserApp $session $entry $provisioned }
+    }
+    $customers = @($Sessions | Where-Object { -not $_.Watched })
+    $settled   = @($customers | Where-Object { -not $_.Since -or $_.Since -lt (Get-Date).AddMinutes(-$UserGraceMinutes) })
+    Write-Step ('Users: {0} signed in, {1} checked (registration only)' -f $customers.Count, $settled.Count)
+    if ($customers.Count -gt $settled.Count) { Write-Skip ('{0} signed in less than {1} minutes ago - next run' -f ($customers.Count - $settled.Count), $UserGraceMinutes) }
+    foreach ($session in $settled) {
+        foreach ($entry in $Apps) { Test-UserApp $session $entry $provisioned -NoLaunch }
     }
 }
 
 # -- Repair --------------------------------------------------------------------------
 function Invoke-Repair {
     <#
-        Host first - our own account's fixes need the package on the machine - then our
-        account. Returns one line per action for the report.
+        Host first - a user's fix needs the package on the machine - then each user
+        in their own session. Returns one line per action for the report, naming the
+        user, and marks a finding Fixed when the read-back says it is.
     #>
     param($Found, $State)
     $actions = [System.Collections.Generic.List[string]]::new()
 
-    $hostApps = @($Found | Where-Object { $_.Account -eq $HostAccount -or $_.Problem -eq 'Broken' } | ForEach-Object { $_.App } | Sort-Object -Unique)
+    # What a customer runs into is nearly always the host: FSLogix asking for a build
+    # this host does not provision. So their findings send the host to repair as well.
+    $hostApps = @($Found | Where-Object { $_.Account -eq $HostAccount -or $_.Customer -or $_.Problem -in 'Broken', 'RegisterFailed' } | ForEach-Object { $_.App } | Sort-Object -Unique)
     if ($hostApps.Count -gt 0) {
         $last = $null
         if ($State.LastRepair) { $last = [datetime]::Parse($State.LastRepair, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
@@ -550,22 +699,59 @@ function Invoke-Repair {
         }
     }
 
-    $sessions = @(Get-AccountSession)
-    foreach ($finding in @($Found | Where-Object { $_.Account -ne $HostAccount })) {
-        $session = @($sessions | Where-Object { $_.Account -eq $finding.Account }) | Select-Object -First 1
-        if (-not $session) { continue }
+    $sessions = @(Get-UserSession)
+    $done     = @{}
+    foreach ($finding in @($Found | Where-Object { $_.Sid })) {
+        $who   = $finding.Account
+        $key   = '{0}|{1}' -f $finding.Sid, $finding.App
+        $entry = @($Apps | Where-Object { $_.App -eq $finding.App }) | Select-Object -First 1
+        if ($done.ContainsKey($key)) { $finding.Fixed = $done[$key]; continue }
+
+        $session = @($sessions | Where-Object { $_.Sid -eq $finding.Sid }) | Select-Object -First 1
+        if (-not $session) {
+            $actions.Add("$who $($finding.App): signed off - the host repair covers the next sign-in")
+            continue
+        }
+        if ($finding.Customer -and $NoUserRepair) {
+            $actions.Add("$who $($finding.App): not repaired in their session (-NoUserRepair)")
+            continue
+        }
+        if ($finding.Customer) {
+            $running = @($entry.Exe | ForEach-Object { Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($_)) })
+            if ($running.Count -gt 0) {
+                # It is open for them now, so whatever failed earlier has passed - and
+                # re-registering under a running app would close it.
+                $finding.Fixed = $true
+                $done[$key]    = $true
+                $actions.Add("$who $($finding.App): running for them now - nothing to do")
+                continue
+            }
+            $lastFix = $State.UserRepairs[$key]
+            if ($lastFix -and ([datetime]::Parse($lastFix, $null, [Globalization.DateTimeStyles]::RoundtripKind)).AddHours($RepairCooldownHours) -gt (Get-Date)) {
+                $actions.Add("$who $($finding.App): already re-registered at $(([datetime] $lastFix).ToString('HH:mm')) - not again within $RepairCooldownHours h")
+                continue
+            }
+        }
+
         $family = '{0}_{1}' -f $finding.Package, $PublisherId
-        if ($finding.Problem -eq 'WontStart') {
+        if ($finding.Problem -eq 'WontStart' -and -not $finding.Customer) {
             $verb    = 'reset'
-            $command = "try { Get-AppxPackage -Name '$($finding.Package)' | Reset-AppxPackage -ErrorAction Stop; exit 0 } catch { exit 1 }"
+            $command = "Get-AppxPackage -Name '$($finding.Package)' | Reset-AppxPackage"
         } else {
             $verb    = 're-registered'
-            $command = "try { Add-AppxPackage -RegisterByFamilyName -MainPackage '$family' -ErrorAction Stop; exit 0 } catch { exit 1 }"
+            $command = "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family'"
         }
-        Write-Step "$($finding.App) for $($session.User): $verb in that session"
-        $code = Invoke-AsUser -Session $session -Execute $nativeShell -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -Command `"$command`"" -WaitSeconds 300
-        if ($code -eq 0) { Write-Ok "$($finding.App) $verb" } else { Write-Warn "$($finding.App) not $verb (result $code)" }
-        $actions.Add("$($finding.Account) $($finding.App): $verb as the user - result $code")
+        Write-Step "$($finding.App) for $($session.User): $verb in their session"
+        Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null
+        if ($finding.Customer) { $State.UserRepairs[$key] = (Get-Date).ToString('o') }
+
+        # The headless console does not pass the exit code on: the package itself says
+        # whether it worked. A reset is judged by the launch test in the read-back.
+        $ok = ($verb -eq 'reset') -or (Test-UserPackage -User $session.User -Packages $entry.Packages)
+        $finding.Fixed = $ok
+        $done[$key]    = $ok
+        if ($ok) { Write-Ok "$($finding.App) $verb for $who" } else { Write-Warn "$($finding.App) for $who - still not registered and Ok after $verb" }
+        $actions.Add(('{0} {1}: {2} in their session - {3}' -f $who, $finding.App, $verb, $(if ($ok) { 'OK' } else { 'still not registered and Ok' })))
     }
     return $actions
 }
@@ -581,8 +767,8 @@ function Send-Notification {
         time     = (Get-Date).ToString('o')
         summary  = $Summary
         accounts = @($Account)
-        findings = @($Found  | Select-Object Account, App, Problem, Detail)
-        before   = @($Before | Select-Object Account, App, Problem, Detail)
+        findings = @($Found  | Select-Object Account, App, Problem, Detail, Customer)
+        before   = @($Before | Select-Object Account, App, Problem, Detail, Customer, Fixed)
         actions  = @($Actions)
         crashes  = @($Crashes | Select-Object App, Kind, Count, Last, Exe, Version, Module, Code)
         log      = $script:logFile
@@ -644,6 +830,7 @@ if ($Install) {
         RenotifyHours       = $RenotifyHours
         CrashThreshold      = $CrashThreshold
         NoRepair            = [bool] $NoRepair
+        NoUserRepair        = [bool] $NoUserRepair
         SkipLaunchTest      = [bool] $SkipLaunchTest
     } | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
     Write-Ok "Settings in $ConfigPath"
@@ -685,20 +872,34 @@ try {
     Write-Host ("  M365 app watchdog - {0} - {1:yyyy-MM-dd HH:mm}" -f $env:COMPUTERNAME, (Get-Date)) -ForegroundColor Cyan
 
     $runStart = Get-Date
-    $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null }
+    $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null; UserRepairs = @{} }
     if (Test-Path $StatePath) {
         $saved = Get-Content -Path $StatePath -Raw | ConvertFrom-Json
         foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun') { $state.$name = Get-PropertyValue $saved $name }
         if ($null -eq $state.Signature) { $state.Signature = '' }
+        # Per user and app, when their app was last re-registered; older than a day is forgotten.
+        $savedRepairs = Get-PropertyValue $saved 'UserRepairs'
+        if ($savedRepairs) {
+            foreach ($prop in $savedRepairs.PSObject.Properties) {
+                $when = [datetime]::Parse([string] $prop.Value, $null, [Globalization.DateTimeStyles]::RoundtripKind)
+                if ($when -gt $runStart.AddDays(-1)) { $state.UserRepairs[$prop.Name] = [string] $prop.Value }
+            }
+        }
     }
 
-    # Crashes since the previous run; the first run looks back one hour, and a long
-    # gap (host off, task disabled) no more than a day.
+    # Events since the previous run; the first run looks back one hour, and a long gap
+    # (host off, task disabled) no more than a day.
+    $since = $runStart.AddHours(-1)
+    if ($state.LastRun) { $since = [datetime]::Parse($state.LastRun, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
+    if ($since -lt $runStart.AddDays(-1)) { $since = $runStart.AddDays(-1) }
+
+    $sessions = @(Get-UserSession)
+    Write-Step ('Apps users could not open since {0:yyyy-MM-dd HH:mm}' -f $since)
+    $openFailures = @(Get-OpenFailure -Since $since -Sessions $sessions)
+    if ($openFailures.Count -eq 0) { Write-Ok 'None' }
+
     $crashes = @()
     if ($CrashThreshold -gt 0) {
-        $since = $runStart.AddHours(-1)
-        if ($state.LastRun) { $since = [datetime]::Parse($state.LastRun, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
-        if ($since -lt $runStart.AddDays(-1)) { $since = $runStart.AddDays(-1) }
         Write-Step ('Crashes and hangs since {0:yyyy-MM-dd HH:mm}' -f $since)
         $crashes = @(Get-AppCrash -Since $since | Where-Object { $_.Count -ge $CrashThreshold })
         if ($crashes.Count -eq 0) { Write-Ok 'None' }
@@ -707,7 +908,9 @@ try {
         }
     }
 
-    $before  = @(Get-Finding)
+    # Events are what happened since the last run; the read-back can only say whether
+    # what they point at is still wrong, so an event finding stays unless it was fixed.
+    $before  = @(@(Get-Finding -Sessions $sessions) + $openFailures)
     $after   = $before
     $actions = @()
     $repair  = $before.Count -gt 0 -and -not $NoRepair -and -not $WhatIfPreference
@@ -717,7 +920,7 @@ try {
         $actions = @(Invoke-Repair -Found $before -State $state)
         Write-Host ''
         Write-Host '  ==== Read back '.PadRight(80, '=') -ForegroundColor Cyan
-        $after = @(Get-Finding)
+        $after = @(@(Get-Finding -Sessions @(Get-UserSession)) + @($openFailures | Where-Object { -not $_.Fixed }))
     } elseif ($before.Count -gt 0) {
         Write-Skip 'Not repaired (-NoRepair)'
     }
@@ -728,11 +931,11 @@ try {
     $kind = $null
     if ($before.Count -gt 0 -and $after.Count -eq 0) {
         $kind   = 'repaired'
-        $summary = '{0}: {1} problem(s) found and repaired - {2}' -f $env:COMPUTERNAME, $before.Count, ((@($before | ForEach-Object { "$($_.Account) $($_.App) $($_.Problem)" })) -join ', ')
+        $summary = '{0}: {1} problem(s) found and repaired - {2}' -f $env:COMPUTERNAME, $before.Count, ((@($before | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
     } elseif ($after.Count -gt 0) {
         if ($signature -ne $state.Signature -or -not $lastSent -or $lastSent.AddHours($RenotifyHours) -lt (Get-Date) -or $actions.Count -gt 0) {
             $kind   = if ($repair) { 'repair-failed' } else { 'failing' }
-            $summary = '{0}: {1} problem(s) {2} - {3}' -f $env:COMPUTERNAME, $after.Count, $(if ($repair) { 'left after repair' } else { 'found' }), ((@($after | ForEach-Object { "$($_.Account) $($_.App) $($_.Problem)" })) -join ', ')
+            $summary = '{0}: {1} problem(s) {2} - {3}' -f $env:COMPUTERNAME, $after.Count, $(if ($repair) { 'left after repair' } else { 'found' }), ((@($after | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
         }
     } elseif ($state.Signature) {
         $kind   = 'recovered'
