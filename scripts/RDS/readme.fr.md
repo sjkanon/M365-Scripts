@@ -17,7 +17,7 @@ Scripts de diagnostic, de supervision et de préparation pour l'infrastructure R
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | Diagnostic des profils FSLogix / Azure Files sur un hôte de session AVD |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Réduire les disques de profil FSLogix d'un partage (Invoke-FslShrinkDisk), ou vérifier si FSLogix les compacte lui-même à la déconnexion |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Vérifier et préparer une image Windows 11 multisession ou un hôte de session AVD pour que le nouveau Teams, le nouvel Outlook et Copilot continuent de fonctionner avec FSLogix — FSLogix lui-même n'est pas modifié |
-| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (tâche planifiée) — teste le nouveau Teams, le nouvel Outlook et Copilot avec nos propres comptes (`itceadmin`, `itce.user`) sur un hôte de session, répare ce qui est cassé avant qu'un client ne le subisse, et le signale à n8n |
+| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (tâche planifiée) — teste le nouveau Teams, le nouvel Outlook et Copilot avec notre propre compte (`itceadmin`) sur un hôte de session, répare ce qui est cassé avant qu'un client ne le subisse, et le signale à n8n |
 
 ---
 
@@ -299,9 +299,9 @@ autres hôtes.
 ### Watch-M365Apps.ps1
 
 Un watchdog pour le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de session. Il
-s'exécute en tâche planifiée sous System et utilise **nos propres comptes** — par défaut
-`itceadmin` et `itce.user` — comme canaris : si une application ne démarre pas pour eux,
-elle ne démarrera pas non plus pour un client. Le watchdog répare l'hôte avant que le
+s'exécute en tâche planifiée sous System et utilise **notre propre compte** — par défaut
+`itceadmin` — comme canari : si une application ne démarre pas pour lui, elle ne démarrera
+pas non plus pour un client. Le watchdog répare l'hôte avant que le
 client ne s'en aperçoive, et le signale à un webhook n8n.
 
 **À chaque exécution**
@@ -322,7 +322,7 @@ Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas d
 
 | Paramètre | Description |
 |-----------|-------------|
-| `-Account` | Comptes de test — nom d'utilisateur, UPN ou `DOMAINE\utilisateur` (par défaut : `itceadmin`, `itce.user`) |
+| `-Account` | Comptes de test — nom d'utilisateur, UPN ou `DOMAINE\utilisateur` (par défaut : `itceadmin` ; avec plusieurs comptes, chacun est testé, p. ex. `itceadmin,itce.user`) |
 | `-App` | `Teams`, `Outlook`, `Copilot` (par défaut : les trois) |
 | `-WebhookUrl` | Webhook n8n (URL de production) auquel le rapport est envoyé en POST. Sans lui, l'exécution ne fait que journaliser |
 | `-WebhookToken` | Envoyé dans l'en-tête `X-Watchdog-Token` ; à faire correspondre avec Header Auth sur le nœud Webhook de n8n |
@@ -361,11 +361,11 @@ Rien n'est fermé, supprimé ni réinitialisé pour un autre utilisateur : pas d
   "event": "repaired",
   "host": "AVD-0",
   "time": "2026-10-09T14:30:02.1234567+02:00",
-  "summary": "AVD-0: 1 problem(s) found and repaired - itce.user Outlook NotRegistered",
-  "accounts": ["itceadmin", "itce.user"],
+  "summary": "AVD-0: 1 problem(s) found and repaired - itceadmin Outlook NotRegistered",
+  "accounts": ["itceadmin"],
   "findings": [],
-  "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
-  "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "before": [{ "Account": "itceadmin", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
+  "actions": ["itceadmin Outlook: re-registered as the user - result 0"],
   "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
   "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log"
 }
@@ -389,8 +389,8 @@ sur l'hôte :
 
 ```powershell
 # Watch-M365Apps.ps1 à un commit fixe - mettre les deux lignes à jour ensemble
-$commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
-$sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+$commit = '1182c3a169ac798d0d5fbbe699ad5db72f82067f'
+$sha256 = '34283756084B5042D444D883916CB3B36417114C9C5E915559F551623DF9AFC0'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -404,8 +404,8 @@ Sur plusieurs hôtes à la fois, depuis votre propre poste via PowerShell remoti
 ```powershell
 # Le même téléchargement sur chaque hôte, en parallèle
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
-    $sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+    $commit = '1182c3a169ac798d0d5fbbe699ad5db72f82067f'
+    $sha256 = '34283756084B5042D444D883916CB3B36417114C9C5E915559F551623DF9AFC0'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -423,7 +423,7 @@ ne vont jamais dans ce dépôt : il est public.
 
 **Remarques**
 
-- **Gardez une session de chaque compte surveillé ouverte sur chaque hôte** (déconnectée,
+- **Gardez une session de `itceadmin` (et de tout autre compte surveillé) ouverte sur chaque hôte** (déconnectée,
   c'est bien). Un compte non connecté est ignoré : ses packages se trouvent dans son
   conteneur FSLogix et ne peuvent pas être testés sans lui. Sans aucune session, la
   vérification de l'hôte (étape 1) s'exécute quand même.

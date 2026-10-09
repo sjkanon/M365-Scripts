@@ -470,7 +470,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
   - Updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build on every run (Teams' self-update off only where FSLogix needs it) and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
 
-- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host:
+- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook and Copilot with our own account (`itceadmin`) on a session host:
   - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
   - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
@@ -1014,6 +1014,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-09 (6)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) watches only `itceadmin` by default instead of `itceadmin` and `itce.user`: one account to keep signed in on every host, and one fewer session where the launch test can open a window. `-Account itceadmin,itce.user` still tests both. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) is pinned to `1182c3a` with that file's SHA-256, and the menu's prompt shows the new default |
+| Verified: syntax check of the script and `menu.ps1`; the raw URL at `1182c3a` serves the file with `$Account = @('itceadmin')` and the documented SHA-256. **Not** verified on a session host |
 
 ### 2026-10-09 (5)
 | Change |

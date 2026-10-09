@@ -470,7 +470,7 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Vérifie WebView2, les frameworks AppX dont dépendent les applications, les builds provisionnées et les écarts par utilisateur, Teams sur AVD (SlimCore, le redirecteur WebRTC retiré le 1er octobre 2026), Shared Computer Activation et le broker de connexion
   - Met à jour Teams, Outlook, Copilot, le complément de réunion et WebView2 vers leur build la plus récente à chaque exécution (mise à jour automatique de Teams désactivée seulement si FSLogix l'exige) et corrige les applications via `Repair-AppxPackageStore.ps1` et `Update-TeamsClient.ps1` ; `-ComputerName` compare tout le pool, `-ForCapture` vérifie que Sysprep peut passer
 
-- Watchdog des applications ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — une tâche planifiée (System) qui teste le nouveau Teams, le nouvel Outlook et Copilot avec nos propres comptes (`itceadmin`, `itce.user`) sur un hôte de session :
+- Watchdog des applications ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — une tâche planifiée (System) qui teste le nouveau Teams, le nouvel Outlook et Copilot avec notre propre compte (`itceadmin`) sur un hôte de session :
   - Vérifie que l'hôte provisionne les applications, et pour chaque compte connecté que chacune est inscrite, intacte et démarre réellement dans cette session
   - Répare l'hôte via `Repair-AppxPackageStore.ps1 -Provision` (avec un délai de carence) et notre propre compte en réinscrivant ou réinitialisant l'application, sans toucher aux sessions des clients ; signale `repaired` / `repair-failed` / `recovered` en JSON à un webhook n8n
   - Signale chaque plantage et blocage des trois applications sur l'hôte (Application Error 1000 / Application Hang 1002), y compris ceux des clients, regroupés par application, module et code d'exception
@@ -1014,6 +1014,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-09 (6)
+| Modification |
+|--------------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) ne surveille plus par défaut que `itceadmin` au lieu d'`itceadmin` et `itce.user` : un seul compte à garder connecté sur chaque hôte, et une session de moins où le test de lancement peut ouvrir une fenêtre. `-Account itceadmin,itce.user` teste toujours les deux. Le téléchargement du [readme RDS](scripts/RDS/readme.fr.md#watch-m365appsps1) est épinglé sur `1182c3a` avec le SHA-256 de ce fichier, et la question du menu affiche la nouvelle valeur par défaut |
+| Vérifié : contrôle de syntaxe du script et de `menu.ps1` ; l'URL raw à `1182c3a` sert le fichier avec `$Account = @('itceadmin')` et le SHA-256 documenté. **Non** vérifié sur un hôte de session |
 
 ### 2026-10-09 (5)
 | Modification |

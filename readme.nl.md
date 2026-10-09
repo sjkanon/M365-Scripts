@@ -470,7 +470,7 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Controleert WebView2, de AppX-frameworks waar de apps van afhangen, klaargezette builds en afwijkingen per gebruiker, Teams op AVD (SlimCore, de WebRTC-redirector die op 1 oktober 2026 met pensioen ging), Shared Computer Activation en de aanmeldbroker
   - Werkt Teams, Outlook, Copilot, de vergaderinvoegtoepassing en WebView2 bij elke run bij naar hun nieuwste build (zelfupdate van Teams alleen uit waar FSLogix dat nodig heeft) en herstelt de apps via `Repair-AppxPackageStore.ps1` en `Update-TeamsClient.ps1`; `-ComputerName` vergelijkt de hele pool, `-ForCapture` controleert of Sysprep kan
 
-- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook en Copilot test met onze eigen accounts (`itceadmin`, `itce.user`) op een sessiehost:
+- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook en Copilot test met ons eigen account (`itceadmin`) op een sessiehost:
   - Controleert of de host de apps klaarzet, en per aangemeld account of elke app geregistreerd en intact is en in die sessie echt start
   - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
   - Meldt elke crash en hang van de drie apps op de host (Application Error 1000 / Application Hang 1002), ook die van klanten, gegroepeerd per app, module en foutcode
@@ -1014,6 +1014,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-09 (6)
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) bewaakt standaard alleen `itceadmin` in plaats van `itceadmin` en `itce.user`: één account om op elke host aangemeld te houden, en één sessie minder waarin de starttest een venster kan openen. `-Account itceadmin,itce.user` test nog steeds beide. De download in de [RDS-readme](scripts/RDS/readme.nl.md#watch-m365appsps1) is vastgepind op `1182c3a` met de SHA-256 van dat bestand, en de vraag in het menu toont de nieuwe standaard |
+| Geverifieerd: syntaxcontrole van het script en `menu.ps1`; de raw-URL op `1182c3a` levert het bestand met `$Account = @('itceadmin')` en de gedocumenteerde SHA-256. **Niet** geverifieerd op een sessiehost |
 
 ### 2026-10-09 (5)
 | Wijziging |

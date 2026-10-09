@@ -17,7 +17,7 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | FSLogix / Azure Files profile diagnostics on an AVD session host |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
-| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
+| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook and Copilot with our own account (`itceadmin`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
 
 ---
 
@@ -294,9 +294,8 @@ other hosts for.
 ### Watch-M365Apps.ps1
 
 A watchdog for new Teams, new Outlook and Copilot on a session host. It runs as a
-scheduled task under System and uses **our own accounts** — `itceadmin` and `itce.user`
-by default — as canaries: when an app does not start for them, it will not start for a
-customer either. The watchdog repairs the host before a customer notices, and reports
+scheduled task under System and uses **our own account** — `itceadmin` by default — as a
+canary: when an app does not start for it, it will not start for a customer either. The watchdog repairs the host before a customer notices, and reports
 to an n8n webhook.
 
 **Each run**
@@ -317,7 +316,7 @@ no stopping of customers' processes.
 
 | Parameter | Description |
 |-----------|-------------|
-| `-Account` | Accounts to test with — user name, UPN or `DOMAIN\user` (default: `itceadmin`, `itce.user`) |
+| `-Account` | Accounts to test with — user name, UPN or `DOMAIN\user` (default: `itceadmin`; more than one tests each, e.g. `itceadmin,itce.user`) |
 | `-App` | `Teams`, `Outlook`, `Copilot` (default: all three) |
 | `-WebhookUrl` | n8n webhook (production URL) the report is POSTed to. Without it the run only logs |
 | `-WebhookToken` | Sent as header `X-Watchdog-Token`; match it with Header Auth on the n8n Webhook node |
@@ -356,11 +355,11 @@ no stopping of customers' processes.
   "event": "repaired",
   "host": "AVD-0",
   "time": "2026-10-09T14:30:02.1234567+02:00",
-  "summary": "AVD-0: 1 problem(s) found and repaired - itce.user Outlook NotRegistered",
-  "accounts": ["itceadmin", "itce.user"],
+  "summary": "AVD-0: 1 problem(s) found and repaired - itceadmin Outlook NotRegistered",
+  "accounts": ["itceadmin"],
   "findings": [],
-  "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
-  "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "before": [{ "Account": "itceadmin", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
+  "actions": ["itceadmin Outlook: re-registered as the user - result 0"],
   "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
   "log": "C:\IT\AppWatchdog\Logs\Watch-M365Apps_20261009.log"
 }
@@ -383,8 +382,8 @@ elevated PowerShell on the host:
 
 ```powershell
 # Watch-M365Apps.ps1 at a fixed commit - move both lines together
-$commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
-$sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+$commit = '1182c3a169ac798d0d5fbbe699ad5db72f82067f'
+$sha256 = '34283756084B5042D444D883916CB3B36417114C9C5E915559F551623DF9AFC0'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -398,8 +397,8 @@ On several hosts at once, from your own machine over PowerShell remoting:
 ```powershell
 # Same download on every host, in parallel
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = '6c088f4a035bfb1d491a9a6e1f6e70f2dc46c027'
-    $sha256 = 'B3B547EECAEC08F20AE0334A5CDC4524464D80BA796700C4D451FF71C5CCF3DF'
+    $commit = '1182c3a169ac798d0d5fbbe699ad5db72f82067f'
+    $sha256 = '34283756084B5042D444D883916CB3B36417114C9C5E915559F551623DF9AFC0'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -417,7 +416,7 @@ it is public.
 
 **Notes**
 
-- **Keep a session of each watched account open on every host** (disconnected is fine). An
+- **Keep a session of `itceadmin` (and any other watched account) open on every host** (disconnected is fine). An
   account that is not signed in is skipped: its packages live in its FSLogix container
   and cannot be tested without it. Without any session the host check (step 1) still runs.
 - Crash events name no user, so a crash can be a customer's or ours. A crash of our own
