@@ -17,6 +17,7 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | FSLogix / Azure Files profile diagnostics on an AVD session host |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
+| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
 
 ---
 
@@ -287,3 +288,102 @@ other hosts for.
   `$HelperHashes` at the top of the script, after reading the diff.
 - `-ComputerName` copies this script and the two it calls to `C:\IT\SessionHostImage`
   on each host.
+
+---
+
+### Watch-M365Apps.ps1
+
+A watchdog for new Teams, new Outlook and Copilot on a session host. It runs as a
+scheduled task under System and uses **our own accounts** — `itceadmin` and `itce.user`
+by default — as canaries: when an app does not start for them, it will not start for a
+customer either. The watchdog repairs the host before a customer notices, and reports
+to an n8n webhook.
+
+**Each run**
+
+| Step | What happens |
+|------|--------------|
+| 1. Host | Teams and new Outlook are provisioned for all users; Copilot is there (provisioned MicrosoftOfficeHub / Copilot, or the unified app Edge Update installs) |
+| 2. Accounts | For each watched account signed in on this host: the package is registered for that user, its files are there and its status is `Ok`. Then the app has to run in that session — if it does not, it is started there (`shell:AppsFolder\<AUMID>`, through a one-off task in that user's own session) and has to still be running 15 seconds later |
+| 3. Repair | Host problems and packages whose files are gone: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then, in **our own account only**: a package that is not registered is registered by family name, an app that does not start is reset (`Reset-AppxPackage`) |
+| 4. Read back | Steps 1 and 2 again |
+| 5. Report | A JSON POST to the webhook when something is wrong, was repaired, or recovered on its own — not on every healthy run. A problem that stays is reported again after `-RenotifyHours` |
+
+Nothing is closed, removed or reset for any other user: no `-RemoveOld`, no `-Latest`,
+no stopping of customers' processes.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Account` | Accounts to test with — user name, UPN or `DOMAIN\user` (default: `itceadmin`, `itce.user`) |
+| `-App` | `Teams`, `Outlook`, `Copilot` (default: all three) |
+| `-WebhookUrl` | n8n webhook (production URL) the report is POSTed to. Without it the run only logs |
+| `-WebhookToken` | Sent as header `X-Watchdog-Token`; match it with Header Auth on the n8n Webhook node |
+| `-IntervalMinutes` | How often the task runs (default: `30`) |
+| `-RepairCooldownHours` | Minimum time between two host repairs, so a problem it cannot fix is not retried every run (default: `4`) |
+| `-RenotifyHours` | Report a problem that stays the same again after this many hours (default: `12`) |
+| `-NoRepair` | Test and report only, change nothing |
+| `-SkipLaunchTest` | Do not start an app that is not running; only check its registration |
+| `-Install` | Copy the watchdog to `-WorkingDir` and register the task **M365 App Watchdog**, with the other parameters as its settings |
+| `-Uninstall` | Remove the task and `-WorkingDir` |
+| `-TestNotification` | Send one test message to the webhook and stop |
+| `-WorkingDir` | Watchdog, settings, state and logs (default: `C:\IT\AppWatchdog`) |
+
+**Examples**
+
+```powershell
+# One run now in this console, report only
+.\Watch-M365Apps.ps1 -NoRepair
+
+# Install on a session host, reporting to n8n
+.\Watch-M365Apps.ps1 -Install -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false
+
+# Check the webhook end to end with the installed settings
+.\Watch-M365Apps.ps1 -TestNotification
+
+# Remove it again
+.\Watch-M365Apps.ps1 -Uninstall -Confirm:$false
+```
+
+**What n8n receives**
+
+```json
+{
+  "source": "Watch-M365Apps",
+  "event": "repaired",
+  "host": "AVD-0",
+  "time": "2026-10-09T14:30:02.1234567+02:00",
+  "summary": "AVD-0: 1 problem(s) found and repaired - itce.user Outlook NotRegistered",
+  "accounts": ["itceadmin", "itce.user"],
+  "findings": [],
+  "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
+  "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "log": "C:\IT\AppWatchdog\Logs\Watch-M365Apps_20261009.log"
+}
+```
+
+`event` is `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `recovered`, `error`
+(the run itself failed) or `test`. `Problem` is `NotProvisioned` (host), `NotRegistered`,
+`Broken` (files gone or status not `Ok`) or `WontStart`. In n8n: a **Webhook** node (POST,
+Header Auth on `X-Watchdog-Token`), then route on `{{$json.body.event}}` to Teams, mail or
+a ticket.
+
+**Notes**
+
+- **Keep a session of each watched account open on every host** (disconnected is fine). An
+  account that is not signed in is skipped: its packages live in its FSLogix container
+  and cannot be tested without it. Without any session the host check (step 1) still runs.
+- The launch test starts an app that is not running in our own session. A window can
+  appear there, and a reset Teams asks our account to sign in again. `-SkipLaunchTest`
+  turns it off.
+- `-Install` locks `-WorkingDir` to System and Administrators (the task runs what is in it
+  as System), copies this script and `Repair-AppxPackageStore.ps1` there — from
+  `..\Device`, or from GitHub at the same pinned commit and SHA-256 as
+  [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — and keeps the webhook URL and
+  token only in `config.json` there, not in the task's command line. Change a setting by
+  running `-Install` again with all parameters.
+- Logs: `C:\IT\AppWatchdog\Logs`, one file per day, kept 14 days. Repair transcripts and
+  `.reg` backups: `C:\IT\AppWatchdog\Repair`.
+- Run elevated or as System; it relaunches itself in 64-bit Windows PowerShell for the
+  AppX cmdlets. Exit code `0` healthy or repaired, `1` something still broken.

@@ -17,6 +17,7 @@ Scripts voor diagnose, monitoring en het klaarmaken van RDP- / RD Web Access-inf
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | Diagnose van FSLogix- / Azure Files-profielen op een AVD-sessiehost |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | FSLogix-profielschijven op een share verkleinen (Invoke-FslShrinkDisk), of controleren of FSLogix ze zelf comprimeert bij afmelden |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Een Windows 11 multi-session-image of AVD-sessiehost controleren en klaarmaken, zodat de nieuwe Teams, de nieuwe Outlook en Copilot blijven werken met FSLogix — FSLogix zelf blijft ongemoeid |
+| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (geplande taak) — test de nieuwe Teams, de nieuwe Outlook en Copilot met onze eigen accounts (`itceadmin`, `itce.user`) op een sessiehost, herstelt wat stuk is voordat een klant er last van heeft, en meldt het aan n8n |
 
 ---
 
@@ -288,3 +289,103 @@ build waar FSLogix de andere hosts om zal vragen.
   `$HelperHashes` bovenin het script, nadat je de diff hebt gelezen.
 - `-ComputerName` kopieert dit script en de twee die het aanroept naar
   `C:\IT\SessionHostImage` op elke host.
+
+---
+
+### Watch-M365Apps.ps1
+
+Een watchdog voor de nieuwe Teams, de nieuwe Outlook en Copilot op een sessiehost. Hij
+draait als geplande taak onder System en gebruikt **onze eigen accounts** — standaard
+`itceadmin` en `itce.user` — als kanarie: start een app voor hen niet, dan start hij voor
+een klant ook niet. De watchdog herstelt de host voordat een klant het merkt, en meldt
+het aan een n8n-webhook.
+
+**Elke run**
+
+| Stap | Wat er gebeurt |
+|------|----------------|
+| 1. Host | Teams en de nieuwe Outlook zijn klaargezet (provisioned) voor alle gebruikers; Copilot is er (MicrosoftOfficeHub / Copilot klaargezet, of de unified app die Edge Update installeert) |
+| 2. Accounts | Voor elk bewaakt account dat op deze host is aangemeld: het pakket is voor die gebruiker geregistreerd, de bestanden zijn er en de status is `Ok`. Daarna moet de app in die sessie draaien — zo niet, dan wordt hij daar gestart (`shell:AppsFolder\<AUMID>`, via een eenmalige taak in de eigen sessie van die gebruiker) en moet hij 15 seconden later nog draaien |
+| 3. Herstel | Hostproblemen en pakketten waarvan de bestanden weg zijn: [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1) `-Provision` (installers van Microsoft, handtekening gecontroleerd), hooguit één keer per `-RepairCooldownHours`. Daarna, **alleen in ons eigen account**: een pakket dat niet geregistreerd is wordt op familienaam geregistreerd, een app die niet start wordt gereset (`Reset-AppxPackage`) |
+| 4. Teruglezen | Stap 1 en 2 opnieuw |
+| 5. Melden | Een JSON-POST naar de webhook als er iets mis is, iets hersteld is, of iets vanzelf weer werkt — niet bij elke gezonde run. Een probleem dat blijft wordt na `-RenotifyHours` opnieuw gemeld |
+
+Voor geen enkele andere gebruiker wordt iets gesloten, verwijderd of gereset: geen
+`-RemoveOld`, geen `-Latest`, geen processen van klanten die worden gestopt.
+
+**Parameters**
+
+| Parameter | Beschrijving |
+|-----------|--------------|
+| `-Account` | Accounts om mee te testen — gebruikersnaam, UPN of `DOMEIN\gebruiker` (standaard: `itceadmin`, `itce.user`) |
+| `-App` | `Teams`, `Outlook`, `Copilot` (standaard: alle drie) |
+| `-WebhookUrl` | n8n-webhook (productie-URL) waar het rapport naartoe wordt gePOST. Zonder deze logt de run alleen |
+| `-WebhookToken` | Wordt meegestuurd als header `X-Watchdog-Token`; stel dezelfde waarde in als Header Auth op de n8n Webhook-node |
+| `-IntervalMinutes` | Hoe vaak de taak draait (standaard: `30`) |
+| `-RepairCooldownHours` | Minimale tijd tussen twee hostherstellingen, zodat een probleem dat hij niet kan oplossen niet elke run opnieuw wordt geprobeerd (standaard: `4`) |
+| `-RenotifyHours` | Een probleem dat gelijk blijft na zoveel uur opnieuw melden (standaard: `12`) |
+| `-NoRepair` | Alleen testen en melden, niets wijzigen |
+| `-SkipLaunchTest` | Een app die niet draait niet starten; alleen de registratie controleren |
+| `-Install` | De watchdog naar `-WorkingDir` kopiëren en de taak **M365 App Watchdog** registreren, met de overige parameters als instellingen |
+| `-Uninstall` | De taak en `-WorkingDir` verwijderen |
+| `-TestNotification` | Eén testbericht naar de webhook sturen en stoppen |
+| `-WorkingDir` | Watchdog, instellingen, status en logs (standaard: `C:\IT\AppWatchdog`) |
+
+**Voorbeelden**
+
+```powershell
+# Eén run nu in deze console, alleen melden
+.\Watch-M365Apps.ps1 -NoRepair
+
+# Installeren op een sessiehost, met meldingen naar n8n
+.\Watch-M365Apps.ps1 -Install -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false
+
+# De webhook van begin tot eind testen met de geïnstalleerde instellingen
+.\Watch-M365Apps.ps1 -TestNotification
+
+# Weer verwijderen
+.\Watch-M365Apps.ps1 -Uninstall -Confirm:$false
+```
+
+**Wat n8n ontvangt**
+
+```json
+{
+  "source": "Watch-M365Apps",
+  "event": "repaired",
+  "host": "AVD-0",
+  "time": "2026-10-09T14:30:02.1234567+02:00",
+  "summary": "AVD-0: 1 problem(s) found and repaired - itce.user Outlook NotRegistered",
+  "accounts": ["itceadmin", "itce.user"],
+  "findings": [],
+  "before": [{ "Account": "itce.user", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
+  "actions": ["itce.user Outlook: re-registered as the user - result 0"],
+  "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log"
+}
+```
+
+`event` is `repaired`, `repair-failed`, `failing` (met `-NoRepair`), `recovered`, `error`
+(de run zelf mislukte) of `test`. `Problem` is `NotProvisioned` (host), `NotRegistered`,
+`Broken` (bestanden weg of status niet `Ok`) of `WontStart`. In n8n: een **Webhook**-node
+(POST, Header Auth op `X-Watchdog-Token`), daarna routeren op `{{$json.body.event}}` naar
+Teams, mail of een ticket.
+
+**Opmerkingen**
+
+- **Houd op elke host een sessie van elk bewaakt account open** (verbroken is prima). Een
+  account dat niet is aangemeld wordt overgeslagen: zijn pakketten staan in zijn
+  FSLogix-container en zijn zonder die container niet te testen. Zonder enige sessie draait
+  de hostcontrole (stap 1) nog wel.
+- De starttest start een app die niet draait in onze eigen sessie. Daar kan een venster
+  verschijnen, en een gereset Teams vraagt ons account opnieuw aan te melden.
+  `-SkipLaunchTest` zet dat uit.
+- `-Install` beperkt `-WorkingDir` tot System en Administrators (de taak voert uit wat erin
+  staat als System), kopieert dit script en `Repair-AppxPackageStore.ps1` daarheen — uit
+  `..\Device`, of van GitHub op dezelfde vastgepinde commit en SHA-256 als
+  [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — en bewaart de webhook-URL en
+  het token alleen in `config.json` daar, niet in de opdrachtregel van de taak. Een
+  instelling wijzigen: `-Install` opnieuw draaien met alle parameters.
+- Logs: `C:\IT\AppWatchdog\Logs`, één bestand per dag, 14 dagen bewaard. Transcripts en
+  `.reg`-back-ups van herstellingen: `C:\IT\AppWatchdog\Repair`.
+- Verhoogd of als System draaien; het script start zichzelf opnieuw in 64-bit Windows
+  PowerShell voor de AppX-cmdlets. Exitcode `0` gezond of hersteld, `1` er is nog iets stuk.
