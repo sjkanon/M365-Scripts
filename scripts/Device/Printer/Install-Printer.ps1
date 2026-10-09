@@ -193,10 +193,13 @@
     NinjaOne/Intune: silent unless something was installed or failed.
 
 .EXAMPLE
-    powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet -Confirm:$false
+    powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet
 
-    First boot of a server built from a golden image (Custom Script Extension or a
-    startup task as System): waits for the spooler and the network, then installs.
+    First boot or deployment of a server or session host (Custom Script Extension,
+    Run Command or a startup task as System): waits for the spooler and the
+    network, then installs. No -Confirm:$false: a run without a console never
+    asks, and with -File it would arrive as the text '$false' and stop the script
+    before it starts.
 
 .NOTES
     Author  : Sjoerd Kanon
@@ -222,23 +225,30 @@ param (
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-ForwardedArgument {
-    <# Rebuild the caller's own parameters as a command line for a relaunch. #>
-    param([Parameter(Mandatory)] $Bound)
+function ConvertTo-ScriptCommand {
+    <#
+        The caller's own parameters as one -Command line for a relaunch. Not -File:
+        that hands every argument over as text, so -Confirm:$false arrives as the
+        string '$false' and the relaunch dies on "Cannot convert 'System.String' to
+        the type SwitchParameter". Strings are single-quoted, arrays become lists,
+        and the exit code is passed on unless the window is meant to stay open.
+    #>
+    param([Parameter(Mandatory)] $Bound, [switch] $KeepOpen)
 
-    $list = @()
+    $quote = { param($s) "'" + ([string] $s -replace "'", "''") + "'" }
+    $line  = '& ' + (& $quote $PSCommandPath)
     foreach ($entry in $Bound.GetEnumerator()) {
-        if ($entry.Value -is [switch] -or $entry.Value -is [bool]) {
-            if ($entry.Value) { $list += "-$($entry.Key)" } else { $list += "-$($entry.Key):`$false" }
-        } elseif ($entry.Value -is [array]) {
-            $list += "-$($entry.Key)"
-            $list += ($entry.Value -join ',')
+        $value = $entry.Value
+        if ($value -is [switch] -or $value -is [bool]) {
+            $line += ' -{0}:${1}' -f $entry.Key, ([bool] $value).ToString().ToLower()
+        } elseif ($value -is [array]) {
+            $line += ' -{0} {1}' -f $entry.Key, (($value | ForEach-Object { & $quote $_ }) -join ',')
         } else {
-            $list += "-$($entry.Key)"
-            $list += [string] $entry.Value
+            $line += ' -{0} {1}' -f $entry.Key, (& $quote $value)
         }
     }
-    return $list
+    if ($KeepOpen) { return $line }
+    return $line + '; exit $LASTEXITCODE'
 }
 
 # -- RMM: run 64-bit -----------------------------------------------------------
@@ -247,9 +257,7 @@ function Get-ForwardedArgument {
 if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
     $nativeShell = Join-Path $env:WINDIR 'SysNative\WindowsPowerShell\v1.0\powershell.exe'
     if (Test-Path $nativeShell) {
-        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) +
-                   (Get-ForwardedArgument -Bound $PSBoundParameters)
-        & $nativeShell @argList
+        & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command (ConvertTo-ScriptCommand -Bound $PSBoundParameters)
         exit $LASTEXITCODE
     }
     Write-Error 'Running 32-bit and SysNative is unavailable - pnputil cannot be reached. Start the script from 64-bit PowerShell.'
@@ -265,8 +273,10 @@ if (-not ([Security.Principal.WindowsPrincipal] $identity).IsInRole([Security.Pr
     }
     Write-Host ''
     Write-Host '  Not running elevated - asking for administrator rights...' -ForegroundColor Yellow
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', $PSCommandPath) +
-               (Get-ForwardedArgument -Bound $PSBoundParameters)
+    # Start-Process joins an argument list with spaces and loses the quoting, so
+    # the command travels Base64-encoded.
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((ConvertTo-ScriptCommand -Bound $PSBoundParameters -KeepOpen)))
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', $encoded)
     try {
         Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $argList -Verb RunAs | Out-Null
         Write-Host '  Continued in an elevated window.' -ForegroundColor Cyan
