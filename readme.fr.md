@@ -473,6 +473,7 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
 - Watchdog des applications ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — une tâche planifiée (System) qui teste le nouveau Teams, le nouvel Outlook et Copilot avec nos propres comptes (`itceadmin`, `itce.user`) sur un hôte de session :
   - Vérifie que l'hôte provisionne les applications, et pour chaque compte connecté que chacune est inscrite, intacte et démarre réellement dans cette session
   - Répare l'hôte via `Repair-AppxPackageStore.ps1 -Provision` (avec un délai de carence) et notre propre compte en réinscrivant ou réinitialisant l'application, sans toucher aux sessions des clients ; signale `repaired` / `repair-failed` / `recovered` en JSON à un webhook n8n
+  - Signale chaque plantage et blocage des trois applications sur l'hôte (Application Error 1000 / Application Hang 1002), y compris ceux des clients, regroupés par application, module et code d'exception
 
 ---
 
@@ -1013,6 +1014,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-09 (4)
+| Modification |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) signale aussi quand Teams, le nouvel Outlook ou Copilot plante ou se bloque.** Le watchdog ne voyait qu'une application incapable de démarrer ; une application qui démarrait puis plantait - chez un client, ou dans notre compte entre deux exécutions - passait inaperçue. Chaque exécution lit désormais Application Error `1000` et Application Hang `1002` dans le journal Application depuis l'exécution précédente (première exécution : la dernière heure, jamais plus d'un jour en arrière), garde les événements des trois applications - par nom de processus, ou par le nom de package que porte l'événement, pour qu'un exécutable Copilot absent de la liste compte aussi - et les regroupe par application, module et code d'exception. Ils accompagnent tout signalement de l'exécution, ou forment un signalement à part (`crashed`) ; `-CrashThreshold` (par défaut `1`, `0` = désactivé) fixe le nombre par application avant envoi. Les plantages sont signalés, pas réparés : l'application d'un client n'est jamais relancée à sa place, et celle de notre propre compte est relancée par le test de lancement existant. Le flux n8n *ITCE – M365 App Watchdog → Teams* les affiche dans une section *Crashes en hangs* et sur une carte orange `CRASH` |
+| Vérifié : contrôle de syntaxe ; sur le journal Application de cette machine, le lecteur a trouvé le vrai blocage du nouvel Outlook du 1er octobre (`olk.exe` 1.2026.915.300, type de blocage `Quiesce`), y compris avec son nom de processus retiré de la liste (correspondance par nom de package), n'a rien renvoyé pour la dernière heure, et a regroupé trois plantages de PowerToys en une ligne avec le module `Microsoft.UI.Xaml.dll` et le code `0xc000027b` quand PowerToys était dans la liste pour le test ; dans n8n, une exécution de test avec une charge `crashed` (envoi Teams épinglé) a produit la carte attendue. **Non** vérifié : un plantage de Teams ou de Copilot lui-même, et une exécution en tant que System sur un hôte de session |
 
 ### 2026-10-09 (3)
 | Modification |

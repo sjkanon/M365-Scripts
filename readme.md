@@ -473,6 +473,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host:
   - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
+  - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
 
 ---
 
@@ -1013,6 +1014,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-09 (4)
+| Change |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) also reports when Teams, new Outlook or Copilot crashes or hangs.** The watchdog only saw an app that could not start; one that started and then crashed - for a customer, or for our account between two runs - went unnoticed. Each run now reads Application Error `1000` and Application Hang `1002` from the Application log since the previous run (first run: the last hour, never more than a day back), keeps the events of the three apps - by process name, or by the package name the event carries, so a Copilot executable not in the list still counts - and groups them per app, module and exception code. They go along with any report of the run, or as a report of their own (`crashed`); `-CrashThreshold` (default `1`, `0` = off) sets how many per app before one is sent. Crashes are reported, not repaired: a customer's app is never restarted for them, and our own account's app is started again by the existing launch test. The n8n flow *ITCE – M365 App Watchdog → Teams* shows them in a *Crashes en hangs* section and an orange `CRASH` card |
+| Verified: syntax check; against this machine's Application log, the reader found the real new-Outlook hang of 1 October (`olk.exe` 1.2026.915.300, hang type `Quiesce`), also with its process name removed from the list (package-name match), returned nothing for the last hour, and grouped three PowerToys crashes into one row with module `Microsoft.UI.Xaml.dll` and code `0xc000027b` when PowerToys was put in the list for the test; in n8n, a test run with a `crashed` payload (Teams post pinned) built the expected card. **Not** verified: a crash of Teams or Copilot itself, and a run as System on a session host |
 
 ### 2026-10-09 (3)
 | Change |
