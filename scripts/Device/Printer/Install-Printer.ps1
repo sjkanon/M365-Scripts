@@ -60,8 +60,14 @@
     portNumber (default 9100), lprQueue (LPR instead of RAW), snmp (true turns SNMP
     status on - off by default, so a printer that does not answer SNMP is not shown
     as Offline), location, comment, shared, shareName, duplex, color, paperSize,
-    and "ensure": "absent" to remove a printer (its port too when nothing else uses
-    it; the driver always stays).
+    inputBin (default tray, by the name the driver shows - "Tray 2" - or its
+    Print Schema name), and "ensure": "absent" to remove a printer (its port too
+    when nothing else uses it; the driver always stays).
+
+    One device, several queues: give each queue its own entry with the same
+    address - they share the IP_<address> port - and its own inputBin, duplex or
+    color. "Office - letterhead" on tray 2 next to "Office" on tray 1 is the
+    usual case: users pick the queue, not the tray.
 
     After a golden image
     --------------------
@@ -343,7 +349,7 @@ $KnownSourceFields  = @{
     path          = @('type', 'path', 'sha256')
 }
 $KnownPrinterFields = @('name', 'driver', 'address', 'portName', 'portNumber', 'lprQueue', 'snmp', 'location',
-                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'ensure', 'description')
+                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'inputBin', 'ensure', 'description')
 $DuplexValues       = @('OneSided', 'TwoSidedLongEdge', 'TwoSidedShortEdge')
 
 # Written after every clean run, for detection rules - see Set-SuccessMarker.
@@ -1130,6 +1136,161 @@ function Get-PrintSetting {
     }
 }
 
+$InputBinFeatures = @('JobInputBin', 'DocumentInputBin', 'PageInputBin')
+
+function Get-InputBinInfo {
+    <#
+        The trays the driver offers and the one its default print ticket uses, in
+        a job like every other call into driver code. Trays are not one of
+        Set-PrintConfiguration's parameters: they live in the Print Schema, as the
+        options of psk:JobInputBin / DocumentInputBin / PageInputBin in the
+        driver's PrintCapabilities, with vendor names such as ns0000:Tray3 and a
+        display name such as "Tray 3". Returns { Options, Current }; Current maps
+        each bin feature in the default ticket to "<namespace>|<name>".
+    #>
+    param([Parameter(Mandatory)] [string] $Name)
+    return Invoke-WithTimeout -Seconds 60 -ArgumentList $Name, $InputBinFeatures -ScriptBlock {
+        param($PrinterName, $Features)
+        $psk = 'http://schemas.microsoft.com/windows/2003/08/printing/printschemakeywords'
+        $resolve = {
+            param($Node, $QName)
+            $parts = ([string] $QName).Split(':', 2)
+            if ($parts.Count -ne 2) { return $null }
+            [PSCustomObject]@{ Uri = $Node.GetNamespaceOfPrefix($parts[0]); Local = $parts[1] }
+        }
+
+        Add-Type -AssemblyName System.Printing
+        $server = [System.Printing.LocalPrintServer]::new()
+        try {
+            $stream = $server.GetPrintQueue($PrinterName).GetPrintCapabilitiesAsXml()
+            [xml] $caps = ([IO.StreamReader]::new($stream)).ReadToEnd()
+        } finally { $server.Dispose() }
+
+        $options = foreach ($feature in $caps.DocumentElement.ChildNodes) {
+            if ($feature.LocalName -ne 'Feature') { continue }
+            $f = & $resolve $feature $feature.GetAttribute('name')
+            if (-not $f -or $f.Uri -ne $psk -or $f.Local -notin $Features) { continue }
+            foreach ($option in $feature.ChildNodes) {
+                if ($option.LocalName -ne 'Option' -or -not $option.GetAttribute('name')) { continue }
+                $o = & $resolve $option $option.GetAttribute('name')
+                if (-not $o) { continue }
+                $display = @($option.ChildNodes | Where-Object { $_.LocalName -eq 'Property' -and $_.GetAttribute('name') -match ':DisplayName$' } |
+                             ForEach-Object { $_.InnerText.Trim() }) | Select-Object -First 1
+                [PSCustomObject]@{ Feature = $f.Local; Uri = $o.Uri; Local = $o.Local; Display = $display }
+            }
+        }
+
+        [xml] $ticket = (Get-PrintConfiguration -PrinterName $PrinterName -ErrorAction Stop).PrintTicketXML
+        $current = @{}
+        foreach ($feature in $ticket.DocumentElement.ChildNodes) {
+            if ($feature.LocalName -ne 'Feature') { continue }
+            $f = & $resolve $feature $feature.GetAttribute('name')
+            if (-not $f -or $f.Uri -ne $psk -or $f.Local -notin $Features) { continue }
+            $option = @($feature.ChildNodes | Where-Object { $_.LocalName -eq 'Option' }) | Select-Object -First 1
+            if ($option -and $option.GetAttribute('name')) {
+                $o = & $resolve $option $option.GetAttribute('name')
+                if ($o) { $current[$f.Local] = "$($o.Uri)|$($o.Local)" }
+            }
+        }
+        [PSCustomObject]@{ Options = @($options); Current = $current }
+    }
+}
+
+function Find-InputBin {
+    <#
+        The tray the JSON asks for, among what the driver offers. Matched on the
+        display name, the Print Schema name or the name without its prefix, with
+        spaces and punctuation ignored: "Tray 2", "tray2" and "ns0000:Tray2" are
+        the same. Returns the option and every bin feature that offers it, or
+        $null - the caller then lists what the driver does offer.
+    #>
+    param([Parameter(Mandatory)] $Info, [Parameter(Mandatory)] [string] $Want)
+
+    $norm = { param($s) ([string] $s -replace '[^\p{L}\p{N}]', '').ToLowerInvariant() }
+    $w = & $norm $Want
+    $hit = @($Info.Options | Where-Object {
+                 (& $norm $_.Display) -eq $w -or (& $norm $_.Local) -eq $w -or (& $norm "$($_.Feature)$($_.Local)") -eq $w
+             })
+    if ($hit.Count -eq 0) { return $null }
+    $first = @($hit | Sort-Object { [array]::IndexOf($InputBinFeatures, $_.Feature) })[0]
+    $same  = @($Info.Options | Where-Object { $_.Uri -eq $first.Uri -and $_.Local -eq $first.Local })
+    return [PSCustomObject]@{
+        Uri      = $first.Uri
+        Local    = $first.Local
+        Display  = if ($first.Display) { $first.Display } else { $first.Local }
+        Features = @($same | ForEach-Object { $_.Feature } | Sort-Object -Unique)
+    }
+}
+
+function Format-InputBinList {
+    param($Info)
+    $list = @($Info.Options | Sort-Object Local -Unique | ForEach-Object { if ($_.Display) { "'$($_.Display)' ($($_.Local))" } else { "'$($_.Local)'" } })
+    if ($list.Count -eq 0) { return 'none - this driver exposes no trays' }
+    return $list -join ', '
+}
+
+function Test-InputBinCurrent {
+    <# True when every bin feature that offers the tray already selects it. #>
+    param([Parameter(Mandatory)] $Info, [Parameter(Mandatory)] $Bin)
+    foreach ($feature in $Bin.Features) {
+        if ($Info.Current[$feature] -ne "$($Bin.Uri)|$($Bin.Local)") { return $false }
+    }
+    return $true
+}
+
+function Set-InputBin {
+    <#
+        Select the tray in the printer's default print ticket - the defaults every
+        user of the queue starts from - for each bin feature that offers it. The
+        option's namespace is declared in the ticket when it is not there yet, and
+        the old option's sub-properties are dropped: they describe the old tray.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] $Bin)
+    $null = Invoke-WithTimeout -Seconds 120 -ArgumentList $Name, $Bin.Features, $Bin.Uri, $Bin.Local -ScriptBlock {
+        param($PrinterName, $Features, $Uri, $Local)
+        $psf   = 'http://schemas.microsoft.com/windows/2003/08/printing/printschemaframework'
+        $psk   = 'http://schemas.microsoft.com/windows/2003/08/printing/printschemakeywords'
+        $xmlns = 'http://www.w3.org/2000/xmlns/'
+
+        [xml] $ticket = (Get-PrintConfiguration -PrinterName $PrinterName -ErrorAction Stop).PrintTicketXML
+        $root = $ticket.DocumentElement
+        $prefixOf = {
+            param($NamespaceUri)
+            $p = $root.GetPrefixOfNamespace($NamespaceUri)
+            if ($p) { return $p }
+            $i = 0
+            do { $p = "nsb$i"; $i++ } while ($root.GetNamespaceOfPrefix($p))
+            $attr = $ticket.CreateAttribute('xmlns', $p, $xmlns)
+            $attr.Value = $NamespaceUri
+            $null = $root.Attributes.Append($attr)
+            return $p
+        }
+        $psfPrefix = & $prefixOf $psf
+        $pskPrefix = & $prefixOf $psk
+        $optName   = '{0}:{1}' -f (& $prefixOf $Uri), $Local
+
+        foreach ($featureName in $Features) {
+            $feature = @($root.ChildNodes | Where-Object {
+                           $_.LocalName -eq 'Feature' -and $_.NamespaceURI -eq $psf -and $_.GetAttribute('name') -match ":$featureName$" -and
+                           $_.GetNamespaceOfPrefix($_.GetAttribute('name').Split(':')[0]) -eq $psk
+                       }) | Select-Object -First 1
+            if (-not $feature) {
+                $feature = $ticket.CreateElement($psfPrefix, 'Feature', $psf)
+                $feature.SetAttribute('name', "${pskPrefix}:$featureName")
+                $null = $root.AppendChild($feature)
+            }
+            $option = @($feature.ChildNodes | Where-Object { $_.LocalName -eq 'Option' -and $_.NamespaceURI -eq $psf }) | Select-Object -First 1
+            if (-not $option) {
+                $option = $ticket.CreateElement($psfPrefix, 'Option', $psf)
+                $null = $feature.AppendChild($option)
+            }
+            $option.RemoveAll()
+            $option.SetAttribute('name', $optName)
+        }
+        Set-PrintConfiguration -PrinterName $PrinterName -PrintTicketXml $ticket.OuterXml -ErrorAction Stop
+    }
+}
+
 function Get-PrinterState {
     <# What differs between the printer as it is and as the JSON wants it. #>
     param([Parameter(Mandatory)] $Spec)
@@ -1194,6 +1355,20 @@ function Get-PrinterState {
             # Unreadable is not the same as wrong: no change is claimed, so a
             # driver that cannot report its settings does not loop every run.
             Write-Warn "Could not read the print defaults of '$($Spec.name)': $($_.Exception.Message)"
+        }
+    }
+
+    $inputBin = Get-PropertyValue $Spec 'inputBin'
+    if ($inputBin) {
+        try {
+            $info = Get-InputBinInfo -Name $Spec.name
+            $bin  = Find-InputBin -Info $info -Want $inputBin
+            # A tray the driver does not know is reported, not counted as a
+            # change: setting it cannot succeed, so it would loop every run.
+            if (-not $bin) { Write-Warn "'$($Spec.name)': the driver has no tray '$inputBin' - it offers $(Format-InputBinList $info)" }
+            elseif (-not (Test-InputBinCurrent -Info $info -Bin $bin)) { $changes.Add("default tray is not '$($bin.Display)'") }
+        } catch {
+            Write-Warn "Could not read the trays of '$($Spec.name)': $($_.Exception.Message)"
         }
     }
     return $state
@@ -1337,6 +1512,27 @@ function Set-PrinterFromSpec {
             Write-Ok "Print defaults set for '$($Spec.name)'"
         } catch {
             Write-Warn "Could not set the print defaults for '$($Spec.name)': $($_.Exception.Message) - the printer itself is installed"
+        }
+    }
+
+    # The tray goes last and on its own: it rewrites the default print ticket,
+    # which by now holds the settings above.
+    $inputBin = Get-PropertyValue $Spec 'inputBin'
+    if ($inputBin) {
+        try {
+            $info = Get-InputBinInfo -Name $Spec.name
+            $bin  = Find-InputBin -Info $info -Want $inputBin
+            if (-not $bin) {
+                Write-Warn "'$($Spec.name)': the driver has no tray '$inputBin' - it offers $(Format-InputBinList $info). Use one of those names in the JSON"
+            } elseif (Test-InputBinCurrent -Info $info -Bin $bin) {
+                Write-Skip "  Default tray of '$($Spec.name)' is already '$($bin.Display)'"
+            } elseif ($PSCmdlet.ShouldProcess($Spec.name, "default tray -> '$($bin.Display)' ($($bin.Local), $($bin.Features -join '/'))")) {
+                Set-InputBin -Name $Spec.name -Bin $bin
+                if (Test-InputBinCurrent -Info (Get-InputBinInfo -Name $Spec.name) -Bin $bin) { Write-Ok "Default tray of '$($Spec.name)' set to '$($bin.Display)'" }
+                else { Write-Warn "'$($Spec.name)': the driver accepted the tray '$($bin.Display)' but its default ticket does not show it - check the printer's preferences" }
+            }
+        } catch {
+            Write-Warn "Could not set the default tray of '$($Spec.name)': $($_.Exception.Message) - the printer itself is installed"
         }
     }
 }
@@ -1521,7 +1717,7 @@ function Test-Configuration {
             $value = Get-PropertyValue $p $flag
             if ($null -ne $value -and $value -isnot [bool]) { $problems.Add("$who '$flag' must be true or false (without quotes)") }
         }
-        foreach ($text in 'location', 'comment', 'shareName', 'paperSize', 'lprQueue') {
+        foreach ($text in 'location', 'comment', 'shareName', 'paperSize', 'inputBin', 'lprQueue') {
             $value = Get-PropertyValue $p $text
             if ($null -ne $value -and $value -isnot [string]) { $problems.Add("$who '$text' must be text") }
         }

@@ -85,7 +85,22 @@ Een apparaat dat al in orde is, kost één keer de JSON lezen. Er wordt niets ge
 | `duplex` | `OneSided`, `TwoSidedLongEdge` of `TwoSidedShortEdge` |
 | `color` | `true` / `false` |
 | `paperSize` | bv. `A4`, `Letter` |
+| `inputBin` | Standaardlade, met de naam die de driver toont (`Tray 2`, `Manual Feed`) of de Print Schema-naam (`ns0000:Tray2`); spaties en hoofdletters maken niet uit. Een naam die de driver niet kent geeft een waarschuwing met de lades die hij wel aanbiedt |
 | `ensure` | `absent` verwijdert de printer (en de poort als geen andere printer die gebruikt). De driver blijft altijd staan |
+
+**Eén apparaat, meerdere wachtrijen (lades)**
+
+Gebruikers kiezen een wachtrij, geen lade. Geef elke wachtrij een eigen regel met **hetzelfde adres**: ze delen de poort `IP_<address>`, en elk krijgt een eigen standaardlade, duplex of kleur:
+
+```json
+"printers": [
+  { "name": "Office",            "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 1" },
+  { "name": "Office - letterhead", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 2", "duplex": "OneSided" },
+  { "name": "Office - envelopes", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Manual Feed" }
+]
+```
+
+De lade wordt ingesteld in het standaard printticket van de wachtrij, dus elke gebruiker van die wachtrij begint daarmee; een gebruiker kan in één afdrukvenster nog steeds een andere lade kiezen. Ladenamen verschillen per driver - draai het script één keer met de naam die je verwacht, en een verkeerde naam wordt beantwoord met de lijst die de driver aanbiedt. Universele drivers tonen pas de lades die het apparaat echt heeft als de opties van het apparaat bekend zijn; komt alleen `Auto Select` terug, stel dan eerst de installeerbare opties in bij de printereigenschappen, of gebruik de modelspecifieke driver van de fabrikant.
 
 **Parameters**
 

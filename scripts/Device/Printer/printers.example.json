@@ -45,7 +45,19 @@
       "comment": "Colour A4/A3",
       "duplex": "TwoSidedLongEdge",
       "color": false,
-      "paperSize": "A4"
+      "paperSize": "A4",
+      "inputBin": "Tray 1"
+    },
+    {
+      "name": "Office 1st floor - letterhead",
+      "driver": "HP Universal Printing PCL 6",
+      "address": "10.0.5.20",
+      "location": "1st floor, near the kitchen",
+      "comment": "Same device, tray 2 (letterhead)",
+      "duplex": "OneSided",
+      "color": false,
+      "paperSize": "A4",
+      "inputBin": "Tray 2"
     },
     {
       "name": "Office 2nd floor",

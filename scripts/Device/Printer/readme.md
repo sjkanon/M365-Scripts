@@ -85,7 +85,22 @@ A device that is already in order costs one read of the JSON. Nothing is downloa
 | `duplex` | `OneSided`, `TwoSidedLongEdge` or `TwoSidedShortEdge` |
 | `color` | `true` / `false` |
 | `paperSize` | e.g. `A4`, `Letter` |
+| `inputBin` | Default tray, by the name the driver shows (`Tray 2`, `Manual Feed`) or its Print Schema name (`ns0000:Tray2`); spaces and case do not matter. A name the driver does not have is a warning that lists the trays it does offer |
 | `ensure` | `absent` removes the printer (and its port when no other printer uses it). The driver always stays |
+
+**One device, several queues (trays)**
+
+Users pick a queue, not a tray. Give each queue its own entry with the **same address**: they share the `IP_<address>` port, and each gets its own default tray, duplex or colour:
+
+```json
+"printers": [
+  { "name": "Office",            "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 1" },
+  { "name": "Office - letterhead", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 2", "duplex": "OneSided" },
+  { "name": "Office - envelopes", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Manual Feed" }
+]
+```
+
+The tray is set in the queue's default print ticket, so it is what every user of that queue starts from; a user can still pick another tray in a single print dialog. Tray names differ per driver - run the script once with a name you expect, and a wrong one is answered with the list the driver offers. Universal drivers only show the trays they know the device has once the device's options are known; if only `Auto Select` comes back, set the installable options in the printer's properties first, or use the vendor's model-specific driver.
 
 **Parameters**
 
