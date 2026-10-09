@@ -193,6 +193,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — AppX-pakketten repareren die falen met 0x80070490 (Teams, nieuwe Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook en Copilot testen met de IT-accounts, herstellen, melden aan n8n |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
@@ -468,6 +469,10 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
 - Sessiehost-image ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — maakt een Windows 11 multi-session-image of AVD-host geschikt voor de nieuwe Teams, de nieuwe Outlook en Copilot met FSLogix, zonder FSLogix te wijzigen:
   - Controleert WebView2, de AppX-frameworks waar de apps van afhangen, klaargezette builds en afwijkingen per gebruiker, Teams op AVD (SlimCore, de WebRTC-redirector die op 1 oktober 2026 met pensioen ging), Shared Computer Activation en de aanmeldbroker
   - Werkt Teams, Outlook, Copilot, de vergaderinvoegtoepassing en WebView2 bij elke run bij naar hun nieuwste build (zelfupdate van Teams alleen uit waar FSLogix dat nodig heeft) en herstelt de apps via `Repair-AppxPackageStore.ps1` en `Update-TeamsClient.ps1`; `-ComputerName` vergelijkt de hele pool, `-ForCapture` controleert of Sysprep kan
+
+- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook en Copilot test met onze eigen accounts (`itceadmin`, `itce.user`) op een sessiehost:
+  - Controleert of de host de apps klaarzet, en per aangemeld account of elke app geregistreerd en intact is en in die sessie echt start
+  - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
 
 ---
 
@@ -860,6 +865,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← FSLogix-profielschijven verkleinen, compressie controleren
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnose van mislukte RDP-/RDWeb-aanmeldingen
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot geschikt voor FSLogix op de image
+    │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog: Teams / Outlook / Copilot, herstel, n8n
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← realtime monitor van sessies + licenties
     ├── <a href="scripts/SMTP/readme.nl.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.nl.md">readme.md</a>
@@ -1007,6 +1013,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-09 (3)
+| Wijziging |
+|--------|
+| **Nieuw [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): een watchdog die de nieuwe Teams, de nieuwe Outlook en Copilot test met onze eigen accounts (`itceadmin`, `itce.user`) op een sessiehost, ze herstelt voordat een klant het merkt, en meldt aan n8n.** Tot nu toe werd een kapotte app ontdekt als een klant belde; Update-SessionHostImage en Repair-AppxPackageStore herstellen hem, maar alleen als iemand ze draait. Geïnstalleerd met `-Install` als de taak *M365 App Watchdog* (System, elke 30 minuten) controleert hij of de host de drie apps klaarzet, en voor elk bewaakt account dat op de host is aangemeld of het pakket geregistreerd en intact is en in die sessie start (een eenmalige taak met de SID van de gebruiker en een interactief token, dus zonder wachtwoord). Hostproblemen gaan naar `Repair-AppxPackageStore.ps1 -Provision` - hooguit één keer per 4 uur, zonder `-RemoveOld` / `-Latest`, zodat niets wat een klant open heeft wordt verwijderd - en ons eigen account wordt opnieuw geregistreerd of gereset. Hij leest alles opnieuw uit en POST `repaired`, `repair-failed`, `recovered` of `error` als JSON naar een n8n-webhook (header `X-Watchdog-Token`), alleen bij een verandering en opnieuw na 12 uur voor een probleem dat blijft. Zijn map is beperkt tot System en Administrators en bevat de webhook-URL en het token; het hulpscript komt uit `..\Device` of van GitHub op dezelfde pin en hash als Update-SessionHostImage. Menu-item `Y` |
+| Geverifieerd: syntaxcontrole in PowerShell 7 en de parser van Windows PowerShell 5.1; de SHA-256 van het vastgepinde hulpscript tegen commit `048cf96`; zonder verhoging op een Windows 11-machine de sessie van een Entra-account (`AzureAD\...`) gevonden via de eigenaar van explorer.exe, en het startitem en proces van Teams, de nieuwe Outlook en Microsoft 365 Copilot uit hun manifests - waaruit bleek dat Teams `MSTeamsRemoteModuleContainer` als eerste noemt, dus wordt het eerste item gebruikt dat in Start verschijnt. **Niet** geverifieerd: een run als System of verhoogd, `-Install`, een app starten of opnieuw registreren via een taak in de sessie van een andere gebruiker, de herstellingen, en een POST naar een echte n8n-webhook - er was geen sessiehost of webhook bij de hand |
 
 ### 2026-10-09 (2)
 | Wijziging |

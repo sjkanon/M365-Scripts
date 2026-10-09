@@ -193,6 +193,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook and Copilot with the IT accounts, repair, report to n8n |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -468,6 +469,10 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - Session host image ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — makes a Windows 11 multi-session image or AVD host fit for new Teams, new Outlook and Copilot with FSLogix, without changing FSLogix:
   - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
   - Updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build on every run (Teams' self-update off only where FSLogix needs it) and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
+
+- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host:
+  - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
+  - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
 
 ---
 
@@ -860,6 +865,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← shrink FSLogix profile disks, check compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← RDP/RDWeb login failure diagnostics
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot fit for FSLogix on the image
+    │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog: Teams / Outlook / Copilot, repair, n8n
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← real-time session + licensing monitor
     ├── <a href="scripts/SMTP/readme.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.md">readme.md</a>
@@ -1007,6 +1013,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-09 (3)
+| Change |
+|--------|
+| **New [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): a watchdog that tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host, repairs them before a customer notices, and reports to n8n.** Until now a broken app was found when a customer called; Update-SessionHostImage and Repair-AppxPackageStore fix it, but only when someone runs them. Installed with `-Install` as the task *M365 App Watchdog* (System, every 30 minutes), it checks the host provisions the three apps, and for each watched account signed in on the host that the package is registered, intact and starts in that session (a one-off task with the user's SID and an interactive token, so no password). Host problems go to `Repair-AppxPackageStore.ps1 -Provision` - at most once per 4 hours, without `-RemoveOld` / `-Latest`, so nothing a customer has open is removed - and our own account is re-registered or reset. It reads everything back and POSTs `repaired`, `repair-failed`, `recovered` or `error` as JSON to an n8n webhook (header `X-Watchdog-Token`), only on a change and again after 12 hours for a problem that stays. Its folder is locked to System and Administrators and holds the webhook URL and token; the helper comes from `..\Device` or GitHub at the same pin and hash as Update-SessionHostImage. Menu entry `Y` |
+| Verified: syntax check in PowerShell 7 and the Windows PowerShell 5.1 parser; the pinned helper's SHA-256 against commit `048cf96`; unelevated on a Windows 11 machine, finding an Entra account's session (`AzureAD\...`) by explorer.exe owner, and the start entry and process of Teams, new Outlook and Microsoft 365 Copilot from their manifests - which showed Teams lists `MSTeamsRemoteModuleContainer` first, so the first entry shown in Start is used. **Not** verified: a run as System or elevated, `-Install`, starting an app or re-registering through a task in another user's session, the repairs, and a POST to a real n8n webhook - no session host or webhook was at hand |
 
 ### 2026-10-09 (2)
 | Change |

@@ -717,6 +717,34 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='Y'; FKey=$null; Category='Device'
+        Label='M365AppWatchdog     — test Teams, Outlook, Copilot with the IT accounts, repair, report to n8n'
+        Script="$ROOT\scripts\RDS\Watch-M365Apps.ps1"
+        Params={
+            Write-Host '  1  Run one check now (repairs what it finds)'
+            Write-Host '  2  Run one check, report only'
+            Write-Host '  3  Install the scheduled task on this host'
+            Write-Host '  4  Send a test message to n8n'
+            Write-Host '  5  Remove the scheduled task'
+            $choice = Read-Host '  Choice [2]'
+            switch ($choice) {
+                '1' { return @{} }
+                '3' {
+                    $a = @{ Confirm = $false }   # already answered here, don't ask twice
+                    $url = Read-Host '  n8n webhook URL (production)'
+                    if ($url) { $a['WebhookUrl'] = $url }
+                    $token = Read-Host '  Webhook token (X-Watchdog-Token, empty = none)'
+                    if ($token) { $a['WebhookToken'] = $token }
+                    $accounts = Read-Host '  Accounts to test with [itceadmin,itce.user]'
+                    if ($accounts) { $a['Account'] = @($accounts -split '[,;\s]' | Where-Object { $_ }) }
+                    return $a
+                }
+                '4' { return @{ TestNotification = $true } }
+                '5' { return @{ Uninstall = $true; Confirm = $false } }
+                default { return @{ NoRepair = $true } }
+            }
+        }
+    }
     [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
         Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
         Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"

@@ -193,6 +193,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — réparer les paquets AppX qui échouent avec 0x80070490 (Teams, nouvel Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook et Copilot avec les comptes IT, réparer, signaler à n8n |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — installer des pilotes d'imprimante (depuis GitHub) et des imprimantes à partir d'un fichier JSON |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
@@ -468,6 +469,10 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
 - Image d'hôte de session ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — rend une image Windows 11 multisession ou un hôte AVD apte au nouveau Teams, au nouvel Outlook et à Copilot avec FSLogix, sans modifier FSLogix :
   - Vérifie WebView2, les frameworks AppX dont dépendent les applications, les builds provisionnées et les écarts par utilisateur, Teams sur AVD (SlimCore, le redirecteur WebRTC retiré le 1er octobre 2026), Shared Computer Activation et le broker de connexion
   - Met à jour Teams, Outlook, Copilot, le complément de réunion et WebView2 vers leur build la plus récente à chaque exécution (mise à jour automatique de Teams désactivée seulement si FSLogix l'exige) et corrige les applications via `Repair-AppxPackageStore.ps1` et `Update-TeamsClient.ps1` ; `-ComputerName` compare tout le pool, `-ForCapture` vérifie que Sysprep peut passer
+
+- Watchdog des applications ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — une tâche planifiée (System) qui teste le nouveau Teams, le nouvel Outlook et Copilot avec nos propres comptes (`itceadmin`, `itce.user`) sur un hôte de session :
+  - Vérifie que l'hôte provisionne les applications, et pour chaque compte connecté que chacune est inscrite, intacte et démarre réellement dans cette session
+  - Répare l'hôte via `Repair-AppxPackageStore.ps1 -Provision` (avec un délai de carence) et notre propre compte en réinscrivant ou réinitialisant l'application, sans toucher aux sessions des clients ; signale `repaired` / `repair-failed` / `recovered` en JSON à un webhook n8n
 
 ---
 
@@ -860,6 +865,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← réduire les disques FSLogix, vérifier la compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnostic des échecs de connexion RDP/RDWeb
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot compatibles FSLogix sur l'image
+    │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog : Teams / Outlook / Copilot, réparation, n8n
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← surveillance en temps réel des sessions + licences
     ├── <a href="scripts/SMTP/readme.fr.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.fr.md">readme.md</a>
@@ -1007,6 +1013,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-09 (3)
+| Modification |
+|--------|
+| **Nouveau [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) : un watchdog qui teste le nouveau Teams, le nouvel Outlook et Copilot avec nos propres comptes (`itceadmin`, `itce.user`) sur un hôte de session, les répare avant qu'un client ne s'en aperçoive, et le signale à n8n.** Jusqu'ici, une application cassée était découverte quand un client appelait ; Update-SessionHostImage et Repair-AppxPackageStore la réparent, mais seulement si quelqu'un les lance. Installé avec `-Install` comme tâche *M365 App Watchdog* (System, toutes les 30 minutes), il vérifie que l'hôte provisionne les trois applications et, pour chaque compte surveillé connecté à l'hôte, que le package est inscrit, intact et démarre dans cette session (une tâche ponctuelle avec le SID de l'utilisateur et un jeton interactif, donc sans mot de passe). Les problèmes de l'hôte passent par `Repair-AppxPackageStore.ps1 -Provision` - au plus une fois toutes les 4 heures, sans `-RemoveOld` / `-Latest`, pour que rien de ce qu'un client a ouvert ne soit supprimé - et notre propre compte est réinscrit ou réinitialisé. Il relit tout et envoie en POST `repaired`, `repair-failed`, `recovered` ou `error` en JSON à un webhook n8n (en-tête `X-Watchdog-Token`), uniquement lors d'un changement et à nouveau après 12 heures pour un problème qui persiste. Son dossier est restreint à System et Administrateurs et contient l'URL du webhook et le jeton ; le script auxiliaire vient de `..\Device` ou de GitHub au même épinglage et à la même empreinte qu'Update-SessionHostImage. Entrée de menu `Y` |
+| Vérifié : contrôle de syntaxe dans PowerShell 7 et l'analyseur de Windows PowerShell 5.1 ; le SHA-256 du script auxiliaire épinglé par rapport au commit `048cf96` ; sans élévation sur une machine Windows 11, la session d'un compte Entra (`AzureAD\...`) trouvée via le propriétaire d'explorer.exe, et l'entrée de démarrage et le processus de Teams, du nouvel Outlook et de Microsoft 365 Copilot depuis leurs manifestes - ce qui a montré que Teams liste `MSTeamsRemoteModuleContainer` en premier, d'où l'utilisation de la première entrée visible dans Démarrer. **Non** vérifié : une exécution en tant que System ou en élevé, `-Install`, le lancement ou la réinscription d'une application via une tâche dans la session d'un autre utilisateur, les réparations, et un POST vers un vrai webhook n8n - aucun hôte de session ni webhook n'était disponible |
 
 ### 2026-10-09 (2)
 | Modification |
