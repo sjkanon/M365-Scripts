@@ -472,6 +472,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 
 - App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook and Copilot with our own account (`itceadmin`) on a session host:
   - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
+  - Also checks every other signed-in user, and every app a user could not open (TWinUI 5961) or whose registration failed (AppX 401/404), and re-registers it in that user's own session without a window - never while it runs for them, never a reset; every report names the user
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
   - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
 
@@ -1014,6 +1015,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-09 (8)
+| Change |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) now finds and repairs what customers run into, and says for whom.** It tested only our own account, so a customer who clicked Teams and got nothing went unseen. Each run now checks every other signed-in user once they have been signed in for 10 minutes (registration, files, status - nothing is started for them), and reads since the previous run every open Windows refused (TWinUI `5961`) and every failed registration of the apps' packages (AppXDeploymentServer `401`/`404`, by field rather than the translated text, with "close the app first" and "already installed" left out, the two events of one failure counted once), each with the user from the event. It repairs the host through `Repair-AppxPackageStore.ps1 -Provision` and then re-registers the package by family name in that user's session, through a one-off task running `conhost --headless` so no window appears - only while the app is not running for them, once per cooldown per user and app, never a reset. `-NoUserRepair` keeps out of customers' sessions. Every finding carries the user (`Account`, `Customer`) and whether it was repaired for them (`Fixed`); the n8n card shows the users, *hersteld bij deze gebruiker* per line and a *Wel hersteld* section after a partial repair |
+| `Get-AppxPackage -User` is now given `DOMAIN\user` instead of a SID: with an Entra ID SID (`S-1-12-1-...`) it answers *No valid SID could be determined*, in Windows PowerShell 5.1 too - so the existing check of itceadmin could not work on an Entra-joined host. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to `abfad94` |
+| Verified on this Windows 11 machine, unelevated: the session list (an Entra user, with sign-in time); against its real event logs the open-failure reader found nothing with the shipped filter, five Teams registration failures (`0x80073D02`, 401 and 404 counted once) when that code was not filtered, and TWinUI `5961` refusals with user and code for a Windows component standing in for an app; HRESULTs signed and unsigned; the registration check of a "customer" (silent for Teams, Outlook and Copilot, a finding with name and SID for a missing package); `Get-AppxPackage -User` by SID failing and by name working; `conhost --headless` waiting for its command but returning `0` for `exit 7`; in n8n a partial-repair payload built the expected card. **Not** verified: a run as System on a session host, a re-registration in a real customer session, and whether anything flashes on their screen |
 
 ### 2026-10-09 (7)
 | Change |

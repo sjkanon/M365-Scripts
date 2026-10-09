@@ -472,6 +472,7 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
 
 - App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook en Copilot test met ons eigen account (`itceadmin`) op een sessiehost:
   - Controleert of de host de apps klaarzet, en per aangemeld account of elke app geregistreerd en intact is en in die sessie echt start
+  - Controleert ook elke andere aangemelde gebruiker, en elke app die een gebruiker niet kon openen (TWinUI 5961) of waarvan de registratie mislukte (AppX 401/404), en registreert die opnieuw in de eigen sessie van die gebruiker zonder venster - nooit terwijl hij bij hem draait, nooit een reset; elke melding noemt de gebruiker
   - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
   - Meldt elke crash en hang van de drie apps op de host (Application Error 1000 / Application Hang 1002), ook die van klanten, gegroepeerd per app, module en foutcode
 
@@ -1014,6 +1015,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-09 (8)
+| Wijziging |
+|-----------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) vindt en herstelt nu waar klanten tegenaan lopen, en zegt bij wie.** Hij testte alleen ons eigen account, dus een klant die op Teams klikte en niets kreeg bleef onopgemerkt. Elke run controleert nu elke andere aangemelde gebruiker zodra die 10 minuten is aangemeld (registratie, bestanden, status - er wordt niets voor hen gestart), en leest sinds de vorige run elke keer dat Windows het openen weigerde (TWinUI `5961`) en elke mislukte registratie van de pakketten van de apps (AppXDeploymentServer `401`/`404`, op veld in plaats van de vertaalde tekst, met "sluit eerst de app" en "al geïnstalleerd" weggelaten, de twee events van één fout één keer geteld), elk met de gebruiker uit het event. Hij herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` en registreert daarna het pakket opnieuw op familienaam in de sessie van die gebruiker, via een eenmalige taak met `conhost --headless` zodat er geen venster verschijnt - alleen als de app niet bij hem draait, één keer per afkoelperiode per gebruiker en app, nooit een reset. `-NoUserRepair` blijft uit de sessies van klanten. Elke bevinding draagt de gebruiker (`Account`, `Customer`) en of het bij hem hersteld is (`Fixed`); de n8n-kaart toont de gebruikers, *hersteld bij deze gebruiker* per regel en een sectie *Wel hersteld* na een gedeeltelijk herstel |
+| `Get-AppxPackage -User` krijgt nu `DOMEIN\gebruiker` in plaats van een SID: met een Entra ID-SID (`S-1-12-1-...`) antwoordt het *No valid SID could be determined*, ook in Windows PowerShell 5.1 - dus de bestaande controle van itceadmin kon op een Entra-joined host niet werken. De download in de [RDS-readme](scripts/RDS/readme.nl.md#watch-m365appsps1) gaat naar `abfad94` |
+| Geverifieerd op deze Windows 11-machine, zonder verhoging: de sessielijst (een Entra-gebruiker, met aanmeldtijd); tegen de echte logboeken vond de lezer niets met het meegeleverde filter, vijf mislukte Teams-registraties (`0x80073D02`, 401 en 404 één keer geteld) als die code niet gefilterd werd, en TWinUI `5961`-weigeringen met gebruiker en code voor een Windows-onderdeel als stand-in voor een app; HRESULTs met en zonder teken; de registratiecontrole van een "klant" (stil voor Teams, Outlook en Copilot, een bevinding met naam en SID voor een ontbrekend pakket); `Get-AppxPackage -User` op SID mislukt en op naam werkt; `conhost --headless` wacht op zijn opdracht maar geeft `0` terug voor `exit 7`; in n8n bouwde een payload met gedeeltelijk herstel de verwachte kaart. **Niet** geverifieerd: een run als System op een sessiehost, een herregistratie in een echte klantsessie, en of er iets op hun scherm flitst |
 
 ### 2026-10-09 (7)
 | Wijziging |
