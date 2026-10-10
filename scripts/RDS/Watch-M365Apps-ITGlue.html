@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 16:13. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 16:25. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-nieuwe-outlook-en-copilot-op-avd-watchdog-en-herstel">Teams, nieuwe Outlook en Copilot op AVD — watchdog en herstel</h1>
 <p>Deze procedure beschrijft wat er automatisch gebeurt als de nieuwe Teams, de nieuwe Outlook of Copilot niet werkt op een AVD-sessiehost, welke meldingen daaruit komen, en wat je doet als een gebruiker belt.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 neemt het gesprek aan, helpt met de eerste stappen en zet door; level 2 leest de meldingen in het CIPP Teams-kanaal en kijkt op de host; level 3 beheert de scripts.</p>
@@ -136,8 +136,8 @@ li > p { margin: .4rem 0; }
 <tr><td><em>kapot</em></td><td>De app is bij die gebruiker geregistreerd, maar de bestanden ontbreken of de status is niet in orde</td></tr>
 <tr><td><em>kon niet openen</em></td><td>De gebruiker klikte op de app en Windows weigerde hem te openen</td></tr>
 <tr><td><em>registratie mislukt</em></td><td>Windows kon de app niet registreren voor die gebruiker, meestal bij het aanmelden. De regel noemt de gevraagde versie (<em>build 1.2026...</em>)</td></tr>
-<tr><td><em>BuildMissing</em> (host)</td><td>Gebruikers vragen een nieuwere Teams- of Outlook-versie dan deze host heeft, en hun registratie mislukt daardoor bij elke aanmelding. De watchdog zet die versie meteen op de host; daarna lukt het aanmelden weer</td></tr>
-<tr><td><em>NoShortcut</em> (host)</td><td>De nieuwe Copilot-app staat er, maar zonder snelkoppeling in het Startmenu. De watchdog maakt hem aan</td></tr>
+<tr><td><em>versie ontbreekt op de host</em></td><td>Gebruikers vragen een nieuwere Teams- of Outlook-versie dan deze host heeft, en hun registratie mislukt daardoor bij elke aanmelding. De watchdog zet die versie meteen op de host; daarna lukt het aanmelden weer</td></tr>
+<tr><td><em>geen snelkoppeling in het Startmenu</em></td><td>De nieuwe Copilot-app staat er, maar zonder snelkoppeling in het Startmenu. De watchdog maakt hem aan</td></tr>
 <tr><td><em>start niet</em></td><td>Alleen bij <code>itceadmin</code>: de app is er, maar start niet of blijft niet open</td></tr>
 <tr><td><em>gecrasht</em> / <em>hing en werd gesloten</em></td><td>De app crashte, of reageerde niet meer en werd afgesloten</td></tr>
 </tbody>

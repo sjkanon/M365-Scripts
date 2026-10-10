@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (10)
+| Change |
+|--------|
+| The n8n flow *ITCE – M365 App Watchdog → Teams* knows the new reports of [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): `updated` becomes 🆕 **NIEUWE VERSIE** with a line *old → new* per app and the versions on the host; *BuildMissing* reads *versie ontbreekt op de host* and *NoShortcut* *geen snelkoppeling in het Startmenu*; a host finding that was repaired says *hersteld op de host* instead of *bij deze gebruiker*. Until now these showed under their raw names, and `updated` fell back to a *PROBLEEM* card |
+| Verified: the card code run locally (Deno) on an `updated`, a `repaired` with *BuildMissing* / *NoShortcut* and an old payload without the new fields gave the expected title, labels and lines; the flow was saved and published. **Not** verified: a real card in the CIPP channel |
+
 ### 2026-10-10 (9)
 | Change |
 |--------|

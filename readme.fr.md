@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (10)
+| Modification |
+|--------|
+| Le flux n8n *ITCE – M365 App Watchdog → Teams* connaît les nouveaux rapports de [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) : `updated` devient 🆕 **NIEUWE VERSIE** avec une ligne *ancien → nouveau* par application et les versions sur l'hôte ; *BuildMissing* s'affiche *versie ontbreekt op de host* et *NoShortcut* *geen snelkoppeling in het Startmenu* ; un constat d'hôte réparé indique *hersteld op de host* au lieu de *bij deze gebruiker*. Jusqu'ici ils apparaissaient sous leur nom brut, et `updated` retombait sur une carte *PROBLEEM* |
+| Vérifié : le code de la carte exécuté localement (Deno) sur un `updated`, un `repaired` avec *BuildMissing* / *NoShortcut* et un ancien payload sans les nouveaux champs a donné le titre, les libellés et les lignes attendus ; le flux a été enregistré et publié. **Non** vérifié : une vraie carte dans le canal CIPP |
+
 ### 2026-10-10 (9)
 | Modification |
 |--------|

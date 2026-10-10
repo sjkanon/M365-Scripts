@@ -1022,6 +1022,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-10 (10)
+| Wijziging |
+|--------|
+| De n8n-flow *ITCE – M365 App Watchdog → Teams* kent de nieuwe meldingen van [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): `updated` wordt 🆕 **NIEUWE VERSIE** met per app een regel *oud → nieuw* en de versies op de host; *BuildMissing* heet *versie ontbreekt op de host* en *NoShortcut* *geen snelkoppeling in het Startmenu*; een herstelde hostbevinding zegt *hersteld op de host* in plaats van *bij deze gebruiker*. Tot nu toe stonden die er met hun ruwe naam, en viel `updated` terug op een *PROBLEEM*-kaart |
+| Geverifieerd: de kaartcode lokaal (Deno) gedraaid op een `updated`, een `repaired` met *BuildMissing* / *NoShortcut* en een oude payload zonder de nieuwe velden gaf de verwachte titel, labels en regels; de flow is opgeslagen en gepubliceerd. **Niet** geverifieerd: een echte kaart in het CIPP-kanaal |
+
 ### 2026-10-10 (9)
 | Wijziging |
 |--------|

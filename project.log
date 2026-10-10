@@ -2,6 +2,14 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — n8n-kaart kent NIEUWE VERSIE, BuildMissing en NoShortcut
+  - Wat: flow W7YYoix73OWuaEvd, node Build Watchdog Card: event 'updated' -> 🆕 NIEUWE VERSIE
+    (regel oud -> nieuw, versies op de host); labels 'versie ontbreekt op de host' en
+    'geen snelkoppeling in het Startmenu'; hostbevinding hersteld -> 'hersteld op de host'.
+    Sticky note bijgewerkt. Opgeslagen en gepubliceerd (versie 6ea63e33).
+  - Getest: kaartcode lokaal met Deno op 3 voorbeeldpayloads. Niet getest: echte kaart in Teams.
+  - IT Glue-procedure: labels in de woordenlijst aangepast.
+
 2026-10-10 — Nieuwe Outlook valt steeds weg op LEM-AVD-5: host de gevraagde build geven
   - Waarom (n8n 10-10): elke nieuwe aanmelding op AVD-5 faalt 10-16x met 0x80073CF9/0x80070490;
     watchdog herregistreert per gebruiker tot 30 min later; hostherstel 13:02 vond niets (helper
