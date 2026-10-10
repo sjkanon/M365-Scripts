@@ -2,6 +2,13 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — App alleen openen na een eigen, recente poging van de gebruiker
+  - Waarom: elke geweigerde opening telde, ook de autostart bij aanmelden of een poging
+    van uren geleden; dan kon er ongevraagd een app (bv. olk) bij een klant opengaan.
+  - Wat: openen alleen als de laatste poging <= 30 min oud is en niet binnen 2 min na
+    aanmelden; anders staat de reden in de acties. Verder wordt bij klanten niets gestart.
+  - Commit: 6e7fa49; downloadpin in de RDS-readme naar 6e7fa49 + SHA-256 (gecontroleerd tegen GitHub).
+
 2026-10-10 — n8n-kaart WORDT HERSTELD + IT Glue-procedure bijgewerkt
   - n8n-flow W7YYoix73OWuaEvd gepubliceerd: kaart voor 'repairing', regel 'Bewijs' (zip-pad).
   - Watch-M365Apps-ITGlue.md/.html: nieuwe kaart, app gaat na herstel vanzelf open, bewijs
