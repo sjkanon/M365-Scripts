@@ -13,7 +13,8 @@ Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commi
   - Open: op een sessiehost nagaan waar copilotapp.exe staat en of er een identiteitspakket per
     gebruiker is; n8n-kaart 'updated'.
   - Bestanden: Watch-M365Apps.ps1, Get-M365AppsLog.ps1, RDS-readmes, IT Glue md/html, Version History.
-  - Commits: c2255d0 (verzamelaar), "Watch the new unified Copilot app instead of the old one" (devel)
+  - Commits: c2255d0 (verzamelaar), f15d9b1 (watchdog); downloadpin naar f15d9b1 + SHA-256
+    1CB3145A65B8EA7B7A85810D12ED83740DC3A63DE897343F0FEBAAC59643CF12.
 
 2026-10-10 — Watchdog werkt Teams/Outlook/Copilot bij en test elke nieuwe build zelf
   - Waarom: de watchdog controleerde alleen de build die er stond; een nieuwe build kwam via
