@@ -1022,6 +1022,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (8)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) watches the **new, unified Microsoft Copilot app** instead of the old one. Before, the old Microsoft 365 Copilot app (`MicrosoftOfficeHub`) or consumer Copilot counted as Copilot, and with the unified app on the host every user was called fine without a test - the app was never started. Now only the unified app counts: on the host Edge Update must have installed it, its `copilotapp.exe` must be on disk (found through the uninstall entry, App Paths or the Edge-style folder - Microsoft documents none of them) and a Start menu entry for all users must point at it (created when missing). Per user its identity package, when the host has one, must be registered and `Ok` - repaired by registering that family again in their session, as for Teams and Outlook - and for our own account it is started (by AUMID, else `copilotapp.exe`) and must stay up. A `copilotapp.exe` from an older build is closed once in our session after an Edge Update, so the new build is what gets tested |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) recognises such a watchdog and no longer reports the old Copilot blind spots for it; the watchdog pins that version (`c2255d0`) |
+| Verified: syntax; `Test-UserCopilot` with stubbed cmdlets - no identity package and our account (started through `copilotapp.exe`, `WontStart` when it does not stay up), identity package missing for a customer (`NotRegistered` with its own family), present and `Ok` (nothing), no app on the host (left to the host check). **Not** verified on a session host: where `copilotapp.exe` really lives, whether the unified app registers an identity package per user, and the Start menu entry it creates |
+
 ### 2026-10-10 (7)
 | Change |
 |--------|

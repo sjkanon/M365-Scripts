@@ -262,7 +262,8 @@ Wijzigt niets. Laat zien welke versie FSLogix bij aanmelden vroeg, welke de host
 | Een gebruiker die minder dan 10 minuten is aangemeld | Windows is de apps dan nog aan het klaarzetten | De volgende run, of afmelden en opnieuw aanmelden |
 | Een gebruiker die al is afgemeld | Zonder sessie kan de app niet voor die gebruiker worden hersteld | Bij de volgende aanmelding wordt de app opnieuw klaargezet; lukt dat niet, dan ziet de watchdog het 10 minuten later |
 | Een app die bij de gebruiker open staat | De watchdog raakt hem dan niet aan, om hem niet te storen | Draait hij, dan werkt hij kennelijk weer |
-| Copilot als unified app (`copilotapp.exe`, via Edge Update) | Die app is geen pakket per gebruiker: de watchdog test niet of hij bij een gebruiker opent, alleen of hij crasht | `Get-M365AppsLog.ps1` toont het als **BLIND SPOT**; bij klachten level 2 |
+| Copilot bij een klant die hem opent en dan faalt | De watchdog telt alleen de nieuwe Copilot-app (`copilotapp.exe`, via Edge Update) en start hem bij `itceadmin`; bij een klant controleert hij alleen of hij geregistreerd is | Bij klachten level 2; `Get-M365AppsLog.ps1 -App Copilot` toont wat er draait |
+| De oude Microsoft 365 Copilot-app | Telt niet meer: alleen de nieuwe Copilot-app geldt als Copilot | Ontbreekt de nieuwe app, dan installeert de watchdog hem via Edge Update |
 | Hosts zonder de watchdog | Hij draait alleen waar hij geïnstalleerd is | Level 3 installeert hem |
 
 ---

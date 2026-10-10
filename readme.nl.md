@@ -1022,6 +1022,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-10 (8)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) bewaakt de **nieuwe, unified Microsoft Copilot-app** in plaats van de oude. Tot nu toe telde de oude Microsoft 365 Copilot-app (`MicrosoftOfficeHub`) of consumenten-Copilot als Copilot, en met de unified app op de host gold elke gebruiker als in orde zonder test - de app werd nooit gestart. Nu telt alleen de unified app: op de host moet Edge Update hem geïnstalleerd hebben, moet zijn `copilotapp.exe` op schijf staan (gevonden via de uninstall-registratie, App Paths of de Edge-achtige map - Microsoft documenteert geen van alle) en moet een Start-menu-snelkoppeling voor alle gebruikers ernaar wijzen (gemaakt als hij ontbreekt). Per gebruiker moet zijn identiteitspakket, als de host er een heeft, geregistreerd en `Ok` zijn - hersteld door die familie opnieuw te registreren in de sessie, zoals bij Teams en Outlook - en voor ons eigen account wordt hij gestart (via AUMID, anders `copilotapp.exe`) en moet hij blijven draaien. Een `copilotapp.exe` van een oudere build wordt na een Edge Update één keer in onze sessie gesloten, zodat de nieuwe build getest wordt |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) herkent zo'n watchdog en meldt de oude Copilot-blinde vlekken daarvoor niet meer; de watchdog pint die versie (`c2255d0`) |
+| Geverifieerd: syntax; `Test-UserCopilot` met nagebootste cmdlets - geen identiteitspakket en ons account (gestart via `copilotapp.exe`, `WontStart` als hij niet blijft draaien), identiteitspakket ontbreekt bij een klant (`NotRegistered` met zijn eigen familie), aanwezig en `Ok` (niets), geen app op de host (aan de hostcontrole gelaten). **Niet** geverifieerd op een sessiehost: waar `copilotapp.exe` echt staat, of de unified app per gebruiker een identiteitspakket registreert, en welke Start-menu-snelkoppeling hij maakt |
+
 ### 2026-10-10 (7)
 | Wijziging |
 |--------|

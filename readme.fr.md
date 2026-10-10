@@ -1022,6 +1022,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (8)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) surveille la **nouvelle application Microsoft Copilot unifiée** au lieu de l'ancienne. Jusqu'ici l'ancienne application Microsoft 365 Copilot (`MicrosoftOfficeHub`) ou le Copilot grand public comptait comme Copilot, et avec l'application unifiée sur l'hôte chaque utilisateur était considéré en ordre sans test - l'application n'était jamais lancée. Désormais seule l'application unifiée compte : sur l'hôte, Edge Update doit l'avoir installée, son `copilotapp.exe` doit être sur le disque (trouvé via l'entrée de désinstallation, App Paths ou le dossier de type Edge - Microsoft n'en documente aucun) et un raccourci du menu Démarrer pour tous les utilisateurs doit pointer vers lui (créé s'il manque). Par utilisateur, son package d'identité, si l'hôte en a un, doit être inscrit et `Ok` - réparé en réinscrivant cette famille dans sa session, comme pour Teams et Outlook - et pour notre propre compte il est lancé (par AUMID, sinon `copilotapp.exe`) et doit rester actif. Un `copilotapp.exe` d'une build plus ancienne est fermé une fois dans notre session après une mise à jour Edge Update, afin que la nouvelle build soit testée |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) reconnaît un tel watchdog et ne signale plus pour lui les anciens angles morts de Copilot ; le watchdog épingle cette version (`c2255d0`) |
+| Vérifié : syntaxe ; `Test-UserCopilot` avec des cmdlets simulées - pas de package d'identité et notre compte (lancé via `copilotapp.exe`, `WontStart` s'il ne reste pas actif), package d'identité manquant chez un client (`NotRegistered` avec sa propre famille), présent et `Ok` (rien), pas d'application sur l'hôte (laissé au contrôle de l'hôte). **Non** vérifié sur un hôte de session : où se trouve réellement `copilotapp.exe`, si l'application unifiée inscrit un package d'identité par utilisateur, et le raccourci du menu Démarrer qu'elle crée |
+
 ### 2026-10-10 (7)
 | Modification |
 |--------|

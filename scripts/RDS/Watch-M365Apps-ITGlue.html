@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 15:39. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 15:55. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-nieuwe-outlook-en-copilot-op-avd-watchdog-en-herstel">Teams, nieuwe Outlook en Copilot op AVD — watchdog en herstel</h1>
 <p>Deze procedure beschrijft wat er automatisch gebeurt als de nieuwe Teams, de nieuwe Outlook of Copilot niet werkt op een AVD-sessiehost, welke meldingen daaruit komen, en wat je doet als een gebruiker belt.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 neemt het gesprek aan, helpt met de eerste stappen en zet door; level 2 leest de meldingen in het CIPP Teams-kanaal en kijkt op de host; level 3 beheert de scripts.</p>
@@ -278,7 +278,8 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <tr><td>Een gebruiker die minder dan 10 minuten is aangemeld</td><td>Windows is de apps dan nog aan het klaarzetten</td><td>De volgende run, of afmelden en opnieuw aanmelden</td></tr>
 <tr><td>Een gebruiker die al is afgemeld</td><td>Zonder sessie kan de app niet voor die gebruiker worden hersteld</td><td>Bij de volgende aanmelding wordt de app opnieuw klaargezet; lukt dat niet, dan ziet de watchdog het 10 minuten later</td></tr>
 <tr><td>Een app die bij de gebruiker open staat</td><td>De watchdog raakt hem dan niet aan, om hem niet te storen</td><td>Draait hij, dan werkt hij kennelijk weer</td></tr>
-<tr><td>Copilot als unified app (<code>copilotapp.exe</code>, via Edge Update)</td><td>Die app is geen pakket per gebruiker: de watchdog test niet of hij bij een gebruiker opent, alleen of hij crasht</td><td><code>Get-M365AppsLog.ps1</code> toont het als <strong>BLIND SPOT</strong>; bij klachten level 2</td></tr>
+<tr><td>Copilot bij een klant die hem opent en dan faalt</td><td>De watchdog telt alleen de nieuwe Copilot-app (<code>copilotapp.exe</code>, via Edge Update) en start hem bij <code>itceadmin</code>; bij een klant controleert hij alleen of hij geregistreerd is</td><td>Bij klachten level 2; <code>Get-M365AppsLog.ps1 -App Copilot</code> toont wat er draait</td></tr>
+<tr><td>De oude Microsoft 365 Copilot-app</td><td>Telt niet meer: alleen de nieuwe Copilot-app geldt als Copilot</td><td>Ontbreekt de nieuwe app, dan installeert de watchdog hem via Edge Update</td></tr>
 <tr><td>Hosts zonder de watchdog</td><td>Hij draait alleen waar hij geïnstalleerd is</td><td>Level 3 installeert hem</td></tr>
 </tbody>
 </table></div>

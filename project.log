@@ -2,6 +2,19 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — Watchdog bewaakt de nieuwe (unified) Copilot-app in plaats van de oude
+  - Waarom: de oude M365 Copilot-app telde als Copilot; met de unified app op de host werd
+    niemand getest en de app nooit gestart.
+  - Wat: alleen unified Copilot (Edge Update, copilotapp.exe) telt. Host: geïnstalleerd, exe
+    gevonden (uninstall/App Paths/map), Start-menu-snelkoppeling voor iedereen (anders gemaakt).
+    Per gebruiker: identiteitspakket (als dat bestaat) geregistreerd + Ok, anders opnieuw
+    registreren met de eigen familie; itceadmin: starten en moet blijven draaien. Oude build na
+    Edge Update één keer sluiten bij itceadmin. Verzamelaar herkent dit (pin c2255d0).
+  - Open: op een sessiehost nagaan waar copilotapp.exe staat en of er een identiteitspakket per
+    gebruiker is; n8n-kaart 'updated'.
+  - Bestanden: Watch-M365Apps.ps1, Get-M365AppsLog.ps1, RDS-readmes, IT Glue md/html, Version History.
+  - Commits: c2255d0 (verzamelaar), "Watch the new unified Copilot app instead of the old one" (devel)
+
 2026-10-10 — Watchdog werkt Teams/Outlook/Copilot bij en test elke nieuwe build zelf
   - Waarom: de watchdog controleerde alleen de build die er stond; een nieuwe build kwam via
     de wekelijkse image-update of de app zelf, en vaak startte een klant hem als eerste.
