@@ -15,7 +15,7 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
 | Wat is het? | Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account `itceadmin` én bij elke aangemelde gebruiker |
 | Wat doet hij als iets stuk is? | Hij herstelt het zelf: eerst de host, daarna de app in de sessie van de gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat |
 | Hoe weten wij het? | Elke bevinding en elk herstel komt als kaart in het **CIPP Teams-kanaal** (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker. **Alleen level 2 en 3** hebben toegang tot dat kanaal |
-| Wat merkt de gebruiker? | Normaal niets. Bij de volgende keer openen werkt de app weer. Probeerde hij een app te openen en lukte dat niet, dan gaat die na het herstel vanzelf voor hem open |
+| Wat merkt de gebruiker? | Normaal niets. Bij de volgende keer openen werkt de app weer. Probeerde hij in het laatste halfuur zelf een app te openen en lukte dat niet, dan gaat die app na het herstel vanzelf voor hem open. Verder start de watchdog bij een gebruiker nooit een app |
 | Gaan er gegevens verloren? | Nee. Bij gebruikers wordt een app alleen opnieuw geregistreerd, nooit gereset of verwijderd |
 | Wat doet hij níet? | Een gecrashte app opnieuw starten bij een gebruiker, inlogproblemen, licenties, mailbox- of agendaproblemen oplossen |
 
@@ -147,7 +147,7 @@ Zoek in het CIPP Teams-kanaal op de **naam van de gebruiker**, de laatste uren. 
 
 | Wat je ziet | Wat je doet |
 |-------------|-------------|
-| **WORDT HERSTELD** met de naam van de gebruiker, nog geen vervolgkaart | De watchdog is bezig. Wacht een paar minuten op de volgende kaart; een app die de gebruiker probeerde te openen gaat daarna vanzelf open. Na een kwartier nog niets: stap 2 |
+| **WORDT HERSTELD** met de naam van de gebruiker, nog geen vervolgkaart | De watchdog is bezig. Wacht een paar minuten op de volgende kaart; een app die de gebruiker in het laatste halfuur zelf probeerde te openen gaat daarna vanzelf open. Na een kwartier nog niets: stap 2 |
 | **HERSTELD** met de naam van de gebruiker | Laat de app opnieuw openen; lukt het niet, laten afmelden en opnieuw aanmelden. Werkt het: ticket sluiten |
 | **NIET HERSTELD** met de naam van de gebruiker | Laat de gebruiker afmelden en opnieuw aanmelden — de host is meestal wel hersteld, en bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: [Stap 2](#stap-2-op-de-host) |
 | Geen kaart, gebruiker net aangemeld | De watchdog kijkt pas na 10 minuten. Laat hem nu draaien (stap 2) en kijk wat hij vindt |
