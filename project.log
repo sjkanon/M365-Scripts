@@ -9,11 +9,10 @@ Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commi
     -Latest -Provision (Teams/Outlook) + Edge Update-check (Copilot); itceadmin elke run naar
     de klaargezette build (app sluiten, opnieuw registreren) zodat de starttest de nieuwe build
     test. Klanten niet aangeraakt. Nieuwe build op de host -> melding 'updated' (oud -> nieuw).
-  - Open: n8n-flow kent 'updated' nog niet; downloadpin in RDS-readme nog niet verplaatst;
-    niet getest op een sessiehost.
+  - Open: n8n-flow kent 'updated' nog niet; niet getest op een sessiehost.
   - Bestanden: scripts/RDS/Watch-M365Apps.ps1, RDS-readmes (EN/NL/FR), IT Glue md/html,
     Version History (EN/NL/FR).
-  - Commit: "Keep the watched apps up to date and test each new build with our own account" (devel)
+  - Commit: 82807f8; downloadpin naar 82807f8 + SHA-256 FDC21FC632BC5D06EDFCD730919A688D2899788A6C064B4B1B4F42E13C364E8E.
 
 2026-10-10 — Probleem bij één klant alleen in diens sessie herstellen
   - Waarom: elke bevinding bij een klant stuurde ook de hele host naar herstel.
