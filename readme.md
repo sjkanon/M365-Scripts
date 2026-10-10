@@ -194,6 +194,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook and Copilot with the IT accounts, repair, report to n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook and Copilot per user, and what the watchdog did |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -475,6 +476,8 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Also checks every other signed-in user, and every app a user could not open (TWinUI 5961) or whose registration failed (AppX 401/404), and re-registers it in that user's own session without a window - never while it runs for them, never a reset; every report names the user
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
   - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
+
+- App log collector ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — read only, after a complaint: per user what is registered and running, the AppX/AppReadiness/FSLogix events, registry and logs, and the watchdog's task, state and logs — set against what the watchdog would conclude, with its blind spots (e.g. the unified Copilot app); one zip
 
 ---
 
@@ -864,6 +867,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     ├── <a href="scripts/RDS/readme.md">RDS/</a>
     │   ├── <a href="scripts/RDS/readme.md">readme.md</a>
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← FSLogix / Azure Files profile diagnostics
+    │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← log collector: apps per user vs. the watchdog
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← shrink FSLogix profile disks, check compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← RDP/RDWeb login failure diagnostics
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot fit for FSLogix on the image
@@ -1016,6 +1020,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-10
+| Change |
+|--------|
+| **New [`scripts/RDS/Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1): after a complaint, collect what happened with new Teams, new Outlook and Copilot on a session host, and why the watchdog did or did not repair it.** Copilot did not work for users on a server while the watchdog was believed to check, report and repair every user; there was no way to see afterwards what it had seen. Read only, into one folder and zip: the watchdog's settings (webhook and token masked), task, state and logs; provisioned builds, the unified Copilot app and WebView2; every user's package state (`Get-AppxPackage -AllUsers`); per signed-in user and app what is registered and running, with the verdict the watchdog would reach and **BLIND SPOT** where it would call it fine untested; the AppX, AppReadiness, AppModel-Runtime, TWinUI and crash events with user, code and whether the watchdog reads them; `PackageStatus`, `Deprovisioned`, FSLogix and Edge Update registry and logs; with `-IncludeAppLogs` the Teams and Outlook logs per user. Every part runs on its own, `Get-AppxPackage` in a job with a 120 s timeout, missing event channels are skipped, open logs are read shared. The channels and files follow Microsoft's MSRD-Collect and the FSLogix AppX documentation. Menu item `Q` |
+| Blind spots of the watchdog it shows, and that likely explain the Copilot case: with the unified Copilot app (Edge Update) on the host the watchdog accepts Copilot for every user without testing it; that app runs as `copilotapp.exe`, which the watchdog's crash check does not know; consumer Copilot counts as Copilot; and a customer's app that is registered but does not work is only seen when Windows refused the open (TWinUI `5961`) |
+| Verified on this Windows 11 machine, unelevated: syntax; a full run and a run filtered on one user and Copilot; the per-user verdict and events (Teams `401`/`404`/`419` with `0x80073D02` marked benign, an Outlook crash marked as read); a missing FSLogix channel and registry key skipped instead of stopping the section; a section that needs elevation named at the end while the rest was collected; app logs copied and the zip written. **Not** verified: an elevated run on a session host with the watchdog installed, FSLogix present and the unified Copilot app |
 
 ### 2026-10-09 (10)
 | Change |

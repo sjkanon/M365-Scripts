@@ -194,6 +194,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook et Copilot avec les comptes IT, réparer, signaler à n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook et Copilot par utilisateur, et ce qu'a fait le watchdog |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — installer des pilotes d'imprimante (depuis GitHub) et des imprimantes à partir d'un fichier JSON |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
@@ -475,6 +476,8 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Vérifie aussi chaque autre utilisateur connecté, et chaque application qu'un utilisateur n'a pas pu ouvrir (TWinUI 5961) ou dont l'inscription a échoué (AppX 401/404), et la réinscrit dans la session de cet utilisateur sans fenêtre - jamais pendant qu'elle tourne chez lui, jamais de réinitialisation ; chaque rapport nomme l'utilisateur
   - Répare l'hôte via `Repair-AppxPackageStore.ps1 -Provision` (avec un délai de carence) et notre propre compte en réinscrivant ou réinitialisant l'application, sans toucher aux sessions des clients ; signale `repaired` / `repair-failed` / `recovered` en JSON à un webhook n8n
   - Signale chaque plantage et blocage des trois applications sur l'hôte (Application Error 1000 / Application Hang 1002), y compris ceux des clients, regroupés par application, module et code d'exception
+
+- Collecteur de journaux ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — lecture seule, après une plainte : par utilisateur ce qui est inscrit et lancé, les événements AppX/AppReadiness/FSLogix, registre et journaux, et la tâche, l'état et les journaux du watchdog — confrontés à ce que conclurait le watchdog, avec ses angles morts (comme l'application Copilot unifiée) ; un seul zip
 
 ---
 
@@ -864,6 +867,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     ├── <a href="scripts/RDS/readme.fr.md">RDS/</a>
     │   ├── <a href="scripts/RDS/readme.fr.md">readme.md</a>
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← diagnostic des profils FSLogix / Azure Files
+    │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← collecteur : applis par utilisateur vs. le watchdog
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← réduire les disques FSLogix, vérifier la compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnostic des échecs de connexion RDP/RDWeb
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot compatibles FSLogix sur l'image
@@ -1016,6 +1020,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-10
+| Modification |
+|--------|
+| **Nouveau [`scripts/RDS/Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) : après une plainte, collecter ce qui s'est passé avec le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de session, et pourquoi le watchdog l'a réparé ou non.** Copilot ne fonctionnait pas pour des utilisateurs sur un serveur alors qu'on pensait que le watchdog contrôlait, signalait et réparait chaque utilisateur ; rien ne permettait de voir après coup ce qu'il avait vu. En lecture seule, dans un dossier et un zip : les réglages du watchdog (webhook et jeton masqués), tâche, état et journaux ; builds provisionnés, l'application Copilot unifiée et WebView2 ; l'état des packages de chaque utilisateur (`Get-AppxPackage -AllUsers`) ; par utilisateur connecté et application ce qui est inscrit et lancé, avec le verdict auquel arriverait le watchdog et **BLIND SPOT** là où il le jugerait correct sans test ; les événements AppX, AppReadiness, AppModel-Runtime, TWinUI et de plantage avec utilisateur, code et si le watchdog les lit ; `PackageStatus`, `Deprovisioned`, registre et journaux de FSLogix et Edge Update ; avec `-IncludeAppLogs` les journaux Teams et Outlook par utilisateur. Chaque partie tourne seule, `Get-AppxPackage` dans un job avec un délai de 120 s, les canaux d'événements absents sont ignorés, les journaux ouverts sont lus en partage. Les canaux et fichiers suivent MSRD-Collect de Microsoft et la documentation FSLogix sur AppX. Entrée de menu `Q` |
+| Angles morts du watchdog qu'il montre, et qui expliquent probablement le cas Copilot : avec l'application Copilot unifiée (Edge Update) sur l'hôte, le watchdog accepte Copilot pour chaque utilisateur sans le tester ; cette application tourne sous `copilotapp.exe`, que le contrôle des plantages du watchdog ne connaît pas ; le Copilot grand public compte comme Copilot ; et l'application d'un client inscrite mais qui ne fonctionne pas n'est vue que si Windows a refusé l'ouverture (TWinUI `5961`) |
+| Vérifié sur ce poste Windows 11, sans élévation : syntaxe ; une exécution complète et une exécution filtrée sur un utilisateur et Copilot ; le verdict par utilisateur et les événements (Teams `401`/`404`/`419` avec `0x80073D02` marqué bénin, un plantage d'Outlook marqué comme lu) ; un canal FSLogix et une clé de registre absents ignorés au lieu d'arrêter la partie ; une partie nécessitant l'élévation nommée à la fin pendant que le reste était collecté ; journaux d'application copiés et zip écrit. **Non** vérifié : une exécution élevée sur un hôte de session avec le watchdog installé, FSLogix présent et l'application Copilot unifiée |
 
 ### 2026-10-09 (10)
 | Modification |

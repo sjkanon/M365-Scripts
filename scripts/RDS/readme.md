@@ -18,6 +18,7 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook and Copilot with our own account (`itceadmin`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
+| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collects, read only, what happened with new Teams, new Outlook and Copilot on a session host — per user what is registered and running, the events, and what the watchdog did and would conclude, with its blind spots — into one zip |
 
 ---
 
@@ -450,3 +451,78 @@ it is public.
   `.reg` backups: `C:\IT\AppWatchdog\Repair`.
 - Run elevated or as System; it relaunches itself in 64-bit Windows PowerShell for the
   AppX cmdlets. Exit code `0` healthy or repaired, `1` something still broken.
+
+---
+
+### Get-M365AppsLog.ps1
+
+Collects everything about new Teams, new Outlook and Copilot on a session host into one
+folder and zip, to answer two questions after a complaint: *why did the app not work for
+this user*, and *why did the watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) not
+catch or repair it*. Read only — nothing is started, registered, repaired or closed.
+
+**What it collects**
+
+| Part | What |
+|------|------|
+| Watchdog | `config.json` (webhook and token masked), whether `NoRepair` / `NoUserRepair` is on and the app is watched, the installed version and whether it has the per-user checks at all; the task's state, last run, result and history, probe tasks left behind; `state.json` (last run, last host repair, open problems, per-user re-registrations); its logs and repair logs from the window, with the lines about the apps and users in question pulled out |
+| Host | Provisioned builds, the Copilot unified app (Edge Update) and the WebView2 runtime |
+| All users | `Get-AppxPackage -AllUsers`: every user each package is known for and its install state — signed-off users included |
+| Signed-in users | Per user and app: the packages registered for them, status, files present, running in their session, and the verdict the watchdog would reach — marked **BLIND SPOT** where it would call it fine without testing it |
+| Events | From the last `-Hours`: TWinUI `5960`/`5961`, AppXDeploymentServer (errors and `401`/`404`), AppXDeployment, AppxPackaging, AppReadiness, AppModel-Runtime, Application Error `1000` / Hang `1002` of the apps — each with the user, the error code, and whether the watchdog reads that event at all |
+| Registry | A non-zero `PackageStatus` (Windows marked the package bad), packages in `Deprovisioned`, FSLogix `InstallAppxPackages`, the Edge Update Copilot policies; exports of the FSLogix, Edge Update policy, Teams and Deprovisioned keys |
+| FSLogix and Edge Update | Their log files from the window (FSLogix honours `Logging\LogDir`), the Profile log lines about the apps that carry an error, FSLogix error and warning events |
+| Copilot | Installed Copilot apps with their folder, and which Copilot process runs for whom — `copilotapp.exe` is the unified app, `M365Copilot.exe` the packaged one |
+| App logs (`-IncludeAppLogs`) | Per signed-in user in scope: Teams logs (LocalCache — gone at sign-out with FSLogix), the Teams diagnostics bundle in Downloads, new Outlook logs, FSLogix `AppxPackages.xml` |
+
+Output in `-OutputPath` (falls back to `%TEMP%`): `summary.txt` (the screen), `sessions.csv`,
+`packages.csv`, `allusers.csv`, `events.csv`, `fslogix-events.csv`, `watchdog\`,
+`registry\`, `fslogix\`, `edgeupdate\` and `applogs\`, zipped.
+
+**Blind spots it points out**
+
+- Copilot not registered for a user while the unified app (Edge Update) is on the host:
+  the watchdog accepts that as Copilot for everyone, without testing it per user.
+- The unified app in use (`copilotapp.exe`): the watchdog checks neither its start nor its crashes.
+- Only consumer Copilot (`Microsoft.Copilot`) registered, not Microsoft 365 Copilot
+  (`Microsoft.MicrosoftOfficeHub`): the watchdog counts either.
+- A customer's app registered and `Ok` but not working: the watchdog starts nothing for
+  customers, so it only sees an open that Windows refused (TWinUI `5961`).
+- A user signed in less than 10 minutes, a user who is signed off, the watched account
+  not signed in on the host, a task that has not run, an older watchdog without the
+  per-user checks, events the watchdog does not read.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-User` | Only these users — user name, UPN or `DOMAIN\user`, also when signed off (default: everyone) |
+| `-App` | `Teams`, `Outlook`, `Copilot` (default: all three) |
+| `-Hours` | How far back to read events and logs (default: `24`, at most `336`) |
+| `-OutputPath` | Where the folder and zip are written (default: `C:\Temp`) |
+| `-WorkingDir` | The watchdog's folder (default: `C:\IT\AppWatchdog`) |
+| `-IncludeAppLogs` | Also copy the apps' own logs per signed-in user — they hold names and mail addresses, so only on request |
+| `-NoZip` | Leave the folder, do not zip it |
+
+**Examples**
+
+```powershell
+# A customer says Copilot did not open this morning
+.\Get-M365AppsLog.ps1 -User jansen -App Copilot -Hours 12
+
+# Everything on this host from the last two days, with the Teams and Outlook logs
+.\Get-M365AppsLog.ps1 -Hours 48 -IncludeAppLogs
+```
+
+**Notes**
+
+- Run elevated on the host, soon after the complaint; it relaunches itself in 64-bit
+  Windows PowerShell for the AppX cmdlets. Menu item `Q`.
+- Every part runs on its own: one that fails is named at the end and the rest is still
+  collected. `Get-AppxPackage` runs in a separate process and is given up after 120
+  seconds, because it can hang on exactly the host this is for. An event channel that
+  does not exist on the host (no FSLogix, an older build) is skipped.
+- Logs that are still open are read shared; a log over 50 MB keeps its last 50 MB.
+- The webhook URL and token are masked in the copy of `config.json`.
+- Comparable to the AppX and FSLogix parts of Microsoft's MSRD-Collect, but limited to
+  these three apps and set against what the watchdog does.

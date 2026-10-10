@@ -18,6 +18,7 @@ Scripts de diagnostic, de supervision et de préparation pour l'infrastructure R
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Réduire les disques de profil FSLogix d'un partage (Invoke-FslShrinkDisk), ou vérifier si FSLogix les compacte lui-même à la déconnexion |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Vérifier et préparer une image Windows 11 multisession ou un hôte de session AVD pour que le nouveau Teams, le nouvel Outlook et Copilot continuent de fonctionner avec FSLogix — FSLogix lui-même n'est pas modifié |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (tâche planifiée) — teste le nouveau Teams, le nouvel Outlook et Copilot avec notre propre compte (`itceadmin`) sur un hôte de session, répare ce qui est cassé avant qu'un client ne le subisse, et le signale à n8n |
+| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collecte, en lecture seule, ce qui s'est passé avec le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de session — par utilisateur ce qui est inscrit et lancé, les événements, et ce que le watchdog a fait et conclurait, avec ses angles morts — dans un seul zip |
 
 ---
 
@@ -461,3 +462,80 @@ ne vont jamais dans ce dépôt : il est public.
   Transcriptions et sauvegardes `.reg` des réparations : `C:\IT\AppWatchdog\Repair`.
 - À exécuter en élevé ou en tant que System ; il se relance en Windows PowerShell 64 bits
   pour les cmdlets AppX. Code de sortie `0` sain ou réparé, `1` quelque chose est encore cassé.
+
+---
+
+### Get-M365AppsLog.ps1
+
+Collecte tout ce qui concerne le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de
+session dans un dossier et un zip, pour répondre à deux questions après une plainte :
+*pourquoi l'application n'a-t-elle pas fonctionné pour cet utilisateur*, et *pourquoi le
+watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) ne l'a-t-il pas vu ou réparé*.
+Lecture seule — rien n'est lancé, inscrit, réparé ou fermé.
+
+**Ce qu'il collecte**
+
+| Partie | Quoi |
+|--------|------|
+| Watchdog | `config.json` (webhook et jeton masqués), si `NoRepair` / `NoUserRepair` est actif et l'application surveillée, la version installée et si elle a seulement les contrôles par utilisateur ; état, dernière exécution, résultat et historique de la tâche, tâches de sonde restées en place ; `state.json` (dernière exécution, dernière réparation de l'hôte, problèmes ouverts, réinscriptions par utilisateur) ; ses journaux et journaux de réparation de la période, avec les lignes sur les applications et utilisateurs concernés extraites |
+| Hôte | Builds provisionnés, l'application Copilot unifiée (Edge Update) et le runtime WebView2 |
+| Tous les utilisateurs | `Get-AppxPackage -AllUsers` : chaque utilisateur pour qui chaque package est connu et son état d'installation — utilisateurs déconnectés compris |
+| Utilisateurs connectés | Par utilisateur et application : les packages inscrits pour eux, état, fichiers présents, lancé dans leur session, et le verdict auquel arriverait le watchdog — marqué **BLIND SPOT** là où il le jugerait correct sans le tester |
+| Événements | Des dernières `-Hours` : TWinUI `5960`/`5961`, AppXDeploymentServer (erreurs et `401`/`404`), AppXDeployment, AppxPackaging, AppReadiness, AppModel-Runtime, Application Error `1000` / Hang `1002` des applications — chacun avec l'utilisateur, le code d'erreur, et si le watchdog lit seulement cet événement |
+| Registre | Un `PackageStatus` non nul (Windows a marqué le package comme défectueux), les packages dans `Deprovisioned`, FSLogix `InstallAppxPackages`, les stratégies Copilot d'Edge Update ; exports des clés FSLogix, stratégie Edge Update, Teams et Deprovisioned |
+| FSLogix et Edge Update | Leurs fichiers journaux de la période (FSLogix suit `Logging\LogDir`), les lignes du journal Profile sur les applications portant une erreur, les événements d'erreur et d'avertissement de FSLogix |
+| Copilot | Les applications Copilot installées avec leur dossier, et quel processus Copilot tourne pour qui — `copilotapp.exe` est l'application unifiée, `M365Copilot.exe` celle en package |
+| Journaux d'application (`-IncludeAppLogs`) | Par utilisateur connecté concerné : journaux Teams (LocalCache — supprimés à la déconnexion avec FSLogix), le paquet de diagnostic Teams dans Téléchargements, journaux du nouvel Outlook, FSLogix `AppxPackages.xml` |
+
+Sortie dans `-OutputPath` (sinon `%TEMP%`) : `summary.txt` (l'écran), `sessions.csv`,
+`packages.csv`, `allusers.csv`, `events.csv`, `fslogix-events.csv`, `watchdog\`,
+`registry\`, `fslogix\`, `edgeupdate\` et `applogs\`, zippés.
+
+**Angles morts qu'il signale**
+
+- Copilot non inscrit pour un utilisateur alors que l'application unifiée (Edge Update) est
+  sur l'hôte : le watchdog l'accepte comme Copilot pour tous, sans le tester par utilisateur.
+- L'application unifiée en service (`copilotapp.exe`) : le watchdog ne contrôle ni son démarrage ni ses plantages.
+- Seul le Copilot grand public (`Microsoft.Copilot`) inscrit, pas Microsoft 365 Copilot
+  (`Microsoft.MicrosoftOfficeHub`) : le watchdog compte l'un ou l'autre.
+- L'application d'un client inscrite et `Ok` mais qui ne fonctionne pas : le watchdog ne
+  lance rien pour les clients, il ne voit donc qu'une ouverture refusée par Windows (TWinUI `5961`).
+- Un utilisateur connecté depuis moins de 10 minutes, un utilisateur déconnecté, le compte
+  surveillé non connecté sur l'hôte, une tâche qui n'a pas tourné, un ancien watchdog sans
+  les contrôles par utilisateur, des événements que le watchdog ne lit pas.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-User` | Uniquement ces utilisateurs — nom d'utilisateur, UPN ou `DOMAIN\user`, même déconnectés (par défaut : tous) |
+| `-App` | `Teams`, `Outlook`, `Copilot` (par défaut : les trois) |
+| `-Hours` | Jusqu'où remonter dans les événements et journaux (par défaut : `24`, au plus `336`) |
+| `-OutputPath` | Où écrire le dossier et le zip (par défaut : `C:\Temp`) |
+| `-WorkingDir` | Le dossier du watchdog (par défaut : `C:\IT\AppWatchdog`) |
+| `-IncludeAppLogs` | Copier aussi les journaux propres aux applications par utilisateur connecté — ils contiennent des noms et adresses e-mail, donc seulement sur demande |
+| `-NoZip` | Laisser le dossier, ne pas le zipper |
+
+**Exemples**
+
+```powershell
+# Un client dit que Copilot ne s'est pas ouvert ce matin
+.\Get-M365AppsLog.ps1 -User jansen -App Copilot -Hours 12
+
+# Tout sur cet hôte des deux derniers jours, avec les journaux Teams et Outlook
+.\Get-M365AppsLog.ps1 -Hours 48 -IncludeAppLogs
+```
+
+**Remarques**
+
+- À lancer en élevé sur l'hôte, peu après la plainte ; il se relance en Windows PowerShell
+  64 bits pour les cmdlets AppX. Entrée de menu `Q`.
+- Chaque partie tourne seule : une partie qui échoue est nommée à la fin et le reste est
+  quand même collecté. `Get-AppxPackage` tourne dans un processus séparé et est abandonné
+  après 120 secondes, car il peut se bloquer justement sur l'hôte visé. Un canal
+  d'événements absent de l'hôte (pas de FSLogix, un build plus ancien) est ignoré.
+- Les journaux encore ouverts sont lus en partage ; d'un journal de plus de 50 Mo seuls
+  les 50 derniers Mo sont gardés.
+- L'URL du webhook et le jeton sont masqués dans la copie de `config.json`.
+- Comparable aux parties AppX et FSLogix de MSRD-Collect de Microsoft, mais limité à ces
+  trois applications et confronté à ce que fait le watchdog.

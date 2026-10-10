@@ -194,6 +194,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook en Copilot testen met de IT-accounts, herstellen, melden aan n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook en Copilot gebeurde, en wat de watchdog deed |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
@@ -475,6 +476,8 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Controleert ook elke andere aangemelde gebruiker, en elke app die een gebruiker niet kon openen (TWinUI 5961) of waarvan de registratie mislukte (AppX 401/404), en registreert die opnieuw in de eigen sessie van die gebruiker zonder venster - nooit terwijl hij bij hem draait, nooit een reset; elke melding noemt de gebruiker
   - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
   - Meldt elke crash en hang van de drie apps op de host (Application Error 1000 / Application Hang 1002), ook die van klanten, gegroepeerd per app, module en foutcode
+
+- App-logverzamelaar ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — alleen lezend, na een klacht: per gebruiker wat er geregistreerd is en draait, de AppX-/AppReadiness-/FSLogix-events, register en logs, en de taak, status en logs van de watchdog — afgezet tegen waar de watchdog op zou uitkomen, met zijn blinde vlekken (zoals de unified Copilot-app); één zip
 
 ---
 
@@ -864,6 +867,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     ├── <a href="scripts/RDS/readme.nl.md">RDS/</a>
     │   ├── <a href="scripts/RDS/readme.nl.md">readme.md</a>
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← diagnose van FSLogix- / Azure Files-profielen
+    │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← logverzamelaar: apps per gebruiker vs. de watchdog
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← FSLogix-profielschijven verkleinen, compressie controleren
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnose van mislukte RDP-/RDWeb-aanmeldingen
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot geschikt voor FSLogix op de image
@@ -1016,6 +1020,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-10
+| Wijziging |
+|--------|
+| **Nieuw [`scripts/RDS/Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1): na een klacht verzamelen wat er met de nieuwe Teams, de nieuwe Outlook en Copilot op een sessiehost gebeurde, en waarom de watchdog het wel of niet herstelde.** Copilot werkte op een server niet bij gebruikers terwijl we dachten dat de watchdog elke gebruiker controleerde, meldde en herstelde; achteraf was niet te zien wat hij gezien had. Alleen lezend, in één map en zip: de instellingen van de watchdog (webhook en token gemaskeerd), taak, status en logs; klaargezette builds, de unified Copilot-app en WebView2; de pakketstatus van elke gebruiker (`Get-AppxPackage -AllUsers`); per aangemelde gebruiker en app wat er geregistreerd is en draait, met het oordeel waar de watchdog op zou uitkomen en **BLIND SPOT** waar hij het ongetest goed zou vinden; de AppX-, AppReadiness-, AppModel-Runtime-, TWinUI- en crash-events met gebruiker, code en of de watchdog ze leest; `PackageStatus`, `Deprovisioned`, register en logs van FSLogix en Edge Update; met `-IncludeAppLogs` de logs van Teams en Outlook per gebruiker. Elk deel draait op zichzelf, `Get-AppxPackage` in een job met een time-out van 120 s, ontbrekende eventkanalen worden overgeslagen, open logs worden gedeeld gelezen. De kanalen en bestanden volgen Microsofts MSRD-Collect en de FSLogix-documentatie over AppX. Menu-item `Q` |
+| Blinde vlekken van de watchdog die het laat zien, en die het Copilot-geval waarschijnlijk verklaren: met de unified Copilot-app (Edge Update) op de host accepteert de watchdog Copilot voor elke gebruiker zonder het te testen; die app draait als `copilotapp.exe`, dat de crashcontrole van de watchdog niet kent; consumenten-Copilot telt als Copilot; en de app van een klant die geregistreerd is maar niet werkt wordt alleen gezien als Windows het openen weigerde (TWinUI `5961`) |
+| Gecontroleerd op deze Windows 11-machine, niet verhoogd: syntaxis; een volledige run en een run gefilterd op één gebruiker en Copilot; het oordeel per gebruiker en de events (Teams `401`/`404`/`419` met `0x80073D02` als onschuldig gemarkeerd, een Outlook-crash als gelezen gemarkeerd); een ontbrekend FSLogix-kanaal en registersleutel overgeslagen in plaats van dat het deel stopte; een deel dat verhoging nodig heeft aan het eind genoemd terwijl de rest verzameld werd; app-logs gekopieerd en de zip geschreven. **Niet** gecontroleerd: een verhoogde run op een sessiehost met de watchdog geïnstalleerd, FSLogix aanwezig en de unified Copilot-app |
 
 ### 2026-10-09 (10)
 | Wijziging |
