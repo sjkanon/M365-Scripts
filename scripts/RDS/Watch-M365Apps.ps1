@@ -48,8 +48,11 @@
                      per user and app, and never reset. In our own account an app that
                      does not start is reset (Reset-AppxPackage). Nothing is closed or
                      removed for anyone - no -RemoveOld, no -Latest. A user who tried to
-                     open the app (TWinUI 5961) gets it opened in their session once it
-                     is registered again, unless -NoUserLaunch.
+                     open the app themselves (TWinUI 5961) in the last 30 minutes gets it
+                     opened in their session once it is registered again, unless
+                     -NoUserLaunch. Nothing else is ever started for a customer; an
+                     attempt in the first 2 minutes after sign-in is autostart and does
+                     not count.
       4. Read back   Steps 1, 2 and 2b's registration check again; a user's failure
                      counts as repaired when the package is registered and Ok for them
                      afterwards.
@@ -193,6 +196,11 @@ $ProbeTaskPath = '\M365AppWatchdog\'
 $HostAccount   = '(host)'
 $LaunchSeconds = 60
 $UserGraceMinutes = 10   # a fresh sign-in is still registering its apps; leave it alone until then
+# An app is only opened for a user after a repair when they tried it themselves, recently:
+# their last refused open is at most $UserLaunchMinutes old, and not within $AutoStartSeconds
+# of signing in - that is the app's own autostart, not the user.
+$UserLaunchMinutes = 30
+$AutoStartSeconds  = 120
 # Deployment results that are not a fault: an update waiting for the app to close
 # (0x80073D02), and asking for what is already there (0x80073CFB, 0x80073D06).
 $BenignAppxCodes = @('0x80073D02', '0x80073CFB', '0x80073D06')
@@ -601,18 +609,19 @@ function Get-OpenFailure {
         $what    = if ($first.Kind -eq 'WontOpen') { 'Windows could not open it' } else { 'its registration failed' }
         $detail  = '{0} {1}x since {2:dd-MM HH:mm}, last at {3:HH:mm}, error {4}' -f $what, $group.Count, $Since, $last, $first.Code
         New-Finding -Account $name -App $first.App -Problem $first.Kind -Detail $detail -Package $first.Package `
-            -Sid $(if ($system) { '' } else { $first.Sid }) -Customer:(-not $system -and -not ($session -and $session.Watched)) -FromEvent
+            -Sid $(if ($system) { '' } else { $first.Sid }) -Customer:(-not $system -and -not ($session -and $session.Watched)) -FromEvent -LastAttempt $last
     }
 }
 
 # -- Checks --------------------------------------------------------------------------
 function New-Finding {
     param([string] $Account, [string] $App, [string] $Problem, [string] $Detail, [string] $Package,
-          [string] $Sid = '', [switch] $Customer, [switch] $FromEvent)
+          [string] $Sid = '', [switch] $Customer, [switch] $FromEvent, $LastAttempt = $null)
     $who = if ($Account -eq $HostAccount) { '' } else { "$Account - " }
     Write-Bad "$who$App - $Detail"
     [PSCustomObject]@{ Account = $Account; App = $App; Problem = $Problem; Detail = $Detail; Package = $Package
-                       Sid = $Sid; Customer = [bool] $Customer; FromEvent = [bool] $FromEvent; Fixed = $false }
+                       Sid = $Sid; Customer = [bool] $Customer; FromEvent = [bool] $FromEvent; Fixed = $false
+                       LastAttempt = $LastAttempt }
 }
 
 function Test-HostApp {
@@ -780,12 +789,38 @@ function Invoke-Repair {
         # They tried to open it and Windows refused: now that it is registered again,
         # open it for them, so they do not have to try once more - or call.
         if ($ok -and $finding.Problem -eq 'WontOpen' -and -not $NoUserLaunch) {
-            $result = Start-AppForUser -Session $session -Entry $entry -Who $who
-            $actions.Add($result.Action)
-            if (-not $result.Ok) { $finding.Fixed = $false; $done[$key] = $false }
+            $notNow = Test-UserAttempt -Finding $finding -Session $session
+            if ($notNow) {
+                Write-Skip "$($finding.App) for $who not opened - $notNow"
+                $actions.Add("$who $($finding.App): not opened for them - $notNow")
+            } else {
+                $result = Start-AppForUser -Session $session -Entry $entry -Who $who
+                $actions.Add($result.Action)
+                if (-not $result.Ok) { $finding.Fixed = $false; $done[$key] = $false }
+            }
         }
     }
     return $actions
+}
+
+function Test-UserAttempt {
+    <#
+        Why an app should not be opened for this user now, or '' when it may: only
+        right after they tried it themselves. An old attempt (they gave up, or are
+        doing something else) or one in the first minutes after sign-in (autostart
+        of Teams or Outlook, which Windows logs the same way) does not count.
+    #>
+    param($Finding, $Session)
+    $last = $Finding.LastAttempt
+    if (-not $last) { return 'no time of their own attempt' }
+    $last = [datetime] $last
+    if ($last -lt (Get-Date).AddMinutes(-$UserLaunchMinutes)) {
+        return ('their last attempt was at {0:HH:mm}, more than {1} minutes ago' -f $last, $UserLaunchMinutes)
+    }
+    if ($Session.Since -and $last -lt ([datetime] $Session.Since).AddSeconds($AutoStartSeconds)) {
+        return 'the attempt came right after sign-in - the app''s autostart, not the user'
+    }
+    return ''
 }
 
 function Start-AppForUser {

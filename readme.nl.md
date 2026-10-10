@@ -1022,6 +1022,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-10 (4)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) opent een app na een herstel alleen voor een gebruiker die het **zelf en kort geleden** probeerde: zijn laatste geweigerde opening is hooguit 30 minuten oud, en niet binnen 2 minuten na het aanmelden. Voorheen telde elke geweigerde opening sinds de vorige run - ook een van de autostart van Teams of de nieuwe Outlook bij het aanmelden, die Windows op dezelfde manier logt, en een van een gebruiker die het allang had opgegeven - zodat er bij een klant een app op het scherm kon verschijnen waar hij niet om had gevraagd. Anders zegt de actie waarom hij niet geopend is. Verder wordt er bij een klant nooit iets gestart. De download in de [RDS-readme](scripts/RDS/readme.nl.md#watch-m365appsps1) gaat naar deze versie |
+| Gecontroleerd: syntaxis; de nieuwe controle los voor een recente poging (geopend), een poging van 50 minuten oud, een 30 seconden na het aanmelden (beide niet geopend, met de reden) en een 2,5 minuut na het aanmelden (geopend). **Niet** gecontroleerd: of de autostart echt TWinUI `5961` schrijft, en een run op een sessiehost |
+
 ### 2026-10-10 (3)
 | Wijziging |
 |--------|

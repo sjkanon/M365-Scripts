@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (4)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) opens an app for a user after a repair only when they tried it **themselves, recently**: their last refused open must be at most 30 minutes old, and not within 2 minutes of signing in. Before, any refused open since the previous run counted - also one from the autostart of Teams or new Outlook at sign-in, which Windows logs the same way, and one from a user who had long since given up - so an app could appear on a customer's screen they had not asked for. Otherwise the action says why it was not opened. Nothing else is ever started for a customer. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to this version |
+| Verified: syntax; the new check on its own for a recent attempt (opened), an attempt 50 minutes old, one 30 seconds after sign-in (both not opened, with the reason) and one 2.5 minutes after sign-in (opened). **Not** verified: whether autostart really writes TWinUI `5961`, and a run on a session host |
+
 ### 2026-10-10 (3)
 | Change |
 |--------|

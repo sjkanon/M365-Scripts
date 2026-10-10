@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (4)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) n'ouvre une application pour un utilisateur après une réparation que s'il l'a essayée **lui-même, récemment** : sa dernière ouverture refusée date d'au plus 30 minutes, et pas des 2 minutes suivant la connexion. Avant, toute ouverture refusée depuis l'exécution précédente comptait - y compris celle du démarrage automatique de Teams ou du nouvel Outlook à la connexion, que Windows journalise de la même façon, et celle d'un utilisateur qui avait abandonné depuis longtemps - si bien qu'une application pouvait apparaître à l'écran d'un client qui ne l'avait pas demandée. Sinon l'action dit pourquoi elle n'a pas été ouverte. Rien d'autre n'est jamais lancé pour un client. Le téléchargement du [readme RDS](scripts/RDS/readme.fr.md#watch-m365appsps1) passe à cette version |
+| Vérifié : syntaxe ; le nouveau contrôle seul pour une tentative récente (ouverte), une tentative vieille de 50 minutes, une 30 secondes après la connexion (toutes deux non ouvertes, avec la raison) et une 2,5 minutes après la connexion (ouverte). **Non** vérifié : si le démarrage automatique écrit vraiment TWinUI `5961`, et une exécution sur un hôte de session |
+
 ### 2026-10-10 (3)
 | Modification |
 |--------|
