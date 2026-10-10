@@ -924,14 +924,29 @@ function Get-FslogixRequest {
         does not have that exact version answers 0x80070490 with an empty path,
         which is the error in the Apps event log. One object per requested package,
         with how often and when it last failed.
+
+        The same request also shows in the AppX deployment log, under the user's own
+        SID, and on some hosts only there: LEM-AVD-5 failed new Outlook 10-16 times per
+        sign-in with 0x80073CF9 / 0x80070490 while the FSLogix log named nothing, so
+        a host repair found no build to provision. A 0x80070490 there for a version
+        whose files are not on this host counts as a request as well.
     #>
     $since  = (Get-Date).AddDays(-$Days)
     $events = @(Get-EventSafe -Filter @{ ProviderName = 'Microsoft-FSLogix-Apps'; Level = 2; StartTime = $since })
+    $appx   = @(Get-EventSafe -Filter @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Level = 2; StartTime = $since } |
+                Where-Object { $_.Message -match '0x80070490' })
 
     $found = @{}
-    foreach ($entry in $events) {
-        if ($entry.Message -notmatch 'on Package\s+(\S+?)\s+from') { continue }
-        $fullName = $Matches[1]
+    foreach ($entry in @($events) + @($appx)) {
+        $fullName = $null
+        if ($entry.ProviderName -eq 'Microsoft-FSLogix-Apps') {
+            if ($entry.Message -match 'on Package\s+(\S+?)\s+from') { $fullName = $Matches[1] }
+        } elseif ($entry.Message -match '([\w\.\-]+_\d+\.\d+\.\d+\.\d+_\w*_[\w\.\-]*_\w{13})') {
+            # AppX: only a build this host does not have is a request it can answer.
+            $fullName = $Matches[1]
+            if (Test-PackageFiles $fullName) { continue }
+        }
+        if (-not $fullName) { continue }
         if (-not (Test-NameInScope $fullName)) { continue }
         $code = if ($entry.Message -match '(0x[0-9A-Fa-f]{8})') { $Matches[1] } else { 'unknown' }
         if (-not $found.ContainsKey($fullName)) {
