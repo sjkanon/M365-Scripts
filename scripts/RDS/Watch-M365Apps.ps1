@@ -37,8 +37,10 @@
                      and a "repairing" report goes to n8n naming every user, before
                      anything is changed. The same problem again is not announced or
                      collected again within -RenotifyHours.
-      3. Repair      Anything found, for anyone - our own account included, since it
-                     stands in for the whole host: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
+      3. Repair      A problem of one customer only in their session (below). The host
+                     only when it is more than that one user - the host itself, our own
+                     account (the test for the whole host), or the same app at two or
+                     more customers: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
                      installers, signature-checked), at most once per
                      -RepairCooldownHours. Then per user, in that user's own session
                      (a one-off task running a headless console, so nothing appears):
@@ -709,11 +711,15 @@ function Invoke-Repair {
     param($Found, $State)
     $actions = [System.Collections.Generic.List[string]]::new()
 
-    # What anyone runs into is nearly always the host: FSLogix asking for a build this
-    # host does not provision. So every finding - a customer's, and our own account's,
-    # which stands in for everyone on the host - sends the host to repair for that app.
-    # The host repair provisions and starts nothing in anyone's session.
-    $hostApps = @($Found | ForEach-Object { $_.App } | Sort-Object -Unique)
+    # A problem of one customer is fixed in their session only. The host is repaired for
+    # an app when it is not just that one user: the host itself, our own account (the
+    # test for everyone on the host), or the same app at two or more customers. The host
+    # repair provisions and starts nothing in anyone's session.
+    $customersPerApp = @{}
+    foreach ($group in @($Found | Where-Object { $_.Customer } | Group-Object App)) {
+        $customersPerApp[$group.Name] = @($group.Group | ForEach-Object { $_.Account } | Sort-Object -Unique).Count
+    }
+    $hostApps = @($Found | Where-Object { -not $_.Customer -or $customersPerApp[$_.App] -ge 2 } | ForEach-Object { $_.App } | Sort-Object -Unique)
     if ($hostApps.Count -gt 0) {
         $last = $null
         if ($State.LastRepair) { $last = [datetime]::Parse($State.LastRepair, $null, [Globalization.DateTimeStyles]::RoundtripKind) }

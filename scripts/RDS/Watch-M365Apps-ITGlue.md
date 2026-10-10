@@ -13,7 +13,7 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
 | Vraag | Antwoord |
 |-------|----------|
 | Wat is het? | Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account `itceadmin` én bij elke aangemelde gebruiker |
-| Wat doet hij als iets stuk is? | Hij herstelt het zelf: eerst de host, daarna de app in de sessie van de gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat |
+| Wat doet hij als iets stuk is? | Hij herstelt het zelf. Is het alleen bij één gebruiker, dan alleen in de sessie van die gebruiker. Is het ook bij `itceadmin` of bij meerdere gebruikers, dan eerst de host en daarna de app per gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat |
 | Hoe weten wij het? | Elke bevinding en elk herstel komt als kaart in het **CIPP Teams-kanaal** (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker. **Alleen level 2 en 3** hebben toegang tot dat kanaal |
 | Wat merkt de gebruiker? | Normaal niets. Bij de volgende keer openen werkt de app weer. Probeerde hij in het laatste halfuur zelf een app te openen en lukte dat niet, dan gaat die app na het herstel vanzelf voor hem open. Verder start de watchdog bij een gebruiker nooit een app |
 | Gaan er gegevens verloren? | Nee. Bij gebruikers wordt een app alleen opnieuw geregistreerd, nooit gereset of verwijderd |
@@ -40,8 +40,8 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
    - heeft Windows sinds de vorige keer geweigerd een van die apps te openen, of mislukte een registratie — en bij wie;
    - is een van die apps gecrasht of vastgelopen.
 2. Vindt hij iets, dan herstelt hij:
-   - eerst de **host** met `Repair-AppxPackageStore.ps1` (meestal de echte oorzaak);
-   - daarna **per gebruiker** in de eigen sessie van die gebruiker: de app wordt opnieuw geregistreerd.
+   - **per gebruiker** in de eigen sessie van die gebruiker: de app wordt opnieuw geregistreerd. Is het alleen bij één gebruiker, dan blijft het daarbij;
+   - de **host** met `Repair-AppxPackageStore.ps1` alleen als het niet bij één gebruiker blijft: bij `itceadmin` (de test voor de hele host), op de host zelf, of dezelfde app bij twee of meer gebruikers. De host gaat dan eerst.
 3. Daarna controleert hij opnieuw, en stuurt een kaart naar het CIPP Teams-kanaal met wat er stuk was, bij wie, en of het hersteld is.
 
 > **Waarom gaat het mis?** De meeste gevallen komen van FSLogix: bij het aanmelden zet FSLogix de apps terug in exact de versie die de gebruiker de vorige keer had. Heeft deze host die versie niet, dan mislukt dat met fout `0x80070490` en opent de app niet. De oplossing is de host die versie te geven en de app opnieuw te registreren — precies wat de watchdog doet.
@@ -149,7 +149,7 @@ Zoek in het CIPP Teams-kanaal op de **naam van de gebruiker**, de laatste uren. 
 |-------------|-------------|
 | **WORDT HERSTELD** met de naam van de gebruiker, nog geen vervolgkaart | De watchdog is bezig. Wacht een paar minuten op de volgende kaart; een app die de gebruiker in het laatste halfuur zelf probeerde te openen gaat daarna vanzelf open. Na een kwartier nog niets: stap 2 |
 | **HERSTELD** met de naam van de gebruiker | Laat de app opnieuw openen; lukt het niet, laten afmelden en opnieuw aanmelden. Werkt het: ticket sluiten |
-| **NIET HERSTELD** met de naam van de gebruiker | Laat de gebruiker afmelden en opnieuw aanmelden — de host is meestal wel hersteld, en bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: [Stap 2](#stap-2-op-de-host) |
+| **NIET HERSTELD** met de naam van de gebruiker | Laat de gebruiker afmelden en opnieuw aanmelden — bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: [Stap 2](#stap-2-op-de-host); bij één gebruiker herstelt de watchdog de host niet zelf |
 | Geen kaart, gebruiker net aangemeld | De watchdog kijkt pas na 10 minuten. Laat hem nu draaien (stap 2) en kijk wat hij vindt |
 | Geen kaart, langer aangemeld | Laat de watchdog nu draaien (stap 2). Ziet hij niets, dan ligt het niet aan de registratie: Teams bijwerken of herinstalleren volgens *Teams-update op een werkplek*, of doorzetten naar **level 3** |
 | Een of meer **CRASH**-kaarten | Kijk naar het patroon: steeds dezelfde app, module en foutcode? Op meerdere hosts? Dan **level 3** — dan ligt het aan een versie of de image |
@@ -259,7 +259,7 @@ Wijzigt niets. Laat zien welke versie FSLogix bij aanmelden vroeg, welke de host
 | *Er is iets misgegaan* in Teams, Outlook dat zichzelf netjes afsluit | Voor Windows is dat geen crash | Gebruiker vragen; bij herhaling level 2 |
 | Kort *reageert niet* dat vanzelf weer bijtrekt | Wordt niet gelogd | — |
 | Een gebruiker die minder dan 10 minuten is aangemeld | Windows is de apps dan nog aan het klaarzetten | De volgende run, of afmelden en opnieuw aanmelden |
-| Een gebruiker die al is afgemeld | Zonder sessie kan de app niet voor die gebruiker worden hersteld | De host is wel hersteld: bij de volgende aanmelding werkt het |
+| Een gebruiker die al is afgemeld | Zonder sessie kan de app niet voor die gebruiker worden hersteld | Bij de volgende aanmelding wordt de app opnieuw klaargezet; lukt dat niet, dan ziet de watchdog het 10 minuten later |
 | Een app die bij de gebruiker open staat | De watchdog raakt hem dan niet aan, om hem niet te storen | Draait hij, dan werkt hij kennelijk weer |
 | Copilot als unified app (`copilotapp.exe`, via Edge Update) | Die app is geen pakket per gebruiker: de watchdog test niet of hij bij een gebruiker opent, alleen of hij crasht | `Get-M365AppsLog.ps1` toont het als **BLIND SPOT**; bij klachten level 2 |
 | Hosts zonder de watchdog | Hij draait alleen waar hij geïnstalleerd is | Level 3 installeert hem |
