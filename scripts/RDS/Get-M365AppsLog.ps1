@@ -359,7 +359,7 @@ function Get-AppEvent {
                 'Application' {
                     if ($record.Id -eq 1000 -and $values.Count -gt 6) { $code = '0x' + [string] $values[6] }
                     # The watchdog knows the unified Copilot app's process by neither package nor name.
-                    $read = if ([string] $values[0] -ieq 'copilotapp.exe') { 'no - the watchdog does not know copilotapp.exe' } else { 'yes (crash report, no repair)' }
+                    $read = if ([string] $values[0] -ieq 'copilotapp.exe' -and -not $script:knowsCopilotApp) { 'no - this watchdog does not know copilotapp.exe' } else { 'yes (crash report, no repair)' }
                 }
             }
             if (-not $code -and $message -match '0x8[0-9A-Fa-f]{7}') { $code = $Matches[0].ToUpper() -replace '^0X', '0x' }
@@ -462,6 +462,7 @@ catch { Write-Warn "No summary.txt: $($_.Exception.Message)" }
 
 $script:nameCache = @{}
 $script:sessions  = @()
+$script:knowsCopilotApp = $false
 $config   = $null
 $watched  = @('itceadmin')
 $unified  = $null
@@ -500,6 +501,8 @@ try {
             $item = Get-Item $self
             Write-Info ('Installed watchdog: {0:yyyy-MM-dd HH:mm}, SHA-256 {1}' -f $item.LastWriteTime, (Get-FileHash $self -Algorithm SHA256).Hash)
             # Older versions only test our own account: then customers were never looked at.
+            # Watchdogs from before 2026-10-10 do not know the unified Copilot app's process.
+            $script:knowsCopilotApp = [bool] (Select-String -Path $self -Pattern 'copilotapp.exe' -SimpleMatch -Quiet)
             if (-not (Select-String -Path $self -Pattern 'Get-OpenFailure' -SimpleMatch -Quiet)) {
                 Write-Bad 'This watchdog is an older version without the per-user checks (step 2b): customers are not checked or repaired - reinstall from the readme'
             }
@@ -777,7 +780,8 @@ try {
             Write-Info ('Running: {0} for {1} (session {2}) - {3}' -f $proc.ProcessName, $(if ($owner) { $owner.User } else { '?' }), $proc.SessionId, $path)
         }
         if (@(Get-Process -Name 'copilotapp' -ErrorAction SilentlyContinue).Count -gt 0) {
-            Write-Warn 'The unified Copilot app (copilotapp.exe) is in use here: the watchdog checks neither its start nor its crashes'
+            if ($script:knowsCopilotApp) { Write-Warn 'The unified Copilot app (copilotapp.exe) is in use here: the watchdog sees its crashes, but does not test per user whether it opens' }
+            else { Write-Warn 'The unified Copilot app (copilotapp.exe) is in use here: this watchdog checks neither its start nor its crashes' }
         }
     }
 

@@ -489,7 +489,7 @@ Uitvoer in `-OutputPath` (anders `%TEMP%`): `summary.txt` (het scherm), `session
 - Copilot niet geregistreerd voor een gebruiker terwijl de unified app (Edge Update) op de
   host staat: de watchdog accepteert dat als Copilot voor iedereen, zonder het per
   gebruiker te testen.
-- De unified app in gebruik (`copilotapp.exe`): de watchdog controleert niet of die start, en ook niet of hij crasht.
+- De unified app in gebruik (`copilotapp.exe`): geen watchdog test per gebruiker of die opent, en een van vóór 2026-10-10 ziet ook zijn crashes niet.
 - Alleen consumenten-Copilot (`Microsoft.Copilot`) geregistreerd, geen Microsoft 365
   Copilot (`Microsoft.MicrosoftOfficeHub`): de watchdog telt beide.
 - De app van een klant geregistreerd en `Ok` maar werkt niet: de watchdog start niets voor
