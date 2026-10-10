@@ -310,7 +310,8 @@ an n8n webhook — naming the user each finding and each repair belongs to.
 | 1. Host | Teams and new Outlook are provisioned for all users; Copilot is there (provisioned MicrosoftOfficeHub / Copilot, or the unified app Edge Update installs) |
 | 2. Accounts | For each watched account signed in on this host: the package is registered for that user, its files are there and its status is `Ok`. Then the app has to run in that session — if it does not, it is started there (`shell:AppsFolder\<AUMID>`, through a one-off task in that user's own session) and has to still be running 15 seconds later |
 | 2b. Users | Every other signed-in user (customers), once signed in for 10 minutes: the same registration check, **without starting anything**. Plus every attempt since the previous run, by any user, to open one of the apps that Windows refused (TWinUI `5961`), and every failed registration of their packages (AppXDeploymentServer `401`/`404`; "close the app first" and "already installed" are left out), with the user it happened to |
-| 3. Repair | Host problems, packages whose files are gone, and anything a user ran into: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then **per user, in their own session**: the package is registered again by family name (`Add-AppxPackage -RegisterByFamilyName`) through a one-off task running a headless console, so no window appears. For a customer only while the app is not running for them, at most once per `-RepairCooldownHours` per user and app, and never a reset. In our own account an app that does not start is reset (`Reset-AppxPackage`) |
+| 2c. Announce | Something new is wrong: [`Get-M365AppsLog.ps1`](#get-m365appslogps1) collects the evidence for the users and apps concerned into `Diag\` (one zip, kept 14 days) while it is still broken, and a `repairing` report goes to n8n naming every user — before anything is changed. The same problem again is not announced or collected again within `-RenotifyHours` |
+| 3. Repair | Host problems, packages whose files are gone, and anything a user ran into: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then **per user, in their own session**: the package is registered again by family name (`Add-AppxPackage -RegisterByFamilyName`) through a one-off task running a headless console, so no window appears. For a customer only while the app is not running for them, at most once per `-RepairCooldownHours` per user and app, and never a reset. In our own account an app that does not start is reset (`Reset-AppxPackage`). A user who tried to open the app (TWinUI `5961`) gets it **opened for them** in their session once it is registered again — it has to start and stay up, otherwise the problem stays open (`-NoUserLaunch` turns this off) |
 | 4. Read back | Steps 1, 2 and the registration check of 2b again; a user's problem counts as repaired when the package is registered and `Ok` for them afterwards (or the app is running for them) |
 | 5. Report | A JSON POST to the webhook when something is wrong, was repaired, recovered on its own, or crashed at least `-CrashThreshold` times — not on every healthy run. A problem that stays is reported again after `-RenotifyHours` |
 
@@ -335,6 +336,8 @@ gebruiker* next to each one.
 | `-NoRepair` | Test and report only, change nothing |
 | `-NoUserRepair` | Repair the host and our own account, but never run anything in a customer's session — their problems are still reported, with their name |
 | `-SkipLaunchTest` | Do not start an app that is not running; only check its registration |
+| `-NoUserLaunch` | After repairing an app a user could not open, do not open it for them |
+| `-NoDiagnostics` | Do not run `Get-M365AppsLog.ps1` before a repair |
 | `-Install` | Copy the watchdog to `-WorkingDir` and register the task **M365 App Watchdog**, with the other parameters as its settings |
 | `-Uninstall` | Remove the task and `-WorkingDir` |
 | `-TestNotification` | Send one test message to the webhook and stop |
@@ -370,11 +373,12 @@ gebruiker* next to each one.
   "before": [{ "Account": "itceadmin", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
   "actions": ["itceadmin Outlook: re-registered as the user - result 0"],
   "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
-  "log": "C:\IT\AppWatchdog\Logs\Watch-M365Apps_20261009.log"
+  "log": "C:\IT\AppWatchdog\Logs\Watch-M365Apps_20261009.log",
+  "diagnostics": "C:\IT\AppWatchdog\Diag\M365AppsLog_AVD-0_20261009-1430.zip"
 }
 ```
 
-`event` is `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `crashed` (only
+`event` is `repairing` (found, being repaired — sent before the repair, with `diagnostics`), `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `crashed` (only
 crashes this run), `recovered`, `error` (the run itself failed) or `test`; `crashes` rides
 along with any of them. `Problem` is `NotProvisioned` (host), `NotRegistered`,
 `Broken` (files gone or status not `Ok`) or `WontStart` (our account),
@@ -447,6 +451,7 @@ it is public.
   [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — and keeps the webhook URL and
   token only in `config.json` there, not in the task's command line. Change a setting by
   running `-Install` again with all parameters.
+- Evidence: `C:\IT\AppWatchdog\Diag`, one zip per new problem from `Get-M365AppsLog.ps1`, kept 14 days; its path is in `diagnostics` of the report. `-Install` copies the collector next to the watchdog (from the repo, or from GitHub at a pinned commit and SHA-256); without it the watchdog repairs and reports as before.
 - Logs: `C:\IT\AppWatchdog\Logs`, one file per day, kept 14 days. Repair transcripts and
   `.reg` backups: `C:\IT\AppWatchdog\Repair`.
 - Run elevated or as System; it relaunches itself in 64-bit Windows PowerShell for the

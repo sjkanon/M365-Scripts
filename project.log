@@ -2,6 +2,19 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — Watchdog: eerst aankondigen + bewijs, dan herstellen, dan app openen voor de gebruiker
+  - Waarom: n8n hoorde pas na het herstel van een probleem, de toestand ging verloren, en
+    een gebruiker bij wie Windows het openen weigerde moest het zelf opnieuw proberen.
+  - Wat: bij een nieuw probleem (alle aangemelde gebruikers) eerst Get-M365AppsLog -> zip in
+    Diag\, dan melding 'repairing' naar n8n, dan herstel; na herstel van een geweigerde
+    opening de app in de sessie van de gebruiker openen. -NoUserLaunch / -NoDiagnostics.
+    copilotapp.exe (unified Copilot) telt mee. Verzamelaar vastgepind op 6a94769 + SHA-256.
+  - Open: n8n-flow kent 'repairing' nog niet (toont PROBLEEM-kaart); downloadpin in de
+    RDS-readme nog op abfad94; niet getest als System op een sessiehost.
+  - Bestanden: scripts/RDS/Watch-M365Apps.ps1, readmes (EN/NL/FR), Version History.
+  - Commit: "Announce, collect evidence, repair, then open the app for the user" (devel)
+  - Daarvoor: 6a94769 verzamelaar ziet of de geïnstalleerde watchdog copilotapp.exe kent.
+
 2026-10-10 — Get-M365AppsLog.ps1: logverzamelaar voor Teams/Outlook/Copilot
   - Waarom: Copilot werkte op een server niet bij gebruikers, terwijl de watchdog alle
     gebruikers zou controleren, melden en herstellen; achteraf was niet te zien wat hij zag.
