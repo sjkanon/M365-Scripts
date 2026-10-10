@@ -15,7 +15,7 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
 | Wat is het? | Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account `itceadmin` én bij elke aangemelde gebruiker |
 | Wat doet hij als iets stuk is? | Hij herstelt het zelf: eerst de host, daarna de app in de sessie van de gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat |
 | Hoe weten wij het? | Elke bevinding en elk herstel komt als kaart in het **CIPP Teams-kanaal** (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker. **Alleen level 2 en 3** hebben toegang tot dat kanaal |
-| Wat merkt de gebruiker? | Normaal niets. Bij de volgende keer openen werkt de app weer |
+| Wat merkt de gebruiker? | Normaal niets. Bij de volgende keer openen werkt de app weer. Probeerde hij een app te openen en lukte dat niet, dan gaat die na het herstel vanzelf voor hem open |
 | Gaan er gegevens verloren? | Nee. Bij gebruikers wordt een app alleen opnieuw geregistreerd, nooit gereset of verwijderd |
 | Wat doet hij níet? | Een gecrashte app opnieuw starten bij een gebruiker, inlogproblemen, licenties, mailbox- of agendaproblemen oplossen |
 
@@ -56,6 +56,7 @@ Elke kaart noemt de **host** (bijvoorbeeld `LEM-AVD-4`), het tijdstip en de betr
 
 | Kaart | Kleur | Betekenis | Wat doet level 2? |
 |-------|-------|-----------|-------------------|
+| 🔧 **WORDT HERSTELD** | Blauw | Probleem gevonden, de watchdog herstelt het nu. Per regel: welke app, bij wie. *Bewijs* is een zip met wat er op dat moment op de host stond | Niets. Binnen een paar minuten volgt **HERSTELD** of **NIET HERSTELD** |
 | ✅ **HERSTELD** | Groen | Er was iets stuk en het is opgelost. Per regel: welke app, bij wie, en *✅ hersteld bij deze gebruiker* | Niets. Ligt er een ticket van die gebruiker: laat de app opnieuw openen en sluit het ticket als het werkt |
 | 🚨 **NIET HERSTELD** | Rood | Herstel geprobeerd, maar (een deel) is nog stuk. *Nog stuk na herstel* en *Wel hersteld* staan apart | Oppakken, ook zonder ticket — de gebruiker heeft er waarschijnlijk al last van. Zie [Level 2](#level-2-de-kaart-zoeken-en-op-de-host-kijken) |
 | ⚠️ **PROBLEEM** | Rood | Probleem gevonden, maar herstel staat uit op deze host (`-NoRepair`) | Oppakken, zie [Level 2](#level-2-de-kaart-zoeken-en-op-de-host-kijken) |
@@ -146,6 +147,7 @@ Zoek in het CIPP Teams-kanaal op de **naam van de gebruiker**, de laatste uren. 
 
 | Wat je ziet | Wat je doet |
 |-------------|-------------|
+| **WORDT HERSTELD** met de naam van de gebruiker, nog geen vervolgkaart | De watchdog is bezig. Wacht een paar minuten op de volgende kaart; een app die de gebruiker probeerde te openen gaat daarna vanzelf open. Na een kwartier nog niets: stap 2 |
 | **HERSTELD** met de naam van de gebruiker | Laat de app opnieuw openen; lukt het niet, laten afmelden en opnieuw aanmelden. Werkt het: ticket sluiten |
 | **NIET HERSTELD** met de naam van de gebruiker | Laat de gebruiker afmelden en opnieuw aanmelden — de host is meestal wel hersteld, en bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: [Stap 2](#stap-2-op-de-host) |
 | Geen kaart, gebruiker net aangemeld | De watchdog kijkt pas na 10 minuten. Laat hem nu draaien (stap 2) en kijk wat hij vindt |
@@ -189,7 +191,7 @@ Elke regel begint met een label:
 | `[WARN]` | Let op, de run gaat door |
 | `[FAIL]` | Probleem gevonden — de regel noemt de gebruiker en de app |
 
-De run heeft vaste stappen: *Apps users could not open*, *Crashes and hangs*, *Host*, `itceadmin`, *Users*, en bij een probleem *Repairing* en *Read back*. Een regel als
+De run heeft vaste stappen: *Apps users could not open*, *Crashes and hangs*, *Host*, `itceadmin`, *Users*, en bij een probleem *Collecting evidence*, *Repairing* en *Read back*. Een regel als
 
 ```
   [FAIL] AzureAD\jan.peeters - Outlook - Windows could not open it 2x since 09-10 15:00, last at 15:21, error 0x80070490
@@ -216,6 +218,16 @@ Get-Content C:\IT\AppWatchdog\state.json
 | `LastRepair` | Laatste herstel van de host. `null` = nooit nodig geweest |
 | `LastRun` | Laatste run van de watchdog |
 | `UserRepairs` | Per gebruiker en app wanneer die laatst opnieuw geregistreerd is (vergeten na een dag) |
+
+#### Het bewijs: wat stond er op de host?
+
+Bij elk nieuw probleem bewaart de watchdog vóór het herstel een zip in `C:\IT\AppWatchdog\Diag` (14 dagen); het pad staat als *Bewijs* op de kaart. Zelf verzamelen, bijvoorbeeld als een gebruiker belt en er geen kaart is:
+
+```powershell
+& 'C:\IT\AppWatchdog\Get-M365AppsLog.ps1' -User jan.peeters -App Copilot -Hours 12
+```
+
+Wijzigt niets. De zip komt in `C:\Temp`. In `summary.txt` staat per gebruiker en app wat er geregistreerd is en draait, en wat de watchdog ervan vindt; **BLIND SPOT** betekent dat de watchdog het goedkeurt zonder het te testen. Stuur de zip mee als je doorzet naar level 3.
 
 #### De host zelf onderzoeken
 
@@ -249,6 +261,7 @@ Wijzigt niets. Laat zien welke versie FSLogix bij aanmelden vroeg, welke de host
 | Een gebruiker die minder dan 10 minuten is aangemeld | Windows is de apps dan nog aan het klaarzetten | De volgende run, of afmelden en opnieuw aanmelden |
 | Een gebruiker die al is afgemeld | Zonder sessie kan de app niet voor die gebruiker worden hersteld | De host is wel hersteld: bij de volgende aanmelding werkt het |
 | Een app die bij de gebruiker open staat | De watchdog raakt hem dan niet aan, om hem niet te storen | Draait hij, dan werkt hij kennelijk weer |
+| Copilot als unified app (`copilotapp.exe`, via Edge Update) | Die app is geen pakket per gebruiker: de watchdog test niet of hij bij een gebruiker opent, alleen of hij crasht | `Get-M365AppsLog.ps1` toont het als **BLIND SPOT**; bij klachten level 2 |
 | Hosts zonder de watchdog | Hij draait alleen waar hij geïnstalleerd is | Level 3 installeert hem |
 
 ---
@@ -279,7 +292,7 @@ De installatie gebeurt per host, vanaf GitHub, vastgezet op een commit en een SH
 
 De webhook-URL en het token staan **niet** in dit document en niet in de scriptrepo (die is openbaar). Bewaar ze als wachtwoord in IT Glue.
 
-Bijwerken naar een nieuwere versie: het downloadcommando met de nieuwe commit en hash opnieuw draaien, inclusief `-Install` — de taak gebruikt zijn eigen kopie in `C:\IT\AppWatchdog` tot je dat doet.
+Bijwerken naar een nieuwere versie: het downloadcommando met de nieuwe commit en hash opnieuw draaien, inclusief `-Install` — de taak gebruikt zijn eigen kopie in `C:\IT\AppWatchdog` tot je dat doet. Let op: `-Install` neemt de oude `config.json` niet over. Geef de webhook, het token en de andere instellingen opnieuw mee, of lees ze eerst uit `C:\IT\AppWatchdog\config.json` en geef ze door.
 
 Verwijderen:
 
