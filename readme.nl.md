@@ -1022,6 +1022,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-10 (9)
+| Wijziging |
+|--------|
+| **De nieuwe Outlook viel steeds weg op LEM-AVD-5** (n8n, 10-10): bij elke nieuwe aanmelding mislukte de registratie 10-16 keer met `0x80073CF9` / `0x80070490`, de watchdog herregistreerde elke gebruiker tot 30 minuten later, en het ene hostherstel (13:02) veranderde niets. [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1) zocht de build die gebruikers vragen alleen in het FSLogix-log, dat er op die host geen noemde, dus had het niets om klaar te zetten en eindigde het met 0. Nu telt ook een AppX-registratie die met `0x80070490` mislukte voor een build waarvan de bestanden niet op de host staan, en `-Provision` zet die build klaar vanaf Microsofts CDN |
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) noemt bij elke mislukte registratie de gevraagde build, en maakt van `0x80070490` voor een Teams-/Outlook-build die nieuwer is dan wat de host klaarzet een hostbevinding *BuildMissing*: het hostherstel draait meteen (één keer per build, niet tegengehouden door de pauze) in plaats van elke gebruiker bij elke aanmelding opnieuw te registreren, en het geldt als hersteld zodra de host die build klaarzet. De mislukking die zijn eigen herregistratie onderweg logt (in de volgende run gezien als "1x ... last at" het hersteltijdstip, elke run) telt niet meer. De watchdog en [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) pinnen het hulpscript op `abe8202` |
+| Geverifieerd: syntax; `Get-OpenFailure` met nagebootste events - twee gebruikers die Outlook 1.2026.1001.300 vragen op een host met 929.200 geven *BuildMissing* plus hun eigen bevindingen met de build, en het event van ons eigen herstel valt weg; het AppX-berichtformaat past op de pakket-regex; de gepinde hashes kloppen met wat GitHub serveert. **Niet** geverifieerd: welke build gebruikers op LEM-AVD-5 echt vragen en of Microsofts CDN die serveert; een run op een sessiehost; de n8n-kaart toont *BuildMissing* / *NoShortcut* onder hun ruwe naam |
+
 ### 2026-10-10 (8)
 | Wijziging |
 |--------|

@@ -1022,6 +1022,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (9)
+| Change |
+|--------|
+| **New Outlook kept failing on LEM-AVD-5** (n8n, 10-10): every new sign-in failed to register it 10-16 times with `0x80073CF9` / `0x80070490`, the watchdog re-registered each user up to 30 minutes later, and the one host repair (13:02) changed nothing. [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) looked for the build users ask for only in the FSLogix log, which named none on that host, so it had nothing to provision and exited 0. It now also counts an AppX registration that failed with `0x80070490` for a build whose files are not on the host, and `-Provision` provisions that build from Microsoft's CDN |
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) names the build asked for in every registration failure, and turns `0x80070490` for a Teams/Outlook build newer than the host provisions into a host finding *BuildMissing*: the host repair runs at once (once per build, not held back by the cooldown) instead of each user being re-registered at every sign-in, and it counts as fixed once the host provisions that build. The failure its own re-registration logs on the way (seen as "1x ... last at" the repair time in the next run, every run) is no longer counted. The watchdog and [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) pin the helper at `abe8202` |
+| Verified: syntax; `Get-OpenFailure` with stubbed events - two users asking for Outlook 1.2026.1001.300 on a host that provisions 929.200 give *BuildMissing* plus their own findings with the build, and the event of our own repair is dropped; the AppX message format matches the package regex; the pinned hashes match what GitHub serves. **Not** verified: which build LEM-AVD-5 users actually ask for, and that Microsoft's CDN serves it; a run on a session host; the n8n card shows *BuildMissing* / *NoShortcut* under their raw names |
+
 ### 2026-10-10 (8)
 | Change |
 |--------|

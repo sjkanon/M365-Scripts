@@ -1022,6 +1022,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (9)
+| Modification |
+|--------|
+| **Le nouvel Outlook tombait sans cesse sur LEM-AVD-5** (n8n, 10-10) : à chaque nouvelle connexion son inscription échouait 10 à 16 fois avec `0x80073CF9` / `0x80070490`, le watchdog réinscrivait chaque utilisateur jusqu'à 30 minutes plus tard, et l'unique réparation de l'hôte (13:02) n'a rien changé. [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.fr.md#repair-appxpackagestoreps1) ne cherchait la build demandée par les utilisateurs que dans le journal FSLogix, qui n'en nommait aucune sur cet hôte ; il n'avait donc rien à provisionner et terminait avec 0. Il compte désormais aussi une inscription AppX échouée avec `0x80070490` pour une build dont les fichiers ne sont pas sur l'hôte, et `-Provision` provisionne cette build depuis le CDN de Microsoft |
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) indique la build demandée pour chaque échec d'inscription, et fait d'un `0x80070490` pour une build de Teams/Outlook plus récente que celle provisionnée sur l'hôte un constat d'hôte *BuildMissing* : la réparation de l'hôte s'exécute immédiatement (une fois par build, sans attendre la pause) au lieu de réinscrire chaque utilisateur à chaque connexion, et le constat est réparé dès que l'hôte provisionne cette build. L'échec que sa propre réinscription journalise en chemin (vu à l'exécution suivante comme « 1x ... last at » l'heure de la réparation, à chaque exécution) n'est plus compté. Le watchdog et [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) épinglent l'outil sur `abe8202` |
+| Vérifié : syntaxe ; `Get-OpenFailure` avec des événements simulés - deux utilisateurs demandant Outlook 1.2026.1001.300 sur un hôte qui provisionne 929.200 donnent *BuildMissing* plus leurs propres constats avec la build, et l'événement de notre propre réparation est écarté ; le format du message AppX correspond à l'expression du package ; les hachages épinglés correspondent à ce que sert GitHub. **Non** vérifié : quelle build les utilisateurs de LEM-AVD-5 demandent réellement et si le CDN de Microsoft la sert ; une exécution sur un hôte de session ; la carte n8n affiche *BuildMissing* / *NoShortcut* sous leur nom brut |
+
 ### 2026-10-10 (8)
 | Modification |
 |--------|

@@ -2,6 +2,19 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — Nieuwe Outlook valt steeds weg op LEM-AVD-5: host de gevraagde build geven
+  - Waarom (n8n 10-10): elke nieuwe aanmelding op AVD-5 faalt 10-16x met 0x80073CF9/0x80070490;
+    watchdog herregistreert per gebruiker tot 30 min later; hostherstel 13:02 vond niets (helper
+    zocht gevraagde build alleen in FSLogix-log). Plus ruis: eigen herregistratie logde een fout
+    die de volgende run als nieuwe fout telde.
+  - Wat: Repair-AppxPackageStore telt ook AppX 0x80070490 voor een build zonder bestanden op de
+    host (abe8202). Watchdog: build in elke melding; BuildMissing-hostbevinding -> hostherstel
+    direct (1x per build, buiten cooldown); eigen herstel-echo gefilterd; helper-pin abe8202 in
+    watchdog en Update-SessionHostImage.
+  - Open: welke build AVD-5-gebruikers vragen (staat nu in de melding); CDN serveert die?;
+    n8n-kaart labels BuildMissing/NoShortcut/updated; hosts opnieuw -Install.
+  - Commits: abe8202 (helper), "Give the host the Outlook build its users ask for" (devel)
+
 2026-10-10 — Watchdog bewaakt de nieuwe (unified) Copilot-app in plaats van de oude
   - Waarom: de oude M365 Copilot-app telde als Copilot; met de unified app op de host werd
     niemand getest en de app nooit gestart.

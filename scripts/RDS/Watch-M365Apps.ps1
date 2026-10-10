@@ -245,11 +245,11 @@ $script:logFile = $null
 $script:unifiedCopilot     = $null
 $script:unifiedCopilotRead = $false
 # The repair helper, when it is not next to this script: fetched from this repo at a
-# pinned commit of main and refused unless the SHA-256 matches - the same pin as
+# pinned commit and refused unless the SHA-256 matches - the same pin as
 # Update-SessionHostImage.ps1. Move both together.
 $Helpers = @{
-    # main, 2026-10-08
-    'Repair-AppxPackageStore.ps1' = @{ Folder = 'Device'; Commit = '048cf967673f02131ddf4efe8a3a8fe72e55f90c'; Hash = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C' }
+    # devel, 2026-10-10 - also provisions the build the AppX log asks for
+    'Repair-AppxPackageStore.ps1' = @{ Folder = 'Device'; Commit = 'abe8202bc90d855328f4f04844a54406968f0f6b'; Hash = 'D990B0DBF4C530F1CA1D3E00444BF18E6D0F1D44E47FB6E1A7627ADCBF715C84' }
     # devel, 2026-10-10 - collects the evidence before a repair (-NoDiagnostics turns it off)
     'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = 'c2255d0cc8e224a48385962bd2223d4af4d2aa58'; Hash = '638EC1CD3D8E5B3D777E098EBD4658C4C517FB899414EABDD17138B74F488DF6' }
 }
@@ -841,9 +841,21 @@ function Get-OpenFailure {
         the text is translated on a Dutch or French Windows. One failure writes both
         401 and 404, so they are counted once per user, package, code and second. The
         user is the event's own SID; System (FSLogix registering at sign-in) becomes
-        the host. One finding per user, app, kind and code.
+        the host. One finding per user, app, kind and code, naming the build asked for.
+
+        Our own re-registration of a user's package can itself log a failure on the
+        way (one staged build missing) and still end Ok - which the next run took for
+        a new failure, every run: $OwnRepairs (UserRepairs from the state, per SID and
+        app) drops events from 10 seconds before to 3 minutes after such a repair.
+
+        A registration failing with 0x80070490 for a Teams or Outlook build that is
+        newer than what this host provisions, and whose files are not here, is the
+        host's fault, not the user's: users roam in with a build this host never got.
+        That adds a host finding (BuildMissing, Asked = the build), so the host is
+        provisioned with it at once instead of every user being re-registered at
+        every sign-in.
     #>
-    param([datetime] $Since, $Sessions)
+    param([datetime] $Since, $Sessions, [hashtable] $OwnRepairs = @{})
     $rows = @(
         foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TWinUI/Operational'; Id = 5961; StartTime = $Since } -ErrorAction SilentlyContinue)) {
             $values = @($record.Properties | ForEach-Object { $_.Value })
@@ -867,12 +879,39 @@ function Get-OpenFailure {
         }
         if (-not $entry) { continue }
         $sid = [string] $row.Record.UserId
+        $own = $OwnRepairs['{0}|{1}' -f $sid, $entry.App]
+        if ($own) {
+            $ownTime = [datetime]::Parse([string] $own, $null, [Globalization.DateTimeStyles]::RoundtripKind)
+            if ($row.Record.TimeCreated -ge $ownTime.AddSeconds(-10) -and $row.Record.TimeCreated -le $ownTime.AddMinutes(3)) { continue }
+        }
         $key = '{0}|{1}|{2}|{3:yyyyMMddHHmmss}' -f $sid, $row.Target, $row.Code, $row.Record.TimeCreated
         if ($seen.ContainsKey($key)) { continue }
         $seen[$key] = $true
-        [PSCustomObject]@{ Sid = $sid; App = $entry.App; Package = $package; Kind = $row.Kind; Code = $row.Code; Time = $row.Record.TimeCreated }
+        # Name_Version_Arch_ResourceId_PublisherId: the build asked for, when the event names one.
+        $parts   = $row.Target -split '_'
+        $version = if ($parts.Count -ge 2 -and $parts[1] -match '^\d+(\.\d+){3}$') { $parts[1] } else { '' }
+        [PSCustomObject]@{ Sid = $sid; App = $entry.App; Package = $package; Kind = $row.Kind; Code = $row.Code; Time = $row.Record.TimeCreated
+                           Version = $version; FullName = $row.Target }
     })
     if ($found.Count -eq 0) { return }
+
+    # Builds users ask for that this host does not have (see above).
+    $builds     = Get-ProvisionedBuild
+    $appsFolder = Join-Path $env:ProgramFiles 'WindowsApps'
+    $missing    = @($found | Where-Object {
+        $_.Kind -eq 'RegisterFailed' -and $_.Code -eq '0x80070490' -and $_.Version -and $_.App -ne 'Copilot' -and
+        -not (Test-Path -LiteralPath (Join-Path $appsFolder $_.FullName)) -and
+        (-not $builds.ContainsKey($_.Package) -or $builds[$_.Package].Version -lt [version] $_.Version)
+    })
+    foreach ($group in @($missing | Group-Object Package)) {
+        $asked = @($group.Group | ForEach-Object { [version] $_.Version } | Sort-Object -Descending)[0]
+        $users = @($group.Group | ForEach-Object { $_.Sid } | Sort-Object -Unique).Count
+        $have  = if ($builds.ContainsKey($group.Name)) { $builds[$group.Name].Version } else { 'nothing' }
+        $finding = New-Finding -Account $HostAccount -App $group.Group[0].App -Problem 'BuildMissing' -Package $group.Name -FromEvent `
+            -Detail ('{0} user(s) ask for {1}, this host provisions {2} - their registration fails with 0x80070490' -f $users, $asked, $have)
+        $finding | Add-Member -NotePropertyName Asked -NotePropertyValue ([string] $asked)
+        $finding
+    }
     foreach ($group in @($found | Group-Object Sid, App, Kind, Code)) {
         $first   = $group.Group[0]
         $last    = ($group.Group | Sort-Object Time -Descending | Select-Object -First 1).Time
@@ -881,6 +920,8 @@ function Get-OpenFailure {
         $name    = if ($system) { $HostAccount } else { Resolve-UserName $first.Sid $Sessions }
         $what    = if ($first.Kind -eq 'WontOpen') { 'Windows could not open it' } else { 'its registration failed' }
         $detail  = '{0} {1}x since {2:dd-MM HH:mm}, last at {3:HH:mm}, error {4}' -f $what, $group.Count, $Since, $last, $first.Code
+        $asked   = @($group.Group | Where-Object { $_.Version } | ForEach-Object { [version] $_.Version } | Sort-Object -Descending -Unique)
+        if ($asked.Count -gt 0) { $detail += ', build ' + ($asked -join ' / ') }
         New-Finding -Account $name -App $first.App -Problem $first.Kind -Detail $detail -Package $first.Package `
             -Sid $(if ($system) { '' } else { $first.Sid }) -Customer:(-not $system -and -not ($session -and $session.Watched)) -FromEvent -LastAttempt $last
     }
@@ -1049,6 +1090,15 @@ function Invoke-Repair {
     if ($hostApps.Count -gt 0) {
         $last = $null
         if ($State.LastRepair) { $last = [datetime]::Parse($State.LastRepair, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
+        # A build users ask for that this host lacks fails every sign-in until it is
+        # there: not held back by the cooldown - but tried once per build, so a build
+        # Microsoft's CDN does not serve is not downloaded again every run.
+        $newBuilds = @($Found | Where-Object { $_.Problem -eq 'BuildMissing' } | ForEach-Object { '{0}_{1}' -f $_.Package, $_.Asked } |
+                       Where-Object { $_ -notin @($State.BuildRepairs) })
+        if ($newBuilds.Count -gt 0) {
+            $last = $null
+            $State.BuildRepairs = @(@($State.BuildRepairs) + $newBuilds | Where-Object { $_ } | Select-Object -Last 20)
+        }
         if ($last -and $last.AddHours($RepairCooldownHours) -gt (Get-Date)) {
             $actions.Add(('Host repair skipped: the last one ran at {0:yyyy-MM-dd HH:mm}, cooldown {1} h' -f $last, $RepairCooldownHours))
         } else {
@@ -1388,10 +1438,10 @@ try {
     # Versions: the build per app on the host at the last run, so a new one is reported once.
     $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null; UserRepairs = @{}
                                 RepairingSignature = ''; LastRepairing = $null; LastUpdate = $null; Versions = $null
-                                CopilotClosed = '' }
+                                CopilotClosed = ''; BuildRepairs = @() }
     if (Test-Path $StatePath) {
         $saved = Get-Content -Path $StatePath -Raw | ConvertFrom-Json
-        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing', 'LastUpdate', 'Versions', 'CopilotClosed') { $state.$name = Get-PropertyValue $saved $name }
+        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing', 'LastUpdate', 'Versions', 'CopilotClosed', 'BuildRepairs') { $state.$name = Get-PropertyValue $saved $name }
         if ($null -eq $state.Signature) { $state.Signature = '' }
         if ($null -eq $state.RepairingSignature) { $state.RepairingSignature = '' }
         # Per user and app, when their app was last re-registered; older than a day is forgotten.
@@ -1414,7 +1464,7 @@ try {
     # Before the events: the unified Copilot app's identity package is what they name.
     if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot | Out-Null }
     Write-Step ('Apps users could not open since {0:yyyy-MM-dd HH:mm}' -f $since)
-    $openFailures = @(Get-OpenFailure -Since $since -Sessions $sessions)
+    $openFailures = @(Get-OpenFailure -Since $since -Sessions $sessions -OwnRepairs $state.UserRepairs)
     if ($openFailures.Count -eq 0) { Write-Ok 'None' }
 
     $crashes = @()
@@ -1489,6 +1539,11 @@ try {
         $actions = @(Invoke-Repair -Found $before -State $state)
         Write-Host ''
         Write-Host '  ==== Read back '.PadRight(80, '=') -ForegroundColor Cyan
+        # A missing build is fixed once the host provisions it (or newer).
+        $buildsNow = Get-ProvisionedBuild
+        foreach ($f in @($openFailures | Where-Object { $_.Problem -eq 'BuildMissing' })) {
+            $f.Fixed = $buildsNow.ContainsKey($f.Package) -and $buildsNow[$f.Package].Version -ge [version] $f.Asked
+        }
         $after = @(@(Get-Finding -Sessions @(Get-UserSession)) + @($openFailures | Where-Object { -not $_.Fixed }))
     } elseif ($before.Count -gt 0) {
         Write-Skip 'Not repaired (-NoRepair)'
