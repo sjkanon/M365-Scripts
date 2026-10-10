@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 13:04. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 13:12. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-nieuwe-outlook-en-copilot-op-avd-watchdog-en-herstel">Teams, nieuwe Outlook en Copilot op AVD — watchdog en herstel</h1>
 <p>Deze procedure beschrijft wat er automatisch gebeurt als de nieuwe Teams, de nieuwe Outlook of Copilot niet werkt op een AVD-sessiehost, welke meldingen daaruit komen, en wat je doet als een gebruiker belt.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 neemt het gesprek aan, helpt met de eerste stappen en zet door; level 2 leest de meldingen in het CIPP Teams-kanaal en kijkt op de host; level 3 beheert de scripts.</p>
@@ -57,7 +57,7 @@ li > p { margin: .4rem 0; }
 <thead><tr><th>Vraag</th><th>Antwoord</th></tr></thead>
 <tbody>
 <tr><td>Wat is het?</td><td>Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account <code>itceadmin</code> én bij elke aangemelde gebruiker</td></tr>
-<tr><td>Wat doet hij als iets stuk is?</td><td>Hij herstelt het zelf: eerst de host, daarna de app in de sessie van de gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat</td></tr>
+<tr><td>Wat doet hij als iets stuk is?</td><td>Hij herstelt het zelf. Is het alleen bij één gebruiker, dan alleen in de sessie van die gebruiker. Is het ook bij <code>itceadmin</code> of bij meerdere gebruikers, dan eerst de host en daarna de app per gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat</td></tr>
 <tr><td>Hoe weten wij het?</td><td>Elke bevinding en elk herstel komt als kaart in het <strong>CIPP Teams-kanaal</strong> (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker. <strong>Alleen level 2 en 3</strong> hebben toegang tot dat kanaal</td></tr>
 <tr><td>Wat merkt de gebruiker?</td><td>Normaal niets. Bij de volgende keer openen werkt de app weer. Probeerde hij in het laatste halfuur zelf een app te openen en lukte dat niet, dan gaat die app na het herstel vanzelf voor hem open. Verder start de watchdog bij een gebruiker nooit een app</td></tr>
 <tr><td>Gaan er gegevens verloren?</td><td>Nee. Bij gebruikers wordt een app alleen opnieuw geregistreerd, nooit gereset of verwijderd</td></tr>
@@ -98,9 +98,9 @@ li > p { margin: .4rem 0; }
 </li>
 </ol>
 <ul>
-<li>eerst de <strong>host</strong> met <code>Repair-AppxPackageStore.ps1</code> (meestal de echte oorzaak);
+<li><strong>per gebruiker</strong> in de eigen sessie van die gebruiker: de app wordt opnieuw geregistreerd. Is het alleen bij één gebruiker, dan blijft het daarbij;
 </li>
-<li>daarna <strong>per gebruiker</strong> in de eigen sessie van die gebruiker: de app wordt opnieuw geregistreerd.
+<li>de <strong>host</strong> met <code>Repair-AppxPackageStore.ps1</code> alleen als het niet bij één gebruiker blijft: bij <code>itceadmin</code> (de test voor de hele host), op de host zelf, of dezelfde app bij twee of meer gebruikers. De host gaat dan eerst.
 </li>
 </ul>
 <ol>
@@ -197,7 +197,7 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <tbody>
 <tr><td><strong>WORDT HERSTELD</strong> met de naam van de gebruiker, nog geen vervolgkaart</td><td>De watchdog is bezig. Wacht een paar minuten op de volgende kaart; een app die de gebruiker in het laatste halfuur zelf probeerde te openen gaat daarna vanzelf open. Na een kwartier nog niets: stap 2</td></tr>
 <tr><td><strong>HERSTELD</strong> met de naam van de gebruiker</td><td>Laat de app opnieuw openen; lukt het niet, laten afmelden en opnieuw aanmelden. Werkt het: ticket sluiten</td></tr>
-<tr><td><strong>NIET HERSTELD</strong> met de naam van de gebruiker</td><td>Laat de gebruiker afmelden en opnieuw aanmelden — de host is meestal wel hersteld, en bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: <a href="#stap-2-op-de-host">Stap 2</a></td></tr>
+<tr><td><strong>NIET HERSTELD</strong> met de naam van de gebruiker</td><td>Laat de gebruiker afmelden en opnieuw aanmelden — bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: <a href="#stap-2-op-de-host">Stap 2</a>; bij één gebruiker herstelt de watchdog de host niet zelf</td></tr>
 <tr><td>Geen kaart, gebruiker net aangemeld</td><td>De watchdog kijkt pas na 10 minuten. Laat hem nu draaien (stap 2) en kijk wat hij vindt</td></tr>
 <tr><td>Geen kaart, langer aangemeld</td><td>Laat de watchdog nu draaien (stap 2). Ziet hij niets, dan ligt het niet aan de registratie: Teams bijwerken of herinstalleren volgens <em>Teams-update op een werkplek</em>, of doorzetten naar <strong>level 3</strong></td></tr>
 <tr><td>Een of meer <strong>CRASH</strong>-kaarten</td><td>Kijk naar het patroon: steeds dezelfde app, module en foutcode? Op meerdere hosts? Dan <strong>level 3</strong> — dan ligt het aan een versie of de image</td></tr>
@@ -275,7 +275,7 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <tr><td><em>Er is iets misgegaan</em> in Teams, Outlook dat zichzelf netjes afsluit</td><td>Voor Windows is dat geen crash</td><td>Gebruiker vragen; bij herhaling level 2</td></tr>
 <tr><td>Kort <em>reageert niet</em> dat vanzelf weer bijtrekt</td><td>Wordt niet gelogd</td><td>—</td></tr>
 <tr><td>Een gebruiker die minder dan 10 minuten is aangemeld</td><td>Windows is de apps dan nog aan het klaarzetten</td><td>De volgende run, of afmelden en opnieuw aanmelden</td></tr>
-<tr><td>Een gebruiker die al is afgemeld</td><td>Zonder sessie kan de app niet voor die gebruiker worden hersteld</td><td>De host is wel hersteld: bij de volgende aanmelding werkt het</td></tr>
+<tr><td>Een gebruiker die al is afgemeld</td><td>Zonder sessie kan de app niet voor die gebruiker worden hersteld</td><td>Bij de volgende aanmelding wordt de app opnieuw klaargezet; lukt dat niet, dan ziet de watchdog het 10 minuten later</td></tr>
 <tr><td>Een app die bij de gebruiker open staat</td><td>De watchdog raakt hem dan niet aan, om hem niet te storen</td><td>Draait hij, dan werkt hij kennelijk weer</td></tr>
 <tr><td>Copilot als unified app (<code>copilotapp.exe</code>, via Edge Update)</td><td>Die app is geen pakket per gebruiker: de watchdog test niet of hij bij een gebruiker opent, alleen of hij crasht</td><td><code>Get-M365AppsLog.ps1</code> toont het als <strong>BLIND SPOT</strong>; bij klachten level 2</td></tr>
 <tr><td>Hosts zonder de watchdog</td><td>Hij draait alleen waar hij geïnstalleerd is</td><td>Level 3 installeert hem</td></tr>

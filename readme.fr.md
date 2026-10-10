@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (6)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) répare le problème d'un seul client dans la session de ce client uniquement, et l'hôte seulement quand cela dépasse un utilisateur : l'hôte lui-même, notre propre compte (`itceadmin`, le test pour tout l'hôte), ou la même application chez deux clients ou plus. Depuis les contrôles par utilisateur, chaque constat d'un client envoyait aussi tout l'hôte vers `Repair-AppxPackageStore.ps1 -Provision`, pour quelque chose qui ne concernait peut-être qu'un profil. Une réparation chez un client qui échoue est signalée comme *NIET HERSTELD* ; le niveau 2 décide pour l'hôte. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) et son [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) disent la même chose. Le téléchargement du [readme RDS](scripts/RDS/readme.fr.md#watch-m365appsps1) passe à cette version |
+| Vérifié sur des copies de test avec les scripts auxiliaires remplacés par un bouchon : un client avec Outlook cassé - pas de réparation de l'hôte ; `itceadmin` seul - `Repair-AppxPackageStore -Name outlook` ; deux clients avec Outlook - idem. **Non** vérifié : sur un hôte de session |
+
 ### 2026-10-10 (5)
 | Modification |
 |--------|

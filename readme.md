@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (6)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) repairs a problem of one customer in that customer's session only, and the host only when it is more than one user: the host itself, our own account (`itceadmin`, the test for the whole host), or the same app at two or more customers. Since the start of the per-user checks every customer finding also sent the whole host to `Repair-AppxPackageStore.ps1 -Provision`, for something that might concern one profile. A customer's repair that does not take is reported as *NIET HERSTELD*; level 2 decides on the host. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) and its [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) say the same. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to this version |
+| Verified on test copies with the helpers stubbed: one customer with a broken Outlook - no host repair; `itceadmin` alone - `Repair-AppxPackageStore -Name outlook`; two customers with Outlook - the same. **Not** verified: on a session host |
+
 ### 2026-10-10 (5)
 | Change |
 |--------|

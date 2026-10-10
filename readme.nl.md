@@ -1022,6 +1022,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-10 (6)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) herstelt een probleem van één klant alleen in de sessie van die klant, en de host alleen als het meer is dan één gebruiker: de host zelf, ons eigen account (`itceadmin`, de test voor de hele host), of dezelfde app bij twee of meer klanten. Sinds de controles per gebruiker stuurde elke bevinding van een klant ook de hele host naar `Repair-AppxPackageStore.ps1 -Provision`, voor iets wat misschien één profiel betrof. Een herstel bij een klant dat niet lukt wordt gemeld als *NIET HERSTELD*; level 2 beslist over de host. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) en de [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) zeggen hetzelfde. De download in de [RDS-readme](scripts/RDS/readme.nl.md#watch-m365appsps1) gaat naar deze versie |
+| Gecontroleerd op testkopieën met de hulpscripts vervangen door een stub: één klant met een kapotte Outlook - geen hostherstel; alleen `itceadmin` - `Repair-AppxPackageStore -Name outlook`; twee klanten met Outlook - hetzelfde. **Niet** gecontroleerd: op een sessiehost |
+
 ### 2026-10-10 (5)
 | Wijziging |
 |--------|
