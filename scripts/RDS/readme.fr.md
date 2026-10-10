@@ -495,7 +495,7 @@ Sortie dans `-OutputPath` (sinon `%TEMP%`) : `summary.txt` (l'écran), `sessions
 
 - Copilot non inscrit pour un utilisateur alors que l'application unifiée (Edge Update) est
   sur l'hôte : le watchdog l'accepte comme Copilot pour tous, sans le tester par utilisateur.
-- L'application unifiée en service (`copilotapp.exe`) : le watchdog ne contrôle ni son démarrage ni ses plantages.
+- L'application unifiée en service (`copilotapp.exe`) : aucun watchdog ne teste par utilisateur si elle s'ouvre, et un watchdog antérieur au 2026-10-10 ne voit pas non plus ses plantages.
 - Seul le Copilot grand public (`Microsoft.Copilot`) inscrit, pas Microsoft 365 Copilot
   (`Microsoft.MicrosoftOfficeHub`) : le watchdog compte l'un ou l'autre.
 - L'application d'un client inscrite et `Ok` mais qui ne fonctionne pas : le watchdog ne
