@@ -2,6 +2,19 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — Watchdog werkt Teams/Outlook/Copilot bij en test elke nieuwe build zelf
+  - Waarom: de watchdog controleerde alleen de build die er stond; een nieuwe build kwam via
+    de wekelijkse image-update of de app zelf, en vaak startte een klant hem als eerste.
+  - Wat: stap 1a + -UpdateHours (std 6, 0 = uit): host elke 6 u Repair-AppxPackageStore
+    -Latest -Provision (Teams/Outlook) + Edge Update-check (Copilot); itceadmin elke run naar
+    de klaargezette build (app sluiten, opnieuw registreren) zodat de starttest de nieuwe build
+    test. Klanten niet aangeraakt. Nieuwe build op de host -> melding 'updated' (oud -> nieuw).
+  - Open: n8n-flow kent 'updated' nog niet; downloadpin in RDS-readme nog niet verplaatst;
+    niet getest op een sessiehost.
+  - Bestanden: scripts/RDS/Watch-M365Apps.ps1, RDS-readmes (EN/NL/FR), IT Glue md/html,
+    Version History (EN/NL/FR).
+  - Commit: "Keep the watched apps up to date and test each new build with our own account" (devel)
+
 2026-10-10 — Probleem bij één klant alleen in diens sessie herstellen
   - Waarom: elke bevinding bij een klant stuurde ook de hele host naar herstel.
   - Wat: één klant -> alleen diens sessie; host alleen bij de host zelf, itceadmin (test

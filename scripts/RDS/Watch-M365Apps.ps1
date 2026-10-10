@@ -19,6 +19,19 @@
                      is there - provisioned (MicrosoftOfficeHub / Copilot) or the
                      unified app Edge Update installs. Without that no new profile,
                      customer or ours, gets the app.
+      1a. Update     Every -UpdateHours: the newest Teams and new Outlook are
+                     provisioned on the host (Repair-AppxPackageStore.ps1 -Latest
+                     -Provision: Teams from Microsoft's config service, Outlook the
+                     newest build seen on this host or in a profile - only ever newer,
+                     signature-checked), and Edge Update is asked to check now for the
+                     unified Copilot app. Every run: when our own account has an older
+                     build than the host provisions, the app is closed in our session
+                     and registered again from the provisioned build, so step 2 starts
+                     the new build - a build that does not run is found by us, not by a
+                     customer at their next sign-in. Customers are never updated by the
+                     watchdog: Windows gives them the new build at their next sign-in.
+                     A new build on the host - from this step or on its own - is
+                     reported once, with what it was before.
       2. Accounts    For each watched account signed in on this host (the owner of an
                      explorer.exe), per app: the package is registered for that user,
                      its files are there and its status is Ok. Then the app has to be
@@ -49,7 +62,7 @@
                      app is not running for them, at most once per -RepairCooldownHours
                      per user and app, and never reset. In our own account an app that
                      does not start is reset (Reset-AppxPackage). Nothing is closed or
-                     removed for anyone - no -RemoveOld, no -Latest. A user who tried to
+                     removed for a customer - no -RemoveOld, no -Latest. A user who tried to
                      open the app themselves (TWinUI 5961) in the last 30 minutes gets it
                      opened in their session once it is registered again, unless
                      -NoUserLaunch. Nothing else is ever started for a customer; an
@@ -97,6 +110,11 @@
 
 .PARAMETER RenotifyHours
     A problem that stays the same is reported again after this many hours. Default 12.
+
+.PARAMETER UpdateHours
+    How often the newest Teams and Outlook are provisioned on the host and Edge Update
+    is asked to check for Copilot. Default 6; 0 turns updating off, for our own account
+    as well. -NoRepair also leaves everything at the build it is.
 
 .PARAMETER CrashThreshold
     Report crashes and hangs of one app once it reaches this many since the last run.
@@ -166,6 +184,8 @@ param (
     [int]      $RepairCooldownHours = 4,
     [ValidateRange(1, 168)]
     [int]      $RenotifyHours = 12,
+    [ValidateRange(0, 168)]
+    [int]      $UpdateHours = 6,
     [ValidateRange(0, 1000)]
     [int]      $CrashThreshold = 1,
     [switch]   $NoRepair,
@@ -284,7 +304,7 @@ $StatePath  = Join-Path $WorkingDir 'state.json'
 $Installed  = (Test-Path $PSScriptRoot) -and ((Resolve-Path $PSScriptRoot).Path.TrimEnd('\') -eq ([IO.Path]::GetFullPath($WorkingDir)).TrimEnd('\'))
 if (-not $Install -and (Test-Path $ConfigPath)) {
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'CrashThreshold', 'NoRepair', 'NoUserRepair', 'SkipLaunchTest', 'NoUserLaunch', 'NoDiagnostics') {
+    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'UpdateHours', 'CrashThreshold', 'NoRepair', 'NoUserRepair', 'SkipLaunchTest', 'NoUserLaunch', 'NoDiagnostics') {
         if ($PSBoundParameters.ContainsKey($name)) { continue }
         $value = Get-PropertyValue $config $name
         if ($null -ne $value) { Set-Variable -Name $name -Value $value }
@@ -505,6 +525,122 @@ function Test-AppStart {
     if (@(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { return $false }
     Start-Sleep -Seconds 15
     return @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
+}
+
+# -- Updates -------------------------------------------------------------------------
+function Get-ProvisionedBuild {
+    <# Per package name the newest provisioned build: its version and the manifest it was provisioned from. #>
+    $builds = @{}
+    foreach ($p in @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue)) {
+        $v = try { [version] $p.Version } catch { $null }
+        if (-not $v) { continue }
+        if ($builds.ContainsKey($p.DisplayName) -and $builds[$p.DisplayName].Version -ge $v) { continue }
+        $builds[$p.DisplayName] = [PSCustomObject]@{
+            Version  = $v
+            Manifest = [Environment]::ExpandEnvironmentVariables([string] (Get-PropertyValue $p 'InstallLocation'))
+        }
+    }
+    return $builds
+}
+
+function Get-HostVersion {
+    <# Per app the build a sign-in gets on this host: the unified Copilot app (Edge Update) first, else the newest provisioned package. #>
+    $builds   = Get-ProvisionedBuild
+    $versions = [ordered]@{}
+    foreach ($entry in $Apps) {
+        $v = $null
+        if ($entry.App -eq 'Copilot') { $v = Get-EdgeUpdateClientVersion $CopilotGuid }
+        if (-not $v) {
+            $v = @($entry.Packages | Where-Object { $builds.ContainsKey($_) } | ForEach-Object { $builds[$_].Version } | Sort-Object -Descending) | Select-Object -First 1
+        }
+        if ($v) { $versions[$entry.App] = [string] $v }
+    }
+    return $versions
+}
+
+function Update-HostApp {
+    <#
+        The newest builds on the host: Teams and new Outlook through
+        Repair-AppxPackageStore.ps1 -Latest -Provision, which only provisions a build
+        newer than what is there and checks its signature, and Edge Update asked to
+        check now for the unified Copilot app - what it installs shows at the next run.
+        Returns one line per action for the report.
+    #>
+    param($State)
+    $actions   = [System.Collections.Generic.List[string]]::new()
+    $repairDir = Join-Path $WorkingDir 'Repair'
+    $names     = @($Apps | Where-Object { $_.App -ne 'Copilot' } | ForEach-Object { $_.Repair })
+    if ($names.Count -gt 0) {
+        $code = Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = $names; Latest = $true; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false })
+        $actions.Add("Update: Repair-AppxPackageStore -Name $($names -join ',') -Latest -Provision: exit code $code")
+    }
+    if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0 -and (Get-EdgeUpdateClientVersion $CopilotGuid)) {
+        $task    = @(Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTaskMachineUA*' -ErrorAction SilentlyContinue) | Select-Object -First 1
+        $updater = Join-Path ${env:ProgramFiles(x86)} 'Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe'
+        try {
+            if ($task) { Start-ScheduledTask -InputObject $task }
+            elseif (Test-Path $updater) { Start-Process -FilePath $updater -ArgumentList '/ua /installsource scheduler' -WindowStyle Hidden | Out-Null }
+            else { throw 'Edge Update is not installed' }
+            Write-Ok 'Edge Update asked to check now (unified Copilot app)'
+            $actions.Add('Update: Edge Update asked to check for Copilot - a new build shows at the next run')
+        } catch {
+            Write-Warn "Edge Update check not started: $($_.Exception.Message)"
+            $actions.Add("Update: Edge Update check for Copilot not started - $($_.Exception.Message)")
+        }
+    }
+    $State.LastUpdate = (Get-Date).ToString('o')
+    return $actions
+}
+
+function Update-AccountApp {
+    <#
+        Our own accounts onto the build the host provisions, when theirs is older: the
+        app closed in that session - ours, never a customer's - and registered again
+        from the provisioned manifest, then the version read back. The launch test in
+        Get-Finding then starts the new build. A package that is not registered at all
+        is left to Test-UserApp, which reports and repairs it.
+    #>
+    param($Sessions)
+    $actions = [System.Collections.Generic.List[string]]::new()
+    $builds  = Get-ProvisionedBuild
+    foreach ($session in @($Sessions | Where-Object { $_.Watched })) {
+        foreach ($entry in $Apps) {
+            foreach ($name in @($entry.Packages | Where-Object { $builds.ContainsKey($_) })) {
+                $mine = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
+                        Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+                if (-not $mine) { continue }
+                $have = [version] $mine.Version
+                $want = $builds[$name].Version
+                if ($have -ge $want) { continue }
+
+                Write-Step "$($entry.App) for $($session.User): $have, the host provisions $want - updating"
+                $exes = @($entry.Exe | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) })
+                $appEntry = Get-AppEntry $mine
+                if ($appEntry) { $exes += $appEntry.Exe }
+                foreach ($exe in @($exes | Sort-Object -Unique)) {
+                    Get-SessionProcess $session $exe | Stop-Process -Force -ErrorAction SilentlyContinue
+                }
+                $manifest = $builds[$name].Manifest
+                $command  = if ($manifest -and (Test-Path -LiteralPath $manifest)) {
+                                "Add-AppxPackage -Register '$manifest' -DisableDevelopmentMode -ForceApplicationShutdown"
+                            } else {
+                                "Add-AppxPackage -RegisterByFamilyName -MainPackage '${name}_$PublisherId' -ForceApplicationShutdown"
+                            }
+                Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null
+
+                $now = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
+                       ForEach-Object { [version] $_.Version } | Sort-Object -Descending | Select-Object -First 1
+                if ($now -and $now -ge $want) {
+                    Write-Ok "$($entry.App) $now registered for $($session.Account) - started by the test below"
+                    $actions.Add("Update: $($session.Account) $($entry.App) $have -> $now")
+                } else {
+                    Write-Warn "$($entry.App) for $($session.Account) is still $now after registering $want"
+                    $actions.Add("Update: $($session.Account) $($entry.App) still $now after registering $want")
+                }
+            }
+        }
+    }
+    return $actions
 }
 
 # -- Crashes -------------------------------------------------------------------------
@@ -859,7 +995,8 @@ function Start-AppForUser {
 
 # -- Report --------------------------------------------------------------------------
 function Send-Notification {
-    param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @(), $Crashes = @(), [string] $Diagnostics)
+    param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @(), $Crashes = @(), [string] $Diagnostics,
+          $Updates = @(), $Versions = $null)
     if (-not $WebhookUrl) { Write-Skip "No -WebhookUrl - not reported ($Kind)"; return $false }
     $payload = [ordered]@{
         source   = 'Watch-M365Apps'
@@ -874,6 +1011,8 @@ function Send-Notification {
         crashes  = @($Crashes | Select-Object App, Kind, Count, Last, Exe, Version, Module, Code)
         log      = $script:logFile
         diagnostics = $Diagnostics
+        updates  = @($Updates)
+        versions = $Versions
     }
     $headers = @{}
     if ($WebhookToken) { $headers['X-Watchdog-Token'] = $WebhookToken }
@@ -966,6 +1105,7 @@ if ($Install) {
         WebhookToken        = $WebhookToken
         RepairCooldownHours = $RepairCooldownHours
         RenotifyHours       = $RenotifyHours
+        UpdateHours         = $UpdateHours
         CrashThreshold      = $CrashThreshold
         NoRepair            = [bool] $NoRepair
         NoUserRepair        = [bool] $NoUserRepair
@@ -1014,11 +1154,12 @@ try {
     $runStart = Get-Date
     # RepairingSignature / LastRepairing: what the last "repairing" report was about, so a
     # problem the repair cannot fix does not announce itself again every run.
+    # Versions: the build per app on the host at the last run, so a new one is reported once.
     $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null; UserRepairs = @{}
-                                RepairingSignature = ''; LastRepairing = $null }
+                                RepairingSignature = ''; LastRepairing = $null; LastUpdate = $null; Versions = $null }
     if (Test-Path $StatePath) {
         $saved = Get-Content -Path $StatePath -Raw | ConvertFrom-Json
-        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing') { $state.$name = Get-PropertyValue $saved $name }
+        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing', 'LastUpdate', 'Versions') { $state.$name = Get-PropertyValue $saved $name }
         if ($null -eq $state.Signature) { $state.Signature = '' }
         if ($null -eq $state.RepairingSignature) { $state.RepairingSignature = '' }
         # Per user and app, when their app was last re-registered; older than a day is forgotten.
@@ -1051,6 +1192,29 @@ try {
             Write-Warn ('{0} {1} {2}x ({3} {4}, {5}{6}) - last at {7:HH:mm}' -f $c.App, $c.Kind.ToLower(), $c.Count, $c.Exe, $c.Version, $c.Module, $(if ($c.Code) { ', ' + $c.Code } else { '' }), [datetime] $c.Last)
         }
     }
+
+    # Updates before the checks, so the checks test the newest build: the host every
+    # -UpdateHours, our own account every run it is behind what the host provisions.
+    $updateActions = @()
+    if ($UpdateHours -gt 0 -and -not $NoRepair -and -not $WhatIfPreference) {
+        $lastUpdate = $null
+        if ($state.LastUpdate) { $lastUpdate = [datetime]::Parse($state.LastUpdate, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
+        if (-not $lastUpdate -or $lastUpdate.AddHours($UpdateHours) -lt (Get-Date)) {
+            Write-Host ''
+            Write-Host '  ==== Updating '.PadRight(80, '=') -ForegroundColor Cyan
+            $updateActions += @(Update-HostApp -State $state)
+        }
+        $updateActions += @(Update-AccountApp -Sessions $sessions)
+    }
+    # A new build on the host, from the update above or on its own (Edge Update, an
+    # admin): reported once, with what it was before. The first run only records.
+    $hostVersions = Get-HostVersion
+    $newBuilds    = @(foreach ($name in @($hostVersions.Keys)) {
+        $was = [string] (Get-PropertyValue $state.Versions $name)
+        if ($was -and $was -ne $hostVersions[$name]) { '{0} {1} -> {2}' -f $name, $was, $hostVersions[$name] }
+    })
+    foreach ($line in $newBuilds) { Write-Ok "New build on the host: $line" }
+    $state.Versions = $hostVersions
 
     # Events are what happened since the last run; the read-back can only say whether
     # what they point at is still wrong, so an event finding stays unless it was fixed.
@@ -1113,6 +1277,20 @@ try {
         $summary = '{0}: healthy again without a repair (was: {1})' -f $env:COMPUTERNAME, $state.Signature
     }
 
+    # A new build, like a crash, rides along with any report of this run or is a report
+    # of its own - a healthy run after it means our account started it.
+    if ($newBuilds.Count -gt 0) {
+        $buildText = $newBuilds -join ', '
+        if ($kind) { $summary += " - also new: $buildText" }
+        else {
+            $kind    = 'updated'
+            $tested  = if ($after.Count -gt 0) { "$($after.Count) problem(s) still open, see the findings" }
+                       elseif (@($sessions | Where-Object { $_.Watched }).Count -gt 0 -and -not $SkipLaunchTest) { 'running with our own account' }
+                       else { 'not started - no watched account signed in, or the launch test is off' }
+            $summary = '{0}: new build(s) {1} - {2}' -f $env:COMPUTERNAME, $buildText, $tested
+        }
+    }
+
     # Crashes are events, not a state: they ride along with any report of this run,
     # or are a report of their own.
     if ($crashes.Count -gt 0) {
@@ -1125,8 +1303,8 @@ try {
     }
 
     if ($kind) {
-        if (Send-Notification -Kind $kind -Summary $summary -Found $after -Before $before -Actions $actions -Crashes $crashes -Diagnostics $diagnostics) {
-            if ($kind -ne 'crashed') { $state.LastNotified = (Get-Date).ToString('o') }
+        if (Send-Notification -Kind $kind -Summary $summary -Found $after -Before $before -Actions @($updateActions + $actions) -Crashes $crashes -Diagnostics $diagnostics -Updates $newBuilds -Versions $hostVersions) {
+            if ($kind -notin 'crashed', 'updated') { $state.LastNotified = (Get-Date).ToString('o') }
         }
     }
     $state.Signature = $signature

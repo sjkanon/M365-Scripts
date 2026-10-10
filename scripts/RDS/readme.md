@@ -308,6 +308,7 @@ an n8n webhook — naming the user each finding and each repair belongs to.
 |------|--------------|
 | 0. Crashes | Every crash (Application Error `1000`) and every hang that ended in a close (Application Hang `1002`) of Teams, new Outlook or Copilot since the previous run, from the Application log — for **every user on the host**, customers included — grouped per app, module and exception code. Reported, not repaired: a customer's app is never restarted for them |
 | 1. Host | Teams and new Outlook are provisioned for all users; Copilot is there (provisioned MicrosoftOfficeHub / Copilot, or the unified app Edge Update installs) |
+| 1a. Update | Every `-UpdateHours` (default 6): the **newest** Teams and new Outlook are provisioned on the host — [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Latest -Provision` (Teams from Microsoft's config service, Outlook the newest build seen on this host or in a profile; only ever newer, signature-checked, no `-RemoveOld`) — and Edge Update is asked to check now for the unified Copilot app. Every run: when **our own account** has an older build than the host provisions, the app is closed in our session and registered again from the provisioned build, so step 2 starts the new build — a build that does not run is found by us, not by a customer at their next sign-in. **Customers are never updated by the watchdog**: Windows gives them the new build at their next sign-in. A new build on the host — from this step or on its own — is reported once (`updated`, with the old and new version) |
 | 2. Accounts | For each watched account signed in on this host: the package is registered for that user, its files are there and its status is `Ok`. Then the app has to run in that session — if it does not, it is started there (`shell:AppsFolder\<AUMID>`, through a one-off task in that user's own session) and has to still be running 15 seconds later |
 | 2b. Users | Every other signed-in user (customers), once signed in for 10 minutes: the same registration check, **without starting anything**. Plus every attempt since the previous run, by any user, to open one of the apps that Windows refused (TWinUI `5961`), and every failed registration of their packages (AppXDeploymentServer `401`/`404`; "close the app first" and "already installed" are left out), with the user it happened to |
 | 2c. Announce | Something new is wrong: [`Get-M365AppsLog.ps1`](#get-m365appslogps1) collects the evidence for the users and apps concerned into `Diag\` (one zip, kept 14 days) while it is still broken, and a `repairing` report goes to n8n naming every user — before anything is changed. The same problem again is not announced or collected again within `-RenotifyHours` |
@@ -315,8 +316,8 @@ an n8n webhook — naming the user each finding and each repair belongs to.
 | 4. Read back | Steps 1, 2 and the registration check of 2b again; a user's problem counts as repaired when the package is registered and `Ok` for them afterwards (or the app is running for them) |
 | 5. Report | A JSON POST to the webhook when something is wrong, was repaired, recovered on its own, or crashed at least `-CrashThreshold` times — not on every healthy run. A problem that stays is reported again after `-RenotifyHours` |
 
-Nothing is closed or removed for anyone, and a customer's app is never reset: no
-`-RemoveOld`, no `-Latest`, no stopping of customers' processes. Every report lists, per
+Nothing is closed or removed for a customer, and a customer's app is never reset: no
+`-RemoveOld`, `-Latest` only for the host in step 1a, no stopping of customers' processes. Every report lists, per
 finding, the user (`Account`, with `Customer` true for a customer) and, under `before`,
 whether it was repaired for them (`Fixed`); the Teams card shows *hersteld bij deze
 gebruiker* next to each one.
@@ -332,6 +333,7 @@ gebruiker* next to each one.
 | `-IntervalMinutes` | How often the task runs (default: `30`) |
 | `-RepairCooldownHours` | Minimum time between two host repairs, so a problem it cannot fix is not retried every run (default: `4`) |
 | `-RenotifyHours` | Report a problem that stays the same again after this many hours (default: `12`) |
+| `-UpdateHours` | How often the newest Teams / Outlook are provisioned and Edge Update checks for Copilot (default: `6`; `0` turns updating off, for our own account as well; `-NoRepair` also updates nothing) |
 | `-CrashThreshold` | Report the crashes and hangs of one app once there are this many since the previous run (default: `1`, every crash; `0` turns crash reporting off) |
 | `-NoRepair` | Test and report only, change nothing |
 | `-NoUserRepair` | Repair the host and our own account, but never run anything in a customer's session — their problems are still reported, with their name |

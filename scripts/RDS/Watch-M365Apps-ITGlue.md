@@ -60,6 +60,7 @@ Elke kaart noemt de **host** (bijvoorbeeld `LEM-AVD-4`), het tijdstip en de betr
 | ✅ **HERSTELD** | Groen | Er was iets stuk en het is opgelost. Per regel: welke app, bij wie, en *✅ hersteld bij deze gebruiker* | Niets. Ligt er een ticket van die gebruiker: laat de app opnieuw openen en sluit het ticket als het werkt |
 | 🚨 **NIET HERSTELD** | Rood | Herstel geprobeerd, maar (een deel) is nog stuk. *Nog stuk na herstel* en *Wel hersteld* staan apart | Oppakken, ook zonder ticket — de gebruiker heeft er waarschijnlijk al last van. Zie [Level 2](#level-2-de-kaart-zoeken-en-op-de-host-kijken) |
 | ⚠️ **PROBLEEM** | Rood | Probleem gevonden, maar herstel staat uit op deze host (`-NoRepair`) | Oppakken, zie [Level 2](#level-2-de-kaart-zoeken-en-op-de-host-kijken) |
+| 🆕 **NIEUWE VERSIE** | Blauw | Er staat een nieuwe build van Teams, Outlook of Copilot op de host (oud → nieuw). De watchdog zet elke 6 uur de nieuwste klaar en start hem meteen bij `itceadmin`; gebruikers krijgen hem bij hun volgende aanmelding | Niets. Belt een gebruiker kort daarna over die app: noem de nieuwe versie in het ticket |
 | 💥 **CRASH** | Oranje | Teams, Outlook of Copilot is gecrasht of vastgelopen (bij iemand op de host — Windows zegt niet bij wie) | Eén crash: niets. Steeds dezelfde app en foutcode, of meerdere kaarten per dag: onderzoeken |
 | ✅ **WEER GOED** | Groen | Een eerder gemeld probleem is vanzelf verdwenen | Niets; sluit een openstaand ticket als de gebruiker het bevestigt |
 | ⚠️ **FOUT** | Oranje | De watchdog zelf liep vast | Doorzetten naar **level 3** |
@@ -311,6 +312,7 @@ Opgeslagen in `C:\IT\AppWatchdog\config.json` (alleen leesbaar voor System en Ad
 | `-CrashThreshold` | `1` (elke crash) | Te veel CRASH-kaarten op een drukke pool: bijvoorbeeld `3`. `0` zet crashmeldingen uit |
 | `-RepairCooldownHours` | `4` | Hoe vaak de host en een gebruiker hooguit hersteld worden |
 | `-RenotifyHours` | `12` | Na hoeveel uur een blijvend probleem opnieuw gemeld wordt |
+| `-UpdateHours` | `6` | Hoe vaak de nieuwste Teams/Outlook klaargezet worden en Edge Update op Copilot controleert. `0` zet bijwerken uit |
 | `-NoUserRepair` | uit | Nooit iets in de sessie van een gebruiker doen, alleen melden en de host herstellen |
 | `-NoRepair` | uit | Alleen melden, niets herstellen |
 | `-SkipLaunchTest` | uit | De apps bij `itceadmin` niet starten, alleen de registratie controleren |

@@ -310,6 +310,7 @@ herstel.
 |------|----------------|
 | 0. Crashes | Elke crash (Application Error `1000`) en elke hang die eindigde in afsluiten (Application Hang `1002`) van Teams, de nieuwe Outlook of Copilot sinds de vorige run, uit het Application-logboek — voor **elke gebruiker op de host**, klanten inbegrepen — gegroepeerd per app, module en foutcode. Gemeld, niet hersteld: de app van een klant wordt nooit voor hem herstart |
 | 1. Host | Teams en de nieuwe Outlook zijn klaargezet (provisioned) voor alle gebruikers; Copilot is er (MicrosoftOfficeHub / Copilot klaargezet, of de unified app die Edge Update installeert) |
+| 1a. Bijwerken | Elke `-UpdateHours` (standaard 6): de **nieuwste** Teams en nieuwe Outlook worden op de host klaargezet — [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1) `-Latest -Provision` (Teams via Microsofts configuratieservice, Outlook de nieuwste build die op deze host of in een profiel gezien is; alleen nieuwer, handtekening gecontroleerd, geen `-RemoveOld`) — en Edge Update wordt gevraagd nu te controleren op de unified Copilot-app. Elke run: heeft **ons eigen account** een oudere build dan de host klaarzet, dan wordt de app in onze sessie gesloten en opnieuw geregistreerd vanaf de klaargezette build, zodat stap 2 de nieuwe build start — een build die niet draait vinden wij, niet een klant bij de volgende aanmelding. **Klanten worden nooit door de watchdog bijgewerkt**: Windows geeft hun de nieuwe build bij de volgende aanmelding. Een nieuwe build op de host — door deze stap of vanzelf — wordt één keer gemeld (`updated`, met oude en nieuwe versie) |
 | 2. Accounts | Voor elk bewaakt account dat op deze host is aangemeld: het pakket is voor die gebruiker geregistreerd, de bestanden zijn er en de status is `Ok`. Daarna moet de app in die sessie draaien — zo niet, dan wordt hij daar gestart (`shell:AppsFolder\<AUMID>`, via een eenmalige taak in de eigen sessie van die gebruiker) en moet hij 15 seconden later nog draaien |
 | 2b. Gebruikers | Elke andere aangemelde gebruiker (klanten), zodra die 10 minuten is aangemeld: dezelfde registratiecontrole, **zonder iets te starten**. Plus elke poging sinds de vorige run, door welke gebruiker ook, om een van de apps te openen die Windows weigerde (TWinUI `5961`), en elke mislukte registratie van hun pakketten (AppXDeploymentServer `401`/`404`; "sluit eerst de app" en "al geïnstalleerd" tellen niet mee), met de gebruiker bij wie het gebeurde |
 | 2c. Aankondigen | Er is iets nieuws mis: [`Get-M365AppsLog.ps1`](#get-m365appslogps1) verzamelt het bewijs voor de betreffende gebruikers en apps in `Diag\` (één zip, 14 dagen bewaard) terwijl het nog stuk is, en er gaat een melding `repairing` naar n8n met elke gebruiker erin — voordat er iets veranderd wordt. Hetzelfde probleem opnieuw wordt binnen `-RenotifyHours` niet nog eens aangekondigd of verzameld |
@@ -317,8 +318,8 @@ herstel.
 | 4. Teruglezen | Stap 1, 2 en de registratiecontrole van 2b opnieuw; het probleem van een gebruiker telt als hersteld als het pakket daarna voor hem geregistreerd en `Ok` is (of de app bij hem draait) |
 | 5. Melden | Een JSON-POST naar de webhook als er iets mis is, iets hersteld is, iets vanzelf weer werkt, of een app minstens `-CrashThreshold` keer crashte — niet bij elke gezonde run. Een probleem dat blijft wordt na `-RenotifyHours` opnieuw gemeld |
 
-Voor niemand wordt iets gesloten of verwijderd, en de app van een klant wordt nooit
-gereset: geen `-RemoveOld`, geen `-Latest`, geen processen van klanten die worden gestopt.
+Voor een klant wordt niets gesloten of verwijderd, en de app van een klant wordt nooit
+gereset: geen `-RemoveOld`, `-Latest` alleen voor de host in stap 1a, geen processen van klanten die worden gestopt.
 Elke melding noemt per bevinding de gebruiker (`Account`, met `Customer` op true voor een
 klant) en onder `before` of het bij hem hersteld is (`Fixed`); de Teams-kaart zet
 *hersteld bij deze gebruiker* bij elke regel.
@@ -334,6 +335,7 @@ klant) en onder `before` of het bij hem hersteld is (`Fixed`); de Teams-kaart ze
 | `-IntervalMinutes` | Hoe vaak de taak draait (standaard: `30`) |
 | `-RepairCooldownHours` | Minimale tijd tussen twee hostherstellingen, zodat een probleem dat hij niet kan oplossen niet elke run opnieuw wordt geprobeerd (standaard: `4`) |
 | `-RenotifyHours` | Een probleem dat gelijk blijft na zoveel uur opnieuw melden (standaard: `12`) |
+| `-UpdateHours` | Hoe vaak de nieuwste Teams / Outlook klaargezet worden en Edge Update op Copilot controleert (standaard: `6`; `0` zet bijwerken uit, ook voor ons eigen account; met `-NoRepair` wordt ook niets bijgewerkt) |
 | `-CrashThreshold` | De crashes en hangs van een app melden zodra het er sinds de vorige run zoveel zijn (standaard: `1`, elke crash; `0` zet crashmeldingen uit) |
 | `-NoRepair` | Alleen testen en melden, niets wijzigen |
 | `-NoUserRepair` | De host en ons eigen account herstellen, maar nooit iets in de sessie van een klant draaien — hun problemen worden nog steeds gemeld, met hun naam |

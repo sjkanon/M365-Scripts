@@ -46,7 +46,7 @@ li > p { margin: .4rem 0; }
 </style>
 </head>
 <body>
-<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 13:12. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
+<p class="meta">Gegenereerd uit <code>Watch-M365Apps-ITGlue.md</code> op 2026-10-10 15:39. Wijzig de markdown, niet deze pagina: <code>Convert-MarkdownToHtml.ps1</code> maakt hem opnieuw.</p>
 <h1 id="teams-nieuwe-outlook-en-copilot-op-avd-watchdog-en-herstel">Teams, nieuwe Outlook en Copilot op AVD — watchdog en herstel</h1>
 <p>Deze procedure beschrijft wat er automatisch gebeurt als de nieuwe Teams, de nieuwe Outlook of Copilot niet werkt op een AVD-sessiehost, welke meldingen daaruit komen, en wat je doet als een gebruiker belt.</p>
 <p><strong>Voor IT Glue — servicedeskdocumentatie.</strong> Bedoeld voor alle supportniveaus: level 1 neemt het gesprek aan, helpt met de eerste stappen en zet door; level 2 leest de meldingen in het CIPP Teams-kanaal en kijkt op de host; level 3 beheert de scripts.</p>
@@ -119,6 +119,7 @@ li > p { margin: .4rem 0; }
 <tr><td>✅ <strong>HERSTELD</strong></td><td>Groen</td><td>Er was iets stuk en het is opgelost. Per regel: welke app, bij wie, en <em>✅ hersteld bij deze gebruiker</em></td><td>Niets. Ligt er een ticket van die gebruiker: laat de app opnieuw openen en sluit het ticket als het werkt</td></tr>
 <tr><td>🚨 <strong>NIET HERSTELD</strong></td><td>Rood</td><td>Herstel geprobeerd, maar (een deel) is nog stuk. <em>Nog stuk na herstel</em> en <em>Wel hersteld</em> staan apart</td><td>Oppakken, ook zonder ticket — de gebruiker heeft er waarschijnlijk al last van. Zie <a href="#level-2-de-kaart-zoeken-en-op-de-host-kijken">Level 2</a></td></tr>
 <tr><td>⚠️ <strong>PROBLEEM</strong></td><td>Rood</td><td>Probleem gevonden, maar herstel staat uit op deze host (<code>-NoRepair</code>)</td><td>Oppakken, zie <a href="#level-2-de-kaart-zoeken-en-op-de-host-kijken">Level 2</a></td></tr>
+<tr><td>🆕 <strong>NIEUWE VERSIE</strong></td><td>Blauw</td><td>Er staat een nieuwe build van Teams, Outlook of Copilot op de host (oud → nieuw). De watchdog zet elke 6 uur de nieuwste klaar en start hem meteen bij <code>itceadmin</code>; gebruikers krijgen hem bij hun volgende aanmelding</td><td>Niets. Belt een gebruiker kort daarna over die app: noem de nieuwe versie in het ticket</td></tr>
 <tr><td>💥 <strong>CRASH</strong></td><td>Oranje</td><td>Teams, Outlook of Copilot is gecrasht of vastgelopen (bij iemand op de host — Windows zegt niet bij wie)</td><td>Eén crash: niets. Steeds dezelfde app en foutcode, of meerdere kaarten per dag: onderzoeken</td></tr>
 <tr><td>✅ <strong>WEER GOED</strong></td><td>Groen</td><td>Een eerder gemeld probleem is vanzelf verdwenen</td><td>Niets; sluit een openstaand ticket als de gebruiker het bevestigt</td></tr>
 <tr><td>⚠️ <strong>FOUT</strong></td><td>Oranje</td><td>De watchdog zelf liep vast</td><td>Doorzetten naar <strong>level 3</strong></td></tr>
@@ -314,6 +315,7 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <tr><td><code>-CrashThreshold</code></td><td><code>1</code> (elke crash)</td><td>Te veel CRASH-kaarten op een drukke pool: bijvoorbeeld <code>3</code>. <code>0</code> zet crashmeldingen uit</td></tr>
 <tr><td><code>-RepairCooldownHours</code></td><td><code>4</code></td><td>Hoe vaak de host en een gebruiker hooguit hersteld worden</td></tr>
 <tr><td><code>-RenotifyHours</code></td><td><code>12</code></td><td>Na hoeveel uur een blijvend probleem opnieuw gemeld wordt</td></tr>
+<tr><td><code>-UpdateHours</code></td><td><code>6</code></td><td>Hoe vaak de nieuwste Teams/Outlook klaargezet worden en Edge Update op Copilot controleert. <code>0</code> zet bijwerken uit</td></tr>
 <tr><td><code>-NoUserRepair</code></td><td>uit</td><td>Nooit iets in de sessie van een gebruiker doen, alleen melden en de host herstellen</td></tr>
 <tr><td><code>-NoRepair</code></td><td>uit</td><td>Alleen melden, niets herstellen</td></tr>
 <tr><td><code>-SkipLaunchTest</code></td><td>uit</td><td>De apps bij <code>itceadmin</code> niet starten, alleen de registratie controleren</td></tr>

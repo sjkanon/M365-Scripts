@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (7)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) keeps the apps up to date and tests every new build itself (new step 1a, `-UpdateHours`, default 6). Before, it only checked and repaired the build that was there: a new Teams, Outlook or Copilot build reached the host only through the weekly image update or the app itself, and the first to start it was often a customer. Now every `-UpdateHours` the host gets the newest Teams and Outlook ([`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-Latest -Provision`, only newer, signature-checked) and Edge Update is asked to check for Copilot; every run our own account (`itceadmin`) is moved to the provisioned build when it is behind - the app closed in our session and registered again - so the launch test starts the new build first. Customers are not touched; Windows gives them the build at their next sign-in. A new build on the host is reported once as `updated` (old -> new), with `updates` and `versions` in the payload |
+| Verified: syntax; the version-change detection on its own (first run records only, a changed Teams build gives one line, state saved as JSON). **Not** verified: a run on a session host (provisioning the newest build, the re-registration in `itceadmin`'s session, the Edge Update check); the n8n flow has no card for `updated` yet; installed hosts keep the old version until `-Install` is run again or the readme's download pin is moved |
+
 ### 2026-10-10 (6)
 | Change |
 |--------|
