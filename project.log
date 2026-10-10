@@ -13,7 +13,8 @@ Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commi
     watchdog en Update-SessionHostImage.
   - Open: welke build AVD-5-gebruikers vragen (staat nu in de melding); CDN serveert die?;
     n8n-kaart labels BuildMissing/NoShortcut/updated; hosts opnieuw -Install.
-  - Commits: abe8202 (helper), "Give the host the Outlook build its users ask for" (devel)
+  - Commits: abe8202 (helper), 3887d1b (watchdog); downloadpin naar 3887d1b + SHA-256
+    8315F72AE49557452CC07F8AE57F84FBE492D7DEDE89CFCA97357CC86E747EBC.
 
 2026-10-10 — Watchdog bewaakt de nieuwe (unified) Copilot-app in plaats van de oude
   - Waarom: de oude M365 Copilot-app telde als Copilot; met de unified app op de host werd
