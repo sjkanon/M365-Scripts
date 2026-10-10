@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (5)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) repairs the host when an app fails for our own account. Before, `itceadmin`'s *not registered* or *does not start* only re-registered or reset the app in `itceadmin`'s session, while the account is there to stand in for everyone on the host - the host was left as it was until a customer ran into it. Now every finding, `itceadmin`'s included, sends the host to `Repair-AppxPackageStore.ps1 -Provision` for that app (within the cooldown). The host repair starts nothing in anyone's session; customers still only get an app opened after their own recent attempt. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to this version |
+| Verified on a test copy with the helpers stubbed: a failing Outlook for `itceadmin` alone now runs `Repair-AppxPackageStore -Name outlook -Provision`, and nothing runs in a session. **Not** verified: a real host repair on a session host |
+
 ### 2026-10-10 (4)
 | Change |
 |--------|

@@ -37,8 +37,8 @@
                      and a "repairing" report goes to n8n naming every user, before
                      anything is changed. The same problem again is not announced or
                      collected again within -RenotifyHours.
-      3. Repair      Host problems, packages whose files are gone, and anything a user
-                     ran into: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
+      3. Repair      Anything found, for anyone - our own account included, since it
+                     stands in for the whole host: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
                      installers, signature-checked), at most once per
                      -RepairCooldownHours. Then per user, in that user's own session
                      (a one-off task running a headless console, so nothing appears):
@@ -709,9 +709,11 @@ function Invoke-Repair {
     param($Found, $State)
     $actions = [System.Collections.Generic.List[string]]::new()
 
-    # What a customer runs into is nearly always the host: FSLogix asking for a build
-    # this host does not provision. So their findings send the host to repair as well.
-    $hostApps = @($Found | Where-Object { $_.Account -eq $HostAccount -or $_.Customer -or $_.Problem -in 'Broken', 'RegisterFailed' } | ForEach-Object { $_.App } | Sort-Object -Unique)
+    # What anyone runs into is nearly always the host: FSLogix asking for a build this
+    # host does not provision. So every finding - a customer's, and our own account's,
+    # which stands in for everyone on the host - sends the host to repair for that app.
+    # The host repair provisions and starts nothing in anyone's session.
+    $hostApps = @($Found | ForEach-Object { $_.App } | Sort-Object -Unique)
     if ($hostApps.Count -gt 0) {
         $last = $null
         if ($State.LastRepair) { $last = [datetime]::Parse($State.LastRepair, $null, [Globalization.DateTimeStyles]::RoundtripKind) }

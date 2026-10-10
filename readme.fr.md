@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (5)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) répare l'hôte quand une application échoue pour notre propre compte. Avant, *non inscrit* ou *ne démarre pas* chez `itceadmin` ne faisait que réinscrire ou réinitialiser l'application dans la session d'`itceadmin`, alors que ce compte est là pour représenter tout le monde sur l'hôte - l'hôte restait tel quel jusqu'à ce qu'un client tombe sur le problème. Désormais chaque constat, y compris celui d'`itceadmin`, envoie l'hôte vers `Repair-AppxPackageStore.ps1 -Provision` pour cette application (dans le délai de carence). La réparation de l'hôte ne lance rien dans la session de personne ; les clients ne voient toujours une application ouverte qu'après leur propre tentative récente. Le téléchargement du [readme RDS](scripts/RDS/readme.fr.md#watch-m365appsps1) passe à cette version |
+| Vérifié sur une copie de test avec les scripts auxiliaires remplacés par un bouchon : un Outlook en échec chez `itceadmin` seul lance désormais `Repair-AppxPackageStore -Name outlook -Provision`, et rien ne tourne dans une session. **Non** vérifié : une vraie réparation de l'hôte sur un hôte de session |
+
 ### 2026-10-10 (4)
 | Modification |
 |--------|
