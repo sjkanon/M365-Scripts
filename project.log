@@ -2,6 +2,13 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — n8n-kaart WORDT HERSTELD + IT Glue-procedure bijgewerkt
+  - n8n-flow W7YYoix73OWuaEvd gepubliceerd: kaart voor 'repairing', regel 'Bewijs' (zip-pad).
+  - Watch-M365Apps-ITGlue.md/.html: nieuwe kaart, app gaat na herstel vanzelf open, bewijs
+    in Diag\ en Get-M365AppsLog handmatig, unified Copilot niet per gebruiker getest,
+    -Install neemt config.json niet over.
+  - Niet getest: echte kaart in het CIPP-kanaal.
+
 2026-10-10 — Watchdog: eerst aankondigen + bewijs, dan herstellen, dan app openen voor de gebruiker
   - Waarom: n8n hoorde pas na het herstel van een probleem, de toestand ging verloren, en
     een gebruiker bij wie Windows het openen weigerde moest het zelf opnieuw proberen.

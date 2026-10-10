@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-10 (3)
+| Modification |
+|--------|
+| Le flux n8n *ITCE – M365 App Watchdog → Teams* a une carte pour le nouveau signalement `repairing` : 🔧 **WORDT HERSTELD**, avec les utilisateurs et applications trouvés et une ligne *Bewijs* portant le chemin du zip de preuves (sur toute carte qui en reçoit un). Jusqu'ici il retombait sur une carte *PROBLEEM*. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) explique la carte et ce qu'en fait le niveau 2, qu'une application qu'un utilisateur n'a pas pu ouvrir s'ouvre désormais d'elle-même après la réparation, où se trouvent les preuves et comment les collecter avec `Get-M365AppsLog.ps1`, l'application Copilot unifiée comme quelque chose que le watchdog ne teste pas par utilisateur, et que `-Install` ne reprend pas l'ancien `config.json`. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) régénéré |
+| Vérifié : le flux a été enregistré et publié ; son code de carte exécuté localement sur un exemple `repairing` et `repaired` a donné le titre, le libellé, les utilisateurs et la ligne *Bewijs* attendus ; le HTML est à jour (`-Check`) et la vérification des liens du dépôt passe. **Non** vérifié : une vraie carte dans le canal Teams CIPP (aucune carte de test n'y a été envoyée), le collage dans IT Glue |
+
 ### 2026-10-10 (2)
 | Modification |
 |--------|

@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-10 (3)
+| Change |
+|--------|
+| The n8n flow *ITCE – M365 App Watchdog → Teams* has a card for the new `repairing` report: 🔧 **WORDT HERSTELD**, with the users and apps found and a *Bewijs* line with the path of the evidence zip (on any card that carries one). Until now it fell back to a *PROBLEEM* card. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) explains the card and what level 2 does with it, that an app a user could not open now opens by itself after the repair, where the evidence is and how to collect it with `Get-M365AppsLog.ps1`, the unified Copilot app as something the watchdog does not test per user, and that `-Install` does not take over the old `config.json`. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) regenerated |
+| Verified: the flow was saved and published; its card code run locally on a `repairing` and a `repaired` sample gave the expected title, label, users and *Bewijs* line; the HTML is current (`-Check`) and the repository link check passes. **Not** verified: a real card in the CIPP Teams channel (no test card sent there), pasting into IT Glue |
+
 ### 2026-10-10 (2)
 | Change |
 |--------|

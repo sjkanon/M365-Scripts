@@ -1022,6 +1022,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-10 (3)
+| Wijziging |
+|--------|
+| De n8n-flow *ITCE – M365 App Watchdog → Teams* heeft een kaart voor de nieuwe melding `repairing`: 🔧 **WORDT HERSTELD**, met de gevonden gebruikers en apps en een regel *Bewijs* met het pad van de bewijs-zip (op elke kaart die er een meekrijgt). Tot nu toe viel die terug op een *PROBLEEM*-kaart. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) legt de kaart uit en wat level 2 ermee doet, dat een app die een gebruiker niet kon openen na het herstel vanzelf opengaat, waar het bewijs staat en hoe je het met `Get-M365AppsLog.ps1` verzamelt, de unified Copilot-app als iets wat de watchdog niet per gebruiker test, en dat `-Install` de oude `config.json` niet overneemt. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) opnieuw gemaakt |
+| Gecontroleerd: de flow is opgeslagen en gepubliceerd; de kaartcode lokaal gedraaid op een voorbeeld `repairing` en `repaired` gaf de verwachte titel, het label, de gebruikers en de regel *Bewijs*; de HTML is actueel (`-Check`) en de linkcontrole van de repo slaagt. **Niet** gecontroleerd: een echte kaart in het CIPP Teams-kanaal (er is daar geen testkaart verstuurd), plakken in IT Glue |
+
 ### 2026-10-10 (2)
 | Wijziging |
 |--------|
