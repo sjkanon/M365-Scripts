@@ -317,7 +317,8 @@ l'utilisateur de chaque constat et de chaque réparation.
 | 1. Hôte | Teams et le nouvel Outlook sont provisionnés pour tous les utilisateurs ; Copilot est présent (MicrosoftOfficeHub / Copilot provisionné, ou l'application unifiée qu'installe Edge Update) |
 | 2. Comptes | Pour chaque compte surveillé connecté à cet hôte : le package est inscrit pour cet utilisateur, ses fichiers sont présents et son état est `Ok`. Ensuite l'application doit tourner dans cette session — sinon elle y est lancée (`shell:AppsFolder\<AUMID>`, via une tâche ponctuelle dans la session de cet utilisateur) et doit toujours tourner 15 secondes plus tard |
 | 2b. Utilisateurs | Chaque autre utilisateur connecté (clients), une fois connecté depuis 10 minutes : la même vérification d'inscription, **sans rien lancer**. Plus chaque tentative depuis l'exécution précédente, par n'importe quel utilisateur, d'ouvrir l'une des applications que Windows a refusée (TWinUI `5961`), et chaque inscription échouée de leurs packages (AppXDeploymentServer `401`/`404` ; « fermez d'abord l'application » et « déjà installé » sont exclus), avec l'utilisateur concerné |
-| 3. Réparation | Problèmes de l'hôte, packages dont les fichiers ont disparu, et tout ce qu'un utilisateur a rencontré : [`Repair-AppxPackageStore.ps1`](../Device/readme.fr.md#repair-appxpackagestoreps1) `-Provision` (installeurs Microsoft, signature vérifiée), au plus une fois par `-RepairCooldownHours`. Ensuite **par utilisateur, dans sa propre session** : le package est réinscrit par nom de famille (`Add-AppxPackage -RegisterByFamilyName`) via une tâche ponctuelle qui lance une console sans fenêtre, pour que rien n'apparaisse. Pour un client seulement si l'application ne tourne pas chez lui à ce moment, au plus une fois par `-RepairCooldownHours` par utilisateur et application, et jamais de réinitialisation. Dans notre propre compte, une application qui ne démarre pas est réinitialisée (`Reset-AppxPackage`) |
+| 2c. Annonce | Un nouveau problème : [`Get-M365AppsLog.ps1`](#get-m365appslogps1) collecte les preuves pour les utilisateurs et applications concernés dans `Diag\` (un zip, conservé 14 jours) tant que c'est encore cassé, et un signalement `repairing` part vers n8n en nommant chaque utilisateur — avant que quoi que ce soit ne change. Le même problème n'est ni réannoncé ni recollecté dans le délai `-RenotifyHours` |
+| 3. Réparation | Problèmes de l'hôte, packages dont les fichiers ont disparu, et tout ce qu'un utilisateur a rencontré : [`Repair-AppxPackageStore.ps1`](../Device/readme.fr.md#repair-appxpackagestoreps1) `-Provision` (installeurs Microsoft, signature vérifiée), au plus une fois par `-RepairCooldownHours`. Ensuite **par utilisateur, dans sa propre session** : le package est réinscrit par nom de famille (`Add-AppxPackage -RegisterByFamilyName`) via une tâche ponctuelle qui lance une console sans fenêtre, pour que rien n'apparaisse. Pour un client seulement si l'application ne tourne pas chez lui à ce moment, au plus une fois par `-RepairCooldownHours` par utilisateur et application, et jamais de réinitialisation. Dans notre propre compte, une application qui ne démarre pas est réinitialisée (`Reset-AppxPackage`). Un utilisateur qui a tenté d'ouvrir l'application (TWinUI `5961`) la voit **ouverte pour lui** dans sa session une fois réinscrite — elle doit démarrer et rester ouverte, sinon le problème reste ouvert (`-NoUserLaunch` désactive cela) |
 | 4. Relecture | Étapes 1, 2 et la vérification d'inscription de 2b à nouveau ; le problème d'un utilisateur compte comme réparé quand le package est ensuite inscrit et `Ok` pour lui (ou que l'application tourne chez lui) |
 | 5. Signalement | Un POST JSON vers le webhook quand quelque chose ne va pas, a été réparé, est rentré dans l'ordre de lui-même, ou a planté au moins `-CrashThreshold` fois — pas à chaque exécution saine. Un problème qui persiste est signalé à nouveau après `-RenotifyHours` |
 
@@ -342,6 +343,8 @@ affiche *hersteld bij deze gebruiker* à côté de chacun.
 | `-NoRepair` | Tester et signaler uniquement, ne rien modifier |
 | `-NoUserRepair` | Réparer l'hôte et notre propre compte, mais ne jamais rien exécuter dans la session d'un client — leurs problèmes sont toujours signalés, avec leur nom |
 | `-SkipLaunchTest` | Ne pas lancer une application qui ne tourne pas ; vérifier seulement son inscription |
+| `-NoUserLaunch` | Après la réparation d'une application qu'un utilisateur n'a pas pu ouvrir, ne pas l'ouvrir pour lui |
+| `-NoDiagnostics` | Ne pas lancer `Get-M365AppsLog.ps1` avant une réparation |
 | `-Install` | Copier le watchdog dans `-WorkingDir` et inscrire la tâche **M365 App Watchdog**, avec les autres paramètres comme réglages |
 | `-Uninstall` | Supprimer la tâche et `-WorkingDir` |
 | `-TestNotification` | Envoyer un message de test au webhook et s'arrêter |
@@ -377,11 +380,12 @@ affiche *hersteld bij deze gebruiker* à côté de chacun.
   "before": [{ "Account": "itceadmin", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
   "actions": ["itceadmin Outlook: re-registered as the user - result 0"],
   "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
-  "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log"
+  "log": "C:\\IT\\AppWatchdog\\Logs\\Watch-M365Apps_20261009.log",
+  "diagnostics": "C:\\IT\\AppWatchdog\\Diag\\M365AppsLog_AVD-0_20261009-1430.zip"
 }
 ```
 
-`event` vaut `repaired`, `repair-failed`, `failing` (avec `-NoRepair`), `crashed`
+`event` vaut `repairing` (trouvé, en cours de réparation — envoyé avant la réparation, avec `diagnostics`), `repaired`, `repair-failed`, `failing` (avec `-NoRepair`), `crashed`
 (uniquement des plantages lors de cette exécution), `recovered`, `error` (l'exécution
 elle-même a échoué) ou `test` ; `crashes` accompagne chacun d'eux. `Problem` vaut `NotProvisioned` (hôte),
 `NotRegistered`, `Broken` (fichiers disparus ou état différent de `Ok`) ou `WontStart` (notre compte),
@@ -458,6 +462,7 @@ ne vont jamais dans ce dépôt : il est public.
   [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — et ne conserve l'URL du webhook
   et le jeton que dans `config.json` à cet endroit, pas dans la ligne de commande de la
   tâche. Pour modifier un réglage : relancer `-Install` avec tous les paramètres.
+- Preuves : `C:\IT\AppWatchdog\Diag`, un zip par nouveau problème de `Get-M365AppsLog.ps1`, conservé 14 jours ; son chemin est dans `diagnostics` du signalement. `-Install` copie le collecteur à côté du watchdog (depuis le dépôt, ou depuis GitHub à un commit et un SHA-256 épinglés) ; sans lui, le watchdog répare et signale comme avant.
 - Journaux : `C:\IT\AppWatchdog\Logs`, un fichier par jour, conservés 14 jours.
   Transcriptions et sauvegardes `.reg` des réparations : `C:\IT\AppWatchdog\Repair`.
 - À exécuter en élevé ou en tant que System ; il se relance en Windows PowerShell 64 bits

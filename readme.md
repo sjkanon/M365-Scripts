@@ -475,6 +475,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
   - Also checks every other signed-in user, and every app a user could not open (TWinUI 5961) or whose registration failed (AppX 401/404), and re-registers it in that user's own session without a window - never while it runs for them, never a reset; every report names the user
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
+  - Before a repair: collects the evidence with `Get-M365AppsLog.ps1` and tells n8n `repairing`, naming every user; after it, opens the app for a user who had tried to open it
   - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
 
 - App log collector ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — read only, after a complaint: per user what is registered and running, the AppX/AppReadiness/FSLogix events, registry and logs, and the watchdog's task, state and logs — set against what the watchdog would conclude, with its blind spots (e.g. the unified Copilot app); one zip
@@ -1020,6 +1021,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-10 (2)
+| Change |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) announces before it repairs, keeps the evidence, and opens the app for the user who tried.** Until now n8n heard of a problem only after the repair, nothing kept the state the host was in, and a user whose open Windows refused still had to try again. When something new is wrong - for any signed-in user, not only `itceadmin` - it now runs [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) for those users and apps (a zip in `C:\IT\AppWatchdog\Diag`, kept 14 days, path in `diagnostics`), then POSTs `repairing` with every finding and user, then repairs and reports `repaired` / `repair-failed` as before. The same problem is not announced or collected again within `-RenotifyHours`. After re-registering an app a user could not open (TWinUI `5961`) it opens it in their session; when it does not start and stay up, the problem stays open. `-NoUserLaunch` and `-NoDiagnostics` turn the two off. `copilotapp.exe`, the unified Copilot app, now counts for crashes and for "running". `-Install` copies the collector too, from the repo or from GitHub at `6a94769` with its SHA-256 |
+| Verified on this Windows 11 machine, unelevated, on a test copy (admin check and folder lock off, a fake refused Copilot open, the repair stubbed, a local listener as webhook): evidence collected first (zip kept, folder removed), then `repairing` with the user and the zip path, then `repaired` with `Fixed` and the same path; the collector's pin matches what GitHub serves. **Not** verified: a run as System on a session host, opening an app in a real customer's session, and the n8n card - the flow does not know `repairing` yet and shows it as a *PROBLEEM* card |
 
 ### 2026-10-10
 | Change |

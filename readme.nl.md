@@ -475,6 +475,7 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Controleert of de host de apps klaarzet, en per aangemeld account of elke app geregistreerd en intact is en in die sessie echt start
   - Controleert ook elke andere aangemelde gebruiker, en elke app die een gebruiker niet kon openen (TWinUI 5961) of waarvan de registratie mislukte (AppX 401/404), en registreert die opnieuw in de eigen sessie van die gebruiker zonder venster - nooit terwijl hij bij hem draait, nooit een reset; elke melding noemt de gebruiker
   - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
+  - Vóór een herstel: verzamelt het bewijs met `Get-M365AppsLog.ps1` en meldt `repairing` aan n8n, met elke gebruiker erin; daarna opent hij de app voor een gebruiker die hem probeerde te openen
   - Meldt elke crash en hang van de drie apps op de host (Application Error 1000 / Application Hang 1002), ook die van klanten, gegroepeerd per app, module en foutcode
 
 - App-logverzamelaar ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — alleen lezend, na een klacht: per gebruiker wat er geregistreerd is en draait, de AppX-/AppReadiness-/FSLogix-events, register en logs, en de taak, status en logs van de watchdog — afgezet tegen waar de watchdog op zou uitkomen, met zijn blinde vlekken (zoals de unified Copilot-app); één zip
@@ -1020,6 +1021,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-10 (2)
+| Wijziging |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) kondigt aan voordat hij herstelt, bewaart het bewijs, en opent de app voor de gebruiker die het probeerde.** Tot nu toe hoorde n8n pas na het herstel van een probleem, bewaarde niets de toestand van de host, en moest een gebruiker bij wie Windows het openen weigerde het opnieuw proberen. Als er iets nieuws mis is - bij elke aangemelde gebruiker, niet alleen `itceadmin` - draait hij nu [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) voor die gebruikers en apps (een zip in `C:\IT\AppWatchdog\Diag`, 14 dagen bewaard, pad in `diagnostics`), POST dan `repairing` met elke bevinding en gebruiker, herstelt daarna en meldt `repaired` / `repair-failed` zoals voorheen. Hetzelfde probleem wordt binnen `-RenotifyHours` niet opnieuw aangekondigd of verzameld. Na het opnieuw registreren van een app die een gebruiker niet kon openen (TWinUI `5961`) opent hij hem in diens sessie; start hij niet of blijft hij niet open, dan blijft het probleem open. `-NoUserLaunch` en `-NoDiagnostics` zetten die twee uit. `copilotapp.exe`, de unified Copilot-app, telt nu mee voor crashes en voor "draait". `-Install` kopieert ook de verzamelaar, uit de repo of van GitHub op `6a94769` met zijn SHA-256 |
+| Gecontroleerd op deze Windows 11-machine, niet verhoogd, op een testkopie (admincontrole en mapafscherming uit, een nep geweigerde Copilot-opening, het herstel vervangen door een stub, een lokale listener als webhook): eerst bewijs verzameld (zip bewaard, map verwijderd), dan `repairing` met de gebruiker en het zip-pad, dan `repaired` met `Fixed` en hetzelfde pad; de pin van de verzamelaar klopt met wat GitHub serveert. **Niet** gecontroleerd: een run als System op een sessiehost, een app openen in de sessie van een echte klant, en de n8n-kaart - de flow kent `repairing` nog niet en toont hem als *PROBLEEM*-kaart |
 
 ### 2026-10-10
 | Wijziging |

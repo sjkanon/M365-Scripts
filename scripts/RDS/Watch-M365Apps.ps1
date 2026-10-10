@@ -32,6 +32,11 @@
                      registration of their packages (AppXDeploymentServer 401/404,
                      minus "close the app first" and "already installed"), with the
                      user it happened to.
+      2c. Announce   Something new is wrong: Get-M365AppsLog.ps1 collects the evidence for
+                     the users and apps concerned into Diag\ (a zip, kept $LogDays days),
+                     and a "repairing" report goes to n8n naming every user, before
+                     anything is changed. The same problem again is not announced or
+                     collected again within -RenotifyHours.
       3. Repair      Host problems, packages whose files are gone, and anything a user
                      ran into: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
                      installers, signature-checked), at most once per
@@ -42,7 +47,9 @@
                      app is not running for them, at most once per -RepairCooldownHours
                      per user and app, and never reset. In our own account an app that
                      does not start is reset (Reset-AppxPackage). Nothing is closed or
-                     removed for anyone - no -RemoveOld, no -Latest.
+                     removed for anyone - no -RemoveOld, no -Latest. A user who tried to
+                     open the app (TWinUI 5961) gets it opened in their session once it
+                     is registered again, unless -NoUserLaunch.
       4. Read back   Steps 1, 2 and 2b's registration check again; a user's failure
                      counts as repaired when the package is registered and Ok for them
                      afterwards.
@@ -56,8 +63,9 @@
     canaries - keep a session of each open (disconnected is fine) on every host. Every
     report names the user each finding and each repair belongs to.
 
-    -Install copies this script and Repair-AppxPackageStore.ps1 (from ..\Device, or from
-    GitHub at the commit and SHA-256 pinned below) to -WorkingDir, locks that folder to
+    -Install copies this script, Repair-AppxPackageStore.ps1 and Get-M365AppsLog.ps1 (from
+    the repo checkout, or from GitHub at the commit and SHA-256 pinned below) to
+    -WorkingDir, locks that folder to
     System and Administrators, writes the settings to config.json there, and registers
     the task "M365 App Watchdog". The webhook URL and token live only in that file.
 
@@ -99,6 +107,12 @@
 
 .PARAMETER SkipLaunchTest
     Do not start an app that is not running; only check its registration.
+
+.PARAMETER NoUserLaunch
+    After repairing an app a user could not open, do not open it for them.
+
+.PARAMETER NoDiagnostics
+    Do not run Get-M365AppsLog.ps1 before a repair.
 
 .PARAMETER Install
     Copy the watchdog to -WorkingDir and register the scheduled task, with the other
@@ -152,6 +166,8 @@ param (
     [switch]   $NoRepair,
     [switch]   $NoUserRepair,
     [switch]   $SkipLaunchTest,
+    [switch]   $NoUserLaunch,
+    [switch]   $NoDiagnostics,
     [switch]   $Install,
     [switch]   $Uninstall,
     [switch]   $TestNotification,
@@ -167,7 +183,8 @@ $ErrorActionPreference = 'Stop'
 $Apps = @(
     [PSCustomObject]@{ App = 'Teams';   Packages = @('MSTeams');                                         Exe = @('ms-teams.exe');    Repair = 'teams' }
     [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows');                     Exe = @('olk.exe');         Repair = 'outlook' }
-    [PSCustomObject]@{ App = 'Copilot'; Packages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot'); Exe = @('M365Copilot.exe'); Repair = 'copilot' }
+    # copilotapp.exe is the unified Copilot app (Edge Update, 152.x and up): not a package, so only its name finds it.
+    [PSCustomObject]@{ App = 'Copilot'; Packages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot'); Exe = @('M365Copilot.exe', 'copilotapp.exe'); Repair = 'copilot' }
 )
 $PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for all four packages
 $CopilotGuid   = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
@@ -186,10 +203,13 @@ $script:logFile = $null
 # The repair helper, when it is not next to this script: fetched from this repo at a
 # pinned commit of main and refused unless the SHA-256 matches - the same pin as
 # Update-SessionHostImage.ps1. Move both together.
-$HelperCommit = '048cf967673f02131ddf4efe8a3a8fe72e55f90c'   # main, 2026-10-08
-$HelperHashes = @{
-    'Repair-AppxPackageStore.ps1' = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C'
+$Helpers = @{
+    # main, 2026-10-08
+    'Repair-AppxPackageStore.ps1' = @{ Folder = 'Device'; Commit = '048cf967673f02131ddf4efe8a3a8fe72e55f90c'; Hash = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C' }
+    # devel, 2026-10-10 - collects the evidence before a repair (-NoDiagnostics turns it off)
+    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = '6a94769cf7b81c66251e589cac76818410f1b5b0'; Hash = '38D052E1DA99CC8A37162A030B377450B0524687F5841102CDDDF8C5BA2C70CB' }
 }
+$DiagDir = Join-Path $WorkingDir 'Diag'
 
 # -- Output ------------------------------------------------------------------------
 function Write-Step { param([string] $Message) Write-Host ''; Write-Host "  $Message" -ForegroundColor Cyan }
@@ -254,7 +274,7 @@ $StatePath  = Join-Path $WorkingDir 'state.json'
 $Installed  = (Test-Path $PSScriptRoot) -and ((Resolve-Path $PSScriptRoot).Path.TrimEnd('\') -eq ([IO.Path]::GetFullPath($WorkingDir)).TrimEnd('\'))
 if (-not $Install -and (Test-Path $ConfigPath)) {
     $config = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
-    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'CrashThreshold', 'NoRepair', 'NoUserRepair', 'SkipLaunchTest') {
+    foreach ($name in 'Account', 'App', 'WebhookUrl', 'WebhookToken', 'RepairCooldownHours', 'RenotifyHours', 'CrashThreshold', 'NoRepair', 'NoUserRepair', 'SkipLaunchTest', 'NoUserLaunch', 'NoDiagnostics') {
         if ($PSBoundParameters.ContainsKey($name)) { continue }
         $value = Get-PropertyValue $config $name
         if ($null -ne $value) { Set-Variable -Name $name -Value $value }
@@ -272,35 +292,37 @@ function Protect-WorkingDir {
 
 function Find-Helper {
     <#
-        Next to this script in the installed copy (its locked folder), ..\Device in a
-        checkout of the repo, and otherwise GitHub at $HelperCommit when its SHA-256
-        matches. Not "next to this script" anywhere else: downloaded to a folder such
-        as C:\IT\Setup, whatever sits beside it - or in C:\IT\Device - could have been
-        put there by any user, and -Install would hand it to System.
+        Next to this script in the installed copy (its locked folder), its own folder
+        (..\Device or ..\RDS) in a checkout of the repo, and otherwise GitHub at the
+        commit pinned in $Helpers when its SHA-256 matches. Not "next to this script"
+        anywhere else: downloaded to a folder such as C:\IT\Setup, whatever sits beside
+        it - or in C:\IT\Device - could have been put there by any user, and -Install
+        would hand it to System.
     #>
     param([string] $Name)
+    if (-not $Helpers.ContainsKey($Name)) { return $null }
+    $helper     = $Helpers[$Name]
     $candidates = @()
     if ($Installed) {
         $candidates += Join-Path $PSScriptRoot $Name
     } elseif (Test-Path (Join-Path $PSScriptRoot '..\..\menu.ps1')) {
-        $candidates += Join-Path (Join-Path (Split-Path $PSScriptRoot) 'Device') $Name
+        $candidates += Join-Path (Join-Path (Split-Path $PSScriptRoot) $helper.Folder) $Name
     }
     foreach ($path in $candidates) {
         if (Test-Path $path) { return $path }
     }
-    if (-not $HelperHashes.ContainsKey($Name)) { return $null }
 
-    $url    = 'https://raw.githubusercontent.com/sjkanon/M365-Scripts/{0}/scripts/Device/{1}' -f $HelperCommit, $Name
+    $url    = 'https://raw.githubusercontent.com/sjkanon/M365-Scripts/{0}/scripts/{1}/{2}' -f $helper.Commit, $helper.Folder, $Name
     $target = Join-Path $WorkingDir $Name
     try {
         New-Item -ItemType Directory -Path $WorkingDir -Force | Out-Null
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing
         $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash
-        if ($hash -ne $HelperHashes[$Name]) {
-            throw "SHA-256 is $hash, expected $($HelperHashes[$Name]) - not used"
+        if ($hash -ne $helper.Hash) {
+            throw "SHA-256 is $hash, expected $($helper.Hash) - not used"
         }
-        Write-Ok "$Name fetched from GitHub at $($HelperCommit.Substring(0, 7)), SHA-256 verified"
+        Write-Ok "$Name fetched from GitHub at $($helper.Commit.Substring(0, 7)), SHA-256 verified"
         return $target
     } catch {
         Remove-Item $target -Force -ErrorAction SilentlyContinue
@@ -311,12 +333,14 @@ function Find-Helper {
 
 function Invoke-Helper {
     <# Run a repo script in its own process, so its exit does not end this one. #>
-    param([string] $Name, [System.Collections.IDictionary] $Parameters)
+    param([string] $Name, [System.Collections.IDictionary] $Parameters, [switch] $Quiet)
     $path = Find-Helper $Name
     if (-not $path) { Write-Bad "$Name not found locally and not verified from GitHub - skipped"; return 1 }
     $command = ConvertTo-ScriptCommand -Path $path -Parameters $Parameters
     Write-Step $command
-    & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command $command | Out-Host
+    # -Quiet: the helper keeps its own summary, the watchdog log does not need it twice.
+    if ($Quiet) { & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command $command | Out-Null }
+    else { & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command $command | Out-Host }
     $code = $LASTEXITCODE
     if ($code -eq 0) { Write-Ok "$Name finished" } else { Write-Warn "$Name exited with $code" }
     return $code
@@ -752,13 +776,47 @@ function Invoke-Repair {
         $done[$key]    = $ok
         if ($ok) { Write-Ok "$($finding.App) $verb for $who" } else { Write-Warn "$($finding.App) for $who - still not registered and Ok after $verb" }
         $actions.Add(('{0} {1}: {2} in their session - {3}' -f $who, $finding.App, $verb, $(if ($ok) { 'OK' } else { 'still not registered and Ok' })))
+
+        # They tried to open it and Windows refused: now that it is registered again,
+        # open it for them, so they do not have to try once more - or call.
+        if ($ok -and $finding.Problem -eq 'WontOpen' -and -not $NoUserLaunch) {
+            $result = Start-AppForUser -Session $session -Entry $entry -Who $who
+            $actions.Add($result.Action)
+            if (-not $result.Ok) { $finding.Fixed = $false; $done[$key] = $false }
+        }
     }
     return $actions
 }
 
+function Start-AppForUser {
+    <#
+        Open the app in the user's own session, as Test-AppStart does for our account:
+        after a repair, for a user whose open Windows refused. Not when it is already
+        running for them.
+    #>
+    param($Session, $Entry, [string] $Who)
+    $running = @($Entry.Exe | ForEach-Object { Get-SessionProcess $Session ([IO.Path]::GetFileNameWithoutExtension($_)) })
+    if ($running.Count -gt 0) { return @{ Ok = $true; Action = "$Who $($Entry.App): already open for them" } }
+    $pkg = $null
+    foreach ($name in $Entry.Packages) {
+        $pkg = @(Get-AppxPackage -User $Session.User -Name $name -ErrorAction SilentlyContinue) |
+               Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+        if ($pkg) { break }
+    }
+    $appEntry = if ($pkg) { Get-AppEntry $pkg } else { $null }
+    if (-not $appEntry) { return @{ Ok = $true; Action = "$Who $($Entry.App): repaired, but its manifest names nothing to open - not opened for them" } }
+    Write-Step "$($Entry.App) for $($Session.User): opening it for them - they tried before"
+    if (Test-AppStart $Session $appEntry) {
+        Write-Ok "$($Entry.App) open for $Who"
+        return @{ Ok = $true; Action = "$Who $($Entry.App): opened for them - running" }
+    }
+    Write-Warn "$($Entry.App) for $Who - opened, but $($appEntry.Exe).exe did not start or stay up"
+    return @{ Ok = $false; Action = "$Who $($Entry.App): opened for them, but it did not start or stay up" }
+}
+
 # -- Report --------------------------------------------------------------------------
 function Send-Notification {
-    param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @(), $Crashes = @())
+    param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @(), $Crashes = @(), [string] $Diagnostics)
     if (-not $WebhookUrl) { Write-Skip "No -WebhookUrl - not reported ($Kind)"; return $false }
     $payload = [ordered]@{
         source   = 'Watch-M365Apps'
@@ -772,6 +830,7 @@ function Send-Notification {
         actions  = @($Actions)
         crashes  = @($Crashes | Select-Object App, Kind, Count, Last, Exe, Version, Module, Code)
         log      = $script:logFile
+        diagnostics = $Diagnostics
     }
     $headers = @{}
     if ($WebhookToken) { $headers['X-Watchdog-Token'] = $WebhookToken }
@@ -788,6 +847,33 @@ function Send-Notification {
         }
     }
     return $false
+}
+
+function Invoke-Diagnostics {
+    <#
+        Get-M365AppsLog.ps1 for the users and apps of these findings, into $DiagDir,
+        before anything is repaired - afterwards the evidence is gone. Returns the zip,
+        or '' when there is no collector or it wrote nothing. Keeps $LogDays of zips.
+    #>
+    param($Found, [datetime] $Since)
+    New-Item -ItemType Directory -Path $DiagDir -Force | Out-Null
+    Get-ChildItem -Path $DiagDir -Filter 'M365AppsLog_*.zip' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$LogDays) } | Remove-Item -Force -ErrorAction SilentlyContinue
+    $users = @($Found | Where-Object { $_.Account -ne $HostAccount } | ForEach-Object { $_.Account } | Sort-Object -Unique)
+    $apps  = @($Found | ForEach-Object { $_.App } | Sort-Object -Unique)
+    $hours = [Math]::Max(1, [Math]::Min(336, [int] [Math]::Ceiling(((Get-Date) - $Since).TotalHours) + 1))
+    $parameters = [ordered]@{ App = $apps; Hours = $hours; OutputPath = $DiagDir; WorkingDir = $WorkingDir }
+    if ($users.Count -gt 0) { $parameters['User'] = $users }
+    $started = Get-Date
+    Invoke-Helper 'Get-M365AppsLog.ps1' $parameters -Quiet | Out-Null
+    # The zip is what travels; the folder next to it is the same content.
+    Get-ChildItem -Path $DiagDir -Directory -Filter 'M365AppsLog_*' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    $zip = @(Get-ChildItem -Path $DiagDir -Filter 'M365AppsLog_*.zip' -ErrorAction SilentlyContinue |
+             Where-Object { $_.LastWriteTime -ge $started.AddSeconds(-5) } | Sort-Object LastWriteTime -Descending) | Select-Object -First 1
+    if ($zip) { Write-Ok "Evidence collected: $($zip.FullName)"; return $zip.FullName }
+    Write-Warn 'Evidence not collected'
+    return ''
 }
 
 function Get-Signature {
@@ -820,6 +906,15 @@ if ($Install) {
     $helperTarget = Join-Path $WorkingDir 'Repair-AppxPackageStore.ps1'
     if ($helper -ne $helperTarget) { Copy-Item -Path $helper -Destination $helperTarget -Force }
     Write-Ok 'Watch-M365Apps.ps1 and Repair-AppxPackageStore.ps1 in place'
+    # The collector is a nice-to-have: without it the watchdog still repairs and reports.
+    $collector = Find-Helper 'Get-M365AppsLog.ps1'
+    if ($collector) {
+        $collectorTarget = Join-Path $WorkingDir 'Get-M365AppsLog.ps1'
+        if ($collector -ne $collectorTarget) { Copy-Item -Path $collector -Destination $collectorTarget -Force }
+        Write-Ok 'Get-M365AppsLog.ps1 in place - evidence is collected before a repair'
+    } else {
+        Write-Warn 'Get-M365AppsLog.ps1 not available - the watchdog runs without collecting evidence'
+    }
 
     [ordered]@{
         Account             = @($Account)
@@ -832,6 +927,8 @@ if ($Install) {
         NoRepair            = [bool] $NoRepair
         NoUserRepair        = [bool] $NoUserRepair
         SkipLaunchTest      = [bool] $SkipLaunchTest
+        NoUserLaunch        = [bool] $NoUserLaunch
+        NoDiagnostics       = [bool] $NoDiagnostics
     } | ConvertTo-Json | Set-Content -Path $ConfigPath -Encoding UTF8
     Write-Ok "Settings in $ConfigPath"
 
@@ -872,11 +969,15 @@ try {
     Write-Host ("  M365 app watchdog - {0} - {1:yyyy-MM-dd HH:mm}" -f $env:COMPUTERNAME, (Get-Date)) -ForegroundColor Cyan
 
     $runStart = Get-Date
-    $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null; UserRepairs = @{} }
+    # RepairingSignature / LastRepairing: what the last "repairing" report was about, so a
+    # problem the repair cannot fix does not announce itself again every run.
+    $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null; UserRepairs = @{}
+                                RepairingSignature = ''; LastRepairing = $null }
     if (Test-Path $StatePath) {
         $saved = Get-Content -Path $StatePath -Raw | ConvertFrom-Json
-        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun') { $state.$name = Get-PropertyValue $saved $name }
+        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing') { $state.$name = Get-PropertyValue $saved $name }
         if ($null -eq $state.Signature) { $state.Signature = '' }
+        if ($null -eq $state.RepairingSignature) { $state.RepairingSignature = '' }
         # Per user and app, when their app was last re-registered; older than a day is forgotten.
         $savedRepairs = Get-PropertyValue $saved 'UserRepairs'
         if ($savedRepairs) {
@@ -914,6 +1015,33 @@ try {
     $after   = $before
     $actions = @()
     $repair  = $before.Count -gt 0 -and -not $NoRepair -and -not $WhatIfPreference
+
+    # Something new is wrong: first the evidence, then word to n8n that it is broken and
+    # being repaired - for every user it concerns - and only then the repair. The same
+    # problem again within -RenotifyHours (a repair that did not take) is not announced
+    # or collected twice.
+    $diagnostics = ''
+    if ($before.Count -gt 0) {
+        $beforeSignature = Get-Signature $before
+        $lastRepairing   = $null
+        if ($state.LastRepairing) { $lastRepairing = [datetime]::Parse($state.LastRepairing, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
+        $isNew = $beforeSignature -ne $state.RepairingSignature -or -not $lastRepairing -or $lastRepairing.AddHours($RenotifyHours) -lt (Get-Date)
+        if ($isNew) {
+            if (-not $NoDiagnostics) {
+                Write-Host ''
+                Write-Host '  ==== Collecting evidence '.PadRight(80, '=') -ForegroundColor Cyan
+                try { $diagnostics = Invoke-Diagnostics -Found $before -Since $since }
+                catch { Write-Warn "Evidence not collected: $($_.Exception.Message)" }
+            }
+            if ($repair) {
+                $summary = '{0}: {1} problem(s) found, repairing now - {2}' -f $env:COMPUTERNAME, $before.Count, ((@($before | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
+                Send-Notification -Kind 'repairing' -Summary $summary -Found $before -Diagnostics $diagnostics | Out-Null
+            }
+            $state.RepairingSignature = $beforeSignature
+            $state.LastRepairing      = (Get-Date).ToString('o')
+        }
+    }
+
     if ($repair) {
         Write-Host ''
         Write-Host '  ==== Repairing '.PadRight(80, '=') -ForegroundColor Cyan
@@ -954,7 +1082,7 @@ try {
     }
 
     if ($kind) {
-        if (Send-Notification -Kind $kind -Summary $summary -Found $after -Before $before -Actions $actions -Crashes $crashes) {
+        if (Send-Notification -Kind $kind -Summary $summary -Found $after -Before $before -Actions $actions -Crashes $crashes -Diagnostics $diagnostics) {
             if ($kind -ne 'crashed') { $state.LastNotified = (Get-Date).ToString('o') }
         }
     }
