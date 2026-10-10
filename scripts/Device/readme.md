@@ -199,7 +199,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | Step | What it does |
 |------|--------------|
 | 1. Diagnose | Registered packages whose files are gone (*Ghost*) or whose status is not Ok (*Damaged*), provisioned packages without files, orphaned `AppxAllUserStore` entries, recent AppX deployment errors |
-| 1b. FSLogix | FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, the packages FSLogix failed to register in the last `-Days` days against what this host provisions, AppX install policies |
+| 1b. FSLogix | FSLogix build, `InstallAppxPackages`, ODFC `IncludeTeams`, the packages FSLogix failed to register in the last `-Days` days against what this host provisions, AppX install policies. Also counted as asked for: an AppX registration that failed with `0x80070490` for a build whose files are not on the host — on some hosts the request only shows there (LEM-AVD-5, new Outlook), and `-Provision` then provisions that build |
 | 1c. Failing apps | **Every** package that failed to install, update or register in the last `-Days` days, from the AppX deployment log and the FSLogix log together: count, error codes with their meaning, the versions asked for and whether this host has their files. `0x80070490` first, top 15 |
 | 2. Provisioned | `Remove-AppxProvisionedPackage` for provisioned copies whose files are gone |
 | 3. Re-register | `Add-AppxPackage -Register` from the package's own manifest where the files are still there. An older version next to a newer one of the same package is *Superseded*, not damaged — reported in grey and left for Windows to remove, because re-registering it can only fail with `0x80073D06` |
