@@ -16,9 +16,11 @@
                      restarted for them. Our own account's app is started again in
                      step 2 when it is no longer running.
       1. Host        Teams and new Outlook are provisioned for all users, and Copilot
-                     is there - provisioned (MicrosoftOfficeHub / Copilot) or the
-                     unified app Edge Update installs. Without that no new profile,
-                     customer or ours, gets the app.
+                     - the new, unified Microsoft Copilot app only, not the old
+                     Microsoft 365 Copilot app (MicrosoftOfficeHub) - is installed
+                     machine-wide by Edge Update: its copilotapp.exe is on disk and a
+                     Start menu entry for all users points at it. Without that no new
+                     profile, customer or ours, gets the app.
       1a. Update     Every -UpdateHours: the newest Teams and new Outlook are
                      provisioned on the host (Repair-AppxPackageStore.ps1 -Latest
                      -Provision: Teams from Microsoft's config service, Outlook the
@@ -34,10 +36,13 @@
                      reported once, with what it was before.
       2. Accounts    For each watched account signed in on this host (the owner of an
                      explorer.exe), per app: the package is registered for that user,
-                     its files are there and its status is Ok. Then the app has to be
+                     its files are there and its status is Ok - for Copilot its
+                     identity package, when the host has one (its files are
+                     machine-wide). Then the app has to be
                      running in that session; when it is not, it is started there
-                     (shell:AppsFolder\<AUMID>, through a one-off task in the user's
-                     own session) and must still be running 15 seconds later.
+                     (shell:AppsFolder\<AUMID>, or copilotapp.exe itself, through a
+                     one-off task in the user's own session) and must still be running
+                     15 seconds later.
       2b. Users      Every other signed-in user (customers), once signed in for 10
                      minutes: the same registration check, without starting anything.
                      And every attempt since the last run, by any user, to open one of
@@ -204,15 +209,22 @@ $ErrorActionPreference = 'Stop'
 
 # -- Constants -------------------------------------------------------------------
 # Exe: the process name in a crash event. Packaged apps are also matched on the
-# package name the event carries, which covers a Copilot executable not listed here.
+# package name the event carries.
+# Copilot is the new, unified Microsoft Copilot app only (copilotapp.exe, 152.x and up),
+# which Edge Update installs machine-wide - not the old Microsoft 365 Copilot app
+# (MicrosoftOfficeHub, M365Copilot.exe) or the old Windows Copilot app it replaces. It
+# has no package of its own to provision; Packages is filled at run time with the
+# identity package it registers for its users, when this host has one (Get-UnifiedCopilot).
 $Apps = @(
-    [PSCustomObject]@{ App = 'Teams';   Packages = @('MSTeams');                                         Exe = @('ms-teams.exe');    Repair = 'teams' }
-    [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows');                     Exe = @('olk.exe');         Repair = 'outlook' }
-    # copilotapp.exe is the unified Copilot app (Edge Update, 152.x and up): not a package, so only its name finds it.
-    [PSCustomObject]@{ App = 'Copilot'; Packages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot'); Exe = @('M365Copilot.exe', 'copilotapp.exe'); Repair = 'copilot' }
+    [PSCustomObject]@{ App = 'Teams';   Packages = @('MSTeams');                     Exe = @('ms-teams.exe');   Repair = 'teams' }
+    [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows'); Exe = @('olk.exe');        Repair = 'outlook' }
+    [PSCustomObject]@{ App = 'Copilot'; Packages = @();                              Exe = @('copilotapp.exe'); Repair = 'copilot' }
 )
-$PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for all four packages
+$PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for Teams and Outlook
 $CopilotGuid   = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
+$CopilotExe    = 'copilotapp.exe'
+# The old Copilot packages: never the identity package of the unified app.
+$OldCopilotPackages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot')
 $TaskName      = 'M365 App Watchdog'
 $ProbeTaskPath = '\M365AppWatchdog\'
 $HostAccount   = '(host)'
@@ -230,6 +242,8 @@ $LogDays       = 14
 # Set before anything can report: Send-Notification reads it, and -TestNotification
 # reports before a run has opened its log.
 $script:logFile = $null
+$script:unifiedCopilot     = $null
+$script:unifiedCopilotRead = $false
 # The repair helper, when it is not next to this script: fetched from this repo at a
 # pinned commit of main and refused unless the SHA-256 matches - the same pin as
 # Update-SessionHostImage.ps1. Move both together.
@@ -237,7 +251,7 @@ $Helpers = @{
     # main, 2026-10-08
     'Repair-AppxPackageStore.ps1' = @{ Folder = 'Device'; Commit = '048cf967673f02131ddf4efe8a3a8fe72e55f90c'; Hash = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C' }
     # devel, 2026-10-10 - collects the evidence before a repair (-NoDiagnostics turns it off)
-    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = '6a94769cf7b81c66251e589cac76818410f1b5b0'; Hash = '38D052E1DA99CC8A37162A030B377450B0524687F5841102CDDDF8C5BA2C70CB' }
+    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = 'c2255d0cc8e224a48385962bd2223d4af4d2aa58'; Hash = '638EC1CD3D8E5B3D777E098EBD4658C4C517FB899414EABDD17138B74F488DF6' }
 }
 $DiagDir = Join-Path $WorkingDir 'Diag'
 
@@ -386,6 +400,77 @@ function Get-EdgeUpdateClientVersion {
     return $null
 }
 
+function Get-UnifiedCopilot {
+    <#
+        The unified Copilot app on this host, or $null when Edge Update has not
+        installed it. Microsoft documents neither its folder nor whether it registers
+        a package per user, so both are looked up rather than assumed:
+          Path      copilotapp.exe - from the uninstall entry, App Paths, and the
+                    Edge-style folders under Program Files (Microsoft\<app>\Application).
+          Package   a package registered for any user whose manifest starts
+                    copilotapp.exe (an identity package, as Edge has one) - its name
+                    and family, so a user without it can be told apart and repaired.
+          Shortcut  the Start menu entry for all users that points at copilotapp.exe.
+        Cached for the run: -Refresh after a repair.
+    #>
+    param([switch] $Refresh)
+    if (-not $Refresh -and $script:unifiedCopilotRead) { return $script:unifiedCopilot }
+    $script:unifiedCopilotRead = $true
+    $script:unifiedCopilot     = $null
+    $version = Get-EdgeUpdateClientVersion $CopilotGuid
+    if (-not $version) { return $null }
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($root in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
+        foreach ($key in @(Get-ChildItem $root -ErrorAction SilentlyContinue)) {
+            $props = Get-ItemProperty $key.PSPath -ErrorAction SilentlyContinue
+            if ([string] (Get-PropertyValue $props 'DisplayName') -notlike '*Copilot*') { continue }
+            $location = [string] (Get-PropertyValue $props 'InstallLocation')
+            if ($location) { $candidates.Add((Join-Path $location $CopilotExe)) }
+            $icon = ([string] (Get-PropertyValue $props 'DisplayIcon') -split ',')[0].Trim('"')
+            if ($icon -like "*\$CopilotExe") { $candidates.Add($icon) }
+        }
+    }
+    $appPath = Get-PropertyValue (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\$CopilotExe" -ErrorAction SilentlyContinue) '(default)'
+    if ($appPath) { $candidates.Add(([string] $appPath).Trim('"')) }
+    foreach ($programs in @(${env:ProgramFiles(x86)}, $env:ProgramFiles) | Where-Object { $_ }) {
+        foreach ($dir in @(Get-ChildItem (Join-Path $programs 'Microsoft') -Directory -ErrorAction SilentlyContinue)) {
+            $candidates.Add((Join-Path $dir.FullName "Application\$CopilotExe"))
+        }
+    }
+    $path = @($candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) }) | Select-Object -First 1
+
+    $package = $null
+    foreach ($pkg in @(Get-AppxPackage -AllUsers -Name '*Copilot*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $OldCopilotPackages })) {
+        try {
+            $manifest = Get-AppxPackageManifest -Package $pkg -ErrorAction Stop
+            $exes = @($manifest.Package.Applications.Application | ForEach-Object { ([string] $_.GetAttribute('Executable') -split '[\\/]')[-1] })
+            if ($exes -contains $CopilotExe) { $package = $pkg; break }
+        } catch { }
+    }
+
+    $shortcut = $null
+    $startMenu = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($lnk in @(Get-ChildItem -Path $startMenu -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)) {
+            if ($shell.CreateShortcut($lnk.FullName).TargetPath -like "*\$CopilotExe") { $shortcut = $lnk.FullName; break }
+        }
+    } catch { }
+
+    $script:unifiedCopilot = [PSCustomObject]@{
+        Version  = [string] $version
+        Path     = $path
+        Package  = if ($package) { $package.Name } else { '' }
+        Family   = if ($package) { $package.PackageFamilyName } else { '' }
+        Shortcut = $shortcut
+    }
+    # Its identity package, once known, is matched in events and repaired like Teams' and Outlook's.
+    $copilotEntry = @($Apps | Where-Object { $_.App -eq 'Copilot' }) | Select-Object -First 1
+    if ($copilotEntry -and $package -and $package.Name -notin $copilotEntry.Packages) { $copilotEntry.Packages = @($package.Name) }
+    return $script:unifiedCopilot
+}
+
 function Get-UserSession {
     <#
         Everyone signed in on this host: the owner of each explorer.exe, one row per
@@ -517,14 +602,48 @@ function Test-UserPackage {
 }
 
 function Test-AppStart {
-    <# Start the app in the user's session; it has to come up and still be there 15 seconds later. #>
+    <#
+        Start the app in the user's session; it has to come up and still be there 15
+        seconds later. By its AUMID, or by its executable when the entry has a Path
+        (the unified Copilot app without an identity package).
+    #>
     param($Session, $Entry)
-    Invoke-AsUser -Session $Session -Execute 'explorer.exe' -Argument "shell:AppsFolder\$($Entry.Aumid)" -WaitSeconds 30 | Out-Null
+    $path   = Get-PropertyValue $Entry 'Path'
+    $target = if ($path) { '"{0}"' -f $path } else { "shell:AppsFolder\$($Entry.Aumid)" }
+    Invoke-AsUser -Session $Session -Execute 'explorer.exe' -Argument $target -WaitSeconds 30 | Out-Null
     $deadline = (Get-Date).AddSeconds($LaunchSeconds)
     while ((Get-Date) -lt $deadline -and @(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { Start-Sleep -Seconds 3 }
     if (@(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { return $false }
     Start-Sleep -Seconds 15
     return @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
+}
+
+function Get-ProcessVersion {
+    <# The newest file version among these processes, or $null. #>
+    param($Processes)
+    return @($Processes | ForEach-Object {
+        try { [version] (Get-Item -LiteralPath $_.Path -ErrorAction Stop).VersionInfo.ProductVersion } catch { }
+    } | Sort-Object -Descending) | Select-Object -First 1
+}
+
+function Get-LaunchEntry {
+    <#
+        What to start for this app in this user's session: the AUMID of their newest
+        registered package, or for the unified Copilot app its identity package's
+        AUMID, else copilotapp.exe itself. $null when there is nothing to start.
+    #>
+    param($Session, $Entry)
+    $pkg = $null
+    foreach ($name in $Entry.Packages) {
+        $pkg = @(Get-AppxPackage -User $Session.User -Name $name -ErrorAction SilentlyContinue) |
+               Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+        if ($pkg) { break }
+    }
+    $appEntry = if ($pkg) { Get-AppEntry $pkg } else { $null }
+    if ($appEntry -or $Entry.App -ne 'Copilot') { return $appEntry }
+    $copilot = Get-UnifiedCopilot
+    if (-not $copilot -or -not $copilot.Path) { return $null }
+    return [PSCustomObject]@{ Aumid = ''; Exe = [IO.Path]::GetFileNameWithoutExtension($CopilotExe); Path = $copilot.Path }
 }
 
 # -- Updates -------------------------------------------------------------------------
@@ -544,13 +663,13 @@ function Get-ProvisionedBuild {
 }
 
 function Get-HostVersion {
-    <# Per app the build a sign-in gets on this host: the unified Copilot app (Edge Update) first, else the newest provisioned package. #>
+    <# Per app the build a sign-in gets on this host: the newest provisioned package, for Copilot the unified app Edge Update installed. #>
     $builds   = Get-ProvisionedBuild
     $versions = [ordered]@{}
     foreach ($entry in $Apps) {
-        $v = $null
-        if ($entry.App -eq 'Copilot') { $v = Get-EdgeUpdateClientVersion $CopilotGuid }
-        if (-not $v) {
+        if ($entry.App -eq 'Copilot') {
+            $v = Get-EdgeUpdateClientVersion $CopilotGuid
+        } else {
             $v = @($entry.Packages | Where-Object { $builds.ContainsKey($_) } | ForEach-Object { $builds[$_].Version } | Sort-Object -Descending) | Select-Object -First 1
         }
         if ($v) { $versions[$entry.App] = [string] $v }
@@ -600,10 +719,26 @@ function Update-AccountApp {
         Get-Finding then starts the new build. A package that is not registered at all
         is left to Test-UserApp, which reports and repairs it.
     #>
-    param($Sessions)
+    param($Sessions, $State)
     $actions = [System.Collections.Generic.List[string]]::new()
     $builds  = Get-ProvisionedBuild
+    $copilot = if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot -Refresh } else { $null }
     foreach ($session in @($Sessions | Where-Object { $_.Watched })) {
+        # The unified Copilot app updates in place through Edge Update; a copilotapp.exe
+        # still running from an older build is closed in our session, so the launch
+        # test starts the new one. Once per build and account: while customers keep the
+        # old build open, Windows may start the old one for us again.
+        if ($copilot -and $copilot.Path) {
+            $running = @(Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($CopilotExe)))
+            $have    = Get-ProcessVersion $running
+            $closed  = '{0}|{1}' -f $session.Sid, $copilot.Version
+            if ($have -and $have -lt [version] $copilot.Version -and $State.CopilotClosed -ne $closed) {
+                $State.CopilotClosed = $closed
+                Write-Step "Copilot for $($session.User): running $have, Edge Update installed $($copilot.Version) - closing it for the test below"
+                $running | Stop-Process -Force -ErrorAction SilentlyContinue
+                $actions.Add("Update: $($session.Account) Copilot $have closed - the test starts $($copilot.Version)")
+            }
+        }
         foreach ($entry in $Apps) {
             foreach ($name in @($entry.Packages | Where-Object { $builds.ContainsKey($_) })) {
                 $mine = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
@@ -754,28 +889,44 @@ function Get-OpenFailure {
 # -- Checks --------------------------------------------------------------------------
 function New-Finding {
     param([string] $Account, [string] $App, [string] $Problem, [string] $Detail, [string] $Package,
-          [string] $Sid = '', [switch] $Customer, [switch] $FromEvent, $LastAttempt = $null)
+          [string] $Sid = '', [switch] $Customer, [switch] $FromEvent, $LastAttempt = $null, [string] $Family = '')
     $who = if ($Account -eq $HostAccount) { '' } else { "$Account - " }
     Write-Bad "$who$App - $Detail"
     [PSCustomObject]@{ Account = $Account; App = $App; Problem = $Problem; Detail = $Detail; Package = $Package
                        Sid = $Sid; Customer = [bool] $Customer; FromEvent = [bool] $FromEvent; Fixed = $false
-                       LastAttempt = $LastAttempt }
+                       LastAttempt = $LastAttempt; Family = $Family }
 }
 
 function Test-HostApp {
     param($Entry, [string[]] $Provisioned)
+    if ($Entry.App -eq 'Copilot') {
+        # Only the new, unified app counts: the old Microsoft 365 Copilot app
+        # (MicrosoftOfficeHub) is what it replaces.
+        $copilot = Get-UnifiedCopilot
+        if (-not $copilot) {
+            New-Finding $HostAccount 'Copilot' 'NotProvisioned' 'the new Microsoft Copilot app is not installed (Edge Update) - new profiles do not get it' ''
+            return
+        }
+        if (-not $copilot.Path) {
+            New-Finding $HostAccount 'Copilot' 'Broken' "Edge Update reports Copilot $($copilot.Version), but $CopilotExe is nowhere on this host" ''
+            return
+        }
+        $identity = if ($copilot.Package) { "identity package $($copilot.Package)" } else { 'no identity package' }
+        Write-Ok "Copilot: unified app $($copilot.Version), $($copilot.Path), $identity"
+        if (-not $copilot.Shortcut) {
+            New-Finding $HostAccount 'Copilot' 'NoShortcut' "no Start menu entry for all users points at $CopilotExe - users cannot find it" ''
+        }
+        return
+    }
     $have = @($Entry.Packages | Where-Object { $_ -in $Provisioned })
     if ($have.Count -gt 0) { Write-Ok "$($Entry.App) provisioned ($($have -join ', '))"; return }
-    if ($Entry.App -eq 'Copilot') {
-        $unified = Get-EdgeUpdateClientVersion $CopilotGuid
-        if ($unified) { Write-Ok "Copilot: unified app $unified (Edge Update)"; return }
-    }
     New-Finding $HostAccount $Entry.App 'NotProvisioned' "not provisioned for new profiles ($($Entry.Packages -join ' / '))" $Entry.Packages[0]
 }
 
 function Test-UserApp {
     <# -NoLaunch for customers: registration only, nothing is started in their session, and no OK lines. #>
     param($Session, $Entry, [string[]] $Provisioned, [switch] $NoLaunch)
+    if ($Entry.App -eq 'Copilot') { Test-UserCopilot -Session $Session -NoLaunch:$NoLaunch; return }
     $customer = -not $Session.Watched
     $pkg = $null
     foreach ($name in $Entry.Packages) {
@@ -786,10 +937,6 @@ function Test-UserApp {
         if ($pkg) { break }
     }
     if (-not $pkg) {
-        if ($Entry.App -eq 'Copilot' -and (Get-EdgeUpdateClientVersion $CopilotGuid)) {
-            if (-not $NoLaunch) { Write-Ok 'Copilot: unified app (Edge Update, machine-wide) - not started by this test' }
-            return
-        }
         $target = @($Entry.Packages | Where-Object { $_ -in $Provisioned }) | Select-Object -First 1
         if (-not $target) { $target = $Entry.Packages[0] }
         New-Finding $Session.Account $Entry.App 'NotRegistered' 'not registered for this user' $target -Sid $Session.Sid -Customer:$customer
@@ -816,10 +963,53 @@ function Test-UserApp {
     New-Finding $Session.Account $Entry.App 'WontStart' "$($pkg.Version) is registered but $($appEntry.Exe).exe did not start or did not stay up" $pkg.Name -Sid $Session.Sid
 }
 
+function Test-UserCopilot {
+    <#
+        The unified Copilot app for one user. Its files are machine-wide; what is per
+        user is its identity package, when this host has one: registered and Ok for
+        this user, as for Teams and Outlook - otherwise NotRegistered or Broken, and
+        repaired by registering that family again in their session. Then, for our own
+        account, the launch test: started (by the package's AUMID, else copilotapp.exe)
+        and still running 15 seconds later.
+    #>
+    param($Session, [switch] $NoLaunch)
+    $customer = -not $Session.Watched
+    $copilot  = Get-UnifiedCopilot
+    if (-not $copilot -or -not $copilot.Path) { return }   # the host finding covers it
+    $pkg = $null
+    if ($copilot.Package) {
+        $pkg = @(Get-AppxPackage -User $Session.User -Name $copilot.Package -ErrorAction SilentlyContinue) |
+               Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+        if (-not $pkg) {
+            New-Finding $Session.Account 'Copilot' 'NotRegistered' "$($copilot.Package) (unified app $($copilot.Version)) not registered for this user" $copilot.Package -Family $copilot.Family -Sid $Session.Sid -Customer:$customer
+            return
+        }
+        $status = [string] (Get-PropertyValue $pkg 'Status')
+        if ($status -and $status -ne 'Ok') {
+            New-Finding $Session.Account 'Copilot' 'Broken' "$($pkg.PackageFullName): status is $status" $copilot.Package -Family $copilot.Family -Sid $Session.Sid -Customer:$customer
+            return
+        }
+    }
+    if ($NoLaunch) { return }
+
+    $exe     = [IO.Path]::GetFileNameWithoutExtension($CopilotExe)
+    $running = @(Get-SessionProcess $Session $exe)
+    if ($running.Count -gt 0) { Write-Ok "Copilot $(Get-ProcessVersion $running) running"; return }
+    if ($SkipLaunchTest) { Write-Ok "Copilot $($copilot.Version) installed (not running, launch test off)"; return }
+    $appEntry = Get-LaunchEntry $Session ([PSCustomObject]@{ App = 'Copilot'; Packages = @($copilot.Package | Where-Object { $_ }) })
+    if ($appEntry -and (Test-AppStart $Session $appEntry)) {
+        Write-Ok "Copilot $(Get-ProcessVersion @(Get-SessionProcess $Session $exe)) started"
+        return
+    }
+    New-Finding $Session.Account 'Copilot' 'WontStart' "unified app $($copilot.Version) is installed but $CopilotExe did not start or did not stay up" $copilot.Package -Family $copilot.Family -Sid $Session.Sid
+}
+
 function Get-Finding {
     <# Every check, read only - apart from starting an app that is not running in our own session. #>
     param($Sessions)
     $provisioned = @(Get-AppxProvisionedPackage -Online | ForEach-Object { $_.DisplayName })
+    # Read afresh each time: the read-back after a repair must see what the repair did.
+    if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot -Refresh | Out-Null }
     Write-Step 'Host'
     foreach ($entry in $Apps) { Test-HostApp $entry $provisioned }
     foreach ($name in $Account) {
@@ -876,6 +1066,27 @@ function Invoke-Repair {
         }
     }
 
+    # The unified Copilot app without a Start menu entry for all users: put one there,
+    # pointing at the copilotapp.exe Edge Update installed. Cheap and harmless, so not
+    # held back by the cooldown.
+    if (@($Found | Where-Object { $_.App -eq 'Copilot' -and $_.Problem -eq 'NoShortcut' }).Count -gt 0) {
+        $copilot = Get-UnifiedCopilot -Refresh
+        if ($copilot -and $copilot.Path -and -not $copilot.Shortcut) {
+            $link = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Microsoft Copilot.lnk'
+            try {
+                $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
+                $shortcut.TargetPath       = $copilot.Path
+                $shortcut.WorkingDirectory = Split-Path $copilot.Path
+                $shortcut.Save()
+                Write-Ok "Start menu entry for all users: $link"
+                $actions.Add("Copilot: Start menu entry for all users created ($link)")
+            } catch {
+                Write-Warn "Copilot Start menu entry not created: $($_.Exception.Message)"
+                $actions.Add("Copilot: Start menu entry not created - $($_.Exception.Message)")
+            }
+        }
+    }
+
     $sessions = @(Get-UserSession)
     $done     = @{}
     foreach ($finding in @($Found | Where-Object { $_.Sid })) {
@@ -910,21 +1121,47 @@ function Invoke-Repair {
             }
         }
 
-        $family = '{0}_{1}' -f $finding.Package, $PublisherId
-        if ($finding.Problem -eq 'WontStart' -and -not $finding.Customer) {
-            $verb    = 'reset'
-            $command = "Get-AppxPackage -Name '$($finding.Package)' | Reset-AppxPackage"
+        $packages = @($entry.Packages)
+        if ($finding.App -eq 'Copilot') {
+            # The unified app: its files are machine-wide, so in a session there is only
+            # its identity package to register - by the family Windows reports for it,
+            # whose publisher need not be the Store's. In our own account a copilotapp.exe
+            # that would not start is closed first, so the read-back starts it clean.
+            $copilot = Get-UnifiedCopilot -Refresh
+            if (-not $copilot -or -not $copilot.Path) {
+                $actions.Add("$who Copilot: the app is not on the host - the host repair installs it")
+                continue
+            }
+            $family   = if ($finding.Family) { $finding.Family } else { $copilot.Family }
+            $packages = @($copilot.Package | Where-Object { $_ })
+            if ($finding.Problem -eq 'WontStart' -and -not $finding.Customer) {
+                Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($CopilotExe)) | Stop-Process -Force -ErrorAction SilentlyContinue
+                $verb    = 'restarted'
+                $command = if ($family) { "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family' -ForceApplicationShutdown" } else { '' }
+            } elseif (-not $family) {
+                $actions.Add("$who Copilot: no identity package on this host to register - nothing to do in their session")
+                continue
+            } else {
+                $verb    = 're-registered'
+                $command = "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family'"
+            }
         } else {
-            $verb    = 're-registered'
-            $command = "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family'"
+            $family = '{0}_{1}' -f $finding.Package, $PublisherId
+            if ($finding.Problem -eq 'WontStart' -and -not $finding.Customer) {
+                $verb    = 'reset'
+                $command = "Get-AppxPackage -Name '$($finding.Package)' | Reset-AppxPackage"
+            } else {
+                $verb    = 're-registered'
+                $command = "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family'"
+            }
         }
         Write-Step "$($finding.App) for $($session.User): $verb in their session"
-        Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null
+        if ($command) { Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null }
         if ($finding.Customer) { $State.UserRepairs[$key] = (Get-Date).ToString('o') }
 
         # The headless console does not pass the exit code on: the package itself says
-        # whether it worked. A reset is judged by the launch test in the read-back.
-        $ok = ($verb -eq 'reset') -or (Test-UserPackage -User $session.User -Packages $entry.Packages)
+        # whether it worked. A reset or restart is judged by the launch test in the read-back.
+        $ok = ($verb -in 'reset', 'restarted') -or (Test-UserPackage -User $session.User -Packages $packages)
         $finding.Fixed = $ok
         $done[$key]    = $ok
         if ($ok) { Write-Ok "$($finding.App) $verb for $who" } else { Write-Warn "$($finding.App) for $who - still not registered and Ok after $verb" }
@@ -976,13 +1213,7 @@ function Start-AppForUser {
     param($Session, $Entry, [string] $Who)
     $running = @($Entry.Exe | ForEach-Object { Get-SessionProcess $Session ([IO.Path]::GetFileNameWithoutExtension($_)) })
     if ($running.Count -gt 0) { return @{ Ok = $true; Action = "$Who $($Entry.App): already open for them" } }
-    $pkg = $null
-    foreach ($name in $Entry.Packages) {
-        $pkg = @(Get-AppxPackage -User $Session.User -Name $name -ErrorAction SilentlyContinue) |
-               Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
-        if ($pkg) { break }
-    }
-    $appEntry = if ($pkg) { Get-AppEntry $pkg } else { $null }
+    $appEntry = Get-LaunchEntry $Session $Entry
     if (-not $appEntry) { return @{ Ok = $true; Action = "$Who $($Entry.App): repaired, but its manifest names nothing to open - not opened for them" } }
     Write-Step "$($Entry.App) for $($Session.User): opening it for them - they tried before"
     if (Test-AppStart $Session $appEntry) {
@@ -1156,10 +1387,11 @@ try {
     # problem the repair cannot fix does not announce itself again every run.
     # Versions: the build per app on the host at the last run, so a new one is reported once.
     $state = [PSCustomObject]@{ Signature = ''; LastNotified = $null; LastRepair = $null; LastRun = $null; UserRepairs = @{}
-                                RepairingSignature = ''; LastRepairing = $null; LastUpdate = $null; Versions = $null }
+                                RepairingSignature = ''; LastRepairing = $null; LastUpdate = $null; Versions = $null
+                                CopilotClosed = '' }
     if (Test-Path $StatePath) {
         $saved = Get-Content -Path $StatePath -Raw | ConvertFrom-Json
-        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing', 'LastUpdate', 'Versions') { $state.$name = Get-PropertyValue $saved $name }
+        foreach ($name in 'Signature', 'LastNotified', 'LastRepair', 'LastRun', 'RepairingSignature', 'LastRepairing', 'LastUpdate', 'Versions', 'CopilotClosed') { $state.$name = Get-PropertyValue $saved $name }
         if ($null -eq $state.Signature) { $state.Signature = '' }
         if ($null -eq $state.RepairingSignature) { $state.RepairingSignature = '' }
         # Per user and app, when their app was last re-registered; older than a day is forgotten.
@@ -1179,6 +1411,8 @@ try {
     if ($since -lt $runStart.AddDays(-1)) { $since = $runStart.AddDays(-1) }
 
     $sessions = @(Get-UserSession)
+    # Before the events: the unified Copilot app's identity package is what they name.
+    if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot | Out-Null }
     Write-Step ('Apps users could not open since {0:yyyy-MM-dd HH:mm}' -f $since)
     $openFailures = @(Get-OpenFailure -Since $since -Sessions $sessions)
     if ($openFailures.Count -eq 0) { Write-Ok 'None' }
@@ -1204,7 +1438,7 @@ try {
             Write-Host '  ==== Updating '.PadRight(80, '=') -ForegroundColor Cyan
             $updateActions += @(Update-HostApp -State $state)
         }
-        $updateActions += @(Update-AccountApp -Sessions $sessions)
+        $updateActions += @(Update-AccountApp -Sessions $sessions -State $state)
     }
     # A new build on the host, from the update above or on its own (Edge Update, an
     # admin): reported once, with what it was before. The first run only records.
