@@ -403,7 +403,14 @@ function Get-UserAppRow {
     $customer = -not $Session.Watched
     $verdict  = ''
     $note     = ''
-    if (-not $pick) {
+    if ($Entry.App -eq 'Copilot' -and $script:testsUnifiedCopilot) {
+        # Watchdogs from 2026-10-10 (8) on count the unified app only: installed by Edge
+        # Update on the host, its identity package (if the host has one) registered for
+        # the user, and for our own account started. The old packages no longer count.
+        $verdict = if ($Unified) { 'OK (unified app)' } else { 'NotProvisioned (no unified app)' }
+        $oldOnly = @($registered | Where-Object { $_.Name -in 'Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot' })
+        if (-not $Unified -and $oldOnly.Count -gt 0) { $note = 'Only the old Copilot app is registered - the watchdog no longer counts it' }
+    } elseif (-not $pick) {
         if ($Entry.App -eq 'Copilot' -and $Unified) {
             $verdict = 'OK'
             $note    = "BLIND SPOT: no Copilot package for this user, but the unified app ($Unified) is on the host, so the watchdog calls it fine without testing it for them"
@@ -463,6 +470,7 @@ catch { Write-Warn "No summary.txt: $($_.Exception.Message)" }
 $script:nameCache = @{}
 $script:sessions  = @()
 $script:knowsCopilotApp = $false
+$script:testsUnifiedCopilot = $false
 $config   = $null
 $watched  = @('itceadmin')
 $unified  = $null
@@ -503,6 +511,8 @@ try {
             # Older versions only test our own account: then customers were never looked at.
             # Watchdogs from before 2026-10-10 do not know the unified Copilot app's process.
             $script:knowsCopilotApp = [bool] (Select-String -Path $self -Pattern 'copilotapp.exe' -SimpleMatch -Quiet)
+            # From 2026-10-10 (8) on it tests the unified app per user and starts it for our account.
+            $script:testsUnifiedCopilot = [bool] (Select-String -Path $self -Pattern 'Test-UserCopilot' -SimpleMatch -Quiet)
             if (-not (Select-String -Path $self -Pattern 'Get-OpenFailure' -SimpleMatch -Quiet)) {
                 Write-Bad 'This watchdog is an older version without the per-user checks (step 2b): customers are not checked or repaired - reinstall from the readme'
             }
@@ -780,7 +790,8 @@ try {
             Write-Info ('Running: {0} for {1} (session {2}) - {3}' -f $proc.ProcessName, $(if ($owner) { $owner.User } else { '?' }), $proc.SessionId, $path)
         }
         if (@(Get-Process -Name 'copilotapp' -ErrorAction SilentlyContinue).Count -gt 0) {
-            if ($script:knowsCopilotApp) { Write-Warn 'The unified Copilot app (copilotapp.exe) is in use here: the watchdog sees its crashes, but does not test per user whether it opens' }
+            if ($script:testsUnifiedCopilot) { Write-Info 'The unified Copilot app (copilotapp.exe) is in use here: the watchdog checks it per user and starts it for our own account' }
+            elseif ($script:knowsCopilotApp) { Write-Warn 'The unified Copilot app (copilotapp.exe) is in use here: the watchdog sees its crashes, but does not test per user whether it opens' }
             else { Write-Warn 'The unified Copilot app (copilotapp.exe) is in use here: this watchdog checks neither its start nor its crashes' }
         }
     }
