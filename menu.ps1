@@ -745,6 +745,20 @@ $menu = @(
             }
         }
     }
+    [PSCustomObject]@{ Key='Q'; FKey=$null; Category='Device'
+        Label='M365AppsLog         — collect what happened with Teams, Outlook, Copilot per user, and what the watchdog did'
+        Script="$ROOT\scripts\RDS\Get-M365AppsLog.ps1"
+        Params={
+            $a = @{}
+            $users = Read-Host '  Users (empty = everyone)'
+            if ($users) { $a['User'] = @($users -split '[,;\s]' | Where-Object { $_ }) }
+            $apps = Read-Host '  Apps: Teams, Outlook, Copilot (empty = all)'
+            if ($apps) { $a['App'] = @($apps -split '[,;\s]' | Where-Object { $_ }) }
+            $hours = Read-Host '  Hours back [24]'
+            if ($hours) { $a['Hours'] = [int] $hours }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
         Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
         Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"

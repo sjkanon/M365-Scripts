@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-192 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+193 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -60,6 +60,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Get-FSlogix-errors.ps1`](RDS/Get-FSlogix-errors.ps1) | [`RDS/`](RDS/readme.md) | FSLogix / Azure Files Premium diagnosescript voor AVD session hosts. |
 | [`Get-IntunePolicyAssignments.ps1`](PatronToolkit/Intune/Get-IntunePolicyAssignments.ps1) | [`PatronToolkit/Intune/`](PatronToolkit/Intune/readme.md) | Report which Entra ID groups are assigned to which Intune policies, profiles, and apps. |
 | [`Get-IntunePolicyInventory.ps1`](Office365Toolkit/Intune/Get-IntunePolicyInventory.ps1) | [`Office365Toolkit/Intune/`](Office365Toolkit/Intune/readme.md) | Inventory all Intune / Endpoint Manager policies in a tenant. |
+| [`Get-M365AppsLog.ps1`](RDS/Get-M365AppsLog.ps1) | [`RDS/`](RDS/readme.md) | Collects everything about new Teams, new Outlook and Copilot on a session host into one folder (and zip): per user what is registered and running, the events,… |
 | [`Get-M365UserLicenses.ps1`](Entra/Get-M365UserLicenses.ps1) | [`Entra/`](Entra/readme.md) | Check assigned M365 licenses for a list of users. |
 | [`Get-MailboxAddIns.ps1`](Office365Toolkit/Exchange/Get-MailboxAddIns.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Report Outlook add-ins installed per mailbox. |
 | [`Get-MailboxSizes.ps1`](Exchange/Get-MailboxSizes.ps1) | [`Exchange/`](Exchange/readme.md) | Report mailbox sizes for all or a single mailbox. |

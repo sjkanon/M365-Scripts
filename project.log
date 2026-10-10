@@ -2,6 +2,17 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — Get-M365AppsLog.ps1: logverzamelaar voor Teams/Outlook/Copilot
+  - Waarom: Copilot werkte op een server niet bij gebruikers, terwijl de watchdog alle
+    gebruikers zou controleren, melden en herstellen; achteraf was niet te zien wat hij zag.
+  - Wat: alleen lezend, per gebruiker pakketten/processen + oordeel van de watchdog (BLIND SPOT),
+    events (AppX, AppReadiness, TWinUI, crashes), register, FSLogix/Edge Update-logs,
+    watchdog-taak/status/logs, optioneel app-logs; alles in één zip. Menu-item Q.
+  - Gevonden blinde vlekken: unified Copilot-app wordt voor iedereen als OK aangenomen,
+    copilotapp.exe onbekend voor de crashcontrole, klant-app die opent en faalt onzichtbaar.
+  - Bestanden: scripts/RDS/Get-M365AppsLog.ps1, menu.ps1, readmes (EN/NL/FR), Version History.
+  - Commit: "Add a log collector that shows why the watchdog missed an app" (devel)
+
 2026-10-09 — project.log aangemaakt
   - Vanaf nu wordt elke wijziging hier gelogd en direct gecommit en gepusht.
   - Uitgangspunt: a8862c3 2026-10-09 Give level 1 first help instead of the CIPP cards they cannot see
