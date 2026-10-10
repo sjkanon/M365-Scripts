@@ -76,7 +76,9 @@ Een probleem dat blijft, wordt na 12 uur opnieuw gemeld. Geen kaart betekent: ni
 | *niet geregistreerd* | De app ontbreekt bij die gebruiker en kan dus niet geopend worden |
 | *kapot* | De app is bij die gebruiker geregistreerd, maar de bestanden ontbreken of de status is niet in orde |
 | *kon niet openen* | De gebruiker klikte op de app en Windows weigerde hem te openen |
-| *registratie mislukt* | Windows kon de app niet registreren voor die gebruiker, meestal bij het aanmelden |
+| *registratie mislukt* | Windows kon de app niet registreren voor die gebruiker, meestal bij het aanmelden. De regel noemt de gevraagde versie (*build 1.2026...*) |
+| *BuildMissing* (host) | Gebruikers vragen een nieuwere Teams- of Outlook-versie dan deze host heeft, en hun registratie mislukt daardoor bij elke aanmelding. De watchdog zet die versie meteen op de host; daarna lukt het aanmelden weer |
+| *NoShortcut* (host) | De nieuwe Copilot-app staat er, maar zonder snelkoppeling in het Startmenu. De watchdog maakt hem aan |
 | *start niet* | Alleen bij `itceadmin`: de app is er, maar start niet of blijft niet open |
 | *gecrasht* / *hing en werd gesloten* | De app crashte, of reageerde niet meer en werd afgesloten |
 
