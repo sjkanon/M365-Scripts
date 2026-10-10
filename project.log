@@ -2,6 +2,13 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-10 — Host herstellen als een app bij itceadmin faalt
+  - Waarom: een fout bij itceadmin werd alleen in diens sessie hersteld, de host bleef stuk
+    tot een klant ertegenaan liep.
+  - Wat: elke bevinding (ook itceadmin) start Repair-AppxPackageStore -Provision voor die app.
+    Bij klanten wordt niets gestart, tenzij ze de app zelf net probeerden te openen.
+  - Commit: d29efd4; downloadpin naar d29efd4 + SHA-256 7B47EEE94F5ABFCDFF27AAB3E7C50C9200B57F1C9FD5D87DAE361F9FF2507636.
+
 2026-10-10 — App alleen openen na een eigen, recente poging van de gebruiker
   - Waarom: elke geweigerde opening telde, ook de autostart bij aanmelden of een poging
     van uren geleden; dan kon er ongevraagd een app (bv. olk) bij een klant opengaan.
