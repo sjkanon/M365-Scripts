@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-12 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-Install` gives the task more triggers than the interval: 12 minutes after every sign-in, 30 seconds after Teams / Outlook / Copilot would not open (TWinUI `5961`), crashed or hung (Application Error `1000` / Application Hang `1002`, filtered on the three exes), and 2 minutes after a failed package registration (AppXDeploymentServer `401`/`404`). Until now a user who signed in with a broken app, or whose app would not open, waited up to a full interval (30 minutes by default) plus the 10-minute grace before anything was checked or repaired. The cooldowns, the grace and what is repaired for a customer are unchanged; a trigger during a busy run is dropped (`IgnoreNew`) and its events are read by the next run. Hosts get the triggers by running `-Install` again |
+| Verified: syntax check; the triggers built as in `-Install` registered on a test task on a Windows 11 workstation (non-elevated, so without the sign-in trigger, which needs admin) and read back with their delays and queries, and each query run with `Get-WinEvent -FilterXml`. **Not** verified: `-Install` on a session host, a run actually fired by a sign-in or an event, and how often AppX `401`/`404` fire on a busy host |
+
 ### 2026-10-12
 | Change |
 |--------|

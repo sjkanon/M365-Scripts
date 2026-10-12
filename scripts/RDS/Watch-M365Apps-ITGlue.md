@@ -12,7 +12,7 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
 
 | Vraag | Antwoord |
 |-------|----------|
-| Wat is het? | Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account `itceadmin` én bij elke aangemelde gebruiker |
+| Wat is het? | Een watchdog (geplande taak) op elke AVD-sessiehost die elke 30 minuten — en ook kort na elke aanmelding en zodra een app niet opent of crasht — controleert of Teams, de nieuwe Outlook en Copilot werken — bij ons eigen account `itceadmin` én bij elke aangemelde gebruiker |
 | Wat doet hij als iets stuk is? | Hij herstelt het zelf. Is het alleen bij één gebruiker, dan alleen in de sessie van die gebruiker. Is het ook bij `itceadmin` of bij meerdere gebruikers, dan eerst de host en daarna de app per gebruiker. Zonder venster, en nooit terwijl de app bij de gebruiker open staat |
 | Hoe weten wij het? | Elke bevinding en elk herstel komt als kaart in het **CIPP Teams-kanaal** (hetzelfde kanaal als de CIPP-meldingen), met de host en de naam van de gebruiker. **Alleen level 2 en 3** hebben toegang tot dat kanaal |
 | Wat merkt de gebruiker? | Normaal niets. Bij de volgende keer openen werkt de app weer. Probeerde hij in het laatste halfuur zelf een app te openen en lukte dat niet, dan gaat die app na het herstel vanzelf voor hem open. Verder start de watchdog bij een gebruiker nooit een app |
@@ -25,7 +25,7 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
 
 | Script | Rol | Wie start het? |
 |--------|-----|----------------|
-| `Watch-M365Apps.ps1` | De watchdog: controleert, herstelt en meldt. Draait als geplande taak **M365 App Watchdog** onder System, elke 30 minuten | Automatisch (geïnstalleerd door level 3) |
+| `Watch-M365Apps.ps1` | De watchdog: controleert, herstelt en meldt. Draait als geplande taak **M365 App Watchdog** onder System, elke 30 minuten, 12 minuten na elke aanmelding en binnen een minuut nadat een app niet opent, crasht of niet registreert | Automatisch (geïnstalleerd door level 3) |
 | `Repair-AppxPackageStore.ps1` | Herstelt de **host**: zet Teams, Outlook en Copilot klaar voor alle gebruikers in precies de versie die nodig is, en ruimt kapotte registraties op. De watchdog roept het zelf aan, hooguit één keer per 4 uur | De watchdog; handmatig door level 2/3 |
 | `Update-SessionHostImage.ps1` | Wekelijks onderhoud van de image en de hosts: zet alle apps op de nieuwste versie, op elke host gelijk | Level 3, wekelijks |
 | `Update-TeamsClient.ps1` | Teams bijwerken of herinstalleren op een werkplek | Level 2 — zie de procedure *Teams-update op een werkplek* |
@@ -33,7 +33,7 @@ Technische referentie voor beheerders: de sectie *Watch-M365Apps.ps1* in `script
 
 ### Hoe het samenhangt
 
-1. De watchdog kijkt elke 30 minuten op de host:
+1. De watchdog kijkt elke 30 minuten op de host, 12 minuten na elke aanmelding, en binnen een minuut nadat een app niet opent of crasht:
    - staan Teams, Outlook en Copilot klaar voor nieuwe gebruikers?
    - werken ze bij `itceadmin`? Draait een app daar niet, dan start de watchdog hem en kijkt of hij blijft draaien;
    - zijn ze geregistreerd en in orde bij **elke andere aangemelde gebruiker** (pas na 10 minuten aanmelden);
@@ -153,7 +153,7 @@ Zoek in het CIPP Teams-kanaal op de **naam van de gebruiker**, de laatste uren. 
 | **WORDT HERSTELD** met de naam van de gebruiker, nog geen vervolgkaart | De watchdog is bezig. Wacht een paar minuten op de volgende kaart; een app die de gebruiker in het laatste halfuur zelf probeerde te openen gaat daarna vanzelf open. Na een kwartier nog niets: stap 2 |
 | **HERSTELD** met de naam van de gebruiker | Laat de app opnieuw openen; lukt het niet, laten afmelden en opnieuw aanmelden. Werkt het: ticket sluiten |
 | **NIET HERSTELD** met de naam van de gebruiker | Laat de gebruiker afmelden en opnieuw aanmelden — bij het aanmelden wordt de app opnieuw klaargezet. Werkt het dan nog niet: [Stap 2](#stap-2-op-de-host); bij één gebruiker herstelt de watchdog de host niet zelf |
-| Geen kaart, gebruiker net aangemeld | De watchdog kijkt pas na 10 minuten. Laat hem nu draaien (stap 2) en kijk wat hij vindt |
+| Geen kaart, gebruiker net aangemeld | De watchdog kijkt pas 12 minuten na het aanmelden (een host waarop hij vóór 12-10-2026 is geïnstalleerd: bij de volgende run). Laat hem nu draaien (stap 2) en kijk wat hij vindt |
 | Geen kaart, langer aangemeld | Laat de watchdog nu draaien (stap 2). Ziet hij niets, dan ligt het niet aan de registratie: Teams bijwerken of herinstalleren volgens *Teams-update op een werkplek*, of doorzetten naar **level 3** |
 | Een of meer **CRASH**-kaarten | Kijk naar het patroon: steeds dezelfde app, module en foutcode? Op meerdere hosts? Dan **level 3** — dan ligt het aan een versie of de image |
 | *niet klaargezet op de host* (bijvoorbeeld Copilot) | De host onderzoeken (stap 2, *De host zelf onderzoeken*); lukt herstel niet, **level 3** |

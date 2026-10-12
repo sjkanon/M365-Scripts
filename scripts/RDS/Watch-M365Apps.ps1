@@ -106,7 +106,12 @@
     Sent as header X-Watchdog-Token. Match it with Header Auth on the n8n Webhook node.
 
 .PARAMETER IntervalMinutes
-    How often the task runs. Default 30.
+    How often the task runs. Default 30. Besides that, the task runs 12 minutes after
+    every sign-in (the 10 minutes a fresh sign-in is left alone, plus the start of its
+    explorer.exe), 30 seconds after one of the apps would not open (TWinUI 5961),
+    crashed or hung (Application Error 1000, Application Hang 1002), and 2 minutes after
+    a failed package registration (AppXDeploymentServer 401/404). A trigger while a run
+    is busy is dropped; its events are read by the next run.
 
 .PARAMETER RepairCooldownHours
     Minimum time between two host repairs (Repair-AppxPackageStore.ps1), so a problem
@@ -1397,12 +1402,35 @@ if ($Install) {
     Write-Ok "Settings in $ConfigPath"
 
     $action    = New-ScheduledTaskAction -Execute $nativeShell -Argument ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -WorkingDir "{1}"' -f $self, $WorkingDir)
-    $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
+    $trigger   = @(New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes))
+    # Besides the interval, a run as soon as there is something to see: when a fresh
+    # sign-in has had its $UserGraceMinutes (plus the minute or two explorer.exe starts
+    # after the sign-in), and when one of the apps would not open, crashed or hung, or a
+    # package registration failed. The delay lets Windows finish what it was doing - the
+    # sign-in's own registrations above all. A trigger while a run is busy is dropped
+    # (IgnoreNew): its events wait for the next run, so a burst is not a run per event.
+    $logon = New-ScheduledTaskTrigger -AtLogOn
+    $logon.Delay = 'PT{0}M' -f ($UserGraceMinutes + 2)
+    $trigger += $logon
+    $eventClass = Get-CimClass -Namespace 'Root/Microsoft/Windows/TaskScheduler' -ClassName 'MSFT_TaskEventTrigger'
+    $exeMatch   = (@($Apps | ForEach-Object { $_.Exe }) | ForEach-Object { "Data='$_'" }) -join ' or '
+    foreach ($watch in @(
+        @{ Delay = 'PT30S'; Log = 'Microsoft-Windows-TWinUI/Operational'; Select = '*[System[EventID=5961]]' }
+        @{ Delay = 'PT30S'; Log = 'Application'; Select = "*[System[Provider[@Name='Application Error' or @Name='Application Hang'] and (EventID=1000 or EventID=1002)]] and *[EventData[$exeMatch]]" }
+        @{ Delay = 'PT2M';  Log = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Select = '*[System[(EventID=401 or EventID=404)]]' }
+    )) {
+        $onEvent = New-CimInstance -CimClass $eventClass -ClientOnly
+        $onEvent.Enabled      = $true
+        $onEvent.Delay        = $watch.Delay
+        $onEvent.Subscription = '<QueryList><Query Id="0" Path="{0}"><Select Path="{0}">{1}</Select></Query></QueryList>' -f $watch.Log, $watch.Select
+        $trigger += $onEvent
+    }
     $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 1)
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
         -Description 'Tests Teams, new Outlook and Copilot with the IT accounts, repairs them and reports to n8n (M365-Scripts, scripts/RDS/Watch-M365Apps.ps1)' -Force | Out-Null
     Write-Ok "Task '$TaskName' registered - first run in 2 minutes, then every $IntervalMinutes minutes"
+    Write-Ok ('Also {0} minutes after every sign-in, and within minutes of an app that would not open, crashed, hung or failed to register' -f ($UserGraceMinutes + 2))
     exit 0
 }
 
