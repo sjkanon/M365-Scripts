@@ -330,7 +330,7 @@ gebruiker* next to each one.
 | `-App` | `Teams`, `Outlook`, `Copilot` (default: all three) |
 | `-WebhookUrl` | n8n webhook (production URL) the report is POSTed to. Without it the run only logs |
 | `-WebhookToken` | Sent as header `X-Watchdog-Token`; match it with Header Auth on the n8n Webhook node |
-| `-IntervalMinutes` | How often the task runs (default: `30`) |
+| `-IntervalMinutes` | How often the task runs (default: `30`). Besides that the task runs **12 minutes after every sign-in** (the 10 minutes a fresh sign-in is left alone, plus the start of its `explorer.exe`), **30 seconds after** one of the apps would not open (TWinUI `5961`), crashed or hung (Application Error `1000`, Application Hang `1002`), and **2 minutes after** a failed package registration (AppXDeploymentServer `401`/`404`) — so a user is helped within minutes, not at the next interval. A trigger while a run is busy is dropped; its events are read by the next run. A host installed earlier gets these triggers by running `-Install` again |
 | `-RepairCooldownHours` | Minimum time between two host repairs, so a problem it cannot fix is not retried every run (default: `4`) |
 | `-RenotifyHours` | Report a problem that stays the same again after this many hours (default: `12`) |
 | `-UpdateHours` | How often the newest Teams / Outlook are provisioned and Edge Update checks for Copilot (default: `6`; `0` turns updating off, for our own account as well; `-NoRepair` also updates nothing) |

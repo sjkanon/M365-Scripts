@@ -1009,6 +1009,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-12 (2)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-Install` donne à la tâche d'autres déclencheurs que l'intervalle : 12 minutes après chaque connexion, 30 secondes après que Teams / Outlook / Copilot a refusé de s'ouvrir (TWinUI `5961`), a planté ou s'est figé (Application Error `1000` / Application Hang `1002`, filtrés sur les trois exe), et 2 minutes après une inscription de package échouée (AppXDeploymentServer `401`/`404`). Jusqu'ici, un utilisateur connecté avec une application cassée, ou dont l'application ne s'ouvrait pas, attendait jusqu'à un intervalle complet (30 minutes par défaut) plus le délai de 10 minutes avant toute vérification ou réparation. Les délais de réparation, le délai après connexion et ce qui est réparé chez un client sont inchangés ; un déclencheur pendant une exécution en cours est ignoré (`IgnoreNew`) et ses événements sont lus par l'exécution suivante. Les hôtes reçoivent les déclencheurs en relançant `-Install` |
+| Vérifié : contrôle de syntaxe ; les déclencheurs construits comme dans `-Install` enregistrés sur une tâche de test sur un poste Windows 11 (sans élévation, donc sans le déclencheur de connexion, qui exige des droits d'administrateur) et relus avec leurs délais et requêtes, et chaque requête exécutée avec `Get-WinEvent -FilterXml`. **Non** vérifié : `-Install` sur un hôte de session, une exécution réellement lancée par une connexion ou un événement, et la fréquence des AppX `401`/`404` sur un hôte chargé |
+
 ### 2026-10-12
 | Modification |
 |--------|

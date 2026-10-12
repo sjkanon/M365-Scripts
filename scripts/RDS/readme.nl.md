@@ -332,7 +332,7 @@ klant) en onder `before` of het bij hem hersteld is (`Fixed`); de Teams-kaart ze
 | `-App` | `Teams`, `Outlook`, `Copilot` (standaard: alle drie) |
 | `-WebhookUrl` | n8n-webhook (productie-URL) waar het rapport naartoe wordt gePOST. Zonder deze logt de run alleen |
 | `-WebhookToken` | Wordt meegestuurd als header `X-Watchdog-Token`; stel dezelfde waarde in als Header Auth op de n8n Webhook-node |
-| `-IntervalMinutes` | Hoe vaak de taak draait (standaard: `30`) |
+| `-IntervalMinutes` | Hoe vaak de taak draait (standaard: `30`). Daarnaast draait de taak **12 minuten na elke aanmelding** (de 10 minuten dat een verse aanmelding met rust wordt gelaten, plus het starten van diens `explorer.exe`), **30 seconden nadat** een van de apps niet wilde openen (TWinUI `5961`), crashte of vastliep (Application Error `1000`, Application Hang `1002`), en **2 minuten na** een mislukte pakketregistratie (AppXDeploymentServer `401`/`404`) — zodat een gebruiker binnen enkele minuten geholpen wordt, niet pas bij het volgende interval. Een trigger terwijl er al een run loopt vervalt; de gebeurtenissen ervan leest de volgende run. Een eerder geïnstalleerde host krijgt deze triggers door `-Install` opnieuw te draaien |
 | `-RepairCooldownHours` | Minimale tijd tussen twee hostherstellingen, zodat een probleem dat hij niet kan oplossen niet elke run opnieuw wordt geprobeerd (standaard: `4`) |
 | `-RenotifyHours` | Een probleem dat gelijk blijft na zoveel uur opnieuw melden (standaard: `12`) |
 | `-UpdateHours` | Hoe vaak de nieuwste Teams / Outlook klaargezet worden en Edge Update op Copilot controleert (standaard: `6`; `0` zet bijwerken uit, ook voor ons eigen account; met `-NoRepair` wordt ook niets bijgewerkt) |

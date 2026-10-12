@@ -1009,6 +1009,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-12 (2)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-Install` geeft de taak meer triggers dan het interval: 12 minuten na elke aanmelding, 30 seconden nadat Teams / Outlook / Copilot niet wilde openen (TWinUI `5961`), crashte of vastliep (Application Error `1000` / Application Hang `1002`, gefilterd op de drie exe's), en 2 minuten na een mislukte pakketregistratie (AppXDeploymentServer `401`/`404`). Tot nu toe wachtte een gebruiker die zich aanmeldde met een kapotte app, of wiens app niet opende, tot een heel interval (standaard 30 minuten) plus de 10 minuten wachttijd voordat er iets werd gecontroleerd of hersteld. De afkoeltijden, de wachttijd en wat er bij een klant hersteld wordt zijn ongewijzigd; een trigger tijdens een lopende run vervalt (`IgnoreNew`) en de gebeurtenissen ervan leest de volgende run. Hosts krijgen de triggers door `-Install` opnieuw te draaien |
+| Geverifieerd: syntaxcontrole; de triggers zoals `-Install` ze bouwt geregistreerd op een testtaak op een Windows 11-werkstation (zonder verhoogde rechten, dus zonder de aanmeldtrigger, die beheerdersrechten vraagt) en teruggelezen met hun vertraging en query, en elke query gedraaid met `Get-WinEvent -FilterXml`. **Niet** geverifieerd: `-Install` op een sessiehost, een run die echt door een aanmelding of gebeurtenis start, en hoe vaak AppX `401`/`404` op een drukke host voorkomen |
+
 ### 2026-10-12
 | Wijziging |
 |--------|
