@@ -1022,6 +1022,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-12
+| Wijziging |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/Repair-AppxPackageStore.ps1) `-RemoveOld`: een live run op een FSLogix-host (Outlook, `-Latest -Provision -RemoveOld`) eindigde met 4 *Store orphans* in stap 7 die stap 5 niet had gevonden: build 922.300 per gebruiker verwijderen voor twee gebruikers zonder profiel op de host liet de deployment engine een end-of-life-vermelding voor de oude build en een gebruikersregistratie voor 929.200 klaarzetten — en de end-of-life-vermeldingen schreef hij opnieuw nadat 6b ze had verwijderd. Stap 6b ruimt na een korte wachttijd opnieuw verweesde storevermeldingen op (dezelfde functie, dezelfde `.reg`-back-up als stap 5), zodat de run niet meer faalt op vermeldingen die hij zelf heeft veroorzaakt |
+| 6b waarschuwt alleen nog over draaiende `olk` / `ms-teams` voor de pakketten die het opruimt (een run voor alleen Outlook waarschuwde over `ms-teams`), en de meerregelige *Catastrophic failure* van `Remove-AppxPackage -AllUsers` staat op één regel |
+| Geverifieerd: syntaxcontrole, en de nieuwe opruimfunctie offline met gemockte storevermeldingen in PowerShell 7 en 5.1 (verwijdert, telt, weigert zonder back-up). **Niet** geverifieerd: een live run — of de engine de vermeldingen na 5 seconden wachten opnieuw schrijft, blijkt bij de volgende run |
+
 ### 2026-10-10 (10)
 | Wijziging |
 |--------|

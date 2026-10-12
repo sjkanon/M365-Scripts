@@ -1022,6 +1022,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-12
+| Modification |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/Repair-AppxPackageStore.ps1) `-RemoveOld` : une exécution réelle sur un hôte FSLogix (Outlook, `-Latest -Provision -RemoveOld`) s'est terminée avec 4 *Store orphans* à l'étape 7 que l'étape 5 n'avait pas trouvés : supprimer la build 922.300 par utilisateur pour deux utilisateurs sans profil sur l'hôte a fait mettre en attente par le moteur de déploiement une entrée end-of-life pour l'ancienne build et un enregistrement utilisateur pour 929.200 — et il a réécrit les entrées end-of-life après que 6b les eut supprimées. L'étape 6b nettoie désormais à nouveau les entrées orphelines du magasin (même fonction, même sauvegarde `.reg` qu'à l'étape 5) après une courte attente, pour que l'exécution n'échoue plus sur des entrées qu'elle a elle-même créées |
+| 6b n'avertit plus d'un `olk` / `ms-teams` en cours d'exécution que pour les paquets qu'il nettoie (une exécution Outlook seule avertissait pour `ms-teams`), et le *Catastrophic failure* multiligne de `Remove-AppxPackage -AllUsers` s'affiche sur une ligne |
+| Vérifié : contrôle de syntaxe, et la nouvelle fonction de nettoyage hors ligne avec des entrées de magasin simulées sous PowerShell 7 et 5.1 (supprime, compte, refuse sans sauvegarde). **Non** vérifié : une exécution réelle — si le moteur réécrit les entrées après l'attente de 5 secondes se verra à la prochaine exécution |
+
 ### 2026-10-10 (10)
 | Modification |
 |--------|

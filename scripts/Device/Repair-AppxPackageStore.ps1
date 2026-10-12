@@ -168,8 +168,10 @@
     the named packages: older provisioned copies, older builds registered for any
     user, and what AppxAllUserStore still remembers of them (backed up to .reg
     first). Only for packages named explicitly, and only once the build to keep is
-    provisioned. The WindowsApps folders are left to Windows, and the list in each
-    profile container to FSLogix, which rewrites it at the next sign-out.
+    provisioned. Removing a build for a user with no profile on this host leaves
+    queued store entries nothing will run; they are swept like step 5 afterwards.
+    The WindowsApps folders are left to Windows, and the list in each profile
+    container to FSLogix, which rewrites it at the next sign-out.
 
 .EXAMPLE
     # The very newest Teams and Outlook on the whole pool, and nothing older left
@@ -1500,6 +1502,36 @@ function Write-CopilotStatus {
     return $blocked
 }
 
+function Remove-OrphanedStoreEntry {
+    <#
+        Backs up and removes every orphaned AppxAllUserStore entry in scope, read
+        fresh. Step 5, and again after -RemoveOld, whose removals for users without a
+        profile here leave new ones. Returns how many were removed.
+    #>
+    param([string] $BackupFolder, [string] $Indent = '')
+
+    $removed = 0
+    foreach ($entry in @(Get-OrphanedStoreEntry)) {
+        if (-not $PSCmdlet.ShouldProcess($entry.Path, "Back up and remove the orphaned $($entry.Kind)")) { continue }
+        # No backup, no removal: an edit to the store that cannot be undone is not a repair.
+        if (-not (Backup-RegistryKey -Key $entry.Path -Folder $BackupFolder)) {
+            Write-Warn "${Indent}Could not back up $($entry.Path) - left in place"
+            continue
+        }
+        $psPath = 'Registry::' + $entry.Path
+        Remove-Item -Path $psPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $psPath) {
+            Write-Warn "${Indent}Could not remove $($entry.Path)"
+        } else {
+            $script:storeEdited = $true
+            $removed++
+            $who = if ($entry.Account) { " for $($entry.Account)" } else { '' }
+            Write-Ok "${Indent}Removed the orphaned $($entry.Kind)$who`: $($entry.Name)"
+        }
+    }
+    return $removed
+}
+
 # -- Older builds --------------------------------------------------------------
 function Remove-OlderBuild {
     <#
@@ -1547,7 +1579,9 @@ function Remove-OlderBuild {
             Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
             Write-Ok "  Removed the older $($pkg.PackageFullName) for all users"; $removed++
         } catch {
-            Write-Warn "  Removing $($pkg.PackageFullName) for all users failed: $($_.Exception.Message)"
+            # The engine's message spans lines ("Catastrophic failure" + a blank line + more).
+            Write-Warn ("  Removing $($pkg.PackageFullName) for all users failed: {0} - trying each user" -f
+                        (($_.Exception.Message -split '\r?\n' | Where-Object { $_.Trim() }) -join ' '))
             foreach ($holder in @(Get-AppxPackageHolder -Package $pkg)) {
                 try {
                     Remove-AppxPackage -Package $pkg.PackageFullName -User $holder.Sid -ErrorAction Stop
@@ -1982,24 +2016,7 @@ try {
     # Read again: the removals above may have taken some entries with them.
     Write-Out ''
     Write-Step '5. Orphaned package store entries'
-    $orphans = @(Get-OrphanedStoreEntry)
-    if ($orphans.Count -eq 0) { Write-Skip 'None left' }
-    foreach ($entry in $orphans) {
-        if (-not $PSCmdlet.ShouldProcess($entry.Path, "Back up and remove the orphaned $($entry.Kind)")) { continue }
-        # No backup, no removal: an edit to the store that cannot be undone is not a repair.
-        if (-not (Backup-RegistryKey -Key $entry.Path -Folder $backupDir)) {
-            Write-Warn "Could not back up $($entry.Path) - left in place"
-            continue
-        }
-        $psPath = 'Registry::' + $entry.Path
-        Remove-Item -Path $psPath -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path $psPath) {
-            Write-Warn "Could not remove $($entry.Path)"
-        } else {
-            $storeEdited = $true
-            Write-Ok "Removed the orphaned $($entry.Kind) for $($entry.Name)"
-        }
-    }
+    if ((Remove-OrphanedStoreEntry -BackupFolder $backupDir) -eq 0) { Write-Skip 'None left' }
     if ($storeEdited) { Write-Skip "  Backups: $backupDir (double-click a .reg file to put an entry back)" }
 
     # -- 6. Provision -----------------------------------------------------------
@@ -2106,11 +2123,29 @@ try {
     if ($removeOldTargets.Count -gt 0) {
         Write-Out ''
         Write-Step '6b. Remove older builds'
-        foreach ($proc in @(Get-Process -Name 'olk', 'ms-teams' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -Unique)) {
-            Write-Warn "  $proc is running - an older build in use is closed or finishes at that user's sign-out"
+        # Only the processes of the packages being cleaned: Teams running says nothing
+        # about an Outlook-only run.
+        $appProcess = @{ 'MSTeams' = 'ms-teams'; 'Microsoft.OutlookForWindows' = 'olk' }
+        $watch      = @($removeOldTargets | Where-Object { $appProcess.ContainsKey($_) } | ForEach-Object { $appProcess[$_] })
+        if ($watch.Count -gt 0) {
+            foreach ($proc in @(Get-Process -Name $watch -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -Unique)) {
+                Write-Warn "  $proc is running - an older build in use is closed or finishes at that user's sign-out"
+            }
         }
         foreach ($pkgName in $removeOldTargets) {
             Remove-OlderBuild -PackageName $pkgName -BackupFolder $backupDir
+        }
+
+        # Removing a build for a user with no profile on this host makes the
+        # deployment engine queue that work in the store - an end-of-life entry for
+        # the old build and a user registration for the kept one - and it writes the
+        # end-of-life entry again after Remove-OlderBuild took it away. Nothing ever
+        # runs that queue, so it is swept like step 5 once the engine has settled,
+        # instead of being handed to step 7 as damage this run left behind.
+        if (-not $simulate) {
+            Start-Sleep -Seconds 5
+            $swept = Remove-OrphanedStoreEntry -BackupFolder $backupDir -Indent '  '
+            if ($swept -gt 0) { Write-Skip "  Backups: $backupDir (double-click a .reg file to put an entry back)" }
         }
     }
 
