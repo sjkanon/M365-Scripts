@@ -2,6 +2,15 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-12 — Watchdog draait ook na aanmelding en na een app die faalt; downloadpin bijgewerkt
+  - Wat: -Install geeft de taak extra triggers: 12 min na elke aanmelding, 30 s na TWinUI 5961 of
+    een crash/hang van ms-teams/olk/copilotapp, 2 min na AppX 401/404. IgnoreNew, wachttijden
+    en herstel bij klanten ongewijzigd.
+  - Waarom: bjorn.casier (LEM-AVD-4, 09:42) wachtte tot de volgende run; nu binnen minuten.
+  - Commits: 4940b23 (watchdog); downloadpin naar 4940b23 + SHA-256
+    F041A102431341A721AEC1798FED2F22AC375DEA8698EE897996223A957193AD (gecontroleerd tegen GitHub).
+  - Niet getest: -Install op een sessiehost en een run die door een trigger start.
+
 2026-10-10 — n8n-kaart kent NIEUWE VERSIE, BuildMissing en NoShortcut
   - Wat: flow W7YYoix73OWuaEvd, node Build Watchdog Card: event 'updated' -> 🆕 NIEUWE VERSIE
     (regel oud -> nieuw, versies op de host); labels 'versie ontbreekt op de host' en
