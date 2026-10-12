@@ -1007,6 +1007,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-12
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/Repair-AppxPackageStore.ps1) `-RemoveOld`: a live run on an FSLogix host (Outlook, `-Latest -Provision -RemoveOld`) ended with 4 *Store orphans* in step 7 that step 5 had not found: removing build 922.300 per user for two users with no profile on the host made the deployment engine queue an end-of-life entry for the old build and a user registration for 929.200 — and it wrote the end-of-life entries again after 6b had removed them. Step 6b now sweeps orphaned store entries again (same function, same `.reg` backup as step 5) after a short wait, so the run no longer fails on entries it created itself |
+| 6b only warns about `olk` / `ms-teams` running for the packages it cleans (an Outlook-only run warned about `ms-teams`), and the multi-line *Catastrophic failure* from `Remove-AppxPackage -AllUsers` is printed on one line |
+| Verified: syntax check, and the new sweep function offline with mocked store entries in PowerShell 7 and 5.1 (removes, counts, refuses without a backup). **Not** verified: a live run — whether the engine rewrites the entries again after the 5-second wait is to be seen on the next run |
+
 ### 2026-10-10 (10)
 | Change |
 |--------|
