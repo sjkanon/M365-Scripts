@@ -1022,6 +1022,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-13 (4)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User` did not find a user who was signed in: on LEM-AVD-6 Kris's account is `AIRPORTS\kris.vand (81E1E8C7)` in his session — `quser` shows `kris.vand` — and the name was compared exactly, so `kris.vand` and his UPN both answered *not signed in on this host*. A name is now matched first by the SID Windows resolves it to (a UPN, `DOMAIN\user`), then on the user name with or without that suffix. A bare first name still matches nobody, so it cannot hit the wrong user |
+| Verified: syntax check; the match run locally on a session named `AIRPORTS\kris.vand (81E1E8C7)` (`kris.vand`, `AIRPORTS\kris.vand`, the full name and `kris.vand@...` match, `kris` does not) and by SID on this workstation's own account. **Not** verified: resolving his UPN in the AIRPORTS domain on the host |
+
 ### 2026-10-13 (3)
 | Change |
 |--------|

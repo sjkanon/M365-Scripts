@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-13 (4)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User` ne trouvait pas un utilisateur connecté : sur LEM-AVD-6, le compte de Kris s'appelle `AIRPORTS\kris.vand (81E1E8C7)` dans sa session — `quser` affiche `kris.vand` — et le nom était comparé exactement, donc `kris.vand` comme son UPN répondaient *not signed in on this host*. Un nom est maintenant comparé d'abord sur le SID que Windows trouve pour lui (un UPN, `DOMAINE\utilisateur`), puis sur le nom d'utilisateur avec ou sans ce suffixe. Un simple prénom ne correspond toujours à personne, pour ne pas toucher le mauvais utilisateur |
+| Vérifié : contrôle de syntaxe ; la comparaison exécutée localement sur une session nommée `AIRPORTS\kris.vand (81E1E8C7)` (`kris.vand`, `AIRPORTS\kris.vand`, le nom complet et `kris.vand@...` correspondent, `kris` non) et par SID sur le propre compte de ce poste. **Non** vérifié : la résolution de son UPN dans le domaine AIRPORTS sur l'hôte |
+
 ### 2026-10-13 (3)
 | Modification |
 |--------|

@@ -1443,10 +1443,24 @@ function Invoke-Diagnostics {
 
 # -- At our request, for one user -------------------------------------------------------
 function Test-SessionUser {
-    <# Whether a session is one of these names - user name, UPN or DOMAIN\user, compared on the user name, as -Account is. #>
+    <#
+        Whether a session is one of these names: user name, UPN or DOMAIN\user. First by
+        SID - the name resolved by Windows, so a UPN whose prefix is not the account name
+        still matches - then on the user name, with or without the " (81E1E8C7)" Windows
+        can append to an account name in a session (seen on LEM-AVD-6:
+        "AIRPORTS\kris.vand (81E1E8C7)", which quser cuts to "kris.vand").
+    #>
     param($Session, [string[]] $Names)
-    $leaf = ($Session.User -split '\\')[-1]
-    return @($Names | Where-Object { (($_ -split '\\')[-1] -split '@')[0] -ieq $leaf }).Count -gt 0
+    $leaf  = ($Session.User -split '\\')[-1]
+    $plain = $leaf -replace '\s*\([0-9A-Fa-f]{8}\)$', ''
+    foreach ($name in $Names) {
+        try {
+            if (([Security.Principal.NTAccount] $name).Translate([Security.Principal.SecurityIdentifier]).Value -eq $Session.Sid) { return $true }
+        } catch { }
+        $short = (($name -split '\\')[-1] -split '@')[0]
+        if ($short -ieq $leaf -or $short -ieq $plain) { return $true }
+    }
+    return $false
 }
 
 function Save-UserRepair {
