@@ -617,6 +617,20 @@ function Invoke-PowerShellAsUser {
     return Invoke-AsUser -Session $Session -Execute (Join-Path $env:WINDIR 'System32\conhost.exe') -Argument $argument -WaitSeconds $WaitSeconds
 }
 
+# Get-AppxPackage -User costs seconds per call (3-4 s measured), and a run asks the same
+# per user and app for the check and again for the user table: asked once per check.
+$script:packageCache = @{}
+function Get-UserPackage {
+    <# The newest package of this name registered for this user, from the cache when this check already asked. #>
+    param([string] $User, [string] $Name)
+    $key = '{0}|{1}' -f $User, $Name
+    if (-not $script:packageCache.ContainsKey($key)) {
+        $script:packageCache[$key] = @(Get-AppxPackage -User $User -Name $Name -ErrorAction SilentlyContinue) |
+                                     Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+    }
+    return $script:packageCache[$key]
+}
+
 function Test-UserPackage {
     <# Whether one of the app's packages is registered, present and Ok for this user (DOMAIN\user, not a SID - see Test-UserApp). #>
     param([string] $User, [string[]] $Packages)
@@ -1005,8 +1019,7 @@ function Test-UserApp {
     foreach ($name in $Entry.Packages) {
         # By name, not SID: Get-AppxPackage answers "No valid SID could be determined"
         # for an Entra ID SID (S-1-12-1-...), in Windows PowerShell 5.1 as well.
-        $pkg = @(Get-AppxPackage -User $Session.User -Name $name -ErrorAction SilentlyContinue) |
-               Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+        $pkg = Get-UserPackage -User $Session.User -Name $name
         if ($pkg) { break }
     }
     if (-not $pkg) {
@@ -1051,8 +1064,7 @@ function Test-UserCopilot {
     if (-not $copilot -or -not $copilot.Path) { return }   # the host finding covers it
     $pkg = $null
     if ($copilot.Package) {
-        $pkg = @(Get-AppxPackage -User $Session.User -Name $copilot.Package -ErrorAction SilentlyContinue) |
-               Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+        $pkg = Get-UserPackage -User $Session.User -Name $copilot.Package
         if (-not $pkg) {
             New-Finding $Session.Account 'Copilot' 'NotRegistered' "$($copilot.Package) (unified app $($copilot.Version)) not registered for this user" $copilot.Package -Family $copilot.Family -Sid $Session.Sid -Customer:$customer
             return
@@ -1080,6 +1092,8 @@ function Test-UserCopilot {
 function Get-Finding {
     <# Every check, read only - apart from starting an app that is not running in our own session. #>
     param($Sessions)
+    # A fresh read: the read-back after a repair must not see the answers from before it.
+    $script:packageCache = @{}
     $provisioned = @(Get-AppxProvisionedPackage -Online | ForEach-Object { $_.DisplayName })
     # Read afresh each time: the read-back after a repair must see what the repair did.
     if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot -Refresh | Out-Null }
@@ -1329,8 +1343,7 @@ function Get-UserStatus {
             $names = if ($entry.App -eq 'Copilot') { @($copilot | Where-Object { $_ } | ForEach-Object { $_.Package } | Where-Object { $_ }) } else { @($entry.Packages) }
             $pkg = $null
             foreach ($name in $names) {
-                $pkg = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
-                       Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+                $pkg = Get-UserPackage -User $session.User -Name $name
                 if ($pkg) { break }
             }
             $running = @($entry.Exe | ForEach-Object { Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($_)) }).Count -gt 0
@@ -1537,6 +1550,7 @@ function Invoke-UserRepair {
         }
     })
 
+    $script:packageCache = @{}
     $script:userStatus = @(Get-UserStatus -Sessions @(Get-UserSession | Where-Object { Test-SessionUser $_ $User }))
     Write-UserStatus $script:userStatus 'After'
 

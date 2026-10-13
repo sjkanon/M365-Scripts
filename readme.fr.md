@@ -1022,6 +1022,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-13 (3)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) était bien plus lent depuis le tableau `users` du 2026-10-13 : il redemandait `Get-AppxPackage -User` pour chaque utilisateur et application, en plus de la vérification qui venait de demander la même chose — et un tel appel prend 3 à 4 secondes (mesuré sur un poste), donc sur un hôte de 15 utilisateurs une exécution durait des minutes de plus, deux fois lors d'une exécution avec réparation. La vérification et le tableau partagent maintenant une seule réponse par utilisateur et package ; elle est relue pour la relecture après une réparation, et la vérification juste après une réparation ou avant d'ouvrir une application n'en provient jamais. Le tableau ne coûte en plus que pour les utilisateurs dans leurs 10 premières minutes |
+| Vérifié : contrôle de syntaxe, le flux `-User` à nouveau avec inscription et ouverture simulées (même résultat qu'avant), et le coût d'un appel `Get-AppxPackage` mesuré (3 à 4 s par nom, 16 s pour tous les packages, donc regrouper n'aide pas). **Non** vérifié : la durée d'exécution sur un hôte de session |
+
 ### 2026-10-13 (2)
 | Modification |
 |--------|
