@@ -1009,6 +1009,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-13 (3)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) was veel trager sinds de `users`-tabel van 2026-10-13: die vroeg `Get-AppxPackage -User` opnieuw voor elke gebruiker en app, bovenop de controle die net hetzelfde had gevraagd — en zo'n aanroep duurt 3–4 seconden (gemeten op een werkstation), dus op een host met 15 gebruikers duurde een run minuten langer, twee keer in een run met herstel. De controle en de tabel delen nu één antwoord per gebruiker en pakket; voor het teruglezen na een herstel wordt het opnieuw gelezen, en de controle direct na een herstel of voor het openen van een app komt er nooit uit. De tabel kost alleen extra voor gebruikers in hun eerste 10 minuten |
+| Geverifieerd: syntaxcontrole, de `-User`-flow opnieuw met nagebootst registreren en openen (zelfde resultaat als voorheen), en de kosten van één `Get-AppxPackage`-aanroep gemeten (3–4 s op naam, 16 s voor alle pakketten, dus bundelen helpt niet). **Niet** geverifieerd: de looptijd op een sessiehost |
+
 ### 2026-10-13 (2)
 | Wijziging |
 |--------|

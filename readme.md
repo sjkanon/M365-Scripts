@@ -1007,6 +1007,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-13 (3)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) was much slower since the `users` table of 2026-10-13: it asked `Get-AppxPackage -User` again for every user and app, on top of the check that had just asked the same — and one such call takes 3–4 seconds (measured on a workstation), so on a host with 15 users a run took minutes longer, twice in a run with a repair. The check and the table now share one answer per user and package; it is read afresh for the read-back after a repair, and the check right after a repair or before opening an app is never taken from it. The table only costs extra for users still in their first 10 minutes |
+| Verified: syntax check, the `-User` flow again with simulated registering and opening (same result as before), and the cost of one `Get-AppxPackage` call measured (3–4 s named, 16 s for all packages, so batching does not help). **Not** verified: the run time on a session host |
+
 ### 2026-10-13 (2)
 | Change |
 |--------|
