@@ -1009,6 +1009,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-13 (2)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User <naam> [-App ...]`: voor één gebruiker, op ons verzoek en nu — per app die bij hem niet draait opnieuw geregistreerd in zijn sessie op familienaam, **voor hem geopend**, en hij moet 15 seconden later nog draaien; zo niet, dan wordt de crash, hang of mislukte opening van dat moment genoemd. Geen wachttijd en geen afkoeltijd; niets gereset of gesloten; een app die al draait blijft ongemoeid. Al zijn apps ervoor en erna, een melding aan n8n (`repaired` / `repair-failed`, probleem `OnRequest`), een eigen log `Watch-M365Apps_User_<datum>.log`, en het herstel vastgelegd in `state.json` zodat de volgende run de events ervan niet meetelt. Tot nu toe kon een klant wiens app geregistreerd en `Ok` was maar niet opende — Kris en Copilot, waarvan `copilotapp.exe` geen TWinUI-event achterlaat — niet geholpen of getest worden: de watchdog start uit zichzelf niets bij klanten, en de starttest draaide alleen voor ons eigen account. De IT Glue-procedure heeft het commando onder *Stap 2* |
+| Geverifieerd: syntaxcontrole; de hele `-User`-flow lokaal gedraaid in Windows PowerShell 5.1 op de eigen sessie van dit werkstation, met registreren, de pakketcontrole en het openen nagebootst (een geslaagd pad voor Teams en Outlook en een mislukt pad voor Copilot): de tabellen ervoor en erna, de melding, exitcode 1 en de regels in `state.json` klopten. **Niet** geverifieerd: een echte registratie en opening in de sessie van een klant op een sessiehost |
+
 ### 2026-10-13
 | Wijziging |
 |--------|

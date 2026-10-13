@@ -1009,6 +1009,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-13 (2)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User <nom> [-App ...]` : pour un utilisateur, à notre demande et maintenant — chaque application qui ne tourne pas chez lui est réinscrite dans sa session par nom de famille, **ouverte pour lui**, et doit encore tourner 15 secondes plus tard ; sinon, le plantage, le blocage ou l'ouverture refusée de ce moment est indiqué. Pas de délai ni de temps de refroidissement ; rien de réinitialisé ou fermé ; une application qui tourne déjà n'est pas touchée. Toutes ses applications avant et après, un signalement à n8n (`repaired` / `repair-failed`, problème `OnRequest`), un journal propre `Watch-M365Apps_User_<date>.log`, et la réparation enregistrée dans `state.json` pour que l'exécution suivante n'en compte pas les événements. Jusqu'ici, un client dont l'application était inscrite et `Ok` mais ne s'ouvrait pas — Kris et Copilot, dont `copilotapp.exe` ne laisse aucun événement TWinUI — ne pouvait être ni aidé ni testé : le watchdog ne lance rien de lui-même chez les clients, et le test de lancement ne tournait que pour notre propre compte. La procédure IT Glue contient la commande sous *Stap 2* |
+| Vérifié : contrôle de syntaxe ; tout le flux `-User` exécuté localement dans Windows PowerShell 5.1 sur la propre session de ce poste, avec l'inscription, la vérification du package et l'ouverture simulées (un chemin réussi pour Teams et Outlook et un chemin en échec pour Copilot) : les tableaux avant/après, le signalement, le code de sortie 1 et les entrées dans `state.json` étaient corrects. **Non** vérifié : une vraie inscription et ouverture dans la session d'un client sur un hôte de session |
+
 ### 2026-10-13
 | Modification |
 |--------|

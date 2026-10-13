@@ -183,6 +183,16 @@ Get-Content "C:\IT\AppWatchdog\Logs\Watch-M365Apps_$(Get-Date -Format yyyyMMdd).
 
 Stoppen met meekijken: `Ctrl+C`.
 
+#### Eén gebruiker helpen: app opnieuw registreren en voor hem openen
+
+Belt een gebruiker dat Teams, Outlook of Copilot niet opent, en is hij **nu aangemeld** op deze host:
+
+```powershell
+& 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -User kris -App Copilot
+```
+
+Laat `-App` weg voor alle drie. Per app die bij hem niet draait wordt hij opnieuw geregistreerd in zijn sessie en **voor hem geopend**; de app moet na 15 seconden nog draaien. Je ziet zijn apps ervoor (*Before*) en erna (*After*), en onderaan `OK` of `NOT OK` per app — bij `NOT OK` met de crash of foutcode van dat moment. Er wordt niets gereset en niets gesloten; een app die al draait blijft ongemoeid. Het resultaat komt ook als kaart in het kanaal, en in `C:\IT\AppWatchdog\Logs\Watch-M365Apps_User_<datum>.log`. Blijft het `NOT OK`: ticket naar level 3 met die regel.
+
 #### Het log lezen
 
 Elke regel begint met een label:

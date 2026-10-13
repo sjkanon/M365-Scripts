@@ -99,6 +99,16 @@
 .PARAMETER App
     Apps to watch: Teams, Outlook, Copilot. Default: all three.
 
+.PARAMETER User
+    At our request, now, for these users only (user name, UPN or DOMAIN\user) and
+    -App: per app that is not running for them, register it again in their session
+    (by family name - no reset, nothing closed), open it for them, and check that it
+    is still running 15 seconds later; when it is not, the crash or failed open of that
+    moment is named. No grace after sign-in and no -RepairCooldownHours. Shows every
+    app of theirs before and after, and reports to the webhook. A user who is not
+    signed in on this host cannot be helped: their apps live in their FSLogix
+    container. With -NoRepair (also from config.json) only the before is shown.
+
 .PARAMETER WebhookUrl
     n8n webhook (production URL) the report is POSTed to. Without it the run only logs.
 
@@ -161,6 +171,10 @@
     Where the watchdog, its settings, state and logs live. Default C:\IT\AppWatchdog.
 
 .EXAMPLE
+    # Kris says Copilot does not open: register it again in his session and open it for him
+    & 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -User kris -App Copilot
+
+.EXAMPLE
     # One run now, in this console: what does it find? Repairs only with -NoRepair off.
     .\Watch-M365Apps.ps1 -NoRepair
 
@@ -186,6 +200,7 @@ param (
     [string[]] $Account = @('itceadmin'),
     [ValidateSet('Teams', 'Outlook', 'Copilot')]
     [string[]] $App = @('Teams', 'Outlook', 'Copilot'),
+    [string[]] $User,
     [string]   $WebhookUrl,
     [string]   $WebhookToken,
     [ValidateRange(5, 1440)]
@@ -1413,6 +1428,129 @@ function Invoke-Diagnostics {
     return ''
 }
 
+# -- At our request, for one user -------------------------------------------------------
+function Test-SessionUser {
+    <# Whether a session is one of these names - user name, UPN or DOMAIN\user, compared on the user name, as -Account is. #>
+    param($Session, [string[]] $Names)
+    $leaf = ($Session.User -split '\\')[-1]
+    return @($Names | Where-Object { (($_ -split '\\')[-1] -split '@')[0] -ieq $leaf }).Count -gt 0
+}
+
+function Save-UserRepair {
+    <#
+        Record a repair of ours in state.json (UserRepairs), as a run does: the next run
+        then does not take the failures our registration logs on the way for new ones.
+    #>
+    param([string] $Key)
+    if (-not (Test-Path $WorkingDir)) { return }
+    try {
+        $saved = if (Test-Path $StatePath) { Get-Content -Path $StatePath -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+        $repairs = Get-PropertyValue $saved 'UserRepairs'
+        if (-not $repairs) {
+            $repairs = [PSCustomObject]@{}
+            $saved | Add-Member -NotePropertyName UserRepairs -NotePropertyValue $repairs -Force
+        }
+        $repairs | Add-Member -NotePropertyName $Key -NotePropertyValue (Get-Date).ToString('o') -Force
+        $saved | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8
+    } catch {
+        Write-Warn "Repair not recorded in $StatePath - the next run may report its events: $($_.Exception.Message)"
+    }
+}
+
+function Invoke-UserRepair {
+    <#
+        -User: for these users and -App, now. Per app that is not running for them: its
+        package registered again by family name in their session, the app opened for
+        them, and it has to be running 15 seconds later. Nothing reset, nothing closed,
+        no grace, no cooldown. Returns the exit code: 0 when every app runs for them.
+    #>
+    $sessions = @(Get-UserSession | Where-Object { Test-SessionUser $_ $User })
+    foreach ($name in $User) {
+        if (@($sessions | Where-Object { Test-SessionUser $_ @($name) }).Count -eq 0) {
+            Write-Bad "$name is not signed in on this host - nothing to do: their apps live in their FSLogix container"
+        }
+    }
+    if ($sessions.Count -eq 0) { return 1 }
+
+    $script:userStatus = @(Get-UserStatus -Sessions $sessions)
+    Write-UserStatus $script:userStatus 'Before'
+    if ($NoRepair -or $WhatIfPreference) { Write-Skip 'Nothing changed (-NoRepair)'; return 0 }
+
+    $results = @(foreach ($session in $sessions) {
+        foreach ($entry in $Apps) {
+            $who = $session.Account
+            Write-Step "$($entry.App) for $who (session $($session.SessionId))"
+            $result = [PSCustomObject]@{ Account = $who; App = $entry.App; Customer = -not $session.Watched; Ok = $false; Action = '' }
+            if (@($entry.Exe | ForEach-Object { Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($_)) }).Count -gt 0) {
+                Write-Ok 'Running for them - nothing to do'
+                $result.Ok = $true; $result.Action = 'running for them - nothing to do'
+                $result; continue
+            }
+            $started  = Get-Date
+            $packages = @($entry.Packages)
+            $family   = ''
+            if ($entry.App -eq 'Copilot') {
+                $copilot = Get-UnifiedCopilot -Refresh
+                if (-not $copilot -or -not $copilot.Path) {
+                    Write-Bad 'The unified Copilot app is not on this host - a host repair installs it'
+                    $result.Action = 'the unified Copilot app is not on this host'
+                    $result; continue
+                }
+                $packages = @($copilot.Package | Where-Object { $_ })
+                $family   = [string] $copilot.Family
+            } else {
+                $family = '{0}_{1}' -f $entry.Packages[0], $PublisherId
+            }
+
+            $steps = @()
+            if ($family) {
+                Invoke-PowerShellAsUser -Session $session -Command "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family'" | Out-Null
+                Save-UserRepair ('{0}|{1}' -f $session.Sid, $entry.App)
+                if (Test-UserPackage -User $session.User -Packages $packages) { Write-Ok 'Registered again'; $steps += 're-registered' }
+                else { Write-Warn 'Registered again, but still not registered and Ok'; $steps += 're-registered, still not registered and Ok' }
+            } else {
+                $steps += 'no identity package on this host to register'
+            }
+
+            $launch = Get-LaunchEntry $session ([PSCustomObject]@{ App = $entry.App; Packages = $packages })
+            if (-not $launch) {
+                Write-Bad 'Nothing to open: no app entry for them'
+                $steps += 'nothing to open'
+            } elseif (Test-AppStart $session $launch) {
+                Write-Ok "Opened for them, still running after 15 seconds"
+                $steps += 'opened for them - running'
+                $result.Ok = $true
+            } else {
+                Write-Bad 'Opened for them, but it did not start or did not stay up'
+                $steps += 'opened for them, but it did not start or stay up'
+                # What Windows wrote meanwhile: a crash or hang of the app, a refused open, a failed registration.
+                $from = $started.AddSeconds(-5)
+                foreach ($c in @(Get-AppCrash -Since $from | Where-Object { $_.App -eq $entry.App })) {
+                    $steps += '{0} {1} ({2}, {3}{4})' -f $c.Kind.ToLower(), $c.Exe, $c.Version, $c.Module, $(if ($c.Code) { ', ' + $c.Code } else { '' })
+                }
+                foreach ($f in @(Get-OpenFailure -Since $from -Sessions $sessions | Where-Object { $_.App -eq $entry.App -and $_.Sid -eq $session.Sid })) {
+                    $steps += $f.Detail
+                }
+            }
+            $result.Action = $steps -join '; '
+            $result
+        }
+    })
+
+    $script:userStatus = @(Get-UserStatus -Sessions @(Get-UserSession | Where-Object { Test-SessionUser $_ $User }))
+    Write-UserStatus $script:userStatus 'After'
+
+    $failed  = @($results | Where-Object { -not $_.Ok })
+    $before  = @($results | ForEach-Object { [PSCustomObject]@{ Account = $_.Account; App = $_.App; Problem = 'OnRequest'; Detail = $_.Action; Customer = $_.Customer; Fixed = $_.Ok } })
+    $summary = '{0}: on request for {1} - {2}' -f $env:COMPUTERNAME, ((@($sessions | ForEach-Object { $_.Account })) -join ', '),
+               ((@($results | ForEach-Object { '{0} {1}' -f $_.App, $(if ($_.Ok) { 'OK' } else { 'NOT OK' }) })) -join ', ')
+    Write-Host ''
+    if ($failed.Count -eq 0) { Write-Ok $summary } else { Write-Bad $summary }
+    Send-Notification -Kind $(if ($failed.Count -eq 0) { 'repaired' } else { 'repair-failed' }) -Summary $summary `
+        -Found @($before | Where-Object { -not $_.Fixed }) -Before $before -Actions @($results | ForEach-Object { '{0} {1}: {2}' -f $_.Account, $_.App, $_.Action }) | Out-Null
+    return $(if ($failed.Count -eq 0) { 0 } else { 1 })
+}
+
 function Get-Signature {
     param($Found)
     return (@($Found | ForEach-Object { '{0}|{1}|{2}' -f $_.Account, $_.App, $_.Problem } | Sort-Object) -join ';')
@@ -1517,11 +1655,28 @@ if (-not (Protect-WorkingDir)) { Write-Bad "Could not lock $WorkingDir - stopped
 try {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
     Get-ChildItem -Path $logDir -Filter '*.log' | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$LogDays) } | Remove-Item -Force
-    $script:logFile = Join-Path $logDir ('Watch-M365Apps_{0}.log' -f (Get-Date -Format 'yyyyMMdd'))
+    # -User has a log of its own: the task may be writing the run's log right now.
+    $logName = if ($User) { 'Watch-M365Apps_User_{0}.log' } else { 'Watch-M365Apps_{0}.log' }
+    $script:logFile = Join-Path $logDir ($logName -f (Get-Date -Format 'yyyyMMdd'))
     Start-Transcript -Path $script:logFile -Append | Out-Null
     $transcribing = $true
 } catch {
     Write-Warn "No transcript: $($_.Exception.Message)"
+}
+
+if ($User) {
+    $exitCode = 1
+    try {
+        Write-Host ''
+        Write-Host ("  M365 app watchdog - {0} - {1:yyyy-MM-dd HH:mm} - on request for {2}" -f $env:COMPUTERNAME, (Get-Date), ($User -join ', ')) -ForegroundColor Cyan
+        $exitCode = Invoke-UserRepair
+    } catch {
+        Write-Bad ('Aborted at line {0}: {1}' -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+        Write-Host $_.ScriptStackTrace
+    } finally {
+        if ($transcribing) { try { Stop-Transcript | Out-Null } catch { } }
+    }
+    exit $exitCode
 }
 
 $exitCode = 0

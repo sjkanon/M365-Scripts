@@ -1007,6 +1007,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-13 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User <name> [-App ...]`: for one user, at our request and now — per app that is not running for them, registered again in their session by family name, **opened for them**, and it has to still run 15 seconds later; if not, the crash, hang or failed open of that moment is named. No grace and no cooldown; nothing reset or closed; an app that already runs is left alone. Before and after of all their apps, a report to n8n (`repaired` / `repair-failed`, problem `OnRequest`), its own log `Watch-M365Apps_User_<date>.log`, and the repair recorded in `state.json` so the next run does not count its events. Until now a customer whose app was registered and `Ok` but would not open — Kris and Copilot, whose `copilotapp.exe` leaves no TWinUI event — could not be helped or tested: the watchdog starts nothing for customers on its own, and the launch test ran only for our own account. The IT Glue procedure has the command under *Stap 2* |
+| Verified: syntax check; the whole `-User` flow run locally in Windows PowerShell 5.1 against this workstation's own session, with registering, the package check and opening simulated (an OK path for Teams and Outlook and a failing one for Copilot): the before/after tables, the report, exit code 1 and the entries in `state.json` came out right. **Not** verified: a real registration and open in a customer's session on a session host |
+
 ### 2026-10-13
 | Change |
 |--------|
