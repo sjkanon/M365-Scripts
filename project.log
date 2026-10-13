@@ -2,6 +2,14 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-13 — Watchdog -User: één gebruiker op verzoek helpen (Kris, Copilot opent niet)
+  - Wat: -User <naam> [-App]: per app die niet draait opnieuw registreren in de sessie, voor de
+    gebruiker openen, na 15 s controleren; geen wachttijd/afkoeltijd, niets gereset of gesloten.
+    Eigen log Watch-M365Apps_User_<datum>.log, melding aan n8n (probleem OnRequest).
+  - Commits: d8fb7eb (watchdog); downloadpin naar d8fb7eb + SHA-256
+    C39870B69C593B46F60B8C6316B4E25B306F4D4158CF3A61F672E2C7285F4700 (gecontroleerd tegen GitHub).
+  - Niet getest: echte registratie en opening in een klantsessie op een sessiehost.
+
 2026-10-13 — Watchdog meldt alle gebruikers, valt niet meer om op een sluitende explorer.exe
   - Wat: elke melding bevat 'users' (elke aangemelde gebruiker, per app build + draait ja/nee),
     dezelfde tabel elke run in de log; Sid-crash (LEM-AVD-6 07:52) opgelost; foutmelding noemt
