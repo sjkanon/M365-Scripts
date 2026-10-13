@@ -1022,6 +1022,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-13
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) : une exécution échouait entièrement avec *The property 'Sid' cannot be found on this object* (LEM-AVD-6, 13-10 07:52) quand un `explorer.exe` se fermait pendant la lecture des sessions — un utilisateur qui se déconnecte, ou l'Explorateur qui redémarre. Le SID est maintenant lu de façon sûre et ce processus ignoré. Un rapport d'erreur indique maintenant aussi la ligne de l'échec, et le journal contient la pile |
+| Chaque signalement contient `users` : chaque utilisateur connecté avec, par application, sa build (ou *not registered*, un état autre que `Ok`, *files gone*) et si elle tourne dans sa session — avant la réparation et après — et le même tableau figure dans le journal à chaque exécution. Jusqu'ici un signalement ne nommait que les utilisateurs avec un constat, de sorte qu'une plainte d'un utilisateur jugé sain ne pouvait être vérifiée contre rien |
+| Un seul événement a donné quatre cartes Teams en trois minutes pour un utilisateur (LEM-AVD-6, 13-10 07:31–07:35) : un événement arrivé entre le début d'une exécution et sa lecture était relu par l'exécution suivante, qui signalait l'utilisateur — déjà réparé — comme *repair-failed* à cause du délai, puis *recovered*. Chaque exécution lit maintenant les événements jusqu'à un moment fixe et la suivante commence là, et les événements d'un utilisateur et d'une application jusqu'à 3 minutes après notre propre réparation sont écartés, pas seulement ceux autour. Un utilisateur d'événement non connecté est maintenant nommé `DOMAINE\utilisateur`, comme une session le nomme, et non d'après le dossier de profil — le même utilisateur faisait deux constats (`bjorn.tjaeckx` et `AIRPORTS\bjorn.tjaeckx`) |
+| Vérifié : contrôle de syntaxe ; `Get-UserStatus` et la lecture sûre du SID exécutés localement sur la propre session de ce poste dans Windows PowerShell 5.1 (une ligne, builds et *running* corrects) ; l'erreur StrictMode reproduite sur un `Sid` manquant. **Non** vérifié : une exécution sur un hôte de session, la fenêtre d'événements sur deux exécutions réelles |
+
 ### 2026-10-12 (2)
 | Modification |
 |--------|

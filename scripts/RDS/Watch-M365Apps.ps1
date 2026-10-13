@@ -247,6 +247,8 @@ $LogDays       = 14
 # Set before anything can report: Send-Notification reads it, and -TestNotification
 # reports before a run has opened its log.
 $script:logFile = $null
+# Every signed-in user and their apps, as last read (Get-UserStatus): goes with every report.
+$script:userStatus = @()
 $script:unifiedCopilot     = $null
 $script:unifiedCopilotRead = $false
 # The repair helper, when it is not next to this script: fetched from this repo at a
@@ -487,7 +489,9 @@ function Get-UserSession {
     foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
         $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction SilentlyContinue
         if (-not $owner -or $owner.ReturnValue -ne 0) { continue }
-        $sid = (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid
+        # An explorer.exe that closed meanwhile (a sign-out, a restart) answers nothing:
+        # skipped, not a failed run.
+        $sid = Get-PropertyValue (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue) 'Sid'
         if (-not $sid -or $seen.ContainsKey($sid)) { continue }
         $seen[$sid] = $true
         $user    = '{0}\{1}' -f $owner.Domain, $owner.User
@@ -509,13 +513,18 @@ function Get-AccountSession {
 }
 
 function Resolve-UserName {
-    <# A SID from an event as a name: a signed-in user, else the profile folder, else the SID. #>
+    <#
+        A SID from an event as a name: a signed-in user, else DOMAIN\user as a session
+        names them - so a user is the same finding whether they were signed in at the
+        time or not - else the profile folder, else the SID.
+    #>
     param([string] $Sid, $Sessions)
     $session = @($Sessions | Where-Object { $_.Sid -eq $Sid }) | Select-Object -First 1
     if ($session) { return $session.Account }
+    try { return ([Security.Principal.SecurityIdentifier] $Sid).Translate([Security.Principal.NTAccount]).Value } catch { }
     $profilePath = Get-PropertyValue (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$Sid" -ErrorAction SilentlyContinue) 'ProfileImagePath'
     if ($profilePath) { return Split-Path $profilePath -Leaf }
-    try { return ([Security.Principal.SecurityIdentifier] $Sid).Translate([Security.Principal.NTAccount]).Value } catch { return $Sid }
+    return $Sid
 }
 
 function Get-AppEntry {
@@ -792,8 +801,8 @@ function Get-AppCrash {
         its version at 1, the module at 3, the exception code at 6 and the package at
         13; 1002 has the package at 7 and the hang type at 9. The events name no user.
     #>
-    param([datetime] $Since)
-    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error', 'Application Hang'; Id = 1000, 1002; StartTime = $Since } -ErrorAction SilentlyContinue)
+    param([datetime] $Since, [datetime] $Until = (Get-Date))
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error', 'Application Hang'; Id = 1000, 1002; StartTime = $Since; EndTime = $Until } -ErrorAction SilentlyContinue)
     $rows = @(foreach ($record in $events) {
         $values = @($record.Properties | ForEach-Object { [string] $_.Value })
         $field  = { param($i) if ($i -lt $values.Count) { $values[$i] } else { '' } }
@@ -851,7 +860,10 @@ function Get-OpenFailure {
         Our own re-registration of a user's package can itself log a failure on the
         way (one staged build missing) and still end Ok - which the next run took for
         a new failure, every run: $OwnRepairs (UserRepairs from the state, per SID and
-        app) drops events from 10 seconds before to 3 minutes after such a repair.
+        app) drops events up to 3 minutes after such a repair. Everything before it
+        is what that repair answered: a run that read the same event again (it came
+        in between the previous run's start and its read) repaired a user who was
+        already repaired, and reported it as failed because of the cooldown.
 
         A registration failing with 0x80070490 for a Teams or Outlook build that is
         newer than what this host provisions, and whose files are not here, is the
@@ -860,14 +872,14 @@ function Get-OpenFailure {
         provisioned with it at once instead of every user being re-registered at
         every sign-in.
     #>
-    param([datetime] $Since, $Sessions, [hashtable] $OwnRepairs = @{})
+    param([datetime] $Since, [datetime] $Until = (Get-Date), $Sessions, [hashtable] $OwnRepairs = @{})
     $rows = @(
-        foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TWinUI/Operational'; Id = 5961; StartTime = $Since } -ErrorAction SilentlyContinue)) {
+        foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TWinUI/Operational'; Id = 5961; StartTime = $Since; EndTime = $Until } -ErrorAction SilentlyContinue)) {
             $values = @($record.Properties | ForEach-Object { $_.Value })
             if ($values.Count -lt 2) { continue }
             [PSCustomObject]@{ Kind = 'WontOpen'; Target = [string] $values[0]; Code = Format-HResult $values[1]; Record = $record }
         }
-        foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Id = 401, 404; StartTime = $Since } -ErrorAction SilentlyContinue)) {
+        foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Id = 401, 404; StartTime = $Since; EndTime = $Until } -ErrorAction SilentlyContinue)) {
             $values = @($record.Properties | ForEach-Object { $_.Value })
             $codeAt = if ($record.Id -eq 401) { 3 } else { 2 }
             if ($values.Count -le $codeAt) { continue }
@@ -887,7 +899,7 @@ function Get-OpenFailure {
         $own = $OwnRepairs['{0}|{1}' -f $sid, $entry.App]
         if ($own) {
             $ownTime = [datetime]::Parse([string] $own, $null, [Globalization.DateTimeStyles]::RoundtripKind)
-            if ($row.Record.TimeCreated -ge $ownTime.AddSeconds(-10) -and $row.Record.TimeCreated -le $ownTime.AddMinutes(3)) { continue }
+            if ($row.Record.TimeCreated -le $ownTime.AddMinutes(3)) { continue }
         }
         $key = '{0}|{1}|{2}|{3:yyyyMMddHHmmss}' -f $sid, $row.Target, $row.Code, $row.Record.TimeCreated
         if ($seen.ContainsKey($key)) { continue }
@@ -1280,6 +1292,61 @@ function Start-AppForUser {
 }
 
 # -- Report --------------------------------------------------------------------------
+function Get-UserStatus {
+    <#
+        Every signed-in user, ours and customers - also those still in their first
+        $UserGraceMinutes - with per app what is there for them: the build of their
+        package (and its status when not Ok, or that its files are gone) and whether it
+        runs in their session. For the log and for every report, so a complaint can be
+        held against what the host showed for that user, not only against the findings.
+        Reads only; nothing is started.
+    #>
+    param($Sessions)
+    $copilot = if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot } else { $null }
+    foreach ($session in @($Sessions | Sort-Object Account)) {
+        $row = [ordered]@{
+            Account  = $session.Account
+            Customer = -not $session.Watched
+            Session  = $session.SessionId
+            Since    = if ($session.Since) { '{0:dd-MM HH:mm}' -f $session.Since } else { '' }
+        }
+        foreach ($entry in $Apps) {
+            $names = if ($entry.App -eq 'Copilot') { @($copilot | Where-Object { $_ } | ForEach-Object { $_.Package } | Where-Object { $_ }) } else { @($entry.Packages) }
+            $pkg = $null
+            foreach ($name in $names) {
+                $pkg = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
+                       Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
+                if ($pkg) { break }
+            }
+            $running = @($entry.Exe | ForEach-Object { Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($_)) }).Count -gt 0
+            $parts = @()
+            if ($pkg) {
+                $parts += [string] $pkg.Version
+                $status   = [string] (Get-PropertyValue $pkg 'Status')
+                $location = Get-PropertyValue $pkg 'InstallLocation'
+                if ($status -and $status -ne 'Ok') { $parts += "status $status" }
+                if (-not $location -or -not (Test-Path -LiteralPath $location)) { $parts += 'files gone' }
+            } elseif ($entry.App -eq 'Copilot' -and $copilot -and $copilot.Path -and -not $copilot.Package) {
+                $parts += [string] $copilot.Version     # no identity package on this host: nothing per user to register
+            } elseif ($entry.App -eq 'Copilot' -and -not ($copilot -and $copilot.Path)) {
+                $parts += 'not on the host'
+            } else {
+                $parts += 'not registered'
+            }
+            $parts += if ($running) { 'running' } else { 'not running' }
+            $row[$entry.App] = $parts -join ', '
+        }
+        [PSCustomObject] $row
+    }
+}
+
+function Write-UserStatus {
+    param($Rows, [string] $Title)
+    Write-Step $Title
+    if (@($Rows).Count -eq 0) { Write-Skip 'Nobody signed in'; return }
+    $Rows | Format-Table -AutoSize | Out-String -Width 220 | Write-Host
+}
+
 function Send-Notification {
     param([string] $Kind, [string] $Summary, $Found = @(), $Before = @(), $Actions = @(), $Crashes = @(), [string] $Diagnostics,
           $Updates = @(), $Versions = $null)
@@ -1299,6 +1366,8 @@ function Send-Notification {
         diagnostics = $Diagnostics
         updates  = @($Updates)
         versions = $Versions
+        # Every signed-in user and what they have, healthy or not (Get-UserStatus).
+        users    = @($script:userStatus)
     }
     $headers = @{}
     if ($WebhookToken) { $headers['X-Watchdog-Token'] = $WebhookToken }
@@ -1487,18 +1556,21 @@ try {
     $since = $runStart.AddHours(-1)
     if ($state.LastRun) { $since = [datetime]::Parse($state.LastRun, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
     if ($since -lt $runStart.AddDays(-1)) { $since = $runStart.AddDays(-1) }
+    # Up to now and no further, and the next run starts here: an event that came in
+    # while this run was busy is read by the next run, once - not by both.
+    $until = Get-Date
 
     $sessions = @(Get-UserSession)
     # Before the events: the unified Copilot app's identity package is what they name.
     if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot | Out-Null }
     Write-Step ('Apps users could not open since {0:yyyy-MM-dd HH:mm}' -f $since)
-    $openFailures = @(Get-OpenFailure -Since $since -Sessions $sessions -OwnRepairs $state.UserRepairs)
+    $openFailures = @(Get-OpenFailure -Since $since -Until $until -Sessions $sessions -OwnRepairs $state.UserRepairs)
     if ($openFailures.Count -eq 0) { Write-Ok 'None' }
 
     $crashes = @()
     if ($CrashThreshold -gt 0) {
         Write-Step ('Crashes and hangs since {0:yyyy-MM-dd HH:mm}' -f $since)
-        $crashes = @(Get-AppCrash -Since $since | Where-Object { $_.Count -ge $CrashThreshold })
+        $crashes = @(Get-AppCrash -Since $since -Until $until | Where-Object { $_.Count -ge $CrashThreshold })
         if ($crashes.Count -eq 0) { Write-Ok 'None' }
         foreach ($c in $crashes) {
             Write-Warn ('{0} {1} {2}x ({3} {4}, {5}{6}) - last at {7:HH:mm}' -f $c.App, $c.Kind.ToLower(), $c.Count, $c.Exe, $c.Version, $c.Module, $(if ($c.Code) { ', ' + $c.Code } else { '' }), [datetime] $c.Last)
@@ -1531,6 +1603,8 @@ try {
     # Events are what happened since the last run; the read-back can only say whether
     # what they point at is still wrong, so an event finding stays unless it was fixed.
     $before  = @(@(Get-Finding -Sessions $sessions) + $openFailures)
+    $script:userStatus = @(Get-UserStatus -Sessions @(Get-UserSession))
+    Write-UserStatus $script:userStatus 'Every signed-in user'
     $after   = $before
     $actions = @()
     $repair  = $before.Count -gt 0 -and -not $NoRepair -and -not $WhatIfPreference
@@ -1573,6 +1647,8 @@ try {
             $f.Fixed = $buildsNow.ContainsKey($f.Package) -and $buildsNow[$f.Package].Version -ge [version] $f.Asked
         }
         $after = @(@(Get-Finding -Sessions @(Get-UserSession)) + @($openFailures | Where-Object { -not $_.Fixed }))
+        $script:userStatus = @(Get-UserStatus -Sessions @(Get-UserSession))
+        Write-UserStatus $script:userStatus 'Every signed-in user, after the repair'
     } elseif ($before.Count -gt 0) {
         Write-Skip 'Not repaired (-NoRepair)'
     }
@@ -1625,7 +1701,7 @@ try {
         }
     }
     $state.Signature = $signature
-    $state.LastRun   = $runStart.ToString('o')
+    $state.LastRun   = $until.ToString('o')
     if (Test-Path $WorkingDir) { $state | ConvertTo-Json | Set-Content -Path $StatePath -Encoding UTF8 }
 
     Write-Host ''
@@ -1637,8 +1713,11 @@ try {
         $exitCode = 1
     }
 } catch {
-    Write-Bad "Aborted: $($_.Exception.Message)"
-    Send-Notification -Kind 'error' -Summary "$($env:COMPUTERNAME): the watchdog run failed - $($_.Exception.Message)" | Out-Null
+    # Where it failed, so the report alone says which line to look at.
+    $where = 'line {0}' -f $_.InvocationInfo.ScriptLineNumber
+    Write-Bad "Aborted at ${where}: $($_.Exception.Message)"
+    Write-Host $_.ScriptStackTrace
+    Send-Notification -Kind 'error' -Summary "$($env:COMPUTERNAME): the watchdog run failed at $where - $($_.Exception.Message)" | Out-Null
     $exitCode = 1
 } finally {
     if ($transcribing) { try { Stop-Transcript | Out-Null } catch { } }

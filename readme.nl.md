@@ -1022,6 +1022,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-13
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): een run viel in zijn geheel om met *The property 'Sid' cannot be found on this object* (LEM-AVD-6, 13-10 07:52) als een `explorer.exe` sloot terwijl de sessies gelezen werden — een gebruiker die zich afmeldt, of Explorer die herstart. De SID wordt nu veilig gelezen en dat proces overgeslagen. Een foutmelding noemt nu ook de regel waar het misging, en de log bevat de stack |
+| Elke melding bevat `users`: elke aangemelde gebruiker met per app diens build (of *not registered*, een status die niet `Ok` is, *files gone*) en of de app in diens sessie draait — vóór het herstel en erna — en dezelfde tabel staat elke run in de log. Tot nu toe noemde een melding alleen de gebruikers met een bevinding, zodat een klacht van iemand die de watchdog gezond vond nergens tegen te controleren was |
+| Eén gebeurtenis gaf vier Teams-kaarten in drie minuten voor één gebruiker (LEM-AVD-6, 13-10 07:31–07:35): een event dat binnenkwam tussen de start van een run en het lezen, werd door de volgende run opnieuw gelezen, die de al herstelde gebruiker vanwege de afkoeltijd als *repair-failed* meldde, en daarna *recovered*. Elke run leest nu events tot een vast moment en de volgende begint daar, en events van een gebruiker en app tot 3 minuten na ons eigen herstel ervan vallen weg, niet alleen die eromheen. Een eventgebruiker die niet aangemeld was heet nu `DOMEIN\gebruiker`, zoals een sessie hem noemt, niet naar de profielmap — dezelfde gebruiker was twee bevindingen (`bjorn.tjaeckx` en `AIRPORTS\bjorn.tjaeckx`) |
+| Geverifieerd: syntaxcontrole; `Get-UserStatus` en het veilig lezen van de SID lokaal gedraaid op de eigen sessie van dit werkstation in Windows PowerShell 5.1 (één regel, builds en *running* juist); de StrictMode-fout nagebootst op een ontbrekende `Sid`. **Niet** geverifieerd: een run op een sessiehost, het eventvenster over twee echte runs |
+
 ### 2026-10-12 (2)
 | Wijziging |
 |--------|
