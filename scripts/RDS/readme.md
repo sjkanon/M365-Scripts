@@ -328,6 +328,7 @@ gebruiker* next to each one.
 |-----------|-------------|
 | `-Account` | Accounts to test with — user name, UPN or `DOMAIN\user` (default: `itceadmin`; more than one tests each, e.g. `itceadmin,itce.user`) |
 | `-App` | `Teams`, `Outlook`, `Copilot` (default: all three) |
+| `-User` | **At our request, now, for these users only** (user name, UPN or `DOMAIN\user`) and `-App`: per app that is not running for them, registered again in their session by family name (no reset, nothing closed), **opened for them**, and it has to still run 15 seconds later — if not, the crash or failed open of that moment is named. No 10-minute grace, no `-RepairCooldownHours`. Shows every app of theirs before and after, reports to n8n (`repaired` / `repair-failed`, problem `OnRequest`) and logs to `Logs\Watch-M365Apps_User_<date>.log`. Only for a user signed in on this host; with `-NoRepair` only the before |
 | `-WebhookUrl` | n8n webhook (production URL) the report is POSTed to. Without it the run only logs |
 | `-WebhookToken` | Sent as header `X-Watchdog-Token`; match it with Header Auth on the n8n Webhook node |
 | `-IntervalMinutes` | How often the task runs (default: `30`). Besides that the task runs **12 minutes after every sign-in** (the 10 minutes a fresh sign-in is left alone, plus the start of its `explorer.exe`), **30 seconds after** one of the apps would not open (TWinUI `5961`), crashed or hung (Application Error `1000`, Application Hang `1002`), and **2 minutes after** a failed package registration (AppXDeploymentServer `401`/`404`) — so a user is helped within minutes, not at the next interval. A trigger while a run is busy is dropped; its events are read by the next run. A host installed earlier gets these triggers by running `-Install` again |
@@ -350,6 +351,9 @@ gebruiker* next to each one.
 ```powershell
 # One run now in this console, report only
 .\Watch-M365Apps.ps1 -NoRepair
+
+# Kris says Copilot does not open: register it again in his session and open it for him
+& 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -User kris -App Copilot
 
 # Install on a session host, reporting to n8n
 .\Watch-M365Apps.ps1 -Install -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false

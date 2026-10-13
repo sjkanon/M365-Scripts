@@ -330,6 +330,7 @@ klant) en onder `before` of het bij hem hersteld is (`Fixed`); de Teams-kaart ze
 |-----------|--------------|
 | `-Account` | Accounts om mee te testen — gebruikersnaam, UPN of `DOMEIN\gebruiker` (standaard: `itceadmin`; met meer accounts wordt elk getest, bv. `itceadmin,itce.user`) |
 | `-App` | `Teams`, `Outlook`, `Copilot` (standaard: alle drie) |
+| `-User` | **Op ons verzoek, nu, alleen voor deze gebruikers** (gebruikersnaam, UPN of `DOMEIN\gebruiker`) en `-App`: per app die bij hen niet draait opnieuw geregistreerd in hun sessie op familienaam (geen reset, niets gesloten), **voor hen geopend**, en hij moet 15 seconden later nog draaien — zo niet, dan wordt de crash of mislukte opening van dat moment genoemd. Geen wachttijd van 10 minuten, geen `-RepairCooldownHours`. Toont al hun apps ervoor en erna, meldt aan n8n (`repaired` / `repair-failed`, probleem `OnRequest`) en logt naar `Logs\Watch-M365Apps_User_<datum>.log`. Alleen voor een gebruiker die op deze host is aangemeld; met `-NoRepair` alleen de situatie ervoor |
 | `-WebhookUrl` | n8n-webhook (productie-URL) waar het rapport naartoe wordt gePOST. Zonder deze logt de run alleen |
 | `-WebhookToken` | Wordt meegestuurd als header `X-Watchdog-Token`; stel dezelfde waarde in als Header Auth op de n8n Webhook-node |
 | `-IntervalMinutes` | Hoe vaak de taak draait (standaard: `30`). Daarnaast draait de taak **12 minuten na elke aanmelding** (de 10 minuten dat een verse aanmelding met rust wordt gelaten, plus het starten van diens `explorer.exe`), **30 seconden nadat** een van de apps niet wilde openen (TWinUI `5961`), crashte of vastliep (Application Error `1000`, Application Hang `1002`), en **2 minuten na** een mislukte pakketregistratie (AppXDeploymentServer `401`/`404`) — zodat een gebruiker binnen enkele minuten geholpen wordt, niet pas bij het volgende interval. Een trigger terwijl er al een run loopt vervalt; de gebeurtenissen ervan leest de volgende run. Een eerder geïnstalleerde host krijgt deze triggers door `-Install` opnieuw te draaien |
@@ -352,6 +353,9 @@ klant) en onder `before` of het bij hem hersteld is (`Fixed`); de Teams-kaart ze
 ```powershell
 # Eén run nu in deze console, alleen melden
 .\Watch-M365Apps.ps1 -NoRepair
+
+# Kris zegt dat Copilot niet opent: opnieuw registreren in zijn sessie en voor hem openen
+& 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -User kris -App Copilot
 
 # Installeren op een sessiehost, met meldingen naar n8n
 .\Watch-M365Apps.ps1 -Install -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false

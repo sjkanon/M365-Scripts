@@ -218,6 +218,10 @@ AzureAD\piet.jans Teams: signed off - the host repair covers the next sign-in</c
 <p>Na een paar minuten staat het resultaat in het log en, als er iets was, als kaart in het kanaal. Volg het log terwijl hij draait:</p>
 <pre><code>Get-Content "C:\IT\AppWatchdog\Logs\Watch-M365Apps_$(Get-Date -Format yyyyMMdd).log" -Tail 60 -Wait</code></pre>
 <p>Stoppen met meekijken: <code>Ctrl+C</code>.</p>
+<h4 id="een-gebruiker-helpen-app-opnieuw-registreren-en-voor-hem-openen">Eén gebruiker helpen: app opnieuw registreren en voor hem openen</h4>
+<p>Belt een gebruiker dat Teams, Outlook of Copilot niet opent, en is hij <strong>nu aangemeld</strong> op deze host:</p>
+<pre><code>&amp; 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -User kris -App Copilot</code></pre>
+<p>Laat <code>-App</code> weg voor alle drie. Per app die bij hem niet draait wordt hij opnieuw geregistreerd in zijn sessie en <strong>voor hem geopend</strong>; de app moet na 15 seconden nog draaien. Je ziet zijn apps ervoor (<em>Before</em>) en erna (<em>After</em>), en onderaan <code>OK</code> of <code>NOT OK</code> per app — bij <code>NOT OK</code> met de crash of foutcode van dat moment. Er wordt niets gereset en niets gesloten; een app die al draait blijft ongemoeid. Het resultaat komt ook als kaart in het kanaal, en in <code>C:\IT\AppWatchdog\Logs\Watch-M365Apps_User_&lt;datum&gt;.log</code>. Blijft het <code>NOT OK</code>: ticket naar level 3 met die regel.</p>
 <h4 id="het-log-lezen">Het log lezen</h4>
 <p>Elke regel begint met een label:</p>
 <div class="table-scroll"><table>
