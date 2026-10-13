@@ -2,6 +2,12 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-13 — Watchdog -User vindt de gebruiker op SID en op naam met achtervoegsel
+  - Waarom: Kris heet in zijn sessie AIRPORTS\kris.vand (81E1E8C7); -User vergeleek exact.
+  - Commits: 034c900 (watchdog); downloadpin naar 034c900 + SHA-256
+    23E50BF02C63D76F129F88C2A7C86323EC1512E65719E568CEE1C46D66B7B203 (gecontroleerd tegen GitHub).
+  - Niet getest: UPN opzoeken in het AIRPORTS-domein op de host.
+
 2026-10-13 — Watchdog weer snel: pakketten één keer per controle opvragen
   - Waarom: de users-tabel vroeg Get-AppxPackage -User opnieuw per gebruiker en app (3-4 s per
     aanroep) - minuten extra per run.
