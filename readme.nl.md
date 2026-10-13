@@ -1009,6 +1009,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-13 (4)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User` vond een aangemelde gebruiker niet: op LEM-AVD-6 heet het account van Kris in zijn sessie `AIRPORTS\kris.vand (81E1E8C7)` — `quser` toont `kris.vand` — en de naam werd exact vergeleken, dus zowel `kris.vand` als zijn UPN gaven *not signed in on this host*. Een naam wordt nu eerst vergeleken op de SID waar Windows hem naar opzoekt (een UPN, `DOMEIN\gebruiker`), daarna op de gebruikersnaam met of zonder dat achtervoegsel. Alleen een voornaam past nog steeds bij niemand, zodat hij niet de verkeerde gebruiker kan raken |
+| Geverifieerd: syntaxcontrole; de vergelijking lokaal gedraaid op een sessie met de naam `AIRPORTS\kris.vand (81E1E8C7)` (`kris.vand`, `AIRPORTS\kris.vand`, de volledige naam en `kris.vand@...` passen, `kris` niet) en op SID met het eigen account van dit werkstation. **Niet** geverifieerd: het opzoeken van zijn UPN in het AIRPORTS-domein op de host |
+
 ### 2026-10-13 (3)
 | Wijziging |
 |--------|
