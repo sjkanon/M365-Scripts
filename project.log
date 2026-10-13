@@ -2,6 +2,13 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-13 — Watchdog weer snel: pakketten één keer per controle opvragen
+  - Waarom: de users-tabel vroeg Get-AppxPackage -User opnieuw per gebruiker en app (3-4 s per
+    aanroep) - minuten extra per run.
+  - Commits: 628aa64 (watchdog); downloadpin naar 628aa64 + SHA-256
+    6D1C1D7CE1505C2D4893B7670A000C73CE321C7690B97529F9C6C52AF600004C (gecontroleerd tegen GitHub).
+  - Niet getest: looptijd op een sessiehost.
+
 2026-10-13 — Watchdog -User: één gebruiker op verzoek helpen (Kris, Copilot opent niet)
   - Wat: -User <naam> [-App]: per app die niet draait opnieuw registreren in de sessie, voor de
     gebruiker openen, na 15 s controleren; geen wachttijd/afkoeltijd, niets gereset of gesloten.
