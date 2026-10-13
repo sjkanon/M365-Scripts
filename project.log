@@ -2,6 +2,14 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-13 — Watchdog meldt alle gebruikers, valt niet meer om op een sluitende explorer.exe
+  - Wat: elke melding bevat 'users' (elke aangemelde gebruiker, per app build + draait ja/nee),
+    dezelfde tabel elke run in de log; Sid-crash (LEM-AVD-6 07:52) opgelost; foutmelding noemt
+    de regel; events worden maar één keer gelezen (dubbele kaarten bjorn.tjaeckx 07:31-07:35).
+  - Commits: 35aae05 (watchdog); downloadpin naar 35aae05 + SHA-256
+    3E05272B687C26DDCB585A9D7505FD710F9CD0F9A9B9B0F79577D48BE93BE13B (gecontroleerd tegen GitHub).
+  - Niet getest: een run op een sessiehost. n8n-kaart toont 'users' nog niet.
+
 2026-10-12 — Watchdog draait ook na aanmelding en na een app die faalt; downloadpin bijgewerkt
   - Wat: -Install geeft de taak extra triggers: 12 min na elke aanmelding, 30 s na TWinUI 5961 of
     een crash/hang van ms-teams/olk/copilotapp, 2 min na AppX 401/404. IgnoreNew, wachttijden
