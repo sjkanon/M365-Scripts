@@ -1007,6 +1007,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-13
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): a run failed as a whole with *The property 'Sid' cannot be found on this object* (LEM-AVD-6, 13-10 07:52) when an `explorer.exe` closed while the sessions were read — a user signing out, or Explorer restarting. The SID is now read safely and that process skipped. An error report now also names the line it failed at, and the log holds the stack |
+| Every report carries `users`: every signed-in user with, per app, their build (or *not registered*, a status that is not `Ok`, *files gone*) and whether it runs in their session — before the repair and after it — and the same table is in the log every run. Until now a report named only the users with a finding, so a complaint from someone the watchdog called healthy could not be checked against anything |
+| One event led to four Teams cards in three minutes for one user (LEM-AVD-6, 13-10 07:31–07:35): an event that came in between a run's start and its read was read again by the next run, which then reported the user — already repaired — as *repair-failed* because of the cooldown, and then *recovered*. Each run now reads events up to a fixed moment and the next starts there, and events of a user and app up to 3 minutes after our own repair of them are dropped, not only those around it. An event user who was not signed in is now named `DOMAIN\user`, as a session names them, not by the profile folder — the same user was two findings (`bjorn.tjaeckx` and `AIRPORTS\bjorn.tjaeckx`) |
+| Verified: syntax check; `Get-UserStatus` and the safe SID read run locally against this workstation's own session in Windows PowerShell 5.1 (one row, builds and *running* correct); the StrictMode error reproduced on a missing `Sid`. **Not** verified: a run on a session host, the event window across two real runs |
+
 ### 2026-10-12 (2)
 | Change |
 |--------|
