@@ -23,9 +23,10 @@ Graph is the standard. Where a script still uses Exchange Online PowerShell, or 
 | `Get-MailboxSizes` | Exchange Online | Delegated | Graph's `getMailboxUsageDetail` report is aggregated, a day or more behind, and shows concealed names when the tenant hides user details |
 | `Move-InboxToArchive`, `Restore-MailboxMessages`, `Remove-PhishingMessage` (Graph engine) | Graph (+ Exchange) | **App-only** (temporary app) | A delegated token reaches another user's mailbox only with Full Access on it (`Mail.ReadWrite.Shared`). `-Delegated` takes that route when you have (or, in `Move-InboxToArchive`, are given) Full Access — not under GDAP |
 | `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar` | Graph (+ Exchange) | **App-only** (temporary app) | Cannot be otherwise: they read every user's calendar list or write into a resource mailbox, which no delegated token reaches. No `-Delegated` |
+| `Send-MailboxForward` | Exchange + Graph | Delegated for the rule, **app-only** (temporary app) for the backfill | No Graph API for mailbox forwarding; forwarding another user's mail over Graph needs `Mail.Send` app-only, or Full Access plus Send As delegated (`-Delegated`) — not under GDAP |
 | `Migrate-Calendar` | Graph + Exchange | Delegated to read, **app-only** to write | Graph reads group calendars only delegated, and writes into the new mailbox only app-only |
 
-The temporary app is created with a delegated sign-in (Global Administrator or Privileged Role Administrator) and removed again when the run ends. In `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage` and `Restore-MailboxMessages` that sign-in is always a **device code over plain REST**, whatever `load.config.ps1` says: those scripts also talk to Exchange Online, whose MSAL clashes with the Graph SDK's, so they never load the SDK for it. `Move-InboxToArchive` and `Migrate-Calendar` use `Connect-M365Graph` for it and follow `load.config.ps1`.
+The temporary app is created with a delegated sign-in (Global Administrator or Privileged Role Administrator) and removed again when the run ends. In `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage`, `Restore-MailboxMessages` and `Send-MailboxForward` that sign-in is always a **device code over plain REST**, whatever `load.config.ps1` says: those scripts also talk to Exchange Online, whose MSAL clashes with the Graph SDK's, so they never load the SDK for it. `Move-InboxToArchive` and `Migrate-Calendar` use `Connect-M365Graph` for it and follow `load.config.ps1`.
 
 ---
 
@@ -39,6 +40,7 @@ The temporary app is created with a delegated sign-in (Global Administrator or P
 | [`Set-Calendar-rights.ps1`](Set-Calendar-rights.ps1) ([docs](#set-calendar-rightsps1)) | Grant calendar folder permissions to a user |
 | [`Set-Distributionlist-dynamic-static.ps1`](Set-Distributionlist-dynamic-static.ps1) ([docs](#set-distributionlist-dynamic-staticps1)) | Resolve a dynamic distribution group's members into a regular (static) group |
 | [`Move-InboxToArchive.ps1`](Move-InboxToArchive.ps1) ([docs](#move-inboxtoarchiveps1)) | Move all (or date-filtered) Inbox messages of a mailbox to its Archive folder |
+| [`Send-MailboxForward.ps1`](Send-MailboxForward.ps1) ([docs](#send-mailboxforwardps1)) | Forward all mail of a mailbox to another address: a forwarding rule for new mail, plus the mail of the last N days — temporary app registration, preview by default |
 | [`Test-CalendarPermissions.ps1`](Test-CalendarPermissions.ps1) ([docs](#test-calendarpermissionsps1)) | Audit calendar folder permissions |
 | [`Get-CalendarMappings.ps1`](Get-CalendarMappings.ps1) ([docs](#get-calendarmappingsps1)) | Where each calendar is actually mapped in Outlook, next to the rights behind it — or find one calendar by keyword (`-Search balie`) |
 | [`Test-MailboxPermissions.ps1`](Test-MailboxPermissions.ps1) ([docs](#test-mailboxpermissionsps1)) | Audit Full Access, Send As, Send on Behalf delegation |
@@ -283,6 +285,74 @@ By default the script archives any mailbox in the tenant without requiring Full 
 - GDAP-aware: under a GDAP session (`$global:authMode -eq 'GDAP'`, set via `Connect-Tenant` / `load.ps1`), `-TenantId` is resolved automatically from the selected customer tenant (`$global:cid`) if omitted — through `Resolve-M365TenantId` in `Connect-M365.ps1`. `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` are honored too
 
 **Required modules:** `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `ExchangeOnlineManagement` — installed by `scripts\Startup\Install-Modules.ps1`.
+
+---
+
+### Send-MailboxForward.ps1
+
+Forwards all mail of a mailbox to another address — for example when an employee leaves and a colleague or a shared address has to receive their mail. Two parts, each of which can be skipped:
+
+1. **Forwarding rule** (Exchange Online) — mailbox forwarding on `-Mailbox`, so every new message also goes to `-ForwardTo`, with a copy kept in the mailbox (`-NoKeepCopy` to drop it). An internal target is set as `ForwardingAddress`, which the outbound auto-forward policy does not block; an external one as `ForwardingSmtpAddress`, which needs auto-forwarding allowed in the outbound spam policy — the script warns when the default policy blocks it.
+2. **Backfill** (Microsoft Graph) — forwards every message received in the last `-Days` days (or since `-After`), oldest first, so the target also gets what arrived before the rule existed. Sent Items, Drafts, Deleted Items, Junk Email and Outbox are skipped. The window ends at the start of the run, so running both parts together never forwards a message twice.
+
+Preview by default: shows the current forwarding and how many messages would go, changes nothing. `-Apply` sets the rule and sends.
+
+**Authentication (backfill)**
+
+- **Temporary app (default)** — device code sign-in (Global Administrator or Privileged Role Administrator), a short-lived App Registration with the application permissions `Mail.Read` + `Mail.Send`, used app-only and removed again when the run ends, also when it fails.
+- **Your own app** — `-ClientId` with `-ClientSecret` or `-CertificateThumbprint`, or `-AppOnly` (from `graph.appid.json`). That app needs `Mail.Read` + `Mail.Send` (application, admin-consented). Limit it to the mailbox with an Application Access Policy or RBAC for Applications if you keep it around.
+- **`-Delegated`** — Graph as yourself (`Mail.Read.Shared` + `Mail.Send.Shared`); needs Full Access and Send As on the mailbox. Not under GDAP.
+
+All Graph calls are plain REST — device code, client secret, or a signed client assertion for the certificate — so the Graph SDK is never loaded and cannot clash with the MSAL of `ExchangeOnlineManagement`. The forwarding rule connects delegated through `Connect-M365Exchange`.
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Mailbox` | Yes | UPN or primary SMTP address of the mailbox whose mail is forwarded |
+| `-ForwardTo` | Yes | Address that receives the mail, internal or external |
+| `-Days` | No | Backfill window in days, counted back from the start of the run. Default `30` |
+| `-After` | No | Backfill everything received from this date on, instead of `-Days` |
+| `-NoKeepCopy` | No | Forwarding rule without a copy in the mailbox |
+| `-Comment` | No | Text above each backfilled message. Default `Automatically forwarded from <Mailbox>` |
+| `-SkipForwardingRule` | No | Only the backfill |
+| `-SkipBackfill` | No | Only the forwarding rule; no Graph sign-in |
+| `-Apply` | No | Set the rule and forward. Without it: preview only |
+| `-DelaySeconds` | No | Pause between two forwards. Default `2.1`, just under Exchange's 30 messages per minute |
+| `-LogPath` | No | CSV with one row per backfilled message. Default `C:\Temp\MailboxForward_<mailbox>_<timestamp>.csv` |
+| `-TenantId` | No | Tenant ID or verified domain. Needed for the temporary app and `-ClientId` unless resolvable from a GDAP customer tenant |
+| `-ClientId` | No | Your own App Registration (`Mail.Read` + `Mail.Send` application) |
+| `-ClientSecret` | No | Client secret for `-ClientId` |
+| `-CertificateThumbprint` | No | Certificate for `-ClientId`, from `Cert:\CurrentUser\My` or `Cert:\LocalMachine\My` |
+| `-AppOnly` | No | `ClientId` and `CertificateThumbprint` from `graph.appid.json` |
+| `-Delegated` | No | Graph as yourself; needs Full Access and Send As on the mailbox |
+
+**Examples**
+
+```powershell
+# Preview: current forwarding and how many messages of the last 30 days would go
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com"
+
+# Rule plus 30 days of history, with a temporary app registration
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com" -TenantId contoso.com -Apply
+
+# Only history since 1 September, with your own app (certificate)
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com" `
+    -After 2026-09-01 -SkipForwardingRule -TenantId contoso.com `
+    -ClientId "00000000-0000-0000-0000-000000000000" -CertificateThumbprint "ABC123..." -Apply
+
+# Only the forwarding rule, no copy in the mailbox
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "piet@contoso.com" -SkipBackfill -NoKeepCopy -Apply
+```
+
+**Notes**
+- Each backfilled message is an ordinary forward: not subject to the auto-forward policy, and a copy lands in the mailbox's Sent Items.
+- Exchange Online allows 30 messages per minute and 10,000 recipients per day per mailbox. `-DelaySeconds` keeps the run under the first (about 28 per minute); above 9,000 messages the script warns — split the run with `-After`.
+- Run it again with the same window and the target gets everything again: use `-SkipForwardingRule -After <date>` to send only what is missing. The CSV log shows what went.
+- Removing the forward later: `Set-Mailbox <mailbox> -ForwardingAddress $null -ForwardingSmtpAddress $null`.
+- GDAP-aware: `-TenantId` is resolved from the selected customer tenant, and Exchange connects to that customer.
+
+**Required modules:** `ExchangeOnlineManagement` (forwarding rule only) — installed by `scripts\Startup\Install-Modules.ps1`. The backfill needs no module.
 
 ---
 

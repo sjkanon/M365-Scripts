@@ -232,6 +232,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load [`functies.ps1`](scripts/Startu
 | `J` | [Move-SharedCalendar](scripts/Exchange/Move-SharedCalendar.ps1) — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
 | `K` | [Get-DLMembers](scripts/Exchange/Get-DistributionGroupMembers.ps1) — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
 | `L` | [Restore-MailboxMessages](scripts/Exchange/Restore-MailboxMessages.ps1) — put back mail that was moved or deleted on a given day, or from a date until now, and show who did it (always previews first) |
+| `M` | [Send-MailboxForward](scripts/Exchange/Send-MailboxForward.ps1) — forward a mailbox to another address: a forwarding rule for new mail plus the mail of the last N days (always previews first) |
 
 **Entra ID submenu (`D`)**
 
@@ -283,6 +284,7 @@ Scripts for calendar and mailbox management.
   - `Recycle` / `SoftDelete` / `HardDelete`; refuses to run without a content selector so a date range alone can never match every message
   - Loops purge rounds automatically around Purview's 10-items-per-mailbox limit, and writes a CSV of everything matched and deleted
 - **[Restore-MailboxMessages.ps1](scripts/Exchange/Restore-MailboxMessages.ps1)** — put back messages that were moved or deleted on a given day, and report who did it; preview by default
+- **[Send-MailboxForward.ps1](scripts/Exchange/Send-MailboxForward.ps1)** — forward all mail of a mailbox to another address: a forwarding rule for new mail, plus the mail of the last N days through a temporary app registration; preview by default
   - Deleted messages go back via `Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges); moved messages are traced to their original folder through the audit log and moved back over Graph
   - Names the actor from the Unified Audit Log — account, owner/delegate/admin, client, IP — and says which actions are not audited on the mailbox
 
@@ -783,6 +785,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/Exchange/Set-Distributionlist-dynamic-static.ps1">Set-Distributionlist-dynamic-static.ps1</a>
     │   ├── <a href="scripts/Exchange/Move-InboxToArchive.ps1">Move-InboxToArchive.ps1</a>
     │   ├── <a href="scripts/Exchange/Restore-MailboxMessages.ps1">Restore-MailboxMessages.ps1</a>  ← put back mail moved/deleted on a date, and who did it
+    │   ├── <a href="scripts/Exchange/Send-MailboxForward.ps1">Send-MailboxForward.ps1</a>  ← forward a mailbox: rule for new mail + the last N days
     │   ├── <a href="scripts/Exchange/Test-CalendarPermissions.ps1">Test-CalendarPermissions.ps1</a>
     │   ├── <a href="scripts/Exchange/Get-CalendarMappings.ps1">Get-CalendarMappings.ps1</a>  ← where each calendar is mapped in Outlook, next to the rights behind it
     │   ├── <a href="scripts/Exchange/Test-MailboxPermissions.ps1">Test-MailboxPermissions.ps1</a>
@@ -1021,6 +1024,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-14
+| Change |
+|--------|
+| New [`scripts/Exchange/Send-MailboxForward.ps1`](scripts/Exchange/readme.md#send-mailboxforwardps1): forward all mail of a mailbox to another address — a forwarding rule for new mail (Exchange Online, internal target as `ForwardingAddress`, external as `ForwardingSmtpAddress` with a warning when the outbound spam policy blocks it) and the mail of the last `-Days` days (or since `-After`) forwarded one by one over Graph, oldest first. It replaces a one-off script written for a single customer, with the source and target addresses hard-coded and only a hand-made app registration or Full Access + Send As for the Graph part; it was never committed and sat in `scripts/Teams/`. Graph now goes the way of the other mailbox scripts: a temporary app registration (`Mail.Read` + `Mail.Send` application) that is removed at the end, your own app (`-ClientId` with a secret or certificate, `-AppOnly`), or `-Delegated`. All of it over plain REST — also the certificate, as a signed client assertion — so it cannot clash with the Exchange module's MSAL. Preview by default, `-Apply` to act; the window ends at the start of the run so rule and backfill never send a message twice; `-DelaySeconds` (2.1) keeps under Exchange's 30 messages per minute. Menu: Exchange submenu `M` |
+| Verified: syntax check; the parameter checks (nothing to do, an invalid `-ForwardTo`, `-ClientId` without a secret); the certificate client assertion built with a throwaway self-signed certificate — RS256, `x5t` matches the thumbprint, signature valid against the public key. **Not** verified: a run against a tenant (forwarding rule, temporary app, the forwards themselves) |
 
 ### 2026-10-13 (4)
 | Change |

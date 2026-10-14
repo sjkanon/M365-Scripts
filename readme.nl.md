@@ -232,6 +232,7 @@ De M365-opties (`B`, `C`, `D`, `E`, `H`) laden [`functies.ps1`](scripts/Startup/
 | `J` | [Move-SharedCalendar](scripts/Exchange/Move-SharedCalendar.ps1) — alles in één: een agenda op trefwoord zoeken, verhuizen naar een resourcemailbox, en oplijsten wie moet overstappen |
 | `K` | [Get-DLMembers](scripts/Exchange/Get-DistributionGroupMembers.ps1) — elke distributielijst met haar leden exporteren naar Excel, of alleen de lijsten met één adres, één domein of een domeinboom (`-Recurse` om geneste lijsten uit te klappen) |
 | `L` | [Restore-MailboxMessages](scripts/Exchange/Restore-MailboxMessages.ps1) — mail terugzetten die op een bepaalde dag, of vanaf een datum tot nu, is verplaatst of verwijderd, en tonen wie het deed (toont altijd eerst een voorbeeld) |
+| `M` | [Send-MailboxForward](scripts/Exchange/Send-MailboxForward.ps1) — een mailbox doorsturen naar een ander adres: een doorstuurregel voor nieuwe mail plus de mail van de afgelopen N dagen (toont altijd eerst een voorbeeld) |
 
 **Entra ID-submenu (`D`)**
 
@@ -283,6 +284,7 @@ Scripts voor agenda- en mailboxbeheer.
   - `Recycle` / `SoftDelete` / `HardDelete`; weigert te draaien zonder inhoudsselector, zodat een datumbereik alleen nooit op elk bericht kan matchen
   - Herhaalt purge-rondes automatisch om de limiet van Purview van 10 items per mailbox heen, en schrijft een CSV van alles wat gematcht en verwijderd is
 - **[Restore-MailboxMessages.ps1](scripts/Exchange/Restore-MailboxMessages.ps1)** — berichten terugzetten die op een bepaalde dag zijn verplaatst of verwijderd, en rapporteren wie het deed; standaard alleen een voorbeeld
+- **[Send-MailboxForward.ps1](scripts/Exchange/Send-MailboxForward.ps1)** — alle mail van een mailbox doorsturen naar een ander adres: een doorstuurregel voor nieuwe mail, plus de mail van de afgelopen N dagen via een tijdelijke app registration; standaard alleen een voorbeeld
   - Verwijderde berichten gaan terug via `Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges); verplaatste berichten worden via het auditlogboek naar hun oorspronkelijke map herleid en via Graph teruggezet
   - Noemt de actor uit het Unified Audit Log — account, eigenaar/gemachtigde/beheerder, client, IP — en vermeldt welke acties op de mailbox niet worden geaudit
 
@@ -783,6 +785,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/Exchange/Set-Distributionlist-dynamic-static.ps1">Set-Distributionlist-dynamic-static.ps1</a>
     │   ├── <a href="scripts/Exchange/Move-InboxToArchive.ps1">Move-InboxToArchive.ps1</a>
     │   ├── <a href="scripts/Exchange/Restore-MailboxMessages.ps1">Restore-MailboxMessages.ps1</a>  ← mail terugzetten die op een datum is verplaatst/verwijderd, en wie het deed
+    │   ├── <a href="scripts/Exchange/Send-MailboxForward.ps1">Send-MailboxForward.ps1</a>  ← mailbox doorsturen: regel voor nieuwe mail + de afgelopen N dagen
     │   ├── <a href="scripts/Exchange/Test-CalendarPermissions.ps1">Test-CalendarPermissions.ps1</a>
     │   ├── <a href="scripts/Exchange/Get-CalendarMappings.ps1">Get-CalendarMappings.ps1</a>  ← waar elke agenda in Outlook is toegevoegd, naast de rechten erachter
     │   ├── <a href="scripts/Exchange/Test-MailboxPermissions.ps1">Test-MailboxPermissions.ps1</a>
@@ -1021,6 +1024,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-14
+| Wijziging |
+|-----------|
+| Nieuw [`scripts/Exchange/Send-MailboxForward.ps1`](scripts/Exchange/readme.nl.md#send-mailboxforwardps1): alle mail van een mailbox doorsturen naar een ander adres — een doorstuurregel voor nieuwe mail (Exchange Online, intern doel als `ForwardingAddress`, extern als `ForwardingSmtpAddress` met een waarschuwing als het uitgaande spambeleid het blokkeert) en de mail van de afgelopen `-Days` dagen (of sinds `-After`) één voor één doorgestuurd via Graph, oudste eerst. Het vervangt een eenmalig script voor één klant, met bron- en doeladres hard in de code en voor het Graph-deel alleen een zelf gemaakte app registration of Full Access + Send As; het was nooit gecommit en stond in `scripts/Teams/`. Graph gaat nu zoals bij de andere mailboxscripts: een tijdelijke app registration (`Mail.Read` + `Mail.Send` applicatie) die aan het eind wordt verwijderd, je eigen app (`-ClientId` met secret of certificaat, `-AppOnly`), of `-Delegated`. Alles via gewone REST — ook het certificaat, als ondertekende client assertion — dus het kan niet botsen met de MSAL van de Exchange-module. Standaard een voorbeeld, `-Apply` om uit te voeren; het venster eindigt bij de start van de run, zodat regel en inhalen een bericht nooit twee keer sturen; `-DelaySeconds` (2.1) blijft onder de 30 berichten per minuut van Exchange. Menu: Exchange-submenu `M` |
+| Geverifieerd: syntaxcontrole; de parametercontroles (niets te doen, een ongeldige `-ForwardTo`, `-ClientId` zonder secret); de client assertion voor het certificaat gebouwd met een wegwerp-zelfondertekend certificaat — RS256, `x5t` klopt met de thumbprint, handtekening geldig tegen de publieke sleutel. **Niet** geverifieerd: een run tegen een tenant (doorstuurregel, tijdelijke app, het doorsturen zelf) |
 
 ### 2026-10-13 (4)
 | Wijziging |
