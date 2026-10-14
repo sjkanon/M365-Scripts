@@ -231,6 +231,7 @@ Les options M365 (`B`, `C`, `D`, `E`, `H`) ne chargent [`functies.ps1`](scripts/
 | `J` | [Move-SharedCalendar](scripts/Exchange/Move-SharedCalendar.ps1) — tout-en-un : trouver un calendrier par mot-clé, le déplacer vers une boîte aux lettres de ressource, lister qui doit basculer |
 | `K` | [Get-DLMembers](scripts/Exchange/Get-DistributionGroupMembers.ps1) — exporter chaque liste de distribution avec ses membres vers Excel, ou seulement les listes contenant une adresse, un domaine ou une arborescence de domaines (`-Recurse` pour développer les listes imbriquées) |
 | `L` | [Restore-MailboxMessages](scripts/Exchange/Restore-MailboxMessages.ps1) — remettre en place le courrier déplacé ou supprimé un jour donné, ou depuis une date jusqu'à maintenant, et montrer qui l'a fait (toujours un aperçu d'abord) |
+| `M` | [Send-MailboxForward](scripts/Exchange/Send-MailboxForward.ps1) — transférer une boîte aux lettres vers une autre adresse : une règle de transfert pour le nouveau courrier plus le courrier des N derniers jours (toujours un aperçu d'abord) |
 
 **Sous-menu Entra ID (`D`)**
 
@@ -282,6 +283,7 @@ Scripts de gestion des calendriers et des boîtes aux lettres.
   - `Recycle` / `SoftDelete` / `HardDelete` ; refuse de s'exécuter sans sélecteur de contenu, pour qu'une simple plage de dates ne puisse jamais correspondre à tous les messages
   - Enchaîne automatiquement les passes de purge pour contourner la limite de Purview de 10 éléments par boîte aux lettres, et écrit un CSV de tout ce qui a été trouvé et supprimé
 - **[Restore-MailboxMessages.ps1](scripts/Exchange/Restore-MailboxMessages.ps1)** — remettre en place les messages déplacés ou supprimés un jour donné, et indiquer qui l'a fait ; aperçu par défaut
+- **[Send-MailboxForward.ps1](scripts/Exchange/Send-MailboxForward.ps1)** — transférer tout le courrier d'une boîte aux lettres vers une autre adresse : une règle de transfert pour le nouveau courrier, plus le courrier des N derniers jours via une application temporaire ; aperçu par défaut
   - Les messages supprimés reviennent via `Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges) ; les messages déplacés sont retracés jusqu'à leur dossier d'origine via le journal d'audit et remis en place via Graph
   - Nomme l'auteur à partir du Unified Audit Log — compte, propriétaire/délégué/administrateur, client, IP — et indique quelles actions ne sont pas auditées sur la boîte aux lettres
 
@@ -777,6 +779,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/Exchange/Set-Distributionlist-dynamic-static.ps1">Set-Distributionlist-dynamic-static.ps1</a>
     │   ├── <a href="scripts/Exchange/Move-InboxToArchive.ps1">Move-InboxToArchive.ps1</a>
     │   ├── <a href="scripts/Exchange/Restore-MailboxMessages.ps1">Restore-MailboxMessages.ps1</a>  ← remettre en place le courrier déplacé/supprimé à une date, et qui l'a fait
+    │   ├── <a href="scripts/Exchange/Send-MailboxForward.ps1">Send-MailboxForward.ps1</a>  ← transférer une boîte : règle pour le nouveau courrier + les N derniers jours
     │   ├── <a href="scripts/Exchange/Test-CalendarPermissions.ps1">Test-CalendarPermissions.ps1</a>
     │   ├── <a href="scripts/Exchange/Get-CalendarMappings.ps1">Get-CalendarMappings.ps1</a>  ← où chaque calendrier est ajouté dans Outlook, à côté des droits correspondants
     │   ├── <a href="scripts/Exchange/Test-MailboxPermissions.ps1">Test-MailboxPermissions.ps1</a>
@@ -1008,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-14
+| Modification |
+|--------------|
+| Nouveau [`scripts/Exchange/Send-MailboxForward.ps1`](scripts/Exchange/readme.fr.md#send-mailboxforwardps1) : transférer tout le courrier d'une boîte aux lettres vers une autre adresse — une règle de transfert pour le nouveau courrier (Exchange Online, cible interne en `ForwardingAddress`, externe en `ForwardingSmtpAddress` avec un avertissement quand la stratégie anti-spam sortante la bloque) et le courrier des `-Days` derniers jours (ou depuis `-After`) transféré un par un via Graph, du plus ancien au plus récent. Il remplace un script ponctuel écrit pour un seul client, avec les adresses source et cible codées en dur et, pour la partie Graph, seulement une app registration créée à la main ou Full Access + Send As ; il n'avait jamais été commité et se trouvait dans `scripts/Teams/`. Graph suit désormais la voie des autres scripts de boîte aux lettres : une application temporaire (`Mail.Read` + `Mail.Send` application) supprimée à la fin, votre propre app (`-ClientId` avec secret ou certificat, `-AppOnly`), ou `-Delegated`. Le tout en REST simple — le certificat aussi, en assertion client signée — donc sans conflit avec la MSAL du module Exchange. Aperçu par défaut, `-Apply` pour agir ; la fenêtre se termine au début de l'exécution, donc règle et rattrapage n'envoient jamais un message deux fois ; `-DelaySeconds` (2.1) reste sous les 30 messages par minute d'Exchange. Menu : sous-menu Exchange `M` |
+| Vérifié : contrôle de syntaxe ; les contrôles de paramètres (rien à faire, un `-ForwardTo` invalide, `-ClientId` sans secret) ; l'assertion client du certificat construite avec un certificat auto-signé jetable — RS256, `x5t` correspond à l'empreinte, signature valide avec la clé publique. **Non** vérifié : une exécution sur un tenant (règle de transfert, application temporaire, les transferts eux-mêmes) |
 
 ### 2026-10-13 (4)
 | Modification |

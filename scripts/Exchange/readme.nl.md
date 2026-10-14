@@ -23,9 +23,10 @@ Graph is de standaard. Waar een script nog Exchange Online PowerShell gebruikt, 
 | `Get-MailboxSizes` | Exchange Online | Gedelegeerd | Het Graph-rapport `getMailboxUsageDetail` is geaggregeerd, loopt een dag of meer achter en toont verborgen namen als de tenant gebruikersgegevens afschermt |
 | `Move-InboxToArchive`, `Restore-MailboxMessages`, `Remove-PhishingMessage` (Graph-engine) | Graph (+ Exchange) | **App-only** (tijdelijke app) | Een gedelegeerd token bereikt de mailbox van een andere gebruiker alleen met Full Access erop (`Mail.ReadWrite.Shared`). `-Delegated` neemt die route als je Full Access hebt (of, in `Move-InboxToArchive`, krijgt) — niet onder GDAP |
 | `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar` | Graph (+ Exchange) | **App-only** (tijdelijke app) | Kan niet anders: ze lezen de agendalijst van elke gebruiker of schrijven in een resourcemailbox, en daar komt geen gedelegeerd token bij. Geen `-Delegated` |
+| `Send-MailboxForward` | Exchange + Graph | Gedelegeerd voor de regel, **app-only** (tijdelijke app) voor het inhalen | Geen Graph-API voor mailbox-forwarding; mail van een andere gebruiker doorsturen via Graph vraagt `Mail.Send` app-only, of Full Access plus Send As gedelegeerd (`-Delegated`) — niet onder GDAP |
 | `Migrate-Calendar` | Graph + Exchange | Gedelegeerd om te lezen, **app-only** om te schrijven | Graph leest groepsagenda's alleen gedelegeerd, en schrijft alleen app-only in de nieuwe mailbox |
 
-De tijdelijke app wordt aangemaakt met een gedelegeerde aanmelding (Global Administrator of Privileged Role Administrator) en aan het eind van de run weer verwijderd. In `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage` en `Restore-MailboxMessages` is die aanmelding altijd een **apparaatcode via gewone REST**, wat `load.config.ps1` ook zegt: die scripts praten ook met Exchange Online, waarvan de MSAL botst met die van de Graph SDK, dus laden ze de SDK daar niet voor. `Move-InboxToArchive` en `Migrate-Calendar` gebruiken er `Connect-M365Graph` voor en volgen `load.config.ps1`.
+De tijdelijke app wordt aangemaakt met een gedelegeerde aanmelding (Global Administrator of Privileged Role Administrator) en aan het eind van de run weer verwijderd. In `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage`, `Restore-MailboxMessages` en `Send-MailboxForward` is die aanmelding altijd een **apparaatcode via gewone REST**, wat `load.config.ps1` ook zegt: die scripts praten ook met Exchange Online, waarvan de MSAL botst met die van de Graph SDK, dus laden ze de SDK daar niet voor. `Move-InboxToArchive` en `Migrate-Calendar` gebruiken er `Connect-M365Graph` voor en volgen `load.config.ps1`.
 
 ---
 
@@ -39,6 +40,7 @@ De tijdelijke app wordt aangemaakt met een gedelegeerde aanmelding (Global Admin
 | [`Set-Calendar-rights.ps1`](Set-Calendar-rights.ps1) ([docs](#set-calendar-rightsps1)) | Een gebruiker rechten geven op een agendamap |
 | [`Set-Distributionlist-dynamic-static.ps1`](Set-Distributionlist-dynamic-static.ps1) ([docs](#set-distributionlist-dynamic-staticps1)) | De leden van een dynamische distributiegroep omzetten naar een gewone (statische) groep |
 | [`Move-InboxToArchive.ps1`](Move-InboxToArchive.ps1) ([docs](#move-inboxtoarchiveps1)) | Alle (of op datum gefilterde) berichten uit het Postvak IN van een mailbox naar de map Archief verplaatsen |
+| [`Send-MailboxForward.ps1`](Send-MailboxForward.ps1) ([docs](#send-mailboxforwardps1)) | Alle mail van een mailbox doorsturen naar een ander adres: een doorstuurregel voor nieuwe mail, plus de mail van de afgelopen N dagen — tijdelijke app registration, standaard een voorbeeld |
 | [`Test-CalendarPermissions.ps1`](Test-CalendarPermissions.ps1) ([docs](#test-calendarpermissionsps1)) | Rechten op agendamappen auditen |
 | [`Get-CalendarMappings.ps1`](Get-CalendarMappings.ps1) ([docs](#get-calendarmappingsps1)) | Waar elke agenda daadwerkelijk in Outlook gekoppeld is, naast de rechten erachter — of één agenda op trefwoord zoeken (`-Search balie`) |
 | [`Test-MailboxPermissions.ps1`](Test-MailboxPermissions.ps1) ([docs](#test-mailboxpermissionsps1)) | Delegatie via Full Access, Send As en Send on Behalf auditen |
@@ -283,6 +285,74 @@ Standaard archiveert het script elke mailbox in de tenant zonder dat je er Full 
 - GDAP-bewust: onder een GDAP-sessie (`$global:authMode -eq 'GDAP'`, ingesteld via `Connect-Tenant` / `load.ps1`) wordt `-TenantId`, als die ontbreekt, automatisch afgeleid uit de geselecteerde klanttenant (`$global:cid`) — via `Resolve-M365TenantId` in `Connect-M365.ps1`. Ook `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` worden gerespecteerd
 
 **Vereiste modules:** `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `ExchangeOnlineManagement` — geïnstalleerd door `scripts\Startup\Install-Modules.ps1`.
+
+---
+
+### Send-MailboxForward.ps1
+
+Stuurt alle mail van een mailbox door naar een ander adres — bijvoorbeeld als een medewerker vertrekt en een collega of een gedeeld adres die mail moet krijgen. Twee delen, elk over te slaan:
+
+1. **Doorstuurregel** (Exchange Online) — mailbox-forwarding op `-Mailbox`, zodat elk nieuw bericht ook naar `-ForwardTo` gaat, met een kopie in de mailbox (`-NoKeepCopy` om die weg te laten). Een intern doel wordt ingesteld als `ForwardingAddress`, dat het uitgaande auto-forwardbeleid niet blokkeert; een extern als `ForwardingSmtpAddress`, waarvoor automatisch doorsturen in het uitgaande spambeleid aan moet staan — het script waarschuwt als het standaardbeleid het blokkeert.
+2. **Inhalen** (Microsoft Graph) — stuurt elk bericht door dat de afgelopen `-Days` dagen (of sinds `-After`) binnenkwam, oudste eerst, zodat het doel ook krijgt wat er vóór de regel binnenkwam. Verzonden items, Concepten, Verwijderde items, Ongewenste e-mail en Postvak UIT worden overgeslagen. Het venster eindigt bij de start van de run, dus beide delen samen sturen een bericht nooit twee keer door.
+
+Standaard een voorbeeld: toont de huidige forwarding en hoeveel berichten er zouden gaan, verandert niets. `-Apply` zet de regel en verstuurt.
+
+**Aanmelden (inhalen)**
+
+- **Tijdelijke app (standaard)** — aanmelden met een apparaatcode (Global Administrator of Privileged Role Administrator), een kortlevende App Registration met de applicatierechten `Mail.Read` + `Mail.Send`, app-only gebruikt en aan het eind van de run weer verwijderd, ook als de run mislukt.
+- **Je eigen app** — `-ClientId` met `-ClientSecret` of `-CertificateThumbprint`, of `-AppOnly` (uit `graph.appid.json`). Die app heeft `Mail.Read` + `Mail.Send` nodig (applicatie, admin consent). Beperk hem tot de mailbox met een Application Access Policy of RBAC for Applications als je hem laat staan.
+- **`-Delegated`** — Graph als jezelf (`Mail.Read.Shared` + `Mail.Send.Shared`); vraagt Full Access en Send As op de mailbox. Niet onder GDAP.
+
+Alle Graph-aanroepen zijn gewone REST — apparaatcode, client secret, of een ondertekende client assertion voor het certificaat — dus de Graph SDK wordt nooit geladen en kan niet botsen met de MSAL van `ExchangeOnlineManagement`. De doorstuurregel verbindt gedelegeerd via `Connect-M365Exchange`.
+
+**Parameters**
+
+| Parameter | Verplicht | Omschrijving |
+|-----------|-----------|--------------|
+| `-Mailbox` | Ja | UPN of primair SMTP-adres van de mailbox waarvan de mail wordt doorgestuurd |
+| `-ForwardTo` | Ja | Adres dat de mail krijgt, intern of extern |
+| `-Days` | Nee | Inhaalvenster in dagen, terug vanaf de start van de run. Standaard `30` |
+| `-After` | Nee | Alles inhalen dat vanaf deze datum binnenkwam, in plaats van `-Days` |
+| `-NoKeepCopy` | Nee | Doorstuurregel zonder kopie in de mailbox |
+| `-Comment` | Nee | Tekst boven elk ingehaald bericht. Standaard `Automatically forwarded from <Mailbox>` |
+| `-SkipForwardingRule` | Nee | Alleen inhalen |
+| `-SkipBackfill` | Nee | Alleen de doorstuurregel; geen Graph-aanmelding |
+| `-Apply` | Nee | Regel zetten en doorsturen. Zonder: alleen een voorbeeld |
+| `-DelaySeconds` | Nee | Pauze tussen twee doorstuuracties. Standaard `2.1`, net onder de 30 berichten per minuut van Exchange |
+| `-LogPath` | Nee | CSV met één rij per ingehaald bericht. Standaard `C:\Temp\MailboxForward_<mailbox>_<tijdstempel>.csv` |
+| `-TenantId` | Nee | Tenant-ID of geverifieerd domein. Nodig voor de tijdelijke app en `-ClientId`, tenzij af te leiden uit een GDAP-klanttenant |
+| `-ClientId` | Nee | Je eigen App Registration (`Mail.Read` + `Mail.Send` applicatie) |
+| `-ClientSecret` | Nee | Client secret voor `-ClientId` |
+| `-CertificateThumbprint` | Nee | Certificaat voor `-ClientId`, uit `Cert:\CurrentUser\My` of `Cert:\LocalMachine\My` |
+| `-AppOnly` | Nee | `ClientId` en `CertificateThumbprint` uit `graph.appid.json` |
+| `-Delegated` | Nee | Graph als jezelf; vraagt Full Access en Send As op de mailbox |
+
+**Voorbeelden**
+
+```powershell
+# Voorbeeld: huidige forwarding en hoeveel berichten van de laatste 30 dagen zouden gaan
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com"
+
+# Regel plus 30 dagen geschiedenis, met een tijdelijke app registration
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com" -TenantId contoso.com -Apply
+
+# Alleen de geschiedenis sinds 1 september, met je eigen app (certificaat)
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com" `
+    -After 2026-09-01 -SkipForwardingRule -TenantId contoso.com `
+    -ClientId "00000000-0000-0000-0000-000000000000" -CertificateThumbprint "ABC123..." -Apply
+
+# Alleen de doorstuurregel, geen kopie in de mailbox
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "piet@contoso.com" -SkipBackfill -NoKeepCopy -Apply
+```
+
+**Opmerkingen**
+- Elk ingehaald bericht is een gewone doorstuuractie: niet onderworpen aan het auto-forwardbeleid, en er komt een kopie in Verzonden items van de mailbox.
+- Exchange Online staat 30 berichten per minuut en 10.000 ontvangers per dag per mailbox toe. `-DelaySeconds` houdt de run onder het eerste (zo'n 28 per minuut); boven 9.000 berichten waarschuwt het script — splits de run dan met `-After`.
+- Draai je het opnieuw met hetzelfde venster, dan krijgt het doel alles nog eens: gebruik `-SkipForwardingRule -After <datum>` om alleen te sturen wat ontbreekt. De CSV-log toont wat er ging.
+- De forwarding later weghalen: `Set-Mailbox <mailbox> -ForwardingAddress $null -ForwardingSmtpAddress $null`.
+- GDAP-bewust: `-TenantId` wordt afgeleid uit de gekozen klanttenant, en Exchange verbindt met die klant.
+
+**Vereiste modules:** `ExchangeOnlineManagement` (alleen de doorstuurregel) — geïnstalleerd door `scripts\Startup\Install-Modules.ps1`. Het inhalen heeft geen module nodig.
 
 ---
 

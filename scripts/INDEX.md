@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-193 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+194 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -143,6 +143,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |
 | [`Search-MailboxAuditLog.ps1`](Office365Toolkit/Exchange/Search-MailboxAuditLog.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Search the Microsoft 365 Unified Audit Log for sign-in and mailbox access events. |
 | [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content through Microsoft Graph - signed in as you by default, or app-only tenant-wide - and report the permissions on every hit. |
+| [`Send-MailboxForward.ps1`](Exchange/Send-MailboxForward.ps1) | [`Exchange/`](Exchange/readme.md) | Forward all mail of a mailbox to another address: new mail from now on, and the mail that already arrived in the last N days. |
 | [`Set-Calendar-rights.ps1`](Exchange/Set-Calendar-rights.ps1) | [`Exchange/`](Exchange/readme.md) | Give a user access rights on another user's calendar. |
 | [`Set-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Set-CorporateWallpaper.ps1 |
 | [`Set-DefaultFileAssociation.ps1`](TenantOnboarding/AppDeployment/Set-DefaultFileAssociation.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Set the default application for a file extension, bypassing Windows' UserChoice hash protection. |

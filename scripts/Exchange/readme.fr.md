@@ -23,9 +23,10 @@ Graph est la norme. Là où un script utilise encore Exchange Online PowerShell,
 | `Get-MailboxSizes` | Exchange Online | Déléguée | Le rapport Graph `getMailboxUsageDetail` est agrégé, a un jour ou plus de retard et affiche des noms masqués si le tenant cache les détails des utilisateurs |
 | `Move-InboxToArchive`, `Restore-MailboxMessages`, `Remove-PhishingMessage` (moteur Graph) | Graph (+ Exchange) | **App-only** (application temporaire) | Un jeton délégué n'atteint la boîte aux lettres d'un autre utilisateur qu'avec Full Access sur celle-ci (`Mail.ReadWrite.Shared`). `-Delegated` prend cette voie si vous avez (ou, dans `Move-InboxToArchive`, recevez) Full Access — pas sous GDAP |
 | `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar` | Graph (+ Exchange) | **App-only** (application temporaire) | Impossible autrement : ils lisent la liste de calendriers de chaque utilisateur ou écrivent dans une boîte aux lettres de ressource, ce qu'aucun jeton délégué n'atteint. Pas de `-Delegated` |
+| `Send-MailboxForward` | Exchange + Graph | Délégué pour la règle, **app-only** (application temporaire) pour le rattrapage | Pas d'API Graph pour le transfert de boîte aux lettres ; transférer le courrier d'un autre utilisateur via Graph exige `Mail.Send` en app-only, ou Full Access plus Send As en délégué (`-Delegated`) — pas sous GDAP |
 | `Migrate-Calendar` | Graph + Exchange | Déléguée pour lire, **app-only** pour écrire | Graph ne lit les calendriers de groupe qu'en délégué, et n'écrit dans la nouvelle boîte aux lettres qu'en app-only |
 
-L'application temporaire est créée avec une connexion déléguée (Global Administrator ou Privileged Role Administrator) et supprimée à la fin de l'exécution. Dans `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage` et `Restore-MailboxMessages`, cette connexion est toujours un **code d'appareil en REST pur**, quoi qu'en dise `load.config.ps1` : ces scripts parlent aussi à Exchange Online, dont la MSAL entre en conflit avec celle du SDK Graph, et ne chargent donc pas le SDK pour cela. `Move-InboxToArchive` et `Migrate-Calendar` utilisent `Connect-M365Graph` et suivent `load.config.ps1`.
+L'application temporaire est créée avec une connexion déléguée (Global Administrator ou Privileged Role Administrator) et supprimée à la fin de l'exécution. Dans `Get-CalendarMappings`, `Convert-SharedCalendarToResource`, `Move-SharedCalendar`, `Remove-PhishingMessage`, `Restore-MailboxMessages` et `Send-MailboxForward`, cette connexion est toujours un **code d'appareil en REST pur**, quoi qu'en dise `load.config.ps1` : ces scripts parlent aussi à Exchange Online, dont la MSAL entre en conflit avec celle du SDK Graph, et ne chargent donc pas le SDK pour cela. `Move-InboxToArchive` et `Migrate-Calendar` utilisent `Connect-M365Graph` et suivent `load.config.ps1`.
 
 ---
 
@@ -39,6 +40,7 @@ L'application temporaire est créée avec une connexion déléguée (Global Admi
 | [`Set-Calendar-rights.ps1`](Set-Calendar-rights.ps1) ([docs](#set-calendar-rightsps1)) | Accorder à un utilisateur des autorisations sur un dossier de calendrier |
 | [`Set-Distributionlist-dynamic-static.ps1`](Set-Distributionlist-dynamic-static.ps1) ([docs](#set-distributionlist-dynamic-staticps1)) | Convertir les membres d'un groupe de distribution dynamique en un groupe ordinaire (statique) |
 | [`Move-InboxToArchive.ps1`](Move-InboxToArchive.ps1) ([docs](#move-inboxtoarchiveps1)) | Déplacer tous les messages (ou ceux filtrés par date) de la boîte de réception d'une boîte aux lettres vers son dossier Archive |
+| [`Send-MailboxForward.ps1`](Send-MailboxForward.ps1) ([docs](#send-mailboxforwardps1)) | Transférer tout le courrier d'une boîte aux lettres vers une autre adresse : une règle de transfert pour le nouveau courrier, plus le courrier des N derniers jours — application temporaire, aperçu par défaut |
 | [`Test-CalendarPermissions.ps1`](Test-CalendarPermissions.ps1) ([docs](#test-calendarpermissionsps1)) | Auditer les autorisations sur les dossiers de calendrier |
 | [`Get-CalendarMappings.ps1`](Get-CalendarMappings.ps1) ([docs](#get-calendarmappingsps1)) | Où chaque calendrier est réellement ajouté dans Outlook, à côté des droits qui le sous-tendent — ou trouver un calendrier par mot-clé (`-Search balie`) |
 | [`Test-MailboxPermissions.ps1`](Test-MailboxPermissions.ps1) ([docs](#test-mailboxpermissionsps1)) | Auditer les délégations Full Access, Send As et Send on Behalf |
@@ -283,6 +285,74 @@ Par défaut, le script archive n'importe quelle boîte aux lettres du tenant san
 - Compatible GDAP : dans une session GDAP (`$global:authMode -eq 'GDAP'`, définie via `Connect-Tenant` / `load.ps1`), `-TenantId` est déduit automatiquement du tenant client sélectionné (`$global:cid`) s'il est omis — via `Resolve-M365TenantId` dans `Connect-M365.ps1`. `$env:M365_CUSTOMER_TENANTID` / `$env:M365_AUTH_MODE` sont également pris en compte
 
 **Modules requis :** `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `ExchangeOnlineManagement` — installés par `scripts\Startup\Install-Modules.ps1`.
+
+---
+
+### Send-MailboxForward.ps1
+
+Transfère tout le courrier d'une boîte aux lettres vers une autre adresse — par exemple quand un collaborateur part et qu'un collègue ou une adresse partagée doit recevoir ce courrier. Deux parties, chacune peut être ignorée :
+
+1. **Règle de transfert** (Exchange Online) — transfert de boîte aux lettres sur `-Mailbox`, pour que chaque nouveau message parte aussi vers `-ForwardTo`, avec une copie conservée dans la boîte (`-NoKeepCopy` pour l'omettre). Une cible interne est définie comme `ForwardingAddress`, que la stratégie de transfert automatique sortant ne bloque pas ; une cible externe comme `ForwardingSmtpAddress`, qui exige que le transfert automatique soit autorisé dans la stratégie anti-spam sortante — le script avertit quand la stratégie par défaut le bloque.
+2. **Rattrapage** (Microsoft Graph) — transfère chaque message reçu au cours des `-Days` derniers jours (ou depuis `-After`), du plus ancien au plus récent, pour que la cible reçoive aussi ce qui est arrivé avant la règle. Éléments envoyés, Brouillons, Éléments supprimés, Courrier indésirable et Boîte d'envoi sont ignorés. La fenêtre se termine au début de l'exécution, donc les deux parties ensemble ne transfèrent jamais un message deux fois.
+
+Aperçu par défaut : affiche le transfert actuel et combien de messages partiraient, ne modifie rien. `-Apply` définit la règle et envoie.
+
+**Authentification (rattrapage)**
+
+- **Application temporaire (par défaut)** — connexion par code d'appareil (Global Administrator ou Privileged Role Administrator), une App Registration de courte durée avec les autorisations d'application `Mail.Read` + `Mail.Send`, utilisée en app-only et supprimée à la fin de l'exécution, même en cas d'échec.
+- **Votre propre app** — `-ClientId` avec `-ClientSecret` ou `-CertificateThumbprint`, ou `-AppOnly` (depuis `graph.appid.json`). Cette app a besoin de `Mail.Read` + `Mail.Send` (application, consentement administrateur). Limitez-la à la boîte avec une Application Access Policy ou RBAC for Applications si vous la gardez.
+- **`-Delegated`** — Graph en votre nom (`Mail.Read.Shared` + `Mail.Send.Shared`) ; exige Full Access et Send As sur la boîte. Pas sous GDAP.
+
+Tous les appels Graph passent par REST simple — code d'appareil, secret client, ou une assertion client signée pour le certificat — donc le SDK Graph n'est jamais chargé et ne peut pas entrer en conflit avec la MSAL d'`ExchangeOnlineManagement`. La règle de transfert se connecte en délégué via `Connect-M365Exchange`.
+
+**Paramètres**
+
+| Paramètre | Obligatoire | Description |
+|-----------|-------------|-------------|
+| `-Mailbox` | Oui | UPN ou adresse SMTP principale de la boîte dont le courrier est transféré |
+| `-ForwardTo` | Oui | Adresse qui reçoit le courrier, interne ou externe |
+| `-Days` | Non | Fenêtre de rattrapage en jours, à rebours depuis le début de l'exécution. Par défaut `30` |
+| `-After` | Non | Rattraper tout ce qui est arrivé depuis cette date, au lieu de `-Days` |
+| `-NoKeepCopy` | Non | Règle de transfert sans copie dans la boîte |
+| `-Comment` | Non | Texte au-dessus de chaque message rattrapé. Par défaut `Automatically forwarded from <Mailbox>` |
+| `-SkipForwardingRule` | Non | Uniquement le rattrapage |
+| `-SkipBackfill` | Non | Uniquement la règle de transfert ; pas de connexion Graph |
+| `-Apply` | Non | Définir la règle et transférer. Sans : aperçu seulement |
+| `-DelaySeconds` | Non | Pause entre deux transferts. Par défaut `2.1`, juste sous les 30 messages par minute d'Exchange |
+| `-LogPath` | Non | CSV avec une ligne par message rattrapé. Par défaut `C:\Temp\MailboxForward_<boîte>_<horodatage>.csv` |
+| `-TenantId` | Non | ID de tenant ou domaine vérifié. Requis pour l'application temporaire et `-ClientId`, sauf s'il se déduit d'un tenant client GDAP |
+| `-ClientId` | Non | Votre propre App Registration (`Mail.Read` + `Mail.Send` application) |
+| `-ClientSecret` | Non | Secret client pour `-ClientId` |
+| `-CertificateThumbprint` | Non | Certificat pour `-ClientId`, depuis `Cert:\CurrentUser\My` ou `Cert:\LocalMachine\My` |
+| `-AppOnly` | Non | `ClientId` et `CertificateThumbprint` depuis `graph.appid.json` |
+| `-Delegated` | Non | Graph en votre nom ; exige Full Access et Send As sur la boîte |
+
+**Exemples**
+
+```powershell
+# Aperçu : transfert actuel et combien de messages des 30 derniers jours partiraient
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com"
+
+# Règle plus 30 jours d'historique, avec une app registration temporaire
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com" -TenantId contoso.com -Apply
+
+# Uniquement l'historique depuis le 1er septembre, avec votre propre app (certificat)
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "sales@fabrikam.com" `
+    -After 2026-09-01 -SkipForwardingRule -TenantId contoso.com `
+    -ClientId "00000000-0000-0000-0000-000000000000" -CertificateThumbprint "ABC123..." -Apply
+
+# Uniquement la règle de transfert, sans copie dans la boîte
+.\Send-MailboxForward.ps1 -Mailbox "jan@contoso.com" -ForwardTo "piet@contoso.com" -SkipBackfill -NoKeepCopy -Apply
+```
+
+**Remarques**
+- Chaque message rattrapé est un transfert ordinaire : il n'est pas soumis à la stratégie de transfert automatique, et une copie arrive dans les Éléments envoyés de la boîte.
+- Exchange Online autorise 30 messages par minute et 10 000 destinataires par jour par boîte. `-DelaySeconds` maintient l'exécution sous la première limite (environ 28 par minute) ; au-delà de 9 000 messages le script avertit — scindez alors l'exécution avec `-After`.
+- Relancé avec la même fenêtre, la cible reçoit tout une seconde fois : utilisez `-SkipForwardingRule -After <date>` pour n'envoyer que ce qui manque. Le journal CSV montre ce qui est parti.
+- Supprimer le transfert plus tard : `Set-Mailbox <boîte> -ForwardingAddress $null -ForwardingSmtpAddress $null`.
+- Compatible GDAP : `-TenantId` se déduit du tenant client sélectionné, et Exchange se connecte à ce client.
+
+**Modules requis :** `ExchangeOnlineManagement` (règle de transfert uniquement) — installé par `scripts\Startup\Install-Modules.ps1`. Le rattrapage ne nécessite aucun module.
 
 ---
 
