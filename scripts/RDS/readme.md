@@ -18,7 +18,7 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook and Copilot with our own account (`itceadmin`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
-| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collects, read only, what happened with new Teams, new Outlook and Copilot on a session host — per user what is registered and running, the events, and what the watchdog did and would conclude, with its blind spots — into one zip |
+| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collects, read only, what happened with new Teams, new Outlook, Copilot and Snipping Tool on a session host — per user what is registered and running, the events, and what the watchdog did and would conclude, with its blind spots — into one zip |
 
 ---
 
@@ -468,8 +468,8 @@ it is public.
 
 ### Get-M365AppsLog.ps1
 
-Collects everything about new Teams, new Outlook and Copilot on a session host into one
-folder and zip, to answer two questions after a complaint: *why did the app not work for
+Collects everything about new Teams, new Outlook, Copilot and Snipping Tool on a session
+host into one folder and zip, to answer two questions after a complaint: *why did the app not work for
 this user*, and *why did the watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) not
 catch or repair it*. Read only — nothing is started, registered, repaired or closed.
 
@@ -510,7 +510,7 @@ Output in `-OutputPath` (falls back to `%TEMP%`): `summary.txt` (the screen), `s
 | Parameter | Description |
 |-----------|-------------|
 | `-User` | Only these users — user name, UPN or `DOMAIN\user`, also when signed off (default: everyone) |
-| `-App` | `Teams`, `Outlook`, `Copilot` (default: all three) |
+| `-App` | `Teams`, `Outlook`, `Copilot`, `SnippingTool` (default: all four) |
 | `-Hours` | How far back to read events and logs (default: `24`, at most `336`) |
 | `-OutputPath` | Where the folder and zip are written (default: `C:\Temp`) |
 | `-WorkingDir` | The watchdog's folder (default: `C:\IT\AppWatchdog`) |
