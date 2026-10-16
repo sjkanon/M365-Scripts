@@ -64,7 +64,12 @@
                      account (the test for the whole host), or the same app at two or
                      more customers: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
                      installers, signature-checked), at most once per
-                     -RepairCooldownHours. Then per user, in that user's own session
+                     -RepairCooldownHours. Snipping Tool has no installer: when it is
+                     not provisioned it is provisioned again from the Microsoft-signed
+                     build already on the host (WindowsApps, still registered for a
+                     user) with Add-AppxProvisionedPackage -FolderPath, after removing
+                     a Deprovisioned marker (backed up to .reg). Then per user, in
+                     that user's own session
                      (a one-off task running a headless console, so nothing appears):
                      a package that is not registered, is broken or would not open is
                      registered again by family name - for a customer only while the
@@ -241,13 +246,15 @@ $ErrorActionPreference = 'Stop'
 # (MicrosoftOfficeHub, M365Copilot.exe) or the old Windows Copilot app it replaces. It
 # has no package of its own to provision; Packages is filled at run time with the
 # identity package it registers for its users, when this host has one (Get-UnifiedCopilot).
-# Latest: provisioned at the newest build by Update-HostApp. Snipping Tool is not: the
-# Store keeps it current and Repair-AppxPackageStore.ps1 has no feed or installer for it.
+# Latest: provisioned at the newest build by Update-HostApp. FromDisk: no installer, so a
+# host that does not provision it is provisioned again from the build already in
+# WindowsApps (Add-ProvisionFromDisk). Snipping Tool is that case: the Store keeps it
+# current, and Repair-AppxPackageStore.ps1 has no feed or installer for it.
 $Apps = @(
-    [PSCustomObject]@{ App = 'Teams';        Packages = @('MSTeams');                     Exe = @('ms-teams.exe');     Repair = 'teams';                  Latest = $true }
-    [PSCustomObject]@{ App = 'Outlook';      Packages = @('Microsoft.OutlookForWindows'); Exe = @('olk.exe');          Repair = 'outlook';                Latest = $true }
-    [PSCustomObject]@{ App = 'Copilot';      Packages = @();                              Exe = @('copilotapp.exe');   Repair = 'copilot';                Latest = $false }
-    [PSCustomObject]@{ App = 'SnippingTool'; Packages = @('Microsoft.ScreenSketch');      Exe = @('SnippingTool.exe'); Repair = 'Microsoft.ScreenSketch'; Latest = $false }
+    [PSCustomObject]@{ App = 'Teams';        Packages = @('MSTeams');                     Exe = @('ms-teams.exe');     Repair = 'teams';                  Latest = $true;  FromDisk = $false }
+    [PSCustomObject]@{ App = 'Outlook';      Packages = @('Microsoft.OutlookForWindows'); Exe = @('olk.exe');          Repair = 'outlook';                Latest = $true;  FromDisk = $false }
+    [PSCustomObject]@{ App = 'Copilot';      Packages = @();                              Exe = @('copilotapp.exe');   Repair = 'copilot';                Latest = $false; FromDisk = $false }
+    [PSCustomObject]@{ App = 'SnippingTool'; Packages = @('Microsoft.ScreenSketch');      Exe = @('SnippingTool.exe'); Repair = 'Microsoft.ScreenSketch'; Latest = $false; FromDisk = $true }
 )
 $PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for Teams, Outlook and Snipping Tool
 $CopilotGuid   = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
@@ -1124,6 +1131,58 @@ function Get-Finding {
 }
 
 # -- Repair --------------------------------------------------------------------------
+function Add-ProvisionFromDisk {
+    <#
+        Provision an app that has no installer (Snipping Tool) again from the build that
+        is already on this host: a user still has it registered, so its Microsoft-signed
+        files sit in WindowsApps - which only TrustedInstaller can write to. A
+        Deprovisioned marker (how a removal is remembered) is backed up to .reg and
+        removed first, or Windows would keep it from new profiles. The bundle is tried
+        before the main package, newest build first, each with
+        Add-AppxProvisionedPackage -FolderPath; the provisioned list is read back.
+        Returns one line for the report.
+    #>
+    param($Entry)
+    $name   = $Entry.Packages[0]
+    $family = '{0}_{1}' -f $name, $PublisherId
+    $marker = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned\$family"
+    $notes  = [System.Collections.Generic.List[string]]::new()
+    if (Test-Path $marker) {
+        $backupDir = Join-Path $WorkingDir 'Repair'
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        $backup = Join-Path $backupDir ('Deprovisioned_{0}_{1:yyyyMMdd_HHmmss}.reg' -f $family, (Get-Date))
+        & reg.exe export ($marker -replace '^HKLM:\\', 'HKLM\') $backup /y | Out-Null
+        if ($LASTEXITCODE -ne 0) { return "$($Entry.App): Deprovisioned marker not backed up - not provisioned" }
+        Remove-Item -Path $marker -Recurse -Force
+        Write-Ok "Deprovisioned marker for $family removed (backup $backup)"
+        $notes.Add("Deprovisioned marker removed, backup $backup")
+    }
+    $candidates = @(
+        @(Get-AppxPackage -AllUsers -Name $name -PackageTypeFilter Bundle -ErrorAction SilentlyContinue) +
+        @(Get-AppxPackage -AllUsers -Name $name -PackageTypeFilter Main -ErrorAction SilentlyContinue) |
+        Where-Object { $_.InstallLocation -and (Test-Path -LiteralPath (Join-Path $_.InstallLocation 'AppxSignature.p7x')) } |
+        Sort-Object { [version] $_.Version } -Descending
+    )
+    if ($candidates.Count -eq 0) {
+        return "$($Entry.App): not provisioned - no signed build of $name in WindowsApps to provision from (no user has it); install it from the Store, then the next run provisions it"
+    }
+    foreach ($pkg in $candidates) {
+        try {
+            Add-AppxProvisionedPackage -Online -FolderPath $pkg.InstallLocation -SkipLicense -ErrorAction Stop | Out-Null
+        } catch {
+            Write-Warn "$($pkg.PackageFullName): $($_.Exception.Message)"
+            $notes.Add("$($pkg.PackageFullName): $($_.Exception.Message)")
+            continue
+        }
+        if (@(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $name }).Count -gt 0) {
+            Write-Ok "$($Entry.App) provisioned for all users from $($pkg.InstallLocation)"
+            return ('{0}: provisioned for all users from the build on the host ({1}){2}' -f $Entry.App, $pkg.PackageFullName, $(if ($notes.Count) { ' - ' + ($notes -join '; ') } else { '' }))
+        }
+        $notes.Add("$($pkg.PackageFullName): accepted, but not in the provisioned list afterwards")
+    }
+    return ('{0}: not provisioned - {1}' -f $Entry.App, ($notes -join '; '))
+}
+
 function Invoke-Repair {
     <#
         Host first - a user's fix needs the package on the machine - then each user
@@ -1166,6 +1225,13 @@ function Invoke-Repair {
             if ('Copilot' -in $hostApps) {
                 $code = Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = @('copilot'); Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false })
                 $actions.Add("Repair-AppxPackageStore -Name copilot -Provision: exit code $code")
+            }
+            # No installer: provisioned again from the build on the host, after the store
+            # repair above has cleared what was damaged.
+            foreach ($entry in @($Apps | Where-Object { $_.FromDisk })) {
+                if (@($Found | Where-Object { $_.App -eq $entry.App -and $_.Problem -eq 'NotProvisioned' }).Count -eq 0) { continue }
+                Write-Step "$($entry.App): provisioning it again from the build on the host"
+                $actions.Add((Add-ProvisionFromDisk -Entry $entry))
             }
             $State.LastRepair = (Get-Date).ToString('o')
         }
@@ -1853,7 +1919,10 @@ try {
         $kind   = 'repaired'
         $summary = '{0}: {1} problem(s) found and repaired - {2}' -f $env:COMPUTERNAME, $before.Count, ((@($before | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
     } elseif ($after.Count -gt 0) {
-        if ($signature -ne $state.Signature -or -not $lastSent -or $lastSent.AddHours($RenotifyHours) -lt (Get-Date) -or $actions.Count -gt 0) {
+        # A host repair skipped for the cooldown did nothing: not a reason to report the
+        # same problem again every run.
+        $didSomething = @($actions | Where-Object { $_ -notlike 'Host repair skipped*' }).Count -gt 0
+        if ($signature -ne $state.Signature -or -not $lastSent -or $lastSent.AddHours($RenotifyHours) -lt (Get-Date) -or $didSomething) {
             $kind   = if ($repair) { 'repair-failed' } else { 'failing' }
             $summary = '{0}: {1} problem(s) {2} - {3}' -f $env:COMPUTERNAME, $after.Count, $(if ($repair) { 'left after repair' } else { 'found' }), ((@($after | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
         }

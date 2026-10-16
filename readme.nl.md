@@ -1012,6 +1012,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-16 (2)
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1) **zet Knipprogramma nu zelf klaar** als de host dat niet doet. De eerste run op LEM-AVD-4 meldde `SnippingTool NotProvisioned` — nieuwe profielen krijgen het niet — en het hostherstel kon niet helpen: `Repair-AppxPackageStore.ps1` heeft er geen installer voor. De nieuwe `Add-ProvisionFromDisk` zet het opnieuw klaar vanuit de door Microsoft ondertekende build die al in `WindowsApps` staat (een gebruiker heeft het nog geregistreerd) met `Add-AppxProvisionedPackage -Online -FolderPath`, eerst de bundel, na een back-up en verwijdering van een `Deprovisioned`-markering, en leest de lijst met klaargezette apps terug. Een veld `FromDisk` per app zegt welke apps zo gaan |
+| Een blijvend probleem werd **elke run** opnieuw gemeld zolang het hostherstel zijn cooldown afwachtte: de regel "Host repair skipped" telde als actie, en elke actie stuurde de melding opnieuw. Een overgeslagen herstel doet dat niet meer; hetzelfde probleem komt terug na `-RenotifyHours`, of als er echt iets gedaan is |
+| Gecontroleerd: syntaxcontrole; op een Windows 11-machine hebben zowel de bundelmap als de map van het hoofdpakket van Knipprogramma in `WindowsApps` een `AppxSignature.p7x` (de bundel ook `AppxMetadata\AppxBundleManifest.xml`) — dat is wat `-FolderPath` krijgt. **Niet** gecontroleerd: `Add-AppxProvisionedPackage -FolderPath` vanuit een geïnstalleerde `WindowsApps`-map op een sessiehost — het teruglezen in de run en de melding zeggen of het gelukt is |
+
 ### 2026-10-16
 | Wijziging |
 |-----------|
