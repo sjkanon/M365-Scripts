@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Collects everything about new Teams, new Outlook and Copilot on a session host into
-    one folder (and zip): per user what is registered and running, the events, and what
+    Collects everything about new Teams, new Outlook, Copilot and Snipping Tool on a
+    session host into one folder (and zip): per user what is registered and running, the events, and what
     the watchdog (Watch-M365Apps.ps1) did and would conclude - to find out why an app did
     not work for someone and why the watchdog did or did not repair it.
 
@@ -34,7 +34,7 @@
     (their events and package state are still there). Default: everyone.
 
 .PARAMETER App
-    Teams, Outlook, Copilot. Default: all three.
+    Teams, Outlook, Copilot, SnippingTool. Default: all four.
 
 .PARAMETER Hours
     How far back to read events and logs. Default 24.
@@ -71,8 +71,8 @@
 [CmdletBinding()]
 param (
     [string[]] $User,
-    [ValidateSet('Teams', 'Outlook', 'Copilot')]
-    [string[]] $App = @('Teams', 'Outlook', 'Copilot'),
+    [ValidateSet('Teams', 'Outlook', 'Copilot', 'SnippingTool')]
+    [string[]] $App = @('Teams', 'Outlook', 'Copilot', 'SnippingTool'),
     [ValidateRange(1, 336)]
     [int]      $Hours = 24,
     [string]   $OutputPath = 'C:\Temp',
@@ -90,6 +90,7 @@ $Apps = @(
     [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows');                     Exe = @('olk.exe') }
     # copilotapp.exe is the unified Copilot app (Edge Update, 152.x and up), M365Copilot.exe the packaged one.
     [PSCustomObject]@{ App = 'Copilot'; Packages = @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot'); Exe = @('M365Copilot.exe', 'copilotapp.exe') }
+    [PSCustomObject]@{ App = 'SnippingTool'; Packages = @('Microsoft.ScreenSketch');                     Exe = @('SnippingTool.exe') }
 )
 $CopilotGuid      = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
 $TaskName         = 'M365 App Watchdog'

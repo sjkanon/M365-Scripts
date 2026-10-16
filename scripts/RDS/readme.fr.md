@@ -18,7 +18,7 @@ Scripts de diagnostic, de supervision et de préparation pour l'infrastructure R
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Réduire les disques de profil FSLogix d'un partage (Invoke-FslShrinkDisk), ou vérifier si FSLogix les compacte lui-même à la déconnexion |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Vérifier et préparer une image Windows 11 multisession ou un hôte de session AVD pour que le nouveau Teams, le nouvel Outlook et Copilot continuent de fonctionner avec FSLogix — FSLogix lui-même n'est pas modifié |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (tâche planifiée) — teste le nouveau Teams, le nouvel Outlook et Copilot avec notre propre compte (`itceadmin`) sur un hôte de session, répare ce qui est cassé avant qu'un client ne le subisse, et le signale à n8n |
-| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collecte, en lecture seule, ce qui s'est passé avec le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de session — par utilisateur ce qui est inscrit et lancé, les événements, et ce que le watchdog a fait et conclurait, avec ses angles morts — dans un seul zip |
+| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collecte, en lecture seule, ce qui s'est passé avec le nouveau Teams, le nouvel Outlook, Copilot et l'Outil Capture d'écran (Snipping Tool) sur un hôte de session — par utilisateur ce qui est inscrit et lancé, les événements, et ce que le watchdog a fait et conclurait, avec ses angles morts — dans un seul zip |
 
 ---
 
@@ -479,8 +479,8 @@ ne vont jamais dans ce dépôt : il est public.
 
 ### Get-M365AppsLog.ps1
 
-Collecte tout ce qui concerne le nouveau Teams, le nouvel Outlook et Copilot sur un hôte de
-session dans un dossier et un zip, pour répondre à deux questions après une plainte :
+Collecte tout ce qui concerne le nouveau Teams, le nouvel Outlook, Copilot et l'Outil Capture
+d'écran (Snipping Tool) sur un hôte de session dans un dossier et un zip, pour répondre à deux questions après une plainte :
 *pourquoi l'application n'a-t-elle pas fonctionné pour cet utilisateur*, et *pourquoi le
 watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) ne l'a-t-il pas vu ou réparé*.
 Lecture seule — rien n'est lancé, inscrit, réparé ou fermé.
@@ -523,7 +523,7 @@ Sortie dans `-OutputPath` (sinon `%TEMP%`) : `summary.txt` (l'écran), `sessions
 | Paramètre | Description |
 |-----------|-------------|
 | `-User` | Uniquement ces utilisateurs — nom d'utilisateur, UPN ou `DOMAIN\user`, même déconnectés (par défaut : tous) |
-| `-App` | `Teams`, `Outlook`, `Copilot` (par défaut : les trois) |
+| `-App` | `Teams`, `Outlook`, `Copilot`, `SnippingTool` (par défaut : les quatre) |
 | `-Hours` | Jusqu'où remonter dans les événements et journaux (par défaut : `24`, au plus `336`) |
 | `-OutputPath` | Où écrire le dossier et le zip (par défaut : `C:\Temp`) |
 | `-WorkingDir` | Le dossier du watchdog (par défaut : `C:\IT\AppWatchdog`) |
