@@ -1025,6 +1025,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-16 (2)
+| Modification |
+|--------------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.fr.md#watch-m365appsps1) **provisionne désormais lui-même l'Outil Capture d'écran** quand l'hôte ne le fait pas. La première exécution sur LEM-AVD-4 signalait `SnippingTool NotProvisioned` — les nouveaux profils ne le reçoivent pas — et la réparation de l'hôte ne pouvait rien : `Repair-AppxPackageStore.ps1` n'a pas de programme d'installation pour lui. La nouvelle fonction `Add-ProvisionFromDisk` le provisionne à nouveau depuis la build signée par Microsoft déjà présente dans `WindowsApps` (un utilisateur l'a encore inscrit) avec `Add-AppxProvisionedPackage -Online -FolderPath`, le bundle d'abord, après sauvegarde et suppression d'un marqueur `Deprovisioned`, et relit la liste des paquets provisionnés. Un champ `FromDisk` par application indique lesquelles passent par là |
+| Un problème persistant était signalé **à chaque exécution** pendant que la réparation de l'hôte attendait la fin de son délai : la ligne « Host repair skipped » comptait comme une action, et toute action renvoyait le signalement. Une réparation sautée ne le fait plus ; le même problème revient après `-RenotifyHours`, ou quand quelque chose a réellement été fait |
+| Vérifié : contrôle de syntaxe ; sur une machine Windows 11, le dossier du bundle et celui du paquet principal de l'Outil Capture d'écran dans `WindowsApps` portent tous deux un `AppxSignature.p7x` (le bundle aussi `AppxMetadata\AppxBundleManifest.xml`) — c'est ce que reçoit `-FolderPath`. **Non** vérifié : `Add-AppxProvisionedPackage -FolderPath` depuis un dossier `WindowsApps` installé sur un hôte de session — la relecture pendant l'exécution et le signalement disent si cela a fonctionné |
+
 ### 2026-10-16
 | Modification |
 |--------------|

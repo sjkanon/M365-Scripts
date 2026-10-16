@@ -1025,6 +1025,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-16 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) now **provisions Snipping Tool itself** when the host does not. The first run on LEM-AVD-4 reported `SnippingTool NotProvisioned` — new profiles do not get it — and the host repair could not help: `Repair-AppxPackageStore.ps1` has no installer for it. The new `Add-ProvisionFromDisk` provisions it again from the Microsoft-signed build already in `WindowsApps` (a user still has it registered) with `Add-AppxProvisionedPackage -Online -FolderPath`, bundle first, after backing up and removing a `Deprovisioned` marker, and reads the provisioned list back. A `FromDisk` field per app says which apps go this way |
+| A persisting problem was reported **every run** while the host repair waited out its cooldown: the line "Host repair skipped" counted as an action, and any action sent the report again. A skipped repair no longer does; the same problem comes back after `-RenotifyHours`, or when something was actually done |
+| Verified: syntax check; on a Windows 11 machine both the Snipping Tool bundle folder and its main package folder in `WindowsApps` carry `AppxSignature.p7x` (the bundle also `AppxMetadata\AppxBundleManifest.xml`), which is what `-FolderPath` is given. **Not** verified: `Add-AppxProvisionedPackage -FolderPath` from an installed `WindowsApps` folder on a session host — the read-back in the run and the report say whether it took |
+
 ### 2026-10-16
 | Change |
 |--------|
