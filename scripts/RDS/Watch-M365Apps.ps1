@@ -1,23 +1,25 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Watchdog for new Teams, new Outlook and Copilot on a session host: tests them with
-    our own account (itceadmin) and for every signed-in user, repairs what is broken -
-    on the host and in that user's own session - and reports to an n8n webhook.
+    Watchdog for new Teams, new Outlook, Copilot and Snipping Tool on a session host:
+    tests them with our own account (itceadmin) and for every signed-in user, repairs
+    what is broken - on the host and in that user's own session - and reports to an
+    n8n webhook.
 
 .DESCRIPTION
     Runs as a scheduled task under System (install it with -Install). Each run:
 
       0. Crashes     Every crash (Application Error 1000) and every hang that ended in
-                     a close (Application Hang 1002) of Teams, new Outlook or Copilot
+                     a close (Application Hang 1002) of the watched apps
                      since the last run, from the Application log - for every user on
                      the host, customers included. Grouped per app, module and
                      exception code. Reported, not repaired: a customer's app is never
                      restarted for them. Our own account's app is started again in
                      step 2 when it is no longer running.
-      1. Host        Teams and new Outlook are provisioned for all users, and Copilot
-                     - the new, unified Microsoft Copilot app only, not the old
-                     Microsoft 365 Copilot app (MicrosoftOfficeHub) - is installed
+      1. Host        Teams, new Outlook and Snipping Tool are provisioned for all
+                     users, and Copilot - the new, unified Microsoft Copilot app
+                     only, not the old Microsoft 365 Copilot app (MicrosoftOfficeHub)
+                     - is installed
                      machine-wide by Edge Update: its copilotapp.exe is on disk and a
                      Start menu entry for all users points at it. Without that no new
                      profile, customer or ours, gets the app.
@@ -33,7 +35,9 @@
                      customer at their next sign-in. Customers are never updated by the
                      watchdog: Windows gives them the new build at their next sign-in.
                      A new build on the host - from this step or on its own - is
-                     reported once, with what it was before.
+                     reported once, with what it was before. Snipping Tool is not
+                     updated here: the Store keeps it current, and there is no feed
+                     or installer to provision a newer build from.
       2. Accounts    For each watched account signed in on this host (the owner of an
                      explorer.exe), per app: the package is registered for that user,
                      its files are there and its status is Ok - for Copilot its
@@ -97,7 +101,9 @@
     More than one tests each of them, e.g. -Account itceadmin,itce.user.
 
 .PARAMETER App
-    Apps to watch: Teams, Outlook, Copilot. Default: all three.
+    Apps to watch: Teams, Outlook, Copilot, SnippingTool. Default: all four. An
+    installed watchdog keeps the list it was installed with (config.json): install
+    it again, or give -App, to watch an app added later.
 
 .PARAMETER User
     At our request, now, for these users only (user name, UPN or DOMAIN\user) and
@@ -198,8 +204,8 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param (
     [string[]] $Account = @('itceadmin'),
-    [ValidateSet('Teams', 'Outlook', 'Copilot')]
-    [string[]] $App = @('Teams', 'Outlook', 'Copilot'),
+    [ValidateSet('Teams', 'Outlook', 'Copilot', 'SnippingTool')]
+    [string[]] $App = @('Teams', 'Outlook', 'Copilot', 'SnippingTool'),
     [string[]] $User,
     [string]   $WebhookUrl,
     [string]   $WebhookToken,
@@ -235,12 +241,15 @@ $ErrorActionPreference = 'Stop'
 # (MicrosoftOfficeHub, M365Copilot.exe) or the old Windows Copilot app it replaces. It
 # has no package of its own to provision; Packages is filled at run time with the
 # identity package it registers for its users, when this host has one (Get-UnifiedCopilot).
+# Latest: provisioned at the newest build by Update-HostApp. Snipping Tool is not: the
+# Store keeps it current and Repair-AppxPackageStore.ps1 has no feed or installer for it.
 $Apps = @(
-    [PSCustomObject]@{ App = 'Teams';   Packages = @('MSTeams');                     Exe = @('ms-teams.exe');   Repair = 'teams' }
-    [PSCustomObject]@{ App = 'Outlook'; Packages = @('Microsoft.OutlookForWindows'); Exe = @('olk.exe');        Repair = 'outlook' }
-    [PSCustomObject]@{ App = 'Copilot'; Packages = @();                              Exe = @('copilotapp.exe'); Repair = 'copilot' }
+    [PSCustomObject]@{ App = 'Teams';        Packages = @('MSTeams');                     Exe = @('ms-teams.exe');     Repair = 'teams';                  Latest = $true }
+    [PSCustomObject]@{ App = 'Outlook';      Packages = @('Microsoft.OutlookForWindows'); Exe = @('olk.exe');          Repair = 'outlook';                Latest = $true }
+    [PSCustomObject]@{ App = 'Copilot';      Packages = @();                              Exe = @('copilotapp.exe');   Repair = 'copilot';                Latest = $false }
+    [PSCustomObject]@{ App = 'SnippingTool'; Packages = @('Microsoft.ScreenSketch');      Exe = @('SnippingTool.exe'); Repair = 'Microsoft.ScreenSketch'; Latest = $false }
 )
-$PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for Teams and Outlook
+$PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for Teams, Outlook and Snipping Tool
 $CopilotGuid   = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
 $CopilotExe    = 'copilotapp.exe'
 # The old Copilot packages: never the identity package of the unified app.
@@ -272,8 +281,8 @@ $script:unifiedCopilotRead = $false
 $Helpers = @{
     # devel, 2026-10-10 - also provisions the build the AppX log asks for
     'Repair-AppxPackageStore.ps1' = @{ Folder = 'Device'; Commit = 'abe8202bc90d855328f4f04844a54406968f0f6b'; Hash = 'D990B0DBF4C530F1CA1D3E00444BF18E6D0F1D44E47FB6E1A7627ADCBF715C84' }
-    # devel, 2026-10-10 - collects the evidence before a repair (-NoDiagnostics turns it off)
-    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = 'c2255d0cc8e224a48385962bd2223d4af4d2aa58'; Hash = '638EC1CD3D8E5B3D777E098EBD4658C4C517FB899414EABDD17138B74F488DF6' }
+    # devel, 2026-10-16 - collects the evidence before a repair (-NoDiagnostics turns it off), Snipping Tool included
+    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = '3afc2e0a168faa7313bbdee3dd2a65c5032d3f64'; Hash = '04D46F2852F457A342ACD18CEE17A53C4E6ADAC04CED71E9878E82438122271E' }
 }
 $DiagDir = Join-Path $WorkingDir 'Diag'
 
@@ -722,7 +731,7 @@ function Get-HostVersion {
 
 function Update-HostApp {
     <#
-        The newest builds on the host: Teams and new Outlook through
+        The newest builds on the host: Teams and new Outlook (the apps marked Latest) through
         Repair-AppxPackageStore.ps1 -Latest -Provision, which only provisions a build
         newer than what is there and checks its signature, and Edge Update asked to
         check now for the unified Copilot app - what it installs shows at the next run.
@@ -731,7 +740,7 @@ function Update-HostApp {
     param($State)
     $actions   = [System.Collections.Generic.List[string]]::new()
     $repairDir = Join-Path $WorkingDir 'Repair'
-    $names     = @($Apps | Where-Object { $_.App -ne 'Copilot' } | ForEach-Object { $_.Repair })
+    $names     = @($Apps | Where-Object { $_.Latest } | ForEach-Object { $_.Repair })
     if ($names.Count -gt 0) {
         $code = Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = $names; Latest = $true; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false })
         $actions.Add("Update: Repair-AppxPackageStore -Name $($names -join ',') -Latest -Provision: exit code $code")
@@ -1663,7 +1672,7 @@ if ($Install) {
     $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 1)
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
-        -Description 'Tests Teams, new Outlook and Copilot with the IT accounts, repairs them and reports to n8n (M365-Scripts, scripts/RDS/Watch-M365Apps.ps1)' -Force | Out-Null
+        -Description 'Tests Teams, new Outlook, Copilot and Snipping Tool with the IT accounts, repairs them and reports to n8n (M365-Scripts, scripts/RDS/Watch-M365Apps.ps1)' -Force | Out-Null
     Write-Ok "Task '$TaskName' registered - first run in 2 minutes, then every $IntervalMinutes minutes"
     Write-Ok ('Also {0} minutes after every sign-in, and within minutes of an app that would not open, crashed, hung or failed to register' -f ($UserGraceMinutes + 2))
     exit 0

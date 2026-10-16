@@ -193,8 +193,8 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — réparer les paquets AppX qui échouent avec 0x80070490 (Teams, nouvel Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — réduire les disques de profil FSLogix d'un partage, ou vérifier la compaction à la déconnexion |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
-| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook et Copilot avec les comptes IT, réparer, signaler à n8n |
-| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook et Copilot par utilisateur, et ce qu'a fait le watchdog |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook, Copilot et l'Outil Capture d'écran avec les comptes IT, réparer, signaler à n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook, Copilot et l'Outil Capture d'écran par utilisateur, et ce qu'a fait le watchdog |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — installer des pilotes d'imprimante (depuis GitHub) et des imprimantes à partir d'un fichier JSON |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
@@ -473,7 +473,7 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Vérifie WebView2, les frameworks AppX dont dépendent les applications, les builds provisionnées et les écarts par utilisateur, Teams sur AVD (SlimCore, le redirecteur WebRTC retiré le 1er octobre 2026), Shared Computer Activation et le broker de connexion
   - Met à jour Teams, Outlook, Copilot, le complément de réunion et WebView2 vers leur build la plus récente à chaque exécution (mise à jour automatique de Teams désactivée seulement si FSLogix l'exige) et corrige les applications via `Repair-AppxPackageStore.ps1` et `Update-TeamsClient.ps1` ; `-ComputerName` compare tout le pool, `-ForCapture` vérifie que Sysprep peut passer
 
-- Watchdog des applications ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — une tâche planifiée (System) qui teste le nouveau Teams, le nouvel Outlook et Copilot avec notre propre compte (`itceadmin`) sur un hôte de session :
+- Watchdog des applications ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — une tâche planifiée (System) qui teste le nouveau Teams, le nouvel Outlook, Copilot et l'Outil Capture d'écran (Snipping Tool) avec notre propre compte (`itceadmin`) sur un hôte de session :
   - Vérifie que l'hôte provisionne les applications, et pour chaque compte connecté que chacune est inscrite, intacte et démarre réellement dans cette session
   - Vérifie aussi chaque autre utilisateur connecté, et chaque application qu'un utilisateur n'a pas pu ouvrir (TWinUI 5961) ou dont l'inscription a échoué (AppX 401/404), et la réinscrit dans la session de cet utilisateur sans fenêtre - jamais pendant qu'elle tourne chez lui, jamais de réinitialisation ; chaque rapport nomme l'utilisateur
   - Répare l'hôte via `Repair-AppxPackageStore.ps1 -Provision` (avec un délai de carence) et notre propre compte en réinscrivant ou réinitialisant l'application, sans toucher aux sessions des clients ; signale `repaired` / `repair-failed` / `recovered` en JSON à un webhook n8n
@@ -1024,6 +1024,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-16
+| Modification |
+|--------------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.fr.md#watch-m365appsps1) surveille désormais aussi l'**Outil Capture d'écran** (Snipping Tool, `Microsoft.ScreenSketch`, `SnippingTool.exe`), comme quatrième application à côté de Teams, du nouvel Outlook et de Copilot. L'Outil Capture d'écran ne fonctionnait plus sur le pool AVD et rien ne le signalait : le watchdog ne connaissait que trois applications. Il reçoit maintenant le même traitement que Teams et Outlook — provisionné sur l'hôte, inscrit et `Ok` pour chaque utilisateur connecté, lancé et toujours actif pour notre propre compte, une ouverture refusée (TWinUI 5961) ou une inscription échouée réinscrite dans la session de l'utilisateur, plantages et blocages signalés. Il n'est **pas** inclus dans la mise à jour toutes les six heures (`-Latest -Provision`) : le Store le maintient à jour et il n'existe ni flux ni programme d'installation — un nouveau champ `Latest` par application indique lesquelles le sont. Une réparation de l'hôte lance `Repair-AppxPackageStore.ps1 -Name Microsoft.ScreenSketch -Provision`, qui nettoie une entrée de magasin cassée ou un marqueur Deprovisioned mais ne peut pas télécharger l'application. Un watchdog installé garde la liste d'applications de son `config.json` : réinstallez-le pour que l'Outil Capture d'écran soit surveillé |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.fr.md#get-m365appslogps1) connaît aussi `SnippingTool` comme `-App` — le watchdog lui transmet les applications d'un constat, et l'ancien `ValidateSet` aurait refusé cet appel, si bien qu'aucune preuve n'aurait été collectée. L'épinglage de téléchargement du watchdog passe à `3afc2e0` (SHA-256 vérifié contre ce que GitHub sert). Les entrées de menu `Y` et `Q` nomment la nouvelle application |
+| Vérifié : contrôle de syntaxe des deux scripts et du menu ; le manifeste de l'Outil Capture d'écran (une application `App`, `SnippingTool\SnippingTool.exe`, visible dans Démarrer) lu sur une machine Windows 11 — c'est ce que lance le test de démarrage. **Non** vérifié : une exécution du watchdog sur un hôte de session — le pool n'était pas joignable d'ici — ni la façon dont le workflow n8n affiche la colonne supplémentaire `SnippingTool` dans `users` |
 
 ### 2026-10-14
 | Modification |
