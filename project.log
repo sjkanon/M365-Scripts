@@ -2,6 +2,16 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-16 — Watchdog bewaakt ook Knipprogramma (Snipping Tool)
+  - Waarom: Knipprogramma werkte niet op AVD en niets meldde het; de watchdog kende alleen
+    Teams, Outlook en Copilot.
+  - Commits: 3afc2e0 (Get-M365AppsLog -App SnippingTool), e84fa4c (watchdog, collectorpin
+    naar 3afc2e0); downloadpin naar e84fa4c + SHA-256
+    AE7498DC0B6D7E821122E69D4892C50FB0E217CB2E34EABB74499FE9B63817E2 (gecontroleerd tegen GitHub).
+  - Niet getest: een run op een sessiehost (pool niet bereikbaar via WinRM of Azure vanaf
+    hier); hoe de n8n-workflow de extra kolom SnippingTool toont. Een geïnstalleerde
+    watchdog houdt zijn applijst uit config.json: opnieuw installeren.
+
 2026-10-13 — Watchdog -User vindt de gebruiker op SID en op naam met achtervoegsel
   - Waarom: Kris heet in zijn sessie AIRPORTS\kris.vand (81E1E8C7); -User vergeleek exact.
   - Commits: 034c900 (watchdog); downloadpin naar 034c900 + SHA-256
