@@ -2,6 +2,13 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-10-16 — Watchdog zet Knipprogramma zelf klaar; geen melding meer elke run tijdens cooldown
+  - Waarom: LEM-AVD-4 meldde SnippingTool NotProvisioned, en elke 30 min opnieuw "herstel mislukt".
+  - Commits: 6b3dfc4 (watchdog); downloadpin naar 6b3dfc4 + SHA-256
+    644ECB54A4D0B7D092C6974861BB432C5CFE01DE72BE15742D5BD73B08C8909B (gecontroleerd tegen GitHub).
+  - n8n-workflow W7YYoix73OWuaEvd (M365 App Watchdog → Teams): kop noemt Knipprogramma.
+  - Niet getest: Add-AppxProvisionedPackage -FolderPath vanuit WindowsApps op een sessiehost.
+
 2026-10-16 — Watchdog bewaakt ook Knipprogramma (Snipping Tool)
   - Waarom: Knipprogramma werkte niet op AVD en niets meldde het; de watchdog kende alleen
     Teams, Outlook en Copilot.
