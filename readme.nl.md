@@ -192,8 +192,8 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — AppX-pakketten repareren die falen met 0x80070490 (Teams, nieuwe Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
-| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook en Copilot testen met de IT-accounts, herstellen, melden aan n8n |
-| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook en Copilot gebeurde, en wat de watchdog deed |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot en Knipprogramma testen met de IT-accounts, herstellen, melden aan n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook, Copilot en Knipprogramma gebeurde, en wat de watchdog deed |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
@@ -472,7 +472,7 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Controleert WebView2, de AppX-frameworks waar de apps van afhangen, klaargezette builds en afwijkingen per gebruiker, Teams op AVD (SlimCore, de WebRTC-redirector die op 1 oktober 2026 met pensioen ging), Shared Computer Activation en de aanmeldbroker
   - Werkt Teams, Outlook, Copilot, de vergaderinvoegtoepassing en WebView2 bij elke run bij naar hun nieuwste build (zelfupdate van Teams alleen uit waar FSLogix dat nodig heeft) en herstelt de apps via `Repair-AppxPackageStore.ps1` en `Update-TeamsClient.ps1`; `-ComputerName` vergelijkt de hele pool, `-ForCapture` controleert of Sysprep kan
 
-- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook en Copilot test met ons eigen account (`itceadmin`) op een sessiehost:
+- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook, Copilot en Knipprogramma (Snipping Tool) test met ons eigen account (`itceadmin`) op een sessiehost:
   - Controleert of de host de apps klaarzet, en per aangemeld account of elke app geregistreerd en intact is en in die sessie echt start
   - Controleert ook elke andere aangemelde gebruiker, en elke app die een gebruiker niet kon openen (TWinUI 5961) of waarvan de registratie mislukte (AppX 401/404), en registreert die opnieuw in de eigen sessie van die gebruiker zonder venster - nooit terwijl hij bij hem draait, nooit een reset; elke melding noemt de gebruiker
   - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
@@ -1011,6 +1011,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-16
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1) bewaakt nu ook **Knipprogramma** (Snipping Tool, `Microsoft.ScreenSketch`, `SnippingTool.exe`), als vierde app naast Teams, de nieuwe Outlook en Copilot. Knipprogramma werkte niet meer op de AVD-pool en niets meldde het: de watchdog kende maar drie apps. Het krijgt nu dezelfde behandeling als Teams en Outlook — klaargezet op de host, geregistreerd en `Ok` voor elke aangemelde gebruiker, gestart en nog draaiend voor ons eigen account, een geweigerde opening (TWinUI 5961) of mislukte registratie opnieuw geregistreerd in de eigen sessie van de gebruiker, crashes en hangs gemeld. Het gaat **niet** mee in de update om de zes uur (`-Latest -Provision`): de Store houdt het actueel en er is geen feed of installer voor — een nieuw veld `Latest` per app zegt welke wel. Een hostherstel ervoor draait `Repair-AppxPackageStore.ps1 -Name Microsoft.ScreenSketch -Provision`, dat een kapotte store-vermelding of Deprovisioned-markering opruimt maar de app niet kan downloaden. Een geïnstalleerde watchdog houdt de applijst uit zijn `config.json`: installeer hem opnieuw om Knipprogramma te laten bewaken |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.nl.md#get-m365appslogps1) kent `SnippingTool` ook als `-App` — de watchdog geeft hem de apps van een bevinding mee, en de oude `ValidateSet` had die aanroep geweigerd, zodat er geen bewijs verzameld werd. De downloadpin van de watchdog ervoor gaat naar `3afc2e0` (SHA-256 gecontroleerd tegen wat GitHub serveert). Menu-items `Y` en `Q` noemen de nieuwe app |
+| Gecontroleerd: syntaxcontrole van beide scripts en het menu; het manifest van Knipprogramma (één applicatie `App`, `SnippingTool\SnippingTool.exe`, zichtbaar in Start) gelezen op een Windows 11-machine — dat is wat de starttest opent. **Niet** gecontroleerd: een watchdog-run op een sessiehost — de pool was van hieruit niet bereikbaar — en hoe de n8n-workflow de extra kolom `SnippingTool` in `users` toont |
 
 ### 2026-10-14
 | Wijziging |

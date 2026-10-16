@@ -192,8 +192,8 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
-| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook and Copilot with the IT accounts, repair, report to n8n |
-| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook and Copilot per user, and what the watchdog did |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot and Snipping Tool with the IT accounts, repair, report to n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot and Snipping Tool per user, and what the watchdog did |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -472,7 +472,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
   - Updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build on every run (Teams' self-update off only where FSLogix needs it) and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
 
-- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook and Copilot with our own account (`itceadmin`) on a session host:
+- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook, Copilot and Snipping Tool with our own account (`itceadmin`) on a session host:
   - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
   - Also checks every other signed-in user, and every app a user could not open (TWinUI 5961) or whose registration failed (AppX 401/404), and re-registers it in that user's own session without a window - never while it runs for them, never a reset; every report names the user
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
@@ -1009,6 +1009,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-16
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) also watches **Snipping Tool** (`Microsoft.ScreenSketch`, `SnippingTool.exe`), as a fourth app next to Teams, new Outlook and Copilot. Snipping Tool stopped working on the AVD pool and nothing reported it: the watchdog only knew three apps. It now gets the same treatment as Teams and Outlook — provisioned on the host, registered and `Ok` for every signed-in user, started and still running for our own account, a refused open (TWinUI 5961) or failed registration re-registered in the user's own session, crashes and hangs reported. It is **not** taken along in the six-hourly update (`-Latest -Provision`): the Store keeps it current and there is no feed or installer for it — a new `Latest` field on each app says which ones are. A host repair for it runs `Repair-AppxPackageStore.ps1 -Name Microsoft.ScreenSketch -Provision`, which clears a broken store entry or Deprovisioned marker but cannot download the app. An installed watchdog keeps the app list from its `config.json`: install it again to have Snipping Tool watched |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.md#get-m365appslogps1) knows `SnippingTool` as an `-App` too — the watchdog hands it the apps of a finding, and the old `ValidateSet` would have refused that call, so no evidence would have been collected. The watchdog's download pin for it moves to `3afc2e0` (SHA-256 checked against what GitHub serves). Menu entries `Y` and `Q` name the new app |
+| Verified: syntax check of both scripts and the menu; Snipping Tool's manifest (one application `App`, `SnippingTool\SnippingTool.exe`, shown in Start) read on a Windows 11 machine — that is what the launch test starts. **Not** verified: a watchdog run on a session host — the pool could not be reached from here — nor how the n8n workflow shows the extra `SnippingTool` column in `users` |
 
 ### 2026-10-14
 | Change |
