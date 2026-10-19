@@ -801,6 +801,9 @@ l'enregistrement de l'application.
 | `-KeepOtherItems` | Non | Laisser tels quels les fichiers et sous-dossiers non configurés directement dans le parent au lieu de les réserver aux owners |
 | `-Apply` | Non | Modifier réellement. Sans lui, rien n'est écrit |
 | `-TenantId` / `-ClientId` / `-AppName` | Non | Surcharges de connexion, comme dans `Restore-RecycleBinItems.ps1` |
+| `-GrantSiteAdmin` | Non | Devenir administrateur de collection de sites pendant l'exécution et retirer ces droits ensuite, même en cas d'échec (Administrateur SharePoint requis). Nécessaire sur un site Teams dont vous n'êtes pas membre - un Administrateur général ne peut pas lire les fichiers d'une équipe par son seul rôle |
+| `-KeepSiteAdmin` | Non | Conserver ces droits au lieu de les retirer |
+| `-AdminUpn` | Non | UPN qui reçoit les droits d'administrateur du site (par défaut : le compte connecté) |
 | `-AppOnly` | Non | Application à certificat de `graph.appid.json` (nécessite SharePoint `Sites.FullControl.All`) |
 | `-OutputPath` | Non | Chemin du rapport CSV |
 
@@ -814,6 +817,9 @@ l'enregistrement de l'application.
 
 # Appliquer, puis relire le résultat.
 .\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# Site Teams d'un client dont vous n'êtes pas membre : administrateur de collection de sites pendant l'exécution seulement
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -GrantSiteAdmin -Apply
 
 # Sans fichier de configuration, personnes attribuées directement plutôt que par groupes
 .\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `

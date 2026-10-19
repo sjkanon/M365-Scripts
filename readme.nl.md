@@ -1017,6 +1017,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-19 (6)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) kreeg `-GrantSiteAdmin`, `-KeepSiteAdmin` en `-AdminUpn`, zoals in `Find-SiteContent.ps1` en `Restore-RecycleBinItems.ps1`. De eerste live run registreerde de app en meldde aan, en stopte daarna bij `Get-PnPWeb: Attempted to perform an unauthorized operation`: de Global Administrator waarmee werd aangemeld was geen lid van het team van de klant, en die rol alleen geeft geen toegang tot de inhoud van een site. Met `-GrantSiteAdmin` wordt de beheerder via de tenant-adminsite sitecollectiebeheerder voor de duur van de run; de hele run na het toekennen staat in een `try`/`finally`, dus de rechten worden ook weer weggehaald als een adres niet gevonden wordt of een wijziging faalt. Zonder de switch zegt dezelfde fout nu dat je hem moet gebruiken |
+| Geverifieerd: syntaxcheck; linkcheck; de app-registratie op de live tenant (app aangemaakt, scopes toegestaan, client-ID bewaard) en de delegated aanmelding, die tot de unauthorized-fout kwam. **Niet** geverifieerd: het toekennen en weghalen van de rechten, en alles daarna |
+
 ### 2026-10-19 (5)
 | Wijziging |
 |-----------|

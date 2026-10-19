@@ -1017,6 +1017,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-19 (6)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) reçoit `-GrantSiteAdmin`, `-KeepSiteAdmin` et `-AdminUpn`, comme `Find-SiteContent.ps1` et `Restore-RecycleBinItems.ps1`. La première exécution réelle a enregistré l'application et s'est connectée, puis s'est arrêtée sur `Get-PnPWeb: Attempted to perform an unauthorized operation` : l'Administrateur général utilisé n'était pas membre de l'équipe du client, et ce rôle seul ne donne pas accès au contenu d'un site. Avec `-GrantSiteAdmin`, l'administrateur devient administrateur de collection de sites via le site d'administration du tenant pendant l'exécution ; toute l'exécution après l'attribution est dans un `try`/`finally`, donc les droits sont retirés aussi quand une adresse n'est pas résolue ou qu'une modification échoue. Sans le switch, la même erreur indique désormais de l'utiliser |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; l'enregistrement de l'application sur le tenant réel (application créée, étendues consenties, ID client mis en cache) et la connexion déléguée, qui est allée jusqu'à l'erreur unauthorized. **Non** vérifié : l'attribution et le retrait des droits, et tout ce qui suit |
+
 ### 2026-10-19 (5)
 | Modification |
 |--------------|

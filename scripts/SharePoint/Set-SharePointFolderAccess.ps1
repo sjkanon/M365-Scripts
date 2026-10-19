@@ -129,6 +129,19 @@
     Display name of the app registration to create or reuse.
     Default: "M365-Scripts SharePoint Folder Access".
 
+.PARAMETER GrantSiteAdmin
+    Make the signed-in admin site collection administrator for the duration of the run
+    (requires SharePoint Administrator) and remove the rights again afterwards, also when the
+    run fails. A Global Administrator has no access to a team's files by role alone, so this is
+    what you normally need on a customer's Teams site you are not a member of. Without it such
+    a run stops at "Attempted to perform an unauthorized operation".
+
+.PARAMETER KeepSiteAdmin
+    Keep the site collection admin rights granted by -GrantSiteAdmin.
+
+.PARAMETER AdminUpn
+    UPN to grant site collection admin rights to. Defaults to the signed-in account.
+
 .PARAMETER AppOnly
     App-only sign-in with the certificate app from graph.appid.json (needs SharePoint
     Sites.FullControl.All as an application permission).
@@ -198,6 +211,9 @@ param(
     [string] $ClientId,
     [string] $AppName = 'M365-Scripts SharePoint Folder Access',
     [switch] $AppOnly,
+    [switch] $GrantSiteAdmin,
+    [switch] $KeepSiteAdmin,
+    [string] $AdminUpn,
     [string] $OutputPath
 )
 
@@ -283,6 +299,7 @@ if ($SiteUrl -notmatch '^https://([a-zA-Z0-9-]+?)(-my)?\.sharepoint\.(com|de|us|
     throw "'$SiteUrl' does not look like a SharePoint site URL."
 }
 $tenantName = $Matches[1]
+$adminUrl   = "https://$tenantName-admin.sharepoint.$($Matches[3])"
 if (-not $TenantId) { $TenantId = "$tenantName.onmicrosoft.com" }
 
 $repoRoot   = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -464,490 +481,540 @@ if ($appIsNew) {
     Start-Sleep -Seconds 20
 }
 
-$connectParams = @{ Url = $SiteUrl; TenantId = $TenantId }
+$connectParams = @{ TenantId = $TenantId }
 if ($ClientId) { $connectParams['ClientId'] = $ClientId }
 if ($AppOnly)  { $connectParams['AppOnly']  = $true }
 
-# A freshly created app registration is not replicated everywhere yet, so the first sign-in
-# can fail with "application not found". Retry briefly.
-$connection = $null
-for ($attempt = 1; $attempt -le 6; $attempt++) {
-    try {
-        # Device code or browser per load.config.ps1 - see Connect-M365PnP.
-        $connection = Connect-M365PnP @connectParams
-        break
-    } catch {
-        if ($attempt -eq 6) { throw }
-        Write-Host "  Sign-in attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying in 10s..." -ForegroundColor DarkYellow
-        Start-Sleep -Seconds 10
-    }
-}
-
-$context = Get-PnPContext -Connection $connection
-$web     = Get-PnPWeb -Connection $connection -Includes ServerRelativeUrl, AssociatedOwnerGroup, CurrentUser
-$ownerGroupId = if ($web.AssociatedOwnerGroup -and -not $web.AssociatedOwnerGroup.ServerObjectIsNull) { $web.AssociatedOwnerGroup.Id } else { $null }
-if (-not $ownerGroupId) {
-    Write-Warn 'This site has no associated Owners group. Only the configured people and site collection admins will have access.'
-}
-
-# -- Folder path: site-relative, whatever form it was given in ------------------
-$relative = [System.Uri]::UnescapeDataString($FolderPath.Trim())
-if ($relative -match '^https://[^/]+(/.*)$') { $relative = $Matches[1] }
-$webPath = $web.ServerRelativeUrl.TrimEnd('/')
-if ($webPath -and $relative.StartsWith("$webPath/", [System.StringComparison]::OrdinalIgnoreCase)) {
-    $relative = $relative.Substring($webPath.Length)
-}
-$relative = $relative.Trim('/')
-
-try {
-    $parentFolder = Get-PnPFolder -Url $relative -Connection $connection -Includes ListItemAllFields
-} catch {
-    throw "Folder '$relative' not found in $SiteUrl. The library URL is usually 'Shared Documents', even when it is shown as 'Documents' or 'Documenten'. ($($_.Exception.Message))"
-}
-if (-not $parentFolder.ListItemAllFields -or $parentFolder.ListItemAllFields.ServerObjectIsNull) {
-    throw "'$relative' is the root of a library, not a folder inside one. Point -FolderPath at a folder."
-}
-if (-not $GroupPrefix) { $GroupPrefix = $relative.Split('/')[-1] }
-
-# -- Roles, by type so the site language does not matter -----------------------
-$roleDefs = @{}
-foreach ($pair in @(
-        @('Read',        [Microsoft.SharePoint.Client.RoleType]::Reader),
-        @('Contribute',  [Microsoft.SharePoint.Client.RoleType]::Contributor),
-        @('Edit',        [Microsoft.SharePoint.Client.RoleType]::Editor),
-        @('FullControl', [Microsoft.SharePoint.Client.RoleType]::Administrator))) {
-    $def = $web.RoleDefinitions.GetByType($pair[1])
-    $context.Load($def)
-    $roleDefs[$pair[0]] = $def
-}
-$context.ExecuteQuery()
-$roleRank = @{ Read = 1; Contribute = 2; Edit = 3; FullControl = 4 }
-
-# -- Resolve everyone before touching anything ---------------------------------
-# One unknown address must stop the run here, not halfway through, with the parent already
-# closed off and half the subfolders done.
-Write-Host '  Resolving people...' -ForegroundColor Cyan
-$principals = @{}
-$unresolved = @()
-$everyone = @($ownerLogins) + @($plan.Values | ForEach-Object { $_.Members }) | Sort-Object -Unique
-foreach ($login in $everyone) {
-    try {
-        $user = $web.EnsureUser($login)
-        $context.Load($user)
-        $context.ExecuteQuery()
-        $principals[$login] = $user
-        Write-Host ("    {0,-40} {1}" -f $login, $user.Title) -ForegroundColor DarkGray
-    } catch {
-        $unresolved += $login
-        Write-Bad "$login - $($_.Exception.Message.Trim())"
-    }
-}
-if ($unresolved.Count -gt 0) {
-    foreach ($login in $unresolved) { Add-Result -Folder $relative -Action 'Resolve' -Principal $login -Result 'Not found' }
-    $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
-    throw "$($unresolved.Count) address(es) could not be resolved - nothing was changed. Fix them in the config and run again. Report: $OutputPath"
-}
-function Test-Owner { param([string] $Login) return $ownerKeys.ContainsKey($Login.ToLowerInvariant()) }
-
-# -- Helpers -------------------------------------------------------------------
-function New-Grant {
-    <# One desired assignment. Principal is $null for a group that a dry run has not created. #>
-    param([string] $Name, $Principal, [string] $Role)
-    [pscustomobject]@{ Name = $Name; Principal = $Principal; Role = $Role }
-}
-
-function Merge-Grants {
-    <# One grant per principal, the highest role winning: an owner who is also listed as a
-       member must end up with Full Control, not with whichever entry came last. #>
-    param([array] $Grants)
-    $byKey = [ordered]@{}
-    foreach ($g in $Grants) {
-        $key = if ($g.Principal) { "id:$($g.Principal.Id)" } else { "name:$($g.Name)" }
-        if (-not $byKey.Contains($key) -or $roleRank[$g.Role] -gt $roleRank[$byKey[$key].Role]) { $byKey[$key] = $g }
-    }
-    return @($byKey.Values)
-}
-
-function Get-Assignments {
-    <# The role assignments on a list item, with member and bindings loaded. Inherited ones too:
-       on an item that inherits, SharePoint returns those of the ancestor it inherits from. #>
-    param($Item)
-    $context.Load($Item)
-    $context.Load($Item.RoleAssignments)
-    $context.ExecuteQuery()
-    foreach ($a in $Item.RoleAssignments) {
-        $context.Load($a.Member)
-        $context.Load($a.RoleDefinitionBindings)
-    }
-    $context.ExecuteQuery()
-    return @($Item.RoleAssignments)
-}
-
-function Test-Protected {
-    <# Assignments that are never removed: the site Owners group, the owners of the M365 group
-       behind a Teams site, and system Limited Access entries. #>
-    param($Assignment)
-    if ($ownerGroupId -and $Assignment.Member.Id -eq $ownerGroupId) { return 'site owners' }
-    if ($Assignment.Member.LoginName -match 'federateddirectoryclaimprovider\|.+_o$') { return 'group owners' }
-    $bindings = @($Assignment.RoleDefinitionBindings)
-    if ($bindings.Count -gt 0 -and -not ($bindings | Where-Object { -not $_.Hidden -and "$($_.RoleTypeKind)" -ne 'Guest' })) {
-        return 'limited access'
-    }
-    return $null
-}
-
-function Set-FolderAccess {
+function Connect-Site {
     <#
-        Bring one item in line: unique permissions, site owners Full Control, exactly the desired
-        grants with exactly their role, nobody else. Returns the number of changes (planned in a
-        dry run, made with -Apply).
+        A freshly created app registration is not replicated everywhere yet, so the first
+        sign-in can fail with "application not found". Retry briefly.
     #>
-    param(
-        [string] $Label,
-        $Item,
-        [array] $Desired,
-        [switch] $IsNew
-    )
+    param([string] $Url, [int] $Retries = 6)
 
-    Write-Host ''
-    Write-Host "  $Label" -ForegroundColor Cyan
-    $Desired = Merge-Grants $Desired
-
-    if ($IsNew -and -not $Apply) {
-        Write-Change 'create folder'
-        Add-Result -Folder $Label -Action 'Create folder' -Result 'Planned'
-        Write-Change 'break inheritance, keep only the site owners'
-        foreach ($g in $Desired) {
-            Write-Change "grant $($g.Role) to $($g.Name)"
-            Add-Result -Folder $Label -Action 'Grant' -Principal $g.Name -Detail $g.Role -Result 'Planned'
+    for ($attempt = 1; $attempt -le $Retries; $attempt++) {
+        try {
+            # Device code or browser per load.config.ps1 - see Connect-M365PnP.
+            return Connect-M365PnP -Url $Url @connectParams
+        } catch {
+            if ($attempt -eq $Retries) { throw }
+            Write-Host "  Sign-in attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying in 10s..." -ForegroundColor DarkYellow
+            Start-Sleep -Seconds 10
         }
-        return 2 + $Desired.Count
+    }
+}
+
+# -GrantSiteAdmin: a Global Administrator cannot read a team's files by role alone. Become site
+# collection admin through the tenant admin site, and give it back in the finally at the end.
+$grantedSiteAdmin = $false
+if ($GrantSiteAdmin) {
+    Write-Host "  Connecting to $adminUrl..." -ForegroundColor Cyan
+    $adminConnection = Connect-Site -Url $adminUrl
+    if (-not $AdminUpn) {
+        try {
+            $currentUser = Get-PnPProperty -ClientObject (Get-PnPWeb -Connection $adminConnection) -Property CurrentUser
+            $AdminUpn = if ($currentUser.Email) { $currentUser.Email } else { ($currentUser.LoginName -split '\|')[-1] }
+            Write-Host "  Signed in as $AdminUpn" -ForegroundColor Green
+        } catch {
+            throw "Could not determine the signed-in account - pass -AdminUpn explicitly. $($_.Exception.Message)"
+        }
+    }
+    try {
+        Set-PnPTenantSite -Identity $SiteUrl -Owners @($AdminUpn) -Connection $adminConnection -ErrorAction Stop
+        $grantedSiteAdmin = $true
+        Write-Host "  Granted site collection admin to $AdminUpn on $SiteUrl" -ForegroundColor DarkGray
+    } catch {
+        throw "Could not grant site collection admin on ${SiteUrl} (SharePoint Administrator needed): $($_.Exception.Message)"
+    }
+}
+
+$connection = Connect-Site -Url $SiteUrl
+
+# Everything after the grant runs inside this try, so the site collection admin rights are
+# given back however the run ends - a typo in an address or a failed change included.
+try {
+    $context = Get-PnPContext -Connection $connection
+    try {
+        $web = Get-PnPWeb -Connection $connection -Includes ServerRelativeUrl, AssociatedOwnerGroup, CurrentUser
+    } catch {
+        if (-not $GrantSiteAdmin -and $_.Exception.Message -match 'unauthorized|access denied|403') {
+            throw "No access to $SiteUrl with this account. A Global Administrator cannot read a team's files by role alone - run again with -GrantSiteAdmin to be site collection admin for the duration of the run. ($($_.Exception.Message))"
+        }
+        throw
+    }
+    $ownerGroupId = if ($web.AssociatedOwnerGroup -and -not $web.AssociatedOwnerGroup.ServerObjectIsNull) { $web.AssociatedOwnerGroup.Id } else { $null }
+    if (-not $ownerGroupId) {
+        Write-Warn 'This site has no associated Owners group. Only the configured people and site collection admins will have access.'
     }
 
-    $changes     = 0
-    $assignments = Get-Assignments -Item $Item
+    # -- Folder path: site-relative, whatever form it was given in ------------------
+    $relative = [System.Uri]::UnescapeDataString($FolderPath.Trim())
+    if ($relative -match '^https://[^/]+(/.*)$') { $relative = $Matches[1] }
+    $webPath = $web.ServerRelativeUrl.TrimEnd('/')
+    if ($webPath -and $relative.StartsWith("$webPath/", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $relative = $relative.Substring($webPath.Length)
+    }
+    $relative = $relative.Trim('/')
 
-    if (-not $Item.HasUniqueRoleAssignments) {
-        $changes++
-        Write-Change 'break inheritance (current permissions copied, then trimmed below)'
-        if ($Apply) {
-            # Copy, not clear: clearing would hand the signed-in admin Full Control as a side
-            # effect, and the reconcile below removes what should not stay anyway.
-            $Item.BreakRoleInheritance($true, $false)
+    try {
+        $parentFolder = Get-PnPFolder -Url $relative -Connection $connection -Includes ListItemAllFields
+    } catch {
+        throw "Folder '$relative' not found in $SiteUrl. The library URL is usually 'Shared Documents', even when it is shown as 'Documents' or 'Documenten'. ($($_.Exception.Message))"
+    }
+    if (-not $parentFolder.ListItemAllFields -or $parentFolder.ListItemAllFields.ServerObjectIsNull) {
+        throw "'$relative' is the root of a library, not a folder inside one. Point -FolderPath at a folder."
+    }
+    if (-not $GroupPrefix) { $GroupPrefix = $relative.Split('/')[-1] }
+
+    # -- Roles, by type so the site language does not matter -----------------------
+    $roleDefs = @{}
+    foreach ($pair in @(
+            @('Read',        [Microsoft.SharePoint.Client.RoleType]::Reader),
+            @('Contribute',  [Microsoft.SharePoint.Client.RoleType]::Contributor),
+            @('Edit',        [Microsoft.SharePoint.Client.RoleType]::Editor),
+            @('FullControl', [Microsoft.SharePoint.Client.RoleType]::Administrator))) {
+        $def = $web.RoleDefinitions.GetByType($pair[1])
+        $context.Load($def)
+        $roleDefs[$pair[0]] = $def
+    }
+    $context.ExecuteQuery()
+    $roleRank = @{ Read = 1; Contribute = 2; Edit = 3; FullControl = 4 }
+
+    # -- Resolve everyone before touching anything ---------------------------------
+    # One unknown address must stop the run here, not halfway through, with the parent already
+    # closed off and half the subfolders done.
+    Write-Host '  Resolving people...' -ForegroundColor Cyan
+    $principals = @{}
+    $unresolved = @()
+    $everyone = @($ownerLogins) + @($plan.Values | ForEach-Object { $_.Members }) | Sort-Object -Unique
+    foreach ($login in $everyone) {
+        try {
+            $user = $web.EnsureUser($login)
+            $context.Load($user)
             $context.ExecuteQuery()
-            $assignments = Get-Assignments -Item $Item
+            $principals[$login] = $user
+            Write-Host ("    {0,-40} {1}" -f $login, $user.Title) -ForegroundColor DarkGray
+        } catch {
+            $unresolved += $login
+            Write-Bad "$login - $($_.Exception.Message.Trim())"
         }
-        Add-Result -Folder $Label -Action 'Break inheritance' -Result $status
+    }
+    if ($unresolved.Count -gt 0) {
+        foreach ($login in $unresolved) { Add-Result -Folder $relative -Action 'Resolve' -Principal $login -Result 'Not found' }
+        $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+        throw "$($unresolved.Count) address(es) could not be resolved - nothing was changed. Fix them in the config and run again. Report: $OutputPath"
+    }
+    function Test-Owner { param([string] $Login) return $ownerKeys.ContainsKey($Login.ToLowerInvariant()) }
+
+    # -- Helpers -------------------------------------------------------------------
+    function New-Grant {
+        <# One desired assignment. Principal is $null for a group that a dry run has not created. #>
+        param([string] $Name, $Principal, [string] $Role)
+        [pscustomobject]@{ Name = $Name; Principal = $Principal; Role = $Role }
     }
 
-    # Site owners first, so the item can never end up without them.
-    if ($ownerGroupId -and -not ($assignments | Where-Object { $_.Member.Id -eq $ownerGroupId })) {
-        $changes++
-        Write-Change 'grant Full Control to the site Owners group'
-        if ($Apply) {
-            $bindings = New-Object Microsoft.SharePoint.Client.RoleDefinitionBindingCollection($context)
-            $bindings.Add($roleDefs['FullControl'])
-            $Item.RoleAssignments.Add($web.AssociatedOwnerGroup, $bindings) | Out-Null
-            $context.ExecuteQuery()
+    function Merge-Grants {
+        <# One grant per principal, the highest role winning: an owner who is also listed as a
+           member must end up with Full Control, not with whichever entry came last. #>
+        param([array] $Grants)
+        $byKey = [ordered]@{}
+        foreach ($g in $Grants) {
+            $key = if ($g.Principal) { "id:$($g.Principal.Id)" } else { "name:$($g.Name)" }
+            if (-not $byKey.Contains($key) -or $roleRank[$g.Role] -gt $roleRank[$byKey[$key].Role]) { $byKey[$key] = $g }
         }
-        Add-Result -Folder $Label -Action 'Grant' -Principal 'Site Owners' -Detail 'FullControl' -Result $status
+        return @($byKey.Values)
     }
 
-    $desiredById = @{}
-    foreach ($g in $Desired | Where-Object Principal) { $desiredById[$g.Principal.Id] = $g }
+    function Get-Assignments {
+        <# The role assignments on a list item, with member and bindings loaded. Inherited ones too:
+           on an item that inherits, SharePoint returns those of the ancestor it inherits from. #>
+        param($Item)
+        $context.Load($Item)
+        $context.Load($Item.RoleAssignments)
+        $context.ExecuteQuery()
+        foreach ($a in $Item.RoleAssignments) {
+            $context.Load($a.Member)
+            $context.Load($a.RoleDefinitionBindings)
+        }
+        $context.ExecuteQuery()
+        return @($Item.RoleAssignments)
+    }
 
-    $seen = @{}
-    foreach ($a in $assignments) {
-        $member = $a.Member
-        $roles  = @($a.RoleDefinitionBindings | Where-Object { -not $_.Hidden } | ForEach-Object { $_.Name })
+    function Test-Protected {
+        <# Assignments that are never removed: the site Owners group, the owners of the M365 group
+           behind a Teams site, and system Limited Access entries. #>
+        param($Assignment)
+        if ($ownerGroupId -and $Assignment.Member.Id -eq $ownerGroupId) { return 'site owners' }
+        if ($Assignment.Member.LoginName -match 'federateddirectoryclaimprovider\|.+_o$') { return 'group owners' }
+        $bindings = @($Assignment.RoleDefinitionBindings)
+        if ($bindings.Count -gt 0 -and -not ($bindings | Where-Object { -not $_.Hidden -and "$($_.RoleTypeKind)" -ne 'Guest' })) {
+            return 'limited access'
+        }
+        return $null
+    }
 
-        if ($desiredById.ContainsKey($member.Id)) {
-            $g = $desiredById[$member.Id]
-            $seen[$member.Id] = $true
-            $want = $roleDefs[$g.Role]
-            $have = @($a.RoleDefinitionBindings | Where-Object { -not $_.Hidden })
-            if ($have.Count -eq 1 -and $have[0].Id -eq $want.Id) {
-                Write-Ok "$($g.Name) has $($want.Name)"
-                Add-Result -Folder $Label -Action 'Check' -Principal $g.Name -Detail $want.Name -Result 'Already correct'
-                continue
+    function Set-FolderAccess {
+        <#
+            Bring one item in line: unique permissions, site owners Full Control, exactly the desired
+            grants with exactly their role, nobody else. Returns the number of changes (planned in a
+            dry run, made with -Apply).
+        #>
+        param(
+            [string] $Label,
+            $Item,
+            [array] $Desired,
+            [switch] $IsNew
+        )
+
+        Write-Host ''
+        Write-Host "  $Label" -ForegroundColor Cyan
+        $Desired = Merge-Grants $Desired
+
+        if ($IsNew -and -not $Apply) {
+            Write-Change 'create folder'
+            Add-Result -Folder $Label -Action 'Create folder' -Result 'Planned'
+            Write-Change 'break inheritance, keep only the site owners'
+            foreach ($g in $Desired) {
+                Write-Change "grant $($g.Role) to $($g.Name)"
+                Add-Result -Folder $Label -Action 'Grant' -Principal $g.Name -Detail $g.Role -Result 'Planned'
             }
+            return 2 + $Desired.Count
+        }
+
+        $changes     = 0
+        $assignments = Get-Assignments -Item $Item
+
+        if (-not $Item.HasUniqueRoleAssignments) {
             $changes++
-            Write-Change "set $($g.Name) to $($want.Name) (was: $($roles -join ', '))"
+            Write-Change 'break inheritance (current permissions copied, then trimmed below)'
             if ($Apply) {
-                $a.RoleDefinitionBindings.RemoveAll()
-                $a.RoleDefinitionBindings.Add($want)
-                $a.Update()
+                # Copy, not clear: clearing would hand the signed-in admin Full Control as a side
+                # effect, and the reconcile below removes what should not stay anyway.
+                $Item.BreakRoleInheritance($true, $false)
+                $context.ExecuteQuery()
+                $assignments = Get-Assignments -Item $Item
+            }
+            Add-Result -Folder $Label -Action 'Break inheritance' -Result $status
+        }
+
+        # Site owners first, so the item can never end up without them.
+        if ($ownerGroupId -and -not ($assignments | Where-Object { $_.Member.Id -eq $ownerGroupId })) {
+            $changes++
+            Write-Change 'grant Full Control to the site Owners group'
+            if ($Apply) {
+                $bindings = New-Object Microsoft.SharePoint.Client.RoleDefinitionBindingCollection($context)
+                $bindings.Add($roleDefs['FullControl'])
+                $Item.RoleAssignments.Add($web.AssociatedOwnerGroup, $bindings) | Out-Null
                 $context.ExecuteQuery()
             }
-            Add-Result -Folder $Label -Action 'Change role' -Principal $g.Name -Detail "$($roles -join ', ') -> $($want.Name)" -Result $status
-            continue
+            Add-Result -Folder $Label -Action 'Grant' -Principal 'Site Owners' -Detail 'FullControl' -Result $status
         }
 
-        $keep = Test-Protected -Assignment $a
-        if ($keep) {
-            Write-Host "    [KEEP] $($member.Title) ($keep)" -ForegroundColor DarkGray
-            Add-Result -Folder $Label -Action 'Keep' -Principal $member.LoginName -Detail ($roles -join ', ') -Result $keep
-            continue
-        }
+        $desiredById = @{}
+        foreach ($g in $Desired | Where-Object Principal) { $desiredById[$g.Principal.Id] = $g }
 
-        $changes++
-        $kind = if ($member.LoginName -like 'SharingLinks.*') { 'sharing link' } else { "$($roles -join ', ')" }
-        Write-Change "remove $($member.Title) ($kind)"
-        Add-Result -Folder $Label -Action 'Remove' -Principal $member.LoginName -Detail $kind -Result $(if ($Apply) { 'Pending' } else { 'Planned' })
-        if ($Apply) {
-            $a.DeleteObject()
-            $context.ExecuteQuery()
-            $results[$results.Count - 1].Result = 'Done'
-        }
-    }
+        $seen = @{}
+        foreach ($a in $assignments) {
+            $member = $a.Member
+            $roles  = @($a.RoleDefinitionBindings | Where-Object { -not $_.Hidden } | ForEach-Object { $_.Name })
 
-    foreach ($g in $Desired) {
-        if ($g.Principal -and $seen[$g.Principal.Id]) { continue }
-        $changes++
-        $want = $roleDefs[$g.Role]
-        Write-Change "grant $($want.Name) to $($g.Name)"
-        if ($Apply) {
-            $bindings = New-Object Microsoft.SharePoint.Client.RoleDefinitionBindingCollection($context)
-            $bindings.Add($want)
-            $Item.RoleAssignments.Add($g.Principal, $bindings) | Out-Null
-            $context.ExecuteQuery()
-        }
-        Add-Result -Folder $Label -Action 'Grant' -Principal $g.Name -Detail $want.Name -Result $status
-    }
-
-    if ($changes -eq 0) { Write-Ok 'already correct' }
-    return $changes
-}
-
-function Get-FolderItem {
-    <# The list item behind a folder, or $null when the folder does not exist. #>
-    param([string] $Path)
-    try { return (Get-PnPFolder -Url $Path -Connection $connection -Includes ListItemAllFields).ListItemAllFields }
-    catch { return $null }
-}
-
-function Show-FolderAccess {
-    <# Read back what is actually on a folder now - the proof after -Apply. #>
-    param([string] $Label, $Item)
-    $assignments = Get-Assignments -Item $Item
-    Write-Host "    $Label" -ForegroundColor Cyan
-    foreach ($a in $assignments) {
-        $roles = @($a.RoleDefinitionBindings | Where-Object { -not $_.Hidden -and "$($_.RoleTypeKind)" -ne 'Guest' } | ForEach-Object { $_.Name })
-        if ($roles.Count -eq 0) { continue }
-        Write-Host ("      {0,-40} {1}" -f $a.Member.Title, ($roles -join ', ')) -ForegroundColor DarkGray
-    }
-}
-
-function Get-SiteGroup {
-    param([string] $Title)
-    try { return Get-PnPGroup -Identity $Title -Connection $connection } catch { return $null }
-}
-
-function Set-SiteGroup {
-    <#
-        Make sure a SharePoint group exists, holds at least the configured people (exactly them
-        with -SyncMembers) and is owned by $OwnerTitle. Returns the group, or $null in a dry run
-        when it does not exist yet.
-    #>
-    param([string] $Title, [string[]] $Logins, [string] $OwnerTitle)
-
-    Write-Host ''
-    Write-Host "  Group '$Title'" -ForegroundColor Cyan
-    $changes = 0
-    $group   = Get-SiteGroup -Title $Title
-    $created = $false
-
-    if (-not $group) {
-        $changes++
-        Write-Change 'create group'
-        Add-Result -Folder '' -Action 'Create group' -Principal $Title -Result $status
-        if (-not $Apply) {
-            foreach ($login in $Logins) {
-                Write-Change "add $login"
-                Add-Result -Folder '' -Action 'Add member' -Principal $login -Detail $Title -Result 'Planned'
+            if ($desiredById.ContainsKey($member.Id)) {
+                $g = $desiredById[$member.Id]
+                $seen[$member.Id] = $true
+                $want = $roleDefs[$g.Role]
+                $have = @($a.RoleDefinitionBindings | Where-Object { -not $_.Hidden })
+                if ($have.Count -eq 1 -and $have[0].Id -eq $want.Id) {
+                    Write-Ok "$($g.Name) has $($want.Name)"
+                    Add-Result -Folder $Label -Action 'Check' -Principal $g.Name -Detail $want.Name -Result 'Already correct'
+                    continue
+                }
+                $changes++
+                Write-Change "set $($g.Name) to $($want.Name) (was: $($roles -join ', '))"
+                if ($Apply) {
+                    $a.RoleDefinitionBindings.RemoveAll()
+                    $a.RoleDefinitionBindings.Add($want)
+                    $a.Update()
+                    $context.ExecuteQuery()
+                }
+                Add-Result -Folder $Label -Action 'Change role' -Principal $g.Name -Detail "$($roles -join ', ') -> $($want.Name)" -Result $status
+                continue
             }
-            Write-Change "owner: $OwnerTitle"
-            $script:groupChanges += $changes + $Logins.Count
-            return $null
-        }
-        $group   = New-PnPGroup -Title $Title -Description "Managed by Set-SharePointFolderAccess.ps1 for $relative" -Connection $connection
-        $created = $true
-    }
 
-    # Members, by login name, compared case-insensitively.
-    $current = @{}
-    foreach ($m in @(Get-PnPGroupMember -Group $group -Connection $connection)) { $current[$m.LoginName.ToLowerInvariant()] = $m }
-    $wanted = @{}
-    foreach ($login in $Logins) { $wanted[$principals[$login].LoginName.ToLowerInvariant()] = $login }
+            $keep = Test-Protected -Assignment $a
+            if ($keep) {
+                Write-Host "    [KEEP] $($member.Title) ($keep)" -ForegroundColor DarkGray
+                Add-Result -Folder $Label -Action 'Keep' -Principal $member.LoginName -Detail ($roles -join ', ') -Result $keep
+                continue
+            }
 
-    foreach ($key in $wanted.Keys) {
-        if ($current.ContainsKey($key)) { continue }
-        $changes++
-        $login = $wanted[$key]
-        Write-Change "add $login"
-        if ($Apply) { Add-PnPGroupMember -Group $group -LoginName $principals[$login].LoginName -Connection $connection | Out-Null }
-        Add-Result -Folder '' -Action 'Add member' -Principal $login -Detail $Title -Result $status
-    }
-    foreach ($key in $current.Keys) {
-        if ($wanted.ContainsKey($key)) { continue }
-        $member = $current[$key]
-        # Creating a group can put the signed-in admin in it; that one always goes.
-        $isCreator = $created -and $web.CurrentUser -and $member.Id -eq $web.CurrentUser.Id
-        if ($SyncMembers -or $isCreator) {
             $changes++
-            Write-Change "remove $($member.Title)"
-            if ($Apply) { Remove-PnPGroupMember -Group $group -LoginName $member.LoginName -Connection $connection | Out-Null }
-            Add-Result -Folder '' -Action 'Remove member' -Principal $member.LoginName -Detail $Title -Result $status
-        } else {
-            Write-Warn "$($member.Title) is in the group but not in the config - left in (-SyncMembers removes)"
-            Add-Result -Folder '' -Action 'Extra member' -Principal $member.LoginName -Detail $Title -Result 'Left in'
-        }
-    }
-
-    $owner = Get-PnPProperty -ClientObject $group -Property Owner -Connection $connection
-    if ("$($owner.Title)" -ne $OwnerTitle) {
-        $changes++
-        Write-Change "owner: $OwnerTitle (was: $($owner.Title))"
-        if ($Apply) { Set-PnPGroup -Identity $group -Owner $OwnerTitle -Connection $connection | Out-Null }
-        Add-Result -Folder '' -Action 'Set owner' -Principal $Title -Detail $OwnerTitle -Result $status
-    }
-
-    if ($changes -eq 0) { Write-Ok 'already correct' }
-    $script:groupChanges += $changes
-    return $group
-}
-
-# Wrapped so the CSV is written even when a change fails halfway: the report then shows what
-# was done before it stopped, which is what you need to judge the state the folder is in.
-$total = 0
-$script:groupChanges = 0
-$groupsMade = [ordered]@{}
-try {
-    # -- Who gets what -------------------------------------------------------------
-    $ownerGrants = @()
-    $teamGrants  = @{}   # subfolder -> grants
-    if ($DirectAccess) {
-        foreach ($login in $ownerLogins) { $ownerGrants += New-Grant -Name $login -Principal $principals[$login] -Role 'FullControl' }
-        foreach ($name in $plan.Keys) {
-            $teamGrants[$name] = @($plan[$name].Members | ForEach-Object { New-Grant -Name $_ -Principal $principals[$_] -Role $Role })
-        }
-    } else {
-        $ownerTitle = if ($ownerLogins) { "$GroupPrefix - Owners" }
-                      elseif ($ownerGroupId) { $web.AssociatedOwnerGroup.Title }
-                      else { $null }
-        if (-not $ownerTitle) { throw 'Groups need an owner: list "owners" in the config, or use a site that has an Owners group.' }
-
-        if ($ownerLogins) {
-            $g = Set-SiteGroup -Title $ownerTitle -Logins $ownerLogins -OwnerTitle $ownerTitle
-            $groupsMade[$ownerTitle] = $g
-            $ownerGrants += New-Grant -Name $ownerTitle -Principal $g -Role 'FullControl'
-        }
-        foreach ($name in $plan.Keys) {
-            $title = "$GroupPrefix - $name"
-            $g = Set-SiteGroup -Title $title -Logins $plan[$name].Members -OwnerTitle $ownerTitle
-            $groupsMade[$title] = $g
-            $teamGrants[$name] = @(New-Grant -Name $title -Principal $g -Role $Role)
-        }
-    }
-
-    # -- Parent folder -------------------------------------------------------------
-    $parentGrants = @($ownerGrants)
-    if ($ParentAccess -eq 'Read') {
-        foreach ($name in $plan.Keys) {
-            $parentGrants += @($teamGrants[$name] | ForEach-Object { New-Grant -Name $_.Name -Principal $_.Principal -Role 'Read' })
-        }
-    }
-    $total += Set-FolderAccess -Label $relative -Item $parentFolder.ListItemAllFields -Desired $parentGrants
-
-    # -- Subfolders ----------------------------------------------------------------
-    $others = @()
-    foreach ($f in @(Get-PnPFolderItem -FolderSiteRelativeUrl $relative -Connection $connection)) {
-        if (-not ($f -is [Microsoft.SharePoint.Client.Folder] -and $plan.Contains($f.Name))) { $others += $f }
-    }
-
-    $managed = [ordered]@{}
-    foreach ($name in $plan.Keys) {
-        $path  = "$relative/$name"
-        $item  = Get-FolderItem -Path $path
-        $isNew = -not $item
-        if ($isNew -and $Apply) {
-            Add-PnPFolder -Name $name -Folder $relative -Connection $connection | Out-Null
-            Add-Result -Folder $path -Action 'Create folder' -Result 'Done'
-            Write-Host ''
-            Write-Host "  Created $path" -ForegroundColor Magenta
-            $total++
-            $item = Get-FolderItem -Path $path
-        }
-        $total += Set-FolderAccess -Label $path -Item $item -Desired (@($ownerGrants) + @($teamGrants[$name])) -IsNew:($isNew -and -not $Apply)
-        if ($item) { $managed[$path] = $item }
-
-        # Personal folders: one per listed non-owner (owners too with "all"), only that person
-        # and the owners.
-        if (-not $plan[$name].Personal) { continue }
-        # Compared as a string: $true -eq 'all' is $true in PowerShell, which would make every
-        # "personalFolders": true behave like "all".
-        $withOwners = "$($plan[$name].Personal)" -eq 'all'
-        foreach ($login in $plan[$name].Members | Where-Object { $withOwners -or -not (Test-Owner $_) }) {
-            $folderName = ($principals[$login].Title -replace $invalidName, '-').Trim().TrimEnd('.')
-            if (-not $folderName) { $folderName = ($login -split '@')[0] }
-            $personalPath = "$path/$folderName"
-            $pItem  = if ($isNew) { $null } else { Get-FolderItem -Path $personalPath }
-            $pIsNew = -not $pItem
-            if ($pIsNew -and $Apply) {
-                Add-PnPFolder -Name $folderName -Folder $path -Connection $connection | Out-Null
-                Add-Result -Folder $personalPath -Action 'Create folder' -Result 'Done'
-                Write-Host ''
-                Write-Host "  Created $personalPath" -ForegroundColor Magenta
-                $total++
-                $pItem = Get-FolderItem -Path $personalPath
+            $kind = if ($member.LoginName -like 'SharingLinks.*') { 'sharing link' } else { "$($roles -join ', ')" }
+            Write-Change "remove $($member.Title) ($kind)"
+            Add-Result -Folder $Label -Action 'Remove' -Principal $member.LoginName -Detail $kind -Result $(if ($Apply) { 'Pending' } else { 'Planned' })
+            if ($Apply) {
+                $a.DeleteObject()
+                $context.ExecuteQuery()
+                $results[$results.Count - 1].Result = 'Done'
             }
-            $personalGrants = @($ownerGrants) + @(New-Grant -Name $login -Principal $principals[$login] -Role 'Contribute')
-            $total += Set-FolderAccess -Label $personalPath -Item $pItem -Desired $personalGrants -IsNew:($pIsNew -and -not $Apply)
-            if ($pItem) { $managed[$personalPath] = $pItem }
         }
-    }
 
-    # Anything else directly in the parent - files, subfolders the config does not name - inherits
-    # the parent's Read, so everyone listed anywhere could open it. That is more than "only their
-    # own subfolder", so it is locked to the owners: the same reconcile with only the owners desired.
-    foreach ($f in $others) {
-        $kind = if ($f -is [Microsoft.SharePoint.Client.Folder]) { 'folder' } else { 'file' }
-        $item = $f.ListItemAllFields
-        $context.Load($item); $context.ExecuteQuery()
-        $open = $item.HasUniqueRoleAssignments -or $ParentAccess -eq 'Read'
-
-        if ($KeepOtherItems -or -not $open) {
-            $how = if ($item.HasUniqueRoleAssignments) { 'has its own permissions' }
-                   elseif ($ParentAccess -eq 'Read') { 'inherits from the parent: everyone in the config can READ it' }
-                   else { 'inherits from the parent: owners only' }
-            if ($open) {
-                Write-Host ''
-                Write-Warn "$kind '$($f.Name)' is not in the config and was left alone (-KeepOtherItems) - it $how."
+        foreach ($g in $Desired) {
+            if ($g.Principal -and $seen[$g.Principal.Id]) { continue }
+            $changes++
+            $want = $roleDefs[$g.Role]
+            Write-Change "grant $($want.Name) to $($g.Name)"
+            if ($Apply) {
+                $bindings = New-Object Microsoft.SharePoint.Client.RoleDefinitionBindingCollection($context)
+                $bindings.Add($want)
+                $Item.RoleAssignments.Add($g.Principal, $bindings) | Out-Null
+                $context.ExecuteQuery()
             }
-            Add-Result -Folder "$relative/$($f.Name)" -Action 'Not managed' -Detail $how -Result 'Untouched'
-            continue
+            Add-Result -Folder $Label -Action 'Grant' -Principal $g.Name -Detail $want.Name -Result $status
         }
-        $total += Set-FolderAccess -Label "$relative/$($f.Name) ($kind, not in the config: owners only)" -Item $item -Desired $ownerGrants
+
+        if ($changes -eq 0) { Write-Ok 'already correct' }
+        return $changes
     }
 
-    # -- Read back -----------------------------------------------------------------
-    if ($Apply) {
+    function Get-FolderItem {
+        <# The list item behind a folder, or $null when the folder does not exist. #>
+        param([string] $Path)
+        try { return (Get-PnPFolder -Url $Path -Connection $connection -Includes ListItemAllFields).ListItemAllFields }
+        catch { return $null }
+    }
+
+    function Show-FolderAccess {
+        <# Read back what is actually on a folder now - the proof after -Apply. #>
+        param([string] $Label, $Item)
+        $assignments = Get-Assignments -Item $Item
+        Write-Host "    $Label" -ForegroundColor Cyan
+        foreach ($a in $assignments) {
+            $roles = @($a.RoleDefinitionBindings | Where-Object { -not $_.Hidden -and "$($_.RoleTypeKind)" -ne 'Guest' } | ForEach-Object { $_.Name })
+            if ($roles.Count -eq 0) { continue }
+            Write-Host ("      {0,-40} {1}" -f $a.Member.Title, ($roles -join ', ')) -ForegroundColor DarkGray
+        }
+    }
+
+    function Get-SiteGroup {
+        param([string] $Title)
+        try { return Get-PnPGroup -Identity $Title -Connection $connection } catch { return $null }
+    }
+
+    function Set-SiteGroup {
+        <#
+            Make sure a SharePoint group exists, holds at least the configured people (exactly them
+            with -SyncMembers) and is owned by $OwnerTitle. Returns the group, or $null in a dry run
+            when it does not exist yet.
+        #>
+        param([string] $Title, [string[]] $Logins, [string] $OwnerTitle)
+
         Write-Host ''
-        Write-Host '  Permissions now in place' -ForegroundColor Cyan
-        Show-FolderAccess -Label $relative -Item $parentFolder.ListItemAllFields
-        foreach ($path in $managed.Keys) { Show-FolderAccess -Label $path -Item $managed[$path] }
+        Write-Host "  Group '$Title'" -ForegroundColor Cyan
+        $changes = 0
+        $group   = Get-SiteGroup -Title $Title
+        $created = $false
 
-        if ($groupsMade.Count -gt 0) {
-            Write-Host ''
-            Write-Host '  Group pages - the owners add and remove members here' -ForegroundColor Cyan
-            foreach ($title in $groupsMade.Keys) {
-                $g = Get-SiteGroup -Title $title
-                if ($g) { Write-Host ("    {0,-36} {1}/_layouts/15/people.aspx?MembershipGroupId={2}" -f $title, $SiteUrl, $g.Id) -ForegroundColor DarkGray }
+        if (-not $group) {
+            $changes++
+            Write-Change 'create group'
+            Add-Result -Folder '' -Action 'Create group' -Principal $Title -Result $status
+            if (-not $Apply) {
+                foreach ($login in $Logins) {
+                    Write-Change "add $login"
+                    Add-Result -Folder '' -Action 'Add member' -Principal $login -Detail $Title -Result 'Planned'
+                }
+                Write-Change "owner: $OwnerTitle"
+                $script:groupChanges += $changes + $Logins.Count
+                return $null
+            }
+            $group   = New-PnPGroup -Title $Title -Description "Managed by Set-SharePointFolderAccess.ps1 for $relative" -Connection $connection
+            $created = $true
+        }
+
+        # Members, by login name, compared case-insensitively.
+        $current = @{}
+        foreach ($m in @(Get-PnPGroupMember -Group $group -Connection $connection)) { $current[$m.LoginName.ToLowerInvariant()] = $m }
+        $wanted = @{}
+        foreach ($login in $Logins) { $wanted[$principals[$login].LoginName.ToLowerInvariant()] = $login }
+
+        foreach ($key in $wanted.Keys) {
+            if ($current.ContainsKey($key)) { continue }
+            $changes++
+            $login = $wanted[$key]
+            Write-Change "add $login"
+            if ($Apply) { Add-PnPGroupMember -Group $group -LoginName $principals[$login].LoginName -Connection $connection | Out-Null }
+            Add-Result -Folder '' -Action 'Add member' -Principal $login -Detail $Title -Result $status
+        }
+        foreach ($key in $current.Keys) {
+            if ($wanted.ContainsKey($key)) { continue }
+            $member = $current[$key]
+            # Creating a group can put the signed-in admin in it; that one always goes.
+            $isCreator = $created -and $web.CurrentUser -and $member.Id -eq $web.CurrentUser.Id
+            if ($SyncMembers -or $isCreator) {
+                $changes++
+                Write-Change "remove $($member.Title)"
+                if ($Apply) { Remove-PnPGroupMember -Group $group -LoginName $member.LoginName -Connection $connection | Out-Null }
+                Add-Result -Folder '' -Action 'Remove member' -Principal $member.LoginName -Detail $Title -Result $status
+            } else {
+                Write-Warn "$($member.Title) is in the group but not in the config - left in (-SyncMembers removes)"
+                Add-Result -Folder '' -Action 'Extra member' -Principal $member.LoginName -Detail $Title -Result 'Left in'
             }
         }
+
+        $owner = Get-PnPProperty -ClientObject $group -Property Owner -Connection $connection
+        if ("$($owner.Title)" -ne $OwnerTitle) {
+            $changes++
+            Write-Change "owner: $OwnerTitle (was: $($owner.Title))"
+            if ($Apply) { Set-PnPGroup -Identity $group -Owner $OwnerTitle -Connection $connection | Out-Null }
+            Add-Result -Folder '' -Action 'Set owner' -Principal $Title -Detail $OwnerTitle -Result $status
+        }
+
+        if ($changes -eq 0) { Write-Ok 'already correct' }
+        $script:groupChanges += $changes
+        return $group
+    }
+
+    # Wrapped so the CSV is written even when a change fails halfway: the report then shows what
+    # was done before it stopped, which is what you need to judge the state the folder is in.
+    $total = 0
+    $script:groupChanges = 0
+    $groupsMade = [ordered]@{}
+    try {
+        # -- Who gets what -------------------------------------------------------------
+        $ownerGrants = @()
+        $teamGrants  = @{}   # subfolder -> grants
+        if ($DirectAccess) {
+            foreach ($login in $ownerLogins) { $ownerGrants += New-Grant -Name $login -Principal $principals[$login] -Role 'FullControl' }
+            foreach ($name in $plan.Keys) {
+                $teamGrants[$name] = @($plan[$name].Members | ForEach-Object { New-Grant -Name $_ -Principal $principals[$_] -Role $Role })
+            }
+        } else {
+            $ownerTitle = if ($ownerLogins) { "$GroupPrefix - Owners" }
+                          elseif ($ownerGroupId) { $web.AssociatedOwnerGroup.Title }
+                          else { $null }
+            if (-not $ownerTitle) { throw 'Groups need an owner: list "owners" in the config, or use a site that has an Owners group.' }
+
+            if ($ownerLogins) {
+                $g = Set-SiteGroup -Title $ownerTitle -Logins $ownerLogins -OwnerTitle $ownerTitle
+                $groupsMade[$ownerTitle] = $g
+                $ownerGrants += New-Grant -Name $ownerTitle -Principal $g -Role 'FullControl'
+            }
+            foreach ($name in $plan.Keys) {
+                $title = "$GroupPrefix - $name"
+                $g = Set-SiteGroup -Title $title -Logins $plan[$name].Members -OwnerTitle $ownerTitle
+                $groupsMade[$title] = $g
+                $teamGrants[$name] = @(New-Grant -Name $title -Principal $g -Role $Role)
+            }
+        }
+
+        # -- Parent folder -------------------------------------------------------------
+        $parentGrants = @($ownerGrants)
+        if ($ParentAccess -eq 'Read') {
+            foreach ($name in $plan.Keys) {
+                $parentGrants += @($teamGrants[$name] | ForEach-Object { New-Grant -Name $_.Name -Principal $_.Principal -Role 'Read' })
+            }
+        }
+        $total += Set-FolderAccess -Label $relative -Item $parentFolder.ListItemAllFields -Desired $parentGrants
+
+        # -- Subfolders ----------------------------------------------------------------
+        $others = @()
+        foreach ($f in @(Get-PnPFolderItem -FolderSiteRelativeUrl $relative -Connection $connection)) {
+            if (-not ($f -is [Microsoft.SharePoint.Client.Folder] -and $plan.Contains($f.Name))) { $others += $f }
+        }
+
+        $managed = [ordered]@{}
+        foreach ($name in $plan.Keys) {
+            $path  = "$relative/$name"
+            $item  = Get-FolderItem -Path $path
+            $isNew = -not $item
+            if ($isNew -and $Apply) {
+                Add-PnPFolder -Name $name -Folder $relative -Connection $connection | Out-Null
+                Add-Result -Folder $path -Action 'Create folder' -Result 'Done'
+                Write-Host ''
+                Write-Host "  Created $path" -ForegroundColor Magenta
+                $total++
+                $item = Get-FolderItem -Path $path
+            }
+            $total += Set-FolderAccess -Label $path -Item $item -Desired (@($ownerGrants) + @($teamGrants[$name])) -IsNew:($isNew -and -not $Apply)
+            if ($item) { $managed[$path] = $item }
+
+            # Personal folders: one per listed non-owner (owners too with "all"), only that person
+            # and the owners.
+            if (-not $plan[$name].Personal) { continue }
+            # Compared as a string: $true -eq 'all' is $true in PowerShell, which would make every
+            # "personalFolders": true behave like "all".
+            $withOwners = "$($plan[$name].Personal)" -eq 'all'
+            foreach ($login in $plan[$name].Members | Where-Object { $withOwners -or -not (Test-Owner $_) }) {
+                $folderName = ($principals[$login].Title -replace $invalidName, '-').Trim().TrimEnd('.')
+                if (-not $folderName) { $folderName = ($login -split '@')[0] }
+                $personalPath = "$path/$folderName"
+                $pItem  = if ($isNew) { $null } else { Get-FolderItem -Path $personalPath }
+                $pIsNew = -not $pItem
+                if ($pIsNew -and $Apply) {
+                    Add-PnPFolder -Name $folderName -Folder $path -Connection $connection | Out-Null
+                    Add-Result -Folder $personalPath -Action 'Create folder' -Result 'Done'
+                    Write-Host ''
+                    Write-Host "  Created $personalPath" -ForegroundColor Magenta
+                    $total++
+                    $pItem = Get-FolderItem -Path $personalPath
+                }
+                $personalGrants = @($ownerGrants) + @(New-Grant -Name $login -Principal $principals[$login] -Role 'Contribute')
+                $total += Set-FolderAccess -Label $personalPath -Item $pItem -Desired $personalGrants -IsNew:($pIsNew -and -not $Apply)
+                if ($pItem) { $managed[$personalPath] = $pItem }
+            }
+        }
+
+        # Anything else directly in the parent - files, subfolders the config does not name - inherits
+        # the parent's Read, so everyone listed anywhere could open it. That is more than "only their
+        # own subfolder", so it is locked to the owners: the same reconcile with only the owners desired.
+        foreach ($f in $others) {
+            $kind = if ($f -is [Microsoft.SharePoint.Client.Folder]) { 'folder' } else { 'file' }
+            $item = $f.ListItemAllFields
+            $context.Load($item); $context.ExecuteQuery()
+            $open = $item.HasUniqueRoleAssignments -or $ParentAccess -eq 'Read'
+
+            if ($KeepOtherItems -or -not $open) {
+                $how = if ($item.HasUniqueRoleAssignments) { 'has its own permissions' }
+                       elseif ($ParentAccess -eq 'Read') { 'inherits from the parent: everyone in the config can READ it' }
+                       else { 'inherits from the parent: owners only' }
+                if ($open) {
+                    Write-Host ''
+                    Write-Warn "$kind '$($f.Name)' is not in the config and was left alone (-KeepOtherItems) - it $how."
+                }
+                Add-Result -Folder "$relative/$($f.Name)" -Action 'Not managed' -Detail $how -Result 'Untouched'
+                continue
+            }
+            $total += Set-FolderAccess -Label "$relative/$($f.Name) ($kind, not in the config: owners only)" -Item $item -Desired $ownerGrants
+        }
+
+        # -- Read back -----------------------------------------------------------------
+        if ($Apply) {
+            Write-Host ''
+            Write-Host '  Permissions now in place' -ForegroundColor Cyan
+            Show-FolderAccess -Label $relative -Item $parentFolder.ListItemAllFields
+            foreach ($path in $managed.Keys) { Show-FolderAccess -Label $path -Item $managed[$path] }
+
+            if ($groupsMade.Count -gt 0) {
+                Write-Host ''
+                Write-Host '  Group pages - the owners add and remove members here' -ForegroundColor Cyan
+                foreach ($title in $groupsMade.Keys) {
+                    $g = Get-SiteGroup -Title $title
+                    if ($g) { Write-Host ("    {0,-36} {1}/_layouts/15/people.aspx?MembershipGroupId={2}" -f $title, $SiteUrl, $g.Id) -ForegroundColor DarkGray }
+                }
+            }
+        }
+    } finally {
+        $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
     }
 } finally {
-    $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+    if ($grantedSiteAdmin -and -not $KeepSiteAdmin) {
+        try {
+            Remove-PnPSiteCollectionAdmin -Owners @($AdminUpn) -Connection $connection -ErrorAction Stop
+            Write-Host "  Removed site collection admin rights for $AdminUpn again." -ForegroundColor DarkGray
+        } catch {
+            Write-Warning "$AdminUpn is still site collection admin on ${SiteUrl}: $($_.Exception.Message)"
+        }
+    }
 }
 
 # -- Summary -------------------------------------------------------------------

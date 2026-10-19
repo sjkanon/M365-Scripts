@@ -770,6 +770,9 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 | `-KeepOtherItems` | No | Leave files and unconfigured subfolders directly in the parent alone instead of locking them to the owners |
 | `-Apply` | No | Actually change. Without it nothing is written |
 | `-TenantId` / `-ClientId` / `-AppName` | No | Sign-in overrides, as in `Restore-RecycleBinItems.ps1` |
+| `-GrantSiteAdmin` | No | Make yourself site collection admin for the run and remove it again afterwards, also when the run fails (SharePoint Administrator required). Needed on a Teams site you are not a member of - a Global Administrator cannot read a team's files by role alone |
+| `-KeepSiteAdmin` | No | Keep those rights instead of removing them |
+| `-AdminUpn` | No | UPN to grant site admin to (default: the signed-in account) |
 | `-AppOnly` | No | Certificate app from `graph.appid.json` (needs SharePoint `Sites.FullControl.All`) |
 | `-OutputPath` | No | CSV report path |
 
@@ -783,6 +786,9 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 
 # Do it, then read the result back.
 .\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# A customer's Teams site you are not a member of: site collection admin for the run only
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -GrantSiteAdmin -Apply
 
 # Without a config file, people granted directly instead of through groups
 .\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `

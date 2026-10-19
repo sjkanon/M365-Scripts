@@ -781,6 +781,9 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 | `-KeepOtherItems` | Nee | Bestanden en niet-geconfigureerde submappen direct in de bovenliggende map ongemoeid laten in plaats van ze voor de owners af te sluiten |
 | `-Apply` | Nee | Echt wijzigen. Zonder wordt er niets geschreven |
 | `-TenantId` / `-ClientId` / `-AppName` | Nee | Overschrijvingen voor het aanmelden, zoals in `Restore-RecycleBinItems.ps1` |
+| `-GrantSiteAdmin` | Nee | Maak jezelf sitecollectiebeheerder voor de duur van de run en haal dat daarna weer weg, ook als de run faalt (SharePoint-beheerder vereist). Nodig op een Teams-site waar je geen lid van bent - een Global Administrator kan de bestanden van een team niet lezen op basis van zijn rol alleen |
+| `-KeepSiteAdmin` | Nee | Die rechten houden in plaats van ze weg te halen |
+| `-AdminUpn` | Nee | UPN die de site-adminrechten krijgt (standaard: het aangemelde account) |
 | `-AppOnly` | Nee | Certificaat-app uit `graph.appid.json` (heeft SharePoint `Sites.FullControl.All` nodig) |
 | `-OutputPath` | Nee | Pad van het CSV-rapport |
 
@@ -794,6 +797,9 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 
 # Uitvoeren, en het resultaat teruglezen.
 .\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# Teams-site van een klant waar je geen lid van bent: alleen tijdens de run sitecollectiebeheerder
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -GrantSiteAdmin -Apply
 
 # Zonder configbestand, mensen direct op de map in plaats van via groepen
 .\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `

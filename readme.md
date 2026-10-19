@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-19 (6)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) gained `-GrantSiteAdmin`, `-KeepSiteAdmin` and `-AdminUpn`, as in `Find-SiteContent.ps1` and `Restore-RecycleBinItems.ps1`. The first live run registered the app and signed in, then stopped at `Get-PnPWeb: Attempted to perform an unauthorized operation`: the Global Administrator it signed in with was not a member of the customer's team, and that role alone gives no access to a site's content. With `-GrantSiteAdmin` the admin becomes site collection admin through the tenant admin site for the run; the whole run after the grant is inside a `try`/`finally`, so the rights are removed again also when an address does not resolve or a change fails. Without the switch the same error now says to use it |
+| Verified: syntax check; link check; the app registration on the live tenant (app created, scopes consented, client ID cached) and the delegated sign-in, which got as far as the unauthorized error. **Not** verified: the grant and its removal, and everything after |
+
 ### 2026-10-19 (5)
 | Change |
 |--------|
