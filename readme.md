@@ -643,10 +643,6 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 
 ### 🔧 Custom Tools
 
-
-
-
-
 #### Windows Device Management
 
 📂 Folder: [`Device/`](scripts/Device/readme.md)
@@ -1020,6 +1016,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 |--------|
 | [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) gained `-GrantSiteAdmin`, `-KeepSiteAdmin` and `-AdminUpn`, as in `Find-SiteContent.ps1` and `Restore-RecycleBinItems.ps1`. The first live run registered the app and signed in, then stopped at `Get-PnPWeb: Attempted to perform an unauthorized operation`: the Global Administrator it signed in with was not a member of the customer's team, and that role alone gives no access to a site's content. With `-GrantSiteAdmin` the admin becomes site collection admin through the tenant admin site for the run; the whole run after the grant is inside a `try`/`finally`, so the rights are removed again also when an address does not resolve or a change fails. Without the switch the same error now says to use it |
 | Verified: syntax check; link check; the app registration on the live tenant (app created, scopes consented, client ID cached) and the delegated sign-in, which got as far as the unauthorized error. **Not** verified: the grant and its removal, and everything after |
+
+### 2026-10-19 (6)
+| Change |
+|--------|
+| Removed a batch-monitoring folder that was written for one customer environment; customer-specific material does not belong in this public repo. Its entries in the folder tables, the repository tree, the script categories and the version history are gone too |
+| [`Test-FileIODiagnostics.ps1`](scripts/Network/readme.md#test-fileiodiagnosticsps1) and [`Test-AuthNetworkDiagnostics.ps1`](scripts/Network/readme.md#test-authnetworkdiagnosticsps1) used that environment's paths and server name in their examples; they now use neutral ones (`D:\Data\Work`, `fileserver`, `D:\Logs`) |
+| Verified: syntax check; link check; no remaining references in the tree |
 
 ### 2026-10-19 (5)
 | Change |
@@ -1446,7 +1449,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-10-05 (10)
 | Change |
 |--------|
-| Every folder readme now follows the `scripts/Intune/` pattern: each script in the `## Scripts` table links to the file **and** to its section (`([docs](#…))`). 19 folders did not, in all three languages: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph and Intune/Desktop/Background/Desktop and /Lockscreen had no scripts table at all, and Reporting/Licensing only a tree; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (no file link for `GetAutoPilot.CMD`), UniFi, SMTP, Startup and one row in SharePoint/Provisioning had rows without a docs link |
+| Every folder readme now follows the `scripts/Intune/` pattern: each script in the `## Scripts` table links to the file **and** to its section (`([docs](#…))`). 18 folders did not, in all three languages: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph and Intune/Desktop/Background/Desktop and /Lockscreen had no scripts table at all, and Reporting/Licensing only a tree; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (no file link for `GetAutoPilot.CMD`), UniFi, SMTP, Startup and one row in SharePoint/Provisioning had rows without a docs link |
 | Where a script was documented under a descriptive heading, the heading now carries the file name so the anchor is the same in every language (checked first that nothing linked to the old anchor). Scripts that had no section got a short one from their own header comment: `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, and a shared section for the ClaudeDesktop install/uninstall/detect scripts. The `Remove-CorporateWallpaper.ps1` notes record that it does not undo everything `Set-CorporateWallpaper.ps1` 2.3+ writes |
 | Also corrected: the Intune readme still said the Office theme scripts hardcode their URL, and the Provisioning notes said the shared module is dot-sourced by "all four" scripts — all ten in the folder use it |
 | Verified: every script in every folder readme has a file link and a docs link whose anchor exists (scripted check over all 57 folder readmes), and the link check passes over 4562 internal links. Nothing was run |

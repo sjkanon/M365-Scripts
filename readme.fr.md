@@ -643,12 +643,6 @@ Deux scripts qui maintiennent en place le disque temporaire éphémère (`D:`) d
 
 ### 🔧 Outils maison
 
-
-
-
-- Détecte les erreurs de spawn, les échecs d'authentification sur la bibliothèque WORK, les abandons, les erreurs disque et les lignes `ERROR:` générales
-- Script d'installation unique — installe dans `C:\Scripts\`, crée une tâche planifiée quotidienne
-
 #### Gestion des appareils Windows
 
 📂 Dossier : [`Device/`](scripts/Device/readme.fr.md)
@@ -1022,6 +1016,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 |--------------|
 | [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) reçoit `-GrantSiteAdmin`, `-KeepSiteAdmin` et `-AdminUpn`, comme `Find-SiteContent.ps1` et `Restore-RecycleBinItems.ps1`. La première exécution réelle a enregistré l'application et s'est connectée, puis s'est arrêtée sur `Get-PnPWeb: Attempted to perform an unauthorized operation` : l'Administrateur général utilisé n'était pas membre de l'équipe du client, et ce rôle seul ne donne pas accès au contenu d'un site. Avec `-GrantSiteAdmin`, l'administrateur devient administrateur de collection de sites via le site d'administration du tenant pendant l'exécution ; toute l'exécution après l'attribution est dans un `try`/`finally`, donc les droits sont retirés aussi quand une adresse n'est pas résolue ou qu'une modification échoue. Sans le switch, la même erreur indique désormais de l'utiliser |
 | Vérifié : contrôle de syntaxe ; contrôle des liens ; l'enregistrement de l'application sur le tenant réel (application créée, étendues consenties, ID client mis en cache) et la connexion déléguée, qui est allée jusqu'à l'erreur unauthorized. **Non** vérifié : l'attribution et le retrait des droits, et tout ce qui suit |
+
+### 2026-10-19 (6)
+| Modification |
+|--------|
+| Suppression d'un dossier de supervision batch écrit pour un seul environnement client ; le contenu propre à un client n'a pas sa place dans ce dépôt public. Ses mentions dans les tableaux de dossiers, l'arborescence, les catégories de scripts et l'historique des versions ont aussi disparu |
+| [`Test-FileIODiagnostics.ps1`](scripts/Network/readme.fr.md#test-fileiodiagnosticsps1) et [`Test-AuthNetworkDiagnostics.ps1`](scripts/Network/readme.fr.md#test-authnetworkdiagnosticsps1) utilisaient dans leurs exemples les chemins et le nom de serveur de cet environnement ; ils utilisent désormais des valeurs neutres (`D:\Data\Work`, `fileserver`, `D:\Logs`) |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; plus aucune référence dans l'arborescence |
 
 ### 2026-10-19 (5)
 | Modification |
@@ -1448,7 +1449,7 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ### 2026-10-05 (10)
 | Modification |
 |--------|
-| Chaque readme de dossier suit désormais le modèle de `scripts/Intune/` : chaque script de la table `## Scripts` pointe vers le fichier **et** vers sa section (`([docs](#…))`). 19 dossiers ne le faisaient pas, dans les trois langues : Azure/VM, DNS, Deployment, Device/DriveMapping, Graph et Intune/Desktop/Background/Desktop et /Lockscreen n'avaient aucune table de scripts, et Reporting/Licensing seulement une arborescence ; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (pas de lien vers `GetAutoPilot.CMD`), UniFi, SMTP, Startup et une ligne de SharePoint/Provisioning avaient des lignes sans lien docs |
+| Chaque readme de dossier suit désormais le modèle de `scripts/Intune/` : chaque script de la table `## Scripts` pointe vers le fichier **et** vers sa section (`([docs](#…))`). 18 dossiers ne le faisaient pas, dans les trois langues : Azure/VM, DNS, Deployment, Device/DriveMapping, Graph et Intune/Desktop/Background/Desktop et /Lockscreen n'avaient aucune table de scripts, et Reporting/Licensing seulement une arborescence ; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (pas de lien vers `GetAutoPilot.CMD`), UniFi, SMTP, Startup et une ligne de SharePoint/Provisioning avaient des lignes sans lien docs |
 | Lorsqu'un script était documenté sous un titre descriptif, ce titre porte désormais le nom du fichier, pour que l'ancre soit identique dans chaque langue (après avoir vérifié qu'aucun lien ne visait l'ancienne ancre). Les scripts sans section en ont reçu une courte, tirée de leur propre commentaire d'en-tête : `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, et une section commune pour les scripts install/uninstall/detect de ClaudeDesktop. Les remarques de `Remove-CorporateWallpaper.ps1` notent qu'il n'annule pas tout ce qu'écrit `Set-CorporateWallpaper.ps1` 2.3+ |
 | Également corrigé : le readme Intune disait encore que les scripts de thème Office codent leur URL en dur, et les remarques de Provisioning indiquaient que le module partagé est chargé par « les quatre » scripts — les dix scripts du dossier l'utilisent |
 | Vérifié : chaque script de chaque readme de dossier a un lien vers le fichier et un lien docs dont l'ancre existe (contrôle scripté sur les 57 readmes de dossier), et le contrôle des liens réussit sur 4562 liens internes. Rien n'a été exécuté |

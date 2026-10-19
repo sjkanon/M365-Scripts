@@ -643,12 +643,6 @@ Twee scripts die de vluchtige tijdelijke schijf (`D:`) van een Azure-VM of AVD-s
 
 ### 🔧 Eigen tools
 
-
-
-
-- Detecteert spawn-fouten, authenticatiefouten op de WORK-bibliotheek, afbrekingen, schijffouten en algemene `ERROR:`-regels
-- Eenmalig installatiescript — installeert naar `C:\Scripts\`, maakt een dagelijkse geplande taak aan
-
 #### Beheer van Windows-apparaten
 
 📂 Map: [`Device/`](scripts/Device/readme.nl.md)
@@ -1022,6 +1016,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 |-----------|
 | [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) kreeg `-GrantSiteAdmin`, `-KeepSiteAdmin` en `-AdminUpn`, zoals in `Find-SiteContent.ps1` en `Restore-RecycleBinItems.ps1`. De eerste live run registreerde de app en meldde aan, en stopte daarna bij `Get-PnPWeb: Attempted to perform an unauthorized operation`: de Global Administrator waarmee werd aangemeld was geen lid van het team van de klant, en die rol alleen geeft geen toegang tot de inhoud van een site. Met `-GrantSiteAdmin` wordt de beheerder via de tenant-adminsite sitecollectiebeheerder voor de duur van de run; de hele run na het toekennen staat in een `try`/`finally`, dus de rechten worden ook weer weggehaald als een adres niet gevonden wordt of een wijziging faalt. Zonder de switch zegt dezelfde fout nu dat je hem moet gebruiken |
 | Geverifieerd: syntaxcheck; linkcheck; de app-registratie op de live tenant (app aangemaakt, scopes toegestaan, client-ID bewaard) en de delegated aanmelding, die tot de unauthorized-fout kwam. **Niet** geverifieerd: het toekennen en weghalen van de rechten, en alles daarna |
+
+### 2026-10-19 (6)
+| Wijziging |
+|--------|
+| Een map voor batchmonitoring verwijderd die voor één klantomgeving geschreven was; klantspecifiek materiaal hoort niet in deze publieke repo. De vermeldingen in de maptabellen, de repositoryboom, de scriptcategorieën en de versiegeschiedenis zijn ook weg |
+| [`Test-FileIODiagnostics.ps1`](scripts/Network/readme.nl.md#test-fileiodiagnosticsps1) en [`Test-AuthNetworkDiagnostics.ps1`](scripts/Network/readme.nl.md#test-authnetworkdiagnosticsps1) gebruikten in hun voorbeelden de paden en servernaam van die omgeving; nu neutrale (`D:\Data\Work`, `fileserver`, `D:\Logs`) |
+| Geverifieerd: syntaxcheck; linkcheck; geen verwijzingen meer in de tree |
 
 ### 2026-10-19 (5)
 | Wijziging |
@@ -1448,7 +1449,7 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ### 2026-10-05 (10)
 | Wijziging |
 |--------|
-| Elke map-readme volgt nu het patroon van `scripts/Intune/`: elk script in de tabel `## Scripts` linkt naar het bestand **en** naar zijn sectie (`([docs](#…))`). 19 mappen deden dat niet, in alle drie de talen: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph en Intune/Desktop/Background/Desktop en /Lockscreen hadden helemaal geen scripttabel, en Reporting/Licensing alleen een boom; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (geen bestandslink voor `GetAutoPilot.CMD`), UniFi, SMTP, Startup en één rij in SharePoint/Provisioning hadden rijen zonder docs-link |
+| Elke map-readme volgt nu het patroon van `scripts/Intune/`: elk script in de tabel `## Scripts` linkt naar het bestand **en** naar zijn sectie (`([docs](#…))`). 18 mappen deden dat niet, in alle drie de talen: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph en Intune/Desktop/Background/Desktop en /Lockscreen hadden helemaal geen scripttabel, en Reporting/Licensing alleen een boom; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (geen bestandslink voor `GetAutoPilot.CMD`), UniFi, SMTP, Startup en één rij in SharePoint/Provisioning hadden rijen zonder docs-link |
 | Waar een script onder een beschrijvende kop stond, draagt die kop nu de bestandsnaam, zodat de anchor in elke taal gelijk is (eerst gecontroleerd dat niets naar de oude anchor linkte). Scripts zonder sectie kregen een korte sectie op basis van hun eigen headercommentaar: `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, en een gedeelde sectie voor de install/uninstall/detect-scripts van ClaudeDesktop. De opmerkingen bij `Remove-CorporateWallpaper.ps1` vermelden dat het niet alles terugdraait wat `Set-CorporateWallpaper.ps1` 2.3+ schrijft |
 | Ook gecorrigeerd: de Intune-readme zei nog dat de Office-themascripts hun URL hardcoden, en de Provisioning-opmerkingen zeiden dat de gedeelde module door "alle vier" de scripts wordt gedot-sourcet — alle tien in de map gebruiken hem |
 | Geverifieerd: elk script in elke map-readme heeft een bestandslink en een docs-link waarvan de anchor bestaat (gescripte controle over alle 57 map-readmes), en de linkcontrole slaagt over 4562 interne links. Er is niets gedraaid |
