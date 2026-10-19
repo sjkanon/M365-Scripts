@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-19 (8)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1): the first live `-GrantSiteAdmin` run stopped at `Could not determine the signed-in account ... You are not signed in. Please use Connect-PnPOnline`. The signed-in admin was read with `Get-PnPProperty` without `-Connection`; that cmdlet wants a "current" PnP connection before it looks at the object, and this script only holds returned connections. The account is now loaded with the web (`Get-PnPWeb -Includes CurrentUser`). `Find-SiteContent.ps1` and `Restore-RecycleBinItems.ps1` read it the same way and have not been changed here |
+| Verified: syntax check; `Get-PnPWeb -Includes` and `Get-PnPProperty -Connection` exist in the installed PnP.PowerShell. **Not** verified: the rerun on the tenant |
+
 ### 2026-10-19 (7)
 | Change |
 |--------|

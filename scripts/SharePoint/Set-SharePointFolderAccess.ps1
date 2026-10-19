@@ -529,7 +529,10 @@ if ($GrantSiteAdmin) {
     $adminConnection = Connect-Site -Url $adminUrl
     if (-not $AdminUpn) {
         try {
-            $currentUser = Get-PnPProperty -ClientObject (Get-PnPWeb -Connection $adminConnection) -Property CurrentUser
+            # Loaded with the web, not through Get-PnPProperty: that cmdlet wants a "current" PnP
+            # connection before it looks at the object, and this script only holds returned ones -
+            # the first live -GrantSiteAdmin run failed on exactly that ("You are not signed in").
+            $currentUser = (Get-PnPWeb -Connection $adminConnection -Includes CurrentUser).CurrentUser
             $AdminUpn = if ($currentUser.Email) { $currentUser.Email } else { ($currentUser.LoginName -split '\|')[-1] }
             Write-Host "  Signed in as $AdminUpn" -ForegroundColor Green
         } catch {

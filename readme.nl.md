@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-19 (8)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1): de eerste live run met `-GrantSiteAdmin` stopte bij `Could not determine the signed-in account ... You are not signed in. Please use Connect-PnPOnline`. De aangemelde beheerder werd gelezen met `Get-PnPProperty` zonder `-Connection`; die cmdlet wil een "huidige" PnP-verbinding voordat hij naar het object kijkt, en dit script heeft alleen teruggegeven verbindingen. Het account wordt nu met de web meegeladen (`Get-PnPWeb -Includes CurrentUser`). `Find-SiteContent.ps1` en `Restore-RecycleBinItems.ps1` lezen het op dezelfde manier en zijn hier niet aangepast |
+| Geverifieerd: syntaxcheck; `Get-PnPWeb -Includes` en `Get-PnPProperty -Connection` bestaan in de geïnstalleerde PnP.PowerShell. **Niet** geverifieerd: de nieuwe run op de tenant |
+
 ### 2026-10-19 (7)
 | Wijziging |
 |-----------|
