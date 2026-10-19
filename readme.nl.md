@@ -364,7 +364,7 @@ Contentbewerkingen op SharePoint Online-sites en OneDrive via PnP PowerShell.
 
 #### Maptoegang per submap
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de submappen van een map en wie in elke submap hoort. Het maakt ontbrekende submappen aan, verbreekt de overname, geeft de genoemde mensen lezen/schrijven op hun submap en Lezen op de bovenliggende map, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Site-eigenaren houden altijd Volledig beheer. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de submappen van een map en wie in elke submap hoort. Het maakt ontbrekende submappen aan, verbreekt de overname, geeft de genoemde mensen lezen/schrijven op hun submap en Lezen op de bovenliggende map, sluit al het andere in de bovenliggende map af voor de eigenaren, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Site-eigenaren houden altijd Volledig beheer. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
 
 #### Prullenbak terugzetten
 
@@ -1016,6 +1016,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-19 (2)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) beperkt mensen nu echt tot **hun eigen submap**. Het Lezen op de bovenliggende map, bedoeld om naar de eigen submap te kunnen bladeren, liet iedereen in de config ook elk bestand direct in die map openen en elke submap die de config niet noemde - het script waarschuwde alleen voor dat laatste. Alles direct in de bovenliggende map dat geen geconfigureerde submap is, wordt nu afgesloten voor de eigenaren (overname verbroken, iedereen anders verwijderd); `-KeepOtherItems` geeft het oude gedrag terug: ongemoeid laten en melden |
+| Geverifieerd: syntaxcheck; linkcheck. **Niet** geverifieerd: een run tegen een tenant |
 
 ### 2026-10-19
 | Wijziging |

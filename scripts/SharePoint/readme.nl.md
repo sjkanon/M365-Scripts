@@ -704,6 +704,7 @@ overname en brengt de rechten in lijn - op de bovenliggende map en op elke genoe
 |-----|--------------------------|
 | Bovenliggend (bv. `General/Teamleads`) | Site-eigenaren (Volledig beheer) + iedereen die in een submap genoemd staat met **Lezen**, zodat de map zichtbaar is en ze kunnen doorklikken. `-ParentAccess None`: alleen eigenaren |
 | Elke submap | Site-eigenaren (Volledig beheer) + precies de mensen die ervoor genoemd zijn, met `-Role` (standaard **Bijdragen**: lezen, toevoegen, wijzigen, verwijderen) |
+| Al het andere direct in de bovenliggende map (bestanden, submappen die niet in de config staan) | Alleen site-eigenaren - anders kon iedereen ze via het Lezen op de bovenliggende map openen. `-KeepOtherItems`: ongemoeid, alleen gemeld |
 
 Iedereen anders wordt van die mappen verwijderd: de groepen Leden en Bezoekers, eerdere
 directe toekenningen en deellinks. Een submap waar je geen rechten op hebt, wordt niet eens
@@ -749,6 +750,7 @@ vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app
 | `-Access` | Nee* | Hashtable submap → UPN's/e-mailadressen, in plaats van of bovenop `subfolders` in de config |
 | `-Role` | Nee | `Contribute` (standaard), `Edit` of `Read` op elke submap |
 | `-ParentAccess` | Nee | `Read` (standaard) of `None` op de bovenliggende map |
+| `-KeepOtherItems` | Nee | Bestanden en niet-geconfigureerde submappen direct in de bovenliggende map ongemoeid laten in plaats van ze voor de eigenaren af te sluiten |
 | `-Apply` | Nee | Echt wijzigen. Zonder wordt er niets geschreven |
 | `-TenantId` / `-ClientId` | Nee | Overschrijvingen voor het aanmelden |
 | `-AppOnly` | Nee | Certificaat-app uit `graph.appid.json` (heeft SharePoint `Sites.FullControl.All` nodig) |
@@ -773,13 +775,12 @@ vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app
 ```
 **Opmerkingen**
 - Idempotent: een tweede run meldt *already correct* voor alles wat de eerste heeft ingesteld.
-- Submappen die bestaan maar niet in de config staan, blijven ongemoeid en worden gemeld. Met
-  `-ParentAccess Read` erven ze het Lezen van de bovenliggende map, dus iedereen in de config
-  kan ze openen - de waarschuwing zegt dat.
-- Alleen de bovenliggende map en de genoemde submappen worden aangeraakt. Een bestand of map
-  dieper dat apart gedeeld is, houdt zijn eigen rechten.
-- Bestanden die rechtstreeks in de bovenliggende map staan, zijn leesbaar voor iedereen in de
-  config bij `-ParentAccess Read`.
+- Mensen zien de bovenliggende map en openen alleen hun eigen submappen - verder niets daarin.
+  Iets wat later direct in de bovenliggende map wordt gezet, erft weer het Lezen; een nieuwe
+  run sluit het af.
+- Alleen de bovenliggende map, wat er direct in staat en de genoemde submappen worden
+  aangeraakt. Een bestand of map dieper in een submap dat apart gedeeld is, houdt zijn eigen
+  rechten.
 
 ---
 

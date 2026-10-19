@@ -695,6 +695,7 @@ permissions in line - on the parent folder and on every subfolder named.
 |--------|---------------------------|
 | Parent (e.g. `General/Teamleads`) | Site Owners (Full Control) + everyone named in any subfolder with **Read**, so the folder shows up and they can click through. `-ParentAccess None`: owners only |
 | Each subfolder | Site Owners (Full Control) + exactly the people listed for it, with `-Role` (default **Contribute**: read, add, change, delete) |
+| Everything else directly in the parent (files, subfolders not in the config) | Site Owners only - otherwise the parent's Read would let everyone open them. `-KeepOtherItems`: left alone, reported only |
 
 Everyone else is removed from those folders: the Members and Visitors groups, earlier direct
 grants and sharing links. A subfolder you have no rights on is not even listed, so people do
@@ -737,6 +738,7 @@ entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-C
 | `-Access` | No* | Hashtable subfolder → UPNs/e-mail addresses, instead of or on top of `subfolders` in the config |
 | `-Role` | No | `Contribute` (default), `Edit` or `Read` on each subfolder |
 | `-ParentAccess` | No | `Read` (default) or `None` on the parent folder |
+| `-KeepOtherItems` | No | Leave files and unconfigured subfolders directly in the parent alone instead of locking them to the owners |
 | `-Apply` | No | Actually change. Without it nothing is written |
 | `-TenantId` / `-ClientId` | No | Sign-in overrides |
 | `-AppOnly` | No | Certificate app from `graph.appid.json` (needs SharePoint `Sites.FullControl.All`) |
@@ -761,13 +763,10 @@ entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-C
 ```
 **Notes**
 - Idempotent: a second run reports *already correct* for everything the first one set.
-- Subfolders that exist but are not in the config are left alone and reported. With
-  `-ParentAccess Read` they inherit the parent's Read, so everyone in the config can open
-  them - the warning says so.
-- Only the parent and the named subfolders are touched. A file or folder deeper down that was
-  shared separately keeps its own permissions.
-- Files placed directly in the parent folder are readable for everyone in the config when
-  `-ParentAccess Read`.
+- People can see the parent folder and open only their own subfolders - nothing else in it.
+  Something added directly to the parent later inherits its Read again; a re-run locks it.
+- Only the parent, what sits directly in it and the named subfolders are touched. A file or
+  folder deeper inside a subfolder that was shared separately keeps its own permissions.
 
 ---
 

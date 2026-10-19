@@ -722,6 +722,7 @@ et sur chaque sous-dossier nommé.
 |---------|-----------------------|
 | Parent (p. ex. `General/Teamleads`) | Propriétaires du site (Contrôle total) + toute personne nommée dans un sous-dossier, en **Lecture**, pour que le dossier soit visible et qu'on puisse y naviguer. `-ParentAccess None` : propriétaires seulement |
 | Chaque sous-dossier | Propriétaires du site (Contrôle total) + exactement les personnes listées pour lui, avec `-Role` (par défaut **Collaboration** : lire, ajouter, modifier, supprimer) |
+| Tout le reste directement dans le parent (fichiers, sous-dossiers absents de la config) | Propriétaires du site seulement - sinon la Lecture du parent permettrait à tous de les ouvrir. `-KeepOtherItems` : laissés tels quels, seulement signalés |
 
 Tous les autres sont retirés de ces dossiers : les groupes Membres et Visiteurs, les
 attributions directes antérieures et les liens de partage. Un sous-dossier sur lequel on n'a
@@ -768,6 +769,7 @@ entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application
 | `-Access` | Non* | Table de hachage sous-dossier → UPN/adresses e-mail, à la place de ou en plus de `subfolders` dans la config |
 | `-Role` | Non | `Contribute` (par défaut), `Edit` ou `Read` sur chaque sous-dossier |
 | `-ParentAccess` | Non | `Read` (par défaut) ou `None` sur le dossier parent |
+| `-KeepOtherItems` | Non | Laisser tels quels les fichiers et sous-dossiers non configurés directement dans le parent au lieu de les réserver aux propriétaires |
 | `-Apply` | Non | Modifier réellement. Sans lui, rien n'est écrit |
 | `-TenantId` / `-ClientId` | Non | Surcharges de connexion |
 | `-AppOnly` | Non | Application à certificat de `graph.appid.json` (nécessite SharePoint `Sites.FullControl.All`) |
@@ -792,13 +794,12 @@ entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application
 ```
 **Remarques**
 - Idempotent : une deuxième exécution indique *already correct* pour tout ce que la première a réglé.
-- Les sous-dossiers existants absents de la config ne sont pas modifiés et sont signalés. Avec
-  `-ParentAccess Read`, ils héritent de la Lecture du parent, donc toute personne de la config
-  peut les ouvrir - l'avertissement le dit.
-- Seuls le parent et les sous-dossiers nommés sont touchés. Un fichier ou dossier plus profond
-  partagé séparément garde ses propres autorisations.
-- Les fichiers placés directement dans le dossier parent sont lisibles par toute personne de la
-  config avec `-ParentAccess Read`.
+- Chacun voit le dossier parent et n'ouvre que ses propres sous-dossiers - rien d'autre.
+  Un élément ajouté plus tard directement dans le parent hérite de nouveau de sa Lecture ; une
+  nouvelle exécution le verrouille.
+- Seuls le parent, ce qu'il contient directement et les sous-dossiers nommés sont touchés. Un
+  fichier ou dossier plus profond dans un sous-dossier, partagé séparément, garde ses propres
+  autorisations.
 
 ---
 

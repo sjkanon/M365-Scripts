@@ -364,7 +364,7 @@ Opérations sur le contenu des sites SharePoint Online et de OneDrive via PnP Po
 
 #### Accès aux dossiers par sous-dossier
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les sous-dossiers d'un dossier et qui appartient à chacun. Il crée les sous-dossiers manquants, rompt l'héritage, donne aux personnes listées lecture/écriture sur leur sous-dossier et Lecture sur le parent, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Les propriétaires du site gardent toujours le Contrôle total. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les sous-dossiers d'un dossier et qui appartient à chacun. Il crée les sous-dossiers manquants, rompt l'héritage, donne aux personnes listées lecture/écriture sur leur sous-dossier et Lecture sur le parent, réserve tout le reste du parent aux propriétaires, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Les propriétaires du site gardent toujours le Contrôle total. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
 
 #### Restauration de la corbeille
 
@@ -1016,6 +1016,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-19 (2)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) limite désormais vraiment chacun à **son propre sous-dossier**. La Lecture sur le parent, prévue pour naviguer jusqu'à son sous-dossier, permettait aussi à toute personne de la config d'ouvrir chaque fichier placé directement dans le parent et chaque sous-dossier non nommé dans la config - le script ne signalait que ce dernier cas. Tout ce qui se trouve directement dans le parent sans être un sous-dossier configuré est maintenant réservé aux propriétaires (héritage rompu, tous les autres retirés) ; `-KeepOtherItems` rétablit l'ancien comportement : laisser tel quel et signaler |
+| Vérifié : contrôle de syntaxe ; contrôle des liens. **Non** vérifié : toute exécution sur un tenant |
 
 ### 2026-10-19
 | Modification |

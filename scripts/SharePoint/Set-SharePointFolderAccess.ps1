@@ -23,6 +23,11 @@
           delete files - "lezen/schrijven")
         * Everyone else is removed, including the parent's Read
 
+      Everything else directly in the parent (files, subfolders not in the config)
+        * Locked to the owners: inheritance broken, everyone else removed. Without this the
+          parent's Read would let everyone listed anywhere open them, and people would reach
+          more than their own subfolder. -KeepOtherItems leaves them alone (reported only)
+
     A subfolder you have no rights on is not listed at all, so people do not even see the other
     teams' folder names.
 
@@ -70,6 +75,10 @@
     Read (default): everyone in any subfolder gets Read on the parent so they can browse to it.
     None: only the owners keep access to the parent.
 
+.PARAMETER KeepOtherItems
+    Leave files and unconfigured subfolders directly in the parent alone instead of locking them
+    to the owners. They are still reported, with who can reach them.
+
 .PARAMETER Apply
     Actually make the changes. Without it nothing is written.
 
@@ -116,9 +125,10 @@
 
 .NOTES
     Idempotent: a second run reports "already correct" for everything the first one set.
-    Only the parent and the configured subfolders are touched. Files or folders deeper down that
-    have their own unique permissions (an earlier "Share" on one file) keep them - the run warns
-    about subfolders it does not manage, but does not crawl their contents.
+    Only the parent, what sits directly in it and the configured subfolders are touched. Files or
+    folders deeper inside a subfolder that have their own unique permissions (an earlier "Share"
+    on one file) keep them - the subfolders' contents are not crawled. Something added directly
+    to the parent later inherits its Read again; a re-run locks it.
 #>
 [CmdletBinding()]
 param(
@@ -132,6 +142,8 @@ param(
 
     [ValidateSet('Read', 'None')]
     [string] $ParentAccess,
+
+    [switch] $KeepOtherItems,
 
     [switch] $Apply,
     [string] $TenantId,
@@ -479,8 +491,10 @@ try {
 
     # -- Subfolders ----------------------------------------------------------------
     $existing = @{}
-    foreach ($f in @(Get-PnPFolderItem -FolderSiteRelativeUrl $relative -ItemType Folder -Connection $connection)) {
-        $existing[$f.Name] = $f
+    $others   = @()
+    foreach ($f in @(Get-PnPFolderItem -FolderSiteRelativeUrl $relative -Connection $connection)) {
+        if ($f -is [Microsoft.SharePoint.Client.Folder]) { $existing[$f.Name] = $f }
+        if (-not ($f -is [Microsoft.SharePoint.Client.Folder] -and $subfolders.Contains($f.Name))) { $others += $f }
     }
 
     $managed = @{}
@@ -504,17 +518,27 @@ try {
         $total += Set-FolderAccess -Label $path -Item $item -Desired $desired -IsNew:($isNew -and -not $Apply)
     }
 
-    # Subfolders the config does not mention inherit from the parent - with -ParentAccess Read that
-    # means everyone listed anywhere can open them. Said loudly, never changed.
-    foreach ($name in $existing.Keys | Where-Object { -not $subfolders.Contains($_) }) {
-        $item = (Get-PnPFolder -Url "$relative/$name" -Connection $connection -Includes ListItemAllFields).ListItemAllFields
+    # Anything else directly in the parent - files, subfolders the config does not name - inherits
+    # the parent's Read, so everyone listed anywhere could open it. That is more than "only their
+    # own subfolder", so it is locked to the owners: the same reconcile with nobody desired.
+    foreach ($f in $others) {
+        $kind = if ($f -is [Microsoft.SharePoint.Client.Folder]) { 'folder' } else { 'file' }
+        $item = $f.ListItemAllFields
         $context.Load($item); $context.ExecuteQuery()
-        $how = if ($item.HasUniqueRoleAssignments) { 'has its own permissions' }
-               elseif ($ParentAccess -eq 'Read') { 'inherits from the parent: everyone in the config can READ it' }
-               else { 'inherits from the parent: owners only' }
-        Write-Host ''
-        Write-Warn "'$name' is not in the config and was left alone - it $how."
-        Add-Result -Folder "$relative/$name" -Action 'Not managed' -Detail $how -Result 'Untouched'
+        $open = $item.HasUniqueRoleAssignments -or $ParentAccess -eq 'Read'
+
+        if ($KeepOtherItems -or -not $open) {
+            $how = if ($item.HasUniqueRoleAssignments) { 'has its own permissions' }
+                   elseif ($ParentAccess -eq 'Read') { 'inherits from the parent: everyone in the config can READ it' }
+                   else { 'inherits from the parent: owners only' }
+            if ($open) {
+                Write-Host ''
+                Write-Warn "$kind '$($f.Name)' is not in the config and was left alone (-KeepOtherItems) - it $how."
+            }
+            Add-Result -Folder "$relative/$($f.Name)" -Action 'Not managed' -Detail $how -Result 'Untouched'
+            continue
+        }
+        $total += Set-FolderAccess -Label "$relative/$($f.Name) ($kind, not in the config: owners only)" -Item $item -Desired @{}
     }
 
     # -- Read back -----------------------------------------------------------------

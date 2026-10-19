@@ -364,7 +364,7 @@ Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 
 #### Folder Access per Subfolder
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the subfolders of a folder and who belongs in each. It creates missing subfolders, breaks inheritance, gives the listed people read/write on their subfolder and Read on the parent, and removes everyone else - Members, Visitors, old grants, sharing links. Site Owners always keep Full Control. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the subfolders of a folder and who belongs in each. It creates missing subfolders, breaks inheritance, gives the listed people read/write on their subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Site Owners always keep Full Control. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
 
 #### Recycle Bin Restore
 
@@ -1014,6 +1014,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-19 (2)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now really limits people to **their own subfolder**. The parent's Read, there so people can browse to their subfolder, also let everyone in the config open every file directly in the parent and every subfolder the config did not name - the script only warned about the latter. Anything directly in the parent that is not a configured subfolder is now locked to the owners (inheritance broken, everyone else removed); `-KeepOtherItems` restores the old leave-alone-and-report behaviour |
+| Verified: syntax check; link check. **Not** verified: any run against a tenant |
 
 ### 2026-10-19
 | Change |
