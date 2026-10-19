@@ -28,7 +28,7 @@ Exchange Online voor het auditlogboek.
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Verwijderde bestanden/mappen terugzetten uit de prullenbak van een site of OneDrive (standaard een proefdraai) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Waar is een bestand gebleven? Hernoemingen, verplaatsingen, kopieën en verwijderingen uit het auditlog, ook via een map — in Brusselse tijd, over een periode naar keuze |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Neem één gebruiker overal de toegang af: site collection-beheerder, directe toekenningen op elk niveau, SharePoint-groepen en deellinks. Rapporteert standaard, verwijdert met `-Apply` |
-| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Geef elke submap van één map zijn eigen mensen (standaard lezen/schrijven), zodat iedereen alleen zijn eigen submappen ziet en opent. Rapporteert standaard, wijzigt met `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Geef elke submap van één map een eigen SharePoint-groep (lezen/schrijven), een groep owners die alles beheert, en eventueel een persoonlijke map per persoon - iedereen komt alleen bij zijn eigen mappen. Rapporteert standaard, wijzigt met `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Controleer de twee toegangsscripts zonder een tenant aan te raken — gedeeld authenticatieblok identiek, en de revocatie-trechter gedraagt zich |
 
 ---
@@ -696,46 +696,65 @@ Het gebruikt bij voorkeur het site-access bestand (`..._SiteAccess_...csv`), waa
 ### Set-SharePointFolderAccess.ps1
 
 Voor de vraag "we hebben onder General een map aangemaakt; zorg dat mensen alleen bij hun
-eigen submap kunnen, lezen en schrijven, en verder nergens". Eén config zegt welke submappen
-er zijn en wie in elke submap hoort; het script maakt ontbrekende submappen aan, verbreekt de
-overname en brengt de rechten in lijn - op de bovenliggende map en op elke genoemde submap.
+eigen submap kunnen, lezen en schrijven, verder niets - en laat de teamleads het beheren". Eén
+config noemt de owners, de submappen en wie in elke submap hoort; het script maakt de
+SharePoint-groepen en de ontbrekende mappen aan, verbreekt de overname en brengt elk recht in lijn.
+
+**Groepen** (standaard - `-DirectAccess` geeft de mensen in plaats daarvan direct rechten)
+
+| Groep | Wie | Wat |
+|-------|-----|-----|
+| `<prefix> - Owners` | `owners` uit de config | Volledig beheer op de bovenliggende map en alles wat het script eronder beheert. Eigenaar van elke groep, dus ze voegen zelf leden toe en halen ze weg, zonder IT |
+| `<prefix> - <submap>` | de mensen die voor die submap genoemd zijn | `-Role` op hun submap (standaard **Bijdragen**: lezen, toevoegen, wijzigen, verwijderen) |
+
+`<prefix>` is `groupPrefix`, of de naam van de bovenliggende map. SharePoint-groepen bestaan
+alleen in deze site: een wijziging werkt meteen en er komt niets bij in de directory.
+
+**Mappen**
 
 | Map | Wie heeft daarna toegang |
 |-----|--------------------------|
-| Bovenliggend (bv. `General/Teamleads`) | Site-eigenaren (Volledig beheer) + iedereen die in een submap genoemd staat met **Lezen**, zodat de map zichtbaar is en ze kunnen doorklikken. `-ParentAccess None`: alleen eigenaren |
-| Elke submap | Site-eigenaren (Volledig beheer) + precies de mensen die ervoor genoemd zijn, met `-Role` (standaard **Bijdragen**: lezen, toevoegen, wijzigen, verwijderen) |
-| Al het andere direct in de bovenliggende map (bestanden, submappen die niet in de config staan) | Alleen site-eigenaren - anders kon iedereen ze via het Lezen op de bovenliggende map openen. `-KeepOtherItems`: ongemoeid, alleen gemeld |
+| Bovenliggend (bv. `General/Teamleads`) | Site-eigenaren en de Owners-groep (Volledig beheer) + elke submapgroep met **Lezen**, zodat de map zichtbaar is en ze kunnen doorklikken. `-ParentAccess None`: alleen owners |
+| Elke submap | Owners (Volledig beheer) + de eigen groep met `-Role` |
+| Persoonlijke map (met `personalFolders`) | In de submap, één per genoemde niet-owner, met de weergavenaam als naam: alleen die persoon (Bijdragen) en de owners |
+| Al het andere direct in de bovenliggende map | Alleen owners - anders kon iedereen het via het Lezen op de bovenliggende map openen. `-KeepOtherItems`: ongemoeid, alleen gemeld |
 
 Iedereen anders wordt van die mappen verwijderd: de groepen Leden en Bezoekers, eerdere
-directe toekenningen en deellinks. Een submap waar je geen rechten op hebt, wordt niet eens
+directe toekenningen en deellinks. Een map waar je geen rechten op hebt, wordt niet eens
 getoond, dus mensen zien de mapnamen van de andere teams niet. Altijd behouden: de gekoppelde
 Eigenaren-groep van de site, de eigenaren van de Microsoft 365-groep achter een Teams-site, en
-systeemvermeldingen *Beperkte toegang*. Sitecollectiebeheerders zijn geen roltoewijzing en
-houden hoe dan ook toegang.
+systeemvermeldingen *Beperkte toegang*.
+
+**Lidmaatschap** — ontbrekende leden worden toegevoegd. Iemand in een groep die niet in de
+config staat, wordt gemeld en blijft erin, omdat de owners het lidmaatschap zelf beheren en een
+nieuwe run dat niet mag terugdraaien; `-SyncMembers` maakt de groepen precies gelijk aan de
+config. Na `-Apply` toont het script per groep de pagina
+(`/_layouts/15/people.aspx?MembershipGroupId=…`) waar de owners hem beheren.
 
 Elk adres wordt opgezocht **voordat** er iets verandert; één onbekend adres stopt de run
-zonder wijzigingen. Rollen worden op type gekozen, dus een Nederlandse of Franse site
-(*Bijdragen*, *Collaboration*) werkt hetzelfde. Met `-Apply` worden de rechten achteraf
-teruggelezen en per map getoond. Elke run schrijft een CSV
-(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`).
+zonder wijzigingen. Rollen worden op type gekozen, dus een Nederlandse of Franse site werkt
+hetzelfde. Met `-Apply` worden de rechten per map teruggelezen. Elke run schrijft een CSV
+(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`), ook als een wijziging halverwege faalt.
 
 Aanmelden: delegated PnP via `Connect-M365PnP` (device code / GDAP-klant volgens
 `load.config.ps1`) met de client-ID van de tenant uit `pnp.appid.json`. Een tenant zonder
 vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app), of geef
 `-ClientId` mee.
 
-**Configbestand**
+**Configbestand** — een submap is een lijst mensen, of een object met `members` en `personalFolders`.
 
 ```json
 {
   "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
   "folder":       "Shared Documents/General/Teamleads",
+  "groupPrefix":  "Teamleads",
+  "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
   "role":         "Contribute",
   "parentAccess": "Read",
   "subfolders": {
-    "Team A":  [ "jan@contoso.com", "kim@contoso.com", "piet@contoso.com" ],
-    "Team B":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ],
-    "Leads":   [ "jan@contoso.com", "kim@contoso.com" ]
+    "Team A": { "members": [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com", "piet@contoso.com" ],
+                "personalFolders": true },
+    "Leads":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ]
   }
 }
 ```
@@ -748,9 +767,14 @@ vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app
 | `-SiteUrl` | Nee* | De site waar de map in staat (voor een Teams-kanaal: de site van het team) |
 | `-FolderPath` | Nee* | Bovenliggende map, site-relatief (`Shared Documents/General/Teamleads`); een volledige of server-relatieve URL werkt ook. De bibliotheek-URL is meestal `Shared Documents`, ook als hij als *Documents* / *Documenten* wordt getoond |
 | `-Access` | Nee* | Hashtable submap → UPN's/e-mailadressen, in plaats van of bovenop `subfolders` in de config |
-| `-Role` | Nee | `Contribute` (standaard), `Edit` of `Read` op elke submap |
+| `-Owners` | Nee | Volledig beheer overal en eigenaar van de groepen; gaat voor op `owners` |
+| `-GroupPrefix` | Nee | Begin van de groepsnamen (standaard: `groupPrefix`, anders de naam van de bovenliggende map) |
+| `-PersonalFolders` | Nee | Persoonlijke mappen in elke submap, in plaats van per submap in de config |
+| `-DirectAccess` | Nee | De mensen direct rechten geven in plaats van via SharePoint-groepen |
+| `-SyncMembers` | Nee | Groepsleden die niet in de config staan verwijderen (anders alleen gemeld) |
+| `-Role` | Nee | `Contribute` (standaard), `Edit` of `Read` op elke submap. Persoonlijke mappen krijgen altijd `Contribute` |
 | `-ParentAccess` | Nee | `Read` (standaard) of `None` op de bovenliggende map |
-| `-KeepOtherItems` | Nee | Bestanden en niet-geconfigureerde submappen direct in de bovenliggende map ongemoeid laten in plaats van ze voor de eigenaren af te sluiten |
+| `-KeepOtherItems` | Nee | Bestanden en niet-geconfigureerde submappen direct in de bovenliggende map ongemoeid laten in plaats van ze voor de owners af te sluiten |
 | `-Apply` | Nee | Echt wijzigen. Zonder wordt er niets geschreven |
 | `-TenantId` / `-ClientId` | Nee | Overschrijvingen voor het aanmelden |
 | `-AppOnly` | Nee | Certificaat-app uit `graph.appid.json` (heeft SharePoint `Sites.FullControl.All` nodig) |
@@ -767,20 +791,23 @@ vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app
 # Uitvoeren, en het resultaat teruglezen.
 .\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
 
-# Zonder configbestand
+# Zonder configbestand, mensen direct op de map in plaats van via groepen
 .\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
-    -FolderPath "Shared Documents/General/Teamleads" `
-    -Access @{ 'Team A' = @('jan@contoso.com', 'kim@contoso.com'); 'Leads' = @('jan@contoso.com') } `
-    -Apply
+    -FolderPath "Shared Documents/General/Teamleads" -Owners jan@contoso.com `
+    -Access @{ 'Team A' = @('kim@contoso.com', 'els@contoso.com') } -DirectAccess -Apply
 ```
+
 **Opmerkingen**
 - Idempotent: een tweede run meldt *already correct* voor alles wat de eerste heeft ingesteld.
-- Mensen zien de bovenliggende map en openen alleen hun eigen submappen - verder niets daarin.
-  Iets wat later direct in de bovenliggende map wordt gezet, erft weer het Lezen; een nieuwe
+- Persoonlijke mappen worden op naam herkend: hernoem je er een, dan maakt de volgende run een
+  nieuwe aan onder de weergavenaam.
+- Iets wat later direct in de bovenliggende map wordt gezet, erft weer het Lezen; een nieuwe
   run sluit het af.
-- Alleen de bovenliggende map, wat er direct in staat en de genoemde submappen worden
-  aangeraakt. Een bestand of map dieper in een submap dat apart gedeeld is, houdt zijn eigen
-  rechten.
+- Alleen de bovenliggende map, wat er direct in staat, de submappen en hun persoonlijke mappen
+  worden aangeraakt. Iets dieper dat apart gedeeld is, houdt zijn eigen rechten.
+- Nog niet geverifieerd op een tenant: of owners die alleen Volledig beheer op de mappen hebben
+  (niet op de site) de groepspagina kunnen openen om leden te beheren. Lukt dat niet, dan
+  beheren de site-eigenaren het, of krijgen de owners Lezen op de site.
 
 ---
 

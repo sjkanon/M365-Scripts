@@ -364,7 +364,7 @@ Opérations sur le contenu des sites SharePoint Online et de OneDrive via PnP Po
 
 #### Accès aux dossiers par sous-dossier
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les sous-dossiers d'un dossier et qui appartient à chacun. Il crée les sous-dossiers manquants, rompt l'héritage, donne aux personnes listées lecture/écriture sur leur sous-dossier et Lecture sur le parent, réserve tout le reste du parent aux propriétaires, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Les propriétaires du site gardent toujours le Contrôle total. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les owners, les sous-dossiers d'un dossier et qui appartient à chacun. Il crée un groupe SharePoint par sous-dossier plus un groupe Owners (Contrôle total partout, propriétaire de chaque groupe, pour que les chefs d'équipe gèrent eux-mêmes les membres), crée les dossiers manquants et, au besoin, un dossier personnel par personne, donne à chaque groupe lecture/écriture sur son sous-dossier et Lecture sur le parent, réserve tout le reste du parent aux owners, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
 
 #### Restauration de la corbeille
 
@@ -896,7 +896,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restaurer des fichiers supprimés depuis une corbeille : un site/OneDrive ou tout le tenant (PnP, inscription d'application automatique)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← où est passé un fichier : renommages, déplacements, copies, suppressions (y compris via un dossier) depuis le journal d'audit, en heure de Bruxelles
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← retirer l'accès d'un utilisateur à tous les niveaux, liens de partage compris (rapport seul sans -Apply)
-    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← chaque sous-dossier d'un dossier ses propres personnes, tous les autres retirés (rapport seul sans -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← chaque sous-dossier d'un dossier son propre groupe SharePoint + owners + dossiers personnels, tous les autres retirés (rapport seul sans -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← vérifier les deux scripts d'accès sans tenant (bloc d'authentification partagé + entonnoir de révocation)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.fr.md">Provisioning/</a>                ← provisionner toute une structure à partir d'une seule config JSON (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.fr.md">readme.md</a>
@@ -1016,6 +1016,14 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-19 (3)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) fonctionne désormais **par groupes SharePoint** au lieu d'attribuer des droits à chaque personne sur chaque dossier. Avec des droits directs, chaque arrivée ou départ obligeait à modifier la config et à relancer le script ; il y a maintenant un groupe par sous-dossier (`<prefix> - <sous-dossier>`) et un groupe Owners issu de la nouvelle liste `owners`, qui reçoit le Contrôle total sur tout ce que le script gère et possède chaque groupe, pour que les chefs d'équipe ajoutent et retirent eux-mêmes des membres. `-DirectAccess` conserve les droits par personne |
+| Nouveau : **dossiers personnels**. Avec `personalFolders` sur un sous-dossier (ou `-PersonalFolders`), chaque personne listée qui n'est pas owner y reçoit un dossier à son nom d'affichage, accessible uniquement à elle et aux owners. Demandé pour que chaque employé ait un dossier privé à côté du dossier partagé de l'équipe |
+| Par défaut, l'appartenance aux groupes est seulement complétée ; les personnes que les owners ont ajoutées eux-mêmes sont signalées et restent, pour qu'une nouvelle exécution n'annule pas leur travail. `-SyncMembers` aligne les groupes sur la config. Les owners aussi listés comme membres obtiennent le Contrôle total, jamais le rôle inférieur. Après `-Apply`, les pages des groupes sont affichées |
+| Vérifié : contrôle de syntaxe ; contrôle des liens. **Non** vérifié : toute exécution sur un tenant - création et propriété des groupes, synchronisation des membres, dossiers personnels, et si des owners n'ayant le Contrôle total que sur les dossiers peuvent ouvrir la page du groupe pour gérer les membres |
 
 ### 2026-10-19 (2)
 | Modification |

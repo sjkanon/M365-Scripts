@@ -364,7 +364,7 @@ Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 
 #### Folder Access per Subfolder
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the subfolders of a folder and who belongs in each. It creates missing subfolders, breaks inheritance, gives the listed people read/write on their subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Site Owners always keep Full Control. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the owners, the subfolders of a folder and who belongs in each. It creates a SharePoint group per subfolder plus an Owners group (Full Control everywhere, owner of every group, so the team leads manage membership themselves), creates missing folders and optional personal folders per person, gives each group read/write on its subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
 
 #### Recycle Bin Restore
 
@@ -894,7 +894,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← where did a file go: renames, moves, copies, deletes (incl. via a folder) from the audit log, in Brussels time
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← take one user's access away at every level, sharing links included (reports unless -Apply)
-    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← each subfolder of a folder its own people, everyone else out (reports unless -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← each subfolder of a folder its own SharePoint group + owners + personal folders, everyone else out (reports unless -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.md">Provisioning/</a>                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.md">readme.md</a>
@@ -1014,6 +1014,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-19 (3)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now works **through SharePoint groups** instead of granting each person on each folder. With people granted directly, every new or leaving employee meant editing the config and running the script again; now there is one group per subfolder (`<prefix> - <subfolder>`) and an Owners group from the new `owners` list, which gets Full Control on everything the script manages and owns every group, so the team leads add and remove members themselves. `-DirectAccess` keeps the per-person grants |
+| New **personal folders**: with `personalFolders` on a subfolder (or `-PersonalFolders`) every listed non-owner gets a folder inside it, named after their display name, reachable only by them and the owners. Asked for so each employee has a private folder next to the team's shared one |
+| Group membership is only ever added to by default; people the owners added themselves are reported and left in, so a re-run does not undo their work. `-SyncMembers` makes the groups match the config. Owners also listed as members end up with Full Control, never the lower role. After `-Apply` the group pages are printed |
+| Verified: syntax check; link check. **Not** verified: any run against a tenant - group creation and ownership, the membership sync, personal folders, and whether owners who hold Full Control only on the folders can open the group page to manage members |
 
 ### 2026-10-19 (2)
 | Change |

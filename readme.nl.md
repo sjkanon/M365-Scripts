@@ -364,7 +364,7 @@ Contentbewerkingen op SharePoint Online-sites en OneDrive via PnP PowerShell.
 
 #### Maptoegang per submap
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de submappen van een map en wie in elke submap hoort. Het maakt ontbrekende submappen aan, verbreekt de overname, geeft de genoemde mensen lezen/schrijven op hun submap en Lezen op de bovenliggende map, sluit al het andere in de bovenliggende map af voor de eigenaren, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Site-eigenaren houden altijd Volledig beheer. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de owners, de submappen van een map en wie in elke submap hoort. Het maakt per submap een SharePoint-groep plus een Owners-groep (Volledig beheer overal, eigenaar van elke groep, zodat de teamleads het lidmaatschap zelf beheren), maakt ontbrekende mappen en eventueel persoonlijke mappen per persoon aan, geeft elke groep lezen/schrijven op zijn submap en Lezen op de bovenliggende map, sluit al het andere in de bovenliggende map af voor de owners, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
 
 #### Prullenbak terugzetten
 
@@ -896,7 +896,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← verwijderde bestanden terugzetten uit een prullenbak: één site/OneDrive of tenantbreed (PnP, automatische app-registratie)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← waar is een bestand gebleven: hernoemingen, verplaatsingen, kopieën, verwijderingen (ook via een map) uit het auditlog, in Brusselse tijd
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← de toegang van één gebruiker op elk niveau intrekken, deellinks inbegrepen (rapporteert tenzij -Apply)
-    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← elke submap van een map zijn eigen mensen, iedereen anders eruit (rapporteert tenzij -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← elke submap van een map een eigen SharePoint-groep + owners + persoonlijke mappen, iedereen anders eruit (rapporteert tenzij -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← de twee toegangsscripts verifiëren zonder tenant (gedeeld auth-blok + intrekkingstrechter)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.nl.md">Provisioning/</a>                ← een complete structuur inrichten vanuit één JSON-config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.nl.md">readme.md</a>
@@ -1016,6 +1016,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-19 (3)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) werkt nu **via SharePoint-groepen** in plaats van elke persoon op elke map rechten te geven. Met directe rechten betekende elke nieuwe of vertrekkende medewerker de config aanpassen en het script opnieuw draaien; nu is er één groep per submap (`<prefix> - <submap>`) en een Owners-groep uit de nieuwe lijst `owners`, die Volledig beheer krijgt op alles wat het script beheert en eigenaar is van elke groep, zodat de teamleads zelf leden toevoegen en weghalen. `-DirectAccess` houdt de rechten per persoon |
+| Nieuw: **persoonlijke mappen**. Met `personalFolders` op een submap (of `-PersonalFolders`) krijgt elke genoemde niet-owner daarin een map met zijn weergavenaam, alleen bereikbaar voor die persoon en de owners. Gevraagd zodat elke medewerker een eigen map heeft naast de gedeelde teammap |
+| Groepslidmaatschap wordt standaard alleen aangevuld; mensen die de owners zelf hebben toegevoegd worden gemeld en blijven erin, zodat een nieuwe run hun werk niet terugdraait. `-SyncMembers` maakt de groepen gelijk aan de config. Owners die ook als lid genoemd zijn, krijgen Volledig beheer, nooit de lagere rol. Na `-Apply` worden de groepspagina's getoond |
+| Geverifieerd: syntaxcheck; linkcheck. **Niet** geverifieerd: een run tegen een tenant - het aanmaken en het eigenaarschap van de groepen, het bijwerken van het lidmaatschap, de persoonlijke mappen, en of owners met alleen Volledig beheer op de mappen de groepspagina kunnen openen om leden te beheren |
 
 ### 2026-10-19 (2)
 | Wijziging |

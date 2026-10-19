@@ -27,7 +27,7 @@ and the recycle bin, which Graph has no API for; Exchange Online for the audit l
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Where did a file go? Renames, moves, copies and deletes from the audit log, folder moves included — in Brussels time, over a period you choose |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
-| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Give every subfolder of one folder its own people (read/write by default), so each person only sees and opens their own subfolders. Reports by default, changes with `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Give every subfolder of one folder its own SharePoint group (read/write), a group of owners who manage it all, and optionally a personal folder per person - each person reaches only their own folders. Reports by default, changes with `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Verify the two access scripts without touching a tenant — shared auth block identical, and the revocation funnel behaves |
 
 ---
@@ -687,43 +687,63 @@ It prefers the report's site-access file (`..._SiteAccess_...csv`), which alread
 ### Set-SharePointFolderAccess.ps1
 
 For the request "we made a folder under General; make it so people only reach their own
-subfolder, read and write, and nothing else". One config says which subfolders there are and
-who belongs in each; the script creates missing subfolders, breaks inheritance and brings the
-permissions in line - on the parent folder and on every subfolder named.
+subfolder, read and write, nothing else - and let the team leads manage it". One config names
+the owners, the subfolders and who belongs in each; the script creates the SharePoint groups
+and the missing folders, breaks inheritance and brings every permission in line.
+
+**Groups** (default - `-DirectAccess` grants the people directly instead)
+
+| Group | Who | What |
+|-------|-----|------|
+| `<prefix> - Owners` | `owners` from the config | Full Control on the parent and everything the script manages below it. Owner of every group, so they add and remove members themselves, without IT |
+| `<prefix> - <subfolder>` | the people listed for that subfolder | `-Role` on their subfolder (default **Contribute**: read, add, change, delete) |
+
+`<prefix>` is `groupPrefix`, or the parent folder's name. SharePoint groups live in this site
+only: a change works at once and nothing is added to the directory.
+
+**Folders**
 
 | Folder | Who has access afterwards |
 |--------|---------------------------|
-| Parent (e.g. `General/Teamleads`) | Site Owners (Full Control) + everyone named in any subfolder with **Read**, so the folder shows up and they can click through. `-ParentAccess None`: owners only |
-| Each subfolder | Site Owners (Full Control) + exactly the people listed for it, with `-Role` (default **Contribute**: read, add, change, delete) |
-| Everything else directly in the parent (files, subfolders not in the config) | Site Owners only - otherwise the parent's Read would let everyone open them. `-KeepOtherItems`: left alone, reported only |
+| Parent (e.g. `General/Teamleads`) | Site Owners and the Owners group (Full Control) + every subfolder group with **Read**, so the folder shows up and they can click through. `-ParentAccess None`: owners only |
+| Each subfolder | Owners (Full Control) + its group with `-Role` |
+| Personal folder (with `personalFolders`) | Inside the subfolder, one per listed non-owner, named after their display name: only that person (Contribute) and the owners |
+| Everything else directly in the parent | Owners only - otherwise the parent's Read would let everyone open it. `-KeepOtherItems`: left alone, reported only |
 
 Everyone else is removed from those folders: the Members and Visitors groups, earlier direct
-grants and sharing links. A subfolder you have no rights on is not even listed, so people do
-not see the other teams' folder names. Always kept: the site's associated Owners group, the
-owners of the Microsoft 365 group behind a Teams site, and system *Limited Access* entries.
-Site collection admins are no role assignment and keep access regardless.
+grants and sharing links. A folder you have no rights on is not even listed, so people do not
+see the other teams' folder names. Always kept: the site's associated Owners group, the owners
+of the Microsoft 365 group behind a Teams site, and system *Limited Access* entries.
+
+**Membership** — missing members are added. Someone in a group who is not in the config is
+reported and left in, because the owners manage membership themselves and a re-run must not
+undo that; `-SyncMembers` makes the groups match the config exactly. After `-Apply` the
+script prints each group's page (`/_layouts/15/people.aspx?MembershipGroupId=…`) where the
+owners manage it.
 
 Every address is resolved **before** anything changes; one unknown address stops the run
-with nothing changed. Roles are picked by type, so a Dutch or French site (*Bijdragen*,
-*Collaboration*) works the same. With `-Apply` the permissions are read back afterwards and
-printed per folder. Every run writes a CSV (`C:\Temp\SharePointFolderAccess_<timestamp>.csv`).
+with nothing changed. Roles are picked by type, so a Dutch or French site works the same.
+With `-Apply` the permissions are read back per folder. Every run writes a CSV
+(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`), also when a change fails halfway.
 
 Sign-in: delegated PnP through `Connect-M365PnP` (device code / GDAP customer per
 `load.config.ps1`) with the tenant's client ID from `pnp.appid.json`. A tenant without an
 entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-ClientId`.
 
-**Config file**
+**Config file** — a subfolder is a list of people, or an object with `members` and `personalFolders`.
 
 ```json
 {
   "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
   "folder":       "Shared Documents/General/Teamleads",
+  "groupPrefix":  "Teamleads",
+  "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
   "role":         "Contribute",
   "parentAccess": "Read",
   "subfolders": {
-    "Team A":  [ "jan@contoso.com", "kim@contoso.com", "piet@contoso.com" ],
-    "Team B":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ],
-    "Leads":   [ "jan@contoso.com", "kim@contoso.com" ]
+    "Team A": { "members": [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com", "piet@contoso.com" ],
+                "personalFolders": true },
+    "Leads":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ]
   }
 }
 ```
@@ -736,7 +756,12 @@ entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-C
 | `-SiteUrl` | No* | The site the folder lives in (for a Teams channel: the team's site) |
 | `-FolderPath` | No* | Parent folder, site-relative (`Shared Documents/General/Teamleads`); a full or server-relative URL works too. The library URL is usually `Shared Documents`, even when it is shown as *Documents* / *Documenten* |
 | `-Access` | No* | Hashtable subfolder → UPNs/e-mail addresses, instead of or on top of `subfolders` in the config |
-| `-Role` | No | `Contribute` (default), `Edit` or `Read` on each subfolder |
+| `-Owners` | No | Full Control everywhere and owner of the groups; overrides `owners` |
+| `-GroupPrefix` | No | Start of the group names (default: `groupPrefix`, else the parent folder name) |
+| `-PersonalFolders` | No | Personal folders in every subfolder, instead of per subfolder in the config |
+| `-DirectAccess` | No | Grant the people directly instead of through SharePoint groups |
+| `-SyncMembers` | No | Remove group members who are not in the config (otherwise only reported) |
+| `-Role` | No | `Contribute` (default), `Edit` or `Read` on each subfolder. Personal folders always get `Contribute` |
 | `-ParentAccess` | No | `Read` (default) or `None` on the parent folder |
 | `-KeepOtherItems` | No | Leave files and unconfigured subfolders directly in the parent alone instead of locking them to the owners |
 | `-Apply` | No | Actually change. Without it nothing is written |
@@ -755,18 +780,22 @@ entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-C
 # Do it, then read the result back.
 .\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
 
-# Without a config file
+# Without a config file, people granted directly instead of through groups
 .\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
-    -FolderPath "Shared Documents/General/Teamleads" `
-    -Access @{ 'Team A' = @('jan@contoso.com', 'kim@contoso.com'); 'Leads' = @('jan@contoso.com') } `
-    -Apply
+    -FolderPath "Shared Documents/General/Teamleads" -Owners jan@contoso.com `
+    -Access @{ 'Team A' = @('kim@contoso.com', 'els@contoso.com') } -DirectAccess -Apply
 ```
+
 **Notes**
 - Idempotent: a second run reports *already correct* for everything the first one set.
-- People can see the parent folder and open only their own subfolders - nothing else in it.
-  Something added directly to the parent later inherits its Read again; a re-run locks it.
-- Only the parent, what sits directly in it and the named subfolders are touched. A file or
-  folder deeper inside a subfolder that was shared separately keeps its own permissions.
+- Personal folders are matched by name: rename one and the next run creates a new one under
+  the display name.
+- Something added directly to the parent later inherits its Read again; a re-run locks it.
+- Only the parent, what sits directly in it, the subfolders and their personal folders are
+  touched. Anything deeper that was shared separately keeps its own permissions.
+- Not yet verified on a tenant: whether owners who only hold Full Control on the folders (not
+  on the site) can open the group page to manage membership. If they cannot, the site Owners
+  manage it, or the owners get Read on the site.
 
 ---
 

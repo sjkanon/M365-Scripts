@@ -28,7 +28,7 @@ Graph n'a pas d'API ; Exchange Online pour le journal d'audit.
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restaurer des fichiers/dossiers supprimés depuis la corbeille d'un site ou d'un OneDrive (essai à blanc par défaut) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Où est passé un fichier ? Renommages, déplacements, copies et suppressions depuis le journal d'audit, y compris via un dossier — en heure de Bruxelles, sur une période au choix |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Retirer partout l'accès d'un utilisateur : administrateur de site collection, attributions directes à tous les niveaux, groupes SharePoint et liens de partage. Rapport par défaut, suppression avec `-Apply` |
-| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Attribuer à chaque sous-dossier d'un dossier ses propres personnes (lecture/écriture par défaut), pour que chacun ne voie et n'ouvre que ses propres sous-dossiers. Rapport par défaut, modifie avec `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Donner à chaque sous-dossier d'un dossier son propre groupe SharePoint (lecture/écriture), un groupe d'owners qui gère le tout, et éventuellement un dossier personnel par personne - chacun n'accède qu'à ses propres dossiers. Rapport par défaut, modifie avec `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Vérifier les deux scripts d'accès sans toucher à un tenant — bloc d'authentification partagé identique, et l'entonnoir de révocation se comporte correctement |
 
 ---
@@ -713,48 +713,67 @@ Il privilégie le fichier d'accès par site (`..._SiteAccess_...csv`), où chaqu
 ### Set-SharePointFolderAccess.ps1
 
 Pour la demande « nous avons créé un dossier sous General ; faites en sorte que chacun n'accède
-qu'à son propre sous-dossier, en lecture et écriture, et à rien d'autre ». Une seule config
-indique quels sous-dossiers existent et qui appartient à chacun ; le script crée les
-sous-dossiers manquants, rompt l'héritage et aligne les autorisations - sur le dossier parent
-et sur chaque sous-dossier nommé.
+qu'à son propre sous-dossier, en lecture et écriture, et à rien d'autre - et laissez les chefs
+d'équipe le gérer ». Une config nomme les propriétaires, les sous-dossiers et qui appartient à
+chacun ; le script crée les groupes SharePoint et les dossiers manquants, rompt l'héritage et
+aligne chaque autorisation.
+
+**Groupes** (par défaut - `-DirectAccess` attribue plutôt les droits directement aux personnes)
+
+| Groupe | Qui | Quoi |
+|--------|-----|------|
+| `<prefix> - Owners` | `owners` de la config | Contrôle total sur le parent et sur tout ce que le script gère en dessous. Propriétaire de chaque groupe, donc ils ajoutent et retirent eux-mêmes des membres, sans l'IT |
+| `<prefix> - <sous-dossier>` | les personnes listées pour ce sous-dossier | `-Role` sur leur sous-dossier (par défaut **Collaboration** : lire, ajouter, modifier, supprimer) |
+
+`<prefix>` vaut `groupPrefix`, ou le nom du dossier parent. Les groupes SharePoint n'existent
+que dans ce site : une modification prend effet immédiatement et rien n'est ajouté à l'annuaire.
+
+**Dossiers**
 
 | Dossier | Qui y a accès ensuite |
 |---------|-----------------------|
-| Parent (p. ex. `General/Teamleads`) | Propriétaires du site (Contrôle total) + toute personne nommée dans un sous-dossier, en **Lecture**, pour que le dossier soit visible et qu'on puisse y naviguer. `-ParentAccess None` : propriétaires seulement |
-| Chaque sous-dossier | Propriétaires du site (Contrôle total) + exactement les personnes listées pour lui, avec `-Role` (par défaut **Collaboration** : lire, ajouter, modifier, supprimer) |
-| Tout le reste directement dans le parent (fichiers, sous-dossiers absents de la config) | Propriétaires du site seulement - sinon la Lecture du parent permettrait à tous de les ouvrir. `-KeepOtherItems` : laissés tels quels, seulement signalés |
+| Parent (p. ex. `General/Teamleads`) | Propriétaires du site et le groupe Owners (Contrôle total) + chaque groupe de sous-dossier en **Lecture**, pour que le dossier soit visible et qu'on puisse y naviguer. `-ParentAccess None` : propriétaires seulement |
+| Chaque sous-dossier | Owners (Contrôle total) + son groupe avec `-Role` |
+| Dossier personnel (avec `personalFolders`) | Dans le sous-dossier, un par personne listée qui n'est pas owner, nommé d'après son nom d'affichage : seulement cette personne (Collaboration) et les owners |
+| Tout le reste directement dans le parent | Owners seulement - sinon la Lecture du parent permettrait à tous de l'ouvrir. `-KeepOtherItems` : laissé tel quel, seulement signalé |
 
 Tous les autres sont retirés de ces dossiers : les groupes Membres et Visiteurs, les
-attributions directes antérieures et les liens de partage. Un sous-dossier sur lequel on n'a
-aucun droit n'apparaît même pas, donc personne ne voit les noms des dossiers des autres
-équipes. Toujours conservés : le groupe Propriétaires associé au site, les propriétaires du
-groupe Microsoft 365 derrière un site Teams, et les entrées système *Accès limité*. Les
-administrateurs de collection de sites ne sont pas une attribution de rôle et gardent l'accès
-quoi qu'il arrive.
+attributions directes antérieures et les liens de partage. Un dossier sur lequel on n'a aucun
+droit n'apparaît même pas, donc personne ne voit les noms des dossiers des autres équipes.
+Toujours conservés : le groupe Propriétaires associé au site, les propriétaires du groupe
+Microsoft 365 derrière un site Teams, et les entrées système *Accès limité*.
+
+**Appartenance** — les membres manquants sont ajoutés. Une personne présente dans un groupe
+mais absente de la config est signalée et reste, car les owners gèrent eux-mêmes l'appartenance
+et une nouvelle exécution ne doit pas l'annuler ; `-SyncMembers` aligne exactement les groupes
+sur la config. Après `-Apply`, le script affiche la page de chaque groupe
+(`/_layouts/15/people.aspx?MembershipGroupId=…`) où les owners le gèrent.
 
 Chaque adresse est résolue **avant** toute modification ; une seule adresse inconnue arrête
 l'exécution sans rien changer. Les rôles sont choisis par type, donc un site en néerlandais ou
-en français (*Bijdragen*, *Collaboration*) fonctionne de la même façon. Avec `-Apply`, les
-autorisations sont relues ensuite et affichées par dossier. Chaque exécution écrit un CSV
-(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`).
+en français fonctionne de la même façon. Avec `-Apply`, les autorisations sont relues par
+dossier. Chaque exécution écrit un CSV (`C:\Temp\SharePointFolderAccess_<timestamp>.csv`),
+même quand une modification échoue en cours de route.
 
 Connexion : PnP délégué via `Connect-M365PnP` (code d'appareil / client GDAP selon
 `load.config.ps1`) avec l'ID client du tenant dans `pnp.appid.json`. Pour un tenant sans
 entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application), ou passez
 `-ClientId`.
 
-**Fichier de configuration**
+**Fichier de configuration** — un sous-dossier est une liste de personnes, ou un objet avec `members` et `personalFolders`.
 
 ```json
 {
   "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
   "folder":       "Shared Documents/General/Teamleads",
+  "groupPrefix":  "Teamleads",
+  "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
   "role":         "Contribute",
   "parentAccess": "Read",
   "subfolders": {
-    "Team A":  [ "jan@contoso.com", "kim@contoso.com", "piet@contoso.com" ],
-    "Team B":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ],
-    "Leads":   [ "jan@contoso.com", "kim@contoso.com" ]
+    "Team A": { "members": [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com", "piet@contoso.com" ],
+                "personalFolders": true },
+    "Leads":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ]
   }
 }
 ```
@@ -767,9 +786,14 @@ entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application
 | `-SiteUrl` | Non* | Le site qui contient le dossier (pour un canal Teams : le site de l'équipe) |
 | `-FolderPath` | Non* | Dossier parent, relatif au site (`Shared Documents/General/Teamleads`) ; une URL complète ou relative au serveur fonctionne aussi. L'URL de la bibliothèque est généralement `Shared Documents`, même quand elle s'affiche *Documents* / *Documenten* |
 | `-Access` | Non* | Table de hachage sous-dossier → UPN/adresses e-mail, à la place de ou en plus de `subfolders` dans la config |
-| `-Role` | Non | `Contribute` (par défaut), `Edit` ou `Read` sur chaque sous-dossier |
+| `-Owners` | Non | Contrôle total partout et propriétaires des groupes ; remplace `owners` |
+| `-GroupPrefix` | Non | Début des noms de groupe (par défaut : `groupPrefix`, sinon le nom du dossier parent) |
+| `-PersonalFolders` | Non | Dossiers personnels dans chaque sous-dossier, au lieu du réglage par sous-dossier dans la config |
+| `-DirectAccess` | Non | Attribuer les droits directement aux personnes plutôt que par des groupes SharePoint |
+| `-SyncMembers` | Non | Retirer les membres des groupes absents de la config (sinon seulement signalés) |
+| `-Role` | Non | `Contribute` (par défaut), `Edit` ou `Read` sur chaque sous-dossier. Les dossiers personnels reçoivent toujours `Contribute` |
 | `-ParentAccess` | Non | `Read` (par défaut) ou `None` sur le dossier parent |
-| `-KeepOtherItems` | Non | Laisser tels quels les fichiers et sous-dossiers non configurés directement dans le parent au lieu de les réserver aux propriétaires |
+| `-KeepOtherItems` | Non | Laisser tels quels les fichiers et sous-dossiers non configurés directement dans le parent au lieu de les réserver aux owners |
 | `-Apply` | Non | Modifier réellement. Sans lui, rien n'est écrit |
 | `-TenantId` / `-ClientId` | Non | Surcharges de connexion |
 | `-AppOnly` | Non | Application à certificat de `graph.appid.json` (nécessite SharePoint `Sites.FullControl.All`) |
@@ -786,20 +810,24 @@ entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application
 # Appliquer, puis relire le résultat.
 .\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
 
-# Sans fichier de configuration
+# Sans fichier de configuration, personnes attribuées directement plutôt que par groupes
 .\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
-    -FolderPath "Shared Documents/General/Teamleads" `
-    -Access @{ 'Team A' = @('jan@contoso.com', 'kim@contoso.com'); 'Leads' = @('jan@contoso.com') } `
-    -Apply
+    -FolderPath "Shared Documents/General/Teamleads" -Owners jan@contoso.com `
+    -Access @{ 'Team A' = @('kim@contoso.com', 'els@contoso.com') } -DirectAccess -Apply
 ```
+
 **Remarques**
 - Idempotent : une deuxième exécution indique *already correct* pour tout ce que la première a réglé.
-- Chacun voit le dossier parent et n'ouvre que ses propres sous-dossiers - rien d'autre.
-  Un élément ajouté plus tard directement dans le parent hérite de nouveau de sa Lecture ; une
+- Les dossiers personnels sont reconnus par leur nom : si vous en renommez un, l'exécution
+  suivante en crée un nouveau sous le nom d'affichage.
+- Un élément ajouté plus tard directement dans le parent hérite de nouveau de sa Lecture ; une
   nouvelle exécution le verrouille.
-- Seuls le parent, ce qu'il contient directement et les sous-dossiers nommés sont touchés. Un
-  fichier ou dossier plus profond dans un sous-dossier, partagé séparément, garde ses propres
+- Seuls le parent, ce qu'il contient directement, les sous-dossiers et leurs dossiers
+  personnels sont touchés. Ce qui est plus profond et partagé séparément garde ses propres
   autorisations.
+- Pas encore vérifié sur un tenant : si des owners qui n'ont le Contrôle total que sur les
+  dossiers (pas sur le site) peuvent ouvrir la page du groupe pour gérer les membres. Sinon, les
+  propriétaires du site s'en chargent, ou les owners reçoivent la Lecture sur le site.
 
 ---
 
