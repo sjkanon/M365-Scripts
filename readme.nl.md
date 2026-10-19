@@ -1017,6 +1017,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-19 (5)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) meldt nu aan zoals de andere SharePoint-scripts. De eerste live run tegen een tenant stopte met `PnP needs -ClientId ... or an entry for that tenant in pnp.appid.json`: het las alleen een client-ID die eerst door een ander script geregistreerd moest zijn. Het registreert de app nu zelf bij de eerste run (Graph-aanmelding als beheerder, public-client app `-AppName`, delegated `AllSites.FullControl` met beheerderstoestemming), bewaart de client-ID per tenant in `pnp.appid.json`, wacht tot de nieuwe app overal bekend is en probeert de aanmelding opnieuw. Een client-ID die een ander script al bewaarde, wordt hergebruikt |
+| Geverifieerd: syntaxcheck; linkcheck; de proefdraai kwam op de live tenant tot de aanmeldstap en toonde de config correct voordat hij faalde op de ontbrekende app-registratie. **Niet** geverifieerd: de app-registratie en alles na de aanmelding |
+
 ### 2026-10-19 (4)
 | Wijziging |
 |-----------|

@@ -1017,6 +1017,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-19 (5)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) se connecte désormais comme les autres scripts SharePoint. La première exécution réelle sur un tenant s'arrêtait sur `PnP needs -ClientId ... or an entry for that tenant in pnp.appid.json` : il lisait seulement un ID client qu'un autre script devait avoir enregistré avant. Il enregistre maintenant l'application lui-même à la première exécution (connexion Graph administrateur, application cliente publique `-AppName`, `AllSites.FullControl` délégué avec consentement administrateur), met l'ID client en cache par tenant dans `pnp.appid.json`, attend la propagation de la nouvelle application et réessaie la connexion. Un ID client déjà mis en cache par un autre script est réutilisé |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; l'essai à blanc a atteint l'étape de connexion sur le tenant réel et affiché correctement la config avant d'échouer sur l'enregistrement d'application manquant. **Non** vérifié : l'enregistrement de l'application et tout ce qui suit la connexion |
+
 ### 2026-10-19 (4)
 | Modification |
 |--------------|

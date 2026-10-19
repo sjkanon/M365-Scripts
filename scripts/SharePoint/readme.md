@@ -726,9 +726,13 @@ with nothing changed. Roles are picked by type, so a Dutch or French site works 
 With `-Apply` the permissions are read back per folder. Every run writes a CSV
 (`C:\Temp\SharePointFolderAccess_<timestamp>.csv`), also when a change fails halfway.
 
-Sign-in: delegated PnP through `Connect-M365PnP` (device code / GDAP customer per
-`load.config.ps1`) with the tenant's client ID from `pnp.appid.json`. A tenant without an
-entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-ClientId`.
+Sign-in: the same as the other SharePoint scripts. The first run against a tenant signs in
+to Graph once as an admin (through `Connect-M365Graph`), creates or reuses a public-client app
+(`-AppName`, default *M365-Scripts SharePoint Folder Access*) with the delegated SharePoint
+scope `AllSites.FullControl` admin-consented, and caches its client ID per tenant in
+`pnp.appid.json` (repo root, gitignored). Later runs go straight to the delegated PnP sign-in
+through `Connect-M365PnP` (device code / GDAP customer per `load.config.ps1`); a client ID
+another script already cached for the tenant is reused. `-ClientId` skips app registration.
 
 **Config file** — a subfolder is a list of people, or an object with `members` and `personalFolders` (`true`: non-owners, `"all"`: everyone listed, owners included - for a team leads' own folder).
 
@@ -765,7 +769,7 @@ entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-C
 | `-ParentAccess` | No | `Read` (default) or `None` on the parent folder |
 | `-KeepOtherItems` | No | Leave files and unconfigured subfolders directly in the parent alone instead of locking them to the owners |
 | `-Apply` | No | Actually change. Without it nothing is written |
-| `-TenantId` / `-ClientId` | No | Sign-in overrides |
+| `-TenantId` / `-ClientId` / `-AppName` | No | Sign-in overrides, as in `Restore-RecycleBinItems.ps1` |
 | `-AppOnly` | No | Certificate app from `graph.appid.json` (needs SharePoint `Sites.FullControl.All`) |
 | `-OutputPath` | No | CSV report path |
 

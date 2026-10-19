@@ -736,10 +736,14 @@ zonder wijzigingen. Rollen worden op type gekozen, dus een Nederlandse of Franse
 hetzelfde. Met `-Apply` worden de rechten per map teruggelezen. Elke run schrijft een CSV
 (`C:\Temp\SharePointFolderAccess_<timestamp>.csv`), ook als een wijziging halverwege faalt.
 
-Aanmelden: delegated PnP via `Connect-M365PnP` (device code / GDAP-klant volgens
-`load.config.ps1`) met de client-ID van de tenant uit `pnp.appid.json`. Een tenant zonder
-vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app), of geef
-`-ClientId` mee.
+Aanmelden: hetzelfde als bij de andere SharePoint-scripts. De eerste run tegen een tenant
+meldt één keer als beheerder aan bij Graph (via `Connect-M365Graph`), maakt een public-client
+app aan of hergebruikt die (`-AppName`, standaard *M365-Scripts SharePoint Folder Access*) met
+de delegated SharePoint-scope `AllSites.FullControl` met beheerderstoestemming, en bewaart de
+client-ID per tenant in `pnp.appid.json` (repo-root, gitignored). Latere runs gaan meteen naar
+de delegated PnP-aanmelding via `Connect-M365PnP` (device code / GDAP-klant volgens
+`load.config.ps1`); een client-ID die een ander script al voor de tenant bewaarde, wordt
+hergebruikt. `-ClientId` slaat de app-registratie over.
 
 **Configbestand** — een submap is een lijst mensen, of een object met `members` en `personalFolders` (`true`: niet-owners, `"all"`: iedereen die genoemd is, owners inbegrepen - voor een eigen map van de teamleads).
 
@@ -776,7 +780,7 @@ vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app
 | `-ParentAccess` | Nee | `Read` (standaard) of `None` op de bovenliggende map |
 | `-KeepOtherItems` | Nee | Bestanden en niet-geconfigureerde submappen direct in de bovenliggende map ongemoeid laten in plaats van ze voor de owners af te sluiten |
 | `-Apply` | Nee | Echt wijzigen. Zonder wordt er niets geschreven |
-| `-TenantId` / `-ClientId` | Nee | Overschrijvingen voor het aanmelden |
+| `-TenantId` / `-ClientId` / `-AppName` | Nee | Overschrijvingen voor het aanmelden, zoals in `Restore-RecycleBinItems.ps1` |
 | `-AppOnly` | Nee | Certificaat-app uit `graph.appid.json` (heeft SharePoint `Sites.FullControl.All` nodig) |
 | `-OutputPath` | Nee | Pad van het CSV-rapport |
 

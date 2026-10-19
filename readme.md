@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-19 (5)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now signs in like the other SharePoint scripts. The first live run against a tenant stopped with `PnP needs -ClientId ... or an entry for that tenant in pnp.appid.json`: it only read a client ID that some other script had to have registered first. It now registers the app itself on the first run (Graph admin sign-in, public-client app `-AppName`, delegated `AllSites.FullControl` admin-consented), caches the client ID per tenant in `pnp.appid.json`, waits for the new app to propagate and retries the sign-in. A client ID another script already cached is reused |
+| Verified: syntax check; link check; the dry run reached the sign-in step on the live tenant and printed the config correctly before failing on the missing app registration. **Not** verified: the app registration and anything after the sign-in |
+
 ### 2026-10-19 (4)
 | Change |
 |--------|

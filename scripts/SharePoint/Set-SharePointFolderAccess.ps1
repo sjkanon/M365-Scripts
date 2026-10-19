@@ -52,10 +52,20 @@
     back afterwards and prints the group pages where the owners manage membership. Every run
     writes a CSV. Roles are picked by type, not by name, so a Dutch or French site works the same.
 
-    Sign-in: delegated PnP through Connect-M365PnP (device code / GDAP customer per
-    load.config.ps1), with the client ID for the tenant from pnp.appid.json. If the tenant has
-    no entry there yet, run Find-SiteContent.ps1 once against it (it registers the app) or pass
-    -ClientId. -AppOnly signs in with the certificate app from graph.appid.json instead.
+    Sign-in, the same as the other SharePoint scripts: PnP.PowerShell no longer ships a shared
+    multi-tenant app, so the first run against a tenant creates one:
+
+      1. Signs in to Microsoft Graph as an admin (Application.ReadWrite.All), through
+         Connect-M365Graph: device code / GDAP customer per load.config.ps1
+      2. Creates (or reuses) a public-client app named after -AppName
+      3. Grants and admin-consents the delegated SharePoint scope AllSites.FullControl
+      4. Caches the client ID per tenant in pnp.appid.json (gitignored)
+
+    Later runs - and the other SharePoint scripts - read the cached client ID and go straight to
+    the delegated PnP sign-in (Connect-M365PnP: a device code when $global:useDeviceCodeAuth is
+    set in load.config.ps1, otherwise the browser). A client ID another script already cached
+    for the tenant is reused. Pass -ClientId to skip app registration entirely; -AppOnly signs in
+    with the certificate app from graph.appid.json instead.
 
 .PARAMETER ConfigPath
     JSON file describing the folder, the owners and who goes where. See Examples. Values given as
@@ -109,10 +119,15 @@
     Actually make the changes. Without it nothing is written.
 
 .PARAMETER TenantId
-    Tenant ID or domain for the sign-in. Defaults to what Connect-M365 resolves.
+    Tenant ID or domain for the sign-in and the one-time Graph admin sign-in. Defaults to the
+    tenant derived from -SiteUrl.
 
 .PARAMETER ClientId
-    Client ID of the PnP app registration to sign in with, instead of pnp.appid.json.
+    Client ID of an existing Entra app to sign in with. Skips app registration.
+
+.PARAMETER AppName
+    Display name of the app registration to create or reuse.
+    Default: "M365-Scripts SharePoint Folder Access".
 
 .PARAMETER AppOnly
     App-only sign-in with the certificate app from graph.appid.json (needs SharePoint
@@ -181,6 +196,7 @@ param(
     [switch] $Apply,
     [string] $TenantId,
     [string] $ClientId,
+    [string] $AppName = 'M365-Scripts SharePoint Folder Access',
     [switch] $AppOnly,
     [string] $OutputPath
 )
@@ -263,9 +279,14 @@ if (($plan.Values | Where-Object Personal) -and $ownerLogins.Count -eq 0) {
 }
 
 $SiteUrl = $SiteUrl.Trim().TrimEnd('/')
-if ($SiteUrl -notmatch '^https://[^/]+\.sharepoint\.(com|de|us|cn)(/|$)') {
+if ($SiteUrl -notmatch '^https://([a-zA-Z0-9-]+?)(-my)?\.sharepoint\.(com|de|us|cn)(/|$)') {
     throw "'$SiteUrl' does not look like a SharePoint site URL."
 }
+$tenantName = $Matches[1]
+if (-not $TenantId) { $TenantId = "$tenantName.onmicrosoft.com" }
+
+$repoRoot   = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$appIdStore = Join-Path $repoRoot 'pnp.appid.json'
 
 # -- Output --------------------------------------------------------------------
 $outputDir = if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'C:\Temp' } else { "$HOME/Downloads" }
@@ -309,12 +330,158 @@ if ($Apply) {
 }
 Write-Host ''
 
+# -- App registration ----------------------------------------------------------
+function Get-CachedClientId {
+    param([string] $Tenant)
+
+    if (-not (Test-Path $appIdStore)) { return $null }
+    try {
+        $store = Get-Content $appIdStore -Raw | ConvertFrom-Json
+        return $store.$Tenant
+    } catch {
+        Write-Warning "Could not read ${appIdStore}: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Set-CachedClientId {
+    param([string] $Tenant, [string] $Id)
+
+    $store = @{}
+    if (Test-Path $appIdStore) {
+        try {
+            (Get-Content $appIdStore -Raw | ConvertFrom-Json).PSObject.Properties |
+                ForEach-Object { $store[$_.Name] = $_.Value }
+        } catch { }
+    }
+    $store[$Tenant] = $Id
+    $store | ConvertTo-Json | Set-Content -Path $appIdStore -Encoding UTF8
+    Write-Host "  Client ID cached in $appIdStore" -ForegroundColor DarkGray
+}
+
+function New-FolderAccessApp {
+    <#
+        Creates (or reuses) a public-client app in the target tenant and
+        admin-consents the delegated SharePoint scope PnP needs. Returns the app id.
+        Requires a Graph sign-in as Global / Application Administrator.
+    #>
+    param([string] $Tenant, [string] $DisplayName)
+
+    foreach ($module in @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Applications')) {
+        if (-not (Get-Module -ListAvailable -Name $module)) {
+            throw "Module '$module' is required to create the app registration. Run: Install-Module $module -Scope CurrentUser"
+        }
+    }
+    Import-Module Microsoft.Graph.Applications -ErrorAction Stop
+
+    Write-Host '  No app registration known for this tenant - creating one.' -ForegroundColor Yellow
+    Write-Host "  Sign in as a Global Administrator of $Tenant." -ForegroundColor Yellow
+
+    $bootstrap = Connect-M365Graph -TenantId $Tenant -Scopes @(
+        'Application.ReadWrite.All'
+        'DelegatedPermissionGrant.ReadWrite.All'
+        'Directory.Read.All'
+    )
+
+    Write-Host "  Signed in as $((Get-MgContext).Account)" -ForegroundColor Green
+
+    $escaped = $DisplayName -replace "'", "''"
+    $app = @(Get-MgApplication -Filter "displayName eq '$escaped'" -All) | Select-Object -First 1
+
+    if ($app) {
+        Write-Host "  Reusing existing app '$DisplayName' ($($app.AppId))" -ForegroundColor Green
+    } else {
+        $app = New-MgApplication -DisplayName $DisplayName `
+            -SignInAudience 'AzureADMyOrg' `
+            -IsFallbackPublicClient `
+            -PublicClient @{ RedirectUris = @('http://localhost') }
+        Write-Host "  App created: $($app.AppId)" -ForegroundColor Green
+    }
+
+    $sp = @(Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -All) | Select-Object -First 1
+    if (-not $sp) {
+        $sp = New-MgServicePrincipal -AppId $app.AppId
+        Write-Host '  Service principal created.' -ForegroundColor Green
+    }
+
+    # Delegated scopes: SharePoint for the CSOM calls PnP makes, Graph for sign-in.
+    $resources = @(
+        @{ AppId = '00000003-0000-0ff1-ce00-000000000000'; Name = 'SharePoint'; Scopes = @('AllSites.FullControl', 'User.Read.All') }
+        @{ AppId = '00000003-0000-0000-c000-000000000000'; Name = 'Graph';      Scopes = @('User.Read') }
+    )
+
+    foreach ($resource in $resources) {
+        $resourceSp = @(Get-MgServicePrincipal -Filter "appId eq '$($resource.AppId)'" -All) | Select-Object -First 1
+        if (-not $resourceSp) {
+            Write-Warning "  Service principal for $($resource.Name) not found - skipped."
+            continue
+        }
+
+        $valid = @($resource.Scopes | Where-Object { $resourceSp.Oauth2PermissionScopes.Value -contains $_ })
+        if ($valid.Count -eq 0) { continue }
+
+        $grant = @(Get-MgOauth2PermissionGrant -All -Filter "clientId eq '$($sp.Id)' and consentType eq 'AllPrincipals'") |
+                 Where-Object { $_.ResourceId -eq $resourceSp.Id } | Select-Object -First 1
+
+        $existing = if ($grant -and $grant.Scope) { $grant.Scope -split ' ' } else { @() }
+        $missing  = @($valid | Where-Object { $_ -notin $existing })
+        if ($missing.Count -eq 0) {
+            Write-Host "    $($resource.Name): scopes already consented." -ForegroundColor DarkGray
+            continue
+        }
+
+        $merged = ((@($existing) + $valid) | Where-Object { $_ } | Select-Object -Unique) -join ' '
+        if ($grant) {
+            Update-MgOauth2PermissionGrant -OAuth2PermissionGrantId $grant.Id -Scope $merged | Out-Null
+        } else {
+            New-MgOauth2PermissionGrant -ClientId $sp.Id -ResourceId $resourceSp.Id `
+                -ConsentType 'AllPrincipals' -Scope $merged | Out-Null
+        }
+        Write-Host "    $($resource.Name): consented $($missing -join ', ')" -ForegroundColor Green
+    }
+
+    Disconnect-M365Graph $bootstrap
+    return $app.AppId
+}
+
+# -AppOnly brings its own certificate app from graph.appid.json; nothing to register.
+$appIsNew = $false
+if (-not $AppOnly) {
+    if (-not $ClientId) {
+        $ClientId = Get-CachedClientId -Tenant $TenantId
+        if ($ClientId) { Write-Host "  Using cached app registration $ClientId" -ForegroundColor DarkGray }
+    }
+    if (-not $ClientId) {
+        $ClientId = New-FolderAccessApp -Tenant $TenantId -DisplayName $AppName
+        Set-CachedClientId -Tenant $TenantId -Id $ClientId
+        $appIsNew = $true
+    }
+}
+
 # -- Connect -------------------------------------------------------------------
-$connectParams = @{ Url = $SiteUrl }
-if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+if ($appIsNew) {
+    Write-Host '  Waiting 20s for the new app registration to propagate...' -ForegroundColor DarkGray
+    Start-Sleep -Seconds 20
+}
+
+$connectParams = @{ Url = $SiteUrl; TenantId = $TenantId }
 if ($ClientId) { $connectParams['ClientId'] = $ClientId }
 if ($AppOnly)  { $connectParams['AppOnly']  = $true }
-$connection = Connect-M365PnP @connectParams
+
+# A freshly created app registration is not replicated everywhere yet, so the first sign-in
+# can fail with "application not found". Retry briefly.
+$connection = $null
+for ($attempt = 1; $attempt -le 6; $attempt++) {
+    try {
+        # Device code or browser per load.config.ps1 - see Connect-M365PnP.
+        $connection = Connect-M365PnP @connectParams
+        break
+    } catch {
+        if ($attempt -eq 6) { throw }
+        Write-Host "  Sign-in attempt $attempt failed ($($_.Exception.Message.Trim())) - retrying in 10s..." -ForegroundColor DarkYellow
+        Start-Sleep -Seconds 10
+    }
+}
 
 $context = Get-PnPContext -Connection $connection
 $web     = Get-PnPWeb -Connection $connection -Includes ServerRelativeUrl, AssociatedOwnerGroup, CurrentUser

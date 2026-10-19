@@ -755,10 +755,15 @@ en français fonctionne de la même façon. Avec `-Apply`, les autorisations son
 dossier. Chaque exécution écrit un CSV (`C:\Temp\SharePointFolderAccess_<timestamp>.csv`),
 même quand une modification échoue en cours de route.
 
-Connexion : PnP délégué via `Connect-M365PnP` (code d'appareil / client GDAP selon
-`load.config.ps1`) avec l'ID client du tenant dans `pnp.appid.json`. Pour un tenant sans
-entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application), ou passez
-`-ClientId`.
+Connexion : la même que pour les autres scripts SharePoint. La première exécution sur un
+tenant se connecte une fois à Graph en tant qu'administrateur (via `Connect-M365Graph`), crée
+ou réutilise une application cliente publique (`-AppName`, par défaut *M365-Scripts SharePoint
+Folder Access*) avec l'étendue SharePoint déléguée `AllSites.FullControl` et le consentement
+administrateur, et met son ID client en cache par tenant dans `pnp.appid.json` (racine du dépôt,
+ignoré par git). Les exécutions suivantes passent directement à la connexion PnP déléguée via
+`Connect-M365PnP` (code d'appareil / client GDAP selon `load.config.ps1`) ; un ID client déjà
+mis en cache par un autre script pour le tenant est réutilisé. `-ClientId` évite
+l'enregistrement de l'application.
 
 **Fichier de configuration** — un sous-dossier est une liste de personnes, ou un objet avec `members` et `personalFolders` (`true` : les non-owners, `"all"` : toutes les personnes listées, owners compris - pour un dossier propre aux chefs d'équipe).
 
@@ -795,7 +800,7 @@ entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application
 | `-ParentAccess` | Non | `Read` (par défaut) ou `None` sur le dossier parent |
 | `-KeepOtherItems` | Non | Laisser tels quels les fichiers et sous-dossiers non configurés directement dans le parent au lieu de les réserver aux owners |
 | `-Apply` | Non | Modifier réellement. Sans lui, rien n'est écrit |
-| `-TenantId` / `-ClientId` | Non | Surcharges de connexion |
+| `-TenantId` / `-ClientId` / `-AppName` | Non | Surcharges de connexion, comme dans `Restore-RecycleBinItems.ps1` |
 | `-AppOnly` | Non | Application à certificat de `graph.appid.json` (nécessite SharePoint `Sites.FullControl.All`) |
 | `-OutputPath` | Non | Chemin du rapport CSV |
 
