@@ -32,9 +32,10 @@
       * Its group gets -Role (Contribute by default: read, add, change, delete - "lezen/schrijven")
       * Everyone else is removed, including the parent's Read
 
-    Personal folders (per subfolder "personalFolders": true, or -PersonalFolders for all)
-      * Inside the subfolder, one folder per listed person who is not an owner, named after
-        their display name. Only that person (Contribute) and the owners (Full Control)
+    Personal folders (per subfolder "personalFolders": true or "all", or -PersonalFolders for all)
+      * Inside the subfolder, one folder per listed person who is not an owner ("all": the
+        owners too), named after their display name. Only that person (Contribute) and the
+        owners (Full Control) - so owners can open each other's personal folders
       * Everything else in the subfolder stays the team's, inheriting the subfolder
 
     A folder you have no rights on is not listed at all, so people do not see the other teams'
@@ -207,7 +208,15 @@ function Add-PlanEntry {
     $personal = $false
     if ($Value -is [System.Management.Automation.PSCustomObject] -or $Value -is [hashtable]) {
         $members  = $Value.members
-        $personal = [bool]$Value.personalFolders
+        # true: every listed non-owner; "all": the owners as well (a team leads' folder, where
+        # the leads are the owners and still want a folder of their own).
+        $personal = switch ("$($Value.personalFolders)".ToLowerInvariant()) {
+            'all'   { 'all' }
+            'true'  { $true }
+            ''      { $false }
+            'false' { $false }
+            default { throw "personalFolders for '$Name' is '$($Value.personalFolders)' - use true, false or ""all""." }
+        }
     }
     $plan[$Name] = @{ Members = (ConvertTo-LoginList $members); Personal = $personal }
 }
@@ -705,9 +714,13 @@ try {
         $total += Set-FolderAccess -Label $path -Item $item -Desired (@($ownerGrants) + @($teamGrants[$name])) -IsNew:($isNew -and -not $Apply)
         if ($item) { $managed[$path] = $item }
 
-        # Personal folders: one per listed non-owner, only that person and the owners.
+        # Personal folders: one per listed non-owner (owners too with "all"), only that person
+        # and the owners.
         if (-not $plan[$name].Personal) { continue }
-        foreach ($login in $plan[$name].Members | Where-Object { -not (Test-Owner $_) }) {
+        # Compared as a string: $true -eq 'all' is $true in PowerShell, which would make every
+        # "personalFolders": true behave like "all".
+        $withOwners = "$($plan[$name].Personal)" -eq 'all'
+        foreach ($login in $plan[$name].Members | Where-Object { $withOwners -or -not (Test-Owner $_) }) {
             $folderName = ($principals[$login].Title -replace $invalidName, '-').Trim().TrimEnd('.')
             if (-not $folderName) { $folderName = ($login -split '@')[0] }
             $personalPath = "$path/$folderName"

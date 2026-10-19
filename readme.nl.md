@@ -1017,6 +1017,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-19 (4)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1): `personalFolders` accepteert ook `"all"`, waarmee ook de owners een persoonlijke map krijgen. Owners kregen er nooit een, omdat ze toch overal bij kunnen - maar in een map van de teamleads zelf zijn de teamleads de owners en willen ze toch een eigen map. Met `true` zou alleen de ene teamlead die geen owner is er een hebben gekregen. Een andere waarde dan `true`, `false` of `"all"` stopt de run nu in plaats van als `true` gelezen te worden |
+| Opgemerkt tijdens het schrijven: `$true -eq 'all'` is `$true` in PowerShell, dus een eerste versie liet elke `"personalFolders": true` werken als `"all"`. De waarde wordt nu als tekst vergeleken |
+| Geverifieerd: syntaxcheck; linkcheck; de config-parsing apart gedraaid (`true`, `"all"`, een gewone lijst, geen waarde, en een ongeldige waarde die geweigerd wordt) en de tekstvergelijking. **Niet** geverifieerd: een run tegen een tenant |
+
 ### 2026-10-19 (3)
 | Wijziging |
 |-----------|

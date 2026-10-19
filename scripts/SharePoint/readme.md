@@ -707,7 +707,7 @@ only: a change works at once and nothing is added to the directory.
 |--------|---------------------------|
 | Parent (e.g. `General/Teamleads`) | Site Owners and the Owners group (Full Control) + every subfolder group with **Read**, so the folder shows up and they can click through. `-ParentAccess None`: owners only |
 | Each subfolder | Owners (Full Control) + its group with `-Role` |
-| Personal folder (with `personalFolders`) | Inside the subfolder, one per listed non-owner, named after their display name: only that person (Contribute) and the owners |
+| Personal folder (with `personalFolders`) | Inside the subfolder, one per listed non-owner (`"all"`: the owners too), named after their display name: only that person (Contribute) and the owners - owners can open each other's |
 | Everything else directly in the parent | Owners only - otherwise the parent's Read would let everyone open it. `-KeepOtherItems`: left alone, reported only |
 
 Everyone else is removed from those folders: the Members and Visitors groups, earlier direct
@@ -730,7 +730,7 @@ Sign-in: delegated PnP through `Connect-M365PnP` (device code / GDAP customer pe
 `load.config.ps1`) with the tenant's client ID from `pnp.appid.json`. A tenant without an
 entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-ClientId`.
 
-**Config file** — a subfolder is a list of people, or an object with `members` and `personalFolders`.
+**Config file** — a subfolder is a list of people, or an object with `members` and `personalFolders` (`true`: non-owners, `"all"`: everyone listed, owners included - for a team leads' own folder).
 
 ```json
 {

@@ -734,7 +734,7 @@ que dans ce site : une modification prend effet immédiatement et rien n'est ajo
 |---------|-----------------------|
 | Parent (p. ex. `General/Teamleads`) | Propriétaires du site et le groupe Owners (Contrôle total) + chaque groupe de sous-dossier en **Lecture**, pour que le dossier soit visible et qu'on puisse y naviguer. `-ParentAccess None` : propriétaires seulement |
 | Chaque sous-dossier | Owners (Contrôle total) + son groupe avec `-Role` |
-| Dossier personnel (avec `personalFolders`) | Dans le sous-dossier, un par personne listée qui n'est pas owner, nommé d'après son nom d'affichage : seulement cette personne (Collaboration) et les owners |
+| Dossier personnel (avec `personalFolders`) | Dans le sous-dossier, un par personne listée qui n'est pas owner (`"all"` : les owners aussi), nommé d'après son nom d'affichage : seulement cette personne (Collaboration) et les owners - les owners peuvent ouvrir ceux des autres |
 | Tout le reste directement dans le parent | Owners seulement - sinon la Lecture du parent permettrait à tous de l'ouvrir. `-KeepOtherItems` : laissé tel quel, seulement signalé |
 
 Tous les autres sont retirés de ces dossiers : les groupes Membres et Visiteurs, les
@@ -760,7 +760,7 @@ Connexion : PnP délégué via `Connect-M365PnP` (code d'appareil / client GDAP 
 entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application), ou passez
 `-ClientId`.
 
-**Fichier de configuration** — un sous-dossier est une liste de personnes, ou un objet avec `members` et `personalFolders`.
+**Fichier de configuration** — un sous-dossier est une liste de personnes, ou un objet avec `members` et `personalFolders` (`true` : les non-owners, `"all"` : toutes les personnes listées, owners compris - pour un dossier propre aux chefs d'équipe).
 
 ```json
 {

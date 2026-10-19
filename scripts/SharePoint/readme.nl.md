@@ -716,7 +716,7 @@ alleen in deze site: een wijziging werkt meteen en er komt niets bij in de direc
 |-----|--------------------------|
 | Bovenliggend (bv. `General/Teamleads`) | Site-eigenaren en de Owners-groep (Volledig beheer) + elke submapgroep met **Lezen**, zodat de map zichtbaar is en ze kunnen doorklikken. `-ParentAccess None`: alleen owners |
 | Elke submap | Owners (Volledig beheer) + de eigen groep met `-Role` |
-| Persoonlijke map (met `personalFolders`) | In de submap, één per genoemde niet-owner, met de weergavenaam als naam: alleen die persoon (Bijdragen) en de owners |
+| Persoonlijke map (met `personalFolders`) | In de submap, één per genoemde niet-owner (`"all"`: ook de owners), met de weergavenaam als naam: alleen die persoon (Bijdragen) en de owners - owners kunnen elkaars map openen |
 | Al het andere direct in de bovenliggende map | Alleen owners - anders kon iedereen het via het Lezen op de bovenliggende map openen. `-KeepOtherItems`: ongemoeid, alleen gemeld |
 
 Iedereen anders wordt van die mappen verwijderd: de groepen Leden en Bezoekers, eerdere
@@ -741,7 +741,7 @@ Aanmelden: delegated PnP via `Connect-M365PnP` (device code / GDAP-klant volgens
 vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app), of geef
 `-ClientId` mee.
 
-**Configbestand** — een submap is een lijst mensen, of een object met `members` en `personalFolders`.
+**Configbestand** — een submap is een lijst mensen, of een object met `members` en `personalFolders` (`true`: niet-owners, `"all"`: iedereen die genoemd is, owners inbegrepen - voor een eigen map van de teamleads).
 
 ```json
 {

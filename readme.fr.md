@@ -1017,6 +1017,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-19 (4)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) : `personalFolders` accepte aussi `"all"`, qui donne également un dossier personnel aux owners. Les owners n'en recevaient jamais, puisqu'ils accèdent déjà à tout - mais dans un dossier partagé par les chefs d'équipe eux-mêmes, ce sont eux les owners et ils veulent quand même un dossier à eux. Avec `true`, seul le chef d'équipe qui n'est pas owner en aurait reçu un. Une valeur autre que `true`, `false` ou `"all"` arrête désormais l'exécution au lieu d'être lue comme `true` |
+| Repéré en l'écrivant : `$true -eq 'all'` vaut `$true` en PowerShell, donc une première version faisait se comporter chaque `"personalFolders": true` comme `"all"`. La valeur est maintenant comparée comme texte |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; l'analyse de la config exécutée seule (`true`, `"all"`, une liste simple, aucune valeur, et une valeur invalide refusée) et la comparaison de texte. **Non** vérifié : toute exécution sur un tenant |
+
 ### 2026-10-19 (3)
 | Modification |
 |--------------|
