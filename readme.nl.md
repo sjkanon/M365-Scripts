@@ -364,7 +364,7 @@ Contentbewerkingen op SharePoint Online-sites en OneDrive via PnP PowerShell.
 
 #### Maptoegang per submap
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de owners, de submappen van een map en wie in elke submap hoort. Het maakt per submap een SharePoint-groep plus een Owners-groep (Volledig beheer overal, eigenaar van elke groep, zodat de teamleads het lidmaatschap zelf beheren), maakt ontbrekende mappen en eventueel persoonlijke mappen per persoon aan, geeft elke groep lezen/schrijven op zijn submap en Lezen op de bovenliggende map, sluit al het andere in de bovenliggende map af voor de owners, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de owners, de submappen van een map en wie in elke submap hoort. Het maakt per submap een Entra-beveiligingsgroep plus een Owners-groep (Volledig beheer overal; de owners zijn eigenaar van elke groep, zodat de teamleads het lidmaatschap zelf beheren in Mijn groepen), maakt ontbrekende mappen en eventueel persoonlijke mappen per persoon aan, geeft elke groep lezen/schrijven op zijn submap en Lezen op de bovenliggende map, sluit al het andere in de bovenliggende map af voor de owners, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
 
 #### Prullenbak terugzetten
 
@@ -890,7 +890,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← verwijderde bestanden terugzetten uit een prullenbak: één site/OneDrive of tenantbreed (PnP, automatische app-registratie)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← waar is een bestand gebleven: hernoemingen, verplaatsingen, kopieën, verwijderingen (ook via een map) uit het auditlog, in Brusselse tijd
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← de toegang van één gebruiker op elk niveau intrekken, deellinks inbegrepen (rapporteert tenzij -Apply)
-    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← elke submap van een map een eigen SharePoint-groep + owners + persoonlijke mappen, iedereen anders eruit (rapporteert tenzij -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← elke submap van een map een eigen Entra-groep + owners + persoonlijke mappen, iedereen anders eruit (rapporteert tenzij -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← de twee toegangsscripts verifiëren zonder tenant (gedeeld auth-blok + intrekkingstrechter)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.nl.md">Provisioning/</a>                ← een complete structuur inrichten vanuit één JSON-config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.nl.md">readme.md</a>
@@ -1010,6 +1010,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-19 (7)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) maakt nu standaard **Entra ID-beveiligingsgroepen** in plaats van SharePoint-groepen. SharePoint-groepen bestaan alleen binnen één site, dus de klant kon ze niet zien of beheren in Entra naast zijn andere groepen. De groepen worden via Microsoft Graph aangemaakt (delegated beheerdersaanmelding, `Group.ReadWrite.All`; `Group.Read.All` bij een proefdraai), de mensen in `owners` worden bij het aanmaken eigenaar van elke groep - zodat de aangemelde beheerder niet als bijwerking eigenaar wordt - en de groepen krijgen rechten op de mappen via hun claim. De owners beheren het lidmaatschap in Mijn groepen. Mensen worden in Entra opgezocht op UPN of primair adres voordat er iets verandert. Een bestaande groep met dezelfde naam wordt hergebruikt, maar meerdere ervan, of een on-premises gesynchroniseerde, niet-beveiligings- of dynamische groep stopt de run. Het standaardprefix wordt `<site> - <map>`, omdat Entra-namen tenantbreed zijn. `-GroupType SharePoint` houdt de groepen binnen de site |
+| Geverifieerd: syntaxcheck; linkcheck; de Graph-URL's die het script opbouwt. **Niet** geverifieerd: alle Graph-aanroepen, de toekenning via claim van een net aangemaakte groep, en de instelling voor Mijn groepen in deze tenant |
 
 ### 2026-10-19 (6)
 | Wijziging |

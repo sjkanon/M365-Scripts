@@ -12,11 +12,15 @@
 
     Groups (default; -DirectAccess grants the people directly instead)
       * "<prefix> - Owners"       the people in "owners". Full Control on the parent and on
-                                  everything the script manages below it. Owner of every group
-                                  below, so they add and remove members themselves - no IT needed
+                                  everything the script manages below it
       * "<prefix> - <subfolder>"  the people listed for that subfolder
-      <prefix> is "groupPrefix" from the config, or the parent folder's name. SharePoint groups
-      live in this site only: a change takes effect at once and the directory stays clean.
+      Entra ID security groups by default (-GroupType Entra): visible and manageable in Entra,
+      no mailbox, no team. The people in "owners" become owner of every group, so they manage
+      membership themselves in My Groups (myaccount.microsoft.com/groups) - no IT needed. A
+      membership change can take a while to reach SharePoint. <prefix> is "groupPrefix" from
+      the config, else "<site> - <folder>" (Entra names are tenant-wide, so the site is in it).
+      -GroupType SharePoint makes site-local SharePoint groups instead, owned by the Owners
+      group, prefix default the folder name: effective at once, nothing in the directory.
 
     Parent folder (e.g. General/Teamleads)
       * Inheritance broken. Site Owners and the Owners group: Full Control
@@ -98,6 +102,11 @@
 .PARAMETER DirectAccess
     Grant the people directly on the folders instead of through SharePoint groups. Membership
     then changes only by editing the config and running again.
+
+.PARAMETER GroupType
+    Entra (default): Entra ID security groups, created through Microsoft Graph (a delegated
+    admin sign-in with Group.ReadWrite.All). SharePoint: SharePoint groups in this site only.
+    Overrides "groupType" in the config.
 
 .PARAMETER SyncMembers
     Remove group members who are not in the config. Without it they are only reported.
@@ -199,6 +208,9 @@ param(
     [switch] $DirectAccess,
     [switch] $SyncMembers,
 
+    [ValidateSet('Entra', 'SharePoint')]
+    [string] $GroupType,
+
     [ValidateSet('Contribute', 'Edit', 'Read')]
     [string] $Role,
 
@@ -262,6 +274,7 @@ if ($ConfigPath) {
     if (-not $Role         -and $config.role)         { $Role         = [string]$config.role }
     if (-not $ParentAccess -and $config.parentAccess) { $ParentAccess = [string]$config.parentAccess }
     if (-not $GroupPrefix  -and $config.groupPrefix)  { $GroupPrefix  = [string]$config.groupPrefix }
+    if (-not $GroupType    -and $config.groupType)    { $GroupType    = [string]$config.groupType }
     if ($config.owners) { $ownerLogins = ConvertTo-LoginList $config.owners }
     if ($config.subfolders) {
         foreach ($p in $config.subfolders.PSObject.Properties) { Add-PlanEntry -Name $p.Name -Value $p.Value }
@@ -273,6 +286,9 @@ if ($Access) {
 if ($Owners)          { $ownerLogins = ConvertTo-LoginList $Owners }
 if ($PersonalFolders) { foreach ($name in $plan.Keys) { $plan[$name].Personal = $true } }
 if (-not $Role)         { $Role = 'Contribute' }
+if (-not $GroupType)    { $GroupType = 'Entra' }
+if ($GroupType -notin 'Entra', 'SharePoint') { throw "groupType '$GroupType' is not one of Entra, SharePoint." }
+$useEntra = $GroupType -eq 'Entra' -and -not $DirectAccess
 if (-not $ParentAccess) { $ParentAccess = 'Read' }
 
 if ($Role -notin 'Contribute', 'Edit', 'Read') { throw "Role '$Role' is not one of Contribute, Edit, Read." }
@@ -334,7 +350,7 @@ function Write-Bad    { param([string] $Message) Write-Host "    [FAIL] $Message
 Write-Host ''
 Write-Host "  Site    : $SiteUrl" -ForegroundColor Cyan
 Write-Host "  Folder  : $FolderPath" -ForegroundColor Cyan
-Write-Host "  Access  : $(if ($DirectAccess) { 'people granted directly' } else { 'through SharePoint groups' }); $Role on each subfolder, parent: $ParentAccess" -ForegroundColor Cyan
+Write-Host "  Access  : $(if ($DirectAccess) { 'people granted directly' } elseif ($useEntra) { 'through Entra security groups' } else { 'through SharePoint groups' }); $Role on each subfolder, parent: $ParentAccess" -ForegroundColor Cyan
 Write-Host ("  Owners  : {0}" -f $(if ($ownerLogins) { $ownerLogins -join ', ' } else { '(none - site Owners only)' })) -ForegroundColor Cyan
 foreach ($name in $plan.Keys) {
     $tag = if ($plan[$name].Personal) { ' + personal folders' } else { '' }
@@ -507,6 +523,7 @@ function Connect-Site {
 # -GrantSiteAdmin: a Global Administrator cannot read a team's files by role alone. Become site
 # collection admin through the tenant admin site, and give it back in the finally at the end.
 $grantedSiteAdmin = $false
+$script:graph     = $null
 if ($GrantSiteAdmin) {
     Write-Host "  Connecting to $adminUrl..." -ForegroundColor Cyan
     $adminConnection = Connect-Site -Url $adminUrl
@@ -564,7 +581,10 @@ try {
     if (-not $parentFolder.ListItemAllFields -or $parentFolder.ListItemAllFields.ServerObjectIsNull) {
         throw "'$relative' is the root of a library, not a folder inside one. Point -FolderPath at a folder."
     }
-    if (-not $GroupPrefix) { $GroupPrefix = $relative.Split('/')[-1] }
+    if (-not $GroupPrefix) {
+        # Entra group names are tenant-wide, so the site goes in; SharePoint groups live in the site.
+        $GroupPrefix = if ($useEntra) { "$($SiteUrl.Split('/')[-1]) - $($relative.Split('/')[-1])" } else { $relative.Split('/')[-1] }
+    }
 
     # -- Roles, by type so the site language does not matter -----------------------
     $roleDefs = @{}
@@ -580,11 +600,20 @@ try {
     $context.ExecuteQuery()
     $roleRank = @{ Read = 1; Contribute = 2; Edit = 3; FullControl = 4 }
 
+    # -- Microsoft Graph, for the Entra groups ------------------------------------
+    if ($useEntra) {
+        # Read-only for a dry run: a report has no business holding write access to every group.
+        $graphScopes = if ($Apply) { @('Group.ReadWrite.All', 'User.Read.All') } else { @('Group.Read.All', 'User.Read.All') }
+        $script:graph = Connect-M365Graph -TenantId $TenantId -Scopes $graphScopes
+        Write-Host "  Graph signed in as $($script:graph.Account)" -ForegroundColor DarkGray
+    }
+
     # -- Resolve everyone before touching anything ---------------------------------
     # One unknown address must stop the run here, not halfway through, with the parent already
     # closed off and half the subfolders done.
     Write-Host '  Resolving people...' -ForegroundColor Cyan
     $principals = @{}
+    $entraUsers = @{}
     $unresolved = @()
     $everyone = @($ownerLogins) + @($plan.Values | ForEach-Object { $_.Members }) | Sort-Object -Unique
     foreach ($login in $everyone) {
@@ -593,6 +622,15 @@ try {
             $context.Load($user)
             $context.ExecuteQuery()
             $principals[$login] = $user
+            if ($useEntra) {
+                # By UPN or primary address - the config may hold either.
+                $escaped = $login -replace "'", "''"
+                $filter  = [uri]::EscapeDataString("userPrincipalName eq '$escaped' or mail eq '$escaped'")
+                # An "or" across two properties is an advanced query: it needs the eventual-consistency header.
+                $hits = @(Invoke-M365GraphPaged "/v1.0/users?`$filter=$filter&`$count=true&`$select=id,displayName,userPrincipalName" -Headers @{ ConsistencyLevel = 'eventual' })
+                if ($hits.Count -ne 1) { throw "$($hits.Count) Entra users match this address" }
+                $entraUsers[$login] = $hits[0]
+            }
             Write-Host ("    {0,-40} {1}" -f $login, $user.Title) -ForegroundColor DarkGray
         } catch {
             $unresolved += $login
@@ -874,9 +912,136 @@ try {
         return $group
     }
 
+    function Invoke-GraphWrite {
+        <# A Graph write, retried while a group created seconds ago is not replicated yet (404). #>
+        param([string] $Method, [string] $Uri, $Body)
+        for ($i = 1; $i -le 6; $i++) {
+            try {
+                $p = @{ Method = $Method; Uri = $Uri; OutputType = 'PSObject'; ErrorAction = 'Stop' }
+                if ($null -ne $Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 5); $p['ContentType'] = 'application/json' }
+                return Invoke-MgGraphRequest @p
+            } catch {
+                if ($i -eq 6 -or "$($_.Exception.Message)" -notmatch '404|NotFound|does not exist') { throw }
+                Start-Sleep -Seconds 5
+            }
+        }
+    }
+
+    function Get-SharePointGroupPrincipal {
+        <# The SharePoint principal for an Entra security group, by its claim. EnsureUser adds the
+           site's entry for it; a group created seconds ago may not be known to SharePoint yet. #>
+        param([string] $ObjectId, [string] $Title)
+        for ($i = 1; $i -le 6; $i++) {
+            try {
+                $principal = $web.EnsureUser("c:0t.c|tenant|$ObjectId")
+                $context.Load($principal)
+                $context.ExecuteQuery()
+                return $principal
+            } catch {
+                if ($i -eq 6) { throw "SharePoint does not know the Entra group '$Title' ($ObjectId) yet: $($_.Exception.Message)" }
+                Write-Host "    SharePoint does not see '$Title' yet - retrying in 10s..." -ForegroundColor DarkYellow
+                Start-Sleep -Seconds 10
+            }
+        }
+    }
+
+    function Set-EntraGroup {
+        <#
+            Make sure an Entra security group exists, holds at least the configured members and
+            owners (exactly them with -SyncMembers). Returns its SharePoint principal, or $null in
+            a dry run when the group does not exist yet.
+        #>
+        param([string] $Title, [string[]] $Logins, [string[]] $OwnerList)
+
+        Write-Host ''
+        Write-Host "  Entra group '$Title'" -ForegroundColor Cyan
+        $changes = 0
+
+        $escaped = $Title -replace "'", "''"
+        $filter  = [uri]::EscapeDataString("displayName eq '$escaped'")
+        $found   = @(Invoke-M365GraphPaged "/v1.0/groups?`$filter=$filter&`$select=id,displayName,securityEnabled,mailEnabled,groupTypes,onPremisesSyncEnabled")
+        if ($found.Count -gt 1) { throw "There are $($found.Count) Entra groups called '$Title'. Remove the extra ones, or pick another groupPrefix." }
+        $group = $found | Select-Object -First 1
+        if ($group) {
+            # Refused rather than forced: each of these would fail halfway or do the wrong thing.
+            if ($group.onPremisesSyncEnabled) { throw "Entra group '$Title' is synced from on-premises AD and cannot be changed in the cloud. Pick another groupPrefix." }
+            if (-not $group.securityEnabled)  { throw "Entra group '$Title' exists but is not a security group, so SharePoint cannot grant it access. Pick another groupPrefix." }
+            if (@($group.groupTypes) -contains 'DynamicMembership') { throw "Entra group '$Title' has dynamic membership; its members follow a rule. Pick another groupPrefix." }
+        }
+
+        $created = $false
+        if (-not $group) {
+            $changes++
+            Write-Change 'create security group'
+            Add-Result -Folder '' -Action 'Create Entra group' -Principal $Title -Result $status
+            if (-not $Apply) {
+                foreach ($login in $Logins)    { Write-Change "add member $login"; Add-Result -Folder '' -Action 'Add member' -Principal $login -Detail $Title -Result 'Planned' }
+                foreach ($login in $OwnerList) { Write-Change "add owner $login";  Add-Result -Folder '' -Action 'Add owner'  -Principal $login -Detail $Title -Result 'Planned' }
+                $script:groupChanges += $changes + $Logins.Count + $OwnerList.Count
+                return $null
+            }
+            $nick = ($Title -replace '[^A-Za-z0-9]', '')
+            if ($nick.Length -gt 50) { $nick = $nick.Substring(0, 50) }
+            $body = @{
+                displayName     = $Title
+                description     = "Managed by Set-SharePointFolderAccess.ps1 - $SiteUrl/$relative"
+                mailEnabled     = $false
+                mailNickname    = "$nick-$([guid]::NewGuid().ToString('N').Substring(0, 6))"
+                securityEnabled = $true
+            }
+            # Owners set at creation, so the signed-in admin is not made owner as a side effect.
+            if ($OwnerList) { $body['owners@odata.bind'] = @($OwnerList | ForEach-Object { "https://graph.microsoft.com/v1.0/users/$($entraUsers[$_].id)" }) }
+            $group   = Invoke-GraphWrite -Method POST -Uri '/v1.0/groups' -Body $body
+            $created = $true
+            foreach ($login in $OwnerList) { Add-Result -Folder '' -Action 'Add owner' -Principal $login -Detail $Title -Result 'Done' }
+        }
+        $script:entraGroupIds[$Title] = $group.id
+
+        # Members, and then owners, by object id.
+        foreach ($kind in @('members', 'owners')) {
+            $wantLogins = if ($kind -eq 'members') { $Logins } else { $OwnerList }
+            if ($kind -eq 'owners' -and $created) { continue }   # set at creation above
+
+            $current = @{}
+            if (-not $created) {
+                foreach ($m in @(Invoke-M365GraphPaged "/v1.0/groups/$($group.id)/$kind`?`$select=id,displayName,userPrincipalName")) { $current[$m.id] = $m }
+            }
+            $wanted = @{}
+            foreach ($login in $wantLogins) { $wanted[$entraUsers[$login].id] = $login }
+            $label = $kind.TrimEnd('s')
+
+            foreach ($id in $wanted.Keys) {
+                if ($current.ContainsKey($id)) { continue }
+                $changes++
+                Write-Change "add $label $($wanted[$id])"
+                if ($Apply) { Invoke-GraphWrite -Method POST -Uri "/v1.0/groups/$($group.id)/$kind/`$ref" -Body @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$id" } | Out-Null }
+                Add-Result -Folder '' -Action "Add $label" -Principal $wanted[$id] -Detail $Title -Result $status
+            }
+            foreach ($id in $current.Keys) {
+                if ($wanted.ContainsKey($id)) { continue }
+                $who = if ($current[$id].userPrincipalName) { $current[$id].userPrincipalName } else { $current[$id].displayName }
+                # An owner is only removed when the configured owners are there, so the group is never left ownerless.
+                if ($SyncMembers -and ($kind -eq 'members' -or $wanted.Count -gt 0)) {
+                    $changes++
+                    Write-Change "remove $label $who"
+                    if ($Apply) { Invoke-GraphWrite -Method DELETE -Uri "/v1.0/groups/$($group.id)/$kind/$id/`$ref" | Out-Null }
+                    Add-Result -Folder '' -Action "Remove $label" -Principal $who -Detail $Title -Result $status
+                } else {
+                    Write-Warn "$who is $label of the group but not in the config - left in (-SyncMembers removes)"
+                    Add-Result -Folder '' -Action "Extra $label" -Principal $who -Detail $Title -Result 'Left in'
+                }
+            }
+        }
+
+        if ($changes -eq 0) { Write-Ok 'already correct' }
+        $script:groupChanges += $changes
+        return Get-SharePointGroupPrincipal -ObjectId $group.id -Title $Title
+    }
+
     # Wrapped so the CSV is written even when a change fails halfway: the report then shows what
     # was done before it stopped, which is what you need to judge the state the folder is in.
     $total = 0
+    $script:entraGroupIds = [ordered]@{}
     $script:groupChanges = 0
     $groupsMade = [ordered]@{}
     try {
@@ -887,6 +1052,18 @@ try {
             foreach ($login in $ownerLogins) { $ownerGrants += New-Grant -Name $login -Principal $principals[$login] -Role 'FullControl' }
             foreach ($name in $plan.Keys) {
                 $teamGrants[$name] = @($plan[$name].Members | ForEach-Object { New-Grant -Name $_ -Principal $principals[$_] -Role $Role })
+            }
+        } elseif ($useEntra) {
+            if (-not $ownerLogins) { Write-Warn 'No owners in the config: the Entra groups get no owner, so only admins can manage their members.' }
+            if ($ownerLogins) {
+                $title = "$GroupPrefix - Owners"
+                $g = Set-EntraGroup -Title $title -Logins $ownerLogins -OwnerList $ownerLogins
+                $ownerGrants += New-Grant -Name $title -Principal $g -Role 'FullControl'
+            }
+            foreach ($name in $plan.Keys) {
+                $title = "$GroupPrefix - $name"
+                $g = Set-EntraGroup -Title $title -Logins $plan[$name].Members -OwnerList $ownerLogins
+                $teamGrants[$name] = @(New-Grant -Name $title -Principal $g -Role $Role)
             }
         } else {
             $ownerTitle = if ($ownerLogins) { "$GroupPrefix - Owners" }
@@ -994,6 +1171,14 @@ try {
             Show-FolderAccess -Label $relative -Item $parentFolder.ListItemAllFields
             foreach ($path in $managed.Keys) { Show-FolderAccess -Label $path -Item $managed[$path] }
 
+            if ($script:entraGroupIds.Count -gt 0) {
+                Write-Host ''
+                Write-Host '  Entra groups - the owners manage members at https://myaccount.microsoft.com/groups' -ForegroundColor Cyan
+                foreach ($title in $script:entraGroupIds.Keys) {
+                    Write-Host ("    {0,-40} {1}" -f $title, $script:entraGroupIds[$title]) -ForegroundColor DarkGray
+                }
+                Write-Host '    A membership change can take a while to reach SharePoint.' -ForegroundColor DarkGray
+            }
             if ($groupsMade.Count -gt 0) {
                 Write-Host ''
                 Write-Host '  Group pages - the owners add and remove members here' -ForegroundColor Cyan
@@ -1007,6 +1192,7 @@ try {
         $results | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
     }
 } finally {
+    if ($script:graph) { Disconnect-M365Graph $script:graph }
     if ($grantedSiteAdmin -and -not $KeepSiteAdmin) {
         try {
             Remove-PnPSiteCollectionAdmin -Owners @($AdminUpn) -Connection $connection -ErrorAction Stop

@@ -722,11 +722,22 @@ aligne chaque autorisation.
 
 | Groupe | Qui | Quoi |
 |--------|-----|------|
-| `<prefix> - Owners` | `owners` de la config | Contrôle total sur le parent et sur tout ce que le script gère en dessous. Propriétaire de chaque groupe, donc ils ajoutent et retirent eux-mêmes des membres, sans l'IT |
+| `<prefix> - Owners` | `owners` de la config | Contrôle total sur le parent et sur tout ce que le script gère en dessous |
 | `<prefix> - <sous-dossier>` | les personnes listées pour ce sous-dossier | `-Role` sur leur sous-dossier (par défaut **Collaboration** : lire, ajouter, modifier, supprimer) |
 
-`<prefix>` vaut `groupPrefix`, ou le nom du dossier parent. Les groupes SharePoint n'existent
-que dans ce site : une modification prend effet immédiatement et rien n'est ajouté à l'annuaire.
+Par défaut, ce sont des **groupes de sécurité Entra ID** (`-GroupType Entra`) : visibles et
+gérables dans Entra, sans boîte aux lettres ni équipe. Les personnes de `owners` deviennent
+propriétaires de chaque groupe, donc elles ajoutent et retirent elles-mêmes des membres dans
+*Mes groupes* (`https://myaccount.microsoft.com/groups`), sans l'IT. Le script se connecte
+pour cela à Microsoft Graph en tant qu'administrateur (`Group.ReadWrite.All` ;
+`Group.Read.All` pour un essai à blanc). Un groupe existant du même nom est réutilisé - sauf
+s'il y en a plusieurs, ou s'il est synchronisé depuis l'AD local, n'est pas un groupe de sécurité
+ou est dynamique : l'exécution s'arrête alors avant toute modification. `<prefix>` vaut
+`groupPrefix`, sinon `<site> - <dossier>`, car les noms Entra valent pour tout le tenant.
+
+`-GroupType SharePoint` crée plutôt des groupes SharePoint propres à ce site, dont le
+propriétaire est le groupe Owners (préfixe par défaut : le nom du dossier) : une modification
+prend effet immédiatement et rien n'arrive dans l'annuaire.
 
 **Dossiers**
 
@@ -743,11 +754,15 @@ droit n'apparaît même pas, donc personne ne voit les noms des dossiers des aut
 Toujours conservés : le groupe Propriétaires associé au site, les propriétaires du groupe
 Microsoft 365 derrière un site Teams, et les entrées système *Accès limité*.
 
-**Appartenance** — les membres manquants sont ajoutés. Une personne présente dans un groupe
-mais absente de la config est signalée et reste, car les owners gèrent eux-mêmes l'appartenance
-et une nouvelle exécution ne doit pas l'annuler ; `-SyncMembers` aligne exactement les groupes
-sur la config. Après `-Apply`, le script affiche la page de chaque groupe
-(`/_layouts/15/people.aspx?MembershipGroupId=…`) où les owners le gèrent.
+**Appartenance** — les membres et propriétaires manquants sont ajoutés. Une personne présente
+dans un groupe mais absente de la config est signalée et reste, car les owners gèrent
+eux-mêmes l'appartenance et une nouvelle exécution ne doit pas l'annuler ; `-SyncMembers` aligne
+exactement les groupes sur la config (un propriétaire n'est retiré qu'une fois les propriétaires
+configurés présents). Après `-Apply`, le script liste les groupes et l'endroit où les owners les
+gèrent. Avec des groupes Entra, une modification d'appartenance peut mettre un moment à
+atteindre SharePoint, et les owners ne peuvent les gérer dans *Mes groupes* que si le tenant
+l'autorise (Entra > Groupes > Général : *Restreindre l'accès des utilisateurs aux fonctionnalités
+des groupes dans Mes groupes* = **Non**).
 
 Chaque adresse est résolue **avant** toute modification ; une seule adresse inconnue arrête
 l'exécution sans rien changer. Les rôles sont choisis par type, donc un site en néerlandais ou
@@ -771,7 +786,8 @@ l'enregistrement de l'application.
 {
   "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
   "folder":       "Shared Documents/General/Teamleads",
-  "groupPrefix":  "Teamleads",
+  "groupPrefix":  "Sales - Teamleads",
+  "groupType":    "Entra",
   "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
   "role":         "Contribute",
   "parentAccess": "Read",
@@ -795,6 +811,7 @@ l'enregistrement de l'application.
 | `-GroupPrefix` | Non | Début des noms de groupe (par défaut : `groupPrefix`, sinon le nom du dossier parent) |
 | `-PersonalFolders` | Non | Dossiers personnels dans chaque sous-dossier, au lieu du réglage par sous-dossier dans la config |
 | `-DirectAccess` | Non | Attribuer les droits directement aux personnes plutôt que par des groupes SharePoint |
+| `-GroupType` | Non | `Entra` (par défaut) : groupes de sécurité Entra ID via Graph. `SharePoint` : groupes SharePoint de ce site uniquement |
 | `-SyncMembers` | Non | Retirer les membres des groupes absents de la config (sinon seulement signalés) |
 | `-Role` | Non | `Contribute` (par défaut), `Edit` ou `Read` sur chaque sous-dossier. Les dossiers personnels reçoivent toujours `Contribute` |
 | `-ParentAccess` | Non | `Read` (par défaut) ou `None` sur le dossier parent |

@@ -695,11 +695,20 @@ and the missing folders, breaks inheritance and brings every permission in line.
 
 | Group | Who | What |
 |-------|-----|------|
-| `<prefix> - Owners` | `owners` from the config | Full Control on the parent and everything the script manages below it. Owner of every group, so they add and remove members themselves, without IT |
+| `<prefix> - Owners` | `owners` from the config | Full Control on the parent and everything the script manages below it |
 | `<prefix> - <subfolder>` | the people listed for that subfolder | `-Role` on their subfolder (default **Contribute**: read, add, change, delete) |
 
-`<prefix>` is `groupPrefix`, or the parent folder's name. SharePoint groups live in this site
-only: a change works at once and nothing is added to the directory.
+By default these are **Entra ID security groups** (`-GroupType Entra`): visible and
+manageable in Entra, no mailbox, no team. The people in `owners` become owner of every group,
+so they add and remove members themselves in *My Groups*
+(`https://myaccount.microsoft.com/groups`), without IT. The script signs in to Microsoft Graph
+for this as the admin (`Group.ReadWrite.All`; `Group.Read.All` for a dry run). An existing
+group with the same name is reused - unless there are several, or it is synced from
+on-premises, not a security group, or dynamic: then the run stops before anything changes.
+`<prefix>` is `groupPrefix`, else `<site> - <folder>`, because Entra names are tenant-wide.
+
+`-GroupType SharePoint` makes site-local SharePoint groups instead, owned by the Owners group
+(prefix default: the folder name): a change works at once and nothing lands in the directory.
 
 **Folders**
 
@@ -715,11 +724,13 @@ grants and sharing links. A folder you have no rights on is not even listed, so 
 see the other teams' folder names. Always kept: the site's associated Owners group, the owners
 of the Microsoft 365 group behind a Teams site, and system *Limited Access* entries.
 
-**Membership** — missing members are added. Someone in a group who is not in the config is
-reported and left in, because the owners manage membership themselves and a re-run must not
-undo that; `-SyncMembers` makes the groups match the config exactly. After `-Apply` the
-script prints each group's page (`/_layouts/15/people.aspx?MembershipGroupId=…`) where the
-owners manage it.
+**Membership** — missing members and owners are added. Someone in a group who is not in the
+config is reported and left in, because the owners manage membership themselves and a re-run
+must not undo that; `-SyncMembers` makes the groups match the config exactly (an owner is only
+removed once the configured owners are in). After `-Apply` the script lists the groups and where
+the owners manage them. With Entra groups a membership change can take a while to reach
+SharePoint, and owners can only manage them in *My Groups* when the tenant allows it (Entra >
+Groups > General: *Restrict user ability to access groups features in My Groups* = **No**).
 
 Every address is resolved **before** anything changes; one unknown address stops the run
 with nothing changed. Roles are picked by type, so a Dutch or French site works the same.
@@ -740,7 +751,8 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 {
   "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
   "folder":       "Shared Documents/General/Teamleads",
-  "groupPrefix":  "Teamleads",
+  "groupPrefix":  "Sales - Teamleads",
+  "groupType":    "Entra",
   "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
   "role":         "Contribute",
   "parentAccess": "Read",
@@ -764,6 +776,7 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 | `-GroupPrefix` | No | Start of the group names (default: `groupPrefix`, else the parent folder name) |
 | `-PersonalFolders` | No | Personal folders in every subfolder, instead of per subfolder in the config |
 | `-DirectAccess` | No | Grant the people directly instead of through SharePoint groups |
+| `-GroupType` | No | `Entra` (default): Entra ID security groups through Graph. `SharePoint`: SharePoint groups in this site only |
 | `-SyncMembers` | No | Remove group members who are not in the config (otherwise only reported) |
 | `-Role` | No | `Contribute` (default), `Edit` or `Read` on each subfolder. Personal folders always get `Contribute` |
 | `-ParentAccess` | No | `Read` (default) or `None` on the parent folder |

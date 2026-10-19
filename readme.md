@@ -364,7 +364,7 @@ Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 
 #### Folder Access per Subfolder
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the owners, the subfolders of a folder and who belongs in each. It creates a SharePoint group per subfolder plus an Owners group (Full Control everywhere, owner of every group, so the team leads manage membership themselves), creates missing folders and optional personal folders per person, gives each group read/write on its subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the owners, the subfolders of a folder and who belongs in each. It creates an Entra security group per subfolder plus an Owners group (Full Control everywhere; the owners own every group, so the team leads manage membership themselves in My Groups), creates missing folders and optional personal folders per person, gives each group read/write on its subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
 
 #### Recycle Bin Restore
 
@@ -890,7 +890,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← where did a file go: renames, moves, copies, deletes (incl. via a folder) from the audit log, in Brussels time
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← take one user's access away at every level, sharing links included (reports unless -Apply)
-    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← each subfolder of a folder its own SharePoint group + owners + personal folders, everyone else out (reports unless -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← each subfolder of a folder its own Entra group + owners + personal folders, everyone else out (reports unless -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.md">Provisioning/</a>                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.md">readme.md</a>
@@ -1010,6 +1010,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-19 (7)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now makes **Entra ID security groups** by default instead of SharePoint groups. SharePoint groups exist inside one site only, so the customer could not see or manage them in Entra next to their other groups. The groups are created through Microsoft Graph (delegated admin sign-in, `Group.ReadWrite.All`; `Group.Read.All` for a dry run), the people in `owners` are set as owner of every group at creation - so the signed-in admin is not made owner as a side effect - and the groups are granted on the folders by their claim. The owners manage membership in My Groups. People are looked up in Entra by UPN or primary address before anything changes. An existing group with the same name is reused, but several of them, an on-premises synced, non-security or dynamic group stops the run. The default prefix becomes `<site> - <folder>`, since Entra names are tenant-wide. `-GroupType SharePoint` keeps the site-local groups |
+| Verified: syntax check; link check; the Graph URLs the script builds. **Not** verified: any of the Graph calls, the claim-based grant of a just-created group, or the My Groups setting in this tenant |
 
 ### 2026-10-19 (6)
 | Change |

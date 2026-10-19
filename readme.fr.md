@@ -364,7 +364,7 @@ Opérations sur le contenu des sites SharePoint Online et de OneDrive via PnP Po
 
 #### Accès aux dossiers par sous-dossier
 
-**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les owners, les sous-dossiers d'un dossier et qui appartient à chacun. Il crée un groupe SharePoint par sous-dossier plus un groupe Owners (Contrôle total partout, propriétaire de chaque groupe, pour que les chefs d'équipe gèrent eux-mêmes les membres), crée les dossiers manquants et, au besoin, un dossier personnel par personne, donne à chaque groupe lecture/écriture sur son sous-dossier et Lecture sur le parent, réserve tout le reste du parent aux owners, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les owners, les sous-dossiers d'un dossier et qui appartient à chacun. Il crée un groupe de sécurité Entra par sous-dossier plus un groupe Owners (Contrôle total partout ; les owners sont propriétaires de chaque groupe, pour que les chefs d'équipe gèrent eux-mêmes les membres dans Mes groupes), crée les dossiers manquants et, au besoin, un dossier personnel par personne, donne à chaque groupe lecture/écriture sur son sous-dossier et Lecture sur le parent, réserve tout le reste du parent aux owners, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
 
 #### Restauration de la corbeille
 
@@ -890,7 +890,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restaurer des fichiers supprimés depuis une corbeille : un site/OneDrive ou tout le tenant (PnP, inscription d'application automatique)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← où est passé un fichier : renommages, déplacements, copies, suppressions (y compris via un dossier) depuis le journal d'audit, en heure de Bruxelles
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← retirer l'accès d'un utilisateur à tous les niveaux, liens de partage compris (rapport seul sans -Apply)
-    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← chaque sous-dossier d'un dossier son propre groupe SharePoint + owners + dossiers personnels, tous les autres retirés (rapport seul sans -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← chaque sous-dossier d'un dossier son propre groupe Entra + owners + dossiers personnels, tous les autres retirés (rapport seul sans -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← vérifier les deux scripts d'accès sans tenant (bloc d'authentification partagé + entonnoir de révocation)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.fr.md">Provisioning/</a>                ← provisionner toute une structure à partir d'une seule config JSON (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.fr.md">readme.md</a>
@@ -1010,6 +1010,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-19 (7)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) crée désormais par défaut des **groupes de sécurité Entra ID** au lieu de groupes SharePoint. Les groupes SharePoint n'existent que dans un site, donc le client ne pouvait pas les voir ni les gérer dans Entra à côté de ses autres groupes. Les groupes sont créés via Microsoft Graph (connexion administrateur déléguée, `Group.ReadWrite.All` ; `Group.Read.All` pour un essai à blanc), les personnes de `owners` en deviennent propriétaires dès la création - pour que l'administrateur connecté ne le devienne pas par effet de bord - et les groupes reçoivent les droits sur les dossiers via leur claim. Les owners gèrent l'appartenance dans Mes groupes. Les personnes sont recherchées dans Entra par UPN ou adresse principale avant toute modification. Un groupe existant du même nom est réutilisé, mais plusieurs groupes de ce nom, ou un groupe synchronisé depuis l'AD local, non de sécurité ou dynamique, arrêtent l'exécution. Le préfixe par défaut devient `<site> - <dossier>`, car les noms Entra valent pour tout le tenant. `-GroupType SharePoint` conserve les groupes propres au site |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; les URL Graph construites par le script. **Non** vérifié : tous les appels Graph, l'attribution par claim d'un groupe tout juste créé, et le réglage Mes groupes de ce tenant |
 
 ### 2026-10-19 (6)
 | Modification |

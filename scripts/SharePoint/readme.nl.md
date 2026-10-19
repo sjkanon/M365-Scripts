@@ -704,11 +704,22 @@ SharePoint-groepen en de ontbrekende mappen aan, verbreekt de overname en brengt
 
 | Groep | Wie | Wat |
 |-------|-----|-----|
-| `<prefix> - Owners` | `owners` uit de config | Volledig beheer op de bovenliggende map en alles wat het script eronder beheert. Eigenaar van elke groep, dus ze voegen zelf leden toe en halen ze weg, zonder IT |
+| `<prefix> - Owners` | `owners` uit de config | Volledig beheer op de bovenliggende map en alles wat het script eronder beheert |
 | `<prefix> - <submap>` | de mensen die voor die submap genoemd zijn | `-Role` op hun submap (standaard **Bijdragen**: lezen, toevoegen, wijzigen, verwijderen) |
 
-`<prefix>` is `groupPrefix`, of de naam van de bovenliggende map. SharePoint-groepen bestaan
-alleen in deze site: een wijziging werkt meteen en er komt niets bij in de directory.
+Standaard zijn dit **Entra ID-beveiligingsgroepen** (`-GroupType Entra`): zichtbaar en te
+beheren in Entra, zonder mailbox en zonder team. De mensen in `owners` worden eigenaar van elke
+groep, dus ze voegen zelf leden toe en halen ze weg in *Mijn groepen*
+(`https://myaccount.microsoft.com/groups`), zonder IT. Het script meldt daarvoor als beheerder
+aan bij Microsoft Graph (`Group.ReadWrite.All`; `Group.Read.All` bij een proefdraai). Een
+bestaande groep met dezelfde naam wordt hergebruikt - tenzij er meerdere zijn, of hij vanuit
+on-premises gesynchroniseerd is, geen beveiligingsgroep is of dynamisch is: dan stopt de run
+voordat er iets verandert. `<prefix>` is `groupPrefix`, anders `<site> - <map>`, omdat
+Entra-namen tenantbreed zijn.
+
+`-GroupType SharePoint` maakt in plaats daarvan SharePoint-groepen in deze site, met de
+Owners-groep als eigenaar (prefix standaard: de mapnaam): een wijziging werkt meteen en er komt
+niets in de directory.
 
 **Mappen**
 
@@ -725,11 +736,14 @@ getoond, dus mensen zien de mapnamen van de andere teams niet. Altijd behouden: 
 Eigenaren-groep van de site, de eigenaren van de Microsoft 365-groep achter een Teams-site, en
 systeemvermeldingen *Beperkte toegang*.
 
-**Lidmaatschap** — ontbrekende leden worden toegevoegd. Iemand in een groep die niet in de
-config staat, wordt gemeld en blijft erin, omdat de owners het lidmaatschap zelf beheren en een
-nieuwe run dat niet mag terugdraaien; `-SyncMembers` maakt de groepen precies gelijk aan de
-config. Na `-Apply` toont het script per groep de pagina
-(`/_layouts/15/people.aspx?MembershipGroupId=…`) waar de owners hem beheren.
+**Lidmaatschap** — ontbrekende leden en eigenaren worden toegevoegd. Iemand in een groep die
+niet in de config staat, wordt gemeld en blijft erin, omdat de owners het lidmaatschap zelf
+beheren en een nieuwe run dat niet mag terugdraaien; `-SyncMembers` maakt de groepen precies
+gelijk aan de config (een eigenaar wordt pas weggehaald als de geconfigureerde eigenaren erin
+staan). Na `-Apply` toont het script de groepen en waar de owners ze beheren. Bij Entra-groepen
+kan een wijziging in het lidmaatschap even duren voordat SharePoint die ziet, en owners kunnen
+ze alleen in *Mijn groepen* beheren als de tenant dat toestaat (Entra > Groepen > Algemeen:
+*Gebruikerstoegang tot groepsfuncties in Mijn groepen beperken* = **Nee**).
 
 Elk adres wordt opgezocht **voordat** er iets verandert; één onbekend adres stopt de run
 zonder wijzigingen. Rollen worden op type gekozen, dus een Nederlandse of Franse site werkt
@@ -751,7 +765,8 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 {
   "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
   "folder":       "Shared Documents/General/Teamleads",
-  "groupPrefix":  "Teamleads",
+  "groupPrefix":  "Sales - Teamleads",
+  "groupType":    "Entra",
   "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
   "role":         "Contribute",
   "parentAccess": "Read",
@@ -775,6 +790,7 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 | `-GroupPrefix` | Nee | Begin van de groepsnamen (standaard: `groupPrefix`, anders de naam van de bovenliggende map) |
 | `-PersonalFolders` | Nee | Persoonlijke mappen in elke submap, in plaats van per submap in de config |
 | `-DirectAccess` | Nee | De mensen direct rechten geven in plaats van via SharePoint-groepen |
+| `-GroupType` | Nee | `Entra` (standaard): Entra ID-beveiligingsgroepen via Graph. `SharePoint`: SharePoint-groepen alleen in deze site |
 | `-SyncMembers` | Nee | Groepsleden die niet in de config staan verwijderen (anders alleen gemeld) |
 | `-Role` | Nee | `Contribute` (standaard), `Edit` of `Read` op elke submap. Persoonlijke mappen krijgen altijd `Contribute` |
 | `-ParentAccess` | Nee | `Read` (standaard) of `None` op de bovenliggende map |
