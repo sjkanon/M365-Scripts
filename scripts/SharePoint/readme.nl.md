@@ -784,7 +784,7 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 |-----------|-----------|--------------|
 | `-ConfigPath` | Nee* | JSON-config zoals hierboven. Parameters op de commandoregel gaan voor op het bestand |
 | `-SiteUrl` | Nee* | De site waar de map in staat (voor een Teams-kanaal: de site van het team) |
-| `-FolderPath` | Nee* | Bovenliggende map, site-relatief (`Shared Documents/General/Teamleads`); een volledige of server-relatieve URL werkt ook. De bibliotheek-URL is meestal `Shared Documents`, ook als hij als *Documents* / *Documenten* wordt getoond |
+| `-FolderPath` | Nee* | Bovenliggende map, site-relatief (`Shared Documents/General/Teamleads`); een volledige of server-relatieve URL werkt ook, en ook de **link uit de browser** terwijl de map open staat (`…/Forms/AllItems.aspx?id=…`) - de veilige manier, want de bibliotheek-URL hangt af van de taal waarin de site is aangemaakt (`Shared Documents`, `Gedeelde documenten`, …), niet van wat Teams toont. Wordt de map niet gevonden, dan worden de bibliotheken van de site getoond |
 | `-Access` | Nee* | Hashtable submap → UPN's/e-mailadressen, in plaats van of bovenop `subfolders` in de config |
 | `-Owners` | Nee | Volledig beheer overal en eigenaar van de groepen; gaat voor op `owners` |
 | `-GroupPrefix` | Nee | Begin van de groepsnamen (standaard: `groupPrefix`, anders `<site> - <map>` voor Entra en de mapnaam voor SharePoint-groepen) |

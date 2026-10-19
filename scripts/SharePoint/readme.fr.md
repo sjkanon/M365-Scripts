@@ -805,7 +805,7 @@ l'enregistrement de l'application.
 |-----------|-------------|-------------|
 | `-ConfigPath` | Non* | Config JSON comme ci-dessus. Les paramètres de la ligne de commande l'emportent sur le fichier |
 | `-SiteUrl` | Non* | Le site qui contient le dossier (pour un canal Teams : le site de l'équipe) |
-| `-FolderPath` | Non* | Dossier parent, relatif au site (`Shared Documents/General/Teamleads`) ; une URL complète ou relative au serveur fonctionne aussi. L'URL de la bibliothèque est généralement `Shared Documents`, même quand elle s'affiche *Documents* / *Documenten* |
+| `-FolderPath` | Non* | Dossier parent, relatif au site (`Shared Documents/General/Teamleads`) ; une URL complète ou relative au serveur fonctionne aussi, de même que le **lien du navigateur** quand le dossier est ouvert (`…/Forms/AllItems.aspx?id=…`) - la méthode sûre, car l'URL de la bibliothèque dépend de la langue de création du site (`Shared Documents`, `Gedeelde documenten`, …), pas de ce qu'affiche Teams. Un dossier introuvable affiche les bibliothèques du site |
 | `-Access` | Non* | Table de hachage sous-dossier → UPN/adresses e-mail, à la place de ou en plus de `subfolders` dans la config |
 | `-Owners` | Non | Contrôle total partout et propriétaires des groupes ; remplace `owners` |
 | `-GroupPrefix` | Non | Début des noms de groupe (par défaut : `groupPrefix`, sinon `<site> - <dossier>` pour Entra et le nom du dossier pour les groupes SharePoint) |

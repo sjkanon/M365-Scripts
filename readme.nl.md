@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-19 (10)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) accepteert de maplink rechtstreeks uit de browser (`…/Forms/AllItems.aspx?id=…`) en leest de map uit de `id`. De live proefdraai stopte bij `Folder 'Shared Documents/General/Teamleads' not found`: op die site is de URL van de bibliotheek `Gedeelde documenten`, omdat die URL de taal volgt waarin de site is aangemaakt - de eigen hint van het script dat het "meestal Shared Documents" is, wees de verkeerde kant op. Een map die niet gevonden wordt, toont nu de documentbibliotheken van de site met hun echte URL |
+| Geverifieerd: syntaxcheck; linkcheck; het uitlezen van de echte browserlink van de klant. Live op de tenant: `-GrantSiteAdmin` kende sitecollectiebeheerder toe en haalde het weer weg toen de run stopte. **Niet** geverifieerd: een run voorbij het opzoeken van de map |
+
 ### 2026-10-19 (9)
 | Wijziging |
 |-----------|

@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-19 (10)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) takes the folder link straight from the browser (`…/Forms/AllItems.aspx?id=…`) and reads the folder from its `id`. The live dry run stopped at `Folder 'Shared Documents/General/Teamleads' not found`: on that site the library's URL is `Gedeelde documenten`, because its URL follows the language the site was created in - the script's own hint that it is "usually Shared Documents" pointed the wrong way. A folder that is not found now lists the site's document libraries with their real URL instead |
+| Verified: syntax check; link check; the URL parsing on the customer's real browser link. Live on the tenant: `-GrantSiteAdmin` granted site collection admin and removed it again when the run stopped. **Not** verified: a run past the folder lookup |
+
 ### 2026-10-19 (9)
 | Change |
 |--------|

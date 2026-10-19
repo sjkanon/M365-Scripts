@@ -770,7 +770,7 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 |-----------|----------|-------------|
 | `-ConfigPath` | No* | JSON config as above. Parameters given on the command line win over the file |
 | `-SiteUrl` | No* | The site the folder lives in (for a Teams channel: the team's site) |
-| `-FolderPath` | No* | Parent folder, site-relative (`Shared Documents/General/Teamleads`); a full or server-relative URL works too. The library URL is usually `Shared Documents`, even when it is shown as *Documents* / *Documenten* |
+| `-FolderPath` | No* | Parent folder, site-relative (`Shared Documents/General/Teamleads`); a full or server-relative URL works too, and so does the **link from the browser** while the folder is open (`…/Forms/AllItems.aspx?id=…`) - the safe way, because the library URL depends on the language the site was created in (`Shared Documents`, `Gedeelde documenten`, …), not on what Teams shows. A folder that is not found lists the site's libraries |
 | `-Access` | No* | Hashtable subfolder → UPNs/e-mail addresses, instead of or on top of `subfolders` in the config |
 | `-Owners` | No | Full Control everywhere and owner of the groups; overrides `owners` |
 | `-GroupPrefix` | No | Start of the group names (default: `groupPrefix`, else `<site> - <folder>` for Entra and the folder name for SharePoint groups) |

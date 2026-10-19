@@ -81,8 +81,11 @@
 
 .PARAMETER FolderPath
     The parent folder, site-relative, e.g. "Shared Documents/General/Teamleads". A full URL or a
-    server-relative path (/sites/Sales/Shared Documents/...) is accepted too. The library's URL is
-    usually "Shared Documents" even when Teams and the browser show "Documents" or "Documenten".
+    server-relative path (/sites/Sales/Shared Documents/...) is accepted too, and so is the link
+    from the browser's address bar while the folder is open (.../Forms/AllItems.aspx?id=...): the
+    folder is taken from its id. Pasting that link is the safe way - the library's URL depends on
+    the language the site was created in ("Shared Documents", "Gedeelde documenten", ...), not on
+    what Teams shows. When the folder is not found, the site's libraries are listed with their URL.
 
 .PARAMETER Access
     Subfolder name -> the people for it, as a hashtable, instead of (or on top of) the config:
@@ -576,8 +579,18 @@ try {
     }
 
     # -- Folder path: site-relative, whatever form it was given in ------------------
-    $relative = [System.Uri]::UnescapeDataString($FolderPath.Trim())
-    if ($relative -match '^https://[^/]+(/.*)$') { $relative = $Matches[1] }
+    # A link copied from the browser while the folder is open points at the library's view page
+    # (.../Forms/AllItems.aspx?id=<folder>); the folder is the id. Taken before decoding, because
+    # a decoded id could itself contain the characters that split the query string.
+    $rawPath = $FolderPath.Trim()
+    if ($rawPath -match '^https?://[^/]+(?<path>/[^?#]*)(\?(?<query>[^#]*))?') {
+        $rawPath = $Matches['path']
+        foreach ($pair in "$($Matches['query'])" -split '&') {
+            $key, $value = $pair -split '=', 2
+            if ($key -eq 'id' -and $value) { $rawPath = $value }
+        }
+    }
+    $relative = [System.Uri]::UnescapeDataString($rawPath)
     $webPath = $web.ServerRelativeUrl.TrimEnd('/')
     if ($webPath -and $relative.StartsWith("$webPath/", [System.StringComparison]::OrdinalIgnoreCase)) {
         $relative = $relative.Substring($webPath.Length)
@@ -587,7 +600,16 @@ try {
     try {
         $parentFolder = Get-PnPFolder -Url $relative -Connection $connection -Includes ListItemAllFields
     } catch {
-        throw "Folder '$relative' not found in $SiteUrl. The library URL is usually 'Shared Documents', even when it is shown as 'Documents' or 'Documenten'. ($($_.Exception.Message))"
+        # Name the libraries that do exist: their URL depends on the language the site was
+        # created in, which is exactly what makes a typed path go wrong.
+        $libraries = @()
+        try {
+            $libraries = @(Get-PnPList -Connection $connection -Includes RootFolder |
+                Where-Object { $_.BaseTemplate -eq 101 -and -not $_.Hidden } |
+                ForEach-Object { $_.RootFolder.ServerRelativeUrl.Substring($webPath.Length).Trim('/') })
+        } catch { }
+        $hint = if ($libraries) { " Libraries on this site: $($libraries -join ', ')." } else { '' }
+        throw "Folder '$relative' not found in $SiteUrl.$hint Easiest: open the folder in the browser and pass that link as -FolderPath / ""folder"". ($($_.Exception.Message))"
     }
     if (-not $parentFolder.ListItemAllFields -or $parentFolder.ListItemAllFields.ServerObjectIsNull) {
         throw "'$relative' is the root of a library, not a folder inside one. Point -FolderPath at a folder."

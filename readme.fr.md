@@ -1011,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-19 (10)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) accepte le lien du dossier directement depuis le navigateur (`…/Forms/AllItems.aspx?id=…`) et lit le dossier dans son `id`. L'essai à blanc réel s'est arrêté sur `Folder 'Shared Documents/General/Teamleads' not found` : sur ce site, l'URL de la bibliothèque est `Gedeelde documenten`, car elle suit la langue de création du site - l'indication du script selon laquelle c'est « généralement Shared Documents » orientait dans la mauvaise direction. Un dossier introuvable affiche désormais les bibliothèques de documents du site avec leur URL réelle |
+| Vérifié : contrôle de syntaxe ; contrôle des liens ; l'analyse du vrai lien navigateur du client. En réel sur le tenant : `-GrantSiteAdmin` a attribué l'administration de la collection de sites et l'a retirée quand l'exécution s'est arrêtée. **Non** vérifié : une exécution au-delà de la recherche du dossier |
+
 ### 2026-10-19 (9)
 | Modification |
 |--------------|
