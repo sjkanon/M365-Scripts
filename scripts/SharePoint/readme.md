@@ -27,6 +27,7 @@ and the recycle bin, which Graph has no API for; Exchange Online for the audit l
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Where did a file go? Renames, moves, copies and deletes from the audit log, folder moves included — in Brussels time, over a period you choose |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Take one user's access away everywhere: site collection admin, direct grants at every level, SharePoint groups and sharing links. Reports by default, removes with `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Give every subfolder of one folder its own people (read/write by default), so each person only sees and opens their own subfolders. Reports by default, changes with `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Verify the two access scripts without touching a tenant — shared auth block identical, and the revocation funnel behaves |
 
 ---
@@ -680,6 +681,93 @@ It prefers the report's site-access file (`..._SiteAccess_...csv`), which alread
 ```
 
 > Running unattended? Pass `-Confirm:$false`, otherwise the script asks for confirmation for every removal (`ConfirmImpact = 'High'`).
+
+---
+
+### Set-SharePointFolderAccess.ps1
+
+For the request "we made a folder under General; make it so people only reach their own
+subfolder, read and write, and nothing else". One config says which subfolders there are and
+who belongs in each; the script creates missing subfolders, breaks inheritance and brings the
+permissions in line - on the parent folder and on every subfolder named.
+
+| Folder | Who has access afterwards |
+|--------|---------------------------|
+| Parent (e.g. `General/Teamleads`) | Site Owners (Full Control) + everyone named in any subfolder with **Read**, so the folder shows up and they can click through. `-ParentAccess None`: owners only |
+| Each subfolder | Site Owners (Full Control) + exactly the people listed for it, with `-Role` (default **Contribute**: read, add, change, delete) |
+
+Everyone else is removed from those folders: the Members and Visitors groups, earlier direct
+grants and sharing links. A subfolder you have no rights on is not even listed, so people do
+not see the other teams' folder names. Always kept: the site's associated Owners group, the
+owners of the Microsoft 365 group behind a Teams site, and system *Limited Access* entries.
+Site collection admins are no role assignment and keep access regardless.
+
+Every address is resolved **before** anything changes; one unknown address stops the run
+with nothing changed. Roles are picked by type, so a Dutch or French site (*Bijdragen*,
+*Collaboration*) works the same. With `-Apply` the permissions are read back afterwards and
+printed per folder. Every run writes a CSV (`C:\Temp\SharePointFolderAccess_<timestamp>.csv`).
+
+Sign-in: delegated PnP through `Connect-M365PnP` (device code / GDAP customer per
+`load.config.ps1`) with the tenant's client ID from `pnp.appid.json`. A tenant without an
+entry there: run `Find-SiteContent.ps1` once (it registers the app), or pass `-ClientId`.
+
+**Config file**
+
+```json
+{
+  "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
+  "folder":       "Shared Documents/General/Teamleads",
+  "role":         "Contribute",
+  "parentAccess": "Read",
+  "subfolders": {
+    "Team A":  [ "jan@contoso.com", "kim@contoso.com", "piet@contoso.com" ],
+    "Team B":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ],
+    "Leads":   [ "jan@contoso.com", "kim@contoso.com" ]
+  }
+}
+```
+
+**Parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-ConfigPath` | No* | JSON config as above. Parameters given on the command line win over the file |
+| `-SiteUrl` | No* | The site the folder lives in (for a Teams channel: the team's site) |
+| `-FolderPath` | No* | Parent folder, site-relative (`Shared Documents/General/Teamleads`); a full or server-relative URL works too. The library URL is usually `Shared Documents`, even when it is shown as *Documents* / *Documenten* |
+| `-Access` | No* | Hashtable subfolder → UPNs/e-mail addresses, instead of or on top of `subfolders` in the config |
+| `-Role` | No | `Contribute` (default), `Edit` or `Read` on each subfolder |
+| `-ParentAccess` | No | `Read` (default) or `None` on the parent folder |
+| `-Apply` | No | Actually change. Without it nothing is written |
+| `-TenantId` / `-ClientId` | No | Sign-in overrides |
+| `-AppOnly` | No | Certificate app from `graph.appid.json` (needs SharePoint `Sites.FullControl.All`) |
+| `-OutputPath` | No | CSV report path |
+
+\* A site, a folder and at least one subfolder are required - from the config, the parameters, or both.
+
+**Examples**
+
+```powershell
+# What would change? Reads only, writes the CSV.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json
+
+# Do it, then read the result back.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# Without a config file
+.\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
+    -FolderPath "Shared Documents/General/Teamleads" `
+    -Access @{ 'Team A' = @('jan@contoso.com', 'kim@contoso.com'); 'Leads' = @('jan@contoso.com') } `
+    -Apply
+```
+**Notes**
+- Idempotent: a second run reports *already correct* for everything the first one set.
+- Subfolders that exist but are not in the config are left alone and reported. With
+  `-ParentAccess Read` they inherit the parent's Read, so everyone in the config can open
+  them - the warning says so.
+- Only the parent and the named subfolders are touched. A file or folder deeper down that was
+  shared separately keeps its own permissions.
+- Files placed directly in the parent folder are readable for everyone in the config when
+  `-ParentAccess Read`.
 
 ---
 

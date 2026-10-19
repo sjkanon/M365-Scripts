@@ -28,6 +28,7 @@ Graph n'a pas d'API ; Exchange Online pour le journal d'audit.
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restaurer des fichiers/dossiers supprimés depuis la corbeille d'un site ou d'un OneDrive (essai à blanc par défaut) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Où est passé un fichier ? Renommages, déplacements, copies et suppressions depuis le journal d'audit, y compris via un dossier — en heure de Bruxelles, sur une période au choix |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Retirer partout l'accès d'un utilisateur : administrateur de site collection, attributions directes à tous les niveaux, groupes SharePoint et liens de partage. Rapport par défaut, suppression avec `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Attribuer à chaque sous-dossier d'un dossier ses propres personnes (lecture/écriture par défaut), pour que chacun ne voie et n'ouvre que ses propres sous-dossiers. Rapport par défaut, modifie avec `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Vérifier les deux scripts d'accès sans toucher à un tenant — bloc d'authentification partagé identique, et l'entonnoir de révocation se comporte correctement |
 
 ---
@@ -706,6 +707,98 @@ Il privilégie le fichier d'accès par site (`..._SiteAccess_...csv`), où chaqu
 ```
 
 > Exécution sans surveillance ? Passez `-Confirm:$false`, sinon le script demande une confirmation pour chaque suppression (`ConfirmImpact = 'High'`).
+
+---
+
+### Set-SharePointFolderAccess.ps1
+
+Pour la demande « nous avons créé un dossier sous General ; faites en sorte que chacun n'accède
+qu'à son propre sous-dossier, en lecture et écriture, et à rien d'autre ». Une seule config
+indique quels sous-dossiers existent et qui appartient à chacun ; le script crée les
+sous-dossiers manquants, rompt l'héritage et aligne les autorisations - sur le dossier parent
+et sur chaque sous-dossier nommé.
+
+| Dossier | Qui y a accès ensuite |
+|---------|-----------------------|
+| Parent (p. ex. `General/Teamleads`) | Propriétaires du site (Contrôle total) + toute personne nommée dans un sous-dossier, en **Lecture**, pour que le dossier soit visible et qu'on puisse y naviguer. `-ParentAccess None` : propriétaires seulement |
+| Chaque sous-dossier | Propriétaires du site (Contrôle total) + exactement les personnes listées pour lui, avec `-Role` (par défaut **Collaboration** : lire, ajouter, modifier, supprimer) |
+
+Tous les autres sont retirés de ces dossiers : les groupes Membres et Visiteurs, les
+attributions directes antérieures et les liens de partage. Un sous-dossier sur lequel on n'a
+aucun droit n'apparaît même pas, donc personne ne voit les noms des dossiers des autres
+équipes. Toujours conservés : le groupe Propriétaires associé au site, les propriétaires du
+groupe Microsoft 365 derrière un site Teams, et les entrées système *Accès limité*. Les
+administrateurs de collection de sites ne sont pas une attribution de rôle et gardent l'accès
+quoi qu'il arrive.
+
+Chaque adresse est résolue **avant** toute modification ; une seule adresse inconnue arrête
+l'exécution sans rien changer. Les rôles sont choisis par type, donc un site en néerlandais ou
+en français (*Bijdragen*, *Collaboration*) fonctionne de la même façon. Avec `-Apply`, les
+autorisations sont relues ensuite et affichées par dossier. Chaque exécution écrit un CSV
+(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`).
+
+Connexion : PnP délégué via `Connect-M365PnP` (code d'appareil / client GDAP selon
+`load.config.ps1`) avec l'ID client du tenant dans `pnp.appid.json`. Pour un tenant sans
+entrée : exécutez une fois `Find-SiteContent.ps1` (il enregistre l'application), ou passez
+`-ClientId`.
+
+**Fichier de configuration**
+
+```json
+{
+  "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
+  "folder":       "Shared Documents/General/Teamleads",
+  "role":         "Contribute",
+  "parentAccess": "Read",
+  "subfolders": {
+    "Team A":  [ "jan@contoso.com", "kim@contoso.com", "piet@contoso.com" ],
+    "Team B":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ],
+    "Leads":   [ "jan@contoso.com", "kim@contoso.com" ]
+  }
+}
+```
+
+**Paramètres**
+
+| Paramètre | Obligatoire | Description |
+|-----------|-------------|-------------|
+| `-ConfigPath` | Non* | Config JSON comme ci-dessus. Les paramètres de la ligne de commande l'emportent sur le fichier |
+| `-SiteUrl` | Non* | Le site qui contient le dossier (pour un canal Teams : le site de l'équipe) |
+| `-FolderPath` | Non* | Dossier parent, relatif au site (`Shared Documents/General/Teamleads`) ; une URL complète ou relative au serveur fonctionne aussi. L'URL de la bibliothèque est généralement `Shared Documents`, même quand elle s'affiche *Documents* / *Documenten* |
+| `-Access` | Non* | Table de hachage sous-dossier → UPN/adresses e-mail, à la place de ou en plus de `subfolders` dans la config |
+| `-Role` | Non | `Contribute` (par défaut), `Edit` ou `Read` sur chaque sous-dossier |
+| `-ParentAccess` | Non | `Read` (par défaut) ou `None` sur le dossier parent |
+| `-Apply` | Non | Modifier réellement. Sans lui, rien n'est écrit |
+| `-TenantId` / `-ClientId` | Non | Surcharges de connexion |
+| `-AppOnly` | Non | Application à certificat de `graph.appid.json` (nécessite SharePoint `Sites.FullControl.All`) |
+| `-OutputPath` | Non | Chemin du rapport CSV |
+
+\* Un site, un dossier et au moins un sous-dossier sont obligatoires - depuis la config, les paramètres, ou les deux.
+
+**Exemples**
+
+```powershell
+# Qu'est-ce qui changerait ? Lecture seule, écrit le CSV.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json
+
+# Appliquer, puis relire le résultat.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# Sans fichier de configuration
+.\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
+    -FolderPath "Shared Documents/General/Teamleads" `
+    -Access @{ 'Team A' = @('jan@contoso.com', 'kim@contoso.com'); 'Leads' = @('jan@contoso.com') } `
+    -Apply
+```
+**Remarques**
+- Idempotent : une deuxième exécution indique *already correct* pour tout ce que la première a réglé.
+- Les sous-dossiers existants absents de la config ne sont pas modifiés et sont signalés. Avec
+  `-ParentAccess Read`, ils héritent de la Lecture du parent, donc toute personne de la config
+  peut les ouvrir - l'avertissement le dit.
+- Seuls le parent et les sous-dossiers nommés sont touchés. Un fichier ou dossier plus profond
+  partagé séparément garde ses propres autorisations.
+- Les fichiers placés directement dans le dossier parent sont lisibles par toute personne de la
+  config avec `-ParentAccess Read`.
 
 ---
 

@@ -362,6 +362,10 @@ Opérations sur le contenu des sites SharePoint Online et de OneDrive via PnP Po
 
 **[Test-SharePointAccessScripts.ps1](scripts/SharePoint/Test-SharePointAccessScripts.ps1)** vérifie ce script et le rapport d'autorisations sans toucher à un tenant : la couche d'authentification app-only qu'ils partagent doit rester identique à l'octet près, et l'entonnoir de révocation doit consigner un essai à blanc sans l'exécuter, exécuter et consigner sous `-Apply`, et continuer à refuser les autorisations qu'il ne doit pas supprimer.
 
+#### Accès aux dossiers par sous-dossier
+
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les sous-dossiers d'un dossier et qui appartient à chacun. Il crée les sous-dossiers manquants, rompt l'héritage, donne aux personnes listées lecture/écriture sur leur sous-dossier et Lecture sur le parent, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Les propriétaires du site gardent toujours le Contrôle total. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
+
 #### Restauration de la corbeille
 
 Restaurer des fichiers et dossiers supprimés depuis la corbeille d'un site ou de OneDrive — essai à blanc par défaut, `-Apply` pour restaurer réellement.
@@ -892,6 +896,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restaurer des fichiers supprimés depuis une corbeille : un site/OneDrive ou tout le tenant (PnP, inscription d'application automatique)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← où est passé un fichier : renommages, déplacements, copies, suppressions (y compris via un dossier) depuis le journal d'audit, en heure de Bruxelles
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← retirer l'accès d'un utilisateur à tous les niveaux, liens de partage compris (rapport seul sans -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← chaque sous-dossier d'un dossier ses propres personnes, tous les autres retirés (rapport seul sans -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← vérifier les deux scripts d'accès sans tenant (bloc d'authentification partagé + entonnoir de révocation)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.fr.md">Provisioning/</a>                ← provisionner toute une structure à partir d'une seule config JSON (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.fr.md">readme.md</a>
@@ -1011,6 +1016,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 ## Historique des versions
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
+
+### 2026-10-19
+| Modification |
+|--------------|
+| Ajout de [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) pour la demande récurrente « chacun n'accède qu'à son propre sous-dossier, en lecture et écriture, et à rien d'autre ». Jusqu'ici cela se faisait à la main, dossier par dossier, dans le navigateur : rompre l'héritage, retirer les Membres, ajouter chaque personne - facile de se tromper sur un dossier et impossible à vérifier ensuite. Une config JSON (ou `-Access`) nomme désormais les sous-dossiers et leurs personnes ; le script crée les sous-dossiers manquants, donne au parent la Lecture pour toutes les personnes listées (ou propriétaires seulement avec `-ParentAccess None`) et à chaque sous-dossier `Contribute` pour exactement ses personnes, et retire tous les autres, liens de partage compris. Conservés volontairement : le groupe Propriétaires du site, les propriétaires du groupe M365 et les entrées système Accès limité |
+| Chaque adresse est résolue avant toute modification, donc une faute de frappe arrête l'exécution sans toucher aux dossiers au lieu de s'arrêter à mi-chemin. Les rôles sont choisis par type, pas par nom, donc les sites en néerlandais et en français fonctionnent de la même façon. Essai à blanc par défaut ; `-Apply` relit les autorisations par dossier ; chaque exécution écrit un CSV, même quand une modification échoue en cours de route. Non ajouté à `menu.ps1` : toutes les touches y sont prises, et les autres scripts de contenu SharePoint n'y figurent pas non plus |
+| Vérifié : contrôle de syntaxe ; contrôle des liens. **Non** vérifié : toute exécution sur un tenant - la rupture d'héritage, les suppressions, la relecture et la création des sous-dossiers manquants n'ont pas encore été exercées |
 
 ### 2026-10-16 (2)
 | Modification |

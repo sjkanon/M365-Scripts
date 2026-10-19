@@ -362,6 +362,10 @@ Contentbewerkingen op SharePoint Online-sites en OneDrive via PnP PowerShell.
 
 **[Test-SharePointAccessScripts.ps1](scripts/SharePoint/Test-SharePointAccessScripts.ps1)** verifieert dit script en het rechtenrapport zonder een tenant aan te raken: de app-only-authenticatielaag die beide delen moet byte-identiek blijven, en de intrekkingstrechter moet een proefdraai vastleggen zonder hem uit te voeren, onder `-Apply` uitvoeren en vastleggen, en de toekenningen die hij niet mag verwijderen blijven weigeren.
 
+#### Maptoegang per submap
+
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de submappen van een map en wie in elke submap hoort. Het maakt ontbrekende submappen aan, verbreekt de overname, geeft de genoemde mensen lezen/schrijven op hun submap en Lezen op de bovenliggende map, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Site-eigenaren houden altijd Volledig beheer. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
+
 #### Prullenbak terugzetten
 
 Verwijderde bestanden en mappen terugzetten uit de prullenbak van een site of OneDrive — standaard een proefdraai, `-Apply` om echt terug te zetten.
@@ -892,6 +896,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← verwijderde bestanden terugzetten uit een prullenbak: één site/OneDrive of tenantbreed (PnP, automatische app-registratie)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← waar is een bestand gebleven: hernoemingen, verplaatsingen, kopieën, verwijderingen (ook via een map) uit het auditlog, in Brusselse tijd
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← de toegang van één gebruiker op elk niveau intrekken, deellinks inbegrepen (rapporteert tenzij -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← elke submap van een map zijn eigen mensen, iedereen anders eruit (rapporteert tenzij -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← de twee toegangsscripts verifiëren zonder tenant (gedeeld auth-blok + intrekkingstrechter)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.nl.md">Provisioning/</a>                ← een complete structuur inrichten vanuit één JSON-config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.nl.md">readme.md</a>
@@ -1011,6 +1016,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-19
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) toegevoegd voor de terugkerende vraag "mensen mogen alleen bij hun eigen submap, lezen en schrijven, verder niets". Tot nu toe gebeurde dat per map met de hand in de browser: overname verbreken, Leden weghalen, elke persoon toevoegen - makkelijk om één map fout te doen en achteraf niet te controleren. Eén JSON-config (of `-Access`) noemt nu de submappen en hun mensen; het script maakt ontbrekende submappen aan, geeft de bovenliggende map Lezen voor iedereen die genoemd is (of alleen eigenaren met `-ParentAccess None`) en elke submap `Contribute` voor precies zijn mensen, en verwijdert iedereen anders, deellinks inbegrepen. Bewust behouden: de Eigenaren-groep van de site, de eigenaren van de M365-groep en systeemvermeldingen Beperkte toegang |
+| Elk adres wordt opgezocht voordat er iets verandert, dus een typfout stopt de run met de mappen onaangeroerd in plaats van halverwege. Rollen worden op type gekozen, niet op naam, dus Nederlandse en Franse sites werken hetzelfde. Standaard een proefdraai; `-Apply` leest de rechten per map terug; elke run schrijft een CSV, ook als een wijziging halverwege faalt. Niet toegevoegd aan `menu.ps1`: elke toets daar is bezet, en de andere SharePoint-inhoudsscripts staan er ook niet in |
+| Geverifieerd: syntaxcheck; linkcheck. **Niet** geverifieerd: een run tegen een tenant - het verbreken van de overname, de verwijderingen, het teruglezen en het aanmaken van ontbrekende submappen zijn nog niet uitgevoerd |
 
 ### 2026-10-16 (2)
 | Wijziging |

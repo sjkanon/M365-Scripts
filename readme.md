@@ -362,6 +362,10 @@ Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 
 **[Test-SharePointAccessScripts.ps1](scripts/SharePoint/Test-SharePointAccessScripts.ps1)** verifies this script and the permissions report without touching a tenant: the app-only auth layer both share must stay byte-identical, and the revocation funnel must record a dry run without executing it, execute and record under `-Apply`, and keep refusing the grants it must not remove.
 
+#### Folder Access per Subfolder
+
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the subfolders of a folder and who belongs in each. It creates missing subfolders, breaks inheritance, gives the listed people read/write on their subfolder and Read on the parent, and removes everyone else - Members, Visitors, old grants, sharing links. Site Owners always keep Full Control. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
+
 #### Recycle Bin Restore
 
 Restore deleted files and folders from a site or OneDrive recycle bin — dry-run by default, `-Apply` to actually restore.
@@ -890,6 +894,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← where did a file go: renames, moves, copies, deletes (incl. via a folder) from the audit log, in Brussels time
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← take one user's access away at every level, sharing links included (reports unless -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← each subfolder of a folder its own people, everyone else out (reports unless -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.md">Provisioning/</a>                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.md">readme.md</a>
@@ -1009,6 +1014,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-19
+| Change |
+|--------|
+| Added [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) for the recurring request "people may only reach their own subfolder, read and write, nothing else". Until now that was done by hand per folder in the browser: break inheritance, remove Members, add each person - easy to get one folder wrong and impossible to check afterwards. One JSON config (or `-Access`) now names the subfolders and their people; the script creates missing subfolders, gives the parent Read for everyone listed (or owners only with `-ParentAccess None`) and each subfolder `Contribute` for exactly its people, and removes everyone else, sharing links included. Kept on purpose: the site Owners group, the M365 group owners and system Limited Access entries |
+| Every address is resolved before anything changes, so a typo stops the run with the folders untouched instead of halfway. Roles are taken by type, not by name, so Dutch and French sites work the same. Dry run by default; `-Apply` reads the permissions back per folder; every run writes a CSV, also when a change fails halfway. Not added to `menu.ps1`: every single-key slot there is taken, and the other SharePoint content scripts are not in it either |
+| Verified: syntax check; link check. **Not** verified: any run against a tenant - breaking inheritance, the removals, the read-back and the creation of missing subfolders have not been exercised yet |
 
 ### 2026-10-16 (2)
 | Change |

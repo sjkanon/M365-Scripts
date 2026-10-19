@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-194 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+195 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -155,6 +155,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Set-MailboxFolderPermission.ps1`](LegacyUtilities/Exchange/Set-MailboxFolderPermission.ps1) | [`LegacyUtilities/Exchange/`](LegacyUtilities/Exchange/readme.md) | Grant a user access rights on every folder in a mailbox (not just Calendar/Inbox). |
 | [`Set-NumLockDefault.ps1`](LegacyUtilities/Device/Set-NumLockDefault.ps1) | [`LegacyUtilities/Device/`](LegacyUtilities/Device/readme.md) | Set the default Num Lock state (on/off) for new user profiles and the sign-in screen. |
 | [`Set-OneDriveKnownFolderRedirect.ps1`](TenantOnboarding/OneDriveManagement/Set-OneDriveKnownFolderRedirect.ps1) | [`TenantOnboarding/OneDriveManagement/`](TenantOnboarding/OneDriveManagement/readme.md) | Redirect Desktop/Documents/Pictures/Downloads to the OneDrive for Business sync folder. |
+| [`Set-SharePointFolderAccess.ps1`](SharePoint/Set-SharePointFolderAccess.ps1) | [`SharePoint/`](SharePoint/readme.md) | Give each subfolder of one SharePoint folder its own set of people, so everyone sees only the subfolders they are listed for - created, broken from inheritance… |
 | [`Set-SharePointLibraries.ps1`](SharePoint/Provisioning/Set-SharePointLibraries.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Provision the libraries and channel folders from a structure configuration: content types bound, default metadata set, and permissions granted to the Entra ID… |
 | [`Set-TeamsFirewallRule.ps1`](TenantOnboarding/DeviceConfig/Set-TeamsFirewallRule.ps1) | [`TenantOnboarding/DeviceConfig/`](TenantOnboarding/DeviceConfig/readme.md) | Create the inbound firewall rule Microsoft Teams needs for LAN peer-to-peer screen sharing. |
 | [`Set-UserManager.ps1`](Entra/Set-UserManager.ps1) | [`Entra/`](Entra/readme.md) | Report and optionally bulk-set the manager for a set of Entra ID users. |

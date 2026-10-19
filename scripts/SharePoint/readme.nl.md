@@ -28,6 +28,7 @@ Exchange Online voor het auditlogboek.
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Verwijderde bestanden/mappen terugzetten uit de prullenbak van een site of OneDrive (standaard een proefdraai) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Waar is een bestand gebleven? Hernoemingen, verplaatsingen, kopieën en verwijderingen uit het auditlog, ook via een map — in Brusselse tijd, over een periode naar keuze |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Neem één gebruiker overal de toegang af: site collection-beheerder, directe toekenningen op elk niveau, SharePoint-groepen en deellinks. Rapporteert standaard, verwijdert met `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Geef elke submap van één map zijn eigen mensen (standaard lezen/schrijven), zodat iedereen alleen zijn eigen submappen ziet en opent. Rapporteert standaard, wijzigt met `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Controleer de twee toegangsscripts zonder een tenant aan te raken — gedeeld authenticatieblok identiek, en de revocatie-trechter gedraagt zich |
 
 ---
@@ -689,6 +690,96 @@ Het gebruikt bij voorkeur het site-access bestand (`..._SiteAccess_...csv`), waa
 ```
 
 > Onbeheerd draaien? Geef `-Confirm:$false` mee, anders vraagt het script per verwijdering om bevestiging (`ConfirmImpact = 'High'`).
+
+---
+
+### Set-SharePointFolderAccess.ps1
+
+Voor de vraag "we hebben onder General een map aangemaakt; zorg dat mensen alleen bij hun
+eigen submap kunnen, lezen en schrijven, en verder nergens". Eén config zegt welke submappen
+er zijn en wie in elke submap hoort; het script maakt ontbrekende submappen aan, verbreekt de
+overname en brengt de rechten in lijn - op de bovenliggende map en op elke genoemde submap.
+
+| Map | Wie heeft daarna toegang |
+|-----|--------------------------|
+| Bovenliggend (bv. `General/Teamleads`) | Site-eigenaren (Volledig beheer) + iedereen die in een submap genoemd staat met **Lezen**, zodat de map zichtbaar is en ze kunnen doorklikken. `-ParentAccess None`: alleen eigenaren |
+| Elke submap | Site-eigenaren (Volledig beheer) + precies de mensen die ervoor genoemd zijn, met `-Role` (standaard **Bijdragen**: lezen, toevoegen, wijzigen, verwijderen) |
+
+Iedereen anders wordt van die mappen verwijderd: de groepen Leden en Bezoekers, eerdere
+directe toekenningen en deellinks. Een submap waar je geen rechten op hebt, wordt niet eens
+getoond, dus mensen zien de mapnamen van de andere teams niet. Altijd behouden: de gekoppelde
+Eigenaren-groep van de site, de eigenaren van de Microsoft 365-groep achter een Teams-site, en
+systeemvermeldingen *Beperkte toegang*. Sitecollectiebeheerders zijn geen roltoewijzing en
+houden hoe dan ook toegang.
+
+Elk adres wordt opgezocht **voordat** er iets verandert; één onbekend adres stopt de run
+zonder wijzigingen. Rollen worden op type gekozen, dus een Nederlandse of Franse site
+(*Bijdragen*, *Collaboration*) werkt hetzelfde. Met `-Apply` worden de rechten achteraf
+teruggelezen en per map getoond. Elke run schrijft een CSV
+(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`).
+
+Aanmelden: delegated PnP via `Connect-M365PnP` (device code / GDAP-klant volgens
+`load.config.ps1`) met de client-ID van de tenant uit `pnp.appid.json`. Een tenant zonder
+vermelding daar: draai één keer `Find-SiteContent.ps1` (dat registreert de app), of geef
+`-ClientId` mee.
+
+**Configbestand**
+
+```json
+{
+  "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
+  "folder":       "Shared Documents/General/Teamleads",
+  "role":         "Contribute",
+  "parentAccess": "Read",
+  "subfolders": {
+    "Team A":  [ "jan@contoso.com", "kim@contoso.com", "piet@contoso.com" ],
+    "Team B":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ],
+    "Leads":   [ "jan@contoso.com", "kim@contoso.com" ]
+  }
+}
+```
+
+**Parameters**
+
+| Parameter | Verplicht | Beschrijving |
+|-----------|-----------|--------------|
+| `-ConfigPath` | Nee* | JSON-config zoals hierboven. Parameters op de commandoregel gaan voor op het bestand |
+| `-SiteUrl` | Nee* | De site waar de map in staat (voor een Teams-kanaal: de site van het team) |
+| `-FolderPath` | Nee* | Bovenliggende map, site-relatief (`Shared Documents/General/Teamleads`); een volledige of server-relatieve URL werkt ook. De bibliotheek-URL is meestal `Shared Documents`, ook als hij als *Documents* / *Documenten* wordt getoond |
+| `-Access` | Nee* | Hashtable submap → UPN's/e-mailadressen, in plaats van of bovenop `subfolders` in de config |
+| `-Role` | Nee | `Contribute` (standaard), `Edit` of `Read` op elke submap |
+| `-ParentAccess` | Nee | `Read` (standaard) of `None` op de bovenliggende map |
+| `-Apply` | Nee | Echt wijzigen. Zonder wordt er niets geschreven |
+| `-TenantId` / `-ClientId` | Nee | Overschrijvingen voor het aanmelden |
+| `-AppOnly` | Nee | Certificaat-app uit `graph.appid.json` (heeft SharePoint `Sites.FullControl.All` nodig) |
+| `-OutputPath` | Nee | Pad van het CSV-rapport |
+
+\* Een site, een map en minstens één submap zijn verplicht - uit de config, de parameters, of beide.
+
+**Voorbeelden**
+
+```powershell
+# Wat zou er veranderen? Leest alleen, schrijft de CSV.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json
+
+# Uitvoeren, en het resultaat teruglezen.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# Zonder configbestand
+.\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
+    -FolderPath "Shared Documents/General/Teamleads" `
+    -Access @{ 'Team A' = @('jan@contoso.com', 'kim@contoso.com'); 'Leads' = @('jan@contoso.com') } `
+    -Apply
+```
+**Opmerkingen**
+- Idempotent: een tweede run meldt *already correct* voor alles wat de eerste heeft ingesteld.
+- Submappen die bestaan maar niet in de config staan, blijven ongemoeid en worden gemeld. Met
+  `-ParentAccess Read` erven ze het Lezen van de bovenliggende map, dus iedereen in de config
+  kan ze openen - de waarschuwing zegt dat.
+- Alleen de bovenliggende map en de genoemde submappen worden aangeraakt. Een bestand of map
+  dieper dat apart gedeeld is, houdt zijn eigen rechten.
+- Bestanden die rechtstreeks in de bovenliggende map staan, zijn leesbaar voor iedereen in de
+  config bij `-ParentAccess Read`.
 
 ---
 
