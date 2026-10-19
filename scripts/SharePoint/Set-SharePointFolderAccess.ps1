@@ -11,7 +11,7 @@
     it". This script does that for any folder, from one config.
 
     Groups (default; -DirectAccess grants the people directly instead)
-      * "<prefix> - Owners"       the people in "owners". Full Control on the parent and on
+      * "<prefix> - Owners"       the people in "owners" (name: "ownersGroup" / -OwnersGroup). Full Control on the parent and on
                                   everything the script manages below it
       * "<prefix> - <subfolder>"  the people listed for that subfolder
       Entra ID security groups by default (-GroupType Entra): visible and manageable in Entra,
@@ -93,7 +93,13 @@
     config.
 
 .PARAMETER GroupPrefix
-    Start of the group names. Default: "groupPrefix" from the config, else the parent folder name.
+    Start of the group names. Default: "groupPrefix" from the config, else "<site> - <folder>"
+    for Entra groups and the parent folder name for SharePoint groups.
+
+.PARAMETER OwnersGroup
+    Full name of the owners group, instead of "<prefix> - Owners" - e.g. "LBM - Teamleads Owners"
+    when "LBM - Owners" would read as the owners of the whole team. Default: "ownersGroup" from
+    the config.
 
 .PARAMETER PersonalFolders
     Give every listed non-owner a personal folder in every subfolder. Without it, per subfolder
@@ -204,6 +210,7 @@ param(
     [hashtable] $Access,
     [string[]] $Owners,
     [string] $GroupPrefix,
+    [string] $OwnersGroup,
     [switch] $PersonalFolders,
     [switch] $DirectAccess,
     [switch] $SyncMembers,
@@ -274,6 +281,7 @@ if ($ConfigPath) {
     if (-not $Role         -and $config.role)         { $Role         = [string]$config.role }
     if (-not $ParentAccess -and $config.parentAccess) { $ParentAccess = [string]$config.parentAccess }
     if (-not $GroupPrefix  -and $config.groupPrefix)  { $GroupPrefix  = [string]$config.groupPrefix }
+    if (-not $OwnersGroup  -and $config.ownersGroup)  { $OwnersGroup  = [string]$config.ownersGroup }
     if (-not $GroupType    -and $config.groupType)    { $GroupType    = [string]$config.groupType }
     if ($config.owners) { $ownerLogins = ConvertTo-LoginList $config.owners }
     if ($config.subfolders) {
@@ -1049,6 +1057,7 @@ try {
     $groupsMade = [ordered]@{}
     try {
         # -- Who gets what -------------------------------------------------------------
+        $ownersTitle = if ($OwnersGroup) { $OwnersGroup.Trim() } else { "$GroupPrefix - Owners" }
         $ownerGrants = @()
         $teamGrants  = @{}   # subfolder -> grants
         if ($DirectAccess) {
@@ -1059,7 +1068,7 @@ try {
         } elseif ($useEntra) {
             if (-not $ownerLogins) { Write-Warn 'No owners in the config: the Entra groups get no owner, so only admins can manage their members.' }
             if ($ownerLogins) {
-                $title = "$GroupPrefix - Owners"
+                $title = $ownersTitle
                 $g = Set-EntraGroup -Title $title -Logins $ownerLogins -OwnerList $ownerLogins
                 $ownerGrants += New-Grant -Name $title -Principal $g -Role 'FullControl'
             }
@@ -1069,7 +1078,7 @@ try {
                 $teamGrants[$name] = @(New-Grant -Name $title -Principal $g -Role $Role)
             }
         } else {
-            $ownerTitle = if ($ownerLogins) { "$GroupPrefix - Owners" }
+            $ownerTitle = if ($ownerLogins) { $ownersTitle }
                           elseif ($ownerGroupId) { $web.AssociatedOwnerGroup.Title }
                           else { $null }
             if (-not $ownerTitle) { throw 'Groups need an owner: list "owners" in the config, or use a site that has an Owners group.' }

@@ -787,7 +787,8 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 | `-FolderPath` | Nee* | Bovenliggende map, site-relatief (`Shared Documents/General/Teamleads`); een volledige of server-relatieve URL werkt ook. De bibliotheek-URL is meestal `Shared Documents`, ook als hij als *Documents* / *Documenten* wordt getoond |
 | `-Access` | Nee* | Hashtable submap → UPN's/e-mailadressen, in plaats van of bovenop `subfolders` in de config |
 | `-Owners` | Nee | Volledig beheer overal en eigenaar van de groepen; gaat voor op `owners` |
-| `-GroupPrefix` | Nee | Begin van de groepsnamen (standaard: `groupPrefix`, anders de naam van de bovenliggende map) |
+| `-GroupPrefix` | Nee | Begin van de groepsnamen (standaard: `groupPrefix`, anders `<site> - <map>` voor Entra en de mapnaam voor SharePoint-groepen) |
+| `-OwnersGroup` | Nee | Volledige naam van de owners-groep in plaats van `<prefix> - Owners`, bv. `LBM - Teamleads Owners` (config: `ownersGroup`) |
 | `-PersonalFolders` | Nee | Persoonlijke mappen in elke submap, in plaats van per submap in de config |
 | `-DirectAccess` | Nee | De mensen direct rechten geven in plaats van via SharePoint-groepen |
 | `-GroupType` | Nee | `Entra` (standaard): Entra ID-beveiligingsgroepen via Graph. `SharePoint`: SharePoint-groepen alleen in deze site |

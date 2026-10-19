@@ -1011,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-19 (9)
+| Modification |
+|--------------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.fr.md#set-sharepointfolderaccessps1) reçoit `ownersGroup` / `-OwnersGroup`, le nom complet du groupe des owners. Avec le préfixe voulu par le client (`LBM`), c'était toujours `LBM - Owners`, qui se lit comme les propriétaires de toute l'équipe ; il peut maintenant s'appeler `LBM - Teamleads Owners` tandis que les autres groupes restent `LBM - Team Clara`, etc. L'aide de `-GroupPrefix` décrivait encore l'ancien défaut ; elle cite maintenant les deux |
+| Vérifié : contrôle de syntaxe ; contrôle des liens. **Non** vérifié : une exécution sur le tenant |
+
 ### 2026-10-19 (8)
 | Modification |
 |--------------|

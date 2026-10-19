@@ -808,7 +808,8 @@ l'enregistrement de l'application.
 | `-FolderPath` | Non* | Dossier parent, relatif au site (`Shared Documents/General/Teamleads`) ; une URL complète ou relative au serveur fonctionne aussi. L'URL de la bibliothèque est généralement `Shared Documents`, même quand elle s'affiche *Documents* / *Documenten* |
 | `-Access` | Non* | Table de hachage sous-dossier → UPN/adresses e-mail, à la place de ou en plus de `subfolders` dans la config |
 | `-Owners` | Non | Contrôle total partout et propriétaires des groupes ; remplace `owners` |
-| `-GroupPrefix` | Non | Début des noms de groupe (par défaut : `groupPrefix`, sinon le nom du dossier parent) |
+| `-GroupPrefix` | Non | Début des noms de groupe (par défaut : `groupPrefix`, sinon `<site> - <dossier>` pour Entra et le nom du dossier pour les groupes SharePoint) |
+| `-OwnersGroup` | Non | Nom complet du groupe des owners au lieu de `<prefix> - Owners`, p. ex. `LBM - Teamleads Owners` (config : `ownersGroup`) |
 | `-PersonalFolders` | Non | Dossiers personnels dans chaque sous-dossier, au lieu du réglage par sous-dossier dans la config |
 | `-DirectAccess` | Non | Attribuer les droits directement aux personnes plutôt que par des groupes SharePoint |
 | `-GroupType` | Non | `Entra` (par défaut) : groupes de sécurité Entra ID via Graph. `SharePoint` : groupes SharePoint de ce site uniquement |

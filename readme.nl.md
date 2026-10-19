@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-19 (9)
+| Wijziging |
+|-----------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.nl.md#set-sharepointfolderaccessps1) kreeg `ownersGroup` / `-OwnersGroup`, de volledige naam van de owners-groep. Met het prefix dat de klant wilde (`LBM`) was dat altijd `LBM - Owners`, wat leest als de eigenaren van het hele team; het kan nu `LBM - Teamleads Owners` zijn terwijl de andere groepen `LBM - Team Clara` enzovoort blijven. De help van `-GroupPrefix` beschreef ook nog de oude standaard; die noemt nu beide |
+| Geverifieerd: syntaxcheck; linkcheck. **Niet** geverifieerd: een run op de tenant |
+
 ### 2026-10-19 (8)
 | Wijziging |
 |-----------|

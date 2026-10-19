@@ -773,7 +773,8 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 | `-FolderPath` | No* | Parent folder, site-relative (`Shared Documents/General/Teamleads`); a full or server-relative URL works too. The library URL is usually `Shared Documents`, even when it is shown as *Documents* / *Documenten* |
 | `-Access` | No* | Hashtable subfolder → UPNs/e-mail addresses, instead of or on top of `subfolders` in the config |
 | `-Owners` | No | Full Control everywhere and owner of the groups; overrides `owners` |
-| `-GroupPrefix` | No | Start of the group names (default: `groupPrefix`, else the parent folder name) |
+| `-GroupPrefix` | No | Start of the group names (default: `groupPrefix`, else `<site> - <folder>` for Entra and the folder name for SharePoint groups) |
+| `-OwnersGroup` | No | Full name of the owners group instead of `<prefix> - Owners`, e.g. `LBM - Teamleads Owners` (config: `ownersGroup`) |
 | `-PersonalFolders` | No | Personal folders in every subfolder, instead of per subfolder in the config |
 | `-DirectAccess` | No | Grant the people directly instead of through SharePoint groups |
 | `-GroupType` | No | `Entra` (default): Entra ID security groups through Graph. `SharePoint`: SharePoint groups in this site only |

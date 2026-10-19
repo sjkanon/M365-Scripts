@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-19 (9)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) gained `ownersGroup` / `-OwnersGroup`, the full name of the owners group. With the prefix the customer wanted (`LBM`) it was always `LBM - Owners`, which reads as the owners of the whole team; it can now be `LBM - Teamleads Owners` while the other groups stay `LBM - Team Clara` and so on. The `-GroupPrefix` help also still described the old default; it now names both |
+| Verified: syntax check; link check. **Not** verified: a run on the tenant |
+
 ### 2026-10-19 (8)
 | Change |
 |--------|
