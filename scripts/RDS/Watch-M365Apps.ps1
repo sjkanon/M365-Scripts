@@ -1,10 +1,10 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Watchdog for new Teams, new Outlook, Copilot and Snipping Tool on a session host:
-    tests them with our own account (itceadmin) and for every signed-in user, repairs
-    what is broken - on the host and in that user's own session - and reports to an
-    n8n webhook.
+    Watchdog for new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session
+    host: tests them with our own account (itceadmin) and for every signed-in user,
+    repairs what is broken - on the host and in that user's own session - and reports
+    to an n8n webhook.
 
 .DESCRIPTION
     Runs as a scheduled task under System (install it with -Install). Each run:
@@ -16,8 +16,8 @@
                      exception code. Reported, not repaired: a customer's app is never
                      restarted for them. Our own account's app is started again in
                      step 2 when it is no longer running.
-      1. Host        Teams, new Outlook and Snipping Tool are provisioned for all
-                     users, and Copilot - the new, unified Microsoft Copilot app
+      1. Host        Teams, new Outlook, Snipping Tool and Photos are provisioned for
+                     all users, and Copilot - the new, unified Microsoft Copilot app
                      only, not the old Microsoft 365 Copilot app (MicrosoftOfficeHub)
                      - is installed
                      machine-wide by Edge Update: its copilotapp.exe is on disk and a
@@ -35,9 +35,9 @@
                      customer at their next sign-in. Customers are never updated by the
                      watchdog: Windows gives them the new build at their next sign-in.
                      A new build on the host - from this step or on its own - is
-                     reported once, with what it was before. Snipping Tool is not
-                     updated here: the Store keeps it current, and there is no feed
-                     or installer to provision a newer build from.
+                     reported once, with what it was before. Snipping Tool and Photos
+                     are not updated here: the Store keeps them current, and there is
+                     no feed or installer to provision a newer build from.
       2. Accounts    For each watched account signed in on this host (the owner of an
                      explorer.exe), per app: the package is registered for that user,
                      its files are there and its status is Ok - for Copilot its
@@ -64,8 +64,8 @@
                      account (the test for the whole host), or the same app at two or
                      more customers: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
                      installers, signature-checked), at most once per
-                     -RepairCooldownHours. Snipping Tool has no installer: when it is
-                     not provisioned it is provisioned again from the Microsoft-signed
+                     -RepairCooldownHours. Snipping Tool and Photos have no installer:
+                     when one is not provisioned it is provisioned again from the Microsoft-signed
                      build already on the host (WindowsApps, still registered for a
                      user) with Add-AppxProvisionedPackage -FolderPath, after removing
                      a Deprovisioned marker (backed up to .reg). Then per user, in
@@ -75,7 +75,8 @@
                      registered again by family name - for a customer only while the
                      app is not running for them, at most once per -RepairCooldownHours
                      per user and app, and never reset. In our own account an app that
-                     does not start is reset (Reset-AppxPackage). Nothing is closed or
+                     does not start is reset (Reset-AppxPackage), also at most once per
+                     -RepairCooldownHours. Nothing is closed or
                      removed for a customer - no -RemoveOld, no -Latest. A user who tried to
                      open the app themselves (TWinUI 5961) in the last 30 minutes gets it
                      opened in their session once it is registered again, unless
@@ -106,7 +107,7 @@
     More than one tests each of them, e.g. -Account itceadmin,itce.user.
 
 .PARAMETER App
-    Apps to watch: Teams, Outlook, Copilot, SnippingTool. Default: all four. An
+    Apps to watch: Teams, Outlook, Copilot, SnippingTool, Photos. Default: all five. An
     installed watchdog keeps the list it was installed with (config.json): install
     it again, or give -App, to watch an app added later.
 
@@ -136,8 +137,9 @@
 
 .PARAMETER RepairCooldownHours
     Minimum time between two host repairs (Repair-AppxPackageStore.ps1), so a problem
-    it cannot fix is not retried every run. Default 4. Fixes in our own account are
-    not limited.
+    it cannot fix is not retried every run, and between two repairs of the same app for
+    the same user - our own account included, so an app that will not start for it is
+    not reset every run, each failed start triggering the next. Default 4.
 
 .PARAMETER RenotifyHours
     A problem that stays the same is reported again after this many hours. Default 12.
@@ -209,8 +211,8 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param (
     [string[]] $Account = @('itceadmin'),
-    [ValidateSet('Teams', 'Outlook', 'Copilot', 'SnippingTool')]
-    [string[]] $App = @('Teams', 'Outlook', 'Copilot', 'SnippingTool'),
+    [ValidateSet('Teams', 'Outlook', 'Copilot', 'SnippingTool', 'Photos')]
+    [string[]] $App = @('Teams', 'Outlook', 'Copilot', 'SnippingTool', 'Photos'),
     [string[]] $User,
     [string]   $WebhookUrl,
     [string]   $WebhookToken,
@@ -248,15 +250,19 @@ $ErrorActionPreference = 'Stop'
 # identity package it registers for its users, when this host has one (Get-UnifiedCopilot).
 # Latest: provisioned at the newest build by Update-HostApp. FromDisk: no installer, so a
 # host that does not provision it is provisioned again from the build already in
-# WindowsApps (Add-ProvisionFromDisk). Snipping Tool is that case: the Store keeps it
-# current, and Repair-AppxPackageStore.ps1 has no feed or installer for it.
+# WindowsApps (Add-ProvisionFromDisk). Snipping Tool and Photos are that case: the Store
+# keeps them current, winget has them only from the msstore source (9MZ95KL8MR0L,
+# 9WZDNCRFJBH4), whose download needs an Entra admin, and Repair-AppxPackageStore.ps1
+# has no feed or installer for them. Photos is the default app for .jpg: when it does
+# not open, neither does a photo attached to a mail.
 $Apps = @(
     [PSCustomObject]@{ App = 'Teams';        Packages = @('MSTeams');                     Exe = @('ms-teams.exe');     Repair = 'teams';                  Latest = $true;  FromDisk = $false }
     [PSCustomObject]@{ App = 'Outlook';      Packages = @('Microsoft.OutlookForWindows'); Exe = @('olk.exe');          Repair = 'outlook';                Latest = $true;  FromDisk = $false }
     [PSCustomObject]@{ App = 'Copilot';      Packages = @();                              Exe = @('copilotapp.exe');   Repair = 'copilot';                Latest = $false; FromDisk = $false }
     [PSCustomObject]@{ App = 'SnippingTool'; Packages = @('Microsoft.ScreenSketch');      Exe = @('SnippingTool.exe'); Repair = 'Microsoft.ScreenSketch'; Latest = $false; FromDisk = $true }
+    [PSCustomObject]@{ App = 'Photos';       Packages = @('Microsoft.Windows.Photos');    Exe = @('Photos.exe');       Repair = 'Microsoft.Windows.Photos'; Latest = $false; FromDisk = $true }
 )
-$PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for Teams, Outlook and Snipping Tool
+$PublisherId   = '8wekyb3d8bbwe'   # Microsoft's Store publisher id, the same for Teams, Outlook, Snipping Tool and Photos
 $CopilotGuid   = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
 $CopilotExe    = 'copilotapp.exe'
 # The old Copilot packages: never the identity package of the unified app.
@@ -288,8 +294,8 @@ $script:unifiedCopilotRead = $false
 $Helpers = @{
     # devel, 2026-10-10 - also provisions the build the AppX log asks for
     'Repair-AppxPackageStore.ps1' = @{ Folder = 'Device'; Commit = 'abe8202bc90d855328f4f04844a54406968f0f6b'; Hash = 'D990B0DBF4C530F1CA1D3E00444BF18E6D0F1D44E47FB6E1A7627ADCBF715C84' }
-    # devel, 2026-10-16 - collects the evidence before a repair (-NoDiagnostics turns it off), Snipping Tool included
-    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = '3afc2e0a168faa7313bbdee3dd2a65c5032d3f64'; Hash = '04D46F2852F457A342ACD18CEE17A53C4E6ADAC04CED71E9878E82438122271E' }
+    # devel, 2026-10-20 - collects the evidence before a repair (-NoDiagnostics turns it off), Snipping Tool and Photos included
+    'Get-M365AppsLog.ps1'         = @{ Folder = 'RDS';    Commit = '1c892a0f67b52d7dbb1e4cad2e3bbada4f7612b1'; Hash = '7A77015B171FFFBBDCA60BACE23DD017DE1ED337D8AA2311F5E84CB8F359FA4F' }
 }
 $DiagDir = Join-Path $WorkingDir 'Diag'
 
@@ -1133,7 +1139,7 @@ function Get-Finding {
 # -- Repair --------------------------------------------------------------------------
 function Add-ProvisionFromDisk {
     <#
-        Provision an app that has no installer (Snipping Tool) again from the build that
+        Provision an app that has no installer (Snipping Tool, Photos) again from the build that
         is already on this host: a user still has it registered, so its Microsoft-signed
         files sit in WindowsApps - which only TrustedInstaller can write to. A
         Deprovisioned marker (how a removal is remembered) is backed up to .reg and
@@ -1285,11 +1291,16 @@ function Invoke-Repair {
                 $actions.Add("$who $($finding.App): running for them now - nothing to do")
                 continue
             }
-            $lastFix = $State.UserRepairs[$key]
-            if ($lastFix -and ([datetime]::Parse($lastFix, $null, [Globalization.DateTimeStyles]::RoundtripKind)).AddHours($RepairCooldownHours) -gt (Get-Date)) {
-                $actions.Add("$who $($finding.App): already re-registered at $(([datetime] $lastFix).ToString('HH:mm')) - not again within $RepairCooldownHours h")
-                continue
-            }
+        }
+        # Customers and our own account alike: once per -RepairCooldownHours per user and
+        # app. An app that will not start in our own account was reset every run, and the
+        # failed start of each run (TWinUI 5961, a crash) triggered the next run 30 seconds
+        # later - a reset every few minutes for as long as the app stayed broken.
+        $lastFix = $State.UserRepairs[$key]
+        if ($lastFix -and ([datetime]::Parse($lastFix, $null, [Globalization.DateTimeStyles]::RoundtripKind)).AddHours($RepairCooldownHours) -gt (Get-Date)) {
+            $what = if ($finding.Customer) { 're-registered' } else { 'repaired' }
+            $actions.Add("$who $($finding.App): already $what at $(([datetime] $lastFix).ToString('HH:mm')) - not again within $RepairCooldownHours h")
+            continue
         }
 
         $packages = @($entry.Packages)
@@ -1328,7 +1339,8 @@ function Invoke-Repair {
         }
         Write-Step "$($finding.App) for $($session.User): $verb in their session"
         if ($command) { Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null }
-        if ($finding.Customer) { $State.UserRepairs[$key] = (Get-Date).ToString('o') }
+        # Also for our own account: Get-OpenFailure leaves out what this repair itself logs.
+        $State.UserRepairs[$key] = (Get-Date).ToString('o')
 
         # The headless console does not pass the exit code on: the package itself says
         # whether it worked. A reset or restart is judged by the launch test in the read-back.
@@ -1738,7 +1750,7 @@ if ($Install) {
     $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 1)
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
-        -Description 'Tests Teams, new Outlook, Copilot and Snipping Tool with the IT accounts, repairs them and reports to n8n (M365-Scripts, scripts/RDS/Watch-M365Apps.ps1)' -Force | Out-Null
+        -Description 'Tests Teams, new Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repairs them and reports to n8n (M365-Scripts, scripts/RDS/Watch-M365Apps.ps1)' -Force | Out-Null
     Write-Ok "Task '$TaskName' registered - first run in 2 minutes, then every $IntervalMinutes minutes"
     Write-Ok ('Also {0} minutes after every sign-in, and within minutes of an app that would not open, crashed, hung or failed to register' -f ($UserGraceMinutes + 2))
     exit 0

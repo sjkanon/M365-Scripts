@@ -192,7 +192,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
-| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot and Snipping Tool with the IT accounts, repair, report to n8n |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
@@ -476,7 +476,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
   - Updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build on every run (Teams' self-update off only where FSLogix needs it) and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
 
-- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook, Copilot and Snipping Tool with our own account (`itceadmin`) on a session host:
+- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook, Copilot, Snipping Tool and Photos with our own account (`itceadmin`) on a session host:
   - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
   - Also checks every other signed-in user, and every app a user could not open (TWinUI 5961) or whose registration failed (AppX 401/404), and re-registers it in that user's own session without a window - never while it runs for them, never a reset; every report names the user
   - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
@@ -1010,6 +1010,14 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-20
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) also watches **Photos** (`Microsoft.Windows.Photos`, `Photos.exe`), as a fifth app. Photos is the default app for `.jpg`: photos attached to a mail would not open on the session hosts, while they did outside the cloud, and nothing reported it. It gets the same treatment as Snipping Tool — provisioned on the host, registered and `Ok` for every signed-in user, started for our own account, a refused open or failed registration re-registered in the user's session — and, like Snipping Tool, it is provisioned again from the signed build already on the host: winget has both only from the `msstore` source (`9WZDNCRFJBH4`, `9MZ95KL8MR0L`), whose download needs an Entra admin, so there is no installer to take them from. Snipping Tool itself is unchanged. An installed watchdog keeps its app list from `config.json`: install it again to have Photos watched |
+| An app that would not start **in our own account** was reset every run, without the cooldown customers have — and the failed start of each run (TWinUI 5961, a crash) triggered the next run 30 seconds later. Our own account now has the same `-RepairCooldownHours` per app, and its repair is recorded like a customer's, so what the repair itself logs in the next 3 minutes is no longer taken for a new failure. Still broken is still reported (`-RenotifyHours`) |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.md#get-m365appslogps1) knows `Photos` as an `-App`; the watchdog's pin for it moves to `1c892a0` (SHA-256 checked against what GitHub serves). The install command in the RDS readme moves to the new watchdog commit — the old pin pointed at a commit that is no longer in the history |
+| Verified: syntax check of both scripts and the menu; Photos' manifest (application `App`, `Photos.exe`, family `Microsoft.Windows.Photos_8wekyb3d8bbwe`) read on a Windows 11 machine; winget lists Photos and Snipping Tool only from `msstore`, and `winget download` refused without an Entra admin; `Get-M365AppsLog.ps1 -App Photos,SnippingTool` passes parameter validation (the run itself needs elevation, not available here). **Not** verified: a watchdog run on a session host — the pool could not be reached from here — nor `Add-AppxProvisionedPackage -FolderPath` for Photos, nor how the n8n workflow shows the extra `Photos` column |
 
 ### 2026-10-19 (10)
 | Change |

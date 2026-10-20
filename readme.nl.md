@@ -192,7 +192,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — AppX-pakketten repareren die falen met 0x80070490 (Teams, nieuwe Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — FSLogix-profielschijven op een share verkleinen, of de compressie bij afmelden controleren |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
-| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot en Knipprogramma testen met de IT-accounts, herstellen, melden aan n8n |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot, Knipprogramma en Foto's testen met de IT-accounts, herstellen, melden aan n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook, Copilot, Knipprogramma en Foto's gebeurde, en wat de watchdog deed |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
@@ -476,7 +476,7 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
   - Controleert WebView2, de AppX-frameworks waar de apps van afhangen, klaargezette builds en afwijkingen per gebruiker, Teams op AVD (SlimCore, de WebRTC-redirector die op 1 oktober 2026 met pensioen ging), Shared Computer Activation en de aanmeldbroker
   - Werkt Teams, Outlook, Copilot, de vergaderinvoegtoepassing en WebView2 bij elke run bij naar hun nieuwste build (zelfupdate van Teams alleen uit waar FSLogix dat nodig heeft) en herstelt de apps via `Repair-AppxPackageStore.ps1` en `Update-TeamsClient.ps1`; `-ComputerName` vergelijkt de hele pool, `-ForCapture` controleert of Sysprep kan
 
-- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook, Copilot en Knipprogramma (Snipping Tool) test met ons eigen account (`itceadmin`) op een sessiehost:
+- App-watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — een geplande taak (System) die de nieuwe Teams, de nieuwe Outlook, Copilot, Knipprogramma (Snipping Tool) en Foto's (Photos) test met ons eigen account (`itceadmin`) op een sessiehost:
   - Controleert of de host de apps klaarzet, en per aangemeld account of elke app geregistreerd en intact is en in die sessie echt start
   - Controleert ook elke andere aangemelde gebruiker, en elke app die een gebruiker niet kon openen (TWinUI 5961) of waarvan de registratie mislukte (AppX 401/404), en registreert die opnieuw in de eigen sessie van die gebruiker zonder venster - nooit terwijl hij bij hem draait, nooit een reset; elke melding noemt de gebruiker
   - Herstelt de host via `Repair-AppxPackageStore.ps1 -Provision` (met een afkoelperiode) en ons eigen account door de app opnieuw te registreren of te resetten, zonder sessies van klanten aan te raken; meldt `repaired` / `repair-failed` / `recovered` als JSON aan een n8n-webhook
@@ -1010,6 +1010,14 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 ## Versiegeschiedenis
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
+
+### 2026-10-20
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1) bewaakt nu ook **Foto's** (Photos, `Microsoft.Windows.Photos`, `Photos.exe`), als vijfde app. Foto's is de standaard-app voor `.jpg`: foto's als mailbijlage gingen op de sessiehosts niet open, buiten de cloud wel, en niets meldde het. Het krijgt dezelfde behandeling als Knipprogramma — klaargezet op de host, geregistreerd en `Ok` voor elke aangemelde gebruiker, gestart voor ons eigen account, een geweigerde opening of mislukte registratie opnieuw geregistreerd in de sessie van de gebruiker — en wordt, net als Knipprogramma, opnieuw klaargezet vanuit de ondertekende build die al op de host staat: winget heeft beide alleen uit de bron `msstore` (`9WZDNCRFJBH4`, `9MZ95KL8MR0L`), en die download vraagt een Entra-beheerder, dus er is geen installer om ze vandaan te halen. Knipprogramma zelf is ongewijzigd. Een geïnstalleerde watchdog houdt zijn app-lijst uit `config.json`: installeer hem opnieuw om Foto's te laten bewaken |
+| Een app die **in ons eigen account** niet startte, werd elke run gereset, zonder de cooldown die klanten hebben — en de mislukte start van elke run (TWinUI 5961, een crash) startte 30 seconden later de volgende run. Ons eigen account heeft nu dezelfde `-RepairCooldownHours` per app, en zijn herstel wordt vastgelegd zoals dat van een klant, zodat wat het herstel zelf de 3 minuten erna logt niet meer als nieuwe storing telt. Nog steeds stuk wordt nog steeds gemeld (`-RenotifyHours`) |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.nl.md#get-m365appslogps1) kent `Photos` als `-App`; de pin van de watchdog ervoor gaat naar `1c892a0` (SHA-256 gecontroleerd tegen wat GitHub serveert). Het installatiecommando in de RDS-readme gaat naar de nieuwe watchdog-commit — de oude pin wees naar een commit die niet meer in de geschiedenis staat |
+| Gecontroleerd: syntaxcontrole van beide scripts en het menu; het manifest van Foto's (applicatie `App`, `Photos.exe`, familie `Microsoft.Windows.Photos_8wekyb3d8bbwe`) gelezen op een Windows 11-machine; winget kent Foto's en Knipprogramma alleen uit `msstore`, en `winget download` weigerde zonder Entra-beheerder; `Get-M365AppsLog.ps1 -App Photos,SnippingTool` komt door de parametercontrole (de run zelf vraagt verhoogde rechten, hier niet beschikbaar). **Niet** gecontroleerd: een watchdog-run op een sessiehost — de pool was van hieruit niet bereikbaar — noch `Add-AppxProvisionedPackage -FolderPath` voor Foto's, noch hoe de n8n-workflow de extra kolom `Photos` toont |
 
 ### 2026-10-19 (10)
 | Wijziging |

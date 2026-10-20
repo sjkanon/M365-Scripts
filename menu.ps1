@@ -732,7 +732,7 @@ $menu = @(
         }
     }
     [PSCustomObject]@{ Key='Y'; FKey=$null; Category='Device'
-        Label='M365AppWatchdog     — test Teams, Outlook, Copilot, Snipping Tool with the IT accounts, repair, report to n8n'
+        Label='M365AppWatchdog     — test Teams, Outlook, Copilot, Snipping Tool, Photos with the IT accounts, repair, report to n8n'
         Script="$ROOT\scripts\RDS\Watch-M365Apps.ps1"
         Params={
             Write-Host '  1  Run one check now (repairs what it finds)'
