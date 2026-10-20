@@ -1993,6 +1993,73 @@ function Invoke-StoreProvision {
     return $true
 }
 
+function Remove-OfflineOlderBuild {
+    <#
+        Registering a newer build of a package for one user makes the deployment engine
+        update every user on this host who has an older one - also users who are not
+        signed in. On an FSLogix host their profile sits in a container that is not
+        mounted, so the engine finds nothing ("User was online: false", then 0x80070490
+        in the Resolved state handler) and the whole registration fails, for the user
+        it was meant for as well. Measured on LEM-AVD-6: Snipping Tool 2608.41 could not
+        be registered for anyone while three signed-off users - one of them a deleted
+        account - still had 2607.23 here.
+
+        So, per package: every build older than the newest one with files on this host
+        (bundle against bundle, main against main) is removed for each user who is not
+        signed in - Remove-AppxPackage -User, and where that leaves the user listed, the
+        user's AppxAllUserStore entries, backed up to .reg first. Users signed in are left
+        alone: the engine updates them itself. Their own list stays in their profile, and
+        FSLogix registers it again at their next sign-in. Returns how many were removed.
+    #>
+    param([Parameter(Mandatory)] [string[]] $PackageNames, [string] $BackupFolder)
+
+    $online = @{}
+    foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
+        $sid = Get-PropertyValue (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue) 'Sid'
+        if ($sid) { $online[$sid] = $true }
+    }
+    $removed = 0
+    foreach ($pkgName in $PackageNames) {
+        $newest = @{}
+        foreach ($build in @(Get-HostBuild -PackageName $pkgName)) {
+            $kind = [bool] $build.IsBundle
+            $v    = try { [version] $build.Version } catch { $null }
+            if ($v -and (-not $newest.ContainsKey($kind) -or $v -gt $newest[$kind])) { $newest[$kind] = $v }
+        }
+        if ($newest.Count -eq 0) { continue }
+        foreach ($pkg in @(Get-AppxPackage -AllUsers -Name $pkgName -PackageTypeFilter Bundle, Main -ErrorAction SilentlyContinue)) {
+            $kind = [bool] $pkg.IsBundle
+            $v    = try { [version] $pkg.Version } catch { $null }
+            if (-not $v -or -not $newest.ContainsKey($kind) -or $v -ge $newest[$kind]) { continue }
+            foreach ($info in @($pkg.PackageUserInformation)) {
+                $sid = [string] $info.UserSecurityId.Sid
+                if (-not $sid -or $online.ContainsKey($sid)) { continue }
+                $who = if ($info.UserSecurityId.Username) { $info.UserSecurityId.Username } else { $sid }
+                if (-not $PSCmdlet.ShouldProcess("$($pkg.PackageFullName) for $who", 'Remove the older build for a user who is not signed in')) { continue }
+                try { Remove-AppxPackage -Package $pkg.PackageFullName -User $sid -ErrorAction Stop } catch { }
+                $still = @(Get-AppxPackage -AllUsers -Name $pkgName -PackageTypeFilter Bundle, Main -ErrorAction SilentlyContinue |
+                           Where-Object { $_.PackageFullName -eq $pkg.PackageFullName } |
+                           ForEach-Object { $_.PackageUserInformation } | Where-Object { [string] $_.UserSecurityId.Sid -eq $sid }).Count -gt 0
+                if ($still) {
+                    # Without the profile the cmdlet cannot reach the user; what keeps the
+                    # engine looking for them is their entry in the store.
+                    foreach ($root in @("$AppxAllUserStorePath\$sid", "$AppxAllUserStorePath\EndOfLife\$sid", "$AppxAllUserStorePath\DeferredRemoval\$sid")) {
+                        $key = Join-Path $root $pkg.PackageFullName
+                        if (-not (Test-Path $key)) { continue }
+                        if ($BackupFolder -and -not (Backup-RegistryKey -Key $key -Folder $BackupFolder)) { Write-Warn "  Could not back up $key - left in place"; continue }
+                        Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+                        $script:storeEdited = $true
+                    }
+                }
+                Write-Ok "  $($pkg.PackageFullName) removed for $who (not signed in - FSLogix registers their own build again at their next sign-in)"
+                $removed++
+            }
+        }
+    }
+    if ($removed -eq 0) { Write-Skip '  No older build held by a user who is not signed in' }
+    return $removed
+}
+
 function Register-ForSignedInUser {
     <#
         A provisioned build reaches a profile at its next sign-in - with FSLogix, the
@@ -2486,6 +2553,15 @@ try {
     # Snipping Tool / Photos: from -StoreFolder - filled by the run that fanned out
     # with -ComputerName - or downloaded here from the msstore source.
     if ($Provision) {
+        # Users who are not signed in and still hold an older build make every
+        # registration of a newer one fail (Remove-OfflineOlderBuild): cleared first.
+        if ($storeTargets.Count -gt 0 -and -not $simulate) {
+            Write-Out ''
+            Write-Step "6. Older builds held by users who are not signed in: $($storeTargets -join ', ')"
+            if ((Remove-OfflineOlderBuild -PackageNames $storeTargets -BackupFolder $backupDir) -gt 0) {
+                [void] (Remove-OrphanedStoreEntry -BackupFolder $backupDir -Indent '  ')
+            }
+        }
         $storeDone = @()
         foreach ($pkg in $storeTargets) {
             $how = if ($FromHost) { 'the build already on this host' } else { 'Microsoft Store download' }
@@ -2506,6 +2582,9 @@ try {
         }
         # Provisioned is every future sign-in; whoever is signed in now gets it now.
         if ($storeDone.Count -gt 0 -and -not $simulate) {
+            # A Store build just provisioned is newer than what the first pass compared
+            # against.
+            [void] (Remove-OfflineOlderBuild -PackageNames $storeDone -BackupFolder $backupDir)
             Write-Out ''
             Write-Step "6a. Register $($storeDone -join ', ') for everyone signed in"
             [void] (Register-ForSignedInUser -PackageNames $storeDone)

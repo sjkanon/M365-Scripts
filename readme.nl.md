@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (8)
+| Wijziging |
+|-----------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1): Knipprogramma 2608.41 kon op LEM-AVD-6 voor niemand geregistreerd worden, terwijl de bestanden compleet waren en elk framework boven zijn MinVersion zat. Het deployment-log (`Get-AppPackageLog`) liet zien waarom: een nieuwere build registreren laat Windows elke gebruiker op de host met een oudere bijwerken, drie daarvan waren niet aangemeld (*User was online: false*, één een verwijderd account), hun FSLogix-containers waren niet gekoppeld, en de engine stopte met `0x80070490` in de *Resolved state handler* — ook voor itceadmin. Vóór het provisionen en vóór het registreren wordt nu elke oudere build van de Store-apps in scope verwijderd voor gebruikers die niet aangemeld zijn — `Remove-AppxPackage -User`, en waar ze daarna nog vermeld staan hun AppxAllUserStore-vermeldingen, met .reg-back-up — waarna verweesde store-vermeldingen worden opgeruimd. Aangemelde gebruikers worden aan de engine overgelaten; FSLogix registreert de eigen lijst van elke gebruiker opnieuw bij de volgende aanmelding |
+| Gecontroleerd: syntaxcontrole. **Niet** gecontroleerd: het verwijderen voor afgemelde gebruikers en de registratie daarna op een sessiehost — deze machine is geen multi-sessiehost en heeft hier geen beheersessie |
+
 ### 2026-10-20 (7)
 | Wijziging |
 |-----------|

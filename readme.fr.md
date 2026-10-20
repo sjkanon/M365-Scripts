@@ -1011,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-20 (8)
+| Modification |
+|--------------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.fr.md#repair-appxpackagestoreps1) : l'Outil Capture d'écran 2608.41 ne pouvait être inscrit pour personne sur LEM-AVD-6, ses fichiers complets et chaque framework au-dessus de sa MinVersion. Le journal de déploiement (`Get-AppPackageLog`) a montré pourquoi : inscrire la build plus récente amène Windows à mettre à jour chaque utilisateur de l'hôte qui en a une plus ancienne, trois n'étaient pas connectés (*User was online: false*, dont un compte supprimé), leurs conteneurs FSLogix n'étaient pas montés, et le moteur s'arrêtait avec `0x80070490` dans le *Resolved state handler* — pour itceadmin aussi. Avant le provisionnement et avant l'inscription, toute build plus ancienne des applications Store concernées est désormais retirée pour les utilisateurs non connectés — `Remove-AppxPackage -User`, et s'ils restent listés leurs entrées AppxAllUserStore, sauvegardées en .reg — puis les entrées orphelines du magasin sont nettoyées. Les utilisateurs connectés sont laissés au moteur ; FSLogix réinscrit la liste de chacun à sa prochaine connexion |
+| Vérifié : contrôle de syntaxe. **Non** vérifié : le retrait pour les utilisateurs déconnectés et l'inscription qui suit sur un hôte de session — cette machine n'est pas un hôte multisession et n'a pas de session administrateur ici |
+
 ### 2026-10-20 (7)
 | Modification |
 |--------------|

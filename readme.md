@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (8)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1): Snipping Tool 2608.41 could not be registered for anyone on LEM-AVD-6, its files complete and every framework above its MinVersion. The deployment log (`Get-AppPackageLog`) showed why: registering the newer build makes Windows update every user on the host who has an older one, three of them were not signed in (*User was online: false*, one a deleted account), their FSLogix containers were not mounted, and the engine stopped with `0x80070490` in the *Resolved state handler* — for itceadmin as well. Before provisioning and before registering, every older build of the Store apps in scope is now removed for users who are not signed in — `Remove-AppxPackage -User`, and where that leaves them listed their AppxAllUserStore entries, backed up to .reg — after which orphaned store entries are swept. Signed-in users are left to the engine; FSLogix registers each user's own list again at their next sign-in |
+| Verified: syntax check. **Not** verified: the removal for signed-off users and the registration afterwards on a session host — this machine is no multi-session host and has no admin session here |
+
 ### 2026-10-20 (7)
 | Change |
 |--------|
