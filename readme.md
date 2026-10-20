@@ -1011,6 +1011,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (5)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1): the Store download stopped at once with *Program 'winget.exe' failed to run: The file cannot be accessed by the system* in a window run as an admin account that App Installer is not registered for — the winget alias exists there but does not start. Each winget candidate (the alias, then App Installer's own folder, newest first) now has to answer `--version` before it is used, and when none does the run says how to fix it (register App Installer in that window, or start from a normal window with `-Credential` for the hosts). Verified: syntax check; the fallback loop skips a candidate that cannot start and takes the next. **Not** verified: the App Installer folder as fallback from such an admin window |
+
 ### 2026-10-20 (4)
 | Change |
 |--------|

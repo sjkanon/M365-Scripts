@@ -297,11 +297,26 @@ function Save-StorePackage {
     #>
     param([Parameter(Mandatory)] [string] $PackageName, [Parameter(Mandatory)] [string] $Folder)
 
-    $winget = @(Get-Command 'winget.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ -and (Test-Path $_) }) +
-              @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'winget.exe' } | Where-Object { Test-Path $_ }) |
-              Select-Object -First 1
-    if (-not $winget) { throw 'winget was not found - the App Installer package provides it' }
+    # The alias first, then App Installer's own folder, newest first. The alias exists
+    # but answers "The file cannot be accessed by the system" in a window running as
+    # an account App Installer is not registered for (Run as administrator with an
+    # admin account), so each candidate has to actually run before it is used.
+    $candidates = @(Get-Command 'winget.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ -and (Test-Path $_) }) +
+                  @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' -ErrorAction SilentlyContinue |
+                    Sort-Object -Property @{ Expression = {
+                        $raw = $_.Name -replace '^Microsoft\.DesktopAppInstaller_', '' -replace '_x64__8wekyb3d8bbwe$', ''
+                        try { [version] $raw } catch { [version] '0.0.0.0' }
+                    } } -Descending | ForEach-Object { Join-Path $_.FullName 'winget.exe' } | Where-Object { Test-Path $_ })
+    $winget = $null
+    foreach ($candidate in $candidates) {
+        try {
+            $null = & $candidate --version 2>$null
+            if ($LASTEXITCODE -eq 0) { $winget = $candidate; break }
+        } catch { }
+    }
+    if (-not $winget) {
+        throw "winget does not run for this account - run Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe in this window, or start from a window that is not 'Run as administrator' and give -Credential for the hosts"
+    }
 
     $target = Join-Path $Folder $PackageName
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }

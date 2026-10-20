@@ -1011,6 +1011,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (5)
+| Wijziging |
+|-----------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1): de Store-download stopte meteen met *Program 'winget.exe' failed to run: The file cannot be accessed by the system* in een venster dat draait als beheeraccount waarvoor App Installer niet geregistreerd is — de winget-alias bestaat daar wel maar start niet. Elke winget-kandidaat (de alias, daarna de map van App Installer zelf, nieuwste eerst) moet nu op `--version` antwoorden voordat hij gebruikt wordt, en als geen enkele dat doet zegt de run hoe het op te lossen is (App Installer registreren in dat venster, of starten vanuit een gewoon venster met `-Credential` voor de hosts). Gecontroleerd: syntaxcontrole; de terugvallus slaat een kandidaat over die niet start en neemt de volgende. **Niet** gecontroleerd: de map van App Installer als terugval vanuit zo'n beheervenster |
+
 ### 2026-10-20 (4)
 | Wijziging |
 |-----------|

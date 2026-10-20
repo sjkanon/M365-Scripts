@@ -1011,6 +1011,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-20 (5)
+| Modification |
+|--------------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.fr.md#repair-appxpackagestoreps1) : le téléchargement depuis le Store s'arrêtait aussitôt avec *Program 'winget.exe' failed to run: The file cannot be accessed by the system* dans une fenêtre lancée sous un compte administrateur pour lequel App Installer n'est pas inscrit — l'alias winget y existe mais ne démarre pas. Chaque candidat winget (l'alias, puis le dossier d'App Installer lui-même, le plus récent d'abord) doit désormais répondre à `--version` avant d'être utilisé, et si aucun ne le fait l'exécution indique comment y remédier (inscrire App Installer dans cette fenêtre, ou partir d'une fenêtre normale avec `-Credential` pour les hôtes). Vérifié : contrôle de syntaxe ; la boucle de repli saute un candidat qui ne démarre pas et prend le suivant. **Non** vérifié : le dossier d'App Installer comme repli depuis une telle fenêtre administrateur |
+
 ### 2026-10-20 (4)
 | Modification |
 |--------------|
