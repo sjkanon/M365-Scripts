@@ -220,6 +220,7 @@ Het lege pad vóór `(AppxManifest.xml)` verraadt het: Windows speelt een regist
 | `-WingetId` | winget-ID's van andere pakketten die op dezelfde manier voor alle gebruikers worden geprovisiond (alleen als het winget-manifest ervan een MSIX is) |
 | `-Source` | Deze `.msix` / `.msixbundle` provisionen nadat de store schoon is |
 | `-StoreFolder` | Map met de Microsoft Store-downloads voor Knipprogramma / Foto's, één submap per pakketnaam, zoals `winget download --source msstore` die vult. `-ComputerName` vult en geeft hem zelf door; geef hem mee om vanuit een eerdere download te provisionen zonder opnieuw aan te melden |
+| `-FromHost` | Met `-Provision`, voor Knipprogramma / Foto's: **geen Store-download, geen aanmelding**. De nieuwste door Microsoft ondertekende build die al op de host staat (in `WindowsApps` omdat een gebruiker hem geregistreerd heeft) wordt opnieuw voor alle gebruikers geprovisioned met `Add-AppxProvisionedPackage -FolderPath` — bundel vóór hoofdpakket, nieuwste eerst — nadat een Deprovisioned-markering is geback-upt en verwijderd, en geregistreerd voor iedereen die aangemeld is. Brengt de host niet verder dan de nieuwste build die een gebruiker erop heeft; stap 1b toont die builds |
 | `-IncludeDeprovisioned` | Ook Deprovisioned-markeringen opruimen bij een wildcard-`-Name` (standaard worden ze alleen opgeruimd voor expliciet genoemde pakketten) |
 | `-SkipSignatureCheck` | Geen geldige Microsoft-handtekening eisen op de installer of op `-Source` |
 | `-Days` | Hoe ver terug de FSLogix Apps- en AppX-deploymentlogs worden gelezen (standaard `7`) |
@@ -241,6 +242,9 @@ Ondersteunt `-WhatIf` en `-Confirm`; vraagt per wijziging tenzij `-Confirm:$fals
 
 # Herstellen en Teams + nieuwe Outlook terugzetten voor alle gebruikers, onbeheerd
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# Knipprogramma terug op de pool vanuit de build die al op elke host staat: geen Store-download, geen aanmelding
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool -Provision -FromHost -Confirm:$false
 
 # Knipprogramma en Foto's op de actuele Store-build op de pool: één download op deze machine
 # (meld aan met een Entra-beheerder als daarom gevraagd wordt), geprovisioned op elke host, geregistreerd voor iedereen die aangemeld is

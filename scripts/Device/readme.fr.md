@@ -220,6 +220,7 @@ Le chemin vide avant `(AppxManifest.xml)` est l'indice révélateur : Windows re
 | `-WingetId` | ID winget d'autres paquets à provisionner de la même façon pour tous les utilisateurs (uniquement si le manifeste winget correspondant est un MSIX) |
 | `-Source` | Provisionne ce `.msix` / `.msixbundle` une fois le magasin nettoyé |
 | `-StoreFolder` | Dossier des téléchargements du Microsoft Store pour l'Outil Capture d'écran / Photos, un sous-dossier par nom de paquet, tel que `winget download --source msstore` le remplit. `-ComputerName` le remplit et le transmet lui-même ; indiquez-le pour provisionner depuis un téléchargement antérieur sans vous reconnecter |
+| `-FromHost` | Avec `-Provision`, pour l'Outil Capture d'écran / Photos : **aucun téléchargement depuis le Store, aucune connexion**. La build signée par Microsoft la plus récente déjà présente sur l'hôte (dans `WindowsApps` parce qu'un utilisateur l'a inscrite) est de nouveau provisionnée pour tous les utilisateurs avec `Add-AppxProvisionedPackage -FolderPath` — bundle avant paquet principal, la plus récente d'abord — après sauvegarde et suppression d'un marqueur Deprovisioned, puis inscrite pour tous les utilisateurs connectés. N'amène pas l'hôte au-delà de la build la plus récente qu'un utilisateur y possède ; l'étape 1b liste ces builds |
 | `-IncludeDeprovisioned` | Efface aussi les marqueurs Deprovisioned avec un `-Name` générique (par défaut, ils ne sont effacés que pour les paquets nommés explicitement) |
 | `-SkipSignatureCheck` | N'exige pas de signature Microsoft valide sur le programme d'installation ou sur `-Source` |
 | `-Days` | Profondeur de lecture des journaux FSLogix Apps et de déploiement AppX (par défaut `7`) |
@@ -241,6 +242,9 @@ Prend en charge `-WhatIf` et `-Confirm` ; demande confirmation pour chaque modif
 
 # Réparer et remettre Teams + le nouvel Outlook pour tous les utilisateurs, sans surveillance
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# L'Outil Capture d'écran de retour sur le pool depuis la build déjà présente sur chaque hôte : sans Store, sans connexion
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool -Provision -FromHost -Confirm:$false
 
 # L'Outil Capture d'écran et Photos à la build actuelle du Store sur le pool : un seul téléchargement sur cette machine
 # (connectez-vous avec un administrateur Entra si demandé), provisionnés sur chaque hôte, inscrits pour tous les utilisateurs connectés

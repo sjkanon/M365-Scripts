@@ -162,6 +162,15 @@
     winget download --source msstore fills it. -ComputerName fills and passes it
     itself; give it to provision from a download made earlier, without a new sign-in.
 
+.PARAMETER FromHost
+    With -Provision, for Snipping Tool / Photos: no Store download. The newest
+    Microsoft-signed build already on the host - in WindowsApps because a user has it
+    registered, from a Store update of their own or the build the host had - is
+    provisioned for all users again (Add-AppxProvisionedPackage -FolderPath, bundle
+    before main package, newest first), after a Deprovisioned marker is backed up and
+    removed, and registered for everyone signed in. Needs no Entra admin; brings the
+    host no newer than the newest build any user on it has.
+
 .PARAMETER Copilot
     Look at Copilot: adds Microsoft.MicrosoftOfficeHub and Microsoft.Copilot to -Name
     (so their Deprovisioned markers are in scope) and runs step 1d. What counts as
@@ -207,6 +216,11 @@
     # download here (sign in with an Entra admin when asked), provisioned on every
     # host, and registered for everyone signed in there
     .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
+
+.EXAMPLE
+    # Snipping Tool back on the whole pool from the build already on each host - no
+    # Store download, no sign-in - provisioned and registered for everyone signed in
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool -Provision -FromHost -Confirm:$false
 
 .EXAMPLE
     # What is broken on this host? Changes nothing.
@@ -262,7 +276,8 @@ param (
     [switch]   $Copilot,
     [switch]   $Latest,
     [switch]   $RemoveOld,
-    [string]   $StoreFolder
+    [string]   $StoreFolder,
+    [switch]   $FromHost
 )
 
 Set-StrictMode -Version Latest
@@ -376,7 +391,7 @@ if ($ComputerName.Count -gt 0) {
     $storeTargets = @(Get-StoreTarget $Name)
     $storeLocal   = $null
     $remoteStore  = 'C:\IT\AppxRepair\Store'
-    if ($changes -and $Provision -and $storeTargets.Count -gt 0) {
+    if ($changes -and $Provision -and $storeTargets.Count -gt 0 -and -not $FromHost) {
         try {
             if ($StoreFolder) {
                 $storeLocal = $StoreFolder
@@ -1857,6 +1872,70 @@ function Invoke-WingetProvision {
     return $after[$mainName]
 }
 
+function Remove-DeprovisionedMarker {
+    <#
+        The Deprovisioned marker of a package - how a bloatware removal is remembered -
+        backed up to .reg and removed, or Windows keeps the package from new profiles
+        however it is provisioned. Throws when the backup fails, so nothing is removed
+        without one.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [string] $BackupFolder)
+    $marker = "$AppxAllUserStorePath\Deprovisioned\${PackageName}_8wekyb3d8bbwe"
+    if (-not (Test-Path $marker)) { return }
+    if ($BackupFolder -and -not (Backup-RegistryKey -Key $marker -Folder $BackupFolder)) { throw "could not back up $marker - $PackageName not provisioned" }
+    Remove-Item -Path $marker -Recurse -Force
+    Write-Ok "  Deprovisioned marker for $PackageName removed"
+}
+
+function Get-HostBuild {
+    <#
+        The builds of a package whose signed files are on this host: what Get-AppxPackage
+        -AllUsers knows with an AppxSignature.p7x in its folder, newest first and the
+        bundle before the main package of the same build.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName)
+    @(
+        @(Get-AppxPackage -AllUsers -Name $PackageName -PackageTypeFilter Bundle -ErrorAction SilentlyContinue) +
+        @(Get-AppxPackage -AllUsers -Name $PackageName -PackageTypeFilter Main -ErrorAction SilentlyContinue) |
+        Where-Object { $_.InstallLocation -and (Test-Path -LiteralPath (Join-Path $_.InstallLocation 'AppxSignature.p7x')) } |
+        Sort-Object -Property @{ Expression = { try { [version] $_.Version } catch { [version] '0.0.0.0' } } }, @{ Expression = { [bool] $_.IsBundle } } -Descending
+    )
+}
+
+function Invoke-HostProvision {
+    <#
+        -FromHost: provision a Store-only package for all users again from the newest
+        build already on this host (Get-HostBuild), without downloading anything - the
+        way Watch-M365Apps.ps1 puts Snipping Tool back. Windows checked these files'
+        signature when it installed them; TrustedInstaller owns the folder. Each
+        candidate is tried with Add-AppxProvisionedPackage -FolderPath -SkipLicense until
+        the package is provisioned. Returns whether it is.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [string] $BackupFolder)
+
+    $candidates = @(Get-HostBuild -PackageName $PackageName)
+    if ($candidates.Count -eq 0) { throw "no signed build of $PackageName on this host to provision from - no user has it; use -Provision without -FromHost to take it from the Store" }
+    Remove-DeprovisionedMarker -PackageName $PackageName -BackupFolder $BackupFolder
+
+    $before = (Get-ProvisionedVersion)[$PackageName]
+    foreach ($pkg in $candidates) {
+        try {
+            Add-AppxProvisionedPackage -Online -FolderPath $pkg.InstallLocation -SkipLicense -ErrorAction Stop | Out-Null
+        } catch {
+            Write-Warn "  $($pkg.PackageFullName): $($_.Exception.Message)"
+            continue
+        }
+        $after = (Get-ProvisionedVersion)[$PackageName]
+        if ($after) {
+            $was = if ($before -and $before -ne $after) { " (was $before)" } elseif ($before) { ' (already this build)' } else { '' }
+            Write-Ok "$PackageName provisioned for all users from the build on this host: $after$was - $($pkg.PackageFullName)"
+            return $true
+        }
+    }
+    Write-Bad "${PackageName}: none of the $($candidates.Count) build(s) on this host could be provisioned"
+    return $false
+}
+
 function Invoke-StoreProvision {
     <#
         Provision a Store-only package (Snipping Tool, Photos) for all users from the
@@ -1882,12 +1961,7 @@ function Invoke-StoreProvision {
         }
     }
 
-    $marker = "$AppxAllUserStorePath\Deprovisioned\${PackageName}_8wekyb3d8bbwe"
-    if (Test-Path $marker) {
-        if ($BackupFolder -and -not (Backup-RegistryKey -Key $marker -Folder $BackupFolder)) { throw "could not back up $marker - $PackageName not provisioned" }
-        Remove-Item -Path $marker -Recurse -Force
-        Write-Ok "  Deprovisioned marker for $PackageName removed"
-    }
+    Remove-DeprovisionedMarker -PackageName $PackageName -BackupFolder $BackupFolder
 
     $before = (Get-ProvisionedVersion)[$PackageName]
     $params = @{ Online = $true; PackagePath = $main.FullName; ErrorAction = 'Stop' }
@@ -1956,8 +2030,10 @@ function Register-ForSignedInUser {
 
         # The task's own exit code does not come through conhost: the package says.
         # By name, not SID: Get-AppxPackage -User answers "No valid SID" for some.
+        # Bundle and main package both: the provisioned version is the bundle's, which
+        # need not be the app's (Snipping Tool: bundle 2022.2608.41.0, app 11.2608.41.0).
         foreach ($pkgName in $PackageNames) {
-            $have = @(Get-AppxPackage -User $user -Name $pkgName -ErrorAction SilentlyContinue |
+            $have = @(Get-AppxPackage -User $user -Name $pkgName -PackageTypeFilter Bundle, Main -ErrorAction SilentlyContinue |
                       Where-Object { $_.Status -eq 'Ok' } | ForEach-Object { [version] $_.Version } | Sort-Object -Descending) | Select-Object -First 1
             if ($have -and $provisioned.ContainsKey($pkgName) -and $have -ge $provisioned[$pkgName]) {
                 Write-Ok "  $user - $pkgName $have"
@@ -2112,10 +2188,12 @@ try {
     }
     Write-AppxPolicyStatus
     foreach ($pkg in $storeTargets) {
+        $onHost = @(Get-HostBuild -PackageName $pkg | ForEach-Object { $_.Version } | Select-Object -Unique)
+        $hostText = if ($onHost.Count -gt 0) { 'builds on this host: ' + ($onHost -join ', ') } else { 'no signed build on this host' }
         if ($provisionedNow.ContainsKey($pkg)) {
-            Write-Skip "  $pkg is provisioned at $($provisionedNow[$pkg]) - -Provision brings it to the current Microsoft Store build"
+            Write-Skip "  $pkg is provisioned at $($provisionedNow[$pkg]); $hostText"
         } else {
-            Write-Warn "$pkg is not provisioned - new profiles do not get it; -Provision downloads it from the Microsoft Store"
+            Write-Warn "$pkg is not provisioned - new profiles do not get it; $hostText"
             $work++
         }
     }
@@ -2374,10 +2452,16 @@ try {
     if ($Provision) {
         $storeDone = @()
         foreach ($pkg in $storeTargets) {
-            if (-not $PSCmdlet.ShouldProcess($pkg, 'Provision for all users (Microsoft Store download + Add-AppxProvisionedPackage)')) { continue }
+            $how = if ($FromHost) { 'the build already on this host' } else { 'Microsoft Store download' }
+            if (-not $PSCmdlet.ShouldProcess($pkg, "Provision for all users ($how + Add-AppxProvisionedPackage)")) { continue }
             try {
-                $folder = if ($StoreFolder) { Join-Path $StoreFolder $pkg } else { Save-StorePackage -PackageName $pkg -Folder (Join-Path $WorkingDir 'Store') }
-                if (Invoke-StoreProvision -PackageName $pkg -Folder $folder -BackupFolder $backupDir) { $storeDone += $pkg } else { $exitCode = 1 }
+                if ($FromHost) {
+                    $ok = Invoke-HostProvision -PackageName $pkg -BackupFolder $backupDir
+                } else {
+                    $folder = if ($StoreFolder) { Join-Path $StoreFolder $pkg } else { Save-StorePackage -PackageName $pkg -Folder (Join-Path $WorkingDir 'Store') }
+                    $ok = Invoke-StoreProvision -PackageName $pkg -Folder $folder -BackupFolder $backupDir
+                }
+                if ($ok) { $storeDone += $pkg } else { $exitCode = 1 }
             } catch {
                 Write-Bad "Provisioning $pkg failed: $($_.Exception.Message)"
                 Write-AppxDeploymentError -Minutes 20

@@ -220,6 +220,7 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 | `-WingetId` | winget ids of other packages to provision for all users the same way (only when winget's manifest for it is an MSIX) |
 | `-Source` | Provision this `.msix` / `.msixbundle` after the store is clean |
 | `-StoreFolder` | Folder with the Microsoft Store downloads for Snipping Tool / Photos, one subfolder per package name, as `winget download --source msstore` fills it. `-ComputerName` fills and passes it itself; give it to provision from an earlier download without signing in again |
+| `-FromHost` | With `-Provision`, for Snipping Tool / Photos: **no Store download, no sign-in**. The newest Microsoft-signed build already on the host (in `WindowsApps` because a user has it registered) is provisioned for all users again with `Add-AppxProvisionedPackage -FolderPath` — bundle before main package, newest first — after a Deprovisioned marker is backed up and removed, and registered for everyone signed in. Brings the host no newer than the newest build a user on it has; step 1b lists those builds |
 | `-IncludeDeprovisioned` | Also clear Deprovisioned markers with a wildcard `-Name` (they are cleared by default only for explicitly named packages) |
 | `-SkipSignatureCheck` | Do not require a valid Microsoft signature on the installer or `-Source` |
 | `-Days` | How far back to read the FSLogix Apps and AppX deployment logs (default `7`) |
@@ -241,6 +242,9 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 
 # Repair and put Teams + new Outlook back for all users, unattended
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# Snipping Tool back on the pool from the build already on each host: no Store download, no sign-in
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool -Provision -FromHost -Confirm:$false
 
 # Snipping Tool and Photos at the current Store build on the pool: one download on this machine
 # (sign in with an Entra admin when asked), provisioned on every host, registered for everyone signed in

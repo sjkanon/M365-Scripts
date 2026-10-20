@@ -1011,6 +1011,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (6)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-FromHost`: Snipping Tool (and Photos) restored on the pool **without the Store download**, which needs an Entra admin and a working winget in that window. The newest signed build already on each host is provisioned for all users again with `Add-AppxProvisionedPackage -FolderPath`, a Deprovisioned marker backed up and removed first, and registered for everyone signed in; step 1b now lists the builds on the host next to the provisioned one |
+| Fixed: the per-user read-back compared the user's main package (Snipping Tool `11.2608.41.0`) with the provisioned version, which is the bundle's (`2022.2608.41.0`), so it would have reported every user as behind. It now reads bundle and main package. The same numbering means the host's `2022.2607.23.0` is a July 2026 build, not an old one — the earlier entry today calling it that was wrong |
+| Verified: syntax check; the build selection on this machine (bundle `2022.2608.41.0` before main `11.2608.41.0`); bundle plus main read back as `2022.2608.41.0`; a `-Provision -FromHost` fan-out downloads nothing. **Not** verified: `Add-AppxProvisionedPackage -FolderPath` and the registration on a session host |
+
 ### 2026-10-20 (5)
 | Change |
 |--------|

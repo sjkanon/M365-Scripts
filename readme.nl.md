@@ -1011,6 +1011,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (6)
+| Wijziging |
+|-----------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1) `-FromHost`: Knipprogramma (en Foto's) hersteld op de pool **zonder de Store-download**, die een Entra-beheerder en een werkende winget in dat venster vraagt. De nieuwste ondertekende build die al op elke host staat wordt opnieuw voor alle gebruikers geprovisioned met `Add-AppxProvisionedPackage -FolderPath`, nadat een Deprovisioned-markering is geback-upt en verwijderd, en geregistreerd voor iedereen die aangemeld is; stap 1b toont nu de builds op de host naast de geprovisionde |
+| Opgelost: de terugcontrole per gebruiker vergeleek het hoofdpakket van de gebruiker (Knipprogramma `11.2608.41.0`) met de geprovisionde versie, en dat is die van de bundel (`2022.2608.41.0`), dus elke gebruiker zou als achter gemeld zijn. Nu leest hij bundel en hoofdpakket. Door dezelfde nummering is `2022.2607.23.0` op de host een build van juli 2026, geen oude — het eerdere item van vandaag dat dat zei was fout |
+| Gecontroleerd: syntaxcontrole; de buildkeuze op deze machine (bundel `2022.2608.41.0` vóór hoofdpakket `11.2608.41.0`); bundel plus hoofdpakket teruggelezen als `2022.2608.41.0`; een fan-out met `-Provision -FromHost` downloadt niets. **Niet** gecontroleerd: `Add-AppxProvisionedPackage -FolderPath` en de registratie op een sessiehost |
+
 ### 2026-10-20 (5)
 | Wijziging |
 |-----------|

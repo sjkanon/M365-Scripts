@@ -1011,6 +1011,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-20 (6)
+| Modification |
+|--------------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.fr.md#repair-appxpackagestoreps1) `-FromHost` : l'Outil Capture d'écran (et Photos) restauré sur le pool **sans téléchargement depuis le Store**, qui exige un administrateur Entra et un winget qui fonctionne dans cette fenêtre. La build signée la plus récente déjà présente sur chaque hôte est de nouveau provisionnée pour tous avec `Add-AppxProvisionedPackage -FolderPath`, après sauvegarde et suppression d'un marqueur Deprovisioned, puis inscrite pour tous les utilisateurs connectés ; l'étape 1b liste désormais les builds de l'hôte à côté de celle provisionnée |
+| Corrigé : la relecture par utilisateur comparait le paquet principal de l'utilisateur (Outil Capture d'écran `11.2608.41.0`) à la version provisionnée, qui est celle du bundle (`2022.2608.41.0`), et aurait donc signalé chaque utilisateur en retard. Elle lit maintenant bundle et paquet principal. Cette même numérotation fait de `2022.2607.23.0` sur l'hôte une build de juillet 2026, pas une ancienne — l'entrée précédente d'aujourd'hui qui le disait était erronée |
+| Vérifié : contrôle de syntaxe ; le choix de build sur cette machine (bundle `2022.2608.41.0` avant le paquet principal `11.2608.41.0`) ; bundle plus paquet principal relus comme `2022.2608.41.0` ; une exécution `-Provision -FromHost` ne télécharge rien. **Non** vérifié : `Add-AppxProvisionedPackage -FolderPath` et l'inscription sur un hôte de session |
+
 ### 2026-10-20 (5)
 | Modification |
 |--------------|
