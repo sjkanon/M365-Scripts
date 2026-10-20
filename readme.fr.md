@@ -1011,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-20 (4)
+| Modification |
+|--------------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.fr.md#repair-appxpackagestoreps1) `-Name snippingtool,photos -Provision` inscrit la nouvelle build pour **tous les utilisateurs connectés à l'hôte**, et plus seulement pour les comptes du watchdog : sur un pool FSLogix, le provisionnement n'atteint un profil qu'à la connexion qui charge son conteneur, si bien que les clients connectés gardaient la build cassée toute la journée. Chaque utilisateur connecté reçoit `Add-AppxPackage -RegisterByFamilyName` dans sa propre session, via une tâche ponctuelle à son nom sous `conhost --headless` (comme le watchdog répare un utilisateur), et la build est relue par utilisateur ; rien n'est ouvert ni fermé. L'étape ne dépend plus d'un watchdog installé |
+| Vérifié : contrôle de syntaxe. **Non** vérifié : l'inscription via une tâche sur un hôte de session — aucun n'était joignable d'ici |
+
 ### 2026-10-20 (3)
 | Modification |
 |--------------|

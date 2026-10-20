@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (4)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-Name snippingtool,photos -Provision` registers the new build for **everyone signed in on the host**, not only for the watchdog's own accounts: on an FSLogix pool provisioning reaches a profile only at the sign-in that loads its container, so customers signed in now kept the broken build all day. Each signed-in user gets `Add-AppxPackage -RegisterByFamilyName` in their own session, through a one-off task running as them under `conhost --headless` (the way the watchdog repairs a user), and the build is read back per user; nothing is opened or closed. The step no longer depends on the watchdog being installed |
+| Verified: syntax check. **Not** verified: the registration through a task on a session host — nothing here could reach one |
+
 ### 2026-10-20 (3)
 | Change |
 |--------|

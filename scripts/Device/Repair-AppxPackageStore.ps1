@@ -99,10 +99,12 @@
     Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath, after a
     Deprovisioned marker is backed up and removed. With -ComputerName the download
     happens once, on this machine - where the sign-in can be answered - and the
-    folder is copied to every host. Afterwards the watchdog, when installed
-    (C:\IT\AppWatchdog), registers the apps again for its own accounts that are signed
-    in (Watch-M365Apps.ps1 -User): provisioning only reaches profiles at their next
-    sign-in.
+    folder is copied to every host. Provisioned, the build reaches every profile at
+    its next sign-in - with FSLogix, the sign-in that loads the container. Everyone
+    signed in on the host right now gets it registered in their own session straight
+    away (Add-AppxPackage -RegisterByFamilyName, through a one-off task running as
+    them, headless): nothing is opened or closed for them, and an app that is open
+    stays on the old build until it is closed or they sign in again.
 
     Where FSLogix fails on a newer Teams or Outlook build than this host
     provisions, that exact build is provisioned instead: the MSIX is downloaded
@@ -203,7 +205,7 @@
 .EXAMPLE
     # Snipping Tool and Photos at the current Store build on the whole pool: one
     # download here (sign in with an Entra admin when asked), provisioned on every
-    # host, and registered again for the watchdog's own accounts
+    # host, and registered for everyone signed in there
     .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
 
 .EXAMPLE
@@ -271,10 +273,10 @@ $ErrorActionPreference = 'Stop'
 # has them only from the msstore source, whose download needs an Entra account that is
 # Global, User or License Administrator. They are downloaded where that sign-in can be
 # answered - this machine, before -ComputerName fans out - and provisioned from that
-# folder with their frameworks and offline license. App is the watchdog's name for it.
+# folder with their frameworks and offline license.
 $StorePackages = @{
-    'Microsoft.ScreenSketch'   = @{ StoreId = '9MZ95KL8MR0L'; App = 'SnippingTool' }
-    'Microsoft.Windows.Photos' = @{ StoreId = '9WZDNCRFJBH4'; App = 'Photos' }
+    'Microsoft.ScreenSketch'   = @{ StoreId = '9MZ95KL8MR0L' }
+    'Microsoft.Windows.Photos' = @{ StoreId = '9WZDNCRFJBH4' }
 }
 $StoreShorthands = @{ 'snippingtool' = 'Microsoft.ScreenSketch'; 'snip' = 'Microsoft.ScreenSketch'; 'photos' = 'Microsoft.Windows.Photos' }
 
@@ -359,7 +361,6 @@ if ($ComputerName.Count -gt 0) {
     $storeTargets = @(Get-StoreTarget $Name)
     $storeLocal   = $null
     $remoteStore  = 'C:\IT\AppxRepair\Store'
-    $watchdogApps = @()
     if ($changes -and $Provision -and $storeTargets.Count -gt 0) {
         try {
             if ($StoreFolder) {
@@ -373,7 +374,6 @@ if ($ComputerName.Count -gt 0) {
             exit 1
         }
         $forward['StoreFolder'] = $remoteStore
-        $watchdogApps = @($storeTargets | ForEach-Object { $StorePackages[$_].App })
     }
 
     $remotePath = 'C:\IT\AppxRepair\Repair-AppxPackageStore.ps1'
@@ -408,37 +408,9 @@ if ($ComputerName.Count -gt 0) {
             # The host's own output streams back as it runs; the last object is the
             # state afterwards, read on the host itself.
             $result = Invoke-Command -Session $session -ScriptBlock {
-                param($Path, $Params, $Watch, $Apps)
+                param($Path, $Params, $Watch)
                 & $Path @Params
                 $code = $LASTEXITCODE
-                # Provisioning reaches a profile at its next sign-in. The watchdog's own
-                # accounts that are signed in get the apps registered again now - only
-                # the apps the installed watchdog knows, so an older one is not refused.
-                $userFix  = $null
-                $userNote = ''
-                $watchdog = 'C:\IT\AppWatchdog\Watch-M365Apps.ps1'
-                $config   = 'C:\IT\AppWatchdog\config.json'
-                if (@($Apps).Count -gt 0 -and (Test-Path $watchdog) -and (Test-Path $config)) {
-                    $settings = Get-Content -Path $config -Raw | ConvertFrom-Json
-                    # Only accounts signed in here (the owner of an explorer.exe): the
-                    # watchdog answers a signed-off one with a failure, and its apps live
-                    # in its FSLogix container until the next sign-in anyway.
-                    $owners   = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue |
-                                  ForEach-Object { (Invoke-CimMethod -InputObject $_ -MethodName GetOwner -ErrorAction SilentlyContinue).User } |
-                                  Where-Object { $_ })
-                    $accounts = @($settings.Account | Where-Object { $_ -and ((($_ -replace '^.*\\', '') -replace '@.*$', '') -in $owners) })
-                    $known    = @($Apps | Where-Object { $_ -in @($settings.App) })
-                    if ($known.Count -eq 0) {
-                        $userNote = 'watchdog does not watch these apps - install it again'
-                    } elseif ($accounts.Count -eq 0) {
-                        $userNote = 'watchdog accounts not signed in - registered at their next sign-in'
-                    } else {
-                        Write-Host ''
-                        Write-Host ("  Watchdog: register {0} again for {1}" -f ($known -join ', '), ($accounts -join ', ')) -ForegroundColor Cyan
-                        & $watchdog -User $accounts -App $known
-                        $userFix = $LASTEXITCODE
-                    }
-                }
                 $frx  = Join-Path $env:ProgramFiles 'FSLogix\Apps\frxsvc.exe'
                 $info = if (Test-Path $frx) { (Get-Item $frx).VersionInfo } else { $null }
                 $prov = @{}
@@ -452,10 +424,8 @@ if ($ComputerName.Count -gt 0) {
                     FSLogix      = if ($info) { '{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart } else { 'not installed' }
                     Provisioned  = $prov
                     Copilot      = if ($unified -and $unified.pv) { "$($unified.pv) (unified)" } else { $null }
-                    UserFix      = $userFix
-                    UserNote     = $userNote
                 }
-            } -ArgumentList $remotePath, $forward, $watch, $watchdogApps
+            } -ArgumentList $remotePath, $forward, $watch
 
             $state = @($result | Where-Object { $_ -and $_.PSObject.Properties.Name -contains 'RepairResult' }) | Select-Object -Last 1
             if ($state) {
@@ -468,11 +438,6 @@ if ($ComputerName.Count -gt 0) {
                                else { '-' }
                 $row.SnippingTool = if ($state.Provisioned.ContainsKey('Microsoft.ScreenSketch')) { $state.Provisioned['Microsoft.ScreenSketch'] } else { '-' }
                 $row.Photos       = if ($state.Provisioned.ContainsKey('Microsoft.Windows.Photos')) { $state.Provisioned['Microsoft.Windows.Photos'] } else { '-' }
-                if ($state.UserNote) { $row.Note = $state.UserNote }
-                if ($null -ne $state.UserFix) {
-                    $row.Note = if ($state.UserFix -eq 0) { 'watchdog: registered for its accounts' } else { "watchdog -User: exit code $($state.UserFix)" }
-                    if ($state.UserFix -ne 0 -and $row.Exit -eq 0) { $row.Exit = 1 }
-                }
             } else {
                 $row.Exit = 1; $row.Note = 'no result came back'
             }
@@ -1925,6 +1890,73 @@ function Invoke-StoreProvision {
     return $true
 }
 
+function Register-ForSignedInUser {
+    <#
+        A provisioned build reaches a profile at its next sign-in - with FSLogix, the
+        sign-in that loads the container. Everyone signed in now (the owner of an
+        explorer.exe) gets these packages registered in their own session straight
+        away: Add-AppxPackage -RegisterByFamilyName, which takes the provisioned build,
+        through a one-off scheduled task with their SID and an interactive token,
+        under conhost --headless so no window appears - the way Watch-M365Apps.ps1
+        repairs a user. Nothing is opened or closed: an app that is open keeps its
+        build until it is closed or the user signs in again. Read back per user.
+        Returns the number of users still without the provisioned build.
+    #>
+    param([Parameter(Mandatory)] [string[]] $PackageNames)
+
+    $shell   = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $command = (@($PackageNames | ForEach-Object { "Add-AppxPackage -RegisterByFamilyName -MainPackage '{0}_8wekyb3d8bbwe' -ErrorAction SilentlyContinue" -f $_ })) -join '; '
+    $argument = '--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{1}"' -f $shell, $command
+    $provisioned = Get-ProvisionedVersion
+    $missing = 0
+    $seen    = @{}
+    foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
+        $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction SilentlyContinue
+        $sid   = Get-PropertyValue (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue) 'Sid'
+        if (-not $owner -or $owner.ReturnValue -ne 0 -or -not $sid -or $seen.ContainsKey($sid)) { continue }
+        $seen[$sid] = $true
+        $user = '{0}\{1}' -f $owner.Domain, $owner.User
+        if (-not $PSCmdlet.ShouldProcess($user, "Register $($PackageNames -join ', ') in their session")) { continue }
+
+        $name = 'Register-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $path = '\AppxRepair\'
+        try {
+            $principal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
+            $action    = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\conhost.exe') -Argument $argument
+            $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+            Register-ScheduledTask -TaskName $name -TaskPath $path -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+            $started = Get-Date
+            Start-ScheduledTask -TaskName $name -TaskPath $path
+            do {
+                Start-Sleep -Seconds 2
+                $task = Get-ScheduledTask -TaskName $name -TaskPath $path
+                $info = Get-ScheduledTaskInfo -TaskName $name -TaskPath $path
+                $done = $task.State -ne 'Running' -and $info.LastRunTime -ge $started.AddSeconds(-1)
+            } until ($done -or (Get-Date) -gt $started.AddSeconds(180))
+        } catch {
+            Write-Warn "  $user - no task could run in their session: $($_.Exception.Message)"
+        } finally {
+            Unregister-ScheduledTask -TaskName $name -TaskPath $path -Confirm:$false -ErrorAction SilentlyContinue
+        }
+
+        # The task's own exit code does not come through conhost: the package says.
+        # By name, not SID: Get-AppxPackage -User answers "No valid SID" for some.
+        foreach ($pkgName in $PackageNames) {
+            $have = @(Get-AppxPackage -User $user -Name $pkgName -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Status -eq 'Ok' } | ForEach-Object { [version] $_.Version } | Sort-Object -Descending) | Select-Object -First 1
+            if ($have -and $provisioned.ContainsKey($pkgName) -and $have -ge $provisioned[$pkgName]) {
+                Write-Ok "  $user - $pkgName $have"
+            } else {
+                $what = if ($have) { "still $have - open, so it switches when closed or at their next sign-in" } else { 'not registered - at their next sign-in' }
+                Write-Warn "$user - ${pkgName}: $what"
+                $missing++
+            }
+        }
+    }
+    if ($seen.Count -eq 0) { Write-Skip '  Nobody signed in - every profile gets the build at its next sign-in' }
+    return $missing
+}
+
 # -- Everything that fails -----------------------------------------------------
 function Get-FailingApp {
     <#
@@ -2325,16 +2357,23 @@ try {
     # Snipping Tool / Photos: from -StoreFolder - filled by the run that fanned out
     # with -ComputerName - or downloaded here from the msstore source.
     if ($Provision) {
+        $storeDone = @()
         foreach ($pkg in $storeTargets) {
             if (-not $PSCmdlet.ShouldProcess($pkg, 'Provision for all users (Microsoft Store download + Add-AppxProvisionedPackage)')) { continue }
             try {
                 $folder = if ($StoreFolder) { Join-Path $StoreFolder $pkg } else { Save-StorePackage -PackageName $pkg -Folder (Join-Path $WorkingDir 'Store') }
-                if (-not (Invoke-StoreProvision -PackageName $pkg -Folder $folder -BackupFolder $backupDir)) { $exitCode = 1 }
+                if (Invoke-StoreProvision -PackageName $pkg -Folder $folder -BackupFolder $backupDir) { $storeDone += $pkg } else { $exitCode = 1 }
             } catch {
                 Write-Bad "Provisioning $pkg failed: $($_.Exception.Message)"
                 Write-AppxDeploymentError -Minutes 20
                 $exitCode = 1
             }
+        }
+        # Provisioned is every future sign-in; whoever is signed in now gets it now.
+        if ($storeDone.Count -gt 0 -and -not $simulate) {
+            Write-Out ''
+            Write-Step "6a. Register $($storeDone -join ', ') for everyone signed in"
+            [void] (Register-ForSignedInUser -PackageNames $storeDone)
         }
     }
 

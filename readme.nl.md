@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (4)
+| Wijziging |
+|-----------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1) `-Name snippingtool,photos -Provision` registreert de nieuwe build voor **iedereen die op de host aangemeld is**, niet alleen voor de eigen accounts van de watchdog: op een FSLogix-pool bereikt provisionen een profiel pas bij de aanmelding die de container laadt, dus klanten die nu aangemeld zijn hielden de hele dag de kapotte build. Elke aangemelde gebruiker krijgt `Add-AppxPackage -RegisterByFamilyName` in de eigen sessie, via een eenmalige taak als die gebruiker onder `conhost --headless` (zoals de watchdog een gebruiker herstelt), en de build wordt per gebruiker teruggelezen; er wordt niets geopend of gesloten. De stap hangt niet meer af van een geïnstalleerde watchdog |
+| Gecontroleerd: syntaxcontrole. **Niet** gecontroleerd: de registratie via een taak op een sessiehost — van hieruit was er geen bereikbaar |
+
 ### 2026-10-20 (3)
 | Wijziging |
 |-----------|
