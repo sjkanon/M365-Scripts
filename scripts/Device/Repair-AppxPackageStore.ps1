@@ -1917,11 +1917,16 @@ function Invoke-HostProvision {
     if ($candidates.Count -eq 0) { throw "no signed build of $PackageName on this host to provision from - no user has it; use -Provision without -FromHost to take it from the Store" }
     Remove-DeprovisionedMarker -PackageName $PackageName -BackupFolder $BackupFolder
 
-    $before = (Get-ProvisionedVersion)[$PackageName]
+    $before   = (Get-ProvisionedVersion)[$PackageName]
+    $signedIn = $false
     foreach ($pkg in $candidates) {
         try {
             Add-AppxProvisionedPackage -Online -FolderPath $pkg.InstallLocation -SkipLicense -ErrorAction Stop | Out-Null
         } catch {
+            # -FolderPath is refused while other users are signed in, and nothing forces
+            # it short of signing everyone off. A package file (-PackagePath, the Store
+            # route) is not refused.
+            if ($_.Exception.Message -match 'other users are logged on') { $signedIn = $true }
             Write-Warn "  $($pkg.PackageFullName): $($_.Exception.Message)"
             continue
         }
@@ -1932,7 +1937,16 @@ function Invoke-HostProvision {
             return $true
         }
     }
-    Write-Bad "${PackageName}: none of the $($candidates.Count) build(s) on this host could be provisioned"
+    # Already provisioned is what every next sign-in needs: the repair that matters is
+    # registering it for the users signed in now, which does not wait for them to leave.
+    $now = (Get-ProvisionedVersion)[$PackageName]
+    if ($now) {
+        $why = if ($signedIn) { 'provisioning again from a folder needs everyone signed off' } else { 'provisioning it again did not take' }
+        Write-Warn "$PackageName stays provisioned at $now ($why) - every next sign-in gets it; registering it for the users signed in now"
+        return $true
+    }
+    $hint = if ($signedIn) { ' - sign everyone off (drain the host) and run again, or use -Provision without -FromHost: a package file from the Store is not refused' } else { '' }
+    Write-Bad "${PackageName}: none of the $($candidates.Count) build(s) on this host could be provisioned$hint"
     return $false
 }
 
@@ -1985,7 +1999,8 @@ function Register-ForSignedInUser {
         sign-in that loads the container. Everyone signed in now (the owner of an
         explorer.exe) gets these packages registered in their own session straight
         away: Add-AppxPackage -RegisterByFamilyName, which takes the provisioned build,
-        through a one-off scheduled task with their SID and an interactive token,
+        and when that is refused -Register from the manifest of the newest main package
+        on the host - through a one-off scheduled task with their SID and an interactive token,
         under conhost --headless so no window appears - the way Watch-M365Apps.ps1
         repairs a user. Nothing is opened or closed: an app that is open keeps its
         build until it is closed or the user signs in again. Read back per user.
@@ -1993,9 +2008,16 @@ function Register-ForSignedInUser {
     #>
     param([Parameter(Mandatory)] [string[]] $PackageNames)
 
-    $shell   = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $command = (@($PackageNames | ForEach-Object { "Add-AppxPackage -RegisterByFamilyName -MainPackage '{0}_8wekyb3d8bbwe' -ErrorAction SilentlyContinue" -f $_ })) -join '; '
-    $argument = '--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{1}"' -f $shell, $command
+    $shell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    # Per package: by family name (the provisioned build); when that is refused, from
+    # the manifest of the newest main package on this host. What still fails is
+    # written where the user can write and this run can read - the task's own output
+    # and exit code do not come through conhost - so the reason is shown, not guessed.
+    $manifests = @{}
+    foreach ($pkgName in $PackageNames) {
+        $main = @(Get-HostBuild -PackageName $pkgName | Where-Object { -not $_.IsBundle }) | Select-Object -First 1
+        if ($main) { $manifests[$pkgName] = Join-Path $main.InstallLocation 'AppxManifest.xml' }
+    }
     $provisioned = Get-ProvisionedVersion
     $missing = 0
     $seen    = @{}
@@ -2007,8 +2029,16 @@ function Register-ForSignedInUser {
         $user = '{0}\{1}' -f $owner.Domain, $owner.User
         if (-not $PSCmdlet.ShouldProcess($user, "Register $($PackageNames -join ', ') in their session")) { continue }
 
-        $name = 'Register-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-        $path = '\AppxRepair\'
+        $name    = 'Register-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $path    = '\AppxRepair\'
+        $errFile = Join-Path $env:PUBLIC "AppxRepair_$name.txt"
+        $parts   = foreach ($pkgName in $PackageNames) {
+            $byFamily = "Add-AppxPackage -RegisterByFamilyName -MainPackage '" + $pkgName + "_8wekyb3d8bbwe' -ErrorAction Stop"
+            $fallback = if ($manifests.ContainsKey($pkgName)) { "Add-AppxPackage -Register '" + $manifests[$pkgName] + "' -DisableDevelopmentMode -ErrorAction Stop" } else { 'throw $first' }
+            $log      = "Add-Content -Path '" + $errFile + "' -Value ('" + $pkgName + ": ' + (`$_.Exception.Message -replace '\s+', ' ') + ' | by family name: ' + (`$first -replace '\s+', ' '))"
+            'try { ' + $byFamily + ' } catch { $first = $_.Exception.Message; try { ' + $fallback + ' } catch { ' + $log + ' } }'
+        }
+        $argument = '--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{1}"' -f $shell, ($parts -join '; ')
         try {
             $principal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
             $action    = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\conhost.exe') -Argument $argument
@@ -2026,6 +2056,12 @@ function Register-ForSignedInUser {
             Write-Warn "  $user - no task could run in their session: $($_.Exception.Message)"
         } finally {
             Unregister-ScheduledTask -TaskName $name -TaskPath $path -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $errFile) {
+            foreach ($line in @(Get-Content -LiteralPath $errFile -ErrorAction SilentlyContinue)) {
+                Write-Warn "$user - Windows refused: $(($line -split '\r?\n' | Where-Object { $_.Trim() }) -join ' ')"
+            }
+            Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
         }
 
         # The task's own exit code does not come through conhost: the package says.

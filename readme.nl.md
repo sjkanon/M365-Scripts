@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (7)
+| Wijziging |
+|-----------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1) `-FromHost` op een host met aangemelde gebruikers stopte vóór het deel dat ertoe doet: `Add-AppxProvisionedPackage -FolderPath` antwoordde *This operation is not supported while other users are logged on to the computer*, waardoor stap 6a — Knipprogramma registreren voor de aangemelde gebruikers — werd overgeslagen. Die weigering is niet te forceren behalve door iedereen af te melden; als het pakket al geprovisioned is, en dat is wat elke volgende aanmelding nodig heeft, meldt de run dat nu en registreert hij het toch voor de aangemelde gebruikers. Registreren valt terug van de familienaam op `-Register` vanuit het manifest van het nieuwste hoofdpakket op de host, en als beide geweigerd worden komt de eigen foutmelding van Windows per gebruiker terug (door de taak van de gebruiker geschreven in `%PUBLIC%`, gelezen en verwijderd) — eerder was nooit te zien waarom een gebruiker *niet geregistreerd* bleef |
+| Gecontroleerd: syntaxcontrole; de gegenereerde opdracht per gebruiker gedraaid in een sessie op deze machine: Knipprogramma registreert, een pakket dat niet bestaat schrijft één regel met beide fouten (`0x80073CF9`). **Niet** gecontroleerd op een sessiehost: de run via een taak in de sessie van een andere gebruiker |
+
 ### 2026-10-20 (6)
 | Wijziging |
 |-----------|

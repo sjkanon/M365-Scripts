@@ -1011,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-20 (7)
+| Modification |
+|--------------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.fr.md#repair-appxpackagestoreps1) `-FromHost` sur un hôte avec des utilisateurs connectés s'arrêtait avant l'essentiel : `Add-AppxProvisionedPackage -FolderPath` répondait *This operation is not supported while other users are logged on to the computer*, et l'étape 6a — inscrire l'Outil Capture d'écran pour les utilisateurs connectés — était sautée. Ce refus ne se force pas, sauf à déconnecter tout le monde ; quand le paquet est déjà provisionné, ce dont chaque prochaine connexion a besoin, l'exécution le dit désormais et l'inscrit quand même pour les utilisateurs connectés. L'inscription se replie du nom de famille sur `-Register` depuis le manifeste du paquet principal le plus récent de l'hôte, et si les deux sont refusés l'erreur de Windows revient par utilisateur (écrite par la tâche de l'utilisateur dans `%PUBLIC%`, lue puis supprimée) — auparavant, on ne voyait jamais pourquoi un utilisateur restait *non inscrit* |
+| Vérifié : contrôle de syntaxe ; la commande générée par utilisateur exécutée dans une session sur cette machine : l'Outil Capture d'écran s'inscrit, un paquet inexistant écrit une ligne avec les deux erreurs (`0x80073CF9`). **Non** vérifié sur un hôte de session : l'exécution via une tâche dans la session d'un autre utilisateur |
+
 ### 2026-10-20 (6)
 | Modification |
 |--------------|

@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (7)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-FromHost` on a host with users signed in stopped before the part that matters: `Add-AppxProvisionedPackage -FolderPath` answered *This operation is not supported while other users are logged on to the computer*, so step 6a — registering Snipping Tool for the users signed in — was skipped. That refusal cannot be forced short of signing everyone off; when the package is provisioned already, which every next sign-in needs, the run now says so and registers it for the signed-in users anyway. Registration falls back from the family name to `-Register` from the manifest of the newest main package on the host, and when both are refused Windows' own error comes back per user (written by the user's task to `%PUBLIC%`, read and removed) — before, the reason a user stayed *not registered* was never seen |
+| Verified: syntax check; the generated per-user command run in a session on this machine: Snipping Tool registers, a package that does not exist writes one line with both errors (`0x80073CF9`). **Not** verified on a session host: the run through a task in another user's session |
+
 ### 2026-10-20 (6)
 | Change |
 |--------|
