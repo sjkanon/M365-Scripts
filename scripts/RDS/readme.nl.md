@@ -18,7 +18,7 @@ Scripts voor diagnose, monitoring en het klaarmaken van RDP- / RD Web Access-inf
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | FSLogix-profielschijven op een share verkleinen (Invoke-FslShrinkDisk), of controleren of FSLogix ze zelf comprimeert bij afmelden |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Een Windows 11 multi-session-image of AVD-sessiehost controleren en klaarmaken, zodat de nieuwe Teams, de nieuwe Outlook en Copilot blijven werken met FSLogix — FSLogix zelf blijft ongemoeid |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (geplande taak) — test de nieuwe Teams, de nieuwe Outlook, Copilot en Knipprogramma (Snipping Tool) met ons eigen account (`itceadmin`) op een sessiehost, herstelt wat stuk is voordat een klant er last van heeft, en meldt het aan n8n |
-| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Verzamelt, alleen lezend, wat er met de nieuwe Teams, de nieuwe Outlook, Copilot en Knipprogramma (Snipping Tool) op een sessiehost gebeurd is — per gebruiker wat er geregistreerd is en draait, de events, en wat de watchdog deed en zou concluderen, met zijn blinde vlekken — in één zip |
+| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Verzamelt, alleen lezend, wat er met de nieuwe Teams, de nieuwe Outlook, Copilot, Knipprogramma (Snipping Tool) en Foto's (Photos) op een sessiehost gebeurd is — per gebruiker wat er geregistreerd is en draait, de events, en wat de watchdog deed en zou concluderen, met zijn blinde vlekken — in één zip |
 
 ---
 
@@ -473,7 +473,7 @@ deze repo: die is openbaar.
 
 ### Get-M365AppsLog.ps1
 
-Verzamelt alles over de nieuwe Teams, de nieuwe Outlook, Copilot en Knipprogramma (Snipping
+Verzamelt alles over de nieuwe Teams, de nieuwe Outlook, Copilot, Foto's (Photos) en Knipprogramma (Snipping
 Tool) op een sessiehost in één map en zip, om na een klacht twee vragen te beantwoorden: *waarom werkte de app niet bij
 deze gebruiker*, en *waarom zag of herstelde de watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1))
 het niet*. Alleen lezend — er wordt niets gestart, geregistreerd, hersteld of gesloten.
@@ -515,7 +515,7 @@ Uitvoer in `-OutputPath` (anders `%TEMP%`): `summary.txt` (het scherm), `session
 | Parameter | Beschrijving |
 |-----------|--------------|
 | `-User` | Alleen deze gebruikers — gebruikersnaam, UPN of `DOMAIN\user`, ook als ze afgemeld zijn (standaard: iedereen) |
-| `-App` | `Teams`, `Outlook`, `Copilot`, `SnippingTool` (standaard: alle vier) |
+| `-App` | `Teams`, `Outlook`, `Copilot`, `SnippingTool`, `Photos` (standaard: alle vijf) |
 | `-Hours` | Hoe ver terug events en logs gelezen worden (standaard: `24`, hooguit `336`) |
 | `-OutputPath` | Waar de map en zip komen (standaard: `C:\Temp`) |
 | `-WorkingDir` | De map van de watchdog (standaard: `C:\IT\AppWatchdog`) |
