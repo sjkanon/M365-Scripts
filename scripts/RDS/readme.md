@@ -403,8 +403,8 @@ elevated PowerShell on the host:
 
 ```powershell
 # Watch-M365Apps.ps1 at a fixed commit - move both lines together
-$commit = 'ff857a642f06d3fc8eccd833cc97e7db4d205b1d'
-$sha256 = '2E1D483B9F0CBE74BE126C5980EB4B6875D990A7C1E0FC38E14A045C7A415F2C'
+$commit = '56a3025149d54e702d1d1eacc92f8ba807fb4240'
+$sha256 = 'CC89EE2A92874111501FB47C15E1B3611045BFA149242028F5CBF1B9E6A66FFF'
 $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
@@ -418,8 +418,8 @@ On several hosts at once, from your own machine over PowerShell remoting:
 ```powershell
 # Same download on every host, in parallel
 Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
-    $commit = 'ff857a642f06d3fc8eccd833cc97e7db4d205b1d'
-    $sha256 = '2E1D483B9F0CBE74BE126C5980EB4B6875D990A7C1E0FC38E14A045C7A415F2C'
+    $commit = '56a3025149d54e702d1d1eacc92f8ba807fb4240'
+    $sha256 = 'CC89EE2A92874111501FB47C15E1B3611045BFA149242028F5CBF1B9E6A66FFF'
     $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
