@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) sent a *repair-failed* card **every run** — every minute on LEM-AVD-6 — while it did nothing: the line a run writes for a repair held back by the cooldown (`itceadmin SnippingTool: already repaired at 08:42 - not again within 4 h`, new this morning) counted as a repair, and a repair is reported regardless of `-RenotifyHours`. Only a skipped host repair was left out of that. Skipped repairs of one app for one user, ours or a customer's, are now left out as well: the same problem is reported again after `-RenotifyHours`, or at once when it changes or something is really repaired |
+| Verified: syntax check; the filter against the actions of the card from LEM-AVD-6 (only skips: nothing done; with a reset: something done). **Not** verified on the host: why the run is triggered every minute, and why Snipping Tool stays *not registered* for `itceadmin` after re-registration by family name — that needs the host's log |
+
 ### 2026-10-20
 | Change |
 |--------|

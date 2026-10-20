@@ -1011,6 +1011,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-20 (2)
+| Modification |
+|--------------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.fr.md#watch-m365appsps1) envoyait une carte *repair-failed* **à chaque exécution** — toutes les minutes sur LEM-AVD-6 — alors qu'il ne faisait rien : la ligne qu'une exécution écrit pour une réparation retenue par le délai (`itceadmin SnippingTool: already repaired at 08:42 - not again within 4 h`, nouvelle depuis ce matin) comptait comme une réparation, et une réparation est signalée quel que soit `-RenotifyHours`. Seule une réparation de l'hôte sautée en était exclue. Les réparations sautées d'une application pour un utilisateur, le nôtre ou celui d'un client, le sont désormais aussi : le même problème est signalé de nouveau après `-RenotifyHours`, ou aussitôt s'il change ou si quelque chose est vraiment réparé |
+| Vérifié : contrôle de syntaxe ; le filtre contre les actions de la carte de LEM-AVD-6 (uniquement des sauts : rien fait ; avec une réinitialisation : quelque chose fait). **Non** vérifié sur l'hôte : pourquoi l'exécution est déclenchée toutes les minutes, et pourquoi l'Outil Capture d'écran reste *non inscrit* pour `itceadmin` après la réinscription par nom de famille — il faut pour cela le journal de l'hôte |
+
 ### 2026-10-20
 | Modification |
 |--------------|

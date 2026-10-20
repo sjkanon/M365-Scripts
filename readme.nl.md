@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (2)
+| Wijziging |
+|-----------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1) stuurde **elke run** een *repair-failed*-kaart — op LEM-AVD-6 elke minuut — terwijl hij niets deed: de regel die een run schrijft voor een herstel dat door de cooldown wordt tegengehouden (`itceadmin SnippingTool: already repaired at 08:42 - not again within 4 h`, sinds vanochtend) telde als herstel, en een herstel wordt gemeld ongeacht `-RenotifyHours`. Alleen een overgeslagen hostherstel was daarvan uitgezonderd. Overgeslagen herstel van één app voor één gebruiker, van ons of van een klant, nu ook: hetzelfde probleem wordt opnieuw gemeld na `-RenotifyHours`, of meteen als het verandert of er echt iets hersteld wordt |
+| Gecontroleerd: syntaxcontrole; het filter tegen de acties van de kaart van LEM-AVD-6 (alleen overgeslagen: niets gedaan; met een reset: wel iets gedaan). **Niet** gecontroleerd op de host: waarom de run elke minuut gestart wordt, en waarom Knipprogramma voor `itceadmin` *niet geregistreerd* blijft na registratie op familienaam — daarvoor is het log van de host nodig |
+
 ### 2026-10-20
 | Wijziging |
 |-----------|

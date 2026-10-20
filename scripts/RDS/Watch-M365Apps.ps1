@@ -1931,9 +1931,10 @@ try {
         $kind   = 'repaired'
         $summary = '{0}: {1} problem(s) found and repaired - {2}' -f $env:COMPUTERNAME, $before.Count, ((@($before | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
     } elseif ($after.Count -gt 0) {
-        # A host repair skipped for the cooldown did nothing: not a reason to report the
-        # same problem again every run.
-        $didSomething = @($actions | Where-Object { $_ -notlike 'Host repair skipped*' }).Count -gt 0
+        # A repair skipped for the cooldown - of the host, or of an app for one user, our
+        # own account included - did nothing: not a reason to report the same problem
+        # again every run.
+        $didSomething = @($actions | Where-Object { $_ -notlike 'Host repair skipped*' -and $_ -notlike '* - not again within * h' }).Count -gt 0
         if ($signature -ne $state.Signature -or -not $lastSent -or $lastSent.AddHours($RenotifyHours) -lt (Get-Date) -or $didSomething) {
             $kind   = if ($repair) { 'repair-failed' } else { 'failing' }
             $summary = '{0}: {1} problem(s) {2} - {3}' -f $env:COMPUTERNAME, $after.Count, $(if ($repair) { 'left after repair' } else { 'found' }), ((@($after | ForEach-Object { "$($_.Account): $($_.App) $($_.Problem)" })) -join ', ')
