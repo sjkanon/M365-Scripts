@@ -1011,6 +1011,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-20 (3)
+| Wijziging |
+|-----------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.nl.md#repair-appxpackagestoreps1) brengt **Knipprogramma en Foto's** in één aanroep naar de actuele Microsoft Store-build op de hele pool: `-ComputerName ... -Name snippingtool,photos -Provision`. Op LEM-AVD-6 bleef Knipprogramma *niet geregistreerd* voor `itceadmin` na elke herregistratie, terwijl de host build `2022.2607.23.0` provisionde — het klaarzetten door de watchdog vanuit de build op de host kon alleen die terugzetten. Beide apps hebben geen installer en winget heeft ze alleen uit de bron `msstore`, en die download vraagt een Entra-beheerder: daarom gebeurt de download één keer, op de machine die het script draait, waar die aanmelding beantwoord kan worden; de bundel, zijn frameworks en de offline licentie worden op handtekening gecontroleerd, naar elke host gekopieerd en geprovisioned met `Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath`, nadat een Deprovisioned-markering is geback-upt en verwijderd. Daarna registreert de geïnstalleerde watchdog de apps opnieuw voor zijn eigen accounts die op die host aangemeld zijn (`Watch-M365Apps.ps1 -User`); andere profielen krijgen ze bij hun volgende aanmelding. Nieuw: afkortingen `snippingtool` / `snip` / `photos`, parameter `-StoreFolder`, en kolommen Knipprogramma / Foto's in de pooltabel |
+| Gecontroleerd: syntaxcontrole; een fan-out `-ComputerName ... -Name snippingtool,photos,teams -CheckOnly` tegen een onbereikbare host (geen download zonder `-Provision`, de nieuwe kolommen in de pooltabel); de afkortingen worden `Microsoft.ScreenSketch` / `Microsoft.Windows.Photos`; op een nagebootste downloadmap wordt de bundel gekozen boven een groter los pakket, en worden de frameworks en de licentie gevonden. **Niet** gecontroleerd: de msstore-download zelf (die vraagt een aanmelding als Entra-beheerder, die deze sessie niet heeft), `Add-AppxProvisionedPackage` met de licentie op een sessiehost, en de `-User`-run van de watchdog gestart vanuit een remoting-sessie |
+
 ### 2026-10-20 (2)
 | Wijziging |
 |-----------|

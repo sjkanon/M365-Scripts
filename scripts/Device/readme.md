@@ -213,12 +213,13 @@ The empty path before `(AppxManifest.xml)` is the giveaway: Windows is replaying
 
 | Parameter | Description |
 |-----------|-------------|
-| `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows`. Shorthands: `teams`, `outlook`, `copilot` (= `-Copilot`) — `-Name outlook,copilot` is enough |
+| `-Name` | Package names, wildcards allowed (default `*`). E.g. `MSTeams,Microsoft.OutlookForWindows`. Shorthands: `teams`, `outlook`, `copilot` (= `-Copilot`), `snippingtool` / `snip` (`Microsoft.ScreenSketch`), `photos` (`Microsoft.Windows.Photos`) — `-Name outlook,copilot` is enough |
 | `-CheckOnly` | Diagnose only, change nothing (exit code `2` when there is work) |
-| `-Provision` | Provision Teams / new Outlook for all users with Microsoft's installer: what FSLogix showed is missing or behind, plus either one named explicitly in `-Name` |
+| `-Provision` | Provision Teams / new Outlook for all users with Microsoft's installer: what FSLogix showed is missing or behind, plus either one named explicitly in `-Name`. **Snipping Tool and Photos** named in `-Name` are brought to the current Microsoft Store build: winget has them only from the `msstore` source (`9MZ95KL8MR0L`, `9WZDNCRFJBH4`), whose download asks for an Entra account that is Global, User or License Administrator; the bundle, its frameworks and the offline license are downloaded, signature-checked and provisioned with `Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath`, after a Deprovisioned marker is backed up and removed. With `-ComputerName` the download happens **once, on your own machine**, and the folder is copied to every host; afterwards the installed watchdog registers the apps again for its own accounts that are signed in (`Watch-M365Apps.ps1 -User`) — provisioning reaches other profiles at their next sign-in. The pool table shows the provisioned Snipping Tool and Photos per host |
 | `-UseWinget` | With `-Provision`: take Teams / new Outlook from winget instead of Microsoft's installer. winget checks the SHA256, the script the Microsoft signature. winget's manifests lag behind (measured: Teams 26198 vs 26246, Outlook 1.2026.812 vs 902); the run warns when the build is older than what the profiles ask for |
 | `-WingetId` | winget ids of other packages to provision for all users the same way (only when winget's manifest for it is an MSIX) |
 | `-Source` | Provision this `.msix` / `.msixbundle` after the store is clean |
+| `-StoreFolder` | Folder with the Microsoft Store downloads for Snipping Tool / Photos, one subfolder per package name, as `winget download --source msstore` fills it. `-ComputerName` fills and passes it itself; give it to provision from an earlier download without signing in again |
 | `-IncludeDeprovisioned` | Also clear Deprovisioned markers with a wildcard `-Name` (they are cleared by default only for explicitly named packages) |
 | `-SkipSignatureCheck` | Do not require a valid Microsoft signature on the installer or `-Source` |
 | `-Days` | How far back to read the FSLogix Apps and AppX deployment logs (default `7`) |
@@ -240,6 +241,10 @@ Supports `-WhatIf` and `-Confirm`; asks per change unless `-Confirm:$false`. Nin
 
 # Repair and put Teams + new Outlook back for all users, unattended
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# Snipping Tool and Photos at the current Store build on the pool: one download on this machine
+# (sign in with an Entra admin when asked), provisioned on every host, registered for itceadmin
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
 
 # The whole pool from one place: diagnose, then repair + provision on every host
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly

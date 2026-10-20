@@ -57,9 +57,11 @@
       6. Provision    With -Provision, Teams and new Outlook are provisioned for all
                       users with Microsoft's own installer (teamsbootstrapper.exe -p,
                       Outlook Setup.exe --provision true), or with -UseWinget from the
-                      MSIX winget downloads. -WingetId does the same for any other
-                      package, -Source for an MSIX you supply. All only after the
-                      Microsoft signature is checked.
+                      MSIX winget downloads. Snipping Tool and Photos, which have no
+                      installer, come from the Microsoft Store (winget, msstore source)
+                      with their frameworks and offline license. -WingetId does the
+                      same for any other package, -Source for an MSIX you supply. All
+                      only after the Microsoft signature is checked.
       7. Verify       The diagnosis runs again. Exit code 0 means nothing is broken
                       any more, 1 that something survived.
 
@@ -70,8 +72,9 @@
 .PARAMETER Name
     Package names to look at, wildcards allowed. Default '*': the whole store.
     Examples: 'MSTeams', 'Microsoft.OutlookForWindows', 'MSTeams','Microsoft.OutlookForWindows'.
-    Shorthands: teams (MSTeams), outlook (Microsoft.OutlookForWindows) and copilot
-    (the same as -Copilot), so -Name outlook,copilot is enough.
+    Shorthands: teams (MSTeams), outlook (Microsoft.OutlookForWindows), copilot
+    (the same as -Copilot), snippingtool or snip (Microsoft.ScreenSketch) and photos
+    (Microsoft.Windows.Photos), so -Name outlook,copilot is enough.
 
 .PARAMETER CheckOnly
     Diagnose and report, change nothing. Exit code 2 when there is something to repair.
@@ -86,6 +89,20 @@
     failed to register that this host does not provision, and any of MSTeams /
     Microsoft.OutlookForWindows named explicitly in -Name. Other packages need
     -Source.
+
+    Snipping Tool (Microsoft.ScreenSketch) and Photos (Microsoft.Windows.Photos)
+    named in -Name are brought to the current Microsoft Store build: winget has them
+    only from the msstore source (9MZ95KL8MR0L, 9WZDNCRFJBH4), whose download asks
+    for an Entra account that is Global, User or License Administrator. winget
+    download fetches the bundle, its frameworks and the offline license; every
+    package is checked for Microsoft's signature and provisioned with
+    Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath, after a
+    Deprovisioned marker is backed up and removed. With -ComputerName the download
+    happens once, on this machine - where the sign-in can be answered - and the
+    folder is copied to every host. Afterwards the watchdog, when installed
+    (C:\IT\AppWatchdog), registers the apps again for its own accounts that are signed
+    in (Watch-M365Apps.ps1 -User): provisioning only reaches profiles at their next
+    sign-in.
 
     Where FSLogix fails on a newer Teams or Outlook build than this host
     provisions, that exact build is provisioned instead: the MSIX is downloaded
@@ -137,6 +154,12 @@
     Credential for the remoting sessions, when the current account is not an
     administrator on the hosts.
 
+.PARAMETER StoreFolder
+    Folder with the Microsoft Store downloads for Snipping Tool / Photos, one
+    subfolder per package name (Microsoft.ScreenSketch, Microsoft.Windows.Photos), as
+    winget download --source msstore fills it. -ComputerName fills and passes it
+    itself; give it to provision from a download made earlier, without a new sign-in.
+
 .PARAMETER Copilot
     Look at Copilot: adds Microsoft.MicrosoftOfficeHub and Microsoft.Copilot to -Name
     (so their Deprovisioned markers are in scope) and runs step 1d. What counts as
@@ -176,6 +199,12 @@
 .EXAMPLE
     # The very newest Teams and Outlook on the whole pool, and nothing older left
     .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -RemoveOld -Confirm:$false
+
+.EXAMPLE
+    # Snipping Tool and Photos at the current Store build on the whole pool: one
+    # download here (sign in with an Entra admin when asked), provisioned on every
+    # host, and registered again for the watchdog's own accounts
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
 
 .EXAMPLE
     # What is broken on this host? Changes nothing.
@@ -230,11 +259,75 @@ param (
     [pscredential] $Credential,
     [switch]   $Copilot,
     [switch]   $Latest,
-    [switch]   $RemoveOld
+    [switch]   $RemoveOld,
+    [string]   $StoreFolder
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -- Store-only apps -------------------------------------------------------------
+# Snipping Tool and Photos have no installer and no MSIX in the winget source: winget
+# has them only from the msstore source, whose download needs an Entra account that is
+# Global, User or License Administrator. They are downloaded where that sign-in can be
+# answered - this machine, before -ComputerName fans out - and provisioned from that
+# folder with their frameworks and offline license. App is the watchdog's name for it.
+$StorePackages = @{
+    'Microsoft.ScreenSketch'   = @{ StoreId = '9MZ95KL8MR0L'; App = 'SnippingTool' }
+    'Microsoft.Windows.Photos' = @{ StoreId = '9WZDNCRFJBH4'; App = 'Photos' }
+}
+$StoreShorthands = @{ 'snippingtool' = 'Microsoft.ScreenSketch'; 'snip' = 'Microsoft.ScreenSketch'; 'photos' = 'Microsoft.Windows.Photos' }
+
+function Get-StoreTarget {
+    <# The Store-only packages a -Name list asks for, shorthands resolved. #>
+    param([string[]] $Names)
+    @($Names | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } |
+      ForEach-Object { if ($StoreShorthands.ContainsKey($_)) { $StoreShorthands[$_] } else { $_ } } |
+      Where-Object { $StorePackages.ContainsKey($_) } | Select-Object -Unique)
+}
+
+function Save-StorePackage {
+    <#
+        winget download of one Store-only package from the msstore source into
+        $Folder\<package name>, emptied first: the bundle, its frameworks and the
+        offline license. winget asks for the Entra sign-in itself. Every package file
+        is checked for Microsoft's signature. Returns the folder, or throws.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [Parameter(Mandatory)] [string] $Folder)
+
+    $winget = @(Get-Command 'winget.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ -and (Test-Path $_) }) +
+              @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'winget.exe' } | Where-Object { Test-Path $_ }) |
+              Select-Object -First 1
+    if (-not $winget) { throw 'winget was not found - the App Installer package provides it' }
+
+    $target = Join-Path $Folder $PackageName
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    $id = $StorePackages[$PackageName].StoreId
+    Write-Host "  winget download $id (msstore) - $PackageName; sign in with an Entra admin account when asked" -ForegroundColor Cyan
+    # Windows PowerShell 5.1 with ErrorActionPreference Stop ends the run on any native
+    # stderr line; the exit code is what counts.
+    $ErrorActionPreference = 'Continue'
+    & $winget download --id $id --source msstore --download-directory $target --architecture x64 --platform Windows.Desktop `
+                       --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        throw "winget download --id $id --source msstore failed (exit code $LASTEXITCODE) - the account has to be Global, User or License Administrator"
+    }
+    $files = @(Get-ChildItem -LiteralPath $target -File -Recurse | Where-Object { $_.Extension -in '.msix', '.msixbundle', '.appx', '.appxbundle' })
+    if (@($files | Where-Object { $_.Name -like "$PackageName*" }).Count -eq 0) { throw "winget downloaded no $PackageName package into $target" }
+    if (-not $SkipSignatureCheck) {
+        foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+                throw "$($file.Name) is not validly signed by Microsoft - not used"
+            }
+        }
+    }
+    Write-Host ("  [ OK ] {0}: {1} package file(s), license {2}" -f $PackageName, $files.Count,
+                $(if (Get-ChildItem -LiteralPath $target -File -Recurse -Filter '*.xml') { 'included' } else { 'not included' })) -ForegroundColor Green
+    return $target
+}
 
 # -- Several session hosts -----------------------------------------------------
 # With -ComputerName this run only orchestrates: it copies itself to each host over
@@ -260,14 +353,37 @@ if ($ComputerName.Count -gt 0) {
     if ($changes) { $forward['Confirm'] = $false }
     if ($WhatIfPreference) { $forward['WhatIf'] = $true }
 
+    # Snipping Tool / Photos: downloaded once, here, before any host is touched - a
+    # failed sign-in stops the run with nothing changed. -StoreFolder given here is a
+    # download made earlier on this machine. Each host gets the folder at $remoteStore.
+    $storeTargets = @(Get-StoreTarget $Name)
+    $storeLocal   = $null
+    $remoteStore  = 'C:\IT\AppxRepair\Store'
+    $watchdogApps = @()
+    if ($changes -and $Provision -and $storeTargets.Count -gt 0) {
+        try {
+            if ($StoreFolder) {
+                $storeLocal = $StoreFolder
+            } else {
+                $storeLocal = Join-Path $env:TEMP 'AppxRepair_Store'
+                foreach ($pkg in $storeTargets) { [void] (Save-StorePackage -PackageName $pkg -Folder $storeLocal) }
+            }
+        } catch {
+            Write-Host "  [FAIL] $($_.Exception.Message) - no host was changed" -ForegroundColor Red
+            exit 1
+        }
+        $forward['StoreFolder'] = $remoteStore
+        $watchdogApps = @($storeTargets | ForEach-Object { $StorePackages[$_].App })
+    }
+
     $remotePath = 'C:\IT\AppxRepair\Repair-AppxPackageStore.ps1'
-    $watch      = @('MSTeams', 'Microsoft.OutlookForWindows', 'Microsoft.MicrosoftOfficeHub')
+    $watch      = @('MSTeams', 'Microsoft.OutlookForWindows', 'Microsoft.MicrosoftOfficeHub', 'Microsoft.ScreenSketch', 'Microsoft.Windows.Photos')
     $summary    = [System.Collections.Generic.List[object]]::new()
 
     foreach ($computer in $ComputerName) {
         Write-Host ''
         Write-Host ("  ==== {0} " -f $computer).PadRight(80, '=') -ForegroundColor Cyan
-        $row = [ordered]@{ Host = $computer; Exit = $null; FSLogix = ''; MSTeams = ''; Outlook = ''; Copilot = ''; Note = '' }
+        $row = [ordered]@{ Host = $computer; Exit = $null; FSLogix = ''; MSTeams = ''; Outlook = ''; Copilot = ''; SnippingTool = ''; Photos = ''; Note = '' }
         $session = $null
         try {
             $sessionArgs = @{ ComputerName = $computer; ErrorAction = 'Stop' }
@@ -278,13 +394,51 @@ if ($ComputerName.Count -gt 0) {
                 param($Path) New-Item -ItemType Directory -Path (Split-Path $Path) -Force | Out-Null
             } -ArgumentList $remotePath
             Copy-Item -Path $PSCommandPath -Destination $remotePath -ToSession $session -Force
+            if ($storeLocal) {
+                Invoke-Command -Session $session -ScriptBlock {
+                    param($Path)
+                    if (Test-Path $Path) { Remove-Item -Path $Path -Recurse -Force }
+                    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+                } -ArgumentList $remoteStore
+                foreach ($pkg in $storeTargets) {
+                    Copy-Item -Path (Join-Path $storeLocal $pkg) -Destination $remoteStore -ToSession $session -Recurse -Force
+                }
+            }
 
             # The host's own output streams back as it runs; the last object is the
             # state afterwards, read on the host itself.
             $result = Invoke-Command -Session $session -ScriptBlock {
-                param($Path, $Params, $Watch)
+                param($Path, $Params, $Watch, $Apps)
                 & $Path @Params
                 $code = $LASTEXITCODE
+                # Provisioning reaches a profile at its next sign-in. The watchdog's own
+                # accounts that are signed in get the apps registered again now - only
+                # the apps the installed watchdog knows, so an older one is not refused.
+                $userFix  = $null
+                $userNote = ''
+                $watchdog = 'C:\IT\AppWatchdog\Watch-M365Apps.ps1'
+                $config   = 'C:\IT\AppWatchdog\config.json'
+                if (@($Apps).Count -gt 0 -and (Test-Path $watchdog) -and (Test-Path $config)) {
+                    $settings = Get-Content -Path $config -Raw | ConvertFrom-Json
+                    # Only accounts signed in here (the owner of an explorer.exe): the
+                    # watchdog answers a signed-off one with a failure, and its apps live
+                    # in its FSLogix container until the next sign-in anyway.
+                    $owners   = @(Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue |
+                                  ForEach-Object { (Invoke-CimMethod -InputObject $_ -MethodName GetOwner -ErrorAction SilentlyContinue).User } |
+                                  Where-Object { $_ })
+                    $accounts = @($settings.Account | Where-Object { $_ -and ((($_ -replace '^.*\\', '') -replace '@.*$', '') -in $owners) })
+                    $known    = @($Apps | Where-Object { $_ -in @($settings.App) })
+                    if ($known.Count -eq 0) {
+                        $userNote = 'watchdog does not watch these apps - install it again'
+                    } elseif ($accounts.Count -eq 0) {
+                        $userNote = 'watchdog accounts not signed in - registered at their next sign-in'
+                    } else {
+                        Write-Host ''
+                        Write-Host ("  Watchdog: register {0} again for {1}" -f ($known -join ', '), ($accounts -join ', ')) -ForegroundColor Cyan
+                        & $watchdog -User $accounts -App $known
+                        $userFix = $LASTEXITCODE
+                    }
+                }
                 $frx  = Join-Path $env:ProgramFiles 'FSLogix\Apps\frxsvc.exe'
                 $info = if (Test-Path $frx) { (Get-Item $frx).VersionInfo } else { $null }
                 $prov = @{}
@@ -298,8 +452,10 @@ if ($ComputerName.Count -gt 0) {
                     FSLogix      = if ($info) { '{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart } else { 'not installed' }
                     Provisioned  = $prov
                     Copilot      = if ($unified -and $unified.pv) { "$($unified.pv) (unified)" } else { $null }
+                    UserFix      = $userFix
+                    UserNote     = $userNote
                 }
-            } -ArgumentList $remotePath, $forward, $watch
+            } -ArgumentList $remotePath, $forward, $watch, $watchdogApps
 
             $state = @($result | Where-Object { $_ -and $_.PSObject.Properties.Name -contains 'RepairResult' }) | Select-Object -Last 1
             if ($state) {
@@ -310,6 +466,13 @@ if ($ComputerName.Count -gt 0) {
                 $row.Copilot = if ($state.Copilot) { $state.Copilot }
                                elseif ($state.Provisioned.ContainsKey('Microsoft.MicrosoftOfficeHub')) { $state.Provisioned['Microsoft.MicrosoftOfficeHub'] }
                                else { '-' }
+                $row.SnippingTool = if ($state.Provisioned.ContainsKey('Microsoft.ScreenSketch')) { $state.Provisioned['Microsoft.ScreenSketch'] } else { '-' }
+                $row.Photos       = if ($state.Provisioned.ContainsKey('Microsoft.Windows.Photos')) { $state.Provisioned['Microsoft.Windows.Photos'] } else { '-' }
+                if ($state.UserNote) { $row.Note = $state.UserNote }
+                if ($null -ne $state.UserFix) {
+                    $row.Note = if ($state.UserFix -eq 0) { 'watchdog: registered for its accounts' } else { "watchdog -User: exit code $($state.UserFix)" }
+                    if ($state.UserFix -ne 0 -and $row.Exit -eq 0) { $row.Exit = 1 }
+                }
             } else {
                 $row.Exit = 1; $row.Note = 'no result came back'
             }
@@ -330,8 +493,8 @@ if ($ComputerName.Count -gt 0) {
     Write-Host ''
     Write-Host '  ==== Pool '.PadRight(80, '=') -ForegroundColor Cyan
     $summary | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-    foreach ($column in 'FSLogix', 'MSTeams', 'Outlook', 'Copilot') {
-        $values = @($summary | Where-Object { $null -ne $_.Exit -and -not $_.Note } | ForEach-Object { $_.$column } | Select-Object -Unique)
+    foreach ($column in 'FSLogix', 'MSTeams', 'Outlook', 'Copilot', 'SnippingTool', 'Photos') {
+        $values = @($summary | Where-Object { $null -ne $_.Exit -and $_.Note -notlike 'not reached*' -and $_.Note -ne 'no result came back' } | ForEach-Object { $_.$column } | Select-Object -Unique)
         if ($values.Count -gt 1) {
             Write-Host "  [WARN] $column differs between hosts ($($values -join ' / ')) - users moving between them get a different build" -ForegroundColor Yellow
         }
@@ -431,6 +594,7 @@ $Name = @(foreach ($entry in $Name) {
         'teams'   { 'MSTeams' }
         'outlook' { 'Microsoft.OutlookForWindows' }
         'copilot' { $Copilot = $true }
+        { $StoreShorthands.ContainsKey($_) } { $StoreShorthands[$_] }
         default   { $entry }
     }
 })
@@ -443,6 +607,8 @@ if ($Copilot) {
     $Name = @($keep + @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot') | Select-Object -Unique)
 }
 $WingetId = @($WingetId | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# Snipping Tool / Photos asked for by name: -Provision brings them to the Store build.
+$storeTargets = @($Name | Where-Object { $StorePackages.ContainsKey($_) } | Select-Object -Unique)
 
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
 if ($confirmSuppressed) { $ConfirmPreference = 'None' }
@@ -1711,6 +1877,54 @@ function Invoke-WingetProvision {
     return $after[$mainName]
 }
 
+function Invoke-StoreProvision {
+    <#
+        Provision a Store-only package (Snipping Tool, Photos) for all users from the
+        folder winget download filled: the package, the frameworks it depends on and
+        the offline license, each checked for Microsoft's signature. A Deprovisioned
+        marker - how a bloatware removal is remembered - is backed up and removed
+        first, or Windows keeps the app from new profiles. Returns whether the package
+        is provisioned afterwards.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [Parameter(Mandatory)] [string] $Folder, [string] $BackupFolder)
+
+    if (-not (Test-Path -LiteralPath $Folder)) { throw "$Folder not found - nothing was downloaded for $PackageName" }
+    $files = @(Get-ChildItem -LiteralPath $Folder -File -Recurse | Where-Object { $_.Extension -in '.msix', '.msixbundle', '.appx', '.appxbundle' })
+    # The bundle over a single package, the largest when there are several.
+    $main  = $files | Where-Object { $_.Name -like "$PackageName*" } |
+             Sort-Object -Property @{ Expression = { $_.Extension -like '*bundle' } }, Length -Descending | Select-Object -First 1
+    if (-not $main) { throw "no $PackageName package in $Folder" }
+    $deps    = @($files | Where-Object { $_.Name -notlike "$PackageName*" })
+    $license = Get-ChildItem -LiteralPath $Folder -File -Recurse -Filter '*.xml' | Select-Object -First 1
+    if (-not $SkipSignatureCheck) {
+        foreach ($file in @($main) + $deps) {
+            if (-not (Test-MicrosoftSignature -Path $file.FullName)) { throw "$($file.Name) is not validly signed by Microsoft - refusing to provision it" }
+        }
+    }
+
+    $marker = "$AppxAllUserStorePath\Deprovisioned\${PackageName}_8wekyb3d8bbwe"
+    if (Test-Path $marker) {
+        if ($BackupFolder -and -not (Backup-RegistryKey -Key $marker -Folder $BackupFolder)) { throw "could not back up $marker - $PackageName not provisioned" }
+        Remove-Item -Path $marker -Recurse -Force
+        Write-Ok "  Deprovisioned marker for $PackageName removed"
+    }
+
+    $before = (Get-ProvisionedVersion)[$PackageName]
+    $params = @{ Online = $true; PackagePath = $main.FullName; ErrorAction = 'Stop' }
+    if ($deps.Count -gt 0) { $params['DependencyPackagePath'] = @($deps | ForEach-Object { $_.FullName }) }
+    if ($license) { $params['LicensePath'] = $license.FullName } else { $params['SkipLicense'] = $true }
+    Add-AppxProvisionedPackage @params | Out-Null
+
+    $after = (Get-ProvisionedVersion)[$PackageName]
+    if (-not $after) {
+        Write-Bad "${PackageName}: Add-AppxProvisionedPackage completed, but it is not provisioned"
+        return $false
+    }
+    $was = if ($before -and $before -ne $after) { " (was $before)" } elseif ($before) { ' (already this build)' } else { '' }
+    Write-Ok "$PackageName provisioned for all users from the Microsoft Store: $after$was"
+    return $true
+}
+
 # -- Everything that fails -----------------------------------------------------
 function Get-FailingApp {
     <#
@@ -1850,6 +2064,14 @@ try {
         }
     }
     Write-AppxPolicyStatus
+    foreach ($pkg in $storeTargets) {
+        if ($provisionedNow.ContainsKey($pkg)) {
+            Write-Skip "  $pkg is provisioned at $($provisionedNow[$pkg]) - -Provision brings it to the current Microsoft Store build"
+        } else {
+            Write-Warn "$pkg is not provisioned - new profiles do not get it; -Provision downloads it from the Microsoft Store"
+            $work++
+        }
+    }
 
     # -- 1c. Everything that fails --------------------------------------------
     # Not only what the store gets wrong: every package that failed to install,
@@ -1915,7 +2137,7 @@ try {
         }
     }
 
-    if ($work -eq 0 -and $removeOldTargets.Count -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count) -gt 0)) {
+    if ($work -eq 0 -and $removeOldTargets.Count -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count + $storeTargets.Count) -gt 0)) {
         # "Nothing to repair" while a package failed today is not the same as healthy.
         if ($script:unexplained.Count -gt 0) {
             $plannedExit = 1
@@ -2097,6 +2319,22 @@ try {
             Write-Bad "Provisioning $id failed: $($_.Exception.Message)"
             Write-AppxDeploymentError -Minutes 20
             $exitCode = 1
+        }
+    }
+
+    # Snipping Tool / Photos: from -StoreFolder - filled by the run that fanned out
+    # with -ComputerName - or downloaded here from the msstore source.
+    if ($Provision) {
+        foreach ($pkg in $storeTargets) {
+            if (-not $PSCmdlet.ShouldProcess($pkg, 'Provision for all users (Microsoft Store download + Add-AppxProvisionedPackage)')) { continue }
+            try {
+                $folder = if ($StoreFolder) { Join-Path $StoreFolder $pkg } else { Save-StorePackage -PackageName $pkg -Folder (Join-Path $WorkingDir 'Store') }
+                if (-not (Invoke-StoreProvision -PackageName $pkg -Folder $folder -BackupFolder $backupDir)) { $exitCode = 1 }
+            } catch {
+                Write-Bad "Provisioning $pkg failed: $($_.Exception.Message)"
+                Write-AppxDeploymentError -Minutes 20
+                $exitCode = 1
+            }
         }
     }
 

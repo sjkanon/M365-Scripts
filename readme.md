@@ -1011,6 +1011,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-20 (3)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) brings **Snipping Tool and Photos** to the current Microsoft Store build on the whole pool in one call: `-ComputerName ... -Name snippingtool,photos -Provision`. On LEM-AVD-6 Snipping Tool stayed *not registered* for `itceadmin` after every re-registration, with the host provisioning build `2022.2607.23.0` — the watchdog's provisioning from the build on the host could only ever put that one back. Both apps have no installer and winget has them only from the `msstore` source, whose download needs an Entra admin: so the download happens once, on the machine running the script, where that sign-in can be answered; the bundle, its frameworks and the offline license are signature-checked, copied to each host and provisioned with `Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath`, a Deprovisioned marker backed up and removed first. Afterwards the installed watchdog registers the apps again for its own accounts that are signed in on that host (`Watch-M365Apps.ps1 -User`); other profiles get them at their next sign-in. New: shorthands `snippingtool` / `snip` / `photos`, parameter `-StoreFolder`, and Snipping Tool / Photos columns in the pool table |
+| Verified: syntax check; a `-ComputerName ... -Name snippingtool,photos,teams -CheckOnly` fan-out against an unreachable host (no download without `-Provision`, the new columns in the pool table); the shorthands resolve to `Microsoft.ScreenSketch` / `Microsoft.Windows.Photos`; on a mock download folder the bundle is taken over a larger loose package, the frameworks and the license are found. **Not** verified: the msstore download itself (it needs an Entra admin sign-in, which this session does not have), `Add-AppxProvisionedPackage` with the license on a session host, and the watchdog's `-User` run started from a remoting session |
+
 ### 2026-10-20 (2)
 | Change |
 |--------|

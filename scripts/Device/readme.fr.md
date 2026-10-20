@@ -213,12 +213,13 @@ Le chemin vide avant `(AppxManifest.xml)` est l'indice révélateur : Windows re
 
 | Paramètre | Description |
 |-----------|-------------|
-| `-Name` | Noms de paquets, caractères génériques autorisés (par défaut `*`). Par ex. `MSTeams,Microsoft.OutlookForWindows`. Raccourcis : `teams`, `outlook`, `copilot` (= `-Copilot`) — `-Name outlook,copilot` suffit |
+| `-Name` | Noms de paquets, caractères génériques autorisés (par défaut `*`). Par ex. `MSTeams,Microsoft.OutlookForWindows`. Raccourcis : `teams`, `outlook`, `copilot` (= `-Copilot`), `snippingtool` / `snip` (`Microsoft.ScreenSketch`), `photos` (`Microsoft.Windows.Photos`) — `-Name outlook,copilot` suffit |
 | `-CheckOnly` | Diagnostic uniquement, aucune modification (code de sortie `2` s'il y a du travail) |
-| `-Provision` | Provisionne Teams / le nouvel Outlook pour tous les utilisateurs avec le programme d'installation de Microsoft : ce que FSLogix montre comme manquant ou en retard, plus l'un ou l'autre s'il est nommé explicitement dans `-Name` |
+| `-Provision` | Provisionne Teams / le nouvel Outlook pour tous les utilisateurs avec le programme d'installation de Microsoft : ce que FSLogix montre comme manquant ou en retard, plus l'un ou l'autre s'il est nommé explicitement dans `-Name`. **L'Outil Capture d'écran et Photos** nommés dans `-Name` sont amenés à la build actuelle du Microsoft Store : winget ne les propose que depuis la source `msstore` (`9MZ95KL8MR0L`, `9WZDNCRFJBH4`), dont le téléchargement exige un compte Entra administrateur global, des utilisateurs ou des licences ; le bundle, ses frameworks et la licence hors ligne sont téléchargés, leur signature vérifiée, puis provisionnés avec `Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath`, après sauvegarde et suppression d'un marqueur Deprovisioned. Avec `-ComputerName`, le téléchargement a lieu **une seule fois, sur votre propre machine**, et le dossier est copié sur chaque hôte ; ensuite le watchdog installé réinscrit les applications pour ses propres comptes connectés (`Watch-M365Apps.ps1 -User`) — les autres profils les reçoivent à leur prochaine connexion. Le tableau du pool montre par hôte l'Outil Capture d'écran et Photos provisionnés |
 | `-UseWinget` | Avec `-Provision` : prend Teams / le nouvel Outlook depuis winget au lieu du programme d'installation de Microsoft. winget vérifie le SHA256, le script la signature Microsoft. Les manifestes winget sont en retard (mesuré : Teams 26198 contre 26246, Outlook 1.2026.812 contre 902) ; l'exécution avertit lorsque le build est plus ancien que ce que demandent les profils |
 | `-WingetId` | ID winget d'autres paquets à provisionner de la même façon pour tous les utilisateurs (uniquement si le manifeste winget correspondant est un MSIX) |
 | `-Source` | Provisionne ce `.msix` / `.msixbundle` une fois le magasin nettoyé |
+| `-StoreFolder` | Dossier des téléchargements du Microsoft Store pour l'Outil Capture d'écran / Photos, un sous-dossier par nom de paquet, tel que `winget download --source msstore` le remplit. `-ComputerName` le remplit et le transmet lui-même ; indiquez-le pour provisionner depuis un téléchargement antérieur sans vous reconnecter |
 | `-IncludeDeprovisioned` | Efface aussi les marqueurs Deprovisioned avec un `-Name` générique (par défaut, ils ne sont effacés que pour les paquets nommés explicitement) |
 | `-SkipSignatureCheck` | N'exige pas de signature Microsoft valide sur le programme d'installation ou sur `-Source` |
 | `-Days` | Profondeur de lecture des journaux FSLogix Apps et de déploiement AppX (par défaut `7`) |
@@ -240,6 +241,10 @@ Prend en charge `-WhatIf` et `-Confirm` ; demande confirmation pour chaque modif
 
 # Réparer et remettre Teams + le nouvel Outlook pour tous les utilisateurs, sans surveillance
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# L'Outil Capture d'écran et Photos à la build actuelle du Store sur le pool : un seul téléchargement sur cette machine
+# (connectez-vous avec un administrateur Entra si demandé), provisionnés sur chaque hôte, inscrits pour itceadmin
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
 
 # Tout le pool depuis un seul endroit : diagnostic, puis réparation + provisionnement sur chaque hôte
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly

@@ -213,12 +213,13 @@ Het lege pad vóór `(AppxManifest.xml)` verraadt het: Windows speelt een regist
 
 | Parameter | Omschrijving |
 |-----------|-------------|
-| `-Name` | Pakketnamen, wildcards toegestaan (standaard `*`). Bijv. `MSTeams,Microsoft.OutlookForWindows`. Afkortingen: `teams`, `outlook`, `copilot` (= `-Copilot`) — `-Name outlook,copilot` is genoeg |
+| `-Name` | Pakketnamen, wildcards toegestaan (standaard `*`). Bijv. `MSTeams,Microsoft.OutlookForWindows`. Afkortingen: `teams`, `outlook`, `copilot` (= `-Copilot`), `snippingtool` / `snip` (`Microsoft.ScreenSketch`), `photos` (`Microsoft.Windows.Photos`) — `-Name outlook,copilot` is genoeg |
 | `-CheckOnly` | Alleen diagnose, niets wijzigen (exitcode `2` als er werk is) |
-| `-Provision` | Teams / nieuwe Outlook voor alle gebruikers provisionen met de installer van Microsoft: wat volgens FSLogix ontbreekt of achterloopt, plus elk van beide die expliciet in `-Name` staat |
+| `-Provision` | Teams / nieuwe Outlook voor alle gebruikers provisionen met de installer van Microsoft: wat volgens FSLogix ontbreekt of achterloopt, plus elk van beide die expliciet in `-Name` staat. **Knipprogramma en Foto's** in `-Name` worden naar de actuele Microsoft Store-build gebracht: winget heeft ze alleen uit de bron `msstore` (`9MZ95KL8MR0L`, `9WZDNCRFJBH4`), en die download vraagt een Entra-account dat Global, User of License Administrator is; de bundel, zijn frameworks en de offline licentie worden gedownload, op handtekening gecontroleerd en geprovisioned met `Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath`, nadat een Deprovisioned-markering is geback-upt en verwijderd. Met `-ComputerName` gebeurt de download **één keer, op je eigen machine**, en wordt de map naar elke host gekopieerd; daarna registreert de geïnstalleerde watchdog de apps opnieuw voor zijn eigen accounts die aangemeld zijn (`Watch-M365Apps.ps1 -User`) — andere profielen krijgen ze bij hun volgende aanmelding. De pooltabel toont per host het geprovisionde Knipprogramma en Foto's |
 | `-UseWinget` | Met `-Provision`: Teams / nieuwe Outlook uit winget halen in plaats van met de installer van Microsoft. winget controleert de SHA256, het script de Microsoft-handtekening. De manifests van winget lopen achter (gemeten: Teams 26198 vs 26246, Outlook 1.2026.812 vs 902); de run waarschuwt als de build ouder is dan wat de profielen vragen |
 | `-WingetId` | winget-ID's van andere pakketten die op dezelfde manier voor alle gebruikers worden geprovisiond (alleen als het winget-manifest ervan een MSIX is) |
 | `-Source` | Deze `.msix` / `.msixbundle` provisionen nadat de store schoon is |
+| `-StoreFolder` | Map met de Microsoft Store-downloads voor Knipprogramma / Foto's, één submap per pakketnaam, zoals `winget download --source msstore` die vult. `-ComputerName` vult en geeft hem zelf door; geef hem mee om vanuit een eerdere download te provisionen zonder opnieuw aan te melden |
 | `-IncludeDeprovisioned` | Ook Deprovisioned-markeringen opruimen bij een wildcard-`-Name` (standaard worden ze alleen opgeruimd voor expliciet genoemde pakketten) |
 | `-SkipSignatureCheck` | Geen geldige Microsoft-handtekening eisen op de installer of op `-Source` |
 | `-Days` | Hoe ver terug de FSLogix Apps- en AppX-deploymentlogs worden gelezen (standaard `7`) |
@@ -240,6 +241,10 @@ Ondersteunt `-WhatIf` en `-Confirm`; vraagt per wijziging tenzij `-Confirm:$fals
 
 # Herstellen en Teams + nieuwe Outlook terugzetten voor alle gebruikers, onbeheerd
 .\Repair-AppxPackageStore.ps1 -Name MSTeams,Microsoft.OutlookForWindows -Provision -Confirm:$false
+
+# Knipprogramma en Foto's op de actuele Store-build op de pool: één download op deze machine
+# (meld aan met een Entra-beheerder als daarom gevraagd wordt), geprovisioned op elke host, geregistreerd voor itceadmin
+.\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
 
 # De hele pool vanaf één plek: diagnose, daarna herstel + provisionen op elke host
 .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name MSTeams,Microsoft.OutlookForWindows -CheckOnly
