@@ -1011,6 +1011,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-21
+| Wijziging |
+|-----------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): op een FSLogix-host noemt de controle van de pakketstore niet langer elke afgemelde gebruiker een wees. "Geen sleutel onder `ProfileList`" gold als "deze gebruiker is weg", maar FSLogix verwijdert die sleutel bij elke afmelding — op twee gepoolde sessiehosts waren de "wezen" grotendeels actieve gebruikers, en `-RepairAppxStore` zou hun registraties hebben verwijderd. Met FSLogix is een vermelding nu alleen een wees als het account niet meer bestaat: de SID wordt niet herleid terwijl de groep Domain Users van dat domein dat wel wordt. Is het domein niet bereikbaar, dan wordt niets beslist en blijft de vermelding staan. Wachtende verwijderingen in de preflight volgen dezelfde regel |
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): korter storerapport — één regel per echte wees met het registerpad eronder, en één samenvattende regel met de afgemelde gebruikers wier vermeldingen Windows bij hun volgende aanmelding afrondt, in plaats van drie regels per vermelding |
+| Geverifieerd: syntaxcontrole; de indeling (lokaal / afgemeld / account weg / domein onbereikbaar / SID buiten een domein, met en zonder FSLogix) en het nieuwe rapport tegen een nagebootst register en nagebootste SID-herleiding, op PowerShell 5.1 en 7. **Niet** geverifieerd op een sessiehost: de run tegen een echte `AppxAllUserStore` en een echte domeincontroller |
+
 ### 2026-10-20 (8)
 | Wijziging |
 |-----------|

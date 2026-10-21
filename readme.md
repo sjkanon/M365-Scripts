@@ -1011,6 +1011,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-21
+| Change |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): on an FSLogix host the package store check no longer calls every signed-out user an orphan. It used to treat "no key under `ProfileList`" as "this user is gone", but FSLogix removes that key at every sign-out, so on two pooled session hosts the list of "orphans" was mostly current users, and `-RepairAppxStore` would have removed their registrations. With FSLogix enabled, an entry is now only an orphan when its account no longer exists: the SID does not resolve while that domain's Domain Users group does. If the domain cannot be reached, nothing is decided and the entry is left alone. Pending removals in preflight use the same rule |
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): shorter package store report — one line per real orphan with its registry path underneath, and a single summary line naming the signed-out users whose entries Windows completes at their next sign-in, instead of three lines per entry |
+| Verified: syntax check; the classification (local / signed out / account gone / domain unreachable / non-domain SID, with and without FSLogix) and the new report against mocked registry and SID resolution, on PowerShell 5.1 and 7. **Not** verified on a session host: the run against a real `AppxAllUserStore` and a real domain controller |
+
 ### 2026-10-20 (8)
 | Change |
 |--------|

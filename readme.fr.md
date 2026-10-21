@@ -1011,6 +1011,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-21
+| Modification |
+|--------------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1) : sur un hôte FSLogix, le contrôle du magasin de paquets ne qualifie plus d'orphelin chaque utilisateur déconnecté. « Aucune clé sous `ProfileList` » valait « cet utilisateur a disparu », mais FSLogix supprime cette clé à chaque déconnexion : sur deux hôtes de session mutualisés, les « orphelins » étaient surtout des utilisateurs actifs, et `-RepairAppxStore` aurait supprimé leurs enregistrements. Avec FSLogix, une entrée n'est désormais orpheline que si le compte n'existe plus : le SID ne se résout pas alors que le groupe Domain Users de ce domaine se résout. Si le domaine est injoignable, rien n'est décidé et l'entrée est laissée en place. Les suppressions en attente du contrôle préalable suivent la même règle |
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1) : rapport du magasin plus court — une ligne par véritable orphelin avec son chemin de registre en dessous, et une seule ligne de synthèse nommant les utilisateurs déconnectés dont Windows termine les entrées à leur prochaine connexion, au lieu de trois lignes par entrée |
+| Vérifié : contrôle de syntaxe ; la classification (local / déconnecté / compte disparu / domaine injoignable / SID hors domaine, avec et sans FSLogix) et le nouveau rapport avec un registre et une résolution de SID simulés, sous PowerShell 5.1 et 7. **Non** vérifié sur un hôte de session : l'exécution contre un vrai `AppxAllUserStore` et un vrai contrôleur de domaine |
+
 ### 2026-10-20 (8)
 | Modification |
 |--------------|
