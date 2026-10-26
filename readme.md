@@ -192,6 +192,8 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `R` | Device | [Repair-AppxPackageStore](scripts/Device/Repair-AppxPackageStore.ps1) — repair AppX packages failing with 0x80070490 (Teams, new Outlook, FSLogix) |
 | `K` | Device | [FSLogix-Shrink](scripts/RDS/Invoke-FSLogixShrink.ps1) — shrink FSLogix profile disks on a share, or check compaction at sign-out |
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
+| `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
+| `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
 | `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -229,6 +231,7 @@ M365 options (`B`, `C`, `D`, `E`, `H`) lazy-load [`functies.ps1`](scripts/Startu
 | `J` | [Move-SharedCalendar](scripts/Exchange/Move-SharedCalendar.ps1) — all in one: find a calendar by keyword, move it into a resource mailbox, list who has to switch |
 | `K` | [Get-DLMembers](scripts/Exchange/Get-DistributionGroupMembers.ps1) — export every distribution list with its members to Excel, or only the lists holding one address, one domain, or a domain tree (`-Recurse` to expand nested lists) |
 | `L` | [Restore-MailboxMessages](scripts/Exchange/Restore-MailboxMessages.ps1) — put back mail that was moved or deleted on a given day, or from a date until now, and show who did it (always previews first) |
+| `M` | [Send-MailboxForward](scripts/Exchange/Send-MailboxForward.ps1) — forward a mailbox to another address: a forwarding rule for new mail plus the mail of the last N days (always previews first) |
 
 **Entra ID submenu (`D`)**
 
@@ -280,6 +283,7 @@ Scripts for calendar and mailbox management.
   - `Recycle` / `SoftDelete` / `HardDelete`; refuses to run without a content selector so a date range alone can never match every message
   - Loops purge rounds automatically around Purview's 10-items-per-mailbox limit, and writes a CSV of everything matched and deleted
 - **[Restore-MailboxMessages.ps1](scripts/Exchange/Restore-MailboxMessages.ps1)** — put back messages that were moved or deleted on a given day, and report who did it; preview by default
+- **[Send-MailboxForward.ps1](scripts/Exchange/Send-MailboxForward.ps1)** — forward all mail of a mailbox to another address: a forwarding rule for new mail, plus the mail of the last N days through a temporary app registration; preview by default
   - Deleted messages go back via `Restore-RecoverableItems` (Deleted Items, Recoverable Items, Purges); moved messages are traced to their original folder through the audit log and moved back over Graph
   - Names the actor from the Unified Audit Log — account, owner/delegate/admin, client, IP — and says which actions are not audited on the mailbox
 
@@ -357,6 +361,10 @@ Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 - `ConfirmImpact = 'High'`, so it asks per removal unless `-Confirm:$false`
 
 **[Test-SharePointAccessScripts.ps1](scripts/SharePoint/Test-SharePointAccessScripts.ps1)** verifies this script and the permissions report without touching a tenant: the app-only auth layer both share must stay byte-identical, and the revocation funnel must record a dry run without executing it, execute and record under `-Apply`, and keep refusing the grants it must not remove.
+
+#### Folder Access per Subfolder
+
+**[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the owners, the subfolders of a folder and who belongs in each. It creates an Entra security group per subfolder plus an Owners group (Full Control everywhere; the owners own every group, so the team leads manage membership themselves in My Groups), creates missing folders and optional personal folders per person, gives each group read/write on its subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
 
 #### Recycle Bin Restore
 
@@ -467,6 +475,15 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 - Session host image ([`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1)) — makes a Windows 11 multi-session image or AVD host fit for new Teams, new Outlook and Copilot with FSLogix, without changing FSLogix:
   - Checks WebView2, the AppX frameworks the apps depend on, provisioned builds and per-user drift, Teams on AVD (SlimCore, the WebRTC redirector retired on 1 October 2026), Shared Computer Activation and the sign-in broker
   - Updates Teams, Outlook, Copilot, the meeting add-in and WebView2 to their newest build on every run (Teams' self-update off only where FSLogix needs it) and fixes the apps through `Repair-AppxPackageStore.ps1` and `Update-TeamsClient.ps1`; `-ComputerName` compares the whole pool, `-ForCapture` checks Sysprep readiness
+
+- App watchdog ([`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1)) — a scheduled task (System) that tests new Teams, new Outlook, Copilot, Snipping Tool and Photos with our own account (`itceadmin`) on a session host:
+  - Checks the host provisions the apps, and per signed-in account that each one is registered, intact and actually starts in that session
+  - Also checks every other signed-in user, and every app a user could not open (TWinUI 5961) or whose registration failed (AppX 401/404), and re-registers it in that user's own session without a window - never while it runs for them, never a reset; every report names the user
+  - Repairs the host through `Repair-AppxPackageStore.ps1 -Provision` (with a cooldown) and our own account by re-registering or resetting the app, without touching customers' sessions; reports `repaired` / `repair-failed` / `recovered` as JSON to an n8n webhook
+  - Before a repair: collects the evidence with `Get-M365AppsLog.ps1` and tells n8n `repairing`, naming every user; after it, opens the app for a user who had tried to open it
+  - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
+
+- App log collector ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — read only, after a complaint: per user what is registered and running, the AppX/AppReadiness/FSLogix events, registry and logs, and the watchdog's task, state and logs — set against what the watchdog would conclude, with its blind spots (e.g. the unified Copilot app); one zip
 
 ---
 
@@ -626,10 +643,6 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 
 ### 🔧 Custom Tools
 
-
-
-
-
 #### Windows Device Management
 
 📂 Folder: [`Device/`](scripts/Device/readme.md)
@@ -764,6 +777,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/Exchange/Set-Distributionlist-dynamic-static.ps1">Set-Distributionlist-dynamic-static.ps1</a>
     │   ├── <a href="scripts/Exchange/Move-InboxToArchive.ps1">Move-InboxToArchive.ps1</a>
     │   ├── <a href="scripts/Exchange/Restore-MailboxMessages.ps1">Restore-MailboxMessages.ps1</a>  ← put back mail moved/deleted on a date, and who did it
+    │   ├── <a href="scripts/Exchange/Send-MailboxForward.ps1">Send-MailboxForward.ps1</a>  ← forward a mailbox: rule for new mail + the last N days
     │   ├── <a href="scripts/Exchange/Test-CalendarPermissions.ps1">Test-CalendarPermissions.ps1</a>
     │   ├── <a href="scripts/Exchange/Get-CalendarMappings.ps1">Get-CalendarMappings.ps1</a>  ← where each calendar is mapped in Outlook, next to the rights behind it
     │   ├── <a href="scripts/Exchange/Test-MailboxPermissions.ps1">Test-MailboxPermissions.ps1</a>
@@ -849,9 +863,12 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     ├── <a href="scripts/RDS/readme.md">RDS/</a>
     │   ├── <a href="scripts/RDS/readme.md">readme.md</a>
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← FSLogix / Azure Files profile diagnostics
+    │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← log collector: apps per user vs. the watchdog
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← shrink FSLogix profile disks, check compaction
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← RDP/RDWeb login failure diagnostics
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot fit for FSLogix on the image
+    │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog: Teams / Outlook / Copilot, repair, n8n
+    │   ├── <a href="scripts/RDS/Watch-M365Apps-ITGlue.md">Watch-M365Apps-ITGlue.md</a>    ← servicedeskversie (NL) om in IT Glue te plakken
     │   └── <a href="scripts/RDS/Watch-RDSLive.ps1">Watch-RDSLive.ps1</a>                 ← real-time session + licensing monitor
     ├── <a href="scripts/SMTP/readme.md">SMTP/</a>
     │   ├── <a href="scripts/SMTP/readme.md">readme.md</a>
@@ -873,6 +890,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/SharePoint/Restore-RecycleBinItems.ps1">Restore-RecycleBinItems.ps1</a>  ← restore deleted files from a recycle bin: one site/OneDrive or tenant-wide (PnP, auto app registration)
     │   ├── <a href="scripts/SharePoint/Trace-SharePointFile.ps1">Trace-SharePointFile.ps1</a>     ← where did a file go: renames, moves, copies, deletes (incl. via a folder) from the audit log, in Brussels time
     │   ├── <a href="scripts/SharePoint/Revoke-SharePointUserAccess.ps1">Revoke-SharePointUserAccess.ps1</a> ← take one user's access away at every level, sharing links included (reports unless -Apply)
+    │   ├── <a href="scripts/SharePoint/Set-SharePointFolderAccess.ps1">Set-SharePointFolderAccess.ps1</a> ← each subfolder of a folder its own Entra group + owners + personal folders, everyone else out (reports unless -Apply)
     │   ├── <a href="scripts/SharePoint/Test-SharePointAccessScripts.ps1">Test-SharePointAccessScripts.ps1</a> ← verify the two access scripts without a tenant (shared auth block + revocation funnel)
     │   └── <a href="scripts/SharePoint/Provisioning/readme.md">Provisioning/</a>                ← provision a whole structure from one JSON config (PnP + Graph)
     │       ├── <a href="scripts/SharePoint/Provisioning/readme.md">readme.md</a>
@@ -992,6 +1010,332 @@ These scripts are provided as-is. Always test in a non-production environment be
 ## Version History
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
+
+### 2026-10-21
+| Change |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): on an FSLogix host the package store check no longer calls every signed-out user an orphan. It used to treat "no key under `ProfileList`" as "this user is gone", but FSLogix removes that key at every sign-out, so on two pooled session hosts the list of "orphans" was mostly current users, and `-RepairAppxStore` would have removed their registrations. With FSLogix enabled, an entry is now only an orphan when its account no longer exists: the SID does not resolve while that domain's Domain Users group does. If the domain cannot be reached, nothing is decided and the entry is left alone. Pending removals in preflight use the same rule |
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): shorter package store report — one line per real orphan with its registry path underneath, and a single summary line naming the signed-out users whose entries Windows completes at their next sign-in, instead of three lines per entry |
+| Verified: syntax check; the classification (local / signed out / account gone / domain unreachable / non-domain SID, with and without FSLogix) and the new report against mocked registry and SID resolution, on PowerShell 5.1 and 7. **Not** verified on a session host: the run against a real `AppxAllUserStore` and a real domain controller |
+
+### 2026-10-20 (8)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1): Snipping Tool 2608.41 could not be registered for anyone on LEM-AVD-6, its files complete and every framework above its MinVersion. The deployment log (`Get-AppPackageLog`) showed why: registering the newer build makes Windows update every user on the host who has an older one, three of them were not signed in (*User was online: false*, one a deleted account), their FSLogix containers were not mounted, and the engine stopped with `0x80070490` in the *Resolved state handler* — for itceadmin as well. Before provisioning and before registering, every older build of the Store apps in scope is now removed for users who are not signed in — `Remove-AppxPackage -User`, and where that leaves them listed their AppxAllUserStore entries, backed up to .reg — after which orphaned store entries are swept. Signed-in users are left to the engine; FSLogix registers each user's own list again at their next sign-in |
+| Verified: syntax check. **Not** verified: the removal for signed-off users and the registration afterwards on a session host — this machine is no multi-session host and has no admin session here |
+
+### 2026-10-20 (7)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-FromHost` on a host with users signed in stopped before the part that matters: `Add-AppxProvisionedPackage -FolderPath` answered *This operation is not supported while other users are logged on to the computer*, so step 6a — registering Snipping Tool for the users signed in — was skipped. That refusal cannot be forced short of signing everyone off; when the package is provisioned already, which every next sign-in needs, the run now says so and registers it for the signed-in users anyway. Registration falls back from the family name to `-Register` from the manifest of the newest main package on the host, and when both are refused Windows' own error comes back per user (written by the user's task to `%PUBLIC%`, read and removed) — before, the reason a user stayed *not registered* was never seen |
+| Verified: syntax check; the generated per-user command run in a session on this machine: Snipping Tool registers, a package that does not exist writes one line with both errors (`0x80073CF9`). **Not** verified on a session host: the run through a task in another user's session |
+
+### 2026-10-20 (6)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-FromHost`: Snipping Tool (and Photos) restored on the pool **without the Store download**, which needs an Entra admin and a working winget in that window. The newest signed build already on each host is provisioned for all users again with `Add-AppxProvisionedPackage -FolderPath`, a Deprovisioned marker backed up and removed first, and registered for everyone signed in; step 1b now lists the builds on the host next to the provisioned one |
+| Fixed: the per-user read-back compared the user's main package (Snipping Tool `11.2608.41.0`) with the provisioned version, which is the bundle's (`2022.2608.41.0`), so it would have reported every user as behind. It now reads bundle and main package. The same numbering means the host's `2022.2607.23.0` is a July 2026 build, not an old one — the earlier entry today calling it that was wrong |
+| Verified: syntax check; the build selection on this machine (bundle `2022.2608.41.0` before main `11.2608.41.0`); bundle plus main read back as `2022.2608.41.0`; a `-Provision -FromHost` fan-out downloads nothing. **Not** verified: `Add-AppxProvisionedPackage -FolderPath` and the registration on a session host |
+
+### 2026-10-20 (5)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1): the Store download stopped at once with *Program 'winget.exe' failed to run: The file cannot be accessed by the system* in a window run as an admin account that App Installer is not registered for — the winget alias exists there but does not start. Each winget candidate (the alias, then App Installer's own folder, newest first) now has to answer `--version` before it is used, and when none does the run says how to fix it (register App Installer in that window, or start from a normal window with `-Credential` for the hosts). Verified: syntax check; the fallback loop skips a candidate that cannot start and takes the next. **Not** verified: the App Installer folder as fallback from such an admin window |
+
+### 2026-10-20 (4)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-Name snippingtool,photos -Provision` registers the new build for **everyone signed in on the host**, not only for the watchdog's own accounts: on an FSLogix pool provisioning reaches a profile only at the sign-in that loads its container, so customers signed in now kept the broken build all day. Each signed-in user gets `Add-AppxPackage -RegisterByFamilyName` in their own session, through a one-off task running as them under `conhost --headless` (the way the watchdog repairs a user), and the build is read back per user; nothing is opened or closed. The step no longer depends on the watchdog being installed |
+| Verified: syntax check. **Not** verified: the registration through a task on a session host — nothing here could reach one |
+
+### 2026-10-20 (3)
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) brings **Snipping Tool and Photos** to the current Microsoft Store build on the whole pool in one call: `-ComputerName ... -Name snippingtool,photos -Provision`. On LEM-AVD-6 Snipping Tool stayed *not registered* for `itceadmin` after every re-registration, with the host provisioning build `2022.2607.23.0` — the watchdog's provisioning from the build on the host could only ever put that one back. Both apps have no installer and winget has them only from the `msstore` source, whose download needs an Entra admin: so the download happens once, on the machine running the script, where that sign-in can be answered; the bundle, its frameworks and the offline license are signature-checked, copied to each host and provisioned with `Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath`, a Deprovisioned marker backed up and removed first. Afterwards the installed watchdog registers the apps again for its own accounts that are signed in on that host (`Watch-M365Apps.ps1 -User`); other profiles get them at their next sign-in. New: shorthands `snippingtool` / `snip` / `photos`, parameter `-StoreFolder`, and Snipping Tool / Photos columns in the pool table |
+| Verified: syntax check; a `-ComputerName ... -Name snippingtool,photos,teams -CheckOnly` fan-out against an unreachable host (no download without `-Provision`, the new columns in the pool table); the shorthands resolve to `Microsoft.ScreenSketch` / `Microsoft.Windows.Photos`; on a mock download folder the bundle is taken over a larger loose package, the frameworks and the license are found. **Not** verified: the msstore download itself (it needs an Entra admin sign-in, which this session does not have), `Add-AppxProvisionedPackage` with the license on a session host, and the watchdog's `-User` run started from a remoting session |
+
+### 2026-10-20 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) sent a *repair-failed* card **every run** — every minute on LEM-AVD-6 — while it did nothing: the line a run writes for a repair held back by the cooldown (`itceadmin SnippingTool: already repaired at 08:42 - not again within 4 h`, new this morning) counted as a repair, and a repair is reported regardless of `-RenotifyHours`. Only a skipped host repair was left out of that. Skipped repairs of one app for one user, ours or a customer's, are now left out as well: the same problem is reported again after `-RenotifyHours`, or at once when it changes or something is really repaired |
+| Verified: syntax check; the filter against the actions of the card from LEM-AVD-6 (only skips: nothing done; with a reset: something done). **Not** verified on the host: why the run is triggered every minute, and why Snipping Tool stays *not registered* for `itceadmin` after re-registration by family name — that needs the host's log |
+
+### 2026-10-20
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) also watches **Photos** (`Microsoft.Windows.Photos`, `Photos.exe`), as a fifth app. Photos is the default app for `.jpg`: photos attached to a mail would not open on the session hosts, while they did outside the cloud, and nothing reported it. It gets the same treatment as Snipping Tool — provisioned on the host, registered and `Ok` for every signed-in user, started for our own account, a refused open or failed registration re-registered in the user's session — and, like Snipping Tool, it is provisioned again from the signed build already on the host: winget has both only from the `msstore` source (`9WZDNCRFJBH4`, `9MZ95KL8MR0L`), whose download needs an Entra admin, so there is no installer to take them from. Snipping Tool itself is unchanged. An installed watchdog keeps its app list from `config.json`: install it again to have Photos watched |
+| An app that would not start **in our own account** was reset every run, without the cooldown customers have — and the failed start of each run (TWinUI 5961, a crash) triggered the next run 30 seconds later. Our own account now has the same `-RepairCooldownHours` per app, and its repair is recorded like a customer's, so what the repair itself logs in the next 3 minutes is no longer taken for a new failure. Still broken is still reported (`-RenotifyHours`) |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.md#get-m365appslogps1) knows `Photos` as an `-App`; the watchdog's pin for it moves to `1c892a0` (SHA-256 checked against what GitHub serves). The install command in the RDS readme moves to the new watchdog commit — the old pin pointed at a commit that is no longer in the history |
+| Verified: syntax check of both scripts and the menu; Photos' manifest (application `App`, `Photos.exe`, family `Microsoft.Windows.Photos_8wekyb3d8bbwe`) read on a Windows 11 machine; winget lists Photos and Snipping Tool only from `msstore`, and `winget download` refused without an Entra admin; `Get-M365AppsLog.ps1 -App Photos,SnippingTool` passes parameter validation (the run itself needs elevation, not available here). **Not** verified: a watchdog run on a session host — the pool could not be reached from here — nor `Add-AppxProvisionedPackage -FolderPath` for Photos, nor how the n8n workflow shows the extra `Photos` column |
+
+### 2026-10-19 (10)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) takes the folder link straight from the browser (`…/Forms/AllItems.aspx?id=…`) and reads the folder from its `id`. The live dry run stopped at `Folder 'Shared Documents/General/Teamleads' not found`: on that site the library's URL is `Gedeelde documenten`, because its URL follows the language the site was created in - the script's own hint that it is "usually Shared Documents" pointed the wrong way. A folder that is not found now lists the site's document libraries with their real URL instead |
+| Verified: syntax check; link check; the URL parsing on the customer's real browser link. Live on the tenant: `-GrantSiteAdmin` granted site collection admin and removed it again when the run stopped. **Not** verified: a run past the folder lookup |
+
+### 2026-10-19 (9)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) gained `ownersGroup` / `-OwnersGroup`, the full name of the owners group. With the prefix the customer wanted (`LBM`) it was always `LBM - Owners`, which reads as the owners of the whole team; it can now be `LBM - Teamleads Owners` while the other groups stay `LBM - Team Clara` and so on. The `-GroupPrefix` help also still described the old default; it now names both |
+| Verified: syntax check; link check. **Not** verified: a run on the tenant |
+
+### 2026-10-19 (8)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1): the first live `-GrantSiteAdmin` run stopped at `Could not determine the signed-in account ... You are not signed in. Please use Connect-PnPOnline`. The signed-in admin was read with `Get-PnPProperty` without `-Connection`; that cmdlet wants a "current" PnP connection before it looks at the object, and this script only holds returned connections. The account is now loaded with the web (`Get-PnPWeb -Includes CurrentUser`). `Find-SiteContent.ps1` and `Restore-RecycleBinItems.ps1` read it the same way and have not been changed here |
+| Verified: syntax check; `Get-PnPWeb -Includes` and `Get-PnPProperty -Connection` exist in the installed PnP.PowerShell. **Not** verified: the rerun on the tenant |
+
+### 2026-10-19 (7)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now makes **Entra ID security groups** by default instead of SharePoint groups. SharePoint groups exist inside one site only, so the customer could not see or manage them in Entra next to their other groups. The groups are created through Microsoft Graph (delegated admin sign-in, `Group.ReadWrite.All`; `Group.Read.All` for a dry run), the people in `owners` are set as owner of every group at creation - so the signed-in admin is not made owner as a side effect - and the groups are granted on the folders by their claim. The owners manage membership in My Groups. People are looked up in Entra by UPN or primary address before anything changes. An existing group with the same name is reused, but several of them, an on-premises synced, non-security or dynamic group stops the run. The default prefix becomes `<site> - <folder>`, since Entra names are tenant-wide. `-GroupType SharePoint` keeps the site-local groups |
+| Verified: syntax check; link check; the Graph URLs the script builds. **Not** verified: any of the Graph calls, the claim-based grant of a just-created group, or the My Groups setting in this tenant |
+
+### 2026-10-19 (6)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) gained `-GrantSiteAdmin`, `-KeepSiteAdmin` and `-AdminUpn`, as in `Find-SiteContent.ps1` and `Restore-RecycleBinItems.ps1`. The first live run registered the app and signed in, then stopped at `Get-PnPWeb: Attempted to perform an unauthorized operation`: the Global Administrator it signed in with was not a member of the customer's team, and that role alone gives no access to a site's content. With `-GrantSiteAdmin` the admin becomes site collection admin through the tenant admin site for the run; the whole run after the grant is inside a `try`/`finally`, so the rights are removed again also when an address does not resolve or a change fails. Without the switch the same error now says to use it |
+| Verified: syntax check; link check; the app registration on the live tenant (app created, scopes consented, client ID cached) and the delegated sign-in, which got as far as the unauthorized error. **Not** verified: the grant and its removal, and everything after |
+
+### 2026-10-19 (6)
+| Change |
+|--------|
+| Removed a batch-monitoring folder that was written for one customer environment; customer-specific material does not belong in this public repo. Its entries in the folder tables, the repository tree, the script categories and the version history are gone too |
+| [`Test-FileIODiagnostics.ps1`](scripts/Network/readme.md#test-fileiodiagnosticsps1) and [`Test-AuthNetworkDiagnostics.ps1`](scripts/Network/readme.md#test-authnetworkdiagnosticsps1) used that environment's paths and server name in their examples; they now use neutral ones (`D:\Data\Work`, `fileserver`, `D:\Logs`) |
+| Verified: syntax check; link check; no remaining references in the tree |
+
+### 2026-10-19 (5)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now signs in like the other SharePoint scripts. The first live run against a tenant stopped with `PnP needs -ClientId ... or an entry for that tenant in pnp.appid.json`: it only read a client ID that some other script had to have registered first. It now registers the app itself on the first run (Graph admin sign-in, public-client app `-AppName`, delegated `AllSites.FullControl` admin-consented), caches the client ID per tenant in `pnp.appid.json`, waits for the new app to propagate and retries the sign-in. A client ID another script already cached is reused |
+| Verified: syntax check; link check; the dry run reached the sign-in step on the live tenant and printed the config correctly before failing on the missing app registration. **Not** verified: the app registration and anything after the sign-in |
+
+### 2026-10-19 (4)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1): `personalFolders` also takes `"all"`, which gives the owners a personal folder too. Owners never got one, because they already reach everything - but in a folder shared by the team leads themselves, the leads are the owners and still want a folder of their own. With `true` only the one non-owner lead would have had one. A value other than `true`, `false` or `"all"` now stops the run instead of being read as `true` |
+| Caught while writing it: `$true -eq 'all'` is `$true` in PowerShell, so a first version made every `"personalFolders": true` behave like `"all"`. The value is now compared as a string |
+| Verified: syntax check; link check; the config parsing run on its own (`true`, `"all"`, a plain list, no value, and an invalid value that is refused) and the string comparison. **Not** verified: any run against a tenant |
+
+### 2026-10-19 (3)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now works **through SharePoint groups** instead of granting each person on each folder. With people granted directly, every new or leaving employee meant editing the config and running the script again; now there is one group per subfolder (`<prefix> - <subfolder>`) and an Owners group from the new `owners` list, which gets Full Control on everything the script manages and owns every group, so the team leads add and remove members themselves. `-DirectAccess` keeps the per-person grants |
+| New **personal folders**: with `personalFolders` on a subfolder (or `-PersonalFolders`) every listed non-owner gets a folder inside it, named after their display name, reachable only by them and the owners. Asked for so each employee has a private folder next to the team's shared one |
+| Group membership is only ever added to by default; people the owners added themselves are reported and left in, so a re-run does not undo their work. `-SyncMembers` makes the groups match the config. Owners also listed as members end up with Full Control, never the lower role. After `-Apply` the group pages are printed |
+| Verified: syntax check; link check. **Not** verified: any run against a tenant - group creation and ownership, the membership sync, personal folders, and whether owners who hold Full Control only on the folders can open the group page to manage members |
+
+### 2026-10-19 (2)
+| Change |
+|--------|
+| [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) now really limits people to **their own subfolder**. The parent's Read, there so people can browse to their subfolder, also let everyone in the config open every file directly in the parent and every subfolder the config did not name - the script only warned about the latter. Anything directly in the parent that is not a configured subfolder is now locked to the owners (inheritance broken, everyone else removed); `-KeepOtherItems` restores the old leave-alone-and-report behaviour |
+| Verified: syntax check; link check. **Not** verified: any run against a tenant |
+
+### 2026-10-19
+| Change |
+|--------|
+| Added [`Set-SharePointFolderAccess.ps1`](scripts/SharePoint/readme.md#set-sharepointfolderaccessps1) for the recurring request "people may only reach their own subfolder, read and write, nothing else". Until now that was done by hand per folder in the browser: break inheritance, remove Members, add each person - easy to get one folder wrong and impossible to check afterwards. One JSON config (or `-Access`) now names the subfolders and their people; the script creates missing subfolders, gives the parent Read for everyone listed (or owners only with `-ParentAccess None`) and each subfolder `Contribute` for exactly its people, and removes everyone else, sharing links included. Kept on purpose: the site Owners group, the M365 group owners and system Limited Access entries |
+| Every address is resolved before anything changes, so a typo stops the run with the folders untouched instead of halfway. Roles are taken by type, not by name, so Dutch and French sites work the same. Dry run by default; `-Apply` reads the permissions back per folder; every run writes a CSV, also when a change fails halfway. Not added to `menu.ps1`: every single-key slot there is taken, and the other SharePoint content scripts are not in it either |
+| Verified: syntax check; link check. **Not** verified: any run against a tenant - breaking inheritance, the removals, the read-back and the creation of missing subfolders have not been exercised yet |
+
+### 2026-10-16 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) now **provisions Snipping Tool itself** when the host does not. The first run on LEM-AVD-4 reported `SnippingTool NotProvisioned` — new profiles do not get it — and the host repair could not help: `Repair-AppxPackageStore.ps1` has no installer for it. The new `Add-ProvisionFromDisk` provisions it again from the Microsoft-signed build already in `WindowsApps` (a user still has it registered) with `Add-AppxProvisionedPackage -Online -FolderPath`, bundle first, after backing up and removing a `Deprovisioned` marker, and reads the provisioned list back. A `FromDisk` field per app says which apps go this way |
+| A persisting problem was reported **every run** while the host repair waited out its cooldown: the line "Host repair skipped" counted as an action, and any action sent the report again. A skipped repair no longer does; the same problem comes back after `-RenotifyHours`, or when something was actually done |
+| Verified: syntax check; on a Windows 11 machine both the Snipping Tool bundle folder and its main package folder in `WindowsApps` carry `AppxSignature.p7x` (the bundle also `AppxMetadata\AppxBundleManifest.xml`), which is what `-FolderPath` is given. **Not** verified: `Add-AppxProvisionedPackage -FolderPath` from an installed `WindowsApps` folder on a session host — the read-back in the run and the report say whether it took |
+
+### 2026-10-16
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) also watches **Snipping Tool** (`Microsoft.ScreenSketch`, `SnippingTool.exe`), as a fourth app next to Teams, new Outlook and Copilot. Snipping Tool stopped working on the AVD pool and nothing reported it: the watchdog only knew three apps. It now gets the same treatment as Teams and Outlook — provisioned on the host, registered and `Ok` for every signed-in user, started and still running for our own account, a refused open (TWinUI 5961) or failed registration re-registered in the user's own session, crashes and hangs reported. It is **not** taken along in the six-hourly update (`-Latest -Provision`): the Store keeps it current and there is no feed or installer for it — a new `Latest` field on each app says which ones are. A host repair for it runs `Repair-AppxPackageStore.ps1 -Name Microsoft.ScreenSketch -Provision`, which clears a broken store entry or Deprovisioned marker but cannot download the app. An installed watchdog keeps the app list from its `config.json`: install it again to have Snipping Tool watched |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/readme.md#get-m365appslogps1) knows `SnippingTool` as an `-App` too — the watchdog hands it the apps of a finding, and the old `ValidateSet` would have refused that call, so no evidence would have been collected. The watchdog's download pin for it moves to `3afc2e0` (SHA-256 checked against what GitHub serves). Menu entries `Y` and `Q` name the new app |
+| Verified: syntax check of both scripts and the menu; Snipping Tool's manifest (one application `App`, `SnippingTool\SnippingTool.exe`, shown in Start) read on a Windows 11 machine — that is what the launch test starts. **Not** verified: a watchdog run on a session host — the pool could not be reached from here — nor how the n8n workflow shows the extra `SnippingTool` column in `users` |
+
+### 2026-10-14
+| Change |
+|--------|
+| New [`scripts/Exchange/Send-MailboxForward.ps1`](scripts/Exchange/readme.md#send-mailboxforwardps1): forward all mail of a mailbox to another address — a forwarding rule for new mail (Exchange Online, internal target as `ForwardingAddress`, external as `ForwardingSmtpAddress` with a warning when the outbound spam policy blocks it) and the mail of the last `-Days` days (or since `-After`) forwarded one by one over Graph, oldest first. It replaces a one-off script written for a single customer, with the source and target addresses hard-coded and only a hand-made app registration or Full Access + Send As for the Graph part; it was never committed and sat in `scripts/Teams/`. Graph now goes the way of the other mailbox scripts: a temporary app registration (`Mail.Read` + `Mail.Send` application) that is removed at the end, your own app (`-ClientId` with a secret or certificate, `-AppOnly`), or `-Delegated`. All of it over plain REST — also the certificate, as a signed client assertion — so it cannot clash with the Exchange module's MSAL. Preview by default, `-Apply` to act; the window ends at the start of the run so rule and backfill never send a message twice; `-DelaySeconds` (2.1) keeps under Exchange's 30 messages per minute. Menu: Exchange submenu `M` |
+| Verified: syntax check; the parameter checks (nothing to do, an invalid `-ForwardTo`, `-ClientId` without a secret); the certificate client assertion built with a throwaway self-signed certificate — RS256, `x5t` matches the thumbprint, signature valid against the public key. **Not** verified: a run against a tenant (forwarding rule, temporary app, the forwards themselves) |
+
+### 2026-10-13 (4)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User` did not find a user who was signed in: on LEM-AVD-6 Kris's account is `AIRPORTS\kris.vand (81E1E8C7)` in his session — `quser` shows `kris.vand` — and the name was compared exactly, so `kris.vand` and his UPN both answered *not signed in on this host*. A name is now matched first by the SID Windows resolves it to (a UPN, `DOMAIN\user`), then on the user name with or without that suffix. A bare first name still matches nobody, so it cannot hit the wrong user |
+| Verified: syntax check; the match run locally on a session named `AIRPORTS\kris.vand (81E1E8C7)` (`kris.vand`, `AIRPORTS\kris.vand`, the full name and `kris.vand@...` match, `kris` does not) and by SID on this workstation's own account. **Not** verified: resolving his UPN in the AIRPORTS domain on the host |
+
+### 2026-10-13 (3)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) was much slower since the `users` table of 2026-10-13: it asked `Get-AppxPackage -User` again for every user and app, on top of the check that had just asked the same — and one such call takes 3–4 seconds (measured on a workstation), so on a host with 15 users a run took minutes longer, twice in a run with a repair. The check and the table now share one answer per user and package; it is read afresh for the read-back after a repair, and the check right after a repair or before opening an app is never taken from it. The table only costs extra for users still in their first 10 minutes |
+| Verified: syntax check, the `-User` flow again with simulated registering and opening (same result as before), and the cost of one `Get-AppxPackage` call measured (3–4 s named, 16 s for all packages, so batching does not help). **Not** verified: the run time on a session host |
+
+### 2026-10-13 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-User <name> [-App ...]`: for one user, at our request and now — per app that is not running for them, registered again in their session by family name, **opened for them**, and it has to still run 15 seconds later; if not, the crash, hang or failed open of that moment is named. No grace and no cooldown; nothing reset or closed; an app that already runs is left alone. Before and after of all their apps, a report to n8n (`repaired` / `repair-failed`, problem `OnRequest`), its own log `Watch-M365Apps_User_<date>.log`, and the repair recorded in `state.json` so the next run does not count its events. Until now a customer whose app was registered and `Ok` but would not open — Kris and Copilot, whose `copilotapp.exe` leaves no TWinUI event — could not be helped or tested: the watchdog starts nothing for customers on its own, and the launch test ran only for our own account. The IT Glue procedure has the command under *Stap 2* |
+| Verified: syntax check; the whole `-User` flow run locally in Windows PowerShell 5.1 against this workstation's own session, with registering, the package check and opening simulated (an OK path for Teams and Outlook and a failing one for Copilot): the before/after tables, the report, exit code 1 and the entries in `state.json` came out right. **Not** verified: a real registration and open in a customer's session on a session host |
+
+### 2026-10-13
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): a run failed as a whole with *The property 'Sid' cannot be found on this object* (LEM-AVD-6, 13-10 07:52) when an `explorer.exe` closed while the sessions were read — a user signing out, or Explorer restarting. The SID is now read safely and that process skipped. An error report now also names the line it failed at, and the log holds the stack |
+| Every report carries `users`: every signed-in user with, per app, their build (or *not registered*, a status that is not `Ok`, *files gone*) and whether it runs in their session — before the repair and after it — and the same table is in the log every run. Until now a report named only the users with a finding, so a complaint from someone the watchdog called healthy could not be checked against anything |
+| One event led to four Teams cards in three minutes for one user (LEM-AVD-6, 13-10 07:31–07:35): an event that came in between a run's start and its read was read again by the next run, which then reported the user — already repaired — as *repair-failed* because of the cooldown, and then *recovered*. Each run now reads events up to a fixed moment and the next starts there, and events of a user and app up to 3 minutes after our own repair of them are dropped, not only those around it. An event user who was not signed in is now named `DOMAIN\user`, as a session names them, not by the profile folder — the same user was two findings (`bjorn.tjaeckx` and `AIRPORTS\bjorn.tjaeckx`) |
+| Verified: syntax check; `Get-UserStatus` and the safe SID read run locally against this workstation's own session in Windows PowerShell 5.1 (one row, builds and *running* correct); the StrictMode error reproduced on a missing `Sid`. **Not** verified: a run on a session host, the event window across two real runs |
+
+### 2026-10-12 (2)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-Install` gives the task more triggers than the interval: 12 minutes after every sign-in, 30 seconds after Teams / Outlook / Copilot would not open (TWinUI `5961`), crashed or hung (Application Error `1000` / Application Hang `1002`, filtered on the three exes), and 2 minutes after a failed package registration (AppXDeploymentServer `401`/`404`). Until now a user who signed in with a broken app, or whose app would not open, waited up to a full interval (30 minutes by default) plus the 10-minute grace before anything was checked or repaired. The cooldowns, the grace and what is repaired for a customer are unchanged; a trigger during a busy run is dropped (`IgnoreNew`) and its events are read by the next run. Hosts get the triggers by running `-Install` again |
+| Verified: syntax check; the triggers built as in `-Install` registered on a test task on a Windows 11 workstation (non-elevated, so without the sign-in trigger, which needs admin) and read back with their delays and queries, and each query run with `Get-WinEvent -FilterXml`. **Not** verified: `-Install` on a session host, a run actually fired by a sign-in or an event, and how often AppX `401`/`404` fire on a busy host |
+
+### 2026-10-12
+| Change |
+|--------|
+| [`Repair-AppxPackageStore.ps1`](scripts/Device/Repair-AppxPackageStore.ps1) `-RemoveOld`: a live run on an FSLogix host (Outlook, `-Latest -Provision -RemoveOld`) ended with 4 *Store orphans* in step 7 that step 5 had not found: removing build 922.300 per user for two users with no profile on the host made the deployment engine queue an end-of-life entry for the old build and a user registration for 929.200 — and it wrote the end-of-life entries again after 6b had removed them. Step 6b now sweeps orphaned store entries again (same function, same `.reg` backup as step 5) after a short wait, so the run no longer fails on entries it created itself |
+| 6b only warns about `olk` / `ms-teams` running for the packages it cleans (an Outlook-only run warned about `ms-teams`), and the multi-line *Catastrophic failure* from `Remove-AppxPackage -AllUsers` is printed on one line |
+| Verified: syntax check, and the new sweep function offline with mocked store entries in PowerShell 7 and 5.1 (removes, counts, refuses without a backup). **Not** verified: a live run — whether the engine rewrites the entries again after the 5-second wait is to be seen on the next run |
+
+### 2026-10-10 (10)
+| Change |
+|--------|
+| The n8n flow *ITCE – M365 App Watchdog → Teams* knows the new reports of [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): `updated` becomes 🆕 **NIEUWE VERSIE** with a line *old → new* per app and the versions on the host; *BuildMissing* reads *versie ontbreekt op de host* and *NoShortcut* *geen snelkoppeling in het Startmenu*; a host finding that was repaired says *hersteld op de host* instead of *bij deze gebruiker*. Until now these showed under their raw names, and `updated` fell back to a *PROBLEEM* card |
+| Verified: the card code run locally (Deno) on an `updated`, a `repaired` with *BuildMissing* / *NoShortcut* and an old payload without the new fields gave the expected title, labels and lines; the flow was saved and published. **Not** verified: a real card in the CIPP channel |
+
+### 2026-10-10 (9)
+| Change |
+|--------|
+| **New Outlook kept failing on LEM-AVD-5** (n8n, 10-10): every new sign-in failed to register it 10-16 times with `0x80073CF9` / `0x80070490`, the watchdog re-registered each user up to 30 minutes later, and the one host repair (13:02) changed nothing. [`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) looked for the build users ask for only in the FSLogix log, which named none on that host, so it had nothing to provision and exited 0. It now also counts an AppX registration that failed with `0x80070490` for a build whose files are not on the host, and `-Provision` provisions that build from Microsoft's CDN |
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) names the build asked for in every registration failure, and turns `0x80070490` for a Teams/Outlook build newer than the host provisions into a host finding *BuildMissing*: the host repair runs at once (once per build, not held back by the cooldown) instead of each user being re-registered at every sign-in, and it counts as fixed once the host provisions that build. The failure its own re-registration logs on the way (seen as "1x ... last at" the repair time in the next run, every run) is no longer counted. The watchdog and [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) pin the helper at `abe8202` |
+| Verified: syntax; `Get-OpenFailure` with stubbed events - two users asking for Outlook 1.2026.1001.300 on a host that provisions 929.200 give *BuildMissing* plus their own findings with the build, and the event of our own repair is dropped; the AppX message format matches the package regex; the pinned hashes match what GitHub serves. **Not** verified: which build LEM-AVD-5 users actually ask for, and that Microsoft's CDN serves it; a run on a session host; the n8n card shows *BuildMissing* / *NoShortcut* under their raw names |
+
+### 2026-10-10 (8)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) watches the **new, unified Microsoft Copilot app** instead of the old one. Before, the old Microsoft 365 Copilot app (`MicrosoftOfficeHub`) or consumer Copilot counted as Copilot, and with the unified app on the host every user was called fine without a test - the app was never started. Now only the unified app counts: on the host Edge Update must have installed it, its `copilotapp.exe` must be on disk (found through the uninstall entry, App Paths or the Edge-style folder - Microsoft documents none of them) and a Start menu entry for all users must point at it (created when missing). Per user its identity package, when the host has one, must be registered and `Ok` - repaired by registering that family again in their session, as for Teams and Outlook - and for our own account it is started (by AUMID, else `copilotapp.exe`) and must stay up. A `copilotapp.exe` from an older build is closed once in our session after an Edge Update, so the new build is what gets tested |
+| [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) recognises such a watchdog and no longer reports the old Copilot blind spots for it; the watchdog pins that version (`c2255d0`) |
+| Verified: syntax; `Test-UserCopilot` with stubbed cmdlets - no identity package and our account (started through `copilotapp.exe`, `WontStart` when it does not stay up), identity package missing for a customer (`NotRegistered` with its own family), present and `Ok` (nothing), no app on the host (left to the host check). **Not** verified on a session host: where `copilotapp.exe` really lives, whether the unified app registers an identity package per user, and the Start menu entry it creates |
+
+### 2026-10-10 (7)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) keeps the apps up to date and tests every new build itself (new step 1a, `-UpdateHours`, default 6). Before, it only checked and repaired the build that was there: a new Teams, Outlook or Copilot build reached the host only through the weekly image update or the app itself, and the first to start it was often a customer. Now every `-UpdateHours` the host gets the newest Teams and Outlook ([`Repair-AppxPackageStore.ps1`](scripts/Device/readme.md#repair-appxpackagestoreps1) `-Latest -Provision`, only newer, signature-checked) and Edge Update is asked to check for Copilot; every run our own account (`itceadmin`) is moved to the provisioned build when it is behind - the app closed in our session and registered again - so the launch test starts the new build first. Customers are not touched; Windows gives them the build at their next sign-in. A new build on the host is reported once as `updated` (old -> new), with `updates` and `versions` in the payload |
+| Verified: syntax; the version-change detection on its own (first run records only, a changed Teams build gives one line, state saved as JSON). **Not** verified: a run on a session host (provisioning the newest build, the re-registration in `itceadmin`'s session, the Edge Update check); the n8n flow has no card for `updated` yet; the download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) is pinned to `82807f8` (SHA-256 checked against GitHub); installed hosts keep the old version until `-Install` is run again |
+
+### 2026-10-10 (6)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) repairs a problem of one customer in that customer's session only, and the host only when it is more than one user: the host itself, our own account (`itceadmin`, the test for the whole host), or the same app at two or more customers. Since the start of the per-user checks every customer finding also sent the whole host to `Repair-AppxPackageStore.ps1 -Provision`, for something that might concern one profile. A customer's repair that does not take is reported as *NIET HERSTELD*; level 2 decides on the host. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) and its [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) say the same. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to this version |
+| Verified on test copies with the helpers stubbed: one customer with a broken Outlook - no host repair; `itceadmin` alone - `Repair-AppxPackageStore -Name outlook`; two customers with Outlook - the same. **Not** verified: on a session host |
+
+### 2026-10-10 (5)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) repairs the host when an app fails for our own account. Before, `itceadmin`'s *not registered* or *does not start* only re-registered or reset the app in `itceadmin`'s session, while the account is there to stand in for everyone on the host - the host was left as it was until a customer ran into it. Now every finding, `itceadmin`'s included, sends the host to `Repair-AppxPackageStore.ps1 -Provision` for that app (within the cooldown). The host repair starts nothing in anyone's session; customers still only get an app opened after their own recent attempt. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to this version |
+| Verified on a test copy with the helpers stubbed: a failing Outlook for `itceadmin` alone now runs `Repair-AppxPackageStore -Name outlook -Provision`, and nothing runs in a session. **Not** verified: a real host repair on a session host |
+
+### 2026-10-10 (4)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) opens an app for a user after a repair only when they tried it **themselves, recently**: their last refused open must be at most 30 minutes old, and not within 2 minutes of signing in. Before, any refused open since the previous run counted - also one from the autostart of Teams or new Outlook at sign-in, which Windows logs the same way, and one from a user who had long since given up - so an app could appear on a customer's screen they had not asked for. Otherwise the action says why it was not opened. Nothing else is ever started for a customer. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to this version |
+| Verified: syntax; the new check on its own for a recent attempt (opened), an attempt 50 minutes old, one 30 seconds after sign-in (both not opened, with the reason) and one 2.5 minutes after sign-in (opened). **Not** verified: whether autostart really writes TWinUI `5961`, and a run on a session host |
+
+### 2026-10-10 (3)
+| Change |
+|--------|
+| The n8n flow *ITCE – M365 App Watchdog → Teams* has a card for the new `repairing` report: 🔧 **WORDT HERSTELD**, with the users and apps found and a *Bewijs* line with the path of the evidence zip (on any card that carries one). Until now it fell back to a *PROBLEEM* card. [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) explains the card and what level 2 does with it, that an app a user could not open now opens by itself after the repair, where the evidence is and how to collect it with `Get-M365AppsLog.ps1`, the unified Copilot app as something the watchdog does not test per user, and that `-Install` does not take over the old `config.json`. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) regenerated |
+| Verified: the flow was saved and published; its card code run locally on a `repairing` and a `repaired` sample gave the expected title, label, users and *Bewijs* line; the HTML is current (`-Check`) and the repository link check passes. **Not** verified: a real card in the CIPP Teams channel (no test card sent there), pasting into IT Glue |
+
+### 2026-10-10 (2)
+| Change |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) announces before it repairs, keeps the evidence, and opens the app for the user who tried.** Until now n8n heard of a problem only after the repair, nothing kept the state the host was in, and a user whose open Windows refused still had to try again. When something new is wrong - for any signed-in user, not only `itceadmin` - it now runs [`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1) for those users and apps (a zip in `C:\IT\AppWatchdog\Diag`, kept 14 days, path in `diagnostics`), then POSTs `repairing` with every finding and user, then repairs and reports `repaired` / `repair-failed` as before. The same problem is not announced or collected again within `-RenotifyHours`. After re-registering an app a user could not open (TWinUI `5961`) it opens it in their session; when it does not start and stay up, the problem stays open. `-NoUserLaunch` and `-NoDiagnostics` turn the two off. `copilotapp.exe`, the unified Copilot app, now counts for crashes and for "running". `-Install` copies the collector too, from the repo or from GitHub at `6a94769` with its SHA-256 |
+| The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to `7c9d2f3` and that file's SHA-256 (checked against what GitHub serves), so a host installed from GitHub gets this version |
+| Verified on this Windows 11 machine, unelevated, on a test copy (admin check and folder lock off, a fake refused Copilot open, the repair stubbed, a local listener as webhook): evidence collected first (zip kept, folder removed), then `repairing` with the user and the zip path, then `repaired` with `Fixed` and the same path; the collector's pin matches what GitHub serves. **Not** verified: a run as System on a session host, opening an app in a real customer's session, and the n8n card - the flow does not know `repairing` yet and shows it as a *PROBLEEM* card |
+
+### 2026-10-10
+| Change |
+|--------|
+| **New [`scripts/RDS/Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1): after a complaint, collect what happened with new Teams, new Outlook and Copilot on a session host, and why the watchdog did or did not repair it.** Copilot did not work for users on a server while the watchdog was believed to check, report and repair every user; there was no way to see afterwards what it had seen. Read only, into one folder and zip: the watchdog's settings (webhook and token masked), task, state and logs; provisioned builds, the unified Copilot app and WebView2; every user's package state (`Get-AppxPackage -AllUsers`); per signed-in user and app what is registered and running, with the verdict the watchdog would reach and **BLIND SPOT** where it would call it fine untested; the AppX, AppReadiness, AppModel-Runtime, TWinUI and crash events with user, code and whether the watchdog reads them; `PackageStatus`, `Deprovisioned`, FSLogix and Edge Update registry and logs; with `-IncludeAppLogs` the Teams and Outlook logs per user. Every part runs on its own, `Get-AppxPackage` in a job with a 120 s timeout, missing event channels are skipped, open logs are read shared. The channels and files follow Microsoft's MSRD-Collect and the FSLogix AppX documentation. Menu item `Q` |
+| Blind spots of the watchdog it shows, and that likely explain the Copilot case: with the unified Copilot app (Edge Update) on the host the watchdog accepts Copilot for every user without testing it; that app runs as `copilotapp.exe`, which the watchdog's crash check does not know; consumer Copilot counts as Copilot; and a customer's app that is registered but does not work is only seen when Windows refused the open (TWinUI `5961`) |
+| Verified on this Windows 11 machine, unelevated: syntax; a full run and a run filtered on one user and Copilot; the per-user verdict and events (Teams `401`/`404`/`419` with `0x80073D02` marked benign, an Outlook crash marked as read); a missing FSLogix channel and registry key skipped instead of stopping the section; a section that needs elevation named at the end while the rest was collected; app logs copied and the zip written. **Not** verified: an elevated run on a session host with the watchdog installed, FSLogix present and the unified Copilot app |
+
+### 2026-10-09 (10)
+| Change |
+|--------|
+| [`Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) had level 1 reading the watchdog's cards in the CIPP Teams channel, but only level 2 and 3 have access to that channel. Level 1 now asks, gives first help without the cards (close the app fully and reopen, wait a quarter of an hour after signing in, sign out and back in) and escalates with what was tried; level 2 gets a first step to find the user's card and act on it, then the host commands as before. The card table says what level 2 does, and the sentences for the user are split by level. Headings that are linked to use a colon instead of a dash, so the anchors are the same for GitHub and the HTML converter. [HTML](scripts/RDS/Watch-M365Apps-ITGlue.html) regenerated |
+| Verified: every in-page link of the HTML points at an existing id, and the repository link check passes for the markdown. **Not** verified: pasting into IT Glue |
+
+### 2026-10-09 (9)
+| Change |
+|--------|
+| New [`scripts/RDS/Watch-M365Apps-ITGlue.md`](scripts/RDS/Watch-M365Apps-ITGlue.md) - the service desk procedure for the watchdog, in Dutch, to paste into IT Glue, with a styled [HTML version](scripts/RDS/Watch-M365Apps-ITGlue.html) from `Convert-MarkdownToHtml.ps1`. It explains which scripts take part (the watchdog, Repair-AppxPackageStore, Update-SessionHostImage, Update-TeamsClient, the n8n flow) and how they fit together; what each Teams card means and what to do about it; for level 1 what to ask a user who calls, where to look, what to do per complaint, what to say and when to escalate; for level 2 the commands on the host (run the watchdog now, follow the log, look without repairing, last repair, examine the host) and what not to do (no reset for a user); what the watchdog cannot see; the common error codes; and for level 3 installing, settings, the n8n flow and the weekly maintenance. It follows the shape of the existing Teams procedure. The webhook URL and token are not in it - the repo is public |
+| Verified: the HTML was generated by the repo's converter and parses as XML; the internal link to *Als een gebruiker belt* resolves; no webhook URL or token in either file; repository link check. **Not** verified: pasting into IT Glue, and the procedure against a real call |
+
+### 2026-10-09 (8)
+| Change |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) now finds and repairs what customers run into, and says for whom.** It tested only our own account, so a customer who clicked Teams and got nothing went unseen. Each run now checks every other signed-in user once they have been signed in for 10 minutes (registration, files, status - nothing is started for them), and reads since the previous run every open Windows refused (TWinUI `5961`) and every failed registration of the apps' packages (AppXDeploymentServer `401`/`404`, by field rather than the translated text, with "close the app first" and "already installed" left out, the two events of one failure counted once), each with the user from the event. It repairs the host through `Repair-AppxPackageStore.ps1 -Provision` and then re-registers the package by family name in that user's session, through a one-off task running `conhost --headless` so no window appears - only while the app is not running for them, once per cooldown per user and app, never a reset. `-NoUserRepair` keeps out of customers' sessions. Every finding carries the user (`Account`, `Customer`) and whether it was repaired for them (`Fixed`); the n8n card shows the users, *hersteld bij deze gebruiker* per line and a *Wel hersteld* section after a partial repair |
+| `Get-AppxPackage -User` is now given `DOMAIN\user` instead of a SID: with an Entra ID SID (`S-1-12-1-...`) it answers *No valid SID could be determined*, in Windows PowerShell 5.1 too - so the existing check of itceadmin could not work on an Entra-joined host. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to `abfad94` |
+| Verified on this Windows 11 machine, unelevated: the session list (an Entra user, with sign-in time); against its real event logs the open-failure reader found nothing with the shipped filter, five Teams registration failures (`0x80073D02`, 401 and 404 counted once) when that code was not filtered, and TWinUI `5961` refusals with user and code for a Windows component standing in for an app; HRESULTs signed and unsigned; the registration check of a "customer" (silent for Teams, Outlook and Copilot, a finding with name and SID for a missing package); `Get-AppxPackage -User` by SID failing and by name working; `conhost --headless` waiting for its command but returning `0` for `exit 7`; in n8n a partial-repair payload built the expected card. **Not** verified: a run as System on a session host, a re-registration in a real customer session, and whether anything flashes on their screen |
+
+### 2026-10-09 (7)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) `-TestNotification` stopped on the first session host it was run on with *The variable '$script:logFile' cannot be retrieved because it has not been set*: the report carries the log path, and that variable was only set once a run opened its log - after `-TestNotification` had already gone its own way. Under StrictMode an unset variable is an error, not `$null`. It is now set at the top with the other constants. Scheduled runs were not affected. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) moves to `960576b` and that file's SHA-256 |
+| Verified: syntax check; `Send-Notification` taken out of the script and run under StrictMode against an unreachable address threw the reported error without the line and, with it, went on to three connection attempts and returned `$false`; the raw URL at `960576b` serves the file with the documented SHA-256. **Not** verified: a test message from the session host to n8n |
+
+### 2026-10-09 (6)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) watches only `itceadmin` by default instead of `itceadmin` and `itce.user`: one account to keep signed in on every host, and one fewer session where the launch test can open a window. `-Account itceadmin,itce.user` still tests both. The download in the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) is pinned to `1182c3a` with that file's SHA-256, and the menu's prompt shows the new default |
+| Verified: syntax check of the script and `menu.ps1`; the raw URL at `1182c3a` serves the file with `$Account = @('itceadmin')` and the documented SHA-256. **Not** verified on a session host |
+
+### 2026-10-09 (5)
+| Change |
+|--------|
+| **[`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) can limit a queue to security groups.** New printer field `permissions`: a list of `{ "principal", "access" }` with access `print`, `manageDocuments` or `manage`, and the principal as `DOMAIN\Group`, a local name or a SID (the only way to name an Entra ID group). Listed principals get that access and every other user or group loses it - but Administrators, SYSTEM, CREATOR OWNER, app packages and service identities always keep theirs: a default printer ACL also grants ALL APPLICATION PACKAGES and a print capability SID, and replacing the ACL wholesale would silently break printing from new Outlook and other packaged apps. Current and wanted are compared by what the access masks mean rather than by SDDL text, so Windows storing an entry in another form does not count as a change on every run. It fails closed: an unresolvable group stops that queue from being created (`-CheckOnly` says so beforehand), and a new queue whose permissions cannot be set is removed again rather than left open to everyone. A queue that only differs in permissions, tray or print defaults no longer gets a redundant `Set-Printer`. Documented in the [Printer readme](scripts/Device/Printer/readme.md#install-printerps1); the tray per queue was added earlier the same day (`inputBin`) |
+| Verified on Windows PowerShell 5.1 and PowerShell 7: name resolution (`Everyone`, `BUILTIN\Users`, an Entra user, a SID, an unknown group with and without retry); the ACL plan against this machine's real `AnyDesk Printer` (Everyone and the installing user removed, Users added, app package, capability, service, Administrators and CREATOR OWNER entries kept); a second plan on the planned ACL reports no change, also after rewriting generic rights the way Windows may store them; the validation of malformed entries; `-CheckOnly` and `-WhatIf` end to end, including a queue whose group does not resolve. Found and fixed on the way: `-band` on the byte-sized `AceFlags` throws "Specified cast is not valid" in Windows PowerShell 5.1. Those runs had the elevation check bypassed, as this session was not elevated. **Not** verified: actually setting the permissions with `Set-Printer -PermissionSDDL`, and what a user without access sees |
+
+### 2026-10-09 (5)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) can be installed straight from GitHub: the [RDS readme](scripts/RDS/readme.md#watch-m365appsps1) now has a download for one host and for several over PowerShell remoting, pinned to a commit and the file's SHA-256 because what it installs runs as System. `-Install` brings the helper itself (pinned commit, hash-checked). Run from such a download, the script used to look for `Repair-AppxPackageStore.ps1` beside itself and in `..\Device` - then `C:\IT\Device` - folders any user may be able to write to, and `-Install` would have copied what it found there into the folder System runs from. It now takes the helper only from its own locked folder (installed copy), from `..\Device` in a repo checkout (recognised by `menu.ps1`), and otherwise from GitHub; and every run, not only `-Install`, locks `C:\IT\AppWatchdog` first. The webhook URL and token are placeholders in the readme: the repo is public |
+| Verified: syntax check; the raw URL at `6c088f4` serves the file with this fix and the documented SHA-256; the helper lookup in Windows PowerShell 5.1 in three cases with planted files beside the script and in `..\Device` - from the repo it used `scripts\Device`, from a loose download it ignored both planted files and fetched the helper from GitHub with the hash verified, as the installed copy it used only its own folder. **Not** verified: the download and `-Install` on a session host, and the remoting loop |
+
+### 2026-10-09 (4)
+| Change |
+|--------|
+| **[`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1) also reports when Teams, new Outlook or Copilot crashes or hangs.** The watchdog only saw an app that could not start; one that started and then crashed - for a customer, or for our account between two runs - went unnoticed. Each run now reads Application Error `1000` and Application Hang `1002` from the Application log since the previous run (first run: the last hour, never more than a day back), keeps the events of the three apps - by process name, or by the package name the event carries, so a Copilot executable not in the list still counts - and groups them per app, module and exception code. They go along with any report of the run, or as a report of their own (`crashed`); `-CrashThreshold` (default `1`, `0` = off) sets how many per app before one is sent. Crashes are reported, not repaired: a customer's app is never restarted for them, and our own account's app is started again by the existing launch test. The n8n flow *ITCE – M365 App Watchdog → Teams* shows them in a *Crashes en hangs* section and an orange `CRASH` card |
+| Verified: syntax check; against this machine's Application log, the reader found the real new-Outlook hang of 1 October (`olk.exe` 1.2026.915.300, hang type `Quiesce`), also with its process name removed from the list (package-name match), returned nothing for the last hour, and grouped three PowerToys crashes into one row with module `Microsoft.UI.Xaml.dll` and code `0xc000027b` when PowerToys was put in the list for the test; in n8n, a test run with a `crashed` payload (Teams post pinned) built the expected card. **Not** verified: a crash of Teams or Copilot itself, and a run as System on a session host |
+
+### 2026-10-09 (3)
+| Change |
+|--------|
+| **New [`Watch-M365Apps.ps1`](scripts/RDS/Watch-M365Apps.ps1): a watchdog that tests new Teams, new Outlook and Copilot with our own accounts (`itceadmin`, `itce.user`) on a session host, repairs them before a customer notices, and reports to n8n.** Until now a broken app was found when a customer called; Update-SessionHostImage and Repair-AppxPackageStore fix it, but only when someone runs them. Installed with `-Install` as the task *M365 App Watchdog* (System, every 30 minutes), it checks the host provisions the three apps, and for each watched account signed in on the host that the package is registered, intact and starts in that session (a one-off task with the user's SID and an interactive token, so no password). Host problems go to `Repair-AppxPackageStore.ps1 -Provision` - at most once per 4 hours, without `-RemoveOld` / `-Latest`, so nothing a customer has open is removed - and our own account is re-registered or reset. It reads everything back and POSTs `repaired`, `repair-failed`, `recovered` or `error` as JSON to an n8n webhook (header `X-Watchdog-Token`), only on a change and again after 12 hours for a problem that stays. Its folder is locked to System and Administrators and holds the webhook URL and token; the helper comes from `..\Device` or GitHub at the same pin and hash as Update-SessionHostImage. Menu entry `Y` |
+| Verified: syntax check in PowerShell 7 and the Windows PowerShell 5.1 parser; the pinned helper's SHA-256 against commit `048cf96`; unelevated on a Windows 11 machine, finding an Entra account's session (`AzureAD\...`) by explorer.exe owner, and the start entry and process of Teams, new Outlook and Microsoft 365 Copilot from their manifests - which showed Teams lists `MSTeamsRemoteModuleContainer` first, so the first entry shown in Start is used. **Not** verified: a run as System or elevated, `-Install`, starting an app or re-registering through a task in another user's session, the repairs, and a POST to a real n8n webhook - no session host or webhook was at hand |
+
+### 2026-10-09 (2)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) sets a **default tray** per queue: the new printer field `inputBin`. Trays are not a parameter of Set-PrintConfiguration; they live in the Print Schema as the options of `psk:JobInputBin` / `DocumentInputBin` / `PageInputBin`, with vendor names such as `ns0000:Tray2`. The script reads the driver's PrintCapabilities, matches the JSON's name against the display name or the Print Schema name (spaces and case ignored, so `Tray 2`, `tray2` and `ns0000:Tray2` are one tray), and writes it into the queue's default print ticket for every bin feature that offers it - in a job with a timeout, like the other print defaults. A name the driver does not have is a warning listing what it does offer, not a change on every run |
+| One device with several queues - `Office` on tray 1, `Office - letterhead` on tray 2 - is documented in the [printer readme](scripts/Device/Printer/readme.md#install-printerps1) and shown in `printers.example.json`: same address, shared `IP_<address>` port, own tray and defaults |
+| Verified: syntax check; link check; in Windows PowerShell 5.1 the tray reading against this machine's drivers (AnyDesk: `Automatically Select`, `Upper Paper Tray`; Fax: one tray; PDF and OneNote: none, reported as such), name matching including a miss, and the ticket rewrite with Set-PrintConfiguration mocked (vendor namespace declared, old option's sub-properties dropped, PageInputBin added); the example JSON passes the script's own validation and a wrong one gives both errors. **Not** verified: setting a tray on a real printer driver (needs elevation and a multi-tray device) |
+
+### 2026-10-09
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) starts at deployment as documented. The command line the readme and help gave for the Custom Script Extension and a startup task, `powershell.exe -File Install-Printer.ps1 ... -Confirm:$false`, stopped before the script began: `-File` passes every argument as text, so `-Confirm:$false` arrived as the string `'$false'` (*Cannot convert 'System.String' to the type SwitchParameter*) and no printer was installed. Those runs have no console and are never asked anything, so the switch is dropped from the examples. The script's own relaunch - to 64-bit when Intune or an RMM starts it 32-bit, and for elevation - forwarded `-Switch:$false` the same way; it now passes its parameters through `-Command` (elevation: `-EncodedCommand`, because Start-Process loses the quoting) |
+| New in the [printer readme](scripts/Device/Printer/readme.md#install-printerps1): installing at deployment instead of in the image - a Bicep Custom Script Extension and an `az vm run-command` example, pinning `fileUris` to a commit, one Custom Script Extension per VM (managed Run Command otherwise), the GitHub token in `protectedSettings`, and exit code `1` failing the extension |
+| Verified: syntax check; link check; from 32-bit Windows PowerShell 5.1 the relaunch reached 64-bit with a UNC path containing `$`, two printer names, `-Quiet`, `-WaitSeconds` and `-Confirm:$false` intact and the exit code passed back; the old `-File ... -Confirm:$false` line reproduced the error. **Not** verified: the elevation relaunch (it opens a UAC prompt), and a real Custom Script Extension or Run Command deployment |
+
+### 2026-10-08 (21)
+| Change |
+|--------|
+| [`Update-SessionHostImage.ps1`](scripts/RDS/Update-SessionHostImage.ps1) fetches its helpers from `main` at `048cf96` (2026-10-08) instead of `746541e`. In between, Update-TeamsClient.ps1 changed in one commit (`8f74ebc`): it now installs the exact Teams build the Teams config service calls current, from its `buildLink` with a size and Microsoft signature check, instead of whatever teamsbootstrapper's staged rollout hands out - the two disagreed for weeks, so a host stayed "outdated". That diff was read before pinning. Repair-AppxPackageStore.ps1 did not change; its hash stays |
+| Verified: both SHA-256 values computed with `git show` at `048cf96` and matched against what raw.githubusercontent.com serves for that commit; syntax check. **Not** verified: a run on a session host |
 
 ### 2026-10-08 (20)
 | Change |
@@ -1186,7 +1530,7 @@ These scripts are provided as-is. Always test in a non-production environment be
 ### 2026-10-05 (10)
 | Change |
 |--------|
-| Every folder readme now follows the `scripts/Intune/` pattern: each script in the `## Scripts` table links to the file **and** to its section (`([docs](#…))`). 19 folders did not, in all three languages: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph and Intune/Desktop/Background/Desktop and /Lockscreen had no scripts table at all, and Reporting/Licensing only a tree; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (no file link for `GetAutoPilot.CMD`), UniFi, SMTP, Startup and one row in SharePoint/Provisioning had rows without a docs link |
+| Every folder readme now follows the `scripts/Intune/` pattern: each script in the `## Scripts` table links to the file **and** to its section (`([docs](#…))`). 18 folders did not, in all three languages: Azure/VM, DNS, Deployment, Device/DriveMapping, Graph and Intune/Desktop/Background/Desktop and /Lockscreen had no scripts table at all, and Reporting/Licensing only a tree; Device/audio, ClaudeDesktop, CoworkPrerequisites, DiskCleanup, iOS-Compliance-Updater, Get-Autopilot (no file link for `GetAutoPilot.CMD`), UniFi, SMTP, Startup and one row in SharePoint/Provisioning had rows without a docs link |
 | Where a script was documented under a descriptive heading, the heading now carries the file name so the anchor is the same in every language (checked first that nothing linked to the old anchor). Scripts that had no section got a short one from their own header comment: `Remove-CorporateWallpaper.ps1`, `Invoke-`/`Detect-DiskCleanupIntune.ps1`, `UnifiApi.ps1`, `SharePointStructure.Common.ps1`, `Browse-InstallScripts.ps1`, and a shared section for the ClaudeDesktop install/uninstall/detect scripts. The `Remove-CorporateWallpaper.ps1` notes record that it does not undo everything `Set-CorporateWallpaper.ps1` 2.3+ writes |
 | Also corrected: the Intune readme still said the Office theme scripts hardcode their URL, and the Provisioning notes said the shared module is dot-sourced by "all four" scripts — all ten in the folder use it |
 | Verified: every script in every folder readme has a file link and a docs link whose anchor exists (scripted check over all 57 folder readmes), and the link check passes over 4562 internal links. Nothing was run |

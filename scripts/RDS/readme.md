@@ -17,6 +17,8 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Get-FSlogix-errors.ps1`](Get-FSlogix-errors.ps1) ([docs](#get-fslogix-errorsps1)) | FSLogix / Azure Files profile diagnostics on an AVD session host |
 | [`Invoke-FSLogixShrink.ps1`](Invoke-FSLogixShrink.ps1) ([docs](#invoke-fslogixshrinkps1)) | Shrink FSLogix profile disks on a share (Invoke-FslShrinkDisk), or check whether FSLogix compacts them itself at sign-out |
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
+| [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook, Copilot, Snipping Tool and Photos with our own account (`itceadmin`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
+| [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collects, read only, what happened with new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session host — per user what is registered and running, the events, and what the watchdog did and would conclude, with its blind spots — into one zip |
 
 ---
 
@@ -287,3 +289,253 @@ other hosts for.
   `$HelperHashes` at the top of the script, after reading the diff.
 - `-ComputerName` copies this script and the two it calls to `C:\IT\SessionHostImage`
   on each host.
+
+---
+
+### Watch-M365Apps.ps1
+
+A watchdog for new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session host. It runs as a
+scheduled task under System and uses **our own account** — `itceadmin` by default — as a
+canary: when an app does not start for it, it will not start for a customer either. It also checks every other signed-in user and every app a user could not open,
+repairs it on the host and in that user's own session before they call, and reports to
+an n8n webhook — naming the user each finding and each repair belongs to.
+
+> Service desk version for IT Glue (Dutch, per support level — what to do when a user calls, how to read the Teams cards): [Watch-M365Apps-ITGlue.md](Watch-M365Apps-ITGlue.md), or the styled [Watch-M365Apps-ITGlue.html](Watch-M365Apps-ITGlue.html) to paste in.
+
+**Each run**
+
+| Step | What happens |
+|------|--------------|
+| 0. Crashes | Every crash (Application Error `1000`) and every hang that ended in a close (Application Hang `1002`) of the watched apps since the previous run, from the Application log — for **every user on the host**, customers included — grouped per app, module and exception code. Reported, not repaired: a customer's app is never restarted for them |
+| 1. Host | Teams, new Outlook, Snipping Tool (`Microsoft.ScreenSketch`) and Photos (`Microsoft.Windows.Photos`, the default app for `.jpg` — also for a photo attached to a mail) are provisioned for all users; Copilot is the **new, unified Microsoft Copilot app** only (`copilotapp.exe`, installed machine-wide by Edge Update) — the old Microsoft 365 Copilot app (`MicrosoftOfficeHub`) no longer counts. Its `copilotapp.exe` has to be on disk and a Start menu entry for all users has to point at it; a missing entry is created, a missing app installed by the host repair (`Repair-AppxPackageStore.ps1 -Name copilot -Provision`, through Edge Update) |
+| 1a. Update | Every `-UpdateHours` (default 6): the **newest** Teams and new Outlook are provisioned on the host — [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Latest -Provision` (Teams from Microsoft's config service, Outlook the newest build seen on this host or in a profile; only ever newer, signature-checked, no `-RemoveOld`) — and Edge Update is asked to check now for the unified Copilot app. Every run: when **our own account** has an older build than the host provisions, the app is closed in our session and registered again from the provisioned build, so step 2 starts the new build — a build that does not run is found by us, not by a customer at their next sign-in. **Customers are never updated by the watchdog**: Windows gives them the new build at their next sign-in. A new build on the host — from this step or on its own — is reported once (`updated`, with the old and new version). Snipping Tool and Photos are not updated by this step: the Store keeps them current, and there is no feed or installer to provision a newer build from |
+| 2. Accounts | For each watched account signed in on this host: the package is registered for that user, its files are there and its status is `Ok` — for Copilot its identity package, when the host has one (its files are machine-wide). Then the app has to run in that session — if it does not, it is started there (`shell:AppsFolder\<AUMID>`, or `copilotapp.exe` itself, through a one-off task in that user's own session) and has to still be running 15 seconds later |
+| 2b. Users | Every other signed-in user (customers), once signed in for 10 minutes: the same registration check, **without starting anything**. Plus every attempt since the previous run, by any user, to open one of the apps that Windows refused (TWinUI `5961`), and every failed registration of their packages (AppXDeploymentServer `401`/`404`; "close the app first" and "already installed" are left out), with the user it happened to. Each finding names the build asked for. A failure with `0x80070490` for a Teams or Outlook build **newer than this host provisions**, whose files are not here, is the host's fault: users roam in with a build this host never got. It adds a host finding *BuildMissing*, so the host repair provisions that build at once — not held back by `-RepairCooldownHours`, but once per build. A failure that the watchdog's own re-registration logged (from 10 seconds before to 3 minutes after it) is not counted again |
+| 2c. Announce | Something new is wrong: [`Get-M365AppsLog.ps1`](#get-m365appslogps1) collects the evidence for the users and apps concerned into `Diag\` (one zip, kept 14 days) while it is still broken, and a `repairing` report goes to n8n naming every user — before anything is changed. The same problem again is not announced or collected again within `-RenotifyHours` |
+| 3. Repair | A problem of **one customer is fixed in their session only**; the host is left alone. The host is repaired for an app only when it is more than that one user — the host itself, **our own account** (`itceadmin` is the test for the whole host), or the same app at two or more customers — without starting anything for anyone: [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1) `-Provision` (Microsoft's installers, signature-checked), at most once per `-RepairCooldownHours`. Then **per user, in their own session**: the package is registered again by family name (`Add-AppxPackage -RegisterByFamilyName`) through a one-off task running a headless console, so no window appears. For a customer only while the app is not running for them, at most once per `-RepairCooldownHours` per user and app, and never a reset. In our own account an app that does not start is reset (`Reset-AppxPackage`) — also at most once per `-RepairCooldownHours`, or every failed start would trigger the next run 30 seconds later and reset it again. A user who tried to open the app **themselves** (TWinUI `5961`) in the last 30 minutes gets it **opened for them** in their session once it is registered again — it has to start and stay up, otherwise the problem stays open. An attempt in the first 2 minutes after sign-in is the app's autostart and does not count, and nothing else is ever started for a customer (`-NoUserLaunch` turns this off). **Snipping Tool** and **Photos** have no installer (winget has them only from the `msstore` source, whose download needs an Entra admin): when the host does not provision one, it is provisioned again from the Microsoft-signed build already on the host — in `WindowsApps`, because a user still has it registered — with `Add-AppxProvisionedPackage -Online -FolderPath` (the bundle first, then the main package), after a `Deprovisioned` marker is backed up to `.reg` in `Repair\` and removed; the provisioned list is read back. When no user has it any more there is nothing to provision from: install it from the Store once and the next run provisions it |
+| 4. Read back | Steps 1, 2 and the registration check of 2b again; a user's problem counts as repaired when the package is registered and `Ok` for them afterwards (or the app is running for them) |
+| 5. Report | A JSON POST to the webhook when something is wrong, was repaired, recovered on its own, or crashed at least `-CrashThreshold` times — not on every healthy run. A problem that stays is reported again after `-RenotifyHours`. **Every report carries `users`: every signed-in user** — ours and customers, also those in their first 10 minutes — with per app the build of their package (its status when not `Ok`, *files gone*, *not registered*) and whether it runs in their session, read before the repair and again after it — from the same reads as the check, so it adds time only for users in their first 10 minutes (`Get-AppxPackage -User` takes seconds per call). The same table is in the log every run, so a complaint can be held against what the host showed for that user |
+
+Nothing is closed or removed for a customer, and a customer's app is never reset: no
+`-RemoveOld`, `-Latest` only for the host in step 1a, no stopping of customers' processes. Every report lists, per
+finding, the user (`Account`, with `Customer` true for a customer) and, under `before`,
+whether it was repaired for them (`Fixed`); the Teams card shows *hersteld bij deze
+gebruiker* next to each one.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Account` | Accounts to test with — user name, UPN or `DOMAIN\user` (default: `itceadmin`; more than one tests each, e.g. `itceadmin,itce.user`) |
+| `-App` | `Teams`, `Outlook`, `Copilot`, `SnippingTool`, `Photos` (default: all five). An installed watchdog keeps the list from its `config.json`: install it again (or pass `-App`) to watch an app added later |
+| `-User` | **At our request, now, for these users only** (user name, UPN or `DOMAIN\user` — matched by the SID Windows resolves the name to, else on the user name, with or without the ` (81E1E8C7)` Windows can append to it in a session; `quser` cuts such a name short) and `-App`: per app that is not running for them, registered again in their session by family name (no reset, nothing closed), **opened for them**, and it has to still run 15 seconds later — if not, the crash or failed open of that moment is named. No 10-minute grace, no `-RepairCooldownHours`. Shows every app of theirs before and after, reports to n8n (`repaired` / `repair-failed`, problem `OnRequest`) and logs to `Logs\Watch-M365Apps_User_<date>.log`. Only for a user signed in on this host; with `-NoRepair` only the before |
+| `-WebhookUrl` | n8n webhook (production URL) the report is POSTed to. Without it the run only logs |
+| `-WebhookToken` | Sent as header `X-Watchdog-Token`; match it with Header Auth on the n8n Webhook node |
+| `-IntervalMinutes` | How often the task runs (default: `30`). Besides that the task runs **12 minutes after every sign-in** (the 10 minutes a fresh sign-in is left alone, plus the start of its `explorer.exe`), **30 seconds after** one of the apps would not open (TWinUI `5961`), crashed or hung (Application Error `1000`, Application Hang `1002`), and **2 minutes after** a failed package registration (AppXDeploymentServer `401`/`404`) — so a user is helped within minutes, not at the next interval. A trigger while a run is busy is dropped; its events are read by the next run. A host installed earlier gets these triggers by running `-Install` again |
+| `-RepairCooldownHours` | Minimum time between two host repairs, and between two repairs of the same app for the same user — our own account included — so a problem it cannot fix is not retried every run (default: `4`) |
+| `-RenotifyHours` | Report a problem that stays the same again after this many hours (default: `12`) |
+| `-UpdateHours` | How often the newest Teams / Outlook are provisioned and Edge Update checks for Copilot (default: `6`; `0` turns updating off, for our own account as well; `-NoRepair` also updates nothing) |
+| `-CrashThreshold` | Report the crashes and hangs of one app once there are this many since the previous run (default: `1`, every crash; `0` turns crash reporting off) |
+| `-NoRepair` | Test and report only, change nothing |
+| `-NoUserRepair` | Repair the host and our own account, but never run anything in a customer's session — their problems are still reported, with their name |
+| `-SkipLaunchTest` | Do not start an app that is not running; only check its registration |
+| `-NoUserLaunch` | After repairing an app a user could not open, do not open it for them |
+| `-NoDiagnostics` | Do not run `Get-M365AppsLog.ps1` before a repair |
+| `-Install` | Copy the watchdog to `-WorkingDir` and register the task **M365 App Watchdog**, with the other parameters as its settings |
+| `-Uninstall` | Remove the task and `-WorkingDir` |
+| `-TestNotification` | Send one test message to the webhook and stop |
+| `-WorkingDir` | Watchdog, settings, state and logs (default: `C:\IT\AppWatchdog`) |
+
+**Examples**
+
+```powershell
+# One run now in this console, report only
+.\Watch-M365Apps.ps1 -NoRepair
+
+# Kris says Copilot does not open: register it again in his session and open it for him
+& 'C:\IT\AppWatchdog\Watch-M365Apps.ps1' -User kris -App Copilot
+
+# Install on a session host, reporting to n8n
+.\Watch-M365Apps.ps1 -Install -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false
+
+# Check the webhook end to end with the installed settings
+.\Watch-M365Apps.ps1 -TestNotification
+
+# Remove it again
+.\Watch-M365Apps.ps1 -Uninstall -Confirm:$false
+```
+
+**What n8n receives**
+
+```json
+{
+  "source": "Watch-M365Apps",
+  "event": "repaired",
+  "host": "AVD-0",
+  "time": "2026-10-09T14:30:02.1234567+02:00",
+  "summary": "AVD-0: 1 problem(s) found and repaired - itceadmin Outlook NotRegistered",
+  "accounts": ["itceadmin"],
+  "findings": [],
+  "before": [{ "Account": "itceadmin", "App": "Outlook", "Problem": "NotRegistered", "Detail": "not registered for this user" }],
+  "actions": ["itceadmin Outlook: re-registered as the user - result 0"],
+  "crashes": [{ "App": "Teams", "Kind": "Crash", "Count": 2, "Last": "2026-10-09T14:12:40.0000000+02:00", "Exe": "ms-teams.exe", "Version": "26260.1704.5188.5238", "Module": "msedgewebview2.dll", "Code": "0xc0000005" }],
+  "log": "C:\IT\AppWatchdog\Logs\Watch-M365Apps_20261009.log",
+  "diagnostics": "C:\IT\AppWatchdog\Diag\M365AppsLog_AVD-0_20261009-1430.zip",
+  "users": [{ "Account": "AIRPORTS\\jansen", "Customer": true, "Session": 4, "Since": "09-10 08:02", "Teams": "26260.1701.5139.3736, running", "Outlook": "1.2026.929.200, not running", "Copilot": "155.0.4283.45, not running" }]
+}
+```
+
+`event` is `repairing` (found, being repaired — sent before the repair, with `diagnostics`), `repaired`, `repair-failed`, `failing` (with `-NoRepair`), `crashed` (only
+crashes this run), `recovered`, `error` (the run itself failed) or `test`; `crashes` rides
+along with any of them. `Problem` is `NotProvisioned` (host), `NotRegistered`,
+`Broken` (files gone or status not `Ok`) or `WontStart` (our account),
+`WontOpen` (Windows refused to open it for a user) or `RegisterFailed`. In n8n: a **Webhook** node (POST,
+Header Auth on `X-Watchdog-Token`), then route on `{{$json.body.event}}` to Teams, mail or
+a ticket.
+
+**Installing from GitHub**
+
+A session host needs no copy of the repo: download this one file and run `-Install`.
+The helper comes along by itself — `-Install` fetches `Repair-AppxPackageStore.ps1` from
+GitHub at the pinned commit and checks its SHA-256. The download below is pinned the same
+way, to a commit and a hash, because what it installs runs as System. Run it in an
+elevated PowerShell on the host:
+
+```powershell
+# Watch-M365Apps.ps1 at a fixed commit - move both lines together
+$commit = '56a3025149d54e702d1d1eacc92f8ba807fb4240'
+$sha256 = 'CC89EE2A92874111501FB47C15E1B3611045BFA149242028F5CBF1B9E6A66FFF'
+$file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
+# then, as in the examples: first -NoRepair to look, then install
+& $file -Install -WebhookUrl '<n8n webhook URL>' -WebhookToken '<token>' -Confirm:$false
+```
+
+On several hosts at once, from your own machine over PowerShell remoting:
+
+```powershell
+# Same download on every host, in parallel
+Invoke-Command -ComputerName avd-0, avd-1, avd-2 -ScriptBlock {
+    $commit = '56a3025149d54e702d1d1eacc92f8ba807fb4240'
+    $sha256 = 'CC89EE2A92874111501FB47C15E1B3611045BFA149242028F5CBF1B9E6A66FFF'
+    $file   = Join-Path $env:TEMP 'Watch-M365Apps.ps1'
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Watch-M365Apps.ps1" -OutFile $file -UseBasicParsing
+    if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw "SHA-256 mismatch on $env:COMPUTERNAME" }
+    & $file -Install -WebhookUrl '<n8n webhook URL>' -WebhookToken '<token>' -Confirm:$false
+}
+```
+
+Afterwards check one host with `-TestNotification`. To move to a newer version: put that
+commit and the file's SHA-256 at that commit
+(`(Get-FileHash .\scripts\RDS\Watch-M365Apps.ps1).Hash` in a checkout of it) in the two
+lines, after reading the diff, and run `-Install` again — the task keeps running its own
+copy in `C:\IT\AppWatchdog` until then. The webhook URL and token never go in this repo:
+it is public.
+
+**Notes**
+
+- **Keep a session of `itceadmin` (and any other watched account) open on every host** (disconnected is fine). An
+  account that is not signed in is skipped: its packages live in its FSLogix container
+  and cannot be tested without it. Without any session the host check (step 1) still runs.
+- Crash events name no user, so a crash can be a customer's or ours. A crash of our own
+  account's app is followed up in step 2: the app is no longer running, so it is started
+  again. On a busy pool where the odd Teams crash is noise, raise `-CrashThreshold`.
+- Repairing in a customer's session uses `conhost --headless`, so no console or Windows
+  Terminal window should appear; that was checked to wait for the command and to drop its
+  exit code (hence the read-back), but **not** yet looked at in a real customer session.
+- `Get-AppxPackage -User` is given `DOMAIN\user`, not a SID: with an Entra ID SID
+  (`S-1-12-1-…`) it answers *No valid SID could be determined*.
+- The launch test starts an app that is not running in our own session. A window can
+  appear there, and a reset Teams asks our account to sign in again. `-SkipLaunchTest`
+  turns it off.
+- `-Install` locks `-WorkingDir` to System and Administrators (the task runs what is in it
+  as System), copies this script and `Repair-AppxPackageStore.ps1` there — from
+  `..\Device` in a checkout of the repo, otherwise always from GitHub (never from beside a
+  downloaded copy, a folder any user may have written to) at the same pinned commit and SHA-256 as
+  [`Update-SessionHostImage.ps1`](#update-sessionhostimageps1) — and keeps the webhook URL and
+  token only in `config.json` there, not in the task's command line. Change a setting by
+  running `-Install` again with all parameters.
+- Evidence: `C:\IT\AppWatchdog\Diag`, one zip per new problem from `Get-M365AppsLog.ps1`, kept 14 days; its path is in `diagnostics` of the report. `-Install` copies the collector next to the watchdog (from the repo, or from GitHub at a pinned commit and SHA-256); without it the watchdog repairs and reports as before.
+- Logs: `C:\IT\AppWatchdog\Logs`, one file per day, kept 14 days. Repair transcripts and
+  `.reg` backups: `C:\IT\AppWatchdog\Repair`.
+- Run elevated or as System; it relaunches itself in 64-bit Windows PowerShell for the
+  AppX cmdlets. Exit code `0` healthy or repaired, `1` something still broken.
+
+---
+
+### Get-M365AppsLog.ps1
+
+Collects everything about new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session
+host into one folder and zip, to answer two questions after a complaint: *why did the app not work for
+this user*, and *why did the watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) not
+catch or repair it*. Read only — nothing is started, registered, repaired or closed.
+
+**What it collects**
+
+| Part | What |
+|------|------|
+| Watchdog | `config.json` (webhook and token masked), whether `NoRepair` / `NoUserRepair` is on and the app is watched, the installed version and whether it has the per-user checks at all; the task's state, last run, result and history, probe tasks left behind; `state.json` (last run, last host repair, open problems, per-user re-registrations); its logs and repair logs from the window, with the lines about the apps and users in question pulled out |
+| Host | Provisioned builds, the Copilot unified app (Edge Update) and the WebView2 runtime |
+| All users | `Get-AppxPackage -AllUsers`: every user each package is known for and its install state — signed-off users included |
+| Signed-in users | Per user and app: the packages registered for them, status, files present, running in their session, and the verdict the watchdog would reach — marked **BLIND SPOT** where it would call it fine without testing it |
+| Events | From the last `-Hours`: TWinUI `5960`/`5961`, AppXDeploymentServer (errors and `401`/`404`), AppXDeployment, AppxPackaging, AppReadiness, AppModel-Runtime, Application Error `1000` / Hang `1002` of the apps — each with the user, the error code, and whether the watchdog reads that event at all |
+| Registry | A non-zero `PackageStatus` (Windows marked the package bad), packages in `Deprovisioned`, FSLogix `InstallAppxPackages`, the Edge Update Copilot policies; exports of the FSLogix, Edge Update policy, Teams and Deprovisioned keys |
+| FSLogix and Edge Update | Their log files from the window (FSLogix honours `Logging\LogDir`), the Profile log lines about the apps that carry an error, FSLogix error and warning events |
+| Copilot | Installed Copilot apps with their folder, and which Copilot process runs for whom — `copilotapp.exe` is the unified app, `M365Copilot.exe` the packaged one |
+| App logs (`-IncludeAppLogs`) | Per signed-in user in scope: Teams logs (LocalCache — gone at sign-out with FSLogix), the Teams diagnostics bundle in Downloads, new Outlook logs, FSLogix `AppxPackages.xml` |
+
+Output in `-OutputPath` (falls back to `%TEMP%`): `summary.txt` (the screen), `sessions.csv`,
+`packages.csv`, `allusers.csv`, `events.csv`, `fslogix-events.csv`, `watchdog\`,
+`registry\`, `fslogix\`, `edgeupdate\` and `applogs\`, zipped.
+
+**Blind spots it points out**
+
+- With a watchdog from before 2026-10-10 (8): Copilot not registered for a user while the
+  unified app is on the host is accepted for everyone without a test, the unified app
+  (`copilotapp.exe`) is never started, older ones do not see its crashes either, and
+  consumer Copilot (`Microsoft.Copilot`) counts as much as Microsoft 365 Copilot. From
+  that version on the watchdog counts only the unified app, checks its identity package
+  per user and starts it for our own account — the collector says which one it found.
+- A customer's app registered and `Ok` but not working: the watchdog starts nothing for
+  customers, so it only sees an open that Windows refused (TWinUI `5961`).
+- A user signed in less than 10 minutes, a user who is signed off, the watched account
+  not signed in on the host, a task that has not run, an older watchdog without the
+  per-user checks, events the watchdog does not read.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-User` | Only these users — user name, UPN or `DOMAIN\user`, also when signed off (default: everyone) |
+| `-App` | `Teams`, `Outlook`, `Copilot`, `SnippingTool`, `Photos` (default: all five) |
+| `-Hours` | How far back to read events and logs (default: `24`, at most `336`) |
+| `-OutputPath` | Where the folder and zip are written (default: `C:\Temp`) |
+| `-WorkingDir` | The watchdog's folder (default: `C:\IT\AppWatchdog`) |
+| `-IncludeAppLogs` | Also copy the apps' own logs per signed-in user — they hold names and mail addresses, so only on request |
+| `-NoZip` | Leave the folder, do not zip it |
+
+**Examples**
+
+```powershell
+# A customer says Copilot did not open this morning
+.\Get-M365AppsLog.ps1 -User jansen -App Copilot -Hours 12
+
+# Everything on this host from the last two days, with the Teams and Outlook logs
+.\Get-M365AppsLog.ps1 -Hours 48 -IncludeAppLogs
+```
+
+**Notes**
+
+- Run elevated on the host, soon after the complaint; it relaunches itself in 64-bit
+  Windows PowerShell for the AppX cmdlets. Menu item `Q`.
+- Every part runs on its own: one that fails is named at the end and the rest is still
+  collected. `Get-AppxPackage` runs in a separate process and is given up after 120
+  seconds, because it can hang on exactly the host this is for. An event channel that
+  does not exist on the host (no FSLogix, an older build) is skipped.
+- Logs that are still open are read shared; a log over 50 MB keeps its last 50 MB.
+- The webhook URL and token are masked in the copy of `config.json`.
+- Comparable to the AppX and FSLogix parts of Microsoft's MSRD-Collect, but limited to
+  these three apps and set against what the watchdog does.

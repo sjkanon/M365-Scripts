@@ -57,9 +57,11 @@
       6. Provision    With -Provision, Teams and new Outlook are provisioned for all
                       users with Microsoft's own installer (teamsbootstrapper.exe -p,
                       Outlook Setup.exe --provision true), or with -UseWinget from the
-                      MSIX winget downloads. -WingetId does the same for any other
-                      package, -Source for an MSIX you supply. All only after the
-                      Microsoft signature is checked.
+                      MSIX winget downloads. Snipping Tool and Photos, which have no
+                      installer, come from the Microsoft Store (winget, msstore source)
+                      with their frameworks and offline license. -WingetId does the
+                      same for any other package, -Source for an MSIX you supply. All
+                      only after the Microsoft signature is checked.
       7. Verify       The diagnosis runs again. Exit code 0 means nothing is broken
                       any more, 1 that something survived.
 
@@ -70,8 +72,9 @@
 .PARAMETER Name
     Package names to look at, wildcards allowed. Default '*': the whole store.
     Examples: 'MSTeams', 'Microsoft.OutlookForWindows', 'MSTeams','Microsoft.OutlookForWindows'.
-    Shorthands: teams (MSTeams), outlook (Microsoft.OutlookForWindows) and copilot
-    (the same as -Copilot), so -Name outlook,copilot is enough.
+    Shorthands: teams (MSTeams), outlook (Microsoft.OutlookForWindows), copilot
+    (the same as -Copilot), snippingtool or snip (Microsoft.ScreenSketch) and photos
+    (Microsoft.Windows.Photos), so -Name outlook,copilot is enough.
 
 .PARAMETER CheckOnly
     Diagnose and report, change nothing. Exit code 2 when there is something to repair.
@@ -86,6 +89,22 @@
     failed to register that this host does not provision, and any of MSTeams /
     Microsoft.OutlookForWindows named explicitly in -Name. Other packages need
     -Source.
+
+    Snipping Tool (Microsoft.ScreenSketch) and Photos (Microsoft.Windows.Photos)
+    named in -Name are brought to the current Microsoft Store build: winget has them
+    only from the msstore source (9MZ95KL8MR0L, 9WZDNCRFJBH4), whose download asks
+    for an Entra account that is Global, User or License Administrator. winget
+    download fetches the bundle, its frameworks and the offline license; every
+    package is checked for Microsoft's signature and provisioned with
+    Add-AppxProvisionedPackage -DependencyPackagePath -LicensePath, after a
+    Deprovisioned marker is backed up and removed. With -ComputerName the download
+    happens once, on this machine - where the sign-in can be answered - and the
+    folder is copied to every host. Provisioned, the build reaches every profile at
+    its next sign-in - with FSLogix, the sign-in that loads the container. Everyone
+    signed in on the host right now gets it registered in their own session straight
+    away (Add-AppxPackage -RegisterByFamilyName, through a one-off task running as
+    them, headless): nothing is opened or closed for them, and an app that is open
+    stays on the old build until it is closed or they sign in again.
 
     Where FSLogix fails on a newer Teams or Outlook build than this host
     provisions, that exact build is provisioned instead: the MSIX is downloaded
@@ -137,6 +156,21 @@
     Credential for the remoting sessions, when the current account is not an
     administrator on the hosts.
 
+.PARAMETER StoreFolder
+    Folder with the Microsoft Store downloads for Snipping Tool / Photos, one
+    subfolder per package name (Microsoft.ScreenSketch, Microsoft.Windows.Photos), as
+    winget download --source msstore fills it. -ComputerName fills and passes it
+    itself; give it to provision from a download made earlier, without a new sign-in.
+
+.PARAMETER FromHost
+    With -Provision, for Snipping Tool / Photos: no Store download. The newest
+    Microsoft-signed build already on the host - in WindowsApps because a user has it
+    registered, from a Store update of their own or the build the host had - is
+    provisioned for all users again (Add-AppxProvisionedPackage -FolderPath, bundle
+    before main package, newest first), after a Deprovisioned marker is backed up and
+    removed, and registered for everyone signed in. Needs no Entra admin; brings the
+    host no newer than the newest build any user on it has.
+
 .PARAMETER Copilot
     Look at Copilot: adds Microsoft.MicrosoftOfficeHub and Microsoft.Copilot to -Name
     (so their Deprovisioned markers are in scope) and runs step 1d. What counts as
@@ -168,12 +202,25 @@
     the named packages: older provisioned copies, older builds registered for any
     user, and what AppxAllUserStore still remembers of them (backed up to .reg
     first). Only for packages named explicitly, and only once the build to keep is
-    provisioned. The WindowsApps folders are left to Windows, and the list in each
-    profile container to FSLogix, which rewrites it at the next sign-out.
+    provisioned. Removing a build for a user with no profile on this host leaves
+    queued store entries nothing will run; they are swept like step 5 afterwards.
+    The WindowsApps folders are left to Windows, and the list in each profile
+    container to FSLogix, which rewrites it at the next sign-out.
 
 .EXAMPLE
     # The very newest Teams and Outlook on the whole pool, and nothing older left
     .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name teams,outlook -Latest -Provision -RemoveOld -Confirm:$false
+
+.EXAMPLE
+    # Snipping Tool and Photos at the current Store build on the whole pool: one
+    # download here (sign in with an Entra admin when asked), provisioned on every
+    # host, and registered for everyone signed in there
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool,photos -Provision -Confirm:$false
+
+.EXAMPLE
+    # Snipping Tool back on the whole pool from the build already on each host - no
+    # Store download, no sign-in - provisioned and registered for everyone signed in
+    .\Repair-AppxPackageStore.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Name snippingtool -Provision -FromHost -Confirm:$false
 
 .EXAMPLE
     # What is broken on this host? Changes nothing.
@@ -228,11 +275,91 @@ param (
     [pscredential] $Credential,
     [switch]   $Copilot,
     [switch]   $Latest,
-    [switch]   $RemoveOld
+    [switch]   $RemoveOld,
+    [string]   $StoreFolder,
+    [switch]   $FromHost
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -- Store-only apps -------------------------------------------------------------
+# Snipping Tool and Photos have no installer and no MSIX in the winget source: winget
+# has them only from the msstore source, whose download needs an Entra account that is
+# Global, User or License Administrator. They are downloaded where that sign-in can be
+# answered - this machine, before -ComputerName fans out - and provisioned from that
+# folder with their frameworks and offline license.
+$StorePackages = @{
+    'Microsoft.ScreenSketch'   = @{ StoreId = '9MZ95KL8MR0L' }
+    'Microsoft.Windows.Photos' = @{ StoreId = '9WZDNCRFJBH4' }
+}
+$StoreShorthands = @{ 'snippingtool' = 'Microsoft.ScreenSketch'; 'snip' = 'Microsoft.ScreenSketch'; 'photos' = 'Microsoft.Windows.Photos' }
+
+function Get-StoreTarget {
+    <# The Store-only packages a -Name list asks for, shorthands resolved. #>
+    param([string[]] $Names)
+    @($Names | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ } |
+      ForEach-Object { if ($StoreShorthands.ContainsKey($_)) { $StoreShorthands[$_] } else { $_ } } |
+      Where-Object { $StorePackages.ContainsKey($_) } | Select-Object -Unique)
+}
+
+function Save-StorePackage {
+    <#
+        winget download of one Store-only package from the msstore source into
+        $Folder\<package name>, emptied first: the bundle, its frameworks and the
+        offline license. winget asks for the Entra sign-in itself. Every package file
+        is checked for Microsoft's signature. Returns the folder, or throws.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [Parameter(Mandatory)] [string] $Folder)
+
+    # The alias first, then App Installer's own folder, newest first. The alias exists
+    # but answers "The file cannot be accessed by the system" in a window running as
+    # an account App Installer is not registered for (Run as administrator with an
+    # admin account), so each candidate has to actually run before it is used.
+    $candidates = @(Get-Command 'winget.exe' -ErrorAction SilentlyContinue | ForEach-Object { $_.Source } | Where-Object { $_ -and (Test-Path $_) }) +
+                  @(Get-ChildItem (Join-Path $env:ProgramFiles 'WindowsApps') -Directory -Filter 'Microsoft.DesktopAppInstaller_*_x64__8wekyb3d8bbwe' -ErrorAction SilentlyContinue |
+                    Sort-Object -Property @{ Expression = {
+                        $raw = $_.Name -replace '^Microsoft\.DesktopAppInstaller_', '' -replace '_x64__8wekyb3d8bbwe$', ''
+                        try { [version] $raw } catch { [version] '0.0.0.0' }
+                    } } -Descending | ForEach-Object { Join-Path $_.FullName 'winget.exe' } | Where-Object { Test-Path $_ })
+    $winget = $null
+    foreach ($candidate in $candidates) {
+        try {
+            $null = & $candidate --version 2>$null
+            if ($LASTEXITCODE -eq 0) { $winget = $candidate; break }
+        } catch { }
+    }
+    if (-not $winget) {
+        throw "winget does not run for this account - run Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe in this window, or start from a window that is not 'Run as administrator' and give -Credential for the hosts"
+    }
+
+    $target = Join-Path $Folder $PackageName
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    New-Item -ItemType Directory -Path $target -Force | Out-Null
+    $id = $StorePackages[$PackageName].StoreId
+    Write-Host "  winget download $id (msstore) - $PackageName; sign in with an Entra admin account when asked" -ForegroundColor Cyan
+    # Windows PowerShell 5.1 with ErrorActionPreference Stop ends the run on any native
+    # stderr line; the exit code is what counts.
+    $ErrorActionPreference = 'Continue'
+    & $winget download --id $id --source msstore --download-directory $target --architecture x64 --platform Windows.Desktop `
+                       --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        throw "winget download --id $id --source msstore failed (exit code $LASTEXITCODE) - the account has to be Global, User or License Administrator"
+    }
+    $files = @(Get-ChildItem -LiteralPath $target -File -Recurse | Where-Object { $_.Extension -in '.msix', '.msixbundle', '.appx', '.appxbundle' })
+    if (@($files | Where-Object { $_.Name -like "$PackageName*" }).Count -eq 0) { throw "winget downloaded no $PackageName package into $target" }
+    if (-not $SkipSignatureCheck) {
+        foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+                throw "$($file.Name) is not validly signed by Microsoft - not used"
+            }
+        }
+    }
+    Write-Host ("  [ OK ] {0}: {1} package file(s), license {2}" -f $PackageName, $files.Count,
+                $(if (Get-ChildItem -LiteralPath $target -File -Recurse -Filter '*.xml') { 'included' } else { 'not included' })) -ForegroundColor Green
+    return $target
+}
 
 # -- Several session hosts -----------------------------------------------------
 # With -ComputerName this run only orchestrates: it copies itself to each host over
@@ -258,14 +385,35 @@ if ($ComputerName.Count -gt 0) {
     if ($changes) { $forward['Confirm'] = $false }
     if ($WhatIfPreference) { $forward['WhatIf'] = $true }
 
+    # Snipping Tool / Photos: downloaded once, here, before any host is touched - a
+    # failed sign-in stops the run with nothing changed. -StoreFolder given here is a
+    # download made earlier on this machine. Each host gets the folder at $remoteStore.
+    $storeTargets = @(Get-StoreTarget $Name)
+    $storeLocal   = $null
+    $remoteStore  = 'C:\IT\AppxRepair\Store'
+    if ($changes -and $Provision -and $storeTargets.Count -gt 0 -and -not $FromHost) {
+        try {
+            if ($StoreFolder) {
+                $storeLocal = $StoreFolder
+            } else {
+                $storeLocal = Join-Path $env:TEMP 'AppxRepair_Store'
+                foreach ($pkg in $storeTargets) { [void] (Save-StorePackage -PackageName $pkg -Folder $storeLocal) }
+            }
+        } catch {
+            Write-Host "  [FAIL] $($_.Exception.Message) - no host was changed" -ForegroundColor Red
+            exit 1
+        }
+        $forward['StoreFolder'] = $remoteStore
+    }
+
     $remotePath = 'C:\IT\AppxRepair\Repair-AppxPackageStore.ps1'
-    $watch      = @('MSTeams', 'Microsoft.OutlookForWindows', 'Microsoft.MicrosoftOfficeHub')
+    $watch      = @('MSTeams', 'Microsoft.OutlookForWindows', 'Microsoft.MicrosoftOfficeHub', 'Microsoft.ScreenSketch', 'Microsoft.Windows.Photos')
     $summary    = [System.Collections.Generic.List[object]]::new()
 
     foreach ($computer in $ComputerName) {
         Write-Host ''
         Write-Host ("  ==== {0} " -f $computer).PadRight(80, '=') -ForegroundColor Cyan
-        $row = [ordered]@{ Host = $computer; Exit = $null; FSLogix = ''; MSTeams = ''; Outlook = ''; Copilot = ''; Note = '' }
+        $row = [ordered]@{ Host = $computer; Exit = $null; FSLogix = ''; MSTeams = ''; Outlook = ''; Copilot = ''; SnippingTool = ''; Photos = ''; Note = '' }
         $session = $null
         try {
             $sessionArgs = @{ ComputerName = $computer; ErrorAction = 'Stop' }
@@ -276,6 +424,16 @@ if ($ComputerName.Count -gt 0) {
                 param($Path) New-Item -ItemType Directory -Path (Split-Path $Path) -Force | Out-Null
             } -ArgumentList $remotePath
             Copy-Item -Path $PSCommandPath -Destination $remotePath -ToSession $session -Force
+            if ($storeLocal) {
+                Invoke-Command -Session $session -ScriptBlock {
+                    param($Path)
+                    if (Test-Path $Path) { Remove-Item -Path $Path -Recurse -Force }
+                    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+                } -ArgumentList $remoteStore
+                foreach ($pkg in $storeTargets) {
+                    Copy-Item -Path (Join-Path $storeLocal $pkg) -Destination $remoteStore -ToSession $session -Recurse -Force
+                }
+            }
 
             # The host's own output streams back as it runs; the last object is the
             # state afterwards, read on the host itself.
@@ -308,6 +466,8 @@ if ($ComputerName.Count -gt 0) {
                 $row.Copilot = if ($state.Copilot) { $state.Copilot }
                                elseif ($state.Provisioned.ContainsKey('Microsoft.MicrosoftOfficeHub')) { $state.Provisioned['Microsoft.MicrosoftOfficeHub'] }
                                else { '-' }
+                $row.SnippingTool = if ($state.Provisioned.ContainsKey('Microsoft.ScreenSketch')) { $state.Provisioned['Microsoft.ScreenSketch'] } else { '-' }
+                $row.Photos       = if ($state.Provisioned.ContainsKey('Microsoft.Windows.Photos')) { $state.Provisioned['Microsoft.Windows.Photos'] } else { '-' }
             } else {
                 $row.Exit = 1; $row.Note = 'no result came back'
             }
@@ -328,8 +488,8 @@ if ($ComputerName.Count -gt 0) {
     Write-Host ''
     Write-Host '  ==== Pool '.PadRight(80, '=') -ForegroundColor Cyan
     $summary | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
-    foreach ($column in 'FSLogix', 'MSTeams', 'Outlook', 'Copilot') {
-        $values = @($summary | Where-Object { $null -ne $_.Exit -and -not $_.Note } | ForEach-Object { $_.$column } | Select-Object -Unique)
+    foreach ($column in 'FSLogix', 'MSTeams', 'Outlook', 'Copilot', 'SnippingTool', 'Photos') {
+        $values = @($summary | Where-Object { $null -ne $_.Exit -and $_.Note -notlike 'not reached*' -and $_.Note -ne 'no result came back' } | ForEach-Object { $_.$column } | Select-Object -Unique)
         if ($values.Count -gt 1) {
             Write-Host "  [WARN] $column differs between hosts ($($values -join ' / ')) - users moving between them get a different build" -ForegroundColor Yellow
         }
@@ -429,6 +589,7 @@ $Name = @(foreach ($entry in $Name) {
         'teams'   { 'MSTeams' }
         'outlook' { 'Microsoft.OutlookForWindows' }
         'copilot' { $Copilot = $true }
+        { $StoreShorthands.ContainsKey($_) } { $StoreShorthands[$_] }
         default   { $entry }
     }
 })
@@ -441,6 +602,8 @@ if ($Copilot) {
     $Name = @($keep + @('Microsoft.MicrosoftOfficeHub', 'Microsoft.Copilot') | Select-Object -Unique)
 }
 $WingetId = @($WingetId | ForEach-Object { $_ -split '[,;]' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# Snipping Tool / Photos asked for by name: -Provision brings them to the Store build.
+$storeTargets = @($Name | Where-Object { $StorePackages.ContainsKey($_) } | Select-Object -Unique)
 
 $confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
 if ($confirmSuppressed) { $ConfirmPreference = 'None' }
@@ -924,14 +1087,29 @@ function Get-FslogixRequest {
         does not have that exact version answers 0x80070490 with an empty path,
         which is the error in the Apps event log. One object per requested package,
         with how often and when it last failed.
+
+        The same request also shows in the AppX deployment log, under the user's own
+        SID, and on some hosts only there: LEM-AVD-5 failed new Outlook 10-16 times per
+        sign-in with 0x80073CF9 / 0x80070490 while the FSLogix log named nothing, so
+        a host repair found no build to provision. A 0x80070490 there for a version
+        whose files are not on this host counts as a request as well.
     #>
     $since  = (Get-Date).AddDays(-$Days)
     $events = @(Get-EventSafe -Filter @{ ProviderName = 'Microsoft-FSLogix-Apps'; Level = 2; StartTime = $since })
+    $appx   = @(Get-EventSafe -Filter @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Level = 2; StartTime = $since } |
+                Where-Object { $_.Message -match '0x80070490' })
 
     $found = @{}
-    foreach ($entry in $events) {
-        if ($entry.Message -notmatch 'on Package\s+(\S+?)\s+from') { continue }
-        $fullName = $Matches[1]
+    foreach ($entry in @($events) + @($appx)) {
+        $fullName = $null
+        if ($entry.ProviderName -eq 'Microsoft-FSLogix-Apps') {
+            if ($entry.Message -match 'on Package\s+(\S+?)\s+from') { $fullName = $Matches[1] }
+        } elseif ($entry.Message -match '([\w\.\-]+_\d+\.\d+\.\d+\.\d+_\w*_[\w\.\-]*_\w{13})') {
+            # AppX: only a build this host does not have is a request it can answer.
+            $fullName = $Matches[1]
+            if (Test-PackageFiles $fullName) { continue }
+        }
+        if (-not $fullName) { continue }
         if (-not (Test-NameInScope $fullName)) { continue }
         $code = if ($entry.Message -match '(0x[0-9A-Fa-f]{8})') { $Matches[1] } else { 'unknown' }
         if (-not $found.ContainsKey($fullName)) {
@@ -1485,6 +1663,36 @@ function Write-CopilotStatus {
     return $blocked
 }
 
+function Remove-OrphanedStoreEntry {
+    <#
+        Backs up and removes every orphaned AppxAllUserStore entry in scope, read
+        fresh. Step 5, and again after -RemoveOld, whose removals for users without a
+        profile here leave new ones. Returns how many were removed.
+    #>
+    param([string] $BackupFolder, [string] $Indent = '')
+
+    $removed = 0
+    foreach ($entry in @(Get-OrphanedStoreEntry)) {
+        if (-not $PSCmdlet.ShouldProcess($entry.Path, "Back up and remove the orphaned $($entry.Kind)")) { continue }
+        # No backup, no removal: an edit to the store that cannot be undone is not a repair.
+        if (-not (Backup-RegistryKey -Key $entry.Path -Folder $BackupFolder)) {
+            Write-Warn "${Indent}Could not back up $($entry.Path) - left in place"
+            continue
+        }
+        $psPath = 'Registry::' + $entry.Path
+        Remove-Item -Path $psPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $psPath) {
+            Write-Warn "${Indent}Could not remove $($entry.Path)"
+        } else {
+            $script:storeEdited = $true
+            $removed++
+            $who = if ($entry.Account) { " for $($entry.Account)" } else { '' }
+            Write-Ok "${Indent}Removed the orphaned $($entry.Kind)$who`: $($entry.Name)"
+        }
+    }
+    return $removed
+}
+
 # -- Older builds --------------------------------------------------------------
 function Remove-OlderBuild {
     <#
@@ -1532,7 +1740,9 @@ function Remove-OlderBuild {
             Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
             Write-Ok "  Removed the older $($pkg.PackageFullName) for all users"; $removed++
         } catch {
-            Write-Warn "  Removing $($pkg.PackageFullName) for all users failed: $($_.Exception.Message)"
+            # The engine's message spans lines ("Catastrophic failure" + a blank line + more).
+            Write-Warn ("  Removing $($pkg.PackageFullName) for all users failed: {0} - trying each user" -f
+                        (($_.Exception.Message -split '\r?\n' | Where-Object { $_.Trim() }) -join ' '))
             foreach ($holder in @(Get-AppxPackageHolder -Package $pkg)) {
                 try {
                     Remove-AppxPackage -Package $pkg.PackageFullName -User $holder.Sid -ErrorAction Stop
@@ -1660,6 +1870,285 @@ function Invoke-WingetProvision {
     }
     Write-Ok "$mainName provisioned for all users from winget ($PackageId): $($after[$mainName])"
     return $after[$mainName]
+}
+
+function Remove-DeprovisionedMarker {
+    <#
+        The Deprovisioned marker of a package - how a bloatware removal is remembered -
+        backed up to .reg and removed, or Windows keeps the package from new profiles
+        however it is provisioned. Throws when the backup fails, so nothing is removed
+        without one.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [string] $BackupFolder)
+    $marker = "$AppxAllUserStorePath\Deprovisioned\${PackageName}_8wekyb3d8bbwe"
+    if (-not (Test-Path $marker)) { return }
+    if ($BackupFolder -and -not (Backup-RegistryKey -Key $marker -Folder $BackupFolder)) { throw "could not back up $marker - $PackageName not provisioned" }
+    Remove-Item -Path $marker -Recurse -Force
+    Write-Ok "  Deprovisioned marker for $PackageName removed"
+}
+
+function Get-HostBuild {
+    <#
+        The builds of a package whose signed files are on this host: what Get-AppxPackage
+        -AllUsers knows with an AppxSignature.p7x in its folder, newest first and the
+        bundle before the main package of the same build.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName)
+    @(
+        @(Get-AppxPackage -AllUsers -Name $PackageName -PackageTypeFilter Bundle -ErrorAction SilentlyContinue) +
+        @(Get-AppxPackage -AllUsers -Name $PackageName -PackageTypeFilter Main -ErrorAction SilentlyContinue) |
+        Where-Object { $_.InstallLocation -and (Test-Path -LiteralPath (Join-Path $_.InstallLocation 'AppxSignature.p7x')) } |
+        Sort-Object -Property @{ Expression = { try { [version] $_.Version } catch { [version] '0.0.0.0' } } }, @{ Expression = { [bool] $_.IsBundle } } -Descending
+    )
+}
+
+function Invoke-HostProvision {
+    <#
+        -FromHost: provision a Store-only package for all users again from the newest
+        build already on this host (Get-HostBuild), without downloading anything - the
+        way Watch-M365Apps.ps1 puts Snipping Tool back. Windows checked these files'
+        signature when it installed them; TrustedInstaller owns the folder. Each
+        candidate is tried with Add-AppxProvisionedPackage -FolderPath -SkipLicense until
+        the package is provisioned. Returns whether it is.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [string] $BackupFolder)
+
+    $candidates = @(Get-HostBuild -PackageName $PackageName)
+    if ($candidates.Count -eq 0) { throw "no signed build of $PackageName on this host to provision from - no user has it; use -Provision without -FromHost to take it from the Store" }
+    Remove-DeprovisionedMarker -PackageName $PackageName -BackupFolder $BackupFolder
+
+    $before   = (Get-ProvisionedVersion)[$PackageName]
+    $signedIn = $false
+    foreach ($pkg in $candidates) {
+        try {
+            Add-AppxProvisionedPackage -Online -FolderPath $pkg.InstallLocation -SkipLicense -ErrorAction Stop | Out-Null
+        } catch {
+            # -FolderPath is refused while other users are signed in, and nothing forces
+            # it short of signing everyone off. A package file (-PackagePath, the Store
+            # route) is not refused.
+            if ($_.Exception.Message -match 'other users are logged on') { $signedIn = $true }
+            Write-Warn "  $($pkg.PackageFullName): $($_.Exception.Message)"
+            continue
+        }
+        $after = (Get-ProvisionedVersion)[$PackageName]
+        if ($after) {
+            $was = if ($before -and $before -ne $after) { " (was $before)" } elseif ($before) { ' (already this build)' } else { '' }
+            Write-Ok "$PackageName provisioned for all users from the build on this host: $after$was - $($pkg.PackageFullName)"
+            return $true
+        }
+    }
+    # Already provisioned is what every next sign-in needs: the repair that matters is
+    # registering it for the users signed in now, which does not wait for them to leave.
+    $now = (Get-ProvisionedVersion)[$PackageName]
+    if ($now) {
+        $why = if ($signedIn) { 'provisioning again from a folder needs everyone signed off' } else { 'provisioning it again did not take' }
+        Write-Warn "$PackageName stays provisioned at $now ($why) - every next sign-in gets it; registering it for the users signed in now"
+        return $true
+    }
+    $hint = if ($signedIn) { ' - sign everyone off (drain the host) and run again, or use -Provision without -FromHost: a package file from the Store is not refused' } else { '' }
+    Write-Bad "${PackageName}: none of the $($candidates.Count) build(s) on this host could be provisioned$hint"
+    return $false
+}
+
+function Invoke-StoreProvision {
+    <#
+        Provision a Store-only package (Snipping Tool, Photos) for all users from the
+        folder winget download filled: the package, the frameworks it depends on and
+        the offline license, each checked for Microsoft's signature. A Deprovisioned
+        marker - how a bloatware removal is remembered - is backed up and removed
+        first, or Windows keeps the app from new profiles. Returns whether the package
+        is provisioned afterwards.
+    #>
+    param([Parameter(Mandatory)] [string] $PackageName, [Parameter(Mandatory)] [string] $Folder, [string] $BackupFolder)
+
+    if (-not (Test-Path -LiteralPath $Folder)) { throw "$Folder not found - nothing was downloaded for $PackageName" }
+    $files = @(Get-ChildItem -LiteralPath $Folder -File -Recurse | Where-Object { $_.Extension -in '.msix', '.msixbundle', '.appx', '.appxbundle' })
+    # The bundle over a single package, the largest when there are several.
+    $main  = $files | Where-Object { $_.Name -like "$PackageName*" } |
+             Sort-Object -Property @{ Expression = { $_.Extension -like '*bundle' } }, Length -Descending | Select-Object -First 1
+    if (-not $main) { throw "no $PackageName package in $Folder" }
+    $deps    = @($files | Where-Object { $_.Name -notlike "$PackageName*" })
+    $license = Get-ChildItem -LiteralPath $Folder -File -Recurse -Filter '*.xml' | Select-Object -First 1
+    if (-not $SkipSignatureCheck) {
+        foreach ($file in @($main) + $deps) {
+            if (-not (Test-MicrosoftSignature -Path $file.FullName)) { throw "$($file.Name) is not validly signed by Microsoft - refusing to provision it" }
+        }
+    }
+
+    Remove-DeprovisionedMarker -PackageName $PackageName -BackupFolder $BackupFolder
+
+    $before = (Get-ProvisionedVersion)[$PackageName]
+    $params = @{ Online = $true; PackagePath = $main.FullName; ErrorAction = 'Stop' }
+    if ($deps.Count -gt 0) { $params['DependencyPackagePath'] = @($deps | ForEach-Object { $_.FullName }) }
+    if ($license) { $params['LicensePath'] = $license.FullName } else { $params['SkipLicense'] = $true }
+    Add-AppxProvisionedPackage @params | Out-Null
+
+    $after = (Get-ProvisionedVersion)[$PackageName]
+    if (-not $after) {
+        Write-Bad "${PackageName}: Add-AppxProvisionedPackage completed, but it is not provisioned"
+        return $false
+    }
+    $was = if ($before -and $before -ne $after) { " (was $before)" } elseif ($before) { ' (already this build)' } else { '' }
+    Write-Ok "$PackageName provisioned for all users from the Microsoft Store: $after$was"
+    return $true
+}
+
+function Remove-OfflineOlderBuild {
+    <#
+        Registering a newer build of a package for one user makes the deployment engine
+        update every user on this host who has an older one - also users who are not
+        signed in. On an FSLogix host their profile sits in a container that is not
+        mounted, so the engine finds nothing ("User was online: false", then 0x80070490
+        in the Resolved state handler) and the whole registration fails, for the user
+        it was meant for as well. Measured on LEM-AVD-6: Snipping Tool 2608.41 could not
+        be registered for anyone while three signed-off users - one of them a deleted
+        account - still had 2607.23 here.
+
+        So, per package: every build older than the newest one with files on this host
+        (bundle against bundle, main against main) is removed for each user who is not
+        signed in - Remove-AppxPackage -User, and where that leaves the user listed, the
+        user's AppxAllUserStore entries, backed up to .reg first. Users signed in are left
+        alone: the engine updates them itself. Their own list stays in their profile, and
+        FSLogix registers it again at their next sign-in. Returns how many were removed.
+    #>
+    param([Parameter(Mandatory)] [string[]] $PackageNames, [string] $BackupFolder)
+
+    $online = @{}
+    foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
+        $sid = Get-PropertyValue (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue) 'Sid'
+        if ($sid) { $online[$sid] = $true }
+    }
+    $removed = 0
+    foreach ($pkgName in $PackageNames) {
+        $newest = @{}
+        foreach ($build in @(Get-HostBuild -PackageName $pkgName)) {
+            $kind = [bool] $build.IsBundle
+            $v    = try { [version] $build.Version } catch { $null }
+            if ($v -and (-not $newest.ContainsKey($kind) -or $v -gt $newest[$kind])) { $newest[$kind] = $v }
+        }
+        if ($newest.Count -eq 0) { continue }
+        foreach ($pkg in @(Get-AppxPackage -AllUsers -Name $pkgName -PackageTypeFilter Bundle, Main -ErrorAction SilentlyContinue)) {
+            $kind = [bool] $pkg.IsBundle
+            $v    = try { [version] $pkg.Version } catch { $null }
+            if (-not $v -or -not $newest.ContainsKey($kind) -or $v -ge $newest[$kind]) { continue }
+            foreach ($info in @($pkg.PackageUserInformation)) {
+                $sid = [string] $info.UserSecurityId.Sid
+                if (-not $sid -or $online.ContainsKey($sid)) { continue }
+                $who = if ($info.UserSecurityId.Username) { $info.UserSecurityId.Username } else { $sid }
+                if (-not $PSCmdlet.ShouldProcess("$($pkg.PackageFullName) for $who", 'Remove the older build for a user who is not signed in')) { continue }
+                try { Remove-AppxPackage -Package $pkg.PackageFullName -User $sid -ErrorAction Stop } catch { }
+                $still = @(Get-AppxPackage -AllUsers -Name $pkgName -PackageTypeFilter Bundle, Main -ErrorAction SilentlyContinue |
+                           Where-Object { $_.PackageFullName -eq $pkg.PackageFullName } |
+                           ForEach-Object { $_.PackageUserInformation } | Where-Object { [string] $_.UserSecurityId.Sid -eq $sid }).Count -gt 0
+                if ($still) {
+                    # Without the profile the cmdlet cannot reach the user; what keeps the
+                    # engine looking for them is their entry in the store.
+                    foreach ($root in @("$AppxAllUserStorePath\$sid", "$AppxAllUserStorePath\EndOfLife\$sid", "$AppxAllUserStorePath\DeferredRemoval\$sid")) {
+                        $key = Join-Path $root $pkg.PackageFullName
+                        if (-not (Test-Path $key)) { continue }
+                        if ($BackupFolder -and -not (Backup-RegistryKey -Key $key -Folder $BackupFolder)) { Write-Warn "  Could not back up $key - left in place"; continue }
+                        Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+                        $script:storeEdited = $true
+                    }
+                }
+                Write-Ok "  $($pkg.PackageFullName) removed for $who (not signed in - FSLogix registers their own build again at their next sign-in)"
+                $removed++
+            }
+        }
+    }
+    if ($removed -eq 0) { Write-Skip '  No older build held by a user who is not signed in' }
+    return $removed
+}
+
+function Register-ForSignedInUser {
+    <#
+        A provisioned build reaches a profile at its next sign-in - with FSLogix, the
+        sign-in that loads the container. Everyone signed in now (the owner of an
+        explorer.exe) gets these packages registered in their own session straight
+        away: Add-AppxPackage -RegisterByFamilyName, which takes the provisioned build,
+        and when that is refused -Register from the manifest of the newest main package
+        on the host - through a one-off scheduled task with their SID and an interactive token,
+        under conhost --headless so no window appears - the way Watch-M365Apps.ps1
+        repairs a user. Nothing is opened or closed: an app that is open keeps its
+        build until it is closed or the user signs in again. Read back per user.
+        Returns the number of users still without the provisioned build.
+    #>
+    param([Parameter(Mandatory)] [string[]] $PackageNames)
+
+    $shell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    # Per package: by family name (the provisioned build); when that is refused, from
+    # the manifest of the newest main package on this host. What still fails is
+    # written where the user can write and this run can read - the task's own output
+    # and exit code do not come through conhost - so the reason is shown, not guessed.
+    $manifests = @{}
+    foreach ($pkgName in $PackageNames) {
+        $main = @(Get-HostBuild -PackageName $pkgName | Where-Object { -not $_.IsBundle }) | Select-Object -First 1
+        if ($main) { $manifests[$pkgName] = Join-Path $main.InstallLocation 'AppxManifest.xml' }
+    }
+    $provisioned = Get-ProvisionedVersion
+    $missing = 0
+    $seen    = @{}
+    foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue)) {
+        $owner = Invoke-CimMethod -InputObject $proc -MethodName GetOwner -ErrorAction SilentlyContinue
+        $sid   = Get-PropertyValue (Invoke-CimMethod -InputObject $proc -MethodName GetOwnerSid -ErrorAction SilentlyContinue) 'Sid'
+        if (-not $owner -or $owner.ReturnValue -ne 0 -or -not $sid -or $seen.ContainsKey($sid)) { continue }
+        $seen[$sid] = $true
+        $user = '{0}\{1}' -f $owner.Domain, $owner.User
+        if (-not $PSCmdlet.ShouldProcess($user, "Register $($PackageNames -join ', ') in their session")) { continue }
+
+        $name    = 'Register-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $path    = '\AppxRepair\'
+        $errFile = Join-Path $env:PUBLIC "AppxRepair_$name.txt"
+        $parts   = foreach ($pkgName in $PackageNames) {
+            $byFamily = "Add-AppxPackage -RegisterByFamilyName -MainPackage '" + $pkgName + "_8wekyb3d8bbwe' -ErrorAction Stop"
+            $fallback = if ($manifests.ContainsKey($pkgName)) { "Add-AppxPackage -Register '" + $manifests[$pkgName] + "' -DisableDevelopmentMode -ErrorAction Stop" } else { 'throw $first' }
+            $log      = "Add-Content -Path '" + $errFile + "' -Value ('" + $pkgName + ": ' + (`$_.Exception.Message -replace '\s+', ' ') + ' | by family name: ' + (`$first -replace '\s+', ' '))"
+            'try { ' + $byFamily + ' } catch { $first = $_.Exception.Message; try { ' + $fallback + ' } catch { ' + $log + ' } }'
+        }
+        $argument = '--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "{1}"' -f $shell, ($parts -join '; ')
+        try {
+            $principal = New-ScheduledTaskPrincipal -UserId $sid -LogonType Interactive -RunLevel Limited
+            $action    = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\conhost.exe') -Argument $argument
+            $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+            Register-ScheduledTask -TaskName $name -TaskPath $path -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+            $started = Get-Date
+            Start-ScheduledTask -TaskName $name -TaskPath $path
+            do {
+                Start-Sleep -Seconds 2
+                $task = Get-ScheduledTask -TaskName $name -TaskPath $path
+                $info = Get-ScheduledTaskInfo -TaskName $name -TaskPath $path
+                $done = $task.State -ne 'Running' -and $info.LastRunTime -ge $started.AddSeconds(-1)
+            } until ($done -or (Get-Date) -gt $started.AddSeconds(180))
+        } catch {
+            Write-Warn "  $user - no task could run in their session: $($_.Exception.Message)"
+        } finally {
+            Unregister-ScheduledTask -TaskName $name -TaskPath $path -Confirm:$false -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $errFile) {
+            foreach ($line in @(Get-Content -LiteralPath $errFile -ErrorAction SilentlyContinue)) {
+                Write-Warn "$user - Windows refused: $(($line -split '\r?\n' | Where-Object { $_.Trim() }) -join ' ')"
+            }
+            Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
+        }
+
+        # The task's own exit code does not come through conhost: the package says.
+        # By name, not SID: Get-AppxPackage -User answers "No valid SID" for some.
+        # Bundle and main package both: the provisioned version is the bundle's, which
+        # need not be the app's (Snipping Tool: bundle 2022.2608.41.0, app 11.2608.41.0).
+        foreach ($pkgName in $PackageNames) {
+            $have = @(Get-AppxPackage -User $user -Name $pkgName -PackageTypeFilter Bundle, Main -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Status -eq 'Ok' } | ForEach-Object { [version] $_.Version } | Sort-Object -Descending) | Select-Object -First 1
+            if ($have -and $provisioned.ContainsKey($pkgName) -and $have -ge $provisioned[$pkgName]) {
+                Write-Ok "  $user - $pkgName $have"
+            } else {
+                $what = if ($have) { "still $have - open, so it switches when closed or at their next sign-in" } else { 'not registered - at their next sign-in' }
+                Write-Warn "$user - ${pkgName}: $what"
+                $missing++
+            }
+        }
+    }
+    if ($seen.Count -eq 0) { Write-Skip '  Nobody signed in - every profile gets the build at its next sign-in' }
+    return $missing
 }
 
 # -- Everything that fails -----------------------------------------------------
@@ -1801,6 +2290,16 @@ try {
         }
     }
     Write-AppxPolicyStatus
+    foreach ($pkg in $storeTargets) {
+        $onHost = @(Get-HostBuild -PackageName $pkg | ForEach-Object { $_.Version } | Select-Object -Unique)
+        $hostText = if ($onHost.Count -gt 0) { 'builds on this host: ' + ($onHost -join ', ') } else { 'no signed build on this host' }
+        if ($provisionedNow.ContainsKey($pkg)) {
+            Write-Skip "  $pkg is provisioned at $($provisionedNow[$pkg]); $hostText"
+        } else {
+            Write-Warn "$pkg is not provisioned - new profiles do not get it; $hostText"
+            $work++
+        }
+    }
 
     # -- 1c. Everything that fails --------------------------------------------
     # Not only what the store gets wrong: every package that failed to install,
@@ -1866,7 +2365,7 @@ try {
         }
     }
 
-    if ($work -eq 0 -and $removeOldTargets.Count -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count) -gt 0)) {
+    if ($work -eq 0 -and $removeOldTargets.Count -eq 0 -and -not $Source -and $WingetId.Count -eq 0 -and -not ($Provision -and ($provisionTargets.Count + $exactTargets.Count + $storeTargets.Count) -gt 0)) {
         # "Nothing to repair" while a package failed today is not the same as healthy.
         if ($script:unexplained.Count -gt 0) {
             $plannedExit = 1
@@ -1967,24 +2466,7 @@ try {
     # Read again: the removals above may have taken some entries with them.
     Write-Out ''
     Write-Step '5. Orphaned package store entries'
-    $orphans = @(Get-OrphanedStoreEntry)
-    if ($orphans.Count -eq 0) { Write-Skip 'None left' }
-    foreach ($entry in $orphans) {
-        if (-not $PSCmdlet.ShouldProcess($entry.Path, "Back up and remove the orphaned $($entry.Kind)")) { continue }
-        # No backup, no removal: an edit to the store that cannot be undone is not a repair.
-        if (-not (Backup-RegistryKey -Key $entry.Path -Folder $backupDir)) {
-            Write-Warn "Could not back up $($entry.Path) - left in place"
-            continue
-        }
-        $psPath = 'Registry::' + $entry.Path
-        Remove-Item -Path $psPath -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path $psPath) {
-            Write-Warn "Could not remove $($entry.Path)"
-        } else {
-            $storeEdited = $true
-            Write-Ok "Removed the orphaned $($entry.Kind) for $($entry.Name)"
-        }
-    }
+    if ((Remove-OrphanedStoreEntry -BackupFolder $backupDir) -eq 0) { Write-Skip 'None left' }
     if ($storeEdited) { Write-Skip "  Backups: $backupDir (double-click a .reg file to put an entry back)" }
 
     # -- 6. Provision -----------------------------------------------------------
@@ -2068,6 +2550,47 @@ try {
         }
     }
 
+    # Snipping Tool / Photos: from -StoreFolder - filled by the run that fanned out
+    # with -ComputerName - or downloaded here from the msstore source.
+    if ($Provision) {
+        # Users who are not signed in and still hold an older build make every
+        # registration of a newer one fail (Remove-OfflineOlderBuild): cleared first.
+        if ($storeTargets.Count -gt 0 -and -not $simulate) {
+            Write-Out ''
+            Write-Step "6. Older builds held by users who are not signed in: $($storeTargets -join ', ')"
+            if ((Remove-OfflineOlderBuild -PackageNames $storeTargets -BackupFolder $backupDir) -gt 0) {
+                [void] (Remove-OrphanedStoreEntry -BackupFolder $backupDir -Indent '  ')
+            }
+        }
+        $storeDone = @()
+        foreach ($pkg in $storeTargets) {
+            $how = if ($FromHost) { 'the build already on this host' } else { 'Microsoft Store download' }
+            if (-not $PSCmdlet.ShouldProcess($pkg, "Provision for all users ($how + Add-AppxProvisionedPackage)")) { continue }
+            try {
+                if ($FromHost) {
+                    $ok = Invoke-HostProvision -PackageName $pkg -BackupFolder $backupDir
+                } else {
+                    $folder = if ($StoreFolder) { Join-Path $StoreFolder $pkg } else { Save-StorePackage -PackageName $pkg -Folder (Join-Path $WorkingDir 'Store') }
+                    $ok = Invoke-StoreProvision -PackageName $pkg -Folder $folder -BackupFolder $backupDir
+                }
+                if ($ok) { $storeDone += $pkg } else { $exitCode = 1 }
+            } catch {
+                Write-Bad "Provisioning $pkg failed: $($_.Exception.Message)"
+                Write-AppxDeploymentError -Minutes 20
+                $exitCode = 1
+            }
+        }
+        # Provisioned is every future sign-in; whoever is signed in now gets it now.
+        if ($storeDone.Count -gt 0 -and -not $simulate) {
+            # A Store build just provisioned is newer than what the first pass compared
+            # against.
+            [void] (Remove-OfflineOlderBuild -PackageNames $storeDone -BackupFolder $backupDir)
+            Write-Out ''
+            Write-Step "6a. Register $($storeDone -join ', ') for everyone signed in"
+            [void] (Register-ForSignedInUser -PackageNames $storeDone)
+        }
+    }
+
     if (-not $Source) {
         if (-not $Provision -and $WingetId.Count -eq 0) { Write-Skip 'No -Provision, -WingetId or -Source given' }
     } else {
@@ -2091,11 +2614,29 @@ try {
     if ($removeOldTargets.Count -gt 0) {
         Write-Out ''
         Write-Step '6b. Remove older builds'
-        foreach ($proc in @(Get-Process -Name 'olk', 'ms-teams' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -Unique)) {
-            Write-Warn "  $proc is running - an older build in use is closed or finishes at that user's sign-out"
+        # Only the processes of the packages being cleaned: Teams running says nothing
+        # about an Outlook-only run.
+        $appProcess = @{ 'MSTeams' = 'ms-teams'; 'Microsoft.OutlookForWindows' = 'olk' }
+        $watch      = @($removeOldTargets | Where-Object { $appProcess.ContainsKey($_) } | ForEach-Object { $appProcess[$_] })
+        if ($watch.Count -gt 0) {
+            foreach ($proc in @(Get-Process -Name $watch -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -Unique)) {
+                Write-Warn "  $proc is running - an older build in use is closed or finishes at that user's sign-out"
+            }
         }
         foreach ($pkgName in $removeOldTargets) {
             Remove-OlderBuild -PackageName $pkgName -BackupFolder $backupDir
+        }
+
+        # Removing a build for a user with no profile on this host makes the
+        # deployment engine queue that work in the store - an end-of-life entry for
+        # the old build and a user registration for the kept one - and it writes the
+        # end-of-life entry again after Remove-OlderBuild took it away. Nothing ever
+        # runs that queue, so it is swept like step 5 once the engine has settled,
+        # instead of being handed to step 7 as damage this run left behind.
+        if (-not $simulate) {
+            Start-Sleep -Seconds 5
+            $swept = Remove-OrphanedStoreEntry -BackupFolder $backupDir -Indent '  '
+            if ($swept -gt 0) { Write-Skip "  Backups: $backupDir (double-click a .reg file to put an entry back)" }
         }
     }
 

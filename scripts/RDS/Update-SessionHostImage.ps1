@@ -66,7 +66,7 @@
 
     The two scripts are taken from the repo when this one runs from it (or from the
     folder -ComputerName copies them to). Run on its own - only this file on the
-    image VM - it fetches them from GitHub at a pinned commit of main and runs them
+    image VM - it fetches them from GitHub at a pinned commit and runs them
     only when their SHA-256 matches; see $HelperCommit / $HelperHashes.
 
     It never restarts the machine, and neither do the scripts and installers it calls
@@ -159,13 +159,13 @@ $CopilotGuid    = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
 $WebView2Url    = 'https://go.microsoft.com/fwlink/?linkid=2124701'   # Evergreen Standalone x64
 $EdgeReleaseApi = 'https://edgeupdates.microsoft.com/api/products'
 # The two scripts this one calls, when they are not next to it: fetched from this
-# repo at a pinned commit of main and refused unless the SHA-256 matches. A newer
+# repo at a pinned commit and refused unless the SHA-256 matches. A newer
 # version is never run unseen - to move up, put the new commit and the hashes of
 # both files at that commit here, after reading the diff.
-$HelperCommit = '746541e4b3bb47fd54867dc3b79c40a629c7fea6'   # main, 2026-10-05
+$HelperCommit = 'abe8202bc90d855328f4f04844a54406968f0f6b'   # devel, 2026-10-10
 $HelperHashes = @{
-    'Update-TeamsClient.ps1'      = 'CC6D97EA9ADBEF12E3614FA482A219CE04E5AB421ECFAF5D11F86AEEC0397E7D'
-    'Repair-AppxPackageStore.ps1' = '88A9CEAB9F801CF60BFD25AEB69320A97AECD9F19323BC6E354A60118A04C45C'
+    'Update-TeamsClient.ps1'      = '7F675FDFDDAB3639C8CF7F1E01AF8EE2E2BAB56B8941908EE7225E609D4635C8'
+    'Repair-AppxPackageStore.ps1' = 'D990B0DBF4C530F1CA1D3E00444BF18E6D0F1D44E47FB6E1A7627ADCBF715C84'
 }
 $WebRtcEndOfSupport      = [datetime] '2026-10-01'
 $WebRtcEndOfAvailability = [datetime] '2027-04-01'

@@ -28,6 +28,7 @@ Exchange Online voor het auditlogboek.
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Verwijderde bestanden/mappen terugzetten uit de prullenbak van een site of OneDrive (standaard een proefdraai) |
 | [`Trace-SharePointFile.ps1`](Trace-SharePointFile.ps1) ([docs](#trace-sharepointfileps1)) | Waar is een bestand gebleven? Hernoemingen, verplaatsingen, kopieën en verwijderingen uit het auditlog, ook via een map — in Brusselse tijd, over een periode naar keuze |
 | [`Revoke-SharePointUserAccess.ps1`](Revoke-SharePointUserAccess.ps1) ([docs](#revoke-sharepointuseraccessps1)) | Neem één gebruiker overal de toegang af: site collection-beheerder, directe toekenningen op elk niveau, SharePoint-groepen en deellinks. Rapporteert standaard, verwijdert met `-Apply` |
+| [`Set-SharePointFolderAccess.ps1`](Set-SharePointFolderAccess.ps1) ([docs](#set-sharepointfolderaccessps1)) | Geef elke submap van één map een eigen SharePoint-groep (lezen/schrijven), een groep owners die alles beheert, en eventueel een persoonlijke map per persoon - iedereen komt alleen bij zijn eigen mappen. Rapporteert standaard, wijzigt met `-Apply` |
 | [`Test-SharePointAccessScripts.ps1`](Test-SharePointAccessScripts.ps1) ([docs](#test-sharepointaccessscriptsps1)) | Controleer de twee toegangsscripts zonder een tenant aan te raken — gedeeld authenticatieblok identiek, en de revocatie-trechter gedraagt zich |
 
 ---
@@ -689,6 +690,151 @@ Het gebruikt bij voorkeur het site-access bestand (`..._SiteAccess_...csv`), waa
 ```
 
 > Onbeheerd draaien? Geef `-Confirm:$false` mee, anders vraagt het script per verwijdering om bevestiging (`ConfirmImpact = 'High'`).
+
+---
+
+### Set-SharePointFolderAccess.ps1
+
+Voor de vraag "we hebben onder General een map aangemaakt; zorg dat mensen alleen bij hun
+eigen submap kunnen, lezen en schrijven, verder niets - en laat de teamleads het beheren". Eén
+config noemt de owners, de submappen en wie in elke submap hoort; het script maakt de
+SharePoint-groepen en de ontbrekende mappen aan, verbreekt de overname en brengt elk recht in lijn.
+
+**Groepen** (standaard - `-DirectAccess` geeft de mensen in plaats daarvan direct rechten)
+
+| Groep | Wie | Wat |
+|-------|-----|-----|
+| `<prefix> - Owners` | `owners` uit de config | Volledig beheer op de bovenliggende map en alles wat het script eronder beheert |
+| `<prefix> - <submap>` | de mensen die voor die submap genoemd zijn | `-Role` op hun submap (standaard **Bijdragen**: lezen, toevoegen, wijzigen, verwijderen) |
+
+Standaard zijn dit **Entra ID-beveiligingsgroepen** (`-GroupType Entra`): zichtbaar en te
+beheren in Entra, zonder mailbox en zonder team. De mensen in `owners` worden eigenaar van elke
+groep, dus ze voegen zelf leden toe en halen ze weg in *Mijn groepen*
+(`https://myaccount.microsoft.com/groups`), zonder IT. Het script meldt daarvoor als beheerder
+aan bij Microsoft Graph (`Group.ReadWrite.All`; `Group.Read.All` bij een proefdraai). Een
+bestaande groep met dezelfde naam wordt hergebruikt - tenzij er meerdere zijn, of hij vanuit
+on-premises gesynchroniseerd is, geen beveiligingsgroep is of dynamisch is: dan stopt de run
+voordat er iets verandert. `<prefix>` is `groupPrefix`, anders `<site> - <map>`, omdat
+Entra-namen tenantbreed zijn.
+
+`-GroupType SharePoint` maakt in plaats daarvan SharePoint-groepen in deze site, met de
+Owners-groep als eigenaar (prefix standaard: de mapnaam): een wijziging werkt meteen en er komt
+niets in de directory.
+
+**Mappen**
+
+| Map | Wie heeft daarna toegang |
+|-----|--------------------------|
+| Bovenliggend (bv. `General/Teamleads`) | Site-eigenaren en de Owners-groep (Volledig beheer) + elke submapgroep met **Lezen**, zodat de map zichtbaar is en ze kunnen doorklikken. `-ParentAccess None`: alleen owners |
+| Elke submap | Owners (Volledig beheer) + de eigen groep met `-Role` |
+| Persoonlijke map (met `personalFolders`) | In de submap, één per genoemde niet-owner (`"all"`: ook de owners), met de weergavenaam als naam: alleen die persoon (Bijdragen) en de owners - owners kunnen elkaars map openen |
+| Al het andere direct in de bovenliggende map | Alleen owners - anders kon iedereen het via het Lezen op de bovenliggende map openen. `-KeepOtherItems`: ongemoeid, alleen gemeld |
+
+Iedereen anders wordt van die mappen verwijderd: de groepen Leden en Bezoekers, eerdere
+directe toekenningen en deellinks. Een map waar je geen rechten op hebt, wordt niet eens
+getoond, dus mensen zien de mapnamen van de andere teams niet. Altijd behouden: de gekoppelde
+Eigenaren-groep van de site, de eigenaren van de Microsoft 365-groep achter een Teams-site, en
+systeemvermeldingen *Beperkte toegang*.
+
+**Lidmaatschap** — ontbrekende leden en eigenaren worden toegevoegd. Iemand in een groep die
+niet in de config staat, wordt gemeld en blijft erin, omdat de owners het lidmaatschap zelf
+beheren en een nieuwe run dat niet mag terugdraaien; `-SyncMembers` maakt de groepen precies
+gelijk aan de config (een eigenaar wordt pas weggehaald als de geconfigureerde eigenaren erin
+staan). Na `-Apply` toont het script de groepen en waar de owners ze beheren. Bij Entra-groepen
+kan een wijziging in het lidmaatschap even duren voordat SharePoint die ziet, en owners kunnen
+ze alleen in *Mijn groepen* beheren als de tenant dat toestaat (Entra > Groepen > Algemeen:
+*Gebruikerstoegang tot groepsfuncties in Mijn groepen beperken* = **Nee**).
+
+Elk adres wordt opgezocht **voordat** er iets verandert; één onbekend adres stopt de run
+zonder wijzigingen. Rollen worden op type gekozen, dus een Nederlandse of Franse site werkt
+hetzelfde. Met `-Apply` worden de rechten per map teruggelezen. Elke run schrijft een CSV
+(`C:\Temp\SharePointFolderAccess_<timestamp>.csv`), ook als een wijziging halverwege faalt.
+
+Aanmelden: hetzelfde als bij de andere SharePoint-scripts. De eerste run tegen een tenant
+meldt één keer als beheerder aan bij Graph (via `Connect-M365Graph`), maakt een public-client
+app aan of hergebruikt die (`-AppName`, standaard *M365-Scripts SharePoint Folder Access*) met
+de delegated SharePoint-scope `AllSites.FullControl` met beheerderstoestemming, en bewaart de
+client-ID per tenant in `pnp.appid.json` (repo-root, gitignored). Latere runs gaan meteen naar
+de delegated PnP-aanmelding via `Connect-M365PnP` (device code / GDAP-klant volgens
+`load.config.ps1`); een client-ID die een ander script al voor de tenant bewaarde, wordt
+hergebruikt. `-ClientId` slaat de app-registratie over.
+
+**Configbestand** — een submap is een lijst mensen, of een object met `members` en `personalFolders` (`true`: niet-owners, `"all"`: iedereen die genoemd is, owners inbegrepen - voor een eigen map van de teamleads).
+
+```json
+{
+  "siteUrl":      "https://contoso.sharepoint.com/sites/Sales",
+  "folder":       "Shared Documents/General/Teamleads",
+  "groupPrefix":  "Sales - Teamleads",
+  "groupType":    "Entra",
+  "owners":       [ "jan@contoso.com", "kim@contoso.com" ],
+  "role":         "Contribute",
+  "parentAccess": "Read",
+  "subfolders": {
+    "Team A": { "members": [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com", "piet@contoso.com" ],
+                "personalFolders": true },
+    "Leads":  [ "jan@contoso.com", "kim@contoso.com", "els@contoso.com" ]
+  }
+}
+```
+
+**Parameters**
+
+| Parameter | Verplicht | Beschrijving |
+|-----------|-----------|--------------|
+| `-ConfigPath` | Nee* | JSON-config zoals hierboven. Parameters op de commandoregel gaan voor op het bestand |
+| `-SiteUrl` | Nee* | De site waar de map in staat (voor een Teams-kanaal: de site van het team) |
+| `-FolderPath` | Nee* | Bovenliggende map, site-relatief (`Shared Documents/General/Teamleads`); een volledige of server-relatieve URL werkt ook, en ook de **link uit de browser** terwijl de map open staat (`…/Forms/AllItems.aspx?id=…`) - de veilige manier, want de bibliotheek-URL hangt af van de taal waarin de site is aangemaakt (`Shared Documents`, `Gedeelde documenten`, …), niet van wat Teams toont. Wordt de map niet gevonden, dan worden de bibliotheken van de site getoond |
+| `-Access` | Nee* | Hashtable submap → UPN's/e-mailadressen, in plaats van of bovenop `subfolders` in de config |
+| `-Owners` | Nee | Volledig beheer overal en eigenaar van de groepen; gaat voor op `owners` |
+| `-GroupPrefix` | Nee | Begin van de groepsnamen (standaard: `groupPrefix`, anders `<site> - <map>` voor Entra en de mapnaam voor SharePoint-groepen) |
+| `-OwnersGroup` | Nee | Volledige naam van de owners-groep in plaats van `<prefix> - Owners`, bv. `LBM - Teamleads Owners` (config: `ownersGroup`) |
+| `-PersonalFolders` | Nee | Persoonlijke mappen in elke submap, in plaats van per submap in de config |
+| `-DirectAccess` | Nee | De mensen direct rechten geven in plaats van via SharePoint-groepen |
+| `-GroupType` | Nee | `Entra` (standaard): Entra ID-beveiligingsgroepen via Graph. `SharePoint`: SharePoint-groepen alleen in deze site |
+| `-SyncMembers` | Nee | Groepsleden die niet in de config staan verwijderen (anders alleen gemeld) |
+| `-Role` | Nee | `Contribute` (standaard), `Edit` of `Read` op elke submap. Persoonlijke mappen krijgen altijd `Contribute` |
+| `-ParentAccess` | Nee | `Read` (standaard) of `None` op de bovenliggende map |
+| `-KeepOtherItems` | Nee | Bestanden en niet-geconfigureerde submappen direct in de bovenliggende map ongemoeid laten in plaats van ze voor de owners af te sluiten |
+| `-Apply` | Nee | Echt wijzigen. Zonder wordt er niets geschreven |
+| `-TenantId` / `-ClientId` / `-AppName` | Nee | Overschrijvingen voor het aanmelden, zoals in `Restore-RecycleBinItems.ps1` |
+| `-GrantSiteAdmin` | Nee | Maak jezelf sitecollectiebeheerder voor de duur van de run en haal dat daarna weer weg, ook als de run faalt (SharePoint-beheerder vereist). Nodig op een Teams-site waar je geen lid van bent - een Global Administrator kan de bestanden van een team niet lezen op basis van zijn rol alleen |
+| `-KeepSiteAdmin` | Nee | Die rechten houden in plaats van ze weg te halen |
+| `-AdminUpn` | Nee | UPN die de site-adminrechten krijgt (standaard: het aangemelde account) |
+| `-AppOnly` | Nee | Certificaat-app uit `graph.appid.json` (heeft SharePoint `Sites.FullControl.All` nodig) |
+| `-OutputPath` | Nee | Pad van het CSV-rapport |
+
+\* Een site, een map en minstens één submap zijn verplicht - uit de config, de parameters, of beide.
+
+**Voorbeelden**
+
+```powershell
+# Wat zou er veranderen? Leest alleen, schrijft de CSV.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json
+
+# Uitvoeren, en het resultaat teruglezen.
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -Apply
+
+# Teams-site van een klant waar je geen lid van bent: alleen tijdens de run sitecollectiebeheerder
+.\Set-SharePointFolderAccess.ps1 -ConfigPath .\teamleads.json -GrantSiteAdmin -Apply
+
+# Zonder configbestand, mensen direct op de map in plaats van via groepen
+.\Set-SharePointFolderAccess.ps1 -SiteUrl https://contoso.sharepoint.com/sites/Sales `
+    -FolderPath "Shared Documents/General/Teamleads" -Owners jan@contoso.com `
+    -Access @{ 'Team A' = @('kim@contoso.com', 'els@contoso.com') } -DirectAccess -Apply
+```
+
+**Opmerkingen**
+- Idempotent: een tweede run meldt *already correct* voor alles wat de eerste heeft ingesteld.
+- Persoonlijke mappen worden op naam herkend: hernoem je er een, dan maakt de volgende run een
+  nieuwe aan onder de weergavenaam.
+- Iets wat later direct in de bovenliggende map wordt gezet, erft weer het Lezen; een nieuwe
+  run sluit het af.
+- Alleen de bovenliggende map, wat er direct in staat, de submappen en hun persoonlijke mappen
+  worden aangeraakt. Iets dieper dat apart gedeeld is, houdt zijn eigen rechten.
+- Nog niet geverifieerd op een tenant: of owners die alleen Volledig beheer op de mappen hebben
+  (niet op de site) de groepspagina kunnen openen om leden te beheren. Lukt dat niet, dan
+  beheren de site-eigenaren het, of krijgen de owners Lezen op de site.
 
 ---
 

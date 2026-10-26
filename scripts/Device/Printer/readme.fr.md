@@ -85,7 +85,48 @@ Un appareil déjà conforme ne coûte qu'une lecture du JSON. Rien n'est téléc
 | `duplex` | `OneSided`, `TwoSidedLongEdge` ou `TwoSidedShortEdge` |
 | `color` | `true` / `false` |
 | `paperSize` | p. ex. `A4`, `Letter` |
+| `inputBin` | Bac par défaut, par le nom qu'affiche le pilote (`Tray 2`, `Manual Feed`) ou son nom Print Schema (`ns0000:Tray2`) ; espaces et casse sans importance. Un nom inconnu du pilote donne un avertissement qui liste les bacs qu'il propose |
+| `permissions` | Qui peut utiliser cette file : une liste de `{ "principal": "CONTOSO\\Finance", "access": "print" }` — voir *Groupes de sécurité par file* ci-dessous. Sans ce champ, les autorisations ne sont pas touchées |
 | `ensure` | `absent` supprime l'imprimante (et son port si aucune autre imprimante ne l'utilise). Le pilote reste toujours |
+
+**Un appareil, plusieurs files (bacs)**
+
+Les utilisateurs choisissent une file, pas un bac. Donnez à chaque file sa propre entrée avec **la même adresse** : elles partagent le port `IP_<address>`, et chacune a son propre bac par défaut, recto verso ou couleur :
+
+```json
+"printers": [
+  { "name": "Office",            "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 1" },
+  { "name": "Office - letterhead", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 2", "duplex": "OneSided" },
+  { "name": "Office - envelopes", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Manual Feed" }
+]
+```
+
+Le bac est défini dans le ticket d'impression par défaut de la file : c'est le point de départ de chaque utilisateur de cette file, qui peut toujours choisir un autre bac pour une impression. Les noms de bacs varient selon le pilote - exécutez le script une fois avec le nom attendu, et un nom erroné reçoit en réponse la liste que propose le pilote. Les pilotes universels n'affichent les bacs réels de l'appareil qu'une fois ses options connues ; si seul `Auto Select` revient, configurez d'abord les options installables dans les propriétés de l'imprimante, ou utilisez le pilote spécifique au modèle du fabricant.
+
+**Groupes de sécurité par file**
+
+Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à chèques sur lequel seule la Finance peut imprimer :
+
+```json
+{ "name": "Office - cheques", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 3",
+  "permissions": [
+    { "principal": "CONTOSO\\Finance",          "access": "print" },
+    { "principal": "CONTOSO\\Office Managers",  "access": "manageDocuments" },
+    { "principal": "S-1-12-1-1111-2222-3333-4444", "access": "print" }
+  ] }
+```
+
+| `access` | Signification |
+|----------|---------------|
+| `print` | Imprimer et gérer ses propres travaux — ce qu'a Everyone par défaut |
+| `manageDocuments` | Aussi suspendre, relancer et supprimer les travaux des autres |
+| `manage` | Aussi modifier l'imprimante elle-même (paramètres, partage, autorisations) |
+
+- `principal` est `DOMAINE\Groupe`, un utilisateur ou groupe local, ou un **SID**. Un groupe Entra ID ne peut être indiqué que par son SID (`S-1-12-1-…`, depuis Entra ID ou `whoami /groups` d'un membre). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` et `SYSTEM` sont compris en anglais, sur un Windows de n'importe quelle langue
+- Les principaux listés reçoivent cet accès ; **Everyone et tout autre utilisateur ou groupe perdent le leur**, y compris le compte qui a installé l'imprimante. Administrators, SYSTEM, CREATOR OWNER, les packages d'application et les identités de service gardent toujours leur accès — l'impression depuis des applications empaquetées comme le nouvel Outlook dépend de ces entrées, elles ne sont donc jamais supprimées. `[]` signifie administrateurs uniquement
+- **Échec sécurisé :** un groupe introuvable empêche la création de cette file (`-CheckOnly` le signale à l'avance), et une nouvelle file dont les autorisations ne peuvent être définies est supprimée plutôt que laissée ouverte à tous. Une file existante garde ses anciennes autorisations et l'exécution échoue. Au premier démarrage, un nom introuvable est retenté jusqu'à 2 minutes, le temps qu'un contrôleur de domaine soit joignable
+- Comparaison par le sens, pas par le texte : Windows peut enregistrer une entrée autrement qu'elle a été donnée, et cela ne compte pas comme une modification. Les autorisations sont vérifiées à chaque exécution, donc un groupe ajouté à la main dans les propriétés de l'imprimante est retiré — le JSON fait foi
+- Les autorisations décident qui peut imprimer sur la file. Qu'un utilisateur sans accès la *voie* encore dans la liste dépend de l'application et n'est pas contrôlé par ce script
 
 **Paramètres**
 
@@ -112,13 +153,53 @@ Un appareil déjà conforme ne coûte qu'une lecture du JSON. Rien n'est téléc
 # Uniquement les imprimantes Office, en simulation, JSON directement depuis GitHub
 .\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Printer 'Office*' -WhatIf
 
-# Premier démarrage d'un serveur issu d'une golden image (Custom Script Extension / tâche de démarrage en SYSTEM)
-powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet -Confirm:$false
+# Premier démarrage ou déploiement (Custom Script Extension, Run Command, tâche de démarrage en SYSTEM)
+powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet
 
 # Dépôt privé
 $env:GITHUB_TOKEN = '<fine-grained token, Contents: read>'
 .\Install-Printer.ps1 -ConfigPath \\fs01\it$\printers.json -Confirm:$false
 ```
+
+**Installer au déploiement plutôt que dans l'image**
+
+L'image reste sans pilotes ni imprimantes ; chaque nouvel hôte de session les reçoit lors de son déploiement, de sorte qu'une imprimante modifiée est une modification du JSON et non une nouvelle image. Exécutez le script une fois en SYSTEM via l'extension Azure Custom Script dans le Bicep de la VM (chaque hôte ajouté au pool l'exécute automatiquement), ou via Run Command sur un hôte qui existe déjà :
+
+```bicep
+// Custom Script Extension: runs once, as SYSTEM, when the VM is deployed
+resource installPrinters 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = {
+  parent: vm
+  name: 'InstallPrinters'
+  location: location
+  properties: {
+    publisher: 'Microsoft.Compute'
+    type: 'CustomScriptExtension'
+    typeHandlerVersion: '1.10'
+    autoUpgradeMinorVersion: true
+    settings: {
+      fileUris: [
+        'https://raw.githubusercontent.com/sjkanon/M365-Scripts/<commit>/scripts/Device/Printer/Install-Printer.ps1'
+      ]
+    }
+    protectedSettings: {
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet'
+    }
+  }
+}
+```
+
+```powershell
+# Run Command: afterwards, on a VM that is already running
+az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellScript `
+  --scripts '@Install-Printer.ps1' `
+  --parameters 'ConfigPath=https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json'
+```
+
+- Faites pointer `fileUris` vers un **commit** plutôt que `main`, pour qu'un hôte déployé le mois prochain exécute le script que vous avez testé. Le JSON peut rester sur une branche : ce sont des données, entièrement validées avant tout changement.
+- **Pas de `-Confirm:$false`** sur ces lignes de commande : une exécution sans console ne demande jamais rien, et via `-File` le commutateur arriverait comme le texte `'$false'` et arrêterait le script avant son démarrage.
+- Une VM n'a qu'**une** extension Custom Script. Si le déploiement l'utilise déjà pour autre chose, utilisez plutôt un Run Command managé (`Microsoft.Compute/virtualMachines/runCommands`).
+- Un jeton GitHub pour un dépôt de pilotes privé va dans `protectedSettings` (`-GitHubToken`), jamais dans `settings`, lisible sur la VM.
+- Le code de sortie `1` fait échouer l'extension, si bien qu'un déploiement avec une imprimante non installée est visible dans le portail ; `Install-Printer.log` dans `-LogPath` indique laquelle.
 
 **Codes de sortie**
 

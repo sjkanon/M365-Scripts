@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-191 scripts across 58 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+192 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -60,6 +60,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Get-FSlogix-errors.ps1`](RDS/Get-FSlogix-errors.ps1) | [`RDS/`](RDS/readme.md) | FSLogix / Azure Files Premium diagnosescript voor AVD session hosts. |
 | [`Get-IntunePolicyAssignments.ps1`](PatronToolkit/Intune/Get-IntunePolicyAssignments.ps1) | [`PatronToolkit/Intune/`](PatronToolkit/Intune/readme.md) | Report which Entra ID groups are assigned to which Intune policies, profiles, and apps. |
 | [`Get-IntunePolicyInventory.ps1`](Office365Toolkit/Intune/Get-IntunePolicyInventory.ps1) | [`Office365Toolkit/Intune/`](Office365Toolkit/Intune/readme.md) | Inventory all Intune / Endpoint Manager policies in a tenant. |
+| [`Get-M365AppsLog.ps1`](RDS/Get-M365AppsLog.ps1) | [`RDS/`](RDS/readme.md) | Collects everything about new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session host into one folder (and zip): per user what is registered an… |
 | [`Get-M365UserLicenses.ps1`](Entra/Get-M365UserLicenses.ps1) | [`Entra/`](Entra/readme.md) | Check assigned M365 licenses for a list of users. |
 | [`Get-MailboxAddIns.ps1`](Office365Toolkit/Exchange/Get-MailboxAddIns.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Report Outlook add-ins installed per mailbox. |
 | [`Get-MailboxSizes.ps1`](Exchange/Get-MailboxSizes.ps1) | [`Exchange/`](Exchange/readme.md) | Report mailbox sizes for all or a single mailbox. |
@@ -142,6 +143,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |
 | [`Search-MailboxAuditLog.ps1`](Office365Toolkit/Exchange/Search-MailboxAuditLog.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Search the Microsoft 365 Unified Audit Log for sign-in and mailbox access events. |
 | [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content through Microsoft Graph - signed in as you by default, or app-only tenant-wide - and report the permissions on every hit. |
+| [`Send-MailboxForward.ps1`](Exchange/Send-MailboxForward.ps1) | [`Exchange/`](Exchange/readme.md) | Forward all mail of a mailbox to another address: new mail from now on, and the mail that already arrived in the last N days. |
 | [`Set-Calendar-rights.ps1`](Exchange/Set-Calendar-rights.ps1) | [`Exchange/`](Exchange/readme.md) | Give a user access rights on another user's calendar. |
 | [`Set-CorporateWallpaper.ps1`](Intune/Desktop/Background/Desktop/Set-CorporateWallpaper.ps1) | [`Intune/Desktop/Background/Desktop/`](Intune/Desktop/Background/Desktop/readme.md) | Set-CorporateWallpaper.ps1 |
 | [`Set-DefaultFileAssociation.ps1`](TenantOnboarding/AppDeployment/Set-DefaultFileAssociation.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Set the default application for a file extension, bypassing Windows' UserChoice hash protection. |
@@ -153,6 +155,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Set-MailboxFolderPermission.ps1`](LegacyUtilities/Exchange/Set-MailboxFolderPermission.ps1) | [`LegacyUtilities/Exchange/`](LegacyUtilities/Exchange/readme.md) | Grant a user access rights on every folder in a mailbox (not just Calendar/Inbox). |
 | [`Set-NumLockDefault.ps1`](LegacyUtilities/Device/Set-NumLockDefault.ps1) | [`LegacyUtilities/Device/`](LegacyUtilities/Device/readme.md) | Set the default Num Lock state (on/off) for new user profiles and the sign-in screen. |
 | [`Set-OneDriveKnownFolderRedirect.ps1`](TenantOnboarding/OneDriveManagement/Set-OneDriveKnownFolderRedirect.ps1) | [`TenantOnboarding/OneDriveManagement/`](TenantOnboarding/OneDriveManagement/readme.md) | Redirect Desktop/Documents/Pictures/Downloads to the OneDrive for Business sync folder. |
+| [`Set-SharePointFolderAccess.ps1`](SharePoint/Set-SharePointFolderAccess.ps1) | [`SharePoint/`](SharePoint/readme.md) | Give each subfolder of one SharePoint folder its own SharePoint group, a group of owners who manage it all, and optionally a personal folder per person - so ev… |
 | [`Set-SharePointLibraries.ps1`](SharePoint/Provisioning/Set-SharePointLibraries.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Provision the libraries and channel folders from a structure configuration: content types bound, default metadata set, and permissions granted to the Entra ID… |
 | [`Set-TeamsFirewallRule.ps1`](TenantOnboarding/DeviceConfig/Set-TeamsFirewallRule.ps1) | [`TenantOnboarding/DeviceConfig/`](TenantOnboarding/DeviceConfig/readme.md) | Create the inbound firewall rule Microsoft Teams needs for LAN peer-to-peer screen sharing. |
 | [`Set-UserManager.ps1`](Entra/Set-UserManager.ps1) | [`Entra/`](Entra/readme.md) | Report and optionally bulk-set the manager for a set of Entra ID users. |
@@ -201,5 +204,6 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Update-TeamsClient.ps1`](Device/Update-TeamsClient.ps1) | [`Device/`](Device/readme.md) | Update the new Microsoft Teams client, including the Teams Meeting Add-in for Outlook, only when Microsoft publishes a newer build. Supports -WhatIf. |
 | [`Update-UnifiFirmware.ps1`](Network/UniFi/Update-UnifiFirmware.ps1) | [`Network/UniFi/`](Network/UniFi/readme.md) | List and optionally trigger firmware upgrades for UniFi devices across one or all sites. |
 | [`Watch-ADAccountLockouts.ps1`](ActiveDirectory/Watch-ADAccountLockouts.ps1) | [`ActiveDirectory/`](ActiveDirectory/readme.md) | Monitor on-prem Active Directory for locked-out user accounts and log new lockouts. |
+| [`Watch-M365Apps.ps1`](RDS/Watch-M365Apps.ps1) | [`RDS/`](RDS/readme.md) | Watchdog for new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session host: tests them with our own account (itceadmin) and for every signed-in u… |
 | [`Watch-RDSLive.ps1`](RDS/Watch-RDSLive.ps1) | [`RDS/`](RDS/readme.md) | Real-time RDS session and licensing monitor. |
 

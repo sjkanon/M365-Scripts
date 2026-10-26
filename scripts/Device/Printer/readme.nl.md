@@ -85,7 +85,48 @@ Een apparaat dat al in orde is, kost één keer de JSON lezen. Er wordt niets ge
 | `duplex` | `OneSided`, `TwoSidedLongEdge` of `TwoSidedShortEdge` |
 | `color` | `true` / `false` |
 | `paperSize` | bv. `A4`, `Letter` |
+| `inputBin` | Standaardlade, met de naam die de driver toont (`Tray 2`, `Manual Feed`) of de Print Schema-naam (`ns0000:Tray2`); spaties en hoofdletters maken niet uit. Een naam die de driver niet kent geeft een waarschuwing met de lades die hij wel aanbiedt |
+| `permissions` | Wie deze wachtrij mag gebruiken: een lijst van `{ "principal": "CONTOSO\\Finance", "access": "print" }` — zie *Beveiligingsgroepen per wachtrij* hieronder. Zonder dit veld blijven de rechten ongemoeid |
 | `ensure` | `absent` verwijdert de printer (en de poort als geen andere printer die gebruikt). De driver blijft altijd staan |
+
+**Eén apparaat, meerdere wachtrijen (lades)**
+
+Gebruikers kiezen een wachtrij, geen lade. Geef elke wachtrij een eigen regel met **hetzelfde adres**: ze delen de poort `IP_<address>`, en elk krijgt een eigen standaardlade, duplex of kleur:
+
+```json
+"printers": [
+  { "name": "Office",            "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 1" },
+  { "name": "Office - letterhead", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 2", "duplex": "OneSided" },
+  { "name": "Office - envelopes", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Manual Feed" }
+]
+```
+
+De lade wordt ingesteld in het standaard printticket van de wachtrij, dus elke gebruiker van die wachtrij begint daarmee; een gebruiker kan in één afdrukvenster nog steeds een andere lade kiezen. Ladenamen verschillen per driver - draai het script één keer met de naam die je verwacht, en een verkeerde naam wordt beantwoord met de lijst die de driver aanbiedt. Universele drivers tonen pas de lades die het apparaat echt heeft als de opties van het apparaat bekend zijn; komt alleen `Auto Select` terug, stel dan eerst de installeerbare opties in bij de printereigenschappen, of gebruik de modelspecifieke driver van de fabrikant.
+
+**Beveiligingsgroepen per wachtrij**
+
+Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade met cheques waar alleen Finance op mag afdrukken:
+
+```json
+{ "name": "Office - cheques", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 3",
+  "permissions": [
+    { "principal": "CONTOSO\\Finance",          "access": "print" },
+    { "principal": "CONTOSO\\Office Managers",  "access": "manageDocuments" },
+    { "principal": "S-1-12-1-1111-2222-3333-4444", "access": "print" }
+  ] }
+```
+
+| `access` | Betekent |
+|----------|----------|
+| `print` | Afdrukken en de eigen afdruktaken beheren — wat Everyone standaard heeft |
+| `manageDocuments` | Ook afdruktaken van anderen onderbreken, herstarten en verwijderen |
+| `manage` | Ook de printer zelf wijzigen (instellingen, delen, rechten) |
+
+- `principal` is `DOMEIN\Groep`, een lokale gebruiker of groep, of een **SID**. Een Entra ID-groep kan alleen via de SID worden opgegeven (`S-1-12-1-…`, uit Entra ID of uit `whoami /groups` van een lid). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` en `SYSTEM` worden in het Engels begrepen, op Windows in elke taal
+- Wie in de lijst staat krijgt die toegang; **Everyone en elke andere gebruiker of groep verliest de zijne**, ook het account dat de printer toevallig heeft geïnstalleerd. Administrators, SYSTEM, CREATOR OWNER, app-pakketten en service-identiteiten houden altijd hun toegang — afdrukken vanuit apps zoals de nieuwe Outlook hangt van die vermeldingen af, dus die worden nooit verwijderd. `[]` betekent alleen beheerders
+- **Faalt veilig:** een groep die niet gevonden wordt houdt die wachtrij tegen (`-CheckOnly` meldt dat vooraf), en een nieuwe wachtrij waarvan de rechten niet ingesteld kunnen worden wordt weer verwijderd in plaats van open te blijven staan voor iedereen. Een bestaande wachtrij houdt zijn oude rechten en de run faalt. Bij een eerste opstart wordt een onbekende naam tot 2 minuten opnieuw geprobeerd, voor een domeincontroller die nog niet bereikbaar is
+- Vergeleken op betekenis, niet op tekst: Windows mag een vermelding anders opslaan dan ze werd opgegeven, en dat telt niet als wijziging. De rechten worden bij elke run gecontroleerd, dus een groep die met de hand in de printereigenschappen is toegevoegd wordt weer weggehaald — de JSON is leidend
+- De rechten bepalen wie op de wachtrij mag afdrukken. Of een gebruiker zonder toegang hem nog wel *ziet* in de lijst hangt van de applicatie af en valt buiten dit script
 
 **Parameters**
 
@@ -112,13 +153,53 @@ Een apparaat dat al in orde is, kost één keer de JSON lezen. Er wordt niets ge
 # Alleen de Office-printers, als proefrun, JSON rechtstreeks van GitHub
 .\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Printer 'Office*' -WhatIf
 
-# Eerste opstart van een server uit een golden image (Custom Script Extension / opstarttaak als SYSTEM)
-powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet -Confirm:$false
+# Eerste opstart of deployment (Custom Script Extension, Run Command, opstarttaak als SYSTEM)
+powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet
 
 # Privé-repository
 $env:GITHUB_TOKEN = '<fine-grained token, Contents: read>'
 .\Install-Printer.ps1 -ConfigPath \\fs01\it$\printers.json -Confirm:$false
 ```
+
+**Installeren bij de deployment in plaats van in de image**
+
+De image blijft vrij van drivers en printers; elke nieuwe sessiehost krijgt ze bij het uitrollen, zodat een gewijzigde printer een wijziging in de JSON is en geen nieuwe image. Draai het script eenmaal als SYSTEM via de Azure Custom Script Extension in de Bicep van de VM (elke host die de pool erbij krijgt, draait het dan vanzelf), of via Run Command op een host die al bestaat:
+
+```bicep
+// Custom Script Extension: runs once, as SYSTEM, when the VM is deployed
+resource installPrinters 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = {
+  parent: vm
+  name: 'InstallPrinters'
+  location: location
+  properties: {
+    publisher: 'Microsoft.Compute'
+    type: 'CustomScriptExtension'
+    typeHandlerVersion: '1.10'
+    autoUpgradeMinorVersion: true
+    settings: {
+      fileUris: [
+        'https://raw.githubusercontent.com/sjkanon/M365-Scripts/<commit>/scripts/Device/Printer/Install-Printer.ps1'
+      ]
+    }
+    protectedSettings: {
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet'
+    }
+  }
+}
+```
+
+```powershell
+# Run Command: afterwards, on a VM that is already running
+az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellScript `
+  --scripts '@Install-Printer.ps1' `
+  --parameters 'ConfigPath=https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json'
+```
+
+- Laat `fileUris` naar een **commit** wijzen in plaats van `main`, zodat een host die volgende maand wordt uitgerold het script draait dat je getest hebt. De JSON mag op een branch blijven: dat is data, en die wordt volledig gecontroleerd voordat er iets verandert.
+- **Geen `-Confirm:$false`** op deze opdrachtregels: een run zonder console vraagt nooit iets, en via `-File` zou de switch aankomen als de tekst `'$false'` en het script stoppen voordat het begint.
+- Een VM heeft **één** Custom Script Extension. Gebruikt de deployment die al voor iets anders, gebruik dan hiervoor een managed Run Command (`Microsoft.Compute/virtualMachines/runCommands`).
+- Een GitHub-token voor een privé-driverrepository hoort in `protectedSettings` (`-GitHubToken`), nooit in `settings`, dat op de VM leesbaar is.
+- Exitcode `1` laat de extensie falen, zodat een deployment met een printer die niet geïnstalleerd kon worden zichtbaar is in de portal; `Install-Printer.log` in `-LogPath` zegt welke.
 
 **Exitcodes**
 

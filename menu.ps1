@@ -325,6 +325,20 @@ $ExchangeSubmenu = @(
         $confirm = Read-Host "  Preview completed. Put the messages back now (-Apply)? [y/N]"
         if ($confirm -match '^[Yy]') { & $path @p -Apply }
     }}
+    @{ Key='M'; Label='Send-MailboxForward      — forward a mailbox to another address, new mail + the last N days'; Action={
+        $path = Join-Path $ROOT 'scripts\Exchange\Send-MailboxForward.ps1'
+        $mbx  = Read-Host "  Mailbox UPN whose mail is forwarded"
+        $to   = Read-Host "  Forward to (internal or external address)"
+        $days = Read-Host "  Also forward the mail of the last N days [30] (0 = only the rule)"
+        $keep = Read-Host "  Keep a copy in the mailbox? [Y/n]"
+        $p = @{ Mailbox = $mbx; ForwardTo = $to }
+        if ($days -eq '0') { $p['SkipBackfill'] = $true } elseif ($days) { $p['Days'] = [int]$days }
+        if ($keep -match '^[Nn]') { $p['NoKeepCopy'] = $true }
+        # Always a preview first, then an explicit second step.
+        & $path @p
+        $confirm = Read-Host "  Preview completed. Set the rule and forward now (-Apply)? [y/N]"
+        if ($confirm -match '^[Yy]') { & $path @p -Apply }
+    }}
     @{ Key='P'; Label='Remove-PhishingMessage   — delete a phishing mail from one or all mailboxes'; Action={
         $mbx = Read-Host "  Mailbox UPN(s), comma-separated (leave blank for ALL mailboxes)"
         $mid = Read-Host "  Internet MessageId (most precise, leave blank to filter otherwise)"
@@ -714,6 +728,48 @@ $menu = @(
                 $min = Read-Host "  Skip disks smaller than GB [5]"
                 if ($min) { $a['IgnoreLessThanGB'] = [int]$min }
             }
+            return $a
+        }
+    }
+    [PSCustomObject]@{ Key='Y'; FKey=$null; Category='Device'
+        Label='M365AppWatchdog     — test Teams, Outlook, Copilot, Snipping Tool, Photos with the IT accounts, repair, report to n8n'
+        Script="$ROOT\scripts\RDS\Watch-M365Apps.ps1"
+        Params={
+            Write-Host '  1  Run one check now (repairs what it finds)'
+            Write-Host '  2  Run one check, report only'
+            Write-Host '  3  Install the scheduled task on this host'
+            Write-Host '  4  Send a test message to n8n'
+            Write-Host '  5  Remove the scheduled task'
+            $choice = Read-Host '  Choice [2]'
+            switch ($choice) {
+                '1' { return @{} }
+                '3' {
+                    $a = @{ Confirm = $false }   # already answered here, don't ask twice
+                    $url = Read-Host '  n8n webhook URL (production)'
+                    if ($url) { $a['WebhookUrl'] = $url }
+                    $token = Read-Host '  Webhook token (X-Watchdog-Token, empty = none)'
+                    if ($token) { $a['WebhookToken'] = $token }
+                    $accounts = Read-Host '  Accounts to test with [itceadmin]'
+                    if ($accounts) { $a['Account'] = @($accounts -split '[,;\s]' | Where-Object { $_ }) }
+                    return $a
+                }
+                '4' { return @{ TestNotification = $true } }
+                '5' { return @{ Uninstall = $true; Confirm = $false } }
+                default { return @{ NoRepair = $true } }
+            }
+        }
+    }
+    [PSCustomObject]@{ Key='Q'; FKey=$null; Category='Device'
+        Label='M365AppsLog         — collect what happened with Teams, Outlook, Copilot, Snipping Tool, Photos per user, and what the watchdog did'
+        Script="$ROOT\scripts\RDS\Get-M365AppsLog.ps1"
+        Params={
+            $a = @{}
+            $users = Read-Host '  Users (empty = everyone)'
+            if ($users) { $a['User'] = @($users -split '[,;\s]' | Where-Object { $_ }) }
+            $apps = Read-Host '  Apps: Teams, Outlook, Copilot, SnippingTool, Photos (empty = all)'
+            if ($apps) { $a['App'] = @($apps -split '[,;\s]' | Where-Object { $_ }) }
+            $hours = Read-Host '  Hours back [24]'
+            if ($hours) { $a['Hours'] = [int] $hours }
             return $a
         }
     }

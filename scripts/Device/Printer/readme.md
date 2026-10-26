@@ -85,7 +85,48 @@ A device that is already in order costs one read of the JSON. Nothing is downloa
 | `duplex` | `OneSided`, `TwoSidedLongEdge` or `TwoSidedShortEdge` |
 | `color` | `true` / `false` |
 | `paperSize` | e.g. `A4`, `Letter` |
+| `inputBin` | Default tray, by the name the driver shows (`Tray 2`, `Manual Feed`) or its Print Schema name (`ns0000:Tray2`); spaces and case do not matter. A name the driver does not have is a warning that lists the trays it does offer |
+| `permissions` | Who may use this queue: a list of `{ "principal": "CONTOSO\\Finance", "access": "print" }` — see *Security groups per queue* below. Without the field the permissions are left alone |
 | `ensure` | `absent` removes the printer (and its port when no other printer uses it). The driver always stays |
+
+**One device, several queues (trays)**
+
+Users pick a queue, not a tray. Give each queue its own entry with the **same address**: they share the `IP_<address>` port, and each gets its own default tray, duplex or colour:
+
+```json
+"printers": [
+  { "name": "Office",            "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 1" },
+  { "name": "Office - letterhead", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 2", "duplex": "OneSided" },
+  { "name": "Office - envelopes", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Manual Feed" }
+]
+```
+
+The tray is set in the queue's default print ticket, so it is what every user of that queue starts from; a user can still pick another tray in a single print dialog. Tray names differ per driver - run the script once with a name you expect, and a wrong one is answered with the list the driver offers. Universal drivers only show the trays they know the device has once the device's options are known; if only `Auto Select` comes back, set the installable options in the printer's properties first, or use the vendor's model-specific driver.
+
+**Security groups per queue**
+
+A queue can be limited to one or more groups, for example a cheque tray only Finance may print to:
+
+```json
+{ "name": "Office - cheques", "driver": "HP Universal Printing PCL 6", "address": "10.0.5.20", "inputBin": "Tray 3",
+  "permissions": [
+    { "principal": "CONTOSO\\Finance",          "access": "print" },
+    { "principal": "CONTOSO\\Office Managers",  "access": "manageDocuments" },
+    { "principal": "S-1-12-1-1111-2222-3333-4444", "access": "print" }
+  ] }
+```
+
+| `access` | Means |
+|----------|-------|
+| `print` | Print and manage one's own jobs — what Everyone has by default |
+| `manageDocuments` | Also pause, restart and delete other people's jobs |
+| `manage` | Also change the printer itself (settings, sharing, permissions) |
+
+- `principal` is `DOMAIN\Group`, a local user or group, or a **SID**. An Entra ID group can only be given by its SID (`S-1-12-1-…`, from Entra ID or `whoami /groups` of a member). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` and `SYSTEM` are understood in English on a Windows of any language
+- Listed principals get that access; **Everyone and every other user or group lose theirs**, including the account that happened to install the printer. Administrators, SYSTEM, CREATOR OWNER, app packages and service identities always keep their access — printing from packaged apps such as new Outlook depends on those entries, so they are never removed. `[]` means administrators only
+- **Fails closed:** a group that does not resolve stops that queue from being created (`-CheckOnly` reports it in advance), and a new queue whose permissions cannot be set is removed again rather than left open to everyone. An existing queue keeps its old permissions and the run fails. On a first boot an unresolved name is retried for up to 2 minutes, for a domain controller that is not reachable yet
+- Compared by meaning, not by text: Windows may store an entry differently from how it was given, and that does not count as a change. The permissions are checked on every run, so a group added by hand in the printer's properties is taken away again — the JSON is the source of truth
+- The permissions decide who may print to the queue. Whether a user without access still *sees* it in the list depends on the application and is not something this script controls
 
 **Parameters**
 
@@ -112,13 +153,53 @@ A device that is already in order costs one read of the JSON. Nothing is downloa
 # Only the Office printers, as a dry run, JSON straight from GitHub
 .\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Printer 'Office*' -WhatIf
 
-# First boot of a server from a golden image (Custom Script Extension / startup task as SYSTEM)
-powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet -Confirm:$false
+# First boot or deployment (Custom Script Extension, Run Command, startup task as SYSTEM)
+powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet
 
 # Private repository
 $env:GITHUB_TOKEN = '<fine-grained token, Contents: read>'
 .\Install-Printer.ps1 -ConfigPath \\fs01\it$\printers.json -Confirm:$false
 ```
+
+**Installing at deployment instead of in the image**
+
+The image stays free of drivers and printers; every new session host gets them when it is deployed, so a changed printer is a change to the JSON, not a new image. Run the script once as SYSTEM through the Azure Custom Script Extension in the VM's Bicep (every host the pool adds runs it automatically), or through Run Command on a host that already exists:
+
+```bicep
+// Custom Script Extension: runs once, as SYSTEM, when the VM is deployed
+resource installPrinters 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = {
+  parent: vm
+  name: 'InstallPrinters'
+  location: location
+  properties: {
+    publisher: 'Microsoft.Compute'
+    type: 'CustomScriptExtension'
+    typeHandlerVersion: '1.10'
+    autoUpgradeMinorVersion: true
+    settings: {
+      fileUris: [
+        'https://raw.githubusercontent.com/sjkanon/M365-Scripts/<commit>/scripts/Device/Printer/Install-Printer.ps1'
+      ]
+    }
+    protectedSettings: {
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet'
+    }
+  }
+}
+```
+
+```powershell
+# Run Command: afterwards, on a VM that is already running
+az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellScript `
+  --scripts '@Install-Printer.ps1' `
+  --parameters 'ConfigPath=https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json'
+```
+
+- Point `fileUris` at a **commit** rather than `main`, so a host deployed next month runs the script you tested. The JSON may stay on a branch: it is data, validated in full before anything changes.
+- **No `-Confirm:$false`** on these command lines: a run without a console never asks, and through `-File` the switch would arrive as the text `'$false'` and stop the script before it starts.
+- A VM holds **one** Custom Script Extension. If the deployment already uses it for something else, use a managed Run Command (`Microsoft.Compute/virtualMachines/runCommands`) for this instead.
+- A GitHub token for a private driver repository belongs in `protectedSettings` (`-GitHubToken`), never in `settings`, which is readable on the VM.
+- Exit code `1` fails the extension, so a deployment with a printer that could not be installed is visible in the portal; `Install-Printer.log` in `-LogPath` says which one.
 
 **Exit codes**
 

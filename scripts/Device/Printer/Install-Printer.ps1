@@ -60,8 +60,25 @@
     portNumber (default 9100), lprQueue (LPR instead of RAW), snmp (true turns SNMP
     status on - off by default, so a printer that does not answer SNMP is not shown
     as Offline), location, comment, shared, shareName, duplex, color, paperSize,
-    and "ensure": "absent" to remove a printer (its port too when nothing else uses
-    it; the driver always stays).
+    inputBin (default tray, by the name the driver shows - "Tray 2" - or its
+    Print Schema name), and "ensure": "absent" to remove a printer (its port too
+    when nothing else uses it; the driver always stays).
+
+    One device, several queues: give each queue its own entry with the same
+    address - they share the IP_<address> port - and its own inputBin, duplex or
+    color. "Office - letterhead" on tray 2 next to "Office" on tray 1 is the
+    usual case: users pick the queue, not the tray.
+
+    Who may use a queue: "permissions": [ { "principal": "CONTOSO\\Finance",
+    "access": "print" } ], with access print, manageDocuments or manage, and the
+    principal as DOMAIN\Group, a local name, or a SID (the only way to name an
+    Entra ID group). Listed principals get that access; Everyone and every other
+    user or group lose it. Administrators, SYSTEM, CREATOR OWNER, app packages and
+    service identities always keep theirs - printing from packaged apps such as
+    new Outlook depends on them. Without the field the ACL is left alone; [] means
+    administrators only. This fails closed: a group that does not resolve stops
+    that queue from being created, and a new queue whose permissions cannot be
+    set is removed again rather than left open to everyone.
 
     After a golden image
     --------------------
@@ -193,10 +210,13 @@
     NinjaOne/Intune: silent unless something was installed or failed.
 
 .EXAMPLE
-    powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet -Confirm:$false
+    powershell.exe -ExecutionPolicy Bypass -File C:\IT\Install-Printer.ps1 -ConfigPath https://raw.githubusercontent.com/contoso/printer-drivers/main/printers.json -Quiet
 
-    First boot of a server built from a golden image (Custom Script Extension or a
-    startup task as System): waits for the spooler and the network, then installs.
+    First boot or deployment of a server or session host (Custom Script Extension,
+    Run Command or a startup task as System): waits for the spooler and the
+    network, then installs. No -Confirm:$false: a run without a console never
+    asks, and with -File it would arrive as the text '$false' and stop the script
+    before it starts.
 
 .NOTES
     Author  : Sjoerd Kanon
@@ -222,23 +242,30 @@ param (
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-ForwardedArgument {
-    <# Rebuild the caller's own parameters as a command line for a relaunch. #>
-    param([Parameter(Mandatory)] $Bound)
+function ConvertTo-ScriptCommand {
+    <#
+        The caller's own parameters as one -Command line for a relaunch. Not -File:
+        that hands every argument over as text, so -Confirm:$false arrives as the
+        string '$false' and the relaunch dies on "Cannot convert 'System.String' to
+        the type SwitchParameter". Strings are single-quoted, arrays become lists,
+        and the exit code is passed on unless the window is meant to stay open.
+    #>
+    param([Parameter(Mandatory)] $Bound, [switch] $KeepOpen)
 
-    $list = @()
+    $quote = { param($s) "'" + ([string] $s -replace "'", "''") + "'" }
+    $line  = '& ' + (& $quote $PSCommandPath)
     foreach ($entry in $Bound.GetEnumerator()) {
-        if ($entry.Value -is [switch] -or $entry.Value -is [bool]) {
-            if ($entry.Value) { $list += "-$($entry.Key)" } else { $list += "-$($entry.Key):`$false" }
-        } elseif ($entry.Value -is [array]) {
-            $list += "-$($entry.Key)"
-            $list += ($entry.Value -join ',')
+        $value = $entry.Value
+        if ($value -is [switch] -or $value -is [bool]) {
+            $line += ' -{0}:${1}' -f $entry.Key, ([bool] $value).ToString().ToLower()
+        } elseif ($value -is [array]) {
+            $line += ' -{0} {1}' -f $entry.Key, (($value | ForEach-Object { & $quote $_ }) -join ',')
         } else {
-            $list += "-$($entry.Key)"
-            $list += [string] $entry.Value
+            $line += ' -{0} {1}' -f $entry.Key, (& $quote $value)
         }
     }
-    return $list
+    if ($KeepOpen) { return $line }
+    return $line + '; exit $LASTEXITCODE'
 }
 
 # -- RMM: run 64-bit -----------------------------------------------------------
@@ -247,9 +274,7 @@ function Get-ForwardedArgument {
 if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
     $nativeShell = Join-Path $env:WINDIR 'SysNative\WindowsPowerShell\v1.0\powershell.exe'
     if (Test-Path $nativeShell) {
-        $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) +
-                   (Get-ForwardedArgument -Bound $PSBoundParameters)
-        & $nativeShell @argList
+        & $nativeShell -NoProfile -ExecutionPolicy Bypass -Command (ConvertTo-ScriptCommand -Bound $PSBoundParameters)
         exit $LASTEXITCODE
     }
     Write-Error 'Running 32-bit and SysNative is unavailable - pnputil cannot be reached. Start the script from 64-bit PowerShell.'
@@ -265,8 +290,10 @@ if (-not ([Security.Principal.WindowsPrincipal] $identity).IsInRole([Security.Pr
     }
     Write-Host ''
     Write-Host '  Not running elevated - asking for administrator rights...' -ForegroundColor Yellow
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', $PSCommandPath) +
-               (Get-ForwardedArgument -Bound $PSBoundParameters)
+    # Start-Process joins an argument list with spaces and loses the quoting, so
+    # the command travels Base64-encoded.
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes((ConvertTo-ScriptCommand -Bound $PSBoundParameters -KeepOpen)))
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', $encoded)
     try {
         Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $argList -Verb RunAs | Out-Null
         Write-Host '  Continued in an elevated window.' -ForegroundColor Cyan
@@ -333,7 +360,29 @@ $KnownSourceFields  = @{
     path          = @('type', 'path', 'sha256')
 }
 $KnownPrinterFields = @('name', 'driver', 'address', 'portName', 'portNumber', 'lprQueue', 'snmp', 'location',
-                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'ensure', 'description')
+                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'inputBin', 'permissions',
+                        'ensure', 'description')
+$KnownPermissionFields = @('principal', 'access')
+
+# Who may use a queue, per access level, as the ACEs Windows itself writes for
+# it ({0} = the SID). "print" is what Everyone has by default; manageDocuments
+# adds control over other people's jobs; manage is the printer itself.
+$PrinterAccessAces = [ordered]@{
+    print           = @('(A;;SWRC;;;{0})', '(A;CIIO;GX;;;{0})')
+    manageDocuments = @('(A;;SWRC;;;{0})', '(A;CIIO;GX;;;{0})', '(A;OIIO;RPWPSDRCWDWO;;;{0})')
+    manage          = @('(A;;LCSWSDRCWDWO;;;{0})', '(A;OIIO;RPWPSDRCWDWO;;;{0})')
+}
+
+# Names that mean the same SID on every Windows, in any language: "Everyone" is
+# "Iedereen" on a Dutch server, and translating the English name there fails.
+$WellKnownPrincipals = @{
+    'everyone'            = 'S-1-1-0'
+    'authenticated users' = 'S-1-5-11'
+    'users'               = 'S-1-5-32-545'
+    'interactive'         = 'S-1-5-4'
+    'administrators'      = 'S-1-5-32-544'
+    'system'              = 'S-1-5-18'
+}
 $DuplexValues       = @('OneSided', 'TwoSidedLongEdge', 'TwoSidedShortEdge')
 
 # Written after every clean run, for detection rules - see Set-SuccessMarker.
@@ -1120,6 +1169,322 @@ function Get-PrintSetting {
     }
 }
 
+$InputBinFeatures = @('JobInputBin', 'DocumentInputBin', 'PageInputBin')
+
+function Get-InputBinInfo {
+    <#
+        The trays the driver offers and the one its default print ticket uses, in
+        a job like every other call into driver code. Trays are not one of
+        Set-PrintConfiguration's parameters: they live in the Print Schema, as the
+        options of psk:JobInputBin / DocumentInputBin / PageInputBin in the
+        driver's PrintCapabilities, with vendor names such as ns0000:Tray3 and a
+        display name such as "Tray 3". Returns { Options, Current }; Current maps
+        each bin feature in the default ticket to "<namespace>|<name>".
+    #>
+    param([Parameter(Mandatory)] [string] $Name)
+    return Invoke-WithTimeout -Seconds 60 -ArgumentList $Name, $InputBinFeatures -ScriptBlock {
+        param($PrinterName, $Features)
+        $psk = 'http://schemas.microsoft.com/windows/2003/08/printing/printschemakeywords'
+        $resolve = {
+            param($Node, $QName)
+            $parts = ([string] $QName).Split(':', 2)
+            if ($parts.Count -ne 2) { return $null }
+            [PSCustomObject]@{ Uri = $Node.GetNamespaceOfPrefix($parts[0]); Local = $parts[1] }
+        }
+
+        Add-Type -AssemblyName System.Printing
+        $server = [System.Printing.LocalPrintServer]::new()
+        try {
+            $stream = $server.GetPrintQueue($PrinterName).GetPrintCapabilitiesAsXml()
+            [xml] $caps = ([IO.StreamReader]::new($stream)).ReadToEnd()
+        } finally { $server.Dispose() }
+
+        $options = foreach ($feature in $caps.DocumentElement.ChildNodes) {
+            if ($feature.LocalName -ne 'Feature') { continue }
+            $f = & $resolve $feature $feature.GetAttribute('name')
+            if (-not $f -or $f.Uri -ne $psk -or $f.Local -notin $Features) { continue }
+            foreach ($option in $feature.ChildNodes) {
+                if ($option.LocalName -ne 'Option' -or -not $option.GetAttribute('name')) { continue }
+                $o = & $resolve $option $option.GetAttribute('name')
+                if (-not $o) { continue }
+                $display = @($option.ChildNodes | Where-Object { $_.LocalName -eq 'Property' -and $_.GetAttribute('name') -match ':DisplayName$' } |
+                             ForEach-Object { $_.InnerText.Trim() }) | Select-Object -First 1
+                [PSCustomObject]@{ Feature = $f.Local; Uri = $o.Uri; Local = $o.Local; Display = $display }
+            }
+        }
+
+        [xml] $ticket = (Get-PrintConfiguration -PrinterName $PrinterName -ErrorAction Stop).PrintTicketXML
+        $current = @{}
+        foreach ($feature in $ticket.DocumentElement.ChildNodes) {
+            if ($feature.LocalName -ne 'Feature') { continue }
+            $f = & $resolve $feature $feature.GetAttribute('name')
+            if (-not $f -or $f.Uri -ne $psk -or $f.Local -notin $Features) { continue }
+            $option = @($feature.ChildNodes | Where-Object { $_.LocalName -eq 'Option' }) | Select-Object -First 1
+            if ($option -and $option.GetAttribute('name')) {
+                $o = & $resolve $option $option.GetAttribute('name')
+                if ($o) { $current[$f.Local] = "$($o.Uri)|$($o.Local)" }
+            }
+        }
+        [PSCustomObject]@{ Options = @($options); Current = $current }
+    }
+}
+
+function Find-InputBin {
+    <#
+        The tray the JSON asks for, among what the driver offers. Matched on the
+        display name, the Print Schema name or the name without its prefix, with
+        spaces and punctuation ignored: "Tray 2", "tray2" and "ns0000:Tray2" are
+        the same. Returns the option and every bin feature that offers it, or
+        $null - the caller then lists what the driver does offer.
+    #>
+    param([Parameter(Mandatory)] $Info, [Parameter(Mandatory)] [string] $Want)
+
+    $norm = { param($s) ([string] $s -replace '[^\p{L}\p{N}]', '').ToLowerInvariant() }
+    $w = & $norm $Want
+    $hit = @($Info.Options | Where-Object {
+                 (& $norm $_.Display) -eq $w -or (& $norm $_.Local) -eq $w -or (& $norm "$($_.Feature)$($_.Local)") -eq $w
+             })
+    if ($hit.Count -eq 0) { return $null }
+    $first = @($hit | Sort-Object { [array]::IndexOf($InputBinFeatures, $_.Feature) })[0]
+    $same  = @($Info.Options | Where-Object { $_.Uri -eq $first.Uri -and $_.Local -eq $first.Local })
+    return [PSCustomObject]@{
+        Uri      = $first.Uri
+        Local    = $first.Local
+        Display  = if ($first.Display) { $first.Display } else { $first.Local }
+        Features = @($same | ForEach-Object { $_.Feature } | Sort-Object -Unique)
+    }
+}
+
+function Format-InputBinList {
+    param($Info)
+    $list = @($Info.Options | Sort-Object Local -Unique | ForEach-Object { if ($_.Display) { "'$($_.Display)' ($($_.Local))" } else { "'$($_.Local)'" } })
+    if ($list.Count -eq 0) { return 'none - this driver exposes no trays' }
+    return $list -join ', '
+}
+
+function Test-InputBinCurrent {
+    <# True when every bin feature that offers the tray already selects it. #>
+    param([Parameter(Mandatory)] $Info, [Parameter(Mandatory)] $Bin)
+    foreach ($feature in $Bin.Features) {
+        if ($Info.Current[$feature] -ne "$($Bin.Uri)|$($Bin.Local)") { return $false }
+    }
+    return $true
+}
+
+function Set-InputBin {
+    <#
+        Select the tray in the printer's default print ticket - the defaults every
+        user of the queue starts from - for each bin feature that offers it. The
+        option's namespace is declared in the ticket when it is not there yet, and
+        the old option's sub-properties are dropped: they describe the old tray.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] $Bin)
+    $null = Invoke-WithTimeout -Seconds 120 -ArgumentList $Name, $Bin.Features, $Bin.Uri, $Bin.Local -ScriptBlock {
+        param($PrinterName, $Features, $Uri, $Local)
+        $psf   = 'http://schemas.microsoft.com/windows/2003/08/printing/printschemaframework'
+        $psk   = 'http://schemas.microsoft.com/windows/2003/08/printing/printschemakeywords'
+        $xmlns = 'http://www.w3.org/2000/xmlns/'
+
+        [xml] $ticket = (Get-PrintConfiguration -PrinterName $PrinterName -ErrorAction Stop).PrintTicketXML
+        $root = $ticket.DocumentElement
+        $prefixOf = {
+            param($NamespaceUri)
+            $p = $root.GetPrefixOfNamespace($NamespaceUri)
+            if ($p) { return $p }
+            $i = 0
+            do { $p = "nsb$i"; $i++ } while ($root.GetNamespaceOfPrefix($p))
+            $attr = $ticket.CreateAttribute('xmlns', $p, $xmlns)
+            $attr.Value = $NamespaceUri
+            $null = $root.Attributes.Append($attr)
+            return $p
+        }
+        $psfPrefix = & $prefixOf $psf
+        $pskPrefix = & $prefixOf $psk
+        $optName   = '{0}:{1}' -f (& $prefixOf $Uri), $Local
+
+        foreach ($featureName in $Features) {
+            $feature = @($root.ChildNodes | Where-Object {
+                           $_.LocalName -eq 'Feature' -and $_.NamespaceURI -eq $psf -and $_.GetAttribute('name') -match ":$featureName$" -and
+                           $_.GetNamespaceOfPrefix($_.GetAttribute('name').Split(':')[0]) -eq $psk
+                       }) | Select-Object -First 1
+            if (-not $feature) {
+                $feature = $ticket.CreateElement($psfPrefix, 'Feature', $psf)
+                $feature.SetAttribute('name', "${pskPrefix}:$featureName")
+                $null = $root.AppendChild($feature)
+            }
+            $option = @($feature.ChildNodes | Where-Object { $_.LocalName -eq 'Option' -and $_.NamespaceURI -eq $psf }) | Select-Object -First 1
+            if (-not $option) {
+                $option = $ticket.CreateElement($psfPrefix, 'Option', $psf)
+                $null = $feature.AppendChild($option)
+            }
+            $option.RemoveAll()
+            $option.SetAttribute('name', $optName)
+        }
+        Set-PrintConfiguration -PrinterName $PrinterName -PrintTicketXml $ticket.OuterXml -ErrorAction Stop
+    }
+}
+
+function Test-ProtectedSid {
+    <#
+        Identities a permissions list never takes away. The machine's own
+        administration (SYSTEM, Administrators, CREATOR OWNER, print operators),
+        and what printing from Store apps and services depends on: a default
+        printer ACL also grants ALL APPLICATION PACKAGES, a print capability SID
+        (S-1-15-3-...) and service SIDs. Removing those breaks printing from new
+        Outlook and other packaged apps without any error saying why.
+    #>
+    param([Parameter(Mandatory)] [string] $Sid)
+
+    if ($Sid -in @('S-1-5-18', 'S-1-5-19', 'S-1-5-20', 'S-1-3-0', 'S-1-3-1',
+                   'S-1-5-32-544', 'S-1-5-32-549', 'S-1-5-32-550')) { return $true }
+    return ($Sid -like 'S-1-15-*' -or $Sid -like 'S-1-5-99-*' -or $Sid -like 'S-1-5-80-*')
+}
+
+function Resolve-PrincipalName {
+    <# SID to a readable name for the output, the SID itself when it does not translate. #>
+    param([Parameter(Mandatory)] [string] $Sid)
+    try { return ([Security.Principal.SecurityIdentifier]::new($Sid)).Translate([Security.Principal.NTAccount]).Value }
+    catch { return $Sid }
+}
+
+$script:principalCache = @{}
+
+function Resolve-Principal {
+    <#
+        A user or group from the JSON to its SID. Accepted: a SID (the only way to
+        name an Entra ID group, S-1-12-1-...), DOMAIN\Group, a local name, or one of
+        the well-known names above in English. On a first boot the domain can be
+        unreachable for a while after the join, so a name that does not translate
+        is retried for -RetrySeconds before it counts as wrong.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [int] $RetrySeconds = 0)
+
+    $key = $Name.Trim().ToLowerInvariant()
+    if ($script:principalCache.ContainsKey($key)) { return $script:principalCache[$key] }
+    if ($WellKnownPrincipals.ContainsKey($key)) { return $WellKnownPrincipals[$key] }
+    if ($Name -match '^S-1-[\d-]+$') {
+        try { $sid = ([Security.Principal.SecurityIdentifier]::new($Name)).Value }
+        catch { throw "'$Name' is not a valid SID" }
+        $script:principalCache[$key] = $sid
+        return $sid
+    }
+
+    $deadline = (Get-Date).AddSeconds($RetrySeconds)
+    $warned   = $false
+    while ($true) {
+        try {
+            $sid = ([Security.Principal.NTAccount]::new($Name.Trim())).Translate([Security.Principal.SecurityIdentifier]).Value
+            $script:principalCache[$key] = $sid
+            return $sid
+        } catch {
+            if ((Get-Date).AddSeconds(15) -gt $deadline) {
+                throw ("'$Name' cannot be resolved to a user or group on this machine. Check the spelling (DOMAIN\Group), " +
+                       "whether this machine can reach a domain controller, or give the SID instead - an Entra ID group " +
+                       "is only known here by its SID (S-1-12-1-...)")
+            }
+            if (-not $warned) { Write-Warn "'$Name' cannot be resolved yet - waiting for the domain"; $warned = $true }
+            Start-Sleep -Seconds 15
+        }
+    }
+}
+
+function Resolve-PrinterGrant {
+    <#
+        The JSON's permissions as { Principal, Sid, Access }. Identities that are
+        protected anyway (Administrators, SYSTEM) are dropped with a note: they
+        always keep full control, and granting them twice would make the ACL look
+        different from the plan on every run.
+    #>
+    param([Parameter(Mandatory)] $Spec, [int] $RetrySeconds = 0)
+
+    $grants = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in @(Get-PropertyValue $Spec 'permissions')) {
+        if ($null -eq $entry) { continue }
+        $sid = Resolve-Principal -Name ([string] $entry.principal) -RetrySeconds $RetrySeconds
+        if (Test-ProtectedSid $sid) {
+            Write-Skip "  '$($entry.principal)' always keeps full control of '$($Spec.name)' - no need to list it"
+            continue
+        }
+        $grants.Add([PSCustomObject]@{ Principal = [string] $entry.principal; Sid = $sid; Access = [string] $entry.access })
+    }
+    return ,$grants
+}
+
+function Get-PrinterAccessMap {
+    <#
+        Who may do what on a printer, per SID, as one of print / manageDocuments /
+        manage - read from the meaning of the access masks rather than from the
+        SDDL text. Windows is free to store an ACE in another form than the one it
+        was given, and comparing text would then call the ACL changed on every run.
+        PRINTER_ACCESS_ADMINISTER (0x4) is manage, JOB_ACCESS_ADMINISTER (0x10) on
+        the inherit-only job ACE is manageDocuments, PRINTER_ACCESS_USE (0x8) print.
+    #>
+    param([Parameter(Mandatory)] [Security.AccessControl.RawAcl] $Acl)
+
+    $rank = @{ print = 1; manageDocuments = 2; manage = 3 }
+    $map  = @{}
+    foreach ($ace in $Acl) {
+        if ($ace -isnot [Security.AccessControl.KnownAce] -or $ace.AceQualifier -ne 'AccessAllowed') { continue }
+        $sid = $ace.SecurityIdentifier.Value
+        if (Test-ProtectedSid $sid) { continue }
+        # AceFlags is a byte-sized enum, and Windows PowerShell 5.1 throws
+        # "Specified cast is not valid" on -band with it unless both are ints.
+        $flags       = [int] $ace.AceFlags
+        $inheritOnly = ($flags -band [int] [Security.AccessControl.AceFlags]::InheritOnly) -ne 0
+        $objInherit  = ($flags -band [int] [Security.AccessControl.AceFlags]::ObjectInherit) -ne 0
+        $level = if (-not $inheritOnly -and ($ace.AccessMask -band 0x4)) { 'manage' }
+                 elseif ($inheritOnly -and $objInherit -and ($ace.AccessMask -band 0x10)) { 'manageDocuments' }
+                 elseif (-not $inheritOnly -and ($ace.AccessMask -band 0x8)) { 'print' }
+                 else { $null }
+        if (-not $level) { continue }
+        if (-not $map.ContainsKey($sid) -or $rank[$level] -gt $rank[$map[$sid]]) { $map[$sid] = $level }
+    }
+    return $map
+}
+
+function Get-PrinterAclPlan {
+    <#
+        The printer's ACL as the JSON wants it, starting from the one it has: every
+        protected entry stays exactly as Windows wrote it, every other user or group
+        goes, and the JSON's grants are added. Returns whether that differs from
+        now, the SDDL to set, and a summary of who gains and loses what.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] [AllowEmptyCollection()] $Grants)
+
+    $printer = Get-Printer -Name $Name -Full -ErrorAction Stop
+    $sddl    = [string] (Get-PropertyValue $printer 'PermissionSDDL')
+    if (-not $sddl) { throw "Windows returns no permissions for '$Name'" }
+
+    $current = [Security.AccessControl.RawSecurityDescriptor]::new($sddl)
+    $acl     = [Security.AccessControl.RawAcl]::new([Security.AccessControl.RawAcl]::AclRevision, 0)
+    foreach ($ace in $current.DiscretionaryAcl) {
+        $keep = $ace -isnot [Security.AccessControl.KnownAce] -or (Test-ProtectedSid $ace.SecurityIdentifier.Value)
+        if ($keep) { $acl.InsertAce($acl.Count, $ace) }
+    }
+    foreach ($grant in $Grants) {
+        $fragment = 'D:' + (($PrinterAccessAces[$grant.Access] | ForEach-Object { $_ -f $grant.Sid }) -join '')
+        foreach ($ace in ([Security.AccessControl.RawSecurityDescriptor]::new($fragment)).DiscretionaryAcl) { $acl.InsertAce($acl.Count, $ace) }
+    }
+
+    $before = Get-PrinterAccessMap -Acl $current.DiscretionaryAcl
+    $after  = Get-PrinterAccessMap -Acl $acl
+    $notes  = [System.Collections.Generic.List[string]]::new()
+    foreach ($sid in $before.Keys) {
+        if (-not $after.ContainsKey($sid)) { $notes.Add("-$(Resolve-PrincipalName $sid) ($($before[$sid]))") }
+        elseif ($after[$sid] -ne $before[$sid]) { $notes.Add("$(Resolve-PrincipalName $sid) $($before[$sid]) -> $($after[$sid])") }
+    }
+    foreach ($sid in $after.Keys) {
+        if (-not $before.ContainsKey($sid)) { $notes.Add("+$(Resolve-PrincipalName $sid) ($($after[$sid]))") }
+    }
+
+    $current.DiscretionaryAcl = $acl
+    return [PSCustomObject]@{
+        Changed = $notes.Count -gt 0
+        Sddl    = $current.GetSddlForm([Security.AccessControl.AccessControlSections]::All)
+        Summary = $notes -join ', '
+    }
+}
+
 function Get-PrinterState {
     <# What differs between the printer as it is and as the JSON wants it. #>
     param([Parameter(Mandatory)] $Spec)
@@ -1132,6 +1497,7 @@ function Get-PrinterState {
         Exists      = [bool] $existing
         PortExists  = [bool] $port
         PortDrift   = $false
+        PropertyDrift = $false
         PortName    = $portName
         CurrentPort = if ($existing) { $existing.PortName } else { $null }
         Changes     = $changes
@@ -1151,9 +1517,16 @@ function Get-PrinterState {
 
     if (-not $existing) {
         $changes.Add('printer does not exist')
+        # A group that does not resolve stops the install later on (fail closed),
+        # so a check run should say so now rather than report a plain install.
+        if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+            try { $null = Resolve-PrinterGrant -Spec $Spec }
+            catch { Write-Bad "'$($Spec.name)' will not be installed: $($_.Exception.Message)" }
+        }
         return $state
     }
 
+    $countBefore = $changes.Count
     if ($existing.DriverName -ne $Spec.driver) { $changes.Add("driver is '$($existing.DriverName)'") }
     if ($existing.PortName -ne $portName)      { $changes.Add("port is '$($existing.PortName)'") }
     foreach ($field in 'Location', 'Comment') {
@@ -1170,6 +1543,9 @@ function Get-PrinterState {
         $shareName = if (Get-PropertyValue $Spec 'shareName') { [string] $Spec.shareName } else { [string] $Spec.name }
         if ($existing.Shared -and [string] $existing.ShareName -ne $shareName) { $changes.Add("share name is '$($existing.ShareName)'") }
     }
+    # Only these need Set-Printer; a queue that differs only in its tray, print
+    # defaults or permissions is left alone by it.
+    $state.PropertyDrift = $changes.Count -gt $countBefore
 
     $duplex = Get-PropertyValue $Spec 'duplex'
     $color  = Get-PropertyValue $Spec 'color'
@@ -1184,6 +1560,33 @@ function Get-PrinterState {
             # Unreadable is not the same as wrong: no change is claimed, so a
             # driver that cannot report its settings does not loop every run.
             Write-Warn "Could not read the print defaults of '$($Spec.name)': $($_.Exception.Message)"
+        }
+    }
+
+    $inputBin = Get-PropertyValue $Spec 'inputBin'
+    if ($inputBin) {
+        try {
+            $info = Get-InputBinInfo -Name $Spec.name
+            $bin  = Find-InputBin -Info $info -Want $inputBin
+            # A tray the driver does not know is reported, not counted as a
+            # change: setting it cannot succeed, so it would loop every run.
+            if (-not $bin) { Write-Warn "'$($Spec.name)': the driver has no tray '$inputBin' - it offers $(Format-InputBinList $info)" }
+            elseif (-not (Test-InputBinCurrent -Info $info -Bin $bin)) { $changes.Add("default tray is not '$($bin.Display)'") }
+        } catch {
+            Write-Warn "Could not read the trays of '$($Spec.name)': $($_.Exception.Message)"
+        }
+    }
+
+    # Who may use the queue. Unlike the print defaults, a permission that cannot
+    # be checked is reported loudly: a queue meant for one group that is open to
+    # everyone is a security problem, not a cosmetic one.
+    if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+        try {
+            $plan = Get-PrinterAclPlan -Name $Spec.name -Grants (Resolve-PrinterGrant -Spec $Spec)
+            if ($plan.Changed) { $changes.Add("permissions: $($plan.Summary)") }
+        } catch {
+            Write-Bad "Could not check the permissions of '$($Spec.name)': $($_.Exception.Message)"
+            $changes.Add('permissions could not be checked')
         }
     }
     return $state
@@ -1256,6 +1659,15 @@ function Remove-PrinterFromSpec {
 function Set-PrinterFromSpec {
     param([Parameter(Mandatory)] $Spec, [Parameter(Mandatory)] $State)
 
+    # Groups are resolved before anything is created: a queue meant for Finance
+    # that cannot be restricted to Finance is better not created at all than
+    # created open to everyone. On a first boot the domain gets time to answer.
+    $grants = $null
+    if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+        $retry  = if ($simulate) { 0 } else { [math]::Min($WaitSeconds, 120) }
+        $grants = Resolve-PrinterGrant -Spec $Spec -RetrySeconds $retry
+    }
+
     $portName = $State.PortName
     if (-not $State.PortExists) {
         if ($PSCmdlet.ShouldProcess("$portName -> $($Spec.address)", 'Add-PrinterPort')) {
@@ -1294,14 +1706,16 @@ function Set-PrinterFromSpec {
         if ($shared) { $extra['ShareName'] = if (Get-PropertyValue $Spec 'shareName') { [string] $Spec.shareName } else { [string] $Spec.name } }
     }
 
+    $createdNow = $false
     if (-not $State.Exists) {
         if ($PSCmdlet.ShouldProcess($Spec.name, "Add-Printer (driver '$($Spec.driver)', port $portName)")) {
             Invoke-SpoolerAction -What 'Add-Printer' -Action {
                 Add-Printer -Name $Spec.name -DriverName $Spec.driver -PortName $portName @extra -ErrorAction Stop
             }
+            $createdNow = $true
             Write-Ok "Printer '$($Spec.name)' added"
         }
-    } elseif ($PSCmdlet.ShouldProcess($Spec.name, "Set-Printer ($($State.Changes -join '; '))")) {
+    } elseif (($State.PropertyDrift -or $State.PortDrift) -and $PSCmdlet.ShouldProcess($Spec.name, "Set-Printer ($($State.Changes -join '; '))")) {
         Invoke-SpoolerAction -What 'Set-Printer' -Action {
             Set-Printer -Name $Spec.name -DriverName $Spec.driver -PortName $portName @extra -ErrorAction Stop
         }
@@ -1309,6 +1723,36 @@ function Set-PrinterFromSpec {
         # With default port names a new address is a new port; the old one is
         # left without a printer and would otherwise linger forever.
         if ($State.CurrentPort -and $State.CurrentPort -ne $portName) { Remove-UnusedPort -PortName $State.CurrentPort }
+    }
+
+    # Permissions straight after the printer exists, before anything that can be
+    # slow or hang. A new queue that cannot be restricted is removed again: left
+    # standing it would be open to everyone, which is the one outcome the JSON
+    # ruled out. An existing queue keeps its old ACL and the run fails loudly.
+    if ($null -ne $grants) {
+        $who = if ($grants.Count -gt 0) { ($grants | ForEach-Object { "$($_.Principal) ($($_.Access))" }) -join ', ' } else { 'administrators only' }
+        if (-not (Get-Printer -Name $Spec.name -ErrorAction SilentlyContinue)) {
+            $null = $PSCmdlet.ShouldProcess($Spec.name, "Restrict to $who")
+        } else {
+            try {
+                $plan = Get-PrinterAclPlan -Name $Spec.name -Grants $grants
+                if (-not $plan.Changed) {
+                    Write-Skip "  Permissions of '$($Spec.name)' are already as configured"
+                } elseif ($PSCmdlet.ShouldProcess($Spec.name, "Set permissions ($($plan.Summary))")) {
+                    Invoke-SpoolerAction -What 'Set-Printer -PermissionSDDL' -Action {
+                        Set-Printer -Name $Spec.name -PermissionSDDL $plan.Sddl -ErrorAction Stop
+                    }
+                    Write-Ok "Permissions of '$($Spec.name)': $($plan.Summary)"
+                }
+            } catch {
+                $reason = $_.Exception.Message
+                if ($createdNow) {
+                    try { Remove-Printer -Name $Spec.name -ErrorAction Stop } catch { }
+                    throw "Could not restrict '$($Spec.name)' to $who ($reason) - the new printer was removed again rather than left open to everyone"
+                }
+                throw "Could not set the permissions of '$($Spec.name)' ($reason) - its previous permissions are still in place"
+            }
+        }
     }
 
     # Print defaults for every user of this printer. Only what the JSON sets is
@@ -1327,6 +1771,27 @@ function Set-PrinterFromSpec {
             Write-Ok "Print defaults set for '$($Spec.name)'"
         } catch {
             Write-Warn "Could not set the print defaults for '$($Spec.name)': $($_.Exception.Message) - the printer itself is installed"
+        }
+    }
+
+    # The tray goes last and on its own: it rewrites the default print ticket,
+    # which by now holds the settings above.
+    $inputBin = Get-PropertyValue $Spec 'inputBin'
+    if ($inputBin) {
+        try {
+            $info = Get-InputBinInfo -Name $Spec.name
+            $bin  = Find-InputBin -Info $info -Want $inputBin
+            if (-not $bin) {
+                Write-Warn "'$($Spec.name)': the driver has no tray '$inputBin' - it offers $(Format-InputBinList $info). Use one of those names in the JSON"
+            } elseif (Test-InputBinCurrent -Info $info -Bin $bin) {
+                Write-Skip "  Default tray of '$($Spec.name)' is already '$($bin.Display)'"
+            } elseif ($PSCmdlet.ShouldProcess($Spec.name, "default tray -> '$($bin.Display)' ($($bin.Local), $($bin.Features -join '/'))")) {
+                Set-InputBin -Name $Spec.name -Bin $bin
+                if (Test-InputBinCurrent -Info (Get-InputBinInfo -Name $Spec.name) -Bin $bin) { Write-Ok "Default tray of '$($Spec.name)' set to '$($bin.Display)'" }
+                else { Write-Warn "'$($Spec.name)': the driver accepted the tray '$($bin.Display)' but its default ticket does not show it - check the printer's preferences" }
+            }
+        } catch {
+            Write-Warn "Could not set the default tray of '$($Spec.name)': $($_.Exception.Message) - the printer itself is installed"
         }
     }
 }
@@ -1511,11 +1976,37 @@ function Test-Configuration {
             $value = Get-PropertyValue $p $flag
             if ($null -ne $value -and $value -isnot [bool]) { $problems.Add("$who '$flag' must be true or false (without quotes)") }
         }
-        foreach ($text in 'location', 'comment', 'shareName', 'paperSize', 'lprQueue') {
+        foreach ($text in 'location', 'comment', 'shareName', 'paperSize', 'inputBin', 'lprQueue') {
             $value = Get-PropertyValue $p $text
             if ($null -ne $value -and $value -isnot [string]) { $problems.Add("$who '$text' must be text") }
         }
         if ((Get-PropertyValue $p 'lprQueue') -and $null -ne $portNumber) { $warnings.Add("$who has lprQueue, so portNumber is ignored (LPR always uses 515)") }
+
+        # Permissions: a list of { principal, access }. [] is allowed and means
+        # "administrators only"; leaving the field out leaves the ACL alone.
+        $permissions = Get-PropertyValue $p 'permissions'
+        if ($null -ne $permissions) {
+            if ($permissions -isnot [array] -and -not (Test-JsonObject $permissions)) {
+                $problems.Add("$who 'permissions' must be a list of { `"principal`": ..., `"access`": ... }")
+            } else {
+                $seen = @{}
+                foreach ($entry in @($permissions)) {
+                    if (-not (Test-JsonObject $entry)) { $problems.Add("$who has a permissions entry that is not an object"); continue }
+                    foreach ($field in Get-FieldName $entry) {
+                        if ($field -notin $KnownPermissionFields) { $problems.Add("$who has a permissions entry with an unknown field '$field' (typo?)") }
+                    }
+                    $principal = Get-PropertyValue $entry 'principal'
+                    $access    = Get-PropertyValue $entry 'access'
+                    if (-not $principal -or $principal -isnot [string]) { $problems.Add("$who has a permissions entry without a 'principal'"); continue }
+                    if ($access -notin $PrinterAccessAces.Keys) {
+                        $problems.Add("$who permission for '$principal' must have access $(@($PrinterAccessAces.Keys) -join ', '), not '$access'")
+                    }
+                    if ($seen.ContainsKey($principal.ToLowerInvariant())) { $problems.Add("$who lists '$principal' twice in permissions") }
+                    $seen[$principal.ToLowerInvariant()] = $true
+                }
+                if (@($permissions).Count -eq 0) { $warnings.Add("$who has an empty permissions list - only administrators will be able to print to it") }
+            }
+        }
 
         # Two printers may share a port - but not with two different addresses,
         # because the second would silently print to the first one's printer.

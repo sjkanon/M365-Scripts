@@ -103,6 +103,13 @@
     for SIDs whose profiles are gone, a machine-wide entry whose manifest is gone,
     and the Deprovisioned marker that refuses the provision outright.
 
+    With FSLogix profile containers a missing local profile proves nothing: FSLogix
+    removes it at every sign-out, so every user who is not signed in would look
+    orphaned. There an entry only counts as orphaned when the account no longer
+    exists - its SID does not resolve while its domain's Domain Users group does.
+    Entries of users who are only signed out are summed up in one line and never
+    removed; Windows completes them at that user's next sign-in.
+
     Preflight names them, with the registry path, whether or not anything may be
     changed - so -CheckOnly is the diagnosis. -RepairAppxStore is the repair, in two
     steps: a package whose files are still on disk is re-registered from its own
@@ -288,7 +295,8 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
     What is left after that is registry: the entries under
     HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore that no
     longer correspond to anything - a package registered for a SID with no profile
-    on this host (also under EndOfLife and DeferredRemoval), a machine-wide entry
+    on this host (also under EndOfLife and DeferredRemoval; with FSLogix only for an
+    account that no longer exists in its domain), a machine-wide entry
     whose manifest is gone, and the Deprovisioned marker that tells Windows never to
     provision this package again. Each one is named with its full registry path
     before it is removed, and nothing outside MSTeams is ever touched.
@@ -565,6 +573,10 @@ $offlineMsix      = $null
 # deployment engine goes looking and finds neither files nor a user to own it.
 $AppxAllUserStorePath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore'
 $ProfileListPath      = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
+
+# Filled on first use by Test-FslogixProfileEnabled and Get-SidPresence.
+$script:fslogixEnabled = $null
+$script:domainOfSid    = @{}
 
 # Teams reads this flag to switch to VDI media optimization; it has to be there
 # before the client is provisioned.
@@ -997,16 +1009,17 @@ function Get-AppxPackageHolder {
                    else { Resolve-SidName $sid }
 
         # "Completes when they sign out" only holds while there is somebody left to
-        # sign out. A pending removal for a SID that has no profile on this host any
-        # more waits for an event that can never happen, and telling a technician to
-        # drain a host that is already empty sends them in a circle.
+        # sign out. A pending removal for an account that no longer exists waits for
+        # an event that can never happen, and telling a technician to drain a host
+        # that is already empty sends them in a circle. An FSLogix user who is merely
+        # not signed in is neither: it completes when they come back.
         [PSCustomObject]@{
             Sid        = $sid
             Account    = $account
             State      = $state
             IsSystem   = ($sid -eq 'S-1-5-18')
             Pending    = ($state -like '*pending removal*')
-            HasProfile = (Test-ProfileOnHost $sid)
+            Presence   = (Get-SidPresence $sid).State
             Raw        = $text
         }
     }
@@ -1016,6 +1029,60 @@ function Test-ProfileOnHost {
     <# Whether a SID still has a profile on this machine. #>
     param([Parameter(Mandatory)] [string] $Sid)
     return (Test-Path "$ProfileListPath\$Sid")
+}
+
+function Test-FslogixProfileEnabled {
+    <# FSLogix profile containers, which take the local profile away at every sign-out. #>
+    if ($null -eq $script:fslogixEnabled) {
+        $settings = Get-ItemProperty 'HKLM:\SOFTWARE\FSLogix\Profiles' -ErrorAction SilentlyContinue
+        $script:fslogixEnabled = ((Get-PropertyValue $settings 'Enabled') -eq 1)
+    }
+    return $script:fslogixEnabled
+}
+
+function Get-SidPresence {
+    <#
+        Whether the user behind a SID can still come back to this host, which is what
+        decides whether a package store entry for them is waiting or orphaned:
+
+          local      a profile is on this host right now
+          returning  no local profile, but FSLogix is on and the account exists - the
+                     profile lives in its container and returns at the next sign-in
+          gone       no profile and no way back: FSLogix is off, or the account no
+                     longer exists in its domain
+          unknown    no local profile, and whether the account exists cannot be told
+
+        "No key under ProfileList" alone called every user on a pooled FSLogix host an
+        orphan, because FSLogix removes that key at each sign-out - measured on two
+        session hosts, where the names rotated between hosts and runs and only the
+        three SIDs that would not resolve were on both. Telling a deleted account from
+        an unreachable domain controller is done by resolving that domain's own Domain
+        Users group (RID 513): if that answers and the user does not, the user is gone.
+    #>
+    param([Parameter(Mandatory)] [string] $Sid)
+
+    if (Test-ProfileOnHost $Sid) { return [PSCustomObject]@{ State = 'local'; Reason = '' } }
+    if (-not (Test-FslogixProfileEnabled)) {
+        return [PSCustomObject]@{ State = 'gone'; Reason = 'that SID has no profile on this host, so nothing will ever complete it' }
+    }
+
+    if ((Resolve-SidName $Sid) -ne $Sid) {
+        return [PSCustomObject]@{ State = 'returning'; Reason = 'not signed in - FSLogix keeps the profile in its container, and Windows completes this at the next sign-in' }
+    }
+
+    if ($Sid -match '^(S-1-5-21-\d+-\d+-\d+)-\d+$') {
+        $domainSid = $Matches[1]
+        if (-not $script:domainOfSid.ContainsKey($domainSid)) {
+            $group = Resolve-SidName "$domainSid-513"
+            $script:domainOfSid[$domainSid] = if ($group -ne "$domainSid-513") { ($group -split '\\')[0] } else { $null }
+        }
+        $domain = $script:domainOfSid[$domainSid]
+        if ($domain) {
+            return [PSCustomObject]@{ State = 'gone'; Reason = "the account no longer exists in $domain, so it will never sign in again" }
+        }
+        return [PSCustomObject]@{ State = 'unknown'; Reason = 'its domain did not answer, so whether the account still exists cannot be told' }
+    }
+    return [PSCustomObject]@{ State = 'unknown'; Reason = 'not a domain account, so this host cannot tell whether it still exists' }
 }
 
 function Get-AppxStoreRegistration {
@@ -1051,8 +1118,8 @@ function Get-AppxStoreRegistration {
     )) {
         foreach ($sidKey in @(Get-ChildItem $scope.Root -ErrorAction SilentlyContinue |
                               Where-Object { $_.PSChildName -like 'S-1-*' })) {
-            $sid     = $sidKey.PSChildName
-            $orphan  = -not (Test-ProfileOnHost $sid)
+            $sid      = $sidKey.PSChildName
+            $presence = Get-SidPresence $sid
             foreach ($pkgKey in @(Get-ChildItem $sidKey.PSPath -ErrorAction SilentlyContinue |
                                   Where-Object { $_.PSChildName -like $NameLike })) {
                 [PSCustomObject]@{
@@ -1062,8 +1129,9 @@ function Get-AppxStoreRegistration {
                     Name     = $pkgKey.PSChildName
                     Path     = $pkgKey.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
                     Payload  = $null
-                    Orphaned = $orphan
-                    Reason   = if ($orphan) { "$sid has no profile on this host, so nothing will ever complete it" } else { '' }
+                    Presence = $presence.State
+                    Orphaned = ($presence.State -eq 'gone')
+                    Reason   = $presence.Reason
                 }
             }
         }
@@ -1080,6 +1148,7 @@ function Get-AppxStoreRegistration {
             Name     = $appKey.PSChildName
             Path     = $appKey.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
             Payload  = $manifest
+            Presence = $null
             Orphaned = $gone
             Reason   = if (-not $gone)   { '' }
                        elseif ($manifest) { "the manifest it was staged from is gone ($manifest)" }
@@ -1096,6 +1165,7 @@ function Get-AppxStoreRegistration {
             Name     = $key.PSChildName
             Path     = $key.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
             Payload  = $null
+            Presence = $null
             Orphaned = $true
             Reason   = 'it tells Windows never to provision this package, which is exactly what the bootstrapper is trying to do'
         }
@@ -1110,6 +1180,7 @@ function Get-AppxStoreRegistration {
             Name     = $key.PSChildName
             Path     = $key.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::HKEY_LOCAL_MACHINE', 'HKLM:'
             Payload  = $null
+            Presence = $null
             Orphaned = $false
             Reason   = ''
         }
@@ -1117,14 +1188,33 @@ function Get-AppxStoreRegistration {
 }
 
 function Write-AppxStoreStatus {
-    <# The orphans, with the registry path, because that is what makes it checkable. #>
+    <#
+        The orphans, one line each with the registry path under it, because that is
+        what -RepairAppxStore would remove and what makes it checkable. Entries of
+        users who are only signed out are summed up in one line: on a pooled FSLogix
+        host that is most of the store, and three lines apiece for something that
+        completes on its own buried the few entries that never will.
+    #>
     param($Registrations)
 
     foreach ($entry in @($Registrations | Where-Object { $_.Orphaned })) {
         $who = if ($entry.Account) { " for $($entry.Account)" } else { '' }
-        Write-Warn "Package store orphan - $($entry.Kind)$who`: $($entry.Name)"
-        Write-Warn "  $($entry.Reason)"
+        Write-Warn "Package store orphan ($($entry.Kind)$who): $($entry.Name) - $($entry.Reason)"
         Write-Skip "  $($entry.Path)"
+    }
+
+    $returning = @($Registrations | Where-Object { $_.Presence -eq 'returning' })
+    if ($returning.Count -gt 0) {
+        $names = @($returning | Select-Object -ExpandProperty Account -Unique)
+        Write-Skip ("{0} package store {1} to {2} user(s) who are not signed in here ({3}) - FSLogix keeps their profiles in containers, and Windows completes these at each user's next sign-in" -f
+                    $returning.Count, $(if ($returning.Count -eq 1) { 'entry belongs' } else { 'entries belong' }), $names.Count, ($names -join ', '))
+    }
+
+    $unknown = @($Registrations | Where-Object { $_.Presence -eq 'unknown' })
+    if ($unknown.Count -gt 0) {
+        $sids = @($unknown | Select-Object -ExpandProperty Sid -Unique)
+        Write-Skip ("{0} package store entr{1} for {2} - {3}; left alone, not counted as orphans" -f
+                    $unknown.Count, $(if ($unknown.Count -eq 1) { 'y' } else { 'ies' }), ($sids -join ', '), $unknown[0].Reason)
     }
 }
 
@@ -1994,14 +2084,16 @@ try {
         $holders = @(Get-AppxPackageHolder -Package $pkg)
         $real    = @($holders | Where-Object { -not $_.IsSystem })
         $pending = @($real | Where-Object { $_.Pending })
-        $waiting = @($pending | Where-Object { $_.HasProfile })
-        $orphans = @($pending | Where-Object { -not $_.HasProfile })
+        $waiting   = @($pending | Where-Object { $_.Presence -eq 'local' })
+        $returning = @($pending | Where-Object { $_.Presence -in @('returning', 'unknown') })
+        $orphans   = @($pending | Where-Object { $_.Presence -eq 'gone' })
 
         $forWhom = if ($real.Count -eq 0) {
             if ($holders.Count -gt 0) { ' - staged only, not installed for any user' } else { '' }
         } elseif ($pending.Count -eq $real.Count) {
             if ($waiting.Count -gt 0) { " - removal is pending for all $($real.Count) user(s), and completes when they sign out" }
-            else { " - removal is pending for all $($real.Count) user(s), none of whom still has a profile here" }
+            elseif ($returning.Count -gt 0) { " - removal is pending for all $($real.Count) user(s), and completes as each of them signs in again" }
+            else { " - removal is pending for all $($real.Count) user(s), none of whom exists any more" }
         } elseif ($pending.Count -gt 0) {
             " - installed for $($real.Count) user profile(s), $($pending.Count) pending removal"
         } else {
@@ -2018,9 +2110,12 @@ try {
             Write-Warn "  pending removal for: $(($waiting | Select-Object -ExpandProperty Account) -join ', ') - sign those users out or reboot the host, then run again"
             $rebootRequired = $true
         }
+        if ($returning.Count -gt 0) {
+            Write-Skip "  pending removal for: $(($returning | Select-Object -ExpandProperty Account) -join ', ') - not signed in here (FSLogix), completes at their next sign-in"
+        }
         if ($orphans.Count -gt 0) {
             $appxOrphaned = $true
-            Write-Warn "  pending removal for: $(($orphans | Select-Object -ExpandProperty Account) -join ', ') - but those profiles are no longer on this host, so there is nobody left to sign out and the removal cannot complete on its own"
+            Write-Warn "  pending removal for: $(($orphans | Select-Object -ExpandProperty Account) -join ', ') - but those accounts are gone, so there is nobody left to sign out and the removal cannot complete on its own"
         }
 
         # A package Windows considers Modified or Tampered is what makes
@@ -2056,10 +2151,8 @@ try {
     # provision trips over. Read-only here - the repair is step 6b.
     $appxStore        = @(Get-AppxStoreRegistration)
     $appxStoreOrphans = @($appxStore | Where-Object { $_.Orphaned })
-    if ($appxStoreOrphans.Count -gt 0) {
-        $appxOrphaned = $true
-        Write-AppxStoreStatus -Registrations $appxStore
-    }
+    if ($appxStoreOrphans.Count -gt 0) { $appxOrphaned = $true }
+    if ($appxStore.Count -gt 0) { Write-AppxStoreStatus -Registrations $appxStore }
 
     # A pooled session host or a fresh image often has Teams provisioned without any
     # user having it installed yet. Without this fallback the version check has

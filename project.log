@@ -1,0 +1,161 @@
+M365-Scripts — projectlog
+===========================
+Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
+
+2026-10-16 — Watchdog zet Knipprogramma zelf klaar; geen melding meer elke run tijdens cooldown
+  - Waarom: LEM-AVD-4 meldde SnippingTool NotProvisioned, en elke 30 min opnieuw "herstel mislukt".
+  - Commits: 6b3dfc4 (watchdog); downloadpin naar 6b3dfc4 + SHA-256
+    644ECB54A4D0B7D092C6974861BB432C5CFE01DE72BE15742D5BD73B08C8909B (gecontroleerd tegen GitHub).
+  - n8n-workflow W7YYoix73OWuaEvd (M365 App Watchdog → Teams): kop noemt Knipprogramma.
+  - Niet getest: Add-AppxProvisionedPackage -FolderPath vanuit WindowsApps op een sessiehost.
+
+2026-10-16 — Watchdog bewaakt ook Knipprogramma (Snipping Tool)
+  - Waarom: Knipprogramma werkte niet op AVD en niets meldde het; de watchdog kende alleen
+    Teams, Outlook en Copilot.
+  - Commits: 3afc2e0 (Get-M365AppsLog -App SnippingTool), e84fa4c (watchdog, collectorpin
+    naar 3afc2e0); downloadpin naar e84fa4c + SHA-256
+    AE7498DC0B6D7E821122E69D4892C50FB0E217CB2E34EABB74499FE9B63817E2 (gecontroleerd tegen GitHub).
+  - Niet getest: een run op een sessiehost (pool niet bereikbaar via WinRM of Azure vanaf
+    hier); hoe de n8n-workflow de extra kolom SnippingTool toont. Een geïnstalleerde
+    watchdog houdt zijn applijst uit config.json: opnieuw installeren.
+
+2026-10-13 — Watchdog -User vindt de gebruiker op SID en op naam met achtervoegsel
+  - Waarom: Kris heet in zijn sessie AIRPORTS\kris.vand (81E1E8C7); -User vergeleek exact.
+  - Commits: 034c900 (watchdog); downloadpin naar 034c900 + SHA-256
+    23E50BF02C63D76F129F88C2A7C86323EC1512E65719E568CEE1C46D66B7B203 (gecontroleerd tegen GitHub).
+  - Niet getest: UPN opzoeken in het AIRPORTS-domein op de host.
+
+2026-10-13 — Watchdog weer snel: pakketten één keer per controle opvragen
+  - Waarom: de users-tabel vroeg Get-AppxPackage -User opnieuw per gebruiker en app (3-4 s per
+    aanroep) - minuten extra per run.
+  - Commits: 628aa64 (watchdog); downloadpin naar 628aa64 + SHA-256
+    6D1C1D7CE1505C2D4893B7670A000C73CE321C7690B97529F9C6C52AF600004C (gecontroleerd tegen GitHub).
+  - Niet getest: looptijd op een sessiehost.
+
+2026-10-13 — Watchdog -User: één gebruiker op verzoek helpen (Kris, Copilot opent niet)
+  - Wat: -User <naam> [-App]: per app die niet draait opnieuw registreren in de sessie, voor de
+    gebruiker openen, na 15 s controleren; geen wachttijd/afkoeltijd, niets gereset of gesloten.
+    Eigen log Watch-M365Apps_User_<datum>.log, melding aan n8n (probleem OnRequest).
+  - Commits: d8fb7eb (watchdog); downloadpin naar d8fb7eb + SHA-256
+    C39870B69C593B46F60B8C6316B4E25B306F4D4158CF3A61F672E2C7285F4700 (gecontroleerd tegen GitHub).
+  - Niet getest: echte registratie en opening in een klantsessie op een sessiehost.
+
+2026-10-13 — Watchdog meldt alle gebruikers, valt niet meer om op een sluitende explorer.exe
+  - Wat: elke melding bevat 'users' (elke aangemelde gebruiker, per app build + draait ja/nee),
+    dezelfde tabel elke run in de log; Sid-crash (LEM-AVD-6 07:52) opgelost; foutmelding noemt
+    de regel; events worden maar één keer gelezen (dubbele kaarten bjorn.tjaeckx 07:31-07:35).
+  - Commits: 35aae05 (watchdog); downloadpin naar 35aae05 + SHA-256
+    3E05272B687C26DDCB585A9D7505FD710F9CD0F9A9B9B0F79577D48BE93BE13B (gecontroleerd tegen GitHub).
+  - Niet getest: een run op een sessiehost. n8n-kaart toont 'users' nog niet.
+
+2026-10-12 — Watchdog draait ook na aanmelding en na een app die faalt; downloadpin bijgewerkt
+  - Wat: -Install geeft de taak extra triggers: 12 min na elke aanmelding, 30 s na TWinUI 5961 of
+    een crash/hang van ms-teams/olk/copilotapp, 2 min na AppX 401/404. IgnoreNew, wachttijden
+    en herstel bij klanten ongewijzigd.
+  - Waarom: bjorn.casier (LEM-AVD-4, 09:42) wachtte tot de volgende run; nu binnen minuten.
+  - Commits: 4940b23 (watchdog); downloadpin naar 4940b23 + SHA-256
+    F041A102431341A721AEC1798FED2F22AC375DEA8698EE897996223A957193AD (gecontroleerd tegen GitHub).
+  - Niet getest: -Install op een sessiehost en een run die door een trigger start.
+
+2026-10-10 — n8n-kaart kent NIEUWE VERSIE, BuildMissing en NoShortcut
+  - Wat: flow W7YYoix73OWuaEvd, node Build Watchdog Card: event 'updated' -> 🆕 NIEUWE VERSIE
+    (regel oud -> nieuw, versies op de host); labels 'versie ontbreekt op de host' en
+    'geen snelkoppeling in het Startmenu'; hostbevinding hersteld -> 'hersteld op de host'.
+    Sticky note bijgewerkt. Opgeslagen en gepubliceerd (versie 6ea63e33).
+  - Getest: kaartcode lokaal met Deno op 3 voorbeeldpayloads. Niet getest: echte kaart in Teams.
+  - IT Glue-procedure: labels in de woordenlijst aangepast.
+
+2026-10-10 — Nieuwe Outlook valt steeds weg op LEM-AVD-5: host de gevraagde build geven
+  - Waarom (n8n 10-10): elke nieuwe aanmelding op AVD-5 faalt 10-16x met 0x80073CF9/0x80070490;
+    watchdog herregistreert per gebruiker tot 30 min later; hostherstel 13:02 vond niets (helper
+    zocht gevraagde build alleen in FSLogix-log). Plus ruis: eigen herregistratie logde een fout
+    die de volgende run als nieuwe fout telde.
+  - Wat: Repair-AppxPackageStore telt ook AppX 0x80070490 voor een build zonder bestanden op de
+    host (abe8202). Watchdog: build in elke melding; BuildMissing-hostbevinding -> hostherstel
+    direct (1x per build, buiten cooldown); eigen herstel-echo gefilterd; helper-pin abe8202 in
+    watchdog en Update-SessionHostImage.
+  - Open: welke build AVD-5-gebruikers vragen (staat nu in de melding); CDN serveert die?;
+    n8n-kaart labels BuildMissing/NoShortcut/updated; hosts opnieuw -Install.
+  - Commits: abe8202 (helper), 3887d1b (watchdog); downloadpin naar 3887d1b + SHA-256
+    8315F72AE49557452CC07F8AE57F84FBE492D7DEDE89CFCA97357CC86E747EBC.
+
+2026-10-10 — Watchdog bewaakt de nieuwe (unified) Copilot-app in plaats van de oude
+  - Waarom: de oude M365 Copilot-app telde als Copilot; met de unified app op de host werd
+    niemand getest en de app nooit gestart.
+  - Wat: alleen unified Copilot (Edge Update, copilotapp.exe) telt. Host: geïnstalleerd, exe
+    gevonden (uninstall/App Paths/map), Start-menu-snelkoppeling voor iedereen (anders gemaakt).
+    Per gebruiker: identiteitspakket (als dat bestaat) geregistreerd + Ok, anders opnieuw
+    registreren met de eigen familie; itceadmin: starten en moet blijven draaien. Oude build na
+    Edge Update één keer sluiten bij itceadmin. Verzamelaar herkent dit (pin c2255d0).
+  - Open: op een sessiehost nagaan waar copilotapp.exe staat en of er een identiteitspakket per
+    gebruiker is; n8n-kaart 'updated'.
+  - Bestanden: Watch-M365Apps.ps1, Get-M365AppsLog.ps1, RDS-readmes, IT Glue md/html, Version History.
+  - Commits: c2255d0 (verzamelaar), f15d9b1 (watchdog); downloadpin naar f15d9b1 + SHA-256
+    1CB3145A65B8EA7B7A85810D12ED83740DC3A63DE897343F0FEBAAC59643CF12.
+
+2026-10-10 — Watchdog werkt Teams/Outlook/Copilot bij en test elke nieuwe build zelf
+  - Waarom: de watchdog controleerde alleen de build die er stond; een nieuwe build kwam via
+    de wekelijkse image-update of de app zelf, en vaak startte een klant hem als eerste.
+  - Wat: stap 1a + -UpdateHours (std 6, 0 = uit): host elke 6 u Repair-AppxPackageStore
+    -Latest -Provision (Teams/Outlook) + Edge Update-check (Copilot); itceadmin elke run naar
+    de klaargezette build (app sluiten, opnieuw registreren) zodat de starttest de nieuwe build
+    test. Klanten niet aangeraakt. Nieuwe build op de host -> melding 'updated' (oud -> nieuw).
+  - Open: n8n-flow kent 'updated' nog niet; niet getest op een sessiehost.
+  - Bestanden: scripts/RDS/Watch-M365Apps.ps1, RDS-readmes (EN/NL/FR), IT Glue md/html,
+    Version History (EN/NL/FR).
+  - Commit: 82807f8; downloadpin naar 82807f8 + SHA-256 FDC21FC632BC5D06EDFCD730919A688D2899788A6C064B4B1B4F42E13C364E8E.
+
+2026-10-10 — Probleem bij één klant alleen in diens sessie herstellen
+  - Waarom: elke bevinding bij een klant stuurde ook de hele host naar herstel.
+  - Wat: één klant -> alleen diens sessie; host alleen bij de host zelf, itceadmin (test
+    voor de hele host) of dezelfde app bij 2+ klanten. Procedure (IT Glue) bijgewerkt.
+  - Commit: c7c3240; downloadpin naar c7c3240 + SHA-256 4096826282B14765277843F152F6489D29ECF7508A453EF596A70FB99DAD34EB.
+
+2026-10-10 — Host herstellen als een app bij itceadmin faalt
+  - Waarom: een fout bij itceadmin werd alleen in diens sessie hersteld, de host bleef stuk
+    tot een klant ertegenaan liep.
+  - Wat: elke bevinding (ook itceadmin) start Repair-AppxPackageStore -Provision voor die app.
+    Bij klanten wordt niets gestart, tenzij ze de app zelf net probeerden te openen.
+  - Commit: d29efd4; downloadpin naar d29efd4 + SHA-256 7B47EEE94F5ABFCDFF27AAB3E7C50C9200B57F1C9FD5D87DAE361F9FF2507636.
+
+2026-10-10 — App alleen openen na een eigen, recente poging van de gebruiker
+  - Waarom: elke geweigerde opening telde, ook de autostart bij aanmelden of een poging
+    van uren geleden; dan kon er ongevraagd een app (bv. olk) bij een klant opengaan.
+  - Wat: openen alleen als de laatste poging <= 30 min oud is en niet binnen 2 min na
+    aanmelden; anders staat de reden in de acties. Verder wordt bij klanten niets gestart.
+  - Commit: 6e7fa49; downloadpin in de RDS-readme naar 6e7fa49 + SHA-256 (gecontroleerd tegen GitHub).
+
+2026-10-10 — n8n-kaart WORDT HERSTELD + IT Glue-procedure bijgewerkt
+  - n8n-flow W7YYoix73OWuaEvd gepubliceerd: kaart voor 'repairing', regel 'Bewijs' (zip-pad).
+  - Watch-M365Apps-ITGlue.md/.html: nieuwe kaart, app gaat na herstel vanzelf open, bewijs
+    in Diag\ en Get-M365AppsLog handmatig, unified Copilot niet per gebruiker getest,
+    -Install neemt config.json niet over.
+  - Niet getest: echte kaart in het CIPP-kanaal.
+
+2026-10-10 — Watchdog: eerst aankondigen + bewijs, dan herstellen, dan app openen voor de gebruiker
+  - Waarom: n8n hoorde pas na het herstel van een probleem, de toestand ging verloren, en
+    een gebruiker bij wie Windows het openen weigerde moest het zelf opnieuw proberen.
+  - Wat: bij een nieuw probleem (alle aangemelde gebruikers) eerst Get-M365AppsLog -> zip in
+    Diag\, dan melding 'repairing' naar n8n, dan herstel; na herstel van een geweigerde
+    opening de app in de sessie van de gebruiker openen. -NoUserLaunch / -NoDiagnostics.
+    copilotapp.exe (unified Copilot) telt mee. Verzamelaar vastgepind op 6a94769 + SHA-256.
+  - Open: n8n-flow kent 'repairing' nog niet (toont PROBLEEM-kaart); downloadpin in de
+    RDS-readme verplaatst naar 7c9d2f3; niet getest als System op een sessiehost.
+  - Bestanden: scripts/RDS/Watch-M365Apps.ps1, readmes (EN/NL/FR), Version History.
+  - Commit: "Announce, collect evidence, repair, then open the app for the user" (devel)
+  - Daarvoor: 6a94769 verzamelaar ziet of de geïnstalleerde watchdog copilotapp.exe kent.
+
+2026-10-10 — Get-M365AppsLog.ps1: logverzamelaar voor Teams/Outlook/Copilot
+  - Waarom: Copilot werkte op een server niet bij gebruikers, terwijl de watchdog alle
+    gebruikers zou controleren, melden en herstellen; achteraf was niet te zien wat hij zag.
+  - Wat: alleen lezend, per gebruiker pakketten/processen + oordeel van de watchdog (BLIND SPOT),
+    events (AppX, AppReadiness, TWinUI, crashes), register, FSLogix/Edge Update-logs,
+    watchdog-taak/status/logs, optioneel app-logs; alles in één zip. Menu-item Q.
+  - Gevonden blinde vlekken: unified Copilot-app wordt voor iedereen als OK aangenomen,
+    copilotapp.exe onbekend voor de crashcontrole, klant-app die opent en faalt onzichtbaar.
+  - Bestanden: scripts/RDS/Get-M365AppsLog.ps1, menu.ps1, readmes (EN/NL/FR), Version History.
+  - Commit: "Add a log collector that shows why the watchdog missed an app" (devel)
+
+2026-10-09 — project.log aangemaakt
+  - Vanaf nu wordt elke wijziging hier gelogd en direct gecommit en gepusht.
+  - Uitgangspunt: a8862c3 2026-10-09 Give level 1 first help instead of the CIPP cards they cannot see
