@@ -174,6 +174,8 @@ $PrinterSubmenu = @(
             $a['Directory'] = 'Entra'
             $tenant = Read-Host "  Tenant (domain or id; empty = the current/GDAP tenant, shown before anything changes)"
             if ($tenant) { $a['TenantId'] = $tenant }
+            $wb = Read-Host "  Hybrid: does Cloud Sync write the groups back to AD (use the AD copies)? [y/N]"
+            if ($wb -match '^[Yy]') { $a['AdWriteback'] = $true }
         } else {
             $a['Directory'] = 'AD'
             $ou = Read-Host "  OU for new groups, in Entra Connect's sync scope (empty = preview only)"

@@ -58,14 +58,39 @@
                         Microsoft Graph. Warns when the matrix users are synced
                         from AD, because then -Directory AD is the one that works.
 
+      -Directory Entra -AdWriteback
+                        Hybrid, but the groups are managed in Entra ID: cloud
+                        groups that Microsoft Entra Cloud Sync provisions to AD
+                        ("Microsoft Entra ID to AD sync"). The AD copy is what
+                        an AD sign-in carries, so that is what lands in
+                        printers.json - found by its displayName and, where the
+                        attribute is readable, its msDS-ExternalDirectoryObjectId.
+                        A group not written back yet is reported and left out of
+                        the JSON; run again after the next provisioning cycle.
+                        Needs Graph (PowerShell 7) and the ActiveDirectory module
+                        on the same domain-joined machine.
+
     Either way a new member only gets access at their next sign-in: a token
     holds the groups it was issued with.
+
+    Cloud Sync, for -AdWriteback: the groups must be in the configuration's scope
+    (selected groups, or all groups with a filter such as displayName REGEX MATCH
+    ^SG-U-PRINTM-), "Provision membership to on-premises users" must be on - it is
+    off by default, and without it the AD copies stay empty - and a custom
+    sAMAccountName mapping (for example [displayName]) gives the AD copy a readable
+    name instead of a random one. The JSON then reads DOMAIN\SG-U-PRINTM-...; with a
+    random sAMAccountName it holds DOMAIN\<that name>, which works just as well.
 
 .PARAMETER MatrixPath
     The matrix file (tab, semicolon or comma separated).
 
 .PARAMETER Directory
     AD or Entra (default). See "AD or Entra ID?" above.
+
+.PARAMETER AdWriteback
+    -Directory Entra: the groups reach AD through Entra Cloud Sync; write their AD
+    copies (DOMAIN\name) into printers.json instead of the cloud SID, and check
+    that their members arrived there. See "Cloud Sync" above.
 
 .PARAMETER OU
     -Directory AD: the distinguished name of the OU new groups are created in,
@@ -119,6 +144,13 @@
 
     Entra-joined devices: cloud groups, and their SIDs into printers.json.
 
+.EXAMPLE
+    .\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -TenantId contoso.com -AdWriteback -ConfigPath .\printers.json -Apply
+
+    Hybrid, managed in Entra ID: cloud groups, and - once Cloud Sync has written
+    them back - their AD copies into printers.json. Run it again after the next
+    provisioning cycle for the groups that were not in AD yet.
+
 .NOTES
     Author          : Sjoerd Kanon
     -Directory AD   : ActiveDirectory module, rights to create groups in -OU
@@ -130,6 +162,7 @@ param(
     [Parameter(Mandatory)] [string] $MatrixPath,
     [ValidateSet('Entra', 'AD')]
     [string] $Directory = 'Entra',
+    [switch] $AdWriteback,
     [string] $OU,
     [string] $Prefix = 'SG-U-PRINTM-',
     [string] $ConfigPath,
@@ -303,6 +336,27 @@ function Remove-DirectoryGroupMember {
     else { Remove-MgGroupMemberDirectoryObjectByRef -GroupId $Group.Id -DirectoryObjectId $Member.Id -ErrorAction Stop }
 }
 
+function Find-WritebackGroup {
+    <#
+        The AD copy Cloud Sync made of a cloud group. Its CN carries a suffix and
+        its sAMAccountName may be random, but displayName is mapped straight
+        across, and msDS-ExternalDirectoryObjectId holds the cloud object id. A
+        group with that displayName whose id points at another object is someone
+        else's and is never taken.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] $Group)
+    $q    = $Name -replace "'", "''"
+    $hits = @(Get-ADGroup -Filter "displayName -eq '$q'" -Properties displayName, member, 'msDS-ExternalDirectoryObjectId' -Server $script:dc)
+    $mine = @($hits | Where-Object {
+        $external = [string] (Get-PropertyValue $_ 'msDS-ExternalDirectoryObjectId')
+        -not $external -or $external -like "*$($Group.Id)"
+    })
+    $exact = @($mine | Where-Object { [string] (Get-PropertyValue $_ 'msDS-ExternalDirectoryObjectId') })
+    if ($exact.Count -ge 1) { return $exact[0] }
+    if ($mine.Count -eq 1) { return $mine[0] }
+    return $null
+}
+
 function Get-GroupPrincipal {
     <# How Install-Printer names the group: DOMAIN\name in AD, the SID for Entra ID. #>
     param([Parameter(Mandatory)] [string] $Name, $Group)
@@ -325,6 +379,10 @@ Write-Host "  Mode: $(if ($Apply) { 'APPLY - groups and members are changed' } e
 Write-Host "  Matrix: $($matrix.Printers.Count) printer(s), $($matrix.Users.Count) user(s)" -ForegroundColor Cyan
 
 # -- Connect --------------------------------------------------------------------
+if ($AdWriteback -and $Directory -eq 'AD') {
+    Write-Bad '-AdWriteback is for cloud groups written back by Cloud Sync (-Directory Entra); -Directory AD creates the groups in AD itself'
+    exit 1
+}
 $graph = $null
 if ($Directory -eq 'AD') {
     try {
@@ -338,6 +396,7 @@ if ($Directory -eq 'AD') {
     }
     $where = "domain $($adDomain.DNSRoot) ($($script:netbios)) via $($script:dc)"
 } else {
+    $where = $null
     if ($PSVersionTable.PSVersion.Major -lt 7) {
         Write-Bad '-Directory Entra needs PowerShell 7 (pwsh). For AD groups use -Directory AD, which runs in Windows PowerShell too.'
         exit 1
@@ -362,6 +421,17 @@ if ($Directory -eq 'AD') {
         Write-Bad "Could not connect to Microsoft Graph: $($_.Exception.Message)"
         exit 1
     }
+    if ($AdWriteback) {
+        try {
+            Import-Module ActiveDirectory -ErrorAction Stop
+            $adDomain       = Get-ADDomain -ErrorAction Stop
+            $script:netbios = $adDomain.NetBIOSName
+            $script:dc      = $adDomain.PDCEmulator
+        } catch {
+            Write-Bad "-AdWriteback reads the written-back groups from AD, which is not reachable: $($_.Exception.Message). Run this on a domain-joined machine with RSAT (ActiveDirectory module)."
+            exit 1
+        }
+    }
 }
 
 $exitCode = 0
@@ -374,6 +444,7 @@ try {
         $org    = @(Get-MgOrganization -Property Id, DisplayName, VerifiedDomains -ErrorAction Stop) | Select-Object -First 1
         $domain = @($org.VerifiedDomains | Where-Object IsDefault | ForEach-Object Name) | Select-Object -First 1
         $where  = "tenant $($org.DisplayName) ($domain, $($org.Id)) - signed in as $($graph.Account)"
+        if ($AdWriteback) { $where += "; written-back copies read from AD domain $($script:netbios) via $($script:dc)" }
     }
     Write-Host "  Target: $where" -ForegroundColor Cyan
     if ($Directory -eq 'AD') { Write-Host "  OU for new groups: $(if ($OU) { $OU } else { '(not given - needed as soon as a group has to be created)' })" -ForegroundColor Cyan }
@@ -404,7 +475,9 @@ try {
     # account, and that token holds AD groups only - a cloud group in a printer
     # ACL then shuts them out. Worth saying before twenty groups are created.
     $synced = @($resolved.Values | Where-Object { $_.Synced })
-    if ($synced.Count -gt 0) {
+    if ($synced.Count -gt 0 -and $AdWriteback) {
+        Write-Skip "$($synced.Count) of $($resolved.Count) user(s) are synced from AD - their sign-in carries the AD copies Cloud Sync writes back, which is what goes into printers.json"
+    } elseif ($synced.Count -gt 0) {
         Write-Host ''
         Write-Warn ("{0} of {1} user(s) are synced from Active Directory (hybrid). A cloud group does not reach their Windows token on a domain-joined or hybrid-joined machine, so as a printer permission it would lock them out - use -Directory AD for those machines" -f $synced.Count, $resolved.Count)
         if ($ConfigPath) { Write-Warn '-ConfigPath is given: the queues would only accept these cloud groups. Only continue if the target machine is Entra-joined and users sign in with Entra ID' }
@@ -454,9 +527,27 @@ try {
         if ($wanted.Count -eq 0) { Write-Warn 'nobody ticked (or resolved) for this printer - the group stays empty' }
 
         $principal = Get-GroupPrincipal -Name $groupName -Group $group
+        if ($AdWriteback) {
+            # What an AD sign-in carries is the copy Cloud Sync wrote back, so
+            # that copy is the principal - or nothing yet.
+            $principal = $null
+            $copy = if ($group) { Find-WritebackGroup -Name $groupName -Group $group }
+            if (-not $copy) {
+                Write-Plan 'not in AD yet - Cloud Sync writes it back at its next cycle, if it is in the configuration''s scope; run again then to put it in printers.json'
+            } else {
+                $principal  = "$($script:netbios)\$($copy.SamAccountName)"
+                $adMembers  = @(Get-PropertyValue $copy 'member').Count
+                Write-Ok "in AD as $principal ($adMembers member(s))"
+                if ($wanted.Count -gt 0 -and $adMembers -eq 0) {
+                    Write-Warn 'the AD copy has no members - turn on "Provision membership to on-premises users" in the Cloud Sync configuration, or wait for its next cycle'
+                } elseif ($adMembers -lt $wanted.Count) {
+                    Write-Warn "the AD copy has $adMembers of $($wanted.Count) members - the next provisioning cycle brings the rest"
+                }
+            }
+        }
         if ($principal) {
             $principals[$printer.Name] = [PSCustomObject]@{ Principal = $principal; Exists = [bool] $group }
-            if ($Directory -eq 'Entra') { Write-Skip "SID $principal" }
+            if ($Directory -eq 'Entra' -and -not $AdWriteback) { Write-Skip "SID $principal" }
         }
     }
 
@@ -471,7 +562,11 @@ try {
         $changed = 0
         foreach ($printer in $matrix.Printers) {
             if (-not $byName.ContainsKey($printer.Name)) { Write-Warn "'$($printer.Name)' is not in the JSON"; continue }
-            if (-not $principals.Contains($printer.Name)) { Write-Plan "'$($printer.Name)': permissions once its group exists (-Apply)"; continue }
+            if (-not $principals.Contains($printer.Name)) {
+                $when = if ($AdWriteback) { 'once Cloud Sync has written its group back to AD - run again then' } else { 'once its group exists (-Apply)' }
+                Write-Plan "'$($printer.Name)': permissions $when"
+                continue
+            }
 
             # Install-Printer fails closed on a group it cannot resolve - the queue
             # is then not created at all - so a group that does not exist yet is

@@ -1015,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (7)
+| Modification |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) `-AdWriteback` : pour un environnement hybride où les groupes sont gérés dans Entra ID. Les groupes cloud arrivent dans AD via Entra Cloud Sync, et c'est la copie AD - pas le SID cloud - que porte une connexion AD, donc cette copie va dans `printers.json`. Cloud Sync lui donne un CN avec suffixe et, sans mappage, un `sAMAccountName` aléatoire ; elle est donc trouvée par `displayName` et `msDS-ExternalDirectoryObjectId` (un groupe de même nom appartenant à un autre objet n'est jamais pris), écrite comme `DOMAINE\<sAMAccountName>`, et vérifiée sur ses membres : Cloud Sync n'écrit les membres locaux qu'avec `Provision membership to on-premises users` activé, désactivé par défaut. Un groupe pas encore réécrit est signalé et laissé hors du JSON jusqu'à une exécution ultérieure. Le readme liste les réglages Cloud Sync nécessaires. Le menu le demande |
+| Vérifié : contrôle de syntaxe ; une copie seule sous PowerShell 7 avec Graph et AD simulés sur la vraie matrice et le vrai export - une copie trouvée avec un nom lisible, une avec un nom aléatoire et sans membres (avertissement), un imposteur de même nom ignoré, 17 groupes non réécrits signalés et laissés hors du JSON, le JSON écrit pour les deux et validé par Install-Printer ; `-AdWriteback` avec `-Directory AD` refusé ; mode AD simple relancé. **Non** vérifié sur un vrai tenant, un vrai domaine ou une vraie configuration Cloud Sync |
+
 ### 2026-10-27 (6)
 | Modification |
 |--------|

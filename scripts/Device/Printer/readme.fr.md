@@ -298,6 +298,7 @@ Transforme une matrice imprimantes x utilisateurs - copiée depuis Excel - en un
 |---|---|---|---|
 | `-Directory AD` | un compte AD : serveur ou hôte de session joint au domaine ou hybride, serveur d'impression classique | créés dans `-OU` - choisissez-en une qu'Entra Connect synchronise, ils apparaissent aussi dans Entra ID | `DOMAINE\SG-U-PRINTM-...` |
 | `-Directory Entra` | un compte Entra ID sur un appareil joint à Entra | groupes cloud | leur SID `S-1-12-1-...`, calculé à partir de l'ID d'objet |
+| `-Directory Entra -AdWriteback` | un compte AD (hybride), mais les groupes sont gérés dans Entra ID | groupes cloud qu'Entra Cloud Sync provisionne dans AD (« Microsoft Entra ID to AD sync ») | la copie AD, `DOMAINE\<son sAMAccountName>` |
 
 Dans un environnement hybride, c'est `-Directory AD` : un groupe cloud n'atteint jamais le jeton d'une connexion AD, et la file refuserait tout le monde. `-Directory Entra` avertit quand les utilisateurs de la matrice sont synchronisés depuis AD. Dans les deux cas, un nouveau membre obtient l'accès à sa prochaine connexion.
 
@@ -310,6 +311,7 @@ La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utili
 | `-MatrixPath` | Le fichier de matrice |
 | `-Directory` | `AD` ou `Entra` (par défaut) |
 | `-OU` | AD : nom distinctif de l'OU des nouveaux groupes. Obligatoire dès qu'un groupe doit être créé |
+| `-AdWriteback` | Entra : les groupes arrivent dans AD via Cloud Sync ; met leurs copies AD dans `printers.json` et vérifie que les membres sont arrivés. Nécessite Graph (PowerShell 7) et le module ActiveDirectory sur la même machine jointe au domaine |
 | `-Prefix` | Préfixe des noms de groupe (par défaut : `SG-U-PRINTM-`). AD limite un nom de groupe à 64 caractères ; un nom plus long arrête l'exécution avant toute modification |
 | `-ConfigPath` | `printers.json` dans lequel écrire les autorisations. Les entrées `manage`/`manageDocuments` sont conservées, `Everyone` et les autres entrées `print` remplacées ; un `.bak` est écrit d'abord. Un groupe n'est écrit qu'une fois qu'il existe - Install-Printer refuse de créer une file dont le groupe ne se résout pas |
 | `-RemoveExtraMembers` | Retirer aussi les membres que la matrice ne coche pas (par défaut : signalés, laissés en place) |
@@ -330,6 +332,7 @@ La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utili
 ```
 
 **Remarques**
+- **Cloud Sync pour `-AdWriteback`** : mettez les groupes dans l'étendue de la configuration (groupes sélectionnés, ou tous les groupes avec un filtre tel que `displayName` REGEX MATCH `^SG-U-PRINTM-`) ; activez **Provision membership to on-premises users** - désactivé par défaut, et sans lui les copies AD restent vides ; et ajoutez un mappage `sAMAccountName` (p. ex. `[displayName]`), sinon la copie AD reçoit un nom aléatoire - cela fonctionne, mais se lit mal dans une ACL. La copie AD est trouvée par `displayName` et son `msDS-ExternalDirectoryObjectId` ; un groupe pas encore réécrit est signalé et laissé hors du JSON - relancez après le prochain cycle de provisionnement
 - **Où** : l'exécution nomme d'abord la cible - le domaine AD et le contrôleur de domaine utilisé (l'émulateur PDC, pour qu'un groupe tout juste créé soit là quand les membres sont ajoutés), ou le tenant Entra - et `-Apply` demande confirmation avant toute création (`-Confirm:$false` saute cette question). Sans `-TenantId`, Entra utilise le client GDAP, sinon le tenant auquel vous vous connectez, ou celui d'une session Graph déjà ouverte dans cette fenêtre
 - `-Directory AD` nécessite le module ActiveDirectory (RSAT) sur une machine jointe au domaine et fonctionne sous Windows PowerShell 5.1 ; `-Directory Entra` nécessite PowerShell 7 et Microsoft Graph (`Group.ReadWrite.All`, `User.Read.All`)
 - Copié seul (à côté d'un export, sans le reste du dépôt), `-Directory Entra` se connecte directement avec `Connect-MgGraph` au lieu de passer par `Connect-M365.ps1`

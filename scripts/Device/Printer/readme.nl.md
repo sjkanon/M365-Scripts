@@ -298,6 +298,7 @@ Zet een printer x gebruiker-matrix - zoals gekopieerd uit Excel - om in één be
 |---|---|---|---|
 | `-Directory AD` | een AD-account: domain-joined of hybrid-joined server of sessiehost, klassieke printserver | aangemaakt in `-OU` - kies er een die Entra Connect synchroniseert, dan staan ze ook in Entra ID | `DOMEIN\SG-U-PRINTM-...` |
 | `-Directory Entra` | een Entra ID-account op een Entra-joined apparaat | cloudgroepen | hun SID `S-1-12-1-...`, berekend uit de object-id |
+| `-Directory Entra -AdWriteback` | een AD-account (hybride), maar de groepen worden in Entra ID beheerd | cloudgroepen die Entra Cloud Sync naar AD schrijft ("Microsoft Entra ID to AD sync") | de AD-kopie, `DOMEIN\<zijn sAMAccountName>` |
 
 In een hybride omgeving is dat `-Directory AD`: een cloudgroep komt nooit in het token van een AD-aanmelding, en de wachtrij zou iedereen weigeren. `-Directory Entra` waarschuwt als de gebruikers uit de matrix vanuit AD gesynchroniseerd worden. In beide gevallen krijgt een nieuw lid toegang bij de volgende aanmelding.
 
@@ -310,6 +311,7 @@ De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam, U
 | `-MatrixPath` | Het matrixbestand |
 | `-Directory` | `AD` of `Entra` (standaard) |
 | `-OU` | AD: distinguished name van de OU voor nieuwe groepen. Verplicht zodra er een groep aangemaakt moet worden |
+| `-AdWriteback` | Entra: de groepen komen via Cloud Sync in AD; zet hun AD-kopieën in `printers.json` en controleer of de leden aangekomen zijn. Heeft Graph (PowerShell 7) en de ActiveDirectory-module op dezelfde domain-joined machine nodig |
 | `-Prefix` | Voorvoegsel van de groepsnaam (standaard: `SG-U-PRINTM-`). AD beperkt een groepsnaam tot 64 tekens; langere stoppen de run voor er iets verandert |
 | `-ConfigPath` | `printers.json` om de rechten in te schrijven. `manage`/`manageDocuments`-vermeldingen blijven, `Everyone` en andere `print`-vermeldingen worden vervangen; eerst wordt een `.bak` geschreven. Een groep wordt pas geschreven als hij bestaat - Install-Printer weigert een wachtrij aan te maken waarvan de groep niet gevonden wordt |
 | `-RemoveExtraMembers` | Ook groepsleden verwijderen die de matrix niet aanvinkt (standaard: gemeld, met rust gelaten) |
@@ -330,6 +332,7 @@ De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam, U
 ```
 
 **Opmerkingen**
+- **Cloud Sync voor `-AdWriteback`**: zet de groepen in de scope van de configuratie (geselecteerde groepen, of alle groepen met een filter zoals `displayName` REGEX MATCH `^SG-U-PRINTM-`); zet **Provision membership to on-premises users** aan - dat staat standaard uit, en zonder blijven de AD-kopieën leeg; en voeg een `sAMAccountName`-mapping toe (bv. `[displayName]`), anders krijgt de AD-kopie een willekeurige naam - dat werkt, maar leest slecht in een ACL. De AD-kopie wordt gevonden op `displayName` en zijn `msDS-ExternalDirectoryObjectId`; een groep die nog niet teruggeschreven is wordt gemeld en blijft uit de JSON - draai opnieuw na de volgende provisioning-cyclus
 - **Waar**: de run noemt eerst het doel - het AD-domein en de domeincontroller die hij gebruikt (de PDC-emulator, zodat een groep die net is aangemaakt er is wanneer leden worden toegevoegd), of de Entra-tenant - en `-Apply` vraagt bevestiging voor er iets wordt aangemaakt (`-Confirm:$false` slaat dat over). Zonder `-TenantId` gebruikt Entra de GDAP-klant, anders de tenant waarin je aanmeldt, of die waarin een bestaande Graph-sessie in dat venster al zit
 - `-Directory AD` heeft de ActiveDirectory-module (RSAT) nodig op een domain-joined machine en draait in Windows PowerShell 5.1; `-Directory Entra` heeft PowerShell 7 en Microsoft Graph nodig (`Group.ReadWrite.All`, `User.Read.All`)
 - Los gekopieerd (naast een export, zonder de rest van de repository) meldt `-Directory Entra` rechtstreeks aan met `Connect-MgGraph` in plaats van via `Connect-M365.ps1`

@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (7)
+| Change |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) `-AdWriteback`: for a hybrid environment where the groups are managed in Entra ID. The cloud groups reach AD through Entra Cloud Sync, and the AD copy - not the cloud SID - is what an AD sign-in carries, so that copy goes into `printers.json`. Cloud Sync gives it a CN with a suffix and, unless mapped, a random `sAMAccountName`, so it is found by `displayName` and `msDS-ExternalDirectoryObjectId` (a same-named group belonging to another object is never taken), written as `DOMAIN\<sAMAccountName>`, and checked for members: Cloud Sync only writes on-premises members with `Provision membership to on-premises users` on, which is off by default. A group not written back yet is reported and left out of the JSON until a later run. The readme lists the Cloud Sync settings this needs. Menu asks for it |
+| Verified: syntax check; a standalone copy on PowerShell 7 with Graph and AD mocked against the real matrix and export - one copy found with a readable name, one with a random name and no members (warned), a same-named imposter ignored, 17 groups not written back reported and left out, the JSON written for the two and passing Install-Printer's validation; `-AdWriteback` with `-Directory AD` refused; plain AD mode re-run. **Not** verified against a real tenant, domain or Cloud Sync configuration |
+
 ### 2026-10-27 (6)
 | Change |
 |--------|

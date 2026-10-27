@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (7)
+| Wijziging |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) `-AdWriteback`: voor een hybride omgeving waarin de groepen in Entra ID beheerd worden. De cloudgroepen komen via Entra Cloud Sync in AD, en de AD-kopie - niet de cloud-SID - is wat een AD-aanmelding bevat, dus die kopie gaat in `printers.json`. Cloud Sync geeft haar een CN met achtervoegsel en, zonder mapping, een willekeurige `sAMAccountName`, dus ze wordt gevonden op `displayName` en `msDS-ExternalDirectoryObjectId` (een groep met dezelfde naam van een ander object wordt nooit genomen), geschreven als `DOMEIN\<sAMAccountName>`, en gecontroleerd op leden: Cloud Sync schrijft on-premises leden alleen met `Provision membership to on-premises users` aan, en dat staat standaard uit. Een groep die nog niet teruggeschreven is wordt gemeld en blijft uit de JSON tot een volgende run. De readme somt de Cloud Sync-instellingen op die dit nodig heeft. Het menu vraagt ernaar |
+| Geverifieerd: syntaxcontrole; een losse kopie op PowerShell 7 met Graph en AD nagebootst tegen de echte matrix en export - één kopie gevonden met een leesbare naam, één met een willekeurige naam en zonder leden (gewaarschuwd), een bedrieger met dezelfde naam genegeerd, 17 niet-teruggeschreven groepen gemeld en uit de JSON gelaten, de JSON geschreven voor de twee en door de validatie van Install-Printer; `-AdWriteback` met `-Directory AD` geweigerd; gewone AD-modus opnieuw gedraaid. **Niet** geverifieerd tegen een echte tenant, een echt domein of een echte Cloud Sync-configuratie |
+
 ### 2026-10-27 (6)
 | Wijziging |
 |--------|
