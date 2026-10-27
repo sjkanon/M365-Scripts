@@ -318,5 +318,7 @@ The matrix: first column the printer names, header row the users (display name o
 **Notes**
 - **An Entra ID group only works in a printer ACL when the user's Windows token carries it**: an Entra ID account signing in to an Entra-joined device (Entra-joined AVD session hosts included), from the next sign-in after being added. A user signing in with an Active Directory account (domain-joined or hybrid server, a classic print server) has AD groups in the token, never cloud groups - the queue then refuses everyone but the administrators. Use AD groups (`DOMAIN\Group`) there
 - The SID is computed from the group's object id (`S-1-12-1-` + the GUID as four 32-bit numbers), the form Windows uses for Entra ID groups
+- **Tenant**: without `-TenantId` the run uses the GDAP customer, else the tenant you sign in to - or the one an existing Graph session in that window is already in. It names the tenant first, and `-Apply` asks before creating anything there (`-Confirm:$false` skips that question). Pass `-TenantId <domain>` to be sure
+- **Hybrid**: users synced from Active Directory sign in to domain-joined or hybrid-joined machines with their AD account, and that token never holds a cloud group. The run warns when the resolved users are synced; for those machines create the groups in AD (synced to Entra ID) and use `DOMAIN\Group` as the principal
 - Keep the matrix out of this repository: it names real people. `C:\Temp` is a fine place for it
 - Required scopes: `Group.ReadWrite.All`, `User.Read.All`

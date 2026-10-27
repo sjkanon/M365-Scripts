@@ -169,6 +169,8 @@ $PrinterSubmenu = @(
     }}
     @{ Key='3'; Label='New-PrinterGroup    — one Entra ID group per printer (SG-U-PRINTM-<printer>) from a printer x user matrix'; Action={
         $a = @{ MatrixPath = (Read-Host "  Matrix file (tab/; separated, printers x users)") }
+        $tenant = Read-Host "  Tenant (domain or id; empty = the current/GDAP tenant, shown before anything changes)"
+        if ($tenant) { $a['TenantId'] = $tenant }
         $cfg = Read-Host "  printers.json to write the group permissions into (empty = none)"
         if ($cfg) { $a['ConfigPath'] = $cfg }
         $apply = Read-Host "  Create the groups now (not just preview)? [y/N]"

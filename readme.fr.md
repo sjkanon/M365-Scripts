@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (4)
+| Modification |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) nomme le tenant avant de faire quoi que ce soit, et `-Apply` demande confirmation avant d'y créer des groupes. Sans `-TenantId`, il prenait sans rien dire la session Graph déjà ouverte dans la fenêtre - souvent le propre tenant du partenaire - si bien que vingt groupes pouvaient atterrir dans le mauvais annuaire. Il avertit aussi quand les utilisateurs de la matrice sont synchronisés depuis Active Directory : leur connexion sur une machine jointe au domaine ou hybride ne porte que des groupes AD, donc un groupe cloud comme autorisation d'imprimante les bloquerait. Le menu demande le tenant |
+| Vérifié : contrôle de syntaxe ; avec Graph simulé, la ligne du tenant, la question répondue « n » qui arrête l'exécution avant tout groupe, et l'avertissement hybride avec et sans `-ConfigPath`. **Non** vérifié sur un vrai tenant |
 ### 2026-10-27 (3)
 | Modification |
 |--------|

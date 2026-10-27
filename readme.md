@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (4)
+| Change |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) names the tenant before it does anything, and `-Apply` asks before creating groups there. Without `-TenantId` it took whatever Graph session the window already had - often the partner's own tenant - without a word, so twenty groups could land in the wrong directory. It also warns when the matrix users are synced from Active Directory: their sign-in on a domain-joined or hybrid-joined machine carries AD groups only, so a cloud group as a printer permission would lock them out. The menu asks for the tenant |
+| Verified: syntax check; with Graph mocked, the tenant line, the question answered "n" stopping the run before any group, and the hybrid warning with and without `-ConfigPath`. **Not** verified against a real tenant |
 ### 2026-10-27 (3)
 | Change |
 |--------|

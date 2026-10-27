@@ -61,7 +61,10 @@
 
 .PARAMETER TenantId
     Entra ID tenant ID or domain. Defaults to the GDAP customer tenant ($global:cid /
-    $env:M365_CUSTOMER_TENANTID), else the tenant you sign in to.
+    $env:M365_CUSTOMER_TENANTID), else the tenant you sign in to - or the one an
+    existing Graph session in this window is already in. The run names the tenant
+    first, and -Apply asks before creating anything there (-Confirm:$false skips
+    that question).
 
 .PARAMETER ClientId
     App registration for app-only sign-in, with -CertificateThumbprint.
@@ -107,11 +110,22 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# -Confirm:$false skips the tenant question, for a run that already knows.
+$confirmSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not $PSBoundParameters['Confirm']
+
 function Write-Ok   { param([string] $Message) Write-Host "  [ OK ] $Message" -ForegroundColor Green }
 function Write-Skip { param([string] $Message) Write-Host "  [SKIP] $Message" -ForegroundColor DarkGray }
 function Write-Warn { param([string] $Message) Write-Host "  [WARN] $Message" -ForegroundColor Yellow }
 function Write-Bad  { param([string] $Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 function Write-Plan { param([string] $Message) Write-Host "  [PLAN] $Message" -ForegroundColor Magenta }
+
+function Get-PropertyValue {
+    <# Property access that returns $null instead of tripping Set-StrictMode. #>
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object.PSObject.Properties.Name -notcontains $Name) { return $null }
+    return $Object.$Name
+}
 
 function Read-PrinterMatrix {
     <#
@@ -164,11 +178,11 @@ function Resolve-MatrixUser {
     param([Parameter(Mandatory)] [string] $Name)
 
     if ($Name -match '@') {
-        try { return [PSCustomObject]@{ User = (Get-MgUser -UserId $Name -Property Id, DisplayName, UserPrincipalName -ErrorAction Stop); Reason = $null } }
+        try { return [PSCustomObject]@{ User = (Get-MgUser -UserId $Name -Property Id, DisplayName, UserPrincipalName, OnPremisesSyncEnabled -ErrorAction Stop); Reason = $null } }
         catch { return [PSCustomObject]@{ User = $null; Reason = "no user with UPN $Name" } }
     }
     foreach ($candidate in @($Name, ($Name -replace '\s*\([^)]*\)\s*$', '').Trim()) | Select-Object -Unique) {
-        $hits = @(Get-MgUser -Filter "displayName eq '$($candidate -replace "'", "''")'" -Property Id, DisplayName, UserPrincipalName -All -ErrorAction Stop)
+        $hits = @(Get-MgUser -Filter "displayName eq '$($candidate -replace "'", "''")'" -Property Id, DisplayName, UserPrincipalName, OnPremisesSyncEnabled -All -ErrorAction Stop)
         if ($hits.Count -eq 1) { return [PSCustomObject]@{ User = $hits[0]; Reason = $null } }
         if ($hits.Count -gt 1) {
             return [PSCustomObject]@{ User = $null; Reason = "$($hits.Count) users are called '$candidate' ($(($hits | ForEach-Object UserPrincipalName) -join ', ')) - put the UPN in the header instead" }
@@ -198,6 +212,20 @@ try {
 
 $exitCode = 0
 try {
+    # -- Tenant -----------------------------------------------------------------
+    # An existing Graph session is reused as it is, and without -TenantId that is
+    # whichever tenant this window last signed in to - often the partner's own.
+    # So the tenant is named before anything is read, and confirmed before
+    # anything is created.
+    $org    = @(Get-MgOrganization -Property Id, DisplayName, VerifiedDomains -ErrorAction Stop) | Select-Object -First 1
+    $domain = @($org.VerifiedDomains | Where-Object IsDefault | ForEach-Object Name) | Select-Object -First 1
+    Write-Host ("  Tenant: {0} ({1}, {2}) - signed in as {3}" -f $org.DisplayName, $domain, $org.Id, $graph.Account) -ForegroundColor Cyan
+    if ($Apply -and -not $confirmSuppressed -and [Environment]::UserInteractive) {
+        $answer = Read-Host "  Create the groups in $($org.DisplayName)? [y/N]"
+        if ($answer -notmatch '^[Yy]') { throw 'Cancelled - wrong tenant? Pass -TenantId <domain> to choose it.' }
+    }
+    Write-Host ''
+
     # -- Users ------------------------------------------------------------------
     Write-Host '  Users' -ForegroundColor Cyan
     $resolved = @{}
@@ -210,6 +238,16 @@ try {
             Write-Bad "${name}: $($r.Reason)"
             $exitCode = 1
         }
+    }
+
+    # Synced users sign in to domain-joined or hybrid machines with their AD
+    # account, and that token holds AD groups only - a cloud group in a printer
+    # ACL then shuts them out. Worth saying before twenty groups are created.
+    $synced = @($resolved.Values | Where-Object { (Get-PropertyValue $_ 'OnPremisesSyncEnabled') -eq $true })
+    if ($synced.Count -gt 0) {
+        Write-Host ''
+        Write-Warn ("{0} of {1} user(s) are synced from Active Directory (hybrid). A cloud group does not reach their Windows token on a domain-joined or hybrid-joined machine, so as a printer permission it would lock them out - create the groups in AD (synced to Entra ID) for that, and leave -ConfigPath off here" -f $synced.Count, $resolved.Count)
+        if ($ConfigPath) { Write-Warn '-ConfigPath is given: the queues would only accept these cloud groups. Only continue if the target machine is Entra-joined and users sign in with Entra ID' }
     }
 
     # -- Groups -----------------------------------------------------------------

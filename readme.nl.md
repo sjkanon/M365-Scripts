@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (4)
+| Wijziging |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) noemt de tenant voor het iets doet, en `-Apply` vraagt bevestiging voor het daar groepen aanmaakt. Zonder `-TenantId` nam het zonder iets te zeggen de Graph-sessie die het venster al had - vaak de eigen partnertenant - zodat twintig groepen in de verkeerde directory konden belanden. Het waarschuwt ook als de gebruikers uit de matrix vanuit Active Directory gesynchroniseerd worden: hun aanmelding op een domain-joined of hybrid-joined machine bevat alleen AD-groepen, dus een cloudgroep als printerrecht zou hen buitensluiten. Het menu vraagt de tenant |
+| Geverifieerd: syntaxcontrole; met Graph nagebootst, de tenantregel, de vraag beantwoord met "n" die de run stopt voor er een groep is, en de hybride-waarschuwing met en zonder `-ConfigPath`. **Niet** geverifieerd tegen een echte tenant |
 ### 2026-10-27 (3)
 | Wijziging |
 |--------|
