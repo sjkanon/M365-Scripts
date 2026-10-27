@@ -1015,6 +1015,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (8)
+| Change |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): replacing the WebRTC Redirector no longer aborts the whole run when the old version cannot be uninstalled. A host upgrading 1.33.2302.07001 to 1.56.2603.20001 got `1612` (installation source not available) from `msiexec /x` and the `throw` took the Teams update down with it. The uninstall now retries `1612` from Windows Installer's cached copy under `C:\Windows\Installer`, as the meeting add-in already did (shared in `Invoke-MsiUninstall`, also used by `-RemoveWebRtcRedirector`); if that fails too the old redirector stays in place, the new one is skipped, the run carries on, and verification reports it with exit code 1 |
+| Corrected the comment claiming the redirector MSI keeps its ProductCode: 1.56.2603.20001 has a new ProductCode and an Upgrade table covering 0.1 up to itself (read from the downloaded MSI), but its `RemoveExistingProducts` needs the old cached MSI as well, so removing first stays the check |
+| Verified: syntax check; ProductCode, UpgradeCode and Upgrade table of the current MSI read on this machine. **Not** verified on the affected session host: whether the cached copy of 1.33 is still there and the retry succeeds |
+
 ### 2026-10-27 (7)
 | Change |
 |--------|

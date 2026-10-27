@@ -1015,6 +1015,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (8)
+| Wijziging |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): het vervangen van de WebRTC Redirector breekt niet langer de hele run af als de oude versie niet weg kan. Een host die 1.33.2302.07001 naar 1.56.2603.20001 bracht kreeg `1612` (installatiebron niet beschikbaar) van `msiexec /x`, en de `throw` nam de Teams-update mee. De verwijdering probeert `1612` nu opnieuw vanuit de gecachte kopie van Windows Installer onder `C:\Windows\Installer`, zoals de vergaderinvoegtoepassing al deed (gedeeld in `Invoke-MsiUninstall`, ook gebruikt door `-RemoveWebRtcRedirector`); lukt dat ook niet, dan blijft de oude redirector staan, wordt de nieuwe overgeslagen, loopt de run door en meldt de verificatie het met exitcode 1 |
+| Commentaar rechtgezet dat zei dat de redirector-MSI zijn ProductCode houdt: 1.56.2603.20001 heeft een nieuwe ProductCode en een Upgrade-tabel van 0.1 tot zichzelf (gelezen uit de gedownloade MSI), maar zijn `RemoveExistingProducts` heeft de oude gecachte MSI net zo goed nodig, dus eerst verwijderen blijft de controle |
+| Geverifieerd: syntaxcontrole; ProductCode, UpgradeCode en Upgrade-tabel van de huidige MSI gelezen op deze machine. **Niet** geverifieerd op de getroffen sessiehost: of de gecachte kopie van 1.33 er nog is en de nieuwe poging slaagt |
+
 ### 2026-10-27 (7)
 | Wijziging |
 |--------|

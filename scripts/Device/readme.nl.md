@@ -346,7 +346,7 @@ Elke stap die iets wijzigt, loopt via `ShouldProcess`, dus `-WhatIf` doorloopt d
 |---|------|-------------------|
 | 1 | Preflight — inventaris: AppX per gebruiker + geprovisiond, classic Teams (machinebreed + per profiel), invoegtoepassing, Outlook-registratie, de AVD-media-optimalisatie en wat Teams daarover logde, draaiende Teams/Outlook | alleen-lezen |
 | 2 | Versiecontrole — gepubliceerde build vs geïnstalleerde build | alleen-lezen |
-| 3 | Alleen AVD (`-AvdOptimizations`): vlag `IsWVDEnvironment` + WebRTC-redirector. Of (`-RemoveWebRtcRedirector`): die redirector verwijderen | ja |
+| 3 | Alleen AVD (`-AvdOptimizations`): vlag `IsWVDEnvironment` + WebRTC-redirector (een oudere versie die niet weg kan - `1612`, opnieuw geprobeerd vanuit de gecachte kopie - blijft staan zonder de Teams-update te stoppen). Of (`-RemoveWebRtcRedirector`): die redirector verwijderen | ja |
 | 4 | Alleen classic Teams (`-RemoveClassicTeams`): machinebrede installer + installaties per profiel verwijderen | ja |
 | 5 | Werkmap aanmaken, de bootstrapper en de MSIX van de gepubliceerde build downloaden (de `buildLink` van de configservice), beide Microsoft-handtekeningen controleren. Lukt het pakket niet, dan kiest de bootstrapper zelf | ja |
 | 6 | `MSTeams`-AppX voor alle gebruikers verwijderen en deprovisionen; een pakket dat de AppX-stack weigert te verwijderen, wordt gemeld, niet fataal. De invoegtoepassing blijft hier ongemoeid | ja |

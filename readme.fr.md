@@ -1015,6 +1015,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (8)
+| Modification |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1) : le remplacement du WebRTC Redirector n'interrompt plus toute l'exécution quand l'ancienne version ne peut pas être désinstallée. Un hôte passant de 1.33.2302.07001 à 1.56.2603.20001 a reçu `1612` (source d'installation indisponible) de `msiexec /x`, et le `throw` emportait la mise à jour de Teams. La désinstallation retente désormais `1612` depuis la copie en cache de Windows Installer sous `C:\Windows\Installer`, comme le faisait déjà le complément de réunion (partagé dans `Invoke-MsiUninstall`, utilisé aussi par `-RemoveWebRtcRedirector`) ; si cela échoue aussi, l'ancien redirecteur reste en place, le nouveau est ignoré, l'exécution continue et la vérification le signale avec le code de sortie 1 |
+| Commentaire corrigé qui affirmait que le MSI du redirecteur garde son ProductCode : 1.56.2603.20001 a un nouveau ProductCode et une table Upgrade couvrant 0.1 jusqu'à lui-même (lue dans le MSI téléchargé), mais son `RemoveExistingProducts` a tout autant besoin de l'ancien MSI en cache, donc retirer d'abord reste le contrôle |
+| Vérifié : contrôle de syntaxe ; ProductCode, UpgradeCode et table Upgrade du MSI actuel lus sur cette machine. **Non** vérifié sur l'hôte de session concerné : si la copie en cache de 1.33 existe encore et si la nouvelle tentative réussit |
+
 ### 2026-10-27 (7)
 | Modification |
 |--------|

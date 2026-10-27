@@ -346,7 +346,7 @@ Chaque étape qui modifie l'état passe par `ShouldProcess`, donc `-WhatIf` parc
 |---|------|-------------------|
 | 1 | Contrôle préalable — inventaire : AppX par utilisateur + provisionné, Teams classique (à l'échelle de la machine + par profil), complément, enregistrement Outlook, l'optimisation multimédia AVD et ce que Teams en a journalisé, Teams/Outlook en cours d'exécution | lecture seule |
 | 2 | Vérification de version — build publié contre build installé | lecture seule |
-| 3 | AVD uniquement (`-AvdOptimizations`) : indicateur `IsWVDEnvironment` + redirecteur WebRTC. Ou (`-RemoveWebRtcRedirector`) : désinstallation de ce redirecteur | oui |
+| 3 | AVD uniquement (`-AvdOptimizations`) : indicateur `IsWVDEnvironment` + redirecteur WebRTC (une version plus ancienne impossible à retirer - `1612`, retenté depuis la copie en cache - reste en place sans arrêter la mise à jour de Teams). Ou (`-RemoveWebRtcRedirector`) : désinstallation de ce redirecteur | oui |
 | 4 | Teams classique uniquement (`-RemoveClassicTeams`) : désinstallation du programme d'installation à l'échelle de la machine + des installations par profil | oui |
 | 5 | Création du dossier de travail, téléchargement du bootstrapper et du MSIX du build publié (le `buildLink` du service de configuration), vérification des deux signatures Microsoft. Si le paquet échoue, le bootstrapper choisit lui-même | oui |
 | 6 | Suppression de l'AppX `MSTeams` pour tous les utilisateurs et déprovisionnement ; un paquet que la pile AppX refuse de supprimer est signalé, sans être bloquant. Le complément n'est pas touché ici | oui |

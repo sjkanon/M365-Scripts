@@ -563,6 +563,7 @@ $transcribing     = $false
 $plannedExit      = $null
 $workingDirReady  = $false
 $addInOrphaned    = $false
+$webRtcStuck      = $false
 $appxOrphaned     = $false
 $appxStoreCleared = $false
 $offlineMsix      = $null
@@ -1856,6 +1857,33 @@ function Get-MsiCachedPackage {
     }
 }
 
+function Invoke-MsiUninstall {
+    <#
+        msiexec /x for one uninstall entry, with the one retry that is known to help:
+        a 1612 ("the installation source is not available") is tried again against
+        Windows Installer's own cached copy under C:\Windows\Installer. Returns the
+        Invoke-Installer result of whichever attempt ran last, plus CacheMissing when
+        1612 came back and there was no cached copy left to try.
+    #>
+    param([Parameter(Mandatory)] $Entry, [Parameter(Mandatory)] [string] $DisplayNameLike)
+
+    $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($Entry.ProductCode) /qn /norestart"
+    $result | Add-Member -NotePropertyName CacheMissing -NotePropertyValue $false -Force
+    if ($result.ExitCode -ne 1612) { return $result }
+
+    $cached = @(Get-MsiCachedPackage -DisplayNameLike $DisplayNameLike |
+                Where-Object { $_.Cached -and $_.Version -eq $Entry.Version }) | Select-Object -First 1
+    if (-not $cached) {
+        $result.CacheMissing = $true
+        return $result
+    }
+
+    Write-Warn "Windows Installer lost the source for $($Entry.DisplayName) $($Entry.Version) (1612) - retrying with its cached copy $($cached.LocalPackage)"
+    $retry = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x `"$($cached.LocalPackage)`" /qn /norestart"
+    $retry | Add-Member -NotePropertyName CacheMissing -NotePropertyValue $false -Force
+    return $retry
+}
+
 function Get-MsiProductVersion {
     <#
         ProductVersion straight from the MSI property table. Microsoft's own sample
@@ -2369,7 +2397,7 @@ try {
             Write-Skip 'WebRTC Redirector is not installed - nothing to remove'
         } elseif ($PSCmdlet.ShouldProcess("Remote Desktop WebRTC Redirector Service $($webRtcEntry.Version)",
                                           'msiexec /x /qn (remove the old optimization)')) {
-            $removal = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($webRtcEntry.ProductCode) /qn /norestart"
+            $removal = Invoke-MsiUninstall -Entry $webRtcEntry -DisplayNameLike '*Remote Desktop WebRTC Redirector Service*'
             if ($removal.ExitCode -eq 1605) {
                 # Same as the classic Teams case: msiexec never heard of the product,
                 # so what is left is an orphaned uninstall entry, not an install.
@@ -2412,12 +2440,17 @@ try {
                 Write-Ok "Downloaded $($file.Name) ($([math]::Round($file.Length / 1MB, 1)) MB), signature verified"
             }
 
-            # The redirector MSI keeps its ProductCode across versions, so msiexec /i
-            # over an existing install returns 1638 ("another version of this product
-            # is already installed") instead of upgrading. Same version: repair in
-            # place. Different version: take the old one off first.
+            # Older redirector MSIs kept their ProductCode across versions, so msiexec /i
+            # over an existing install returned 1638 ("another version of this product
+            # is already installed") instead of upgrading. 1.56.2603.20001 is a real
+            # major upgrade (new ProductCode, Upgrade table covering 0.1 up to itself),
+            # but its RemoveExistingProducts needs the old product's cached MSI just as
+            # much as /x does - so taking the old one off first stays the way to find
+            # out, before anything is installed, whether it can come off at all.
+            # Same version: repair in place.
             $msiVersion = if (Test-Path $webRtcMsi) { Get-MsiProductVersion -Path $webRtcMsi } else { $null }
             $msiArgs    = '/i "{0}" /qn /norestart' -f $webRtcMsi
+            $webRtcStuck = $false
 
             if ($webRtcEntry -and -not $msiVersion) {
                 Write-Skip 'On a real run the downloaded version decides whether the installed redirector is removed first'
@@ -2428,16 +2461,28 @@ try {
                 } else {
                     Write-Ok "Replacing WebRTC Redirector $($webRtcEntry.Version) with $msiVersion"
                     if ($PSCmdlet.ShouldProcess("Remote Desktop WebRTC Redirector Service $($webRtcEntry.Version)", 'msiexec /x /qn (uninstall the old version)')) {
-                        $removal = Invoke-Installer -FilePath 'msiexec.exe' -Arguments "/x $($webRtcEntry.ProductCode) /qn /norestart"
-                        if (-not $removal.Success) {
-                            throw "Could not remove WebRTC Redirector $($webRtcEntry.Version) ($($removal.Message))"
+                        $removal = Invoke-MsiUninstall -Entry $webRtcEntry -DisplayNameLike '*Remote Desktop WebRTC Redirector Service*'
+                        if ($removal.Success) {
+                            if ($removal.RebootRequired) { $rebootRequired = $true }
+                        } else {
+                            # The old redirector still works, so this is no reason to
+                            # skip the Teams update as well: leave it in place, skip the
+                            # install (it would only fail the same way, as 1714) and let
+                            # the verification report it.
+                            $webRtcStuck = $true
+                            if ($removal.CacheMissing) {
+                                Write-Warn "Could not remove WebRTC Redirector $($webRtcEntry.Version): Windows Installer lost its source (1612) and its cached copy under C:\Windows\Installer is gone too - $($webRtcEntry.Version) stays in place. Uninstall it by hand with the original $($webRtcEntry.Version) MSI (msiexec /x <that msi>) and run again"
+                            } else {
+                                Write-Warn "Could not remove WebRTC Redirector $($webRtcEntry.Version) ($($removal.Message)) - it stays in place and $msiVersion is not installed"
+                            }
                         }
-                        if ($removal.RebootRequired) { $rebootRequired = $true }
                     }
                 }
             }
 
-            if ($PSCmdlet.ShouldProcess('Remote Desktop WebRTC Redirector Service', "msiexec.exe $msiArgs")) {
+            if ($webRtcStuck) {
+                Write-Skip "WebRTC Redirector $msiVersion not installed - the old version could not be removed"
+            } elseif ($PSCmdlet.ShouldProcess('Remote Desktop WebRTC Redirector Service', "msiexec.exe $msiArgs")) {
                 $result = Invoke-Installer -FilePath 'msiexec.exe' -Arguments $msiArgs
                 if ($result.ExitCode -eq 1638) {
                     Write-Warn 'msiexec reports another version of the redirector is already installed (1638) - leaving the existing one in place'
@@ -3060,8 +3105,9 @@ try {
             else { Write-Bad 'AVD media flag IsWVDEnvironment is not set'; $exitCode = 1 }
 
             $webRtcNow = @(Get-WebRtcRedirectorEntry) | Select-Object -First 1
-            if ($webRtcNow) { Write-Ok "WebRTC Redirector installed ($($webRtcNow.Version))" }
-            else { Write-Bad 'WebRTC Redirector installation failed'; $exitCode = 1 }
+            if (-not $webRtcNow) { Write-Bad 'WebRTC Redirector installation failed'; $exitCode = 1 }
+            elseif ($webRtcStuck) { Write-Bad "WebRTC Redirector is still $($webRtcNow.Version) - the upgrade to $msiVersion could not go in"; $exitCode = 1 }
+            else { Write-Ok "WebRTC Redirector installed ($($webRtcNow.Version))" }
         }
 
         if ($RemoveWebRtcRedirector) {

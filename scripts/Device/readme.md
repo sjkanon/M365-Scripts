@@ -346,7 +346,7 @@ Every state-changing step goes through `ShouldProcess`, so `-WhatIf` walks the f
 |---|------|-------------------|
 | 1 | Preflight — inventory: AppX per user + provisioned, classic Teams (machine-wide + per profile), add-in, Outlook registration, the AVD media optimization and what Teams logged about it, running Teams/Outlook | read-only |
 | 2 | Version check — published build vs installed build | read-only |
-| 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector. Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
+| 3 | AVD only (`-AvdOptimizations`): `IsWVDEnvironment` flag + WebRTC redirector (an older version that cannot be removed - `1612`, retried from the cached copy - stays in place without stopping the Teams update). Or (`-RemoveWebRtcRedirector`): uninstall that redirector | yes |
 | 4 | Classic Teams only (`-RemoveClassicTeams`): uninstall machine-wide installer + per-profile installs | yes |
 | 5 | Create working folder, download the bootstrapper and the published build's MSIX (the config service's `buildLink`), verify both Microsoft signatures. A package that fails falls back to the bootstrapper's own choice | yes |
 | 6 | Remove `MSTeams` AppX for all users and deprovision it; a package the AppX stack refuses to remove is reported, not fatal. The add-in is left alone here | yes |
