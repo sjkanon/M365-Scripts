@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-192 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+193 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -48,6 +48,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Disable-CredentialManagerVault.ps1`](TenantOnboarding/DeviceConfig/Disable-CredentialManagerVault.ps1) | [`TenantOnboarding/DeviceConfig/`](TenantOnboarding/DeviceConfig/readme.md) | Disable Windows Credential Manager's local storage of passwords and credentials. |
 | [`Disable-internalmic.ps1`](Device/audio/Disable-internalmic.ps1) | [`Device/audio/`](Device/audio/readme.md) | Disable Internal Microphone Script |
 | [`Export-ConditionalAccessPolicies.ps1`](PatronToolkit/Entra/Export-ConditionalAccessPolicies.ps1) | [`PatronToolkit/Entra/`](PatronToolkit/Entra/readme.md) | Back up all Conditional Access policies and named locations to JSON/CSV. |
+| [`Export-Printer.ps1`](Device/Printer/Export-Printer.ps1) | [`Device/Printer/`](Device/Printer/readme.md) | Export the printers of this machine - their settings as a JSON file and their drivers - to one zip in C:\Temp, ready for Install-Printer.ps1 on another one. |
 | [`Find-SiteContent.ps1`](SharePoint/Find-SiteContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search an entire SharePoint site for content - by name, path, type, size, date or full text - and report exactly which permissions apply to every hit. |
 | [`functies.ps1`](Startup/functies.ps1) | [`Startup/`](Startup/readme.md) | Generic MSP M365 management functions, dot-sourced by the launcher menu. |
 | [`genereer_rapport.ps1`](Reporting/Licensing/genereer_rapport.ps1) | [`Reporting/Licensing/`](Reporting/Licensing/readme.md) | Generate-LicensingReport.ps1 |

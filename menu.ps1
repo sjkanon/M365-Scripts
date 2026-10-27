@@ -144,6 +144,31 @@ function Invoke-Submenu {
     }
 }
 
+# ── Printer submenu ───────────────────────────────────────────────────────────
+
+$PrinterSubmenu = @(
+    @{ Key='1'; Label='Install-Printer     — install printer drivers (from GitHub) and printers from a JSON file'; Action={
+        $cfg = Read-Host "  JSON file or https URL"
+        $a = @{ ConfigPath = $cfg }
+        $sel = Read-Host "  Only these printers, comma separated (empty = all)"
+        if ($sel) { $a['Printer'] = @($sel -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        $apply = Read-Host "  Install now (not just check)? [y/N]"
+        if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
+        else { $a['Confirm'] = $false }   # already answered here, don't ask twice
+        & "$ROOT\scripts\Device\Printer\Install-Printer.ps1" @a
+    }}
+    @{ Key='2'; Label='Export-Printer      — printers, settings (JSON) and drivers of this machine to a zip in C:\Temp'; Action={
+        $a = @{}
+        $sel = Read-Host "  Only these printers, comma separated (empty = all)"
+        if ($sel) { $a['Printer'] = @($sel -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        $out = Read-Host "  Output folder [C:\Temp]"
+        if ($out) { $a['OutputPath'] = $out }
+        $drv = Read-Host "  Include the drivers? [Y/n]"
+        if ($drv -match '^[Nn]') { $a['NoDriver'] = $true }
+        & "$ROOT\scripts\Device\Printer\Export-Printer.ps1" @a
+    }}
+)
+
 # ── M365 submenus ─────────────────────────────────────────────────────────────
 
 $ExchangeSubmenu = @(
@@ -784,19 +809,9 @@ $menu = @(
             return $a
         }
     }
-    [PSCustomObject]@{ Key='N'; FKey=$null; Category='Device'
-        Label='Install-Printer     — install printer drivers (from GitHub) and printers from a JSON file'
-        Script="$ROOT\scripts\Device\Printer\Install-Printer.ps1"
-        Params={
-            $cfg = Read-Host "  JSON file or https URL"
-            $a = @{ ConfigPath = $cfg }
-            $sel = Read-Host "  Only these printers, comma separated (empty = all)"
-            if ($sel) { $a['Printer'] = @($sel -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
-            $apply = Read-Host "  Install now (not just check)? [y/N]"
-            if ($apply -notmatch '^[Yy]') { $a['CheckOnly'] = $true }
-            else { $a['Confirm'] = $false }   # already answered here, don't ask twice
-            return $a
-        }
+    [PSCustomObject]@{ Key='N'; FKey=$null; Category='Device'; NoWait=$true
+        Label='Printers            — install printers from a JSON file, or export them to a zip'
+        Action={ Invoke-Submenu -Title 'Device — Printers' -Items $PrinterSubmenu }
     }
     [PSCustomObject]@{ Key='9'; FKey=[ConsoleKey]::F9; Category='Startup'
         Label='Install-Modules     — bootstrap: install all required PS modules'

@@ -46,7 +46,7 @@ Chaque charge de travail a son propre dossier sous [`scripts/`](scripts/readme.f
 | [`Intune/`](scripts/Intune/readme.fr.md) | Inscription Autopilot, mise à jour de la stratégie de conformité iOS, déploiement du fond d'écran/écran de verrouillage de l'entreprise |
 | [`SharePoint/`](scripts/SharePoint/readme.fr.md) | Opérations sur le contenu SharePoint Online / OneDrive — restauration de la corbeille par site ou à l'échelle du tenant (PnP PowerShell, inscription d'application automatique), et où est passé un fichier : renommé, déplacé ou supprimé (journal d'audit) |
 | [`Reporting/`](scripts/Reporting/readme.fr.md) | Rapport de dernière connexion des ordinateurs, rapport de stockage SharePoint, rapport mensuel des licences |
-| [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD, pilotes d'imprimante + imprimantes depuis un fichier JSON |
+| [`Device/`](scripts/Device/readme.fr.md) | Maintenance des postes Windows — activation, nettoyage, fichiers temporaires, synchronisation de l'heure, audio, diagnostic OpenVPN, disque temporaire + fichier d'échange Azure/AVD, pilotes d'imprimante + imprimantes depuis un fichier JSON, et leur export dans un zip |
 | [`Linux/`](scripts/Linux/readme.fr.md) | Serveurs Linux (Debian/Ubuntu, 3CX Phone System) — nettoyage du disque en bash : paquets, journal, journaux, fichiers temporaires, caches utilisateur, Docker, journaux et sauvegardes 3CX |
 | [`Network/`](scripts/Network/readme.fr.md) | Vérification de ports TCP, diagnostic d'authentification/réseau, test de charge des E/S fichiers |
 | [`RDS/`](scripts/RDS/readme.fr.md) | Diagnostic des connexions RDP / RD Web Access, surveillance des sessions en direct, diagnostic et réduction des disques de profil FSLogix, préparation de l'image des hôtes de session (Teams, Outlook, Copilot) |
@@ -194,7 +194,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos avec les comptes IT, réparer, signaler à n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos par utilisateur, et ce qu'a fait le watchdog |
-| `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — installer des pilotes d'imprimante (depuis GitHub) et des imprimantes à partir d'un fichier JSON |
+| `N` | Device | Imprimantes — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (pilotes depuis GitHub + imprimantes depuis un fichier JSON) ou [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (imprimantes, paramètres et pilotes de cette machine dans un zip) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules chargés par des scripts mais absents de `RequiredModules.psd1` |
@@ -631,6 +631,7 @@ Deux scripts qui maintiennent en place le disque temporaire éphémère (`D:`) d
 
 | Script | Doel |
 |---|---|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | Exporter les imprimantes d'une machine - paramètres en fichier JSON, pilotes, tickets d'impression complets - dans un zip dans `C:\Temp`, prêt pour `Install-Printer.ps1` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
 
 - Un seul JSON indique quels pilotes existent, d'où chacun est téléchargé — un asset de release GitHub, un dossier d'un dépôt GitHub, une URL https quelconque ou un partage — et quelles imprimantes TCP/IP les utilisent. `-Printer` en retient une partie
@@ -838,6 +839,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   │   └── <a href="scripts/Device/DriveMapping/New-CloudDriveMapping.ps1">New-CloudDriveMapping.ps1</a>   ← mapper des bibliothèques SharePoint/OneDrive sur des lettres de lecteur (WebDAV)
     │   ├── <a href="scripts/Device/Printer/readme.fr.md">Printer/</a>
     │   │   ├── <a href="scripts/Device/Printer/readme.fr.md">readme.md</a>
+    │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← imprimantes, paramètres (JSON) et pilotes de cette machine dans un zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← pilotes d'imprimante (depuis GitHub) + imprimantes depuis un fichier JSON
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← chaque champ et chaque source de pilote
     │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">TempDisk/</a>
@@ -1011,6 +1013,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27
+| Modification |
+|--------|
+| **Nouveau [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1)**, l'inverse de `Install-Printer.ps1` : lit les imprimantes d'une machine et écrit un zip dans `C:\Temp` avec `printers.json` (les imprimantes et leurs paramètres au format d'Install-Printer - pilote, adresse, port, LPR/SNMP, emplacement, commentaire, partage, recto verso, couleur, format de papier, bac par défaut, autorisations - chaque pilote comme source `"type": "path"` pointant dans le zip), les packages de pilotes copiés depuis le magasin de pilotes, le ticket d'impression par défaut complet de chaque imprimante, et un `inventory.json` avec les imprimantes que le JSON ne peut pas décrire (WSD, USB, PDF, fax, connexions à un serveur d'impression) et pourquoi. Les pilotes intégrés ne sont pas copiés ; les autorisations seulement si elles diffèrent du défaut Windows, un principal Entra ID par son SID. `-PrintBrm` ajoute le `.printerExport` propre à Windows. Documenté dans le [readme Printer](scripts/Device/Printer/readme.fr.md#export-printerps1) |
+| [`menu.ps1`](menu.ps1) : la touche `N` est désormais un sous-menu imprimantes - `1` Install-Printer, `2` Export-Printer - car toutes les lettres du menu principal étaient prises |
+| Vérifié : contrôle de syntaxe ; sous Windows PowerShell 5.1 et PowerShell 7 une exécution sur ce portable (aucune imprimante TCP/IP : les cinq vont dans `inventory.json` avec la raison) et une exécution avec le port de l'imprimante AnyDesk simulé en port TCP/IP - vrai package de pilote copié depuis le magasin de pilotes, vrais bac, paramètres d'impression et ACL ; le `printers.json` obtenu passe le `Test-Configuration` d'Install-Printer sans problème, et ses `Find-DriverInf` et `Test-DriverCatalog` trouvent l'INF dans le dossier exporté et acceptent la signature du catalogue. **Non** vérifié : un export de vraies imprimantes TCP/IP, `-PrintBrm`, et une exécution d'Install-Printer depuis un zip exporté sur une seconde machine |
 ### 2026-10-21
 | Modification |
 |--------------|

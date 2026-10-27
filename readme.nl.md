@@ -46,7 +46,7 @@ Elke workload heeft een eigen map onder [`scripts/`](scripts/readme.nl.md), en e
 | [`Intune/`](scripts/Intune/readme.nl.md) | Autopilot-inschrijving, updater voor het iOS-compliancebeleid, uitrol van bedrijfsachtergrond/-vergrendelscherm |
 | [`SharePoint/`](scripts/SharePoint/readme.nl.md) | Contentbewerkingen in SharePoint Online / OneDrive — prullenbak terugzetten per site of tenantbreed (PnP PowerShell, automatische app-registratie), en waar een bestand gebleven is: hernoemd, verplaatst of verwijderd (auditlog) |
 | [`Reporting/`](scripts/Reporting/readme.nl.md) | Rapport laatste aanmelding van computers, SharePoint-opslagrapport, maandelijks licentierapport |
-| [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD, printerdrivers + printers vanuit een JSON-bestand |
+| [`Device/`](scripts/Device/readme.nl.md) | Onderhoud van Windows-endpoints — activatie, opschonen, tijdelijke bestanden, tijdsynchronisatie, audio, OpenVPN-diagnose, tijdelijke schijf + pagefile op Azure/AVD, printerdrivers + printers vanuit een JSON-bestand, en hun export naar een zip |
 | [`Linux/`](scripts/Linux/readme.nl.md) | Linux-servers (Debian/Ubuntu, 3CX Phone System) — schijfopschoning in bash: pakketten, journal, logs, temp, gebruikerscaches, Docker, 3CX-logs en -back-ups |
 | [`Network/`](scripts/Network/readme.nl.md) | Controle van TCP-poorten, diagnose van authenticatie/netwerk, stresstest van bestands-I/O |
 | [`RDS/`](scripts/RDS/readme.nl.md) | Diagnose van aanmeldingen op RDP / RD Web Access, live monitoring van sessies, diagnose en verkleining van FSLogix-profielschijven, sessiehost-image klaarmaken (Teams, Outlook, Copilot) |
@@ -194,7 +194,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot, Knipprogramma en Foto's testen met de IT-accounts, herstellen, melden aan n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook, Copilot, Knipprogramma en Foto's gebeurde, en wat de watchdog deed |
-| `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — printerdrivers (van GitHub) en printers installeren vanuit een JSON-bestand |
+| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers van GitHub + printers vanuit een JSON-bestand) of [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (printers, instellingen en drivers van deze machine naar een zip) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules die scripts laden maar die niet in `RequiredModules.psd1` staan |
@@ -631,6 +631,7 @@ Twee scripts die de vluchtige tijdelijke schijf (`D:`) van een Azure-VM of AVD-s
 
 | Script | Doel |
 |---|---|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | De printers van een machine exporteren - instellingen als JSON-bestand, drivers, volledige printtickets - naar één zip in `C:\Temp`, klaar voor `Install-Printer.ps1` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Printerdrivers (gedownload van GitHub) en printers installeren zoals beschreven in een JSON-bestand |
 
 - Eén JSON zegt welke drivers er zijn, waar elk vandaan komt — een GitHub-release-asset, een map in een GitHub-repository, een willekeurige https-URL of een share — en welke TCP/IP-printers ze gebruiken. `-Printer` kiest een deel ervan
@@ -838,6 +839,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   │   └── <a href="scripts/Device/DriveMapping/New-CloudDriveMapping.ps1">New-CloudDriveMapping.ps1</a>   ← SharePoint-/OneDrive-bibliotheken aan stationsletters koppelen (WebDAV)
     │   ├── <a href="scripts/Device/Printer/readme.nl.md">Printer/</a>
     │   │   ├── <a href="scripts/Device/Printer/readme.nl.md">readme.md</a>
+    │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← printers, instellingen (JSON) en drivers van deze machine naar een zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printerdrivers (van GitHub) + printers vanuit een JSON-bestand
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← elk veld en elke driverbron
     │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">TempDisk/</a>
@@ -1011,6 +1013,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27
+| Wijziging |
+|--------|
+| **Nieuw [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1)**, het omgekeerde van `Install-Printer.ps1`: leest de printers van een machine en schrijft één zip naar `C:\Temp` met `printers.json` (de printers en hun instellingen in het eigen formaat van Install-Printer - driver, adres, poort, LPR/SNMP, locatie, opmerking, delen, dubbelzijdig, kleur, papierformaat, standaardlade, rechten - elke driver als `"type": "path"`-bron die naar de zip wijst), de driverpakketten gekopieerd uit de driver store, het volledige standaard printticket per printer, en een `inventory.json` met de printers die de JSON niet kan beschrijven (WSD, USB, PDF, fax, printserververbindingen) en waarom. Inbox-drivers worden niet gekopieerd; rechten alleen als ze afwijken van de Windows-standaard, een Entra ID-principal als SID. `-PrintBrm` voegt de eigen `.printerExport` van Windows toe. Gedocumenteerd in de [Printer-readme](scripts/Device/Printer/readme.nl.md#export-printerps1) |
+| [`menu.ps1`](menu.ps1): toets `N` is nu een printer-submenu - `1` Install-Printer, `2` Export-Printer - omdat elke letter in het hoofdmenu bezet was |
+| Geverifieerd: syntaxcontrole; op Windows PowerShell 5.1 en PowerShell 7 een run op deze laptop (geen TCP/IP-printers: alle vijf komen in `inventory.json` met de reden) en een run met de poort van de AnyDesk-printer nagebootst als TCP/IP-poort - echt driverpakket gekopieerd uit de driver store, echte lade, afdrukstandaarden en ACL; de resulterende `printers.json` komt zonder problemen door Install-Printers eigen `Test-Configuration`, en `Find-DriverInf` en `Test-DriverCatalog` vinden de INF in de geëxporteerde map en accepteren de catalogushandtekening. **Niet** geverifieerd: een export van echte TCP/IP-printers, `-PrintBrm`, en een Install-Printer-run vanuit een geëxporteerde zip op een tweede machine |
 ### 2026-10-21
 | Wijziging |
 |-----------|

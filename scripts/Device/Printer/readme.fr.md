@@ -6,6 +6,8 @@
 
 Installe des pilotes d'imprimante et des imprimantes TCP/IP à partir d'un seul fichier JSON. Les pilotes sont téléchargés depuis un dépôt GitHub (asset de release ou dossier), une URL https quelconque ou un partage.
 
+[`Export-Printer.ps1`](#export-printerps1) fait l'inverse : il lit les imprimantes d'une machine existante et écrit ce même JSON, avec les pilotes à côté, dans un seul zip.
+
 Conçu pour s'exécuter sans surveillance après qu'une image de référence (golden image) a provisionné un nouveau serveur ou hôte de session. Au premier démarrage, il attend le spouleur d'impression et le réseau au lieu d'échouer, et comme chaque exécution est idempotente, la même commande peut aussi s'exécuter à chaque démarrage.
 
 ---
@@ -14,6 +16,7 @@ Conçu pour s'exécuter sans surveillance après qu'une image de référence (go
 
 | Script | Description |
 |--------|-------------|
+| [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | Exporter les imprimantes d'une machine - paramètres en fichier JSON, pilotes, tickets d'impression complets - dans un zip dans `C:\Temp`, prêt pour `Install-Printer.ps1` sur une autre |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
 
 ## Fichiers
@@ -234,3 +237,49 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - Lancé en 32 bits (Intune Management Extension, certains agents RMM), le script se relance en 64 bits, car `pnputil` n'existe pas sous SysWOW64. Lancé à la main sans élévation, il la demande
 - Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
 - `-CheckOnly` sert de contrôle de santé pour une condition RMM ou une tâche de détection planifiée : le code de sortie `2` signifie que l'appareil ne correspond pas au JSON
+
+---
+
+### Export-Printer.ps1
+
+L'inverse de `Install-Printer.ps1` : lit les imprimantes de cette machine et écrit un zip, par défaut `C:\Temp\PrinterExport_<ordinateur>_<yyyyMMdd-HHmmss>.zip`. Rien n'est modifié sur la machine.
+
+| Dans le zip | Contenu |
+|-------------|---------|
+| `printers.json` | Les imprimantes et leurs paramètres au format d'Install-Printer : pilote, adresse, nom/numéro de port, file LPR, SNMP, emplacement, commentaire, partage, recto verso, couleur, format de papier, bac par défaut (`inputBin`) et autorisations. Chaque pilote pointe vers son propre dossier dans le zip (`"type": "path"`) |
+| `drivers\<nom du pilote>\` | Le package de pilote complet tel que le magasin de pilotes le conserve : INF, catalogue signé et binaires - ce à partir de quoi `pnputil` installe. Les pilotes fournis avec Windows (`ntprint.inf`, `prnms*.inf`) ne sont pas copiés |
+| `settings\<imprimante>.xml` | Le ticket d'impression par défaut complet de chaque imprimante, y compris chaque paramètre du fabricant que les champs JSON ne couvrent pas |
+| `inventory.json` | Tout ce qui a été lu, aussi pour les imprimantes que le JSON ne peut pas décrire (WSD, USB, PDF, OneNote, fax, connexions à un serveur d'impression), avec la raison de leur absence de `printers.json` et le `PermissionSDDL` brut |
+| `<ordinateur>.printerExport` | Uniquement avec `-PrintBrm` : la sauvegarde Printer Migration propre à Windows |
+
+Sur la machine cible : décompresser le zip et lancer `.\Install-Printer.ps1 -ConfigPath <dossier>\printers.json -CheckOnly`, puis sans `-CheckOnly`. Les chemins relatifs des pilotes sont résolus par rapport au dossier du JSON.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-Printer` | Uniquement ces imprimantes (noms, caractères génériques autorisés). Par défaut : toutes |
+| `-OutputPath` | Dossier du zip (par défaut : `C:\Temp`), créé s'il manque |
+| `-NoDriver` | Paramètres seulement, sans fichiers de pilote - `printers.json` ne liste alors aucun pilote, la cible doit donc déjà les avoir |
+| `-PrintBrm` | Faire aussi une sauvegarde `PrintBrm.exe -b` et la mettre dans le zip. Nécessite les droits administrateur |
+
+**Exemples**
+
+```powershell
+# Toutes les imprimantes, leurs paramètres et pilotes vers C:\Temp
+.\Export-Printer.ps1
+
+# Uniquement les imprimantes Office, paramètres seulement
+.\Export-Printer.ps1 -Printer 'Office*' -NoDriver
+
+# Aussi une sauvegarde PrintBrm, le zip sur un partage
+.\Export-Printer.ps1 -PrintBrm -OutputPath \\fs01\it$\exports
+```
+
+**Remarques**
+- Seules les imprimantes TCP/IP (Standard TCP/IP Port) vont dans `printers.json`, car c'est ce qu'Install-Printer crée. Une imprimante qu'il refuserait - un nom avec `\ , !`, une adresse qui n'est ni une adresse IP ni un nom d'hôte - est signalée et reste uniquement dans `inventory.json`
+- Les champs ne sont écrits que lorsqu'ils diffèrent des valeurs par défaut d'Install-Printer (port `IP_<adresse>`, port 9100, SNMP désactivé), si bien que le fichier se lit comme écrit à la main
+- Les autorisations ne sont exportées que si elles diffèrent du défaut Windows (Everyone peut imprimer). Administrators, SYSTEM, CREATOR OWNER et les identités d'application sont omis, car Install-Printer les garde toujours. Les groupes connus sont écrits sous leur nom anglais, un utilisateur ou groupe Entra ID par son SID (un `AzureAD\nom` ne se résout nulle part ailleurs), un compte local de cette machine avec un avertissement
+- Les paramètres d'impression sont lus dans un job avec un délai de 60 secondes, car certains pilotes universels se bloquent dans `Get-PrintConfiguration` ; un échec y est un avertissement et l'imprimante est exportée sans eux
+- Les droits administrateur ne sont pas nécessaires, sauf pour `-PrintBrm`. Lancé en 32 bits, le script se relance en 64 bits, car le magasin de pilotes n'est pas visible depuis SysWOW64
+- Variables de script NinjaOne : `printer`, `outputPath`, et les cases à cocher `noDriver`, `printBrm`

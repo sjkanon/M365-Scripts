@@ -46,7 +46,7 @@ Every workload has its own folder under [`scripts/`](scripts/readme.md), and eve
 | [`Intune/`](scripts/Intune/readme.md) | Autopilot enrollment, iOS compliance policy updater, corporate wallpaper/lockscreen deployment |
 | [`SharePoint/`](scripts/SharePoint/readme.md) | SharePoint Online / OneDrive content operations — recycle bin restore per site or tenant-wide (PnP PowerShell, auto app registration), and where a file went: renamed, moved or deleted (audit log) |
 | [`Reporting/`](scripts/Reporting/readme.md) | Computer last-logon report, SharePoint storage report, monthly licensing report |
-| [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile, printer drivers + printers from a JSON file |
+| [`Device/`](scripts/Device/readme.md) | Windows endpoint maintenance — activation, cleanup, temp files, time sync, audio, OpenVPN diagnostics, Azure/AVD temp disk + pagefile, printer drivers + printers from a JSON file, and their export to a zip |
 | [`Linux/`](scripts/Linux/readme.md) | Linux servers (Debian/Ubuntu, 3CX Phone System) — bash disk cleanup: packages, journal, logs, temp, user caches, Docker, 3CX logs and backups |
 | [`Network/`](scripts/Network/readme.md) | TCP port checks, auth/network diagnostics, file I/O stress testing |
 | [`RDS/`](scripts/RDS/readme.md) | RDP / RD Web Access login diagnostics, live session monitoring, FSLogix profile diagnostics and disk shrinking, session host image preparation (Teams, Outlook, Copilot) |
@@ -194,7 +194,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
-| `N` | Device | [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) — install printer drivers (from GitHub) and printers from a JSON file |
+| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules scripts load that `RequiredModules.psd1` does not list |
@@ -631,6 +631,7 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 
 | Script | Doel |
 |---|---|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | Export the printers of a machine - settings as a JSON file, drivers, full print tickets - to one zip in `C:\Temp`, ready for `Install-Printer.ps1` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
 
 - One JSON says which drivers exist, where each is downloaded from — a GitHub release asset, a folder in a GitHub repository, any https URL or a share — and which TCP/IP printers use them. `-Printer` picks a subset
@@ -838,6 +839,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   │   └── <a href="scripts/Device/DriveMapping/New-CloudDriveMapping.ps1">New-CloudDriveMapping.ps1</a>   ← map SharePoint/OneDrive libraries to drive letters (WebDAV)
     │   ├── <a href="scripts/Device/Printer/readme.md">Printer/</a>
     │   │   ├── <a href="scripts/Device/Printer/readme.md">readme.md</a>
+    │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← this machine's printers, settings (JSON) and drivers to a zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printer drivers (from GitHub) + printers from a JSON file
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← every field and every driver source
     │   ├── <a href="scripts/Device/TempDisk/readme.md">TempDisk/</a>
@@ -1011,6 +1013,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27
+| Change |
+|--------|
+| **New [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1)**, the reverse of `Install-Printer.ps1`: reads the printers of a machine and writes one zip to `C:\Temp` with `printers.json` (the printers and their settings in Install-Printer's own format - driver, address, port, LPR/SNMP, location, comment, sharing, duplex, colour, paper size, default tray, permissions - each driver as a `"type": "path"` source pointing into the zip), the driver packages copied from the driver store, the full default print ticket per printer, and an `inventory.json` with the printers the JSON cannot describe (WSD, USB, PDF, fax, print server connections) and why. Inbox drivers are not copied; permissions only when they differ from the Windows default, an Entra ID principal as its SID. `-PrintBrm` adds Windows' own `.printerExport`. Documented in the [Printer readme](scripts/Device/Printer/readme.md#export-printerps1) |
+| [`menu.ps1`](menu.ps1): key `N` is now a printer submenu - `1` Install-Printer, `2` Export-Printer - as every main-menu letter was taken |
+| Verified: syntax check; on Windows PowerShell 5.1 and PowerShell 7 a run on this laptop (no TCP/IP printers: all five land in `inventory.json` with the reason) and a run with the AnyDesk printer's port mocked as a TCP/IP port - real driver package copied from the driver store, real tray, print defaults and ACL; the resulting `printers.json` passes Install-Printer's own `Test-Configuration` without problems, and its `Find-DriverInf` and `Test-DriverCatalog` find the INF in the exported folder and accept the catalog signature. **Not** verified: an export of real TCP/IP printers, `-PrintBrm`, and an Install-Printer run from an exported zip on a second machine |
 ### 2026-10-21
 | Change |
 |--------|

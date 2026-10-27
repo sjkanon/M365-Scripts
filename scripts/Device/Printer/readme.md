@@ -6,6 +6,8 @@
 
 Installs printer drivers and TCP/IP printers from one JSON file. The drivers are downloaded from a GitHub repository (release asset or folder), any https URL or a share.
 
+[`Export-Printer.ps1`](#export-printerps1) works the other way round: it reads the printers of an existing machine and writes that same JSON, with the drivers beside it, into one zip.
+
 Built to run unattended after a golden image has provisioned a new server or session host. On first boot it waits for the Print Spooler and the network instead of failing, and because every run is idempotent the same command can also run at every startup.
 
 ---
@@ -14,6 +16,7 @@ Built to run unattended after a golden image has provisioned a new server or ses
 
 | Script | Description |
 |--------|-------------|
+| [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | Export the printers of a machine - settings as a JSON file, drivers, full print tickets - to one zip in `C:\Temp`, ready for `Install-Printer.ps1` on another one |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
 
 ## Files
@@ -234,3 +237,49 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - Started 32-bit (Intune Management Extension, some RMM agents), the script relaunches itself 64-bit, because `pnputil` does not exist under SysWOW64. Started by hand without elevation, it asks for it
 - NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
 - `-CheckOnly` is the health check for an RMM condition or a scheduled detection job: exit `2` means the device does not match the JSON
+
+---
+
+### Export-Printer.ps1
+
+The reverse of `Install-Printer.ps1`: reads the printers of this machine and writes one zip, by default `C:\Temp\PrinterExport_<computer>_<yyyyMMdd-HHmmss>.zip`. Nothing on the machine is changed.
+
+| In the zip | Contents |
+|------------|----------|
+| `printers.json` | The printers and their settings in Install-Printer's format: driver, address, port name/number, LPR queue, SNMP, location, comment, sharing, duplex, colour, paper size, default tray (`inputBin`) and permissions. Each driver points at its own folder in the zip (`"type": "path"`) |
+| `drivers\<driver name>\` | The complete driver package as the driver store holds it: INF, signed catalog and binaries - what `pnputil` installs from. Drivers that ship with Windows (`ntprint.inf`, `prnms*.inf`) are not copied |
+| `settings\<printer>.xml` | The full default print ticket per printer, including every vendor setting the JSON fields do not cover |
+| `inventory.json` | Everything that was read, also for printers the JSON cannot describe (WSD, USB, PDF, OneNote, fax, print server connections), with the reason they are not in `printers.json` and the raw `PermissionSDDL` |
+| `<computer>.printerExport` | Only with `-PrintBrm`: Windows' own Printer Migration backup |
+
+On the target machine: unpack the zip and run `.\Install-Printer.ps1 -ConfigPath <folder>\printers.json -CheckOnly`, then without `-CheckOnly`. The relative driver paths resolve against the folder of the JSON.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-Printer` | Only these printers (names, wildcards allowed). Default: all |
+| `-OutputPath` | Folder for the zip (default: `C:\Temp`), created when missing |
+| `-NoDriver` | Settings only, no driver files - `printers.json` then lists no drivers, so the target needs them already |
+| `-PrintBrm` | Also make a `PrintBrm.exe -b` backup and put it in the zip. Needs administrator rights |
+
+**Examples**
+
+```powershell
+# Every printer, its settings and drivers to C:\Temp
+.\Export-Printer.ps1
+
+# Only the Office printers, settings only
+.\Export-Printer.ps1 -Printer 'Office*' -NoDriver
+
+# Also a PrintBrm backup, the zip on a share
+.\Export-Printer.ps1 -PrintBrm -OutputPath \\fs01\it$\exports
+```
+
+**Notes**
+- Only TCP/IP printers (Standard TCP/IP Port) go into `printers.json`, as that is what Install-Printer creates. A printer it would refuse - a name with `\ , !`, an address that is neither an IP address nor a host name - is reported and kept in `inventory.json` only
+- Fields are written only where they differ from Install-Printer's defaults (port `IP_<address>`, port 9100, SNMP off), so the file reads like one written by hand
+- Permissions are exported only when they differ from the Windows default (Everyone may print). Administrators, SYSTEM, CREATOR OWNER and app identities are left out, as Install-Printer always keeps them. Well-known groups are written by their English name, an Entra ID user or group by its SID (an `AzureAD\name` resolves nowhere else), a local account of this machine with a warning
+- Print defaults are read in a job with a 60-second timeout, as some universal drivers hang in `Get-PrintConfiguration`; a failure there is a warning, and that printer is exported without them
+- Admin rights are not needed, except for `-PrintBrm`. Started 32-bit, the script relaunches itself 64-bit, because the driver store is not visible from SysWOW64
+- NinjaOne script variables: `printer`, `outputPath`, and the checkboxes `noDriver`, `printBrm`
