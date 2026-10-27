@@ -342,10 +342,22 @@ if ($Directory -eq 'AD') {
         Write-Bad '-Directory Entra needs PowerShell 7 (pwsh). For AD groups use -Directory AD, which runs in Windows PowerShell too.'
         exit 1
     }
-    . (Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1')
+    # In the repository the shared sign-in helper is used. Copied on its own -
+    # next to a printer export on a USB stick - the script signs in directly.
+    $connectHelper = Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1'
     try {
-        $graph = Connect-M365Graph -Scopes 'Group.ReadWrite.All', 'User.Read.All' -TenantId $TenantId `
-            -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+        if (Test-Path -LiteralPath $connectHelper) {
+            . $connectHelper
+            $graph = Connect-M365Graph -Scopes 'Group.ReadWrite.All', 'User.Read.All' -TenantId $TenantId `
+                -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+        } else {
+            $p = @{ NoWelcome = $true; ContextScope = 'Process'; ErrorAction = 'Stop' }
+            if ($TenantId) { $p['TenantId'] = $TenantId }
+            if ($ClientId) { $p['ClientId'] = $ClientId; $p['CertificateThumbprint'] = $CertificateThumbprint }
+            else { $p['Scopes'] = 'Group.ReadWrite.All', 'User.Read.All' }
+            Connect-MgGraph @p | Out-Null
+            $graph = [PSCustomObject]@{ ConnectedHere = $true; Account = (Get-MgContext).Account; Standalone = $true }
+        }
     } catch {
         Write-Bad "Could not connect to Microsoft Graph: $($_.Exception.Message)"
         exit 1
@@ -493,7 +505,8 @@ try {
     Write-Bad "Aborted: $($_.Exception.Message)"
     $exitCode = 1
 } finally {
-    if ($graph) { Disconnect-M365Graph $graph }
+    if ($graph -and (Get-PropertyValue $graph 'Standalone')) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
+    elseif ($graph) { Disconnect-M365Graph $graph }
 }
 Write-Host ''
 exit $exitCode

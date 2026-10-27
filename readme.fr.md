@@ -1015,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (6)
+| Modification |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) fonctionne aussi copié seul, à côté d'un export d'imprimantes : `-Directory Entra` chargeait `Connect-M365.ps1` selon l'arborescence du dépôt et s'arrêtait en dehors. Sans ce fichier, il se connecte désormais directement avec `Connect-MgGraph` (`-TenantId`, ou en app-only avec `-ClientId`/`-CertificateThumbprint`) |
+| Vérifié : contrôle de syntaxe ; une copie seule dans un dossier vide avec Graph simulé sous PowerShell 7 - se connecte, nomme le tenant, se déconnecte. **Non** vérifié sur un vrai tenant |
+
 ### 2026-10-27 (5)
 | Modification |
 |--------|

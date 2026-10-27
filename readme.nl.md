@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (6)
+| Wijziging |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) werkt ook los gekopieerd, naast een printerexport: `-Directory Entra` dot-sourcete `Connect-M365.ps1` volgens de mappenstructuur van de repository en stopte daarbuiten. Zonder dat hulpbestand meldt het nu rechtstreeks aan met `Connect-MgGraph` (`-TenantId`, of app-only met `-ClientId`/`-CertificateThumbprint`) |
+| Geverifieerd: syntaxcontrole; een losse kopie in een lege map met Graph nagebootst op PowerShell 7 - meldt aan, noemt de tenant, meldt af. **Niet** geverifieerd tegen een echte tenant |
+
 ### 2026-10-27 (5)
 | Wijziging |
 |--------|

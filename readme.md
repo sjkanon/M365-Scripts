@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (6)
+| Change |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) works when copied on its own, next to a printer export: `-Directory Entra` dot-sourced `Connect-M365.ps1` from the repository's own folder layout and stopped outside it. Without that helper it now signs in with `Connect-MgGraph` directly (`-TenantId`, or app-only with `-ClientId`/`-CertificateThumbprint`) |
+| Verified: syntax check; a standalone copy in an empty folder with Graph mocked on PowerShell 7 - signs in, names the tenant, disconnects. **Not** verified against a real tenant |
+
 ### 2026-10-27 (5)
 | Change |
 |--------|

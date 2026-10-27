@@ -332,4 +332,5 @@ La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utili
 **Remarques**
 - **Où** : l'exécution nomme d'abord la cible - le domaine AD et le contrôleur de domaine utilisé (l'émulateur PDC, pour qu'un groupe tout juste créé soit là quand les membres sont ajoutés), ou le tenant Entra - et `-Apply` demande confirmation avant toute création (`-Confirm:$false` saute cette question). Sans `-TenantId`, Entra utilise le client GDAP, sinon le tenant auquel vous vous connectez, ou celui d'une session Graph déjà ouverte dans cette fenêtre
 - `-Directory AD` nécessite le module ActiveDirectory (RSAT) sur une machine jointe au domaine et fonctionne sous Windows PowerShell 5.1 ; `-Directory Entra` nécessite PowerShell 7 et Microsoft Graph (`Group.ReadWrite.All`, `User.Read.All`)
+- Copié seul (à côté d'un export, sans le reste du dépôt), `-Directory Entra` se connecte directement avec `Connect-MgGraph` au lieu de passer par `Connect-M365.ps1`
 - Gardez la matrice hors de ce dépôt : elle nomme de vraies personnes. Le dossier `local/`, ignoré par git, convient très bien

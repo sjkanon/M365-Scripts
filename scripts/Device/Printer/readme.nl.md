@@ -332,4 +332,5 @@ De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam, U
 **Opmerkingen**
 - **Waar**: de run noemt eerst het doel - het AD-domein en de domeincontroller die hij gebruikt (de PDC-emulator, zodat een groep die net is aangemaakt er is wanneer leden worden toegevoegd), of de Entra-tenant - en `-Apply` vraagt bevestiging voor er iets wordt aangemaakt (`-Confirm:$false` slaat dat over). Zonder `-TenantId` gebruikt Entra de GDAP-klant, anders de tenant waarin je aanmeldt, of die waarin een bestaande Graph-sessie in dat venster al zit
 - `-Directory AD` heeft de ActiveDirectory-module (RSAT) nodig op een domain-joined machine en draait in Windows PowerShell 5.1; `-Directory Entra` heeft PowerShell 7 en Microsoft Graph nodig (`Group.ReadWrite.All`, `User.Read.All`)
+- Los gekopieerd (naast een export, zonder de rest van de repository) meldt `-Directory Entra` rechtstreeks aan met `Connect-MgGraph` in plaats van via `Connect-M365.ps1`
 - Hou de matrix buiten deze repository: er staan echte mensen in. De door git genegeerde map `local/` is een prima plek
