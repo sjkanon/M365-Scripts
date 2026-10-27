@@ -18,6 +18,7 @@ Gemaakt om zonder toezicht te draaien nadat een golden image een nieuwe server o
 |--------|-------------|
 | [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | De printers van een machine exporteren - instellingen als JSON-bestand, drivers, volledige printtickets - naar één zip in `C:\Temp`, klaar voor `Install-Printer.ps1` op een andere |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Printerdrivers (gedownload van GitHub) en printers installeren zoals beschreven in een JSON-bestand |
+| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | Eén Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`) vanuit een printer x gebruiker-matrix, leden toegevoegd, en de groeps-SID's als rechten in `printers.json` |
 
 ## Bestanden
 
@@ -283,3 +284,38 @@ Op de doelmachine: pak de zip uit en draai `.\Install-Printer.ps1 -ConfigPath <m
 - Afdrukstandaarden worden gelezen in een job met een time-out van 60 seconden, omdat sommige universele drivers vastlopen in `Get-PrintConfiguration`; een fout daar is een waarschuwing en die printer wordt zonder geëxporteerd
 - Beheerdersrechten zijn niet nodig, behalve voor `-PrintBrm`. 32-bits gestart herstart het script zichzelf 64-bits, omdat de driver store vanuit SysWOW64 niet zichtbaar is
 - NinjaOne-scriptvariabelen: `printer`, `outputPath`, en de vinkjes `noDriver`, `printBrm`
+
+---
+
+### New-PrinterGroup.ps1
+
+Zet een printer x gebruiker-matrix - zoals gekopieerd uit Excel - om in één Entra ID-beveiligingsgroep per printer, met de naam `<Prefix><printernaam>` zonder spaties (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), en voegt de aangevinkte gebruikers toe. Met `-ConfigPath` schrijft het elke groep in de vermelding van die printer in `printers.json` als `"permissions": [ { "principal": "<groeps-SID>", "access": "print" } ]`, klaar voor `Install-Printer.ps1`. Standaard een voorbeeld; `-Apply` wijzigt de tenant en het bestand.
+
+De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam of UPN), elke niet-lege cel (`x`) betekent toegang. Gescheiden door tab, puntkomma of komma; een kopregel zonder de lege cel linksboven, zoals Excel kopieert, is goed. `Naam (AFDELING)` matcht ook de weergavenaam `Naam`. Een naam die geen of meerdere gebruikers oplevert wordt gemeld en overgeslagen - zet dan de UPN in de kopregel.
+
+**Parameters**
+
+| Parameter | Omschrijving |
+|-----------|-------------|
+| `-MatrixPath` | Het matrixbestand |
+| `-Prefix` | Voorvoegsel van de groepsnaam (standaard: `SG-U-PRINTM-`) |
+| `-ConfigPath` | `printers.json` om de rechten in te schrijven. Bestaande `manage`/`manageDocuments`-vermeldingen blijven, `Everyone` en andere `print`-vermeldingen worden vervangen; eerst wordt een `.bak` geschreven |
+| `-RemoveExtraMembers` | Ook groepsleden verwijderen die de matrix niet aanvinkt (standaard: gemeld, met rust gelaten) |
+| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Aanmelden, via `Connect-M365.ps1` zoals in de andere Entra-scripts |
+| `-Apply` | Groepen aanmaken, leden wijzigen, de JSON schrijven. Zonder: alleen rapporteren |
+
+**Voorbeelden**
+
+```powershell
+# Wat er aangemaakt en toegevoegd zou worden
+.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv
+
+# De groepen aanmaken en hun SID's in een geëxporteerde printers.json schrijven
+.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv -ConfigPath C:\Temp\export\printers.json -Apply
+```
+
+**Opmerkingen**
+- **Een Entra ID-groep werkt in een printer-ACL alleen als het Windows-token van de gebruiker hem bevat**: een Entra ID-account dat aanmeldt op een Entra-joined apparaat (ook Entra-joined AVD-sessiehosts), vanaf de eerste aanmelding na het toevoegen. Wie aanmeldt met een Active Directory-account (domain-joined of hybride server, een klassieke printserver) heeft AD-groepen in het token, nooit cloudgroepen - de wachtrij weigert dan iedereen behalve de beheerders. Gebruik daar AD-groepen (`DOMEIN\Groep`)
+- De SID wordt berekend uit de object-id van de groep (`S-1-12-1-` + de GUID als vier 32-bits getallen), de vorm die Windows gebruikt voor Entra ID-groepen
+- Hou de matrix buiten deze repository: er staan echte mensen in. `C:\Temp` is een prima plek
+- Vereiste scopes: `Group.ReadWrite.All`, `User.Read.All`

@@ -194,7 +194,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot, Knipprogramma en Foto's testen met de IT-accounts, herstellen, melden aan n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook, Copilot, Knipprogramma en Foto's gebeurde, en wat de watchdog deed |
-| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers van GitHub + printers vanuit een JSON-bestand) of [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (printers, instellingen en drivers van deze machine naar een zip) |
+| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers van GitHub + printers vanuit een JSON-bestand) of [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (printers, instellingen en drivers van deze machine naar een zip) of [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (één Entra ID-groep per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules die scripts laden maar die niet in `RequiredModules.psd1` staan |
@@ -632,6 +632,7 @@ Twee scripts die de vluchtige tijdelijke schijf (`D:`) van een Azure-VM of AVD-s
 | Script | Doel |
 |---|---|
 | [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | De printers van een machine exporteren - instellingen als JSON-bestand, drivers, volledige printtickets - naar één zip in `C:\Temp`, klaar voor `Install-Printer.ps1` |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | Eén Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`) vanuit een printer x gebruiker-matrix, en de groeps-SID's als rechten in `printers.json` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Printerdrivers (gedownload van GitHub) en printers installeren zoals beschreven in een JSON-bestand |
 
 - Eén JSON zegt welke drivers er zijn, waar elk vandaan komt — een GitHub-release-asset, een map in een GitHub-repository, een willekeurige https-URL of een share — en welke TCP/IP-printers ze gebruiken. `-Printer` kiest een deel ervan
@@ -841,6 +842,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   │   ├── <a href="scripts/Device/Printer/readme.nl.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← printers, instellingen (JSON) en drivers van deze machine naar een zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printerdrivers (van GitHub) + printers vanuit een JSON-bestand
+    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← één Entra ID-groep per printer vanuit een printer x gebruiker-matrix
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← elk veld en elke driverbron
     │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">readme.md</a>
@@ -1013,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (2)
+| Wijziging |
+|--------|
+| **Nieuw [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1)**: één Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`, zonder spaties) vanuit een printer x gebruiker-matrix zoals gekopieerd uit Excel, met de aangevinkte gebruikers toegevoegd (op weergavenaam of UPN; dubbelzinnige of onbekende namen gemeld, niet geraden). Met `-ConfigPath` schrijft het de SID van de groep (`S-1-12-1-...`, berekend uit de object-id) in de `permissions` van die printer in `printers.json`, met behoud van `manage`-vermeldingen en vervanging van `Everyone`. Standaard een voorbeeld, `-Apply` om te wijzigen. De readme zegt wanneer een Entra ID-groep in een printer-ACL werkt (Entra ID-aanmelding op een Entra-joined apparaat) en wanneer hij iedereen buitensluit (AD-aanmelding). Menu `N` → `3` |
+| Geverifieerd: syntaxcontrole; op PowerShell 7 met de Graph-cmdlets nagebootst, een matrix van 19 printers x 12 gebruikers: kopregel zonder de cel linksboven, terugval voor `Naam (AFDELING)`, een dubbelzinnige naam gemeld, een bestaande groep met een niet-aangevinkt lid met rust gelaten, voorbeeld en apply, de JSON geschreven met back-up en met behoud van de manage-vermelding; de SID-omrekening met de hand nagerekend tegen de GUID-bytes; de geschreven JSON komt door Install-Printers `Test-Configuration`. **Niet** geverifieerd: een run tegen een echte tenant, en een printer-ACL met een Entra ID-groep op een Entra-joined host |
 ### 2026-10-27
 | Wijziging |
 |--------|

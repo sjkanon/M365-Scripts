@@ -18,6 +18,7 @@ Conçu pour s'exécuter sans surveillance après qu'une image de référence (go
 |--------|-------------|
 | [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | Exporter les imprimantes d'une machine - paramètres en fichier JSON, pilotes, tickets d'impression complets - dans un zip dans `C:\Temp`, prêt pour `Install-Printer.ps1` sur une autre |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
+| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | Un groupe de sécurité Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`) à partir d'une matrice imprimantes x utilisateurs, membres ajoutés, et les SID des groupes écrits comme autorisations dans `printers.json` |
 
 ## Fichiers
 
@@ -283,3 +284,38 @@ Sur la machine cible : décompresser le zip et lancer `.\Install-Printer.ps1 -Co
 - Les paramètres d'impression sont lus dans un job avec un délai de 60 secondes, car certains pilotes universels se bloquent dans `Get-PrintConfiguration` ; un échec y est un avertissement et l'imprimante est exportée sans eux
 - Les droits administrateur ne sont pas nécessaires, sauf pour `-PrintBrm`. Lancé en 32 bits, le script se relance en 64 bits, car le magasin de pilotes n'est pas visible depuis SysWOW64
 - Variables de script NinjaOne : `printer`, `outputPath`, et les cases à cocher `noDriver`, `printBrm`
+
+---
+
+### New-PrinterGroup.ps1
+
+Transforme une matrice imprimantes x utilisateurs - copiée depuis Excel - en un groupe de sécurité Entra ID par imprimante, nommé `<Prefix><nom de l'imprimante>` sans espaces (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), et y ajoute les utilisateurs cochés. Avec `-ConfigPath`, il écrit chaque groupe dans l'entrée de cette imprimante dans `printers.json` sous la forme `"permissions": [ { "principal": "<SID du groupe>", "access": "print" } ]`, prêt pour `Install-Printer.ps1`. Aperçu par défaut ; `-Apply` modifie le tenant et le fichier.
+
+La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utilisateurs (nom d'affichage ou UPN), toute cellule non vide (`x`) signifie un accès. Séparée par tabulation, point-virgule ou virgule ; un en-tête sans la cellule vide en haut à gauche, comme Excel le copie, convient. `Nom (SERVICE)` correspond aussi au nom d'affichage `Nom`. Un nom qui ne correspond à aucun utilisateur, ou à plusieurs, est signalé et ignoré - mettez alors l'UPN dans l'en-tête.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-MatrixPath` | Le fichier de matrice |
+| `-Prefix` | Préfixe des noms de groupe (par défaut : `SG-U-PRINTM-`) |
+| `-ConfigPath` | `printers.json` dans lequel écrire les autorisations. Les entrées `manage`/`manageDocuments` existantes sont conservées, `Everyone` et les autres entrées `print` remplacées ; un `.bak` est écrit d'abord |
+| `-RemoveExtraMembers` | Retirer aussi les membres que la matrice ne coche pas (par défaut : signalés, laissés en place) |
+| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Connexion, via `Connect-M365.ps1` comme dans les autres scripts Entra |
+| `-Apply` | Créer les groupes, modifier les membres, écrire le JSON. Sans : rapport uniquement |
+
+**Exemples**
+
+```powershell
+# Ce qui serait créé et ajouté
+.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv
+
+# Créer les groupes et écrire leurs SID dans un printers.json exporté
+.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv -ConfigPath C:\Temp\export\printers.json -Apply
+```
+
+**Remarques**
+- **Un groupe Entra ID ne fonctionne dans une ACL d'imprimante que si le jeton Windows de l'utilisateur le contient** : un compte Entra ID qui se connecte à un appareil joint à Entra (hôtes de session AVD joints à Entra inclus), à partir de la connexion suivant l'ajout. Un utilisateur qui se connecte avec un compte Active Directory (serveur joint au domaine ou hybride, serveur d'impression classique) a des groupes AD dans son jeton, jamais des groupes cloud - la file refuse alors tout le monde sauf les administrateurs. Utilisez-y des groupes AD (`DOMAINE\Groupe`)
+- Le SID est calculé à partir de l'ID d'objet du groupe (`S-1-12-1-` + le GUID en quatre nombres de 32 bits), la forme que Windows utilise pour les groupes Entra ID
+- Gardez la matrice hors de ce dépôt : elle nomme de vraies personnes. `C:\Temp` convient très bien
+- Scopes requis : `Group.ReadWrite.All`, `User.Read.All`

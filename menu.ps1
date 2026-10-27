@@ -167,6 +167,14 @@ $PrinterSubmenu = @(
         if ($drv -match '^[Nn]') { $a['NoDriver'] = $true }
         & "$ROOT\scripts\Device\Printer\Export-Printer.ps1" @a
     }}
+    @{ Key='3'; Label='New-PrinterGroup    — one Entra ID group per printer (SG-U-PRINTM-<printer>) from a printer x user matrix'; Action={
+        $a = @{ MatrixPath = (Read-Host "  Matrix file (tab/; separated, printers x users)") }
+        $cfg = Read-Host "  printers.json to write the group permissions into (empty = none)"
+        if ($cfg) { $a['ConfigPath'] = $cfg }
+        $apply = Read-Host "  Create the groups now (not just preview)? [y/N]"
+        if ($apply -match '^[Yy]') { $a['Apply'] = $true }
+        & "$ROOT\scripts\Device\Printer\New-PrinterGroup.ps1" @a
+    }}
 )
 
 # ── M365 submenus ─────────────────────────────────────────────────────────────

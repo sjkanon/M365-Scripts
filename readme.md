@@ -194,7 +194,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
-| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) |
+| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) or [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (one Entra ID group per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules scripts load that `RequiredModules.psd1` does not list |
@@ -632,6 +632,7 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 | Script | Doel |
 |---|---|
 | [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | Export the printers of a machine - settings as a JSON file, drivers, full print tickets - to one zip in `C:\Temp`, ready for `Install-Printer.ps1` |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | One Entra ID security group per printer (`SG-U-PRINTM-<printer>`) from a printer x user matrix, and the group SIDs into `printers.json` as permissions |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
 
 - One JSON says which drivers exist, where each is downloaded from — a GitHub release asset, a folder in a GitHub repository, any https URL or a share — and which TCP/IP printers use them. `-Printer` picks a subset
@@ -841,6 +842,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   │   ├── <a href="scripts/Device/Printer/readme.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← this machine's printers, settings (JSON) and drivers to a zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printer drivers (from GitHub) + printers from a JSON file
+    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← one Entra ID group per printer from a printer x user matrix
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← every field and every driver source
     │   ├── <a href="scripts/Device/TempDisk/readme.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.md">readme.md</a>
@@ -1013,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (2)
+| Change |
+|--------|
+| **New [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1)**: one Entra ID security group per printer (`SG-U-PRINTM-<printer>`, spaces removed) from a printer x user matrix as copied out of Excel, with the ticked users added (by display name or UPN; ambiguous or unknown names reported, not guessed). With `-ConfigPath` it writes the group's SID (`S-1-12-1-...`, computed from the object id) into that printer's `permissions` in `printers.json`, keeping `manage` entries and replacing `Everyone`. Preview by default, `-Apply` to change. The readme says when an Entra ID group in a printer ACL works (Entra ID sign-in on an Entra-joined device) and when it locks everyone out (AD sign-in). Menu `N` → `3` |
+| Verified: syntax check; on PowerShell 7 with the Graph cmdlets mocked, a 19-printer x 12-user matrix: header without the top-left cell, `Name (DEPARTMENT)` fallback, an ambiguous name reported, an existing group with an unticked member left alone, preview and apply, the JSON written with a backup and the manage entry kept; the SID conversion checked by hand against the GUID bytes; the written JSON passes Install-Printer's `Test-Configuration`. **Not** verified: a run against a real tenant, and a printer ACL with an Entra ID group on an Entra-joined host |
 ### 2026-10-27
 | Change |
 |--------|

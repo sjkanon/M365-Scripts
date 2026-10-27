@@ -194,7 +194,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos avec les comptes IT, réparer, signaler à n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos par utilisateur, et ce qu'a fait le watchdog |
-| `N` | Device | Imprimantes — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (pilotes depuis GitHub + imprimantes depuis un fichier JSON) ou [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (imprimantes, paramètres et pilotes de cette machine dans un zip) |
+| `N` | Device | Imprimantes — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (pilotes depuis GitHub + imprimantes depuis un fichier JSON) ou [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (imprimantes, paramètres et pilotes de cette machine dans un zip) ou [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (un groupe Entra ID par imprimante) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules chargés par des scripts mais absents de `RequiredModules.psd1` |
@@ -632,6 +632,7 @@ Deux scripts qui maintiennent en place le disque temporaire éphémère (`D:`) d
 | Script | Doel |
 |---|---|
 | [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | Exporter les imprimantes d'une machine - paramètres en fichier JSON, pilotes, tickets d'impression complets - dans un zip dans `C:\Temp`, prêt pour `Install-Printer.ps1` |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | Un groupe de sécurité Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`) à partir d'une matrice imprimantes x utilisateurs, et les SID des groupes comme autorisations dans `printers.json` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
 
 - Un seul JSON indique quels pilotes existent, d'où chacun est téléchargé — un asset de release GitHub, un dossier d'un dépôt GitHub, une URL https quelconque ou un partage — et quelles imprimantes TCP/IP les utilisent. `-Printer` en retient une partie
@@ -841,6 +842,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   │   ├── <a href="scripts/Device/Printer/readme.fr.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← imprimantes, paramètres (JSON) et pilotes de cette machine dans un zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← pilotes d'imprimante (depuis GitHub) + imprimantes depuis un fichier JSON
+    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← un groupe Entra ID par imprimante depuis une matrice imprimantes x utilisateurs
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← chaque champ et chaque source de pilote
     │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">readme.md</a>
@@ -1013,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (2)
+| Modification |
+|--------|
+| **Nouveau [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1)** : un groupe de sécurité Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`, sans espaces) à partir d'une matrice imprimantes x utilisateurs copiée depuis Excel, avec les utilisateurs cochés ajoutés (par nom d'affichage ou UPN ; noms ambigus ou inconnus signalés, jamais devinés). Avec `-ConfigPath`, il écrit le SID du groupe (`S-1-12-1-...`, calculé à partir de l'ID d'objet) dans les `permissions` de cette imprimante dans `printers.json`, en conservant les entrées `manage` et en remplaçant `Everyone`. Aperçu par défaut, `-Apply` pour modifier. Le readme précise quand un groupe Entra ID fonctionne dans une ACL d'imprimante (connexion Entra ID sur un appareil joint à Entra) et quand il bloque tout le monde (connexion AD). Menu `N` → `3` |
+| Vérifié : contrôle de syntaxe ; sous PowerShell 7 avec les cmdlets Graph simulées, une matrice de 19 imprimantes x 12 utilisateurs : en-tête sans la cellule en haut à gauche, repli pour `Nom (SERVICE)`, un nom ambigu signalé, un groupe existant avec un membre non coché laissé en place, aperçu et apply, le JSON écrit avec une sauvegarde et l'entrée manage conservée ; la conversion du SID vérifiée à la main contre les octets du GUID ; le JSON écrit passe le `Test-Configuration` d'Install-Printer. **Non** vérifié : une exécution sur un vrai tenant, et une ACL d'imprimante avec un groupe Entra ID sur un hôte joint à Entra |
 ### 2026-10-27
 | Modification |
 |--------|

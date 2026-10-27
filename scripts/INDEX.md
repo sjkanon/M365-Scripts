@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-193 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+194 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -111,6 +111,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`New-EOPProtectionBaseline.ps1`](Office365Toolkit/Security/New-EOPProtectionBaseline.ps1) | [`Office365Toolkit/Security/`](Office365Toolkit/Security/readme.md) | Create or update a baseline Exchange Online Protection anti-spam and anti-malware policy, scoped to the tenant's accepted domains. |
 | [`New-LockWorkstationShortcut.ps1`](LegacyUtilities/Device/New-LockWorkstationShortcut.ps1) | [`LegacyUtilities/Device/`](LegacyUtilities/Device/readme.md) | Create a "Lock Workstation" shortcut on the desktop (or Start Menu). |
 | [`New-M365User.ps1`](Entra/New-M365User.ps1) | [`Entra/`](Entra/readme.md) | Create a new Microsoft 365 user via Microsoft Graph. |
+| [`New-PrinterGroup.ps1`](Device/Printer/New-PrinterGroup.ps1) | [`Device/Printer/`](Device/Printer/readme.md) | Create one Entra ID security group per printer from a printer x user matrix, fill it with the users ticked for that printer, and optionally write those groups… |
 | [`New-ProjectTeam.ps1`](LegacyUtilities/Teams/New-ProjectTeam.ps1) | [`LegacyUtilities/Teams/`](LegacyUtilities/Teams/readme.md) | Bulk-create Teams with a standard set of channels from a CSV-driven template. |
 | [`New-SharePointMetadata.ps1`](SharePoint/Provisioning/New-SharePointMetadata.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Provision the metadata model - managed metadata term set, site columns and content types - from a structure configuration file. Idempotent, supports -WhatIf. |
 | [`New-SharePointTeam.ps1`](SharePoint/Provisioning/New-SharePointTeam.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Create the Microsoft 365 Team and its channels - including the private MGMT channel - from the structure configuration, and write the resulting site URLs back… |

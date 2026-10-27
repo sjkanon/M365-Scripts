@@ -18,6 +18,7 @@ Built to run unattended after a golden image has provisioned a new server or ses
 |--------|-------------|
 | [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | Export the printers of a machine - settings as a JSON file, drivers, full print tickets - to one zip in `C:\Temp`, ready for `Install-Printer.ps1` on another one |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
+| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | One Entra ID security group per printer (`SG-U-PRINTM-<printer>`) from a printer x user matrix, members added, and the group SIDs written into `printers.json` as permissions |
 
 ## Files
 
@@ -283,3 +284,38 @@ On the target machine: unpack the zip and run `.\Install-Printer.ps1 -ConfigPath
 - Print defaults are read in a job with a 60-second timeout, as some universal drivers hang in `Get-PrintConfiguration`; a failure there is a warning, and that printer is exported without them
 - Admin rights are not needed, except for `-PrintBrm`. Started 32-bit, the script relaunches itself 64-bit, because the driver store is not visible from SysWOW64
 - NinjaOne script variables: `printer`, `outputPath`, and the checkboxes `noDriver`, `printBrm`
+
+---
+
+### New-PrinterGroup.ps1
+
+Turns a printer x user matrix - as copied out of Excel - into one Entra ID security group per printer, named `<Prefix><printer name>` with spaces removed (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), and adds the ticked users. With `-ConfigPath` it writes each group into that printer's entry in `printers.json` as `"permissions": [ { "principal": "<group SID>", "access": "print" } ]`, ready for `Install-Printer.ps1`. Preview by default; `-Apply` changes the tenant and the file.
+
+The matrix: first column the printer names, header row the users (display name or UPN), any non-empty cell (`x`) means access. Tab, semicolon or comma separated; a header without the empty top-left cell, as Excel copies it, is fine. `Name (DEPARTMENT)` also matches the display name `Name`. A name that matches no user, or several, is reported and left out - put the UPN in the header instead.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-MatrixPath` | The matrix file |
+| `-Prefix` | Group name prefix (default: `SG-U-PRINTM-`) |
+| `-ConfigPath` | `printers.json` to write the permissions into. Existing `manage`/`manageDocuments` entries are kept, `Everyone` and other `print` entries replaced; a `.bak` is written first |
+| `-RemoveExtraMembers` | Also remove group members the matrix does not tick (default: reported, left alone) |
+| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Sign-in, through `Connect-M365.ps1` as in the other Entra scripts |
+| `-Apply` | Create groups, change members, write the JSON. Without it: report only |
+
+**Examples**
+
+```powershell
+# What would be created and added
+.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv
+
+# Create the groups and write their SIDs into an exported printers.json
+.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv -ConfigPath C:\Temp\export\printers.json -Apply
+```
+
+**Notes**
+- **An Entra ID group only works in a printer ACL when the user's Windows token carries it**: an Entra ID account signing in to an Entra-joined device (Entra-joined AVD session hosts included), from the next sign-in after being added. A user signing in with an Active Directory account (domain-joined or hybrid server, a classic print server) has AD groups in the token, never cloud groups - the queue then refuses everyone but the administrators. Use AD groups (`DOMAIN\Group`) there
+- The SID is computed from the group's object id (`S-1-12-1-` + the GUID as four 32-bit numbers), the form Windows uses for Entra ID groups
+- Keep the matrix out of this repository: it names real people. `C:\Temp` is a fine place for it
+- Required scopes: `Group.ReadWrite.All`, `User.Read.All`
