@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (3)
+| Change |
+|--------|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) brings printers on a vendor port monitor along. A real export of 15 queues left an Epson SC-T3100M behind - and its driver with it - because it hangs on an `EpsonNet Print Port (IPP)` named `10.1.50.235:`, which has no address field Windows' TCP/IP port reader knows and only exists where Epson's software is installed. When such a port's name holds an IPv4 address or an http(s) URL, the printer is now exported as a Standard TCP/IP port (RAW 9100) to that address, with its driver, print defaults, tray and permissions, a warning in the output and a note in its `description`; `inventory.json` records `convertedFrom`. Local, fax and other ports without an address in their name are still left out |
+| Verified: syntax check; the address parsing on eleven port names (IPv4 with a trailing colon, `IP_<address>_1`, http and https URLs, and `nul:`, `PORTPROMPT:`, `LPT1:`, WSD, `999.1.1.1:`, five octets correctly rejected); a Windows PowerShell 5.1 export with this machine's AnyDesk printer moved onto a mocked `EpsonNet Print Port (IPP)` `10.1.50.235:` - exported with driver, defaults and ACL, and the resulting `printers.json` passes Install-Printer's validation and driver checks. **Not** verified: the real Epson queue, and printing to an SC-T3100M over RAW 9100 |
 ### 2026-10-27 (2)
 | Change |
 |--------|

@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (3)
+| Modification |
+|--------|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) emporte les imprimantes sur un moniteur de port du fabricant. Un vrai export de 15 files laissait de côté une Epson SC-T3100M - et son pilote avec - parce qu'elle est sur un `EpsonNet Print Port (IPP)` nommé `10.1.50.235:`, qui n'a aucun champ d'adresse que le lecteur de ports TCP/IP de Windows connaît et n'existe que là où le logiciel d'Epson est installé. Quand le nom d'un tel port contient une adresse IPv4 ou une URL http(s), l'imprimante est désormais exportée comme port Standard TCP/IP (RAW 9100) vers cette adresse, avec son pilote, ses paramètres d'impression, son bac et ses autorisations, un avertissement dans la sortie et une note dans sa `description` ; `inventory.json` enregistre `convertedFrom`. Les ports locaux, de fax et les autres sans adresse dans leur nom restent exclus |
+| Vérifié : contrôle de syntaxe ; la détection d'adresse sur onze noms de port (IPv4 suivie de deux-points, `IP_<adresse>_1`, URL http et https, et `nul:`, `PORTPROMPT:`, `LPT1:`, WSD, `999.1.1.1:`, cinq octets correctement refusés) ; un export sous Windows PowerShell 5.1 avec l'imprimante AnyDesk de cette machine sur un `EpsonNet Print Port (IPP)` `10.1.50.235:` simulé - exportée avec pilote, paramètres et ACL, et le `printers.json` obtenu passe la validation et les contrôles de pilote d'Install-Printer. **Non** vérifié : la vraie file Epson, et l'impression vers une SC-T3100M en RAW 9100 |
 ### 2026-10-27 (2)
 | Modification |
 |--------|

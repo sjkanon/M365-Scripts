@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (3)
+| Wijziging |
+|--------|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) neemt printers op een poortmonitor van de fabrikant mee. Een echte export van 15 wachtrijen liet een Epson SC-T3100M achter - en daarmee zijn driver - omdat die aan een `EpsonNet Print Port (IPP)` met de naam `10.1.50.235:` hangt, die geen adresveld heeft dat Windows' TCP/IP-poortlezer kent en alleen bestaat waar de software van Epson geïnstalleerd is. Als de naam van zo'n poort een IPv4-adres of een http(s)-URL bevat, wordt de printer nu geëxporteerd als Standard TCP/IP-poort (RAW 9100) naar dat adres, met zijn driver, afdrukstandaarden, lade en rechten, een waarschuwing in de uitvoer en een notitie in zijn `description`; `inventory.json` legt `convertedFrom` vast. Lokale, fax- en andere poorten zonder adres in de naam blijven buiten de export |
+| Geverifieerd: syntaxcontrole; de adresherkenning op elf poortnamen (IPv4 met dubbele punt erachter, `IP_<adres>_1`, http- en https-URL's, en `nul:`, `PORTPROMPT:`, `LPT1:`, WSD, `999.1.1.1:`, vijf octetten terecht geweigerd); een export onder Windows PowerShell 5.1 met de AnyDesk-printer van deze machine op een nagebootste `EpsonNet Print Port (IPP)` `10.1.50.235:` - geëxporteerd met driver, standaarden en ACL, en de resulterende `printers.json` komt door de validatie en drivercontroles van Install-Printer. **Niet** geverifieerd: de echte Epson-wachtrij, en afdrukken naar een SC-T3100M via RAW 9100 |
 ### 2026-10-27 (2)
 | Wijziging |
 |--------|

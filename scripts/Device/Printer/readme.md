@@ -279,6 +279,7 @@ On the target machine: unpack the zip and run `.\Install-Printer.ps1 -ConfigPath
 
 **Notes**
 - Only TCP/IP printers (Standard TCP/IP Port) go into `printers.json`, as that is what Install-Printer creates. A printer it would refuse - a name with `\ , !`, an address that is neither an IP address nor a host name - is reported and kept in `inventory.json` only
+- A printer on a vendor port monitor (EpsonNet Print, IPP) whose port name holds its address - `10.1.50.235:`, `http://10.0.5.20:631/ipp` - is exported as a Standard TCP/IP port (RAW 9100) to that address, with its driver and settings, a warning and a note in its `description`: that port monitor only exists where the vendor's software is installed. Print a test page on the target
 - Fields are written only where they differ from Install-Printer's defaults (port `IP_<address>`, port 9100, SNMP off), so the file reads like one written by hand
 - Permissions are exported only when they differ from the Windows default (Everyone may print). Administrators, SYSTEM, CREATOR OWNER and app identities are left out, as Install-Printer always keeps them. Well-known groups are written by their English name, an Entra ID user or group by its SID (an `AzureAD\name` resolves nowhere else), a local account of this machine with a warning
 - Print defaults are read in a job with a 60-second timeout, as some universal drivers hang in `Get-PrintConfiguration`; a failure there is a warning, and that printer is exported without them

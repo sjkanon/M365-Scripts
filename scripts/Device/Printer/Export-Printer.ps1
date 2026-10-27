@@ -28,8 +28,13 @@
                       server. Their raw settings are here, with the reason why they
                       are not in printers.json.
 
-    Only TCP/IP printers (Standard TCP/IP Port) go into printers.json, because
-    that is what Install-Printer.ps1 can create. A printer it would refuse - a
+    Only TCP/IP printers go into printers.json, because that is what
+    Install-Printer.ps1 can create. A printer on a vendor port monitor
+    (EpsonNet Print, IPP) whose port name holds its address - "10.1.50.235:",
+    "http://10.0.5.20:631/ipp" - comes along as a Standard TCP/IP port (RAW 9100)
+    to that address, with its driver and settings, a warning and a note in its
+    "description": that port monitor only exists where the vendor's software is
+    installed. A printer Install-Printer would refuse - a
     name with \ , or !, an address that is neither an IP address nor a host
     name - is listed in inventory.json and reported, not written.
 
@@ -312,6 +317,19 @@ function Get-PrinterPermission {
     return ,@($list)
 }
 
+function Get-PortNameAddress {
+    <#
+        The printer address hidden in the name of a vendor port, which keeps it in
+        its own fields: "10.1.50.235:" (EpsonNet Print), "IP_10.0.5.20_1",
+        "http://10.0.5.20:631/ipp/print". Only an IPv4 address or the host of an
+        http(s) URL counts - "nul:" or "PORTPROMPT:" would pass as host names.
+    #>
+    param([string] $PortName)
+    if ($PortName -match '^https?://([^/:]+)') { return $Matches[1] }
+    if ($PortName -match '(?<![\d.])((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})(?![\d.])') { return $Matches[1] }
+    return $null
+}
+
 function Test-PrinterAddress {
     param([string] $Address)
     $ip = $null
@@ -352,7 +370,22 @@ try {
         Write-Step "Printer '$($p.Name)'"
         $port   = $ports[[string] $p.PortName]
         $reason = $null
-        $address = if ($port) { foreach ($f in 'PrinterHostAddress', 'LprHostAddress', 'HostName') { $v = Get-PropertyValue $port $f; if ($v) { [string] $v; break } } }
+        $address = [string] $(if ($port) { foreach ($f in 'PrinterHostAddress', 'LprHostAddress', 'HostName') { $v = [string] (Get-PropertyValue $port $f); if ($v) { $v; break } } })
+
+        # A vendor port monitor (EpsonNet Print, HP Standard TCP/IP, IPP) only
+        # exists where that vendor's software is installed. Its printer is still
+        # a network printer at an address, so it is exported as a Standard TCP/IP
+        # port (RAW 9100) to that address - with its driver and settings - and
+        # said so, rather than left behind.
+        $convertedFrom = $null
+        if ($port -and -not $address -and "$($p.Type)" -ne 'Connection' -and
+            "$(Get-PropertyValue $port 'Description')" -notmatch '^(Local Port|Fax Monitor Port)$') {
+            $guess = Get-PortNameAddress -PortName $p.PortName
+            if ($guess) {
+                $address       = $guess
+                $convertedFrom = "$(Get-PropertyValue $port 'Description') '$($p.PortName)'"
+            }
+        }
 
         if ("$($p.Type)" -eq 'Connection')       { $reason = 'a connection to a print server queue (per user) - Install-Printer creates local TCP/IP queues' }
         elseif (-not $port)                      { $reason = "its port '$($p.PortName)' is not found" }
@@ -381,6 +414,7 @@ try {
             name           = $p.Name
             inPrintersJson = -not $reason
             reason         = $reason
+            convertedFrom  = $convertedFrom
             type           = "$($p.Type)"
             driver         = $p.DriverName
             portName       = $p.PortName
@@ -412,11 +446,18 @@ try {
         # The JSON entry, with only what differs from Install-Printer's defaults,
         # so the file reads like one written by hand.
         $entry = [ordered]@{ name = $p.Name; driver = $p.DriverName; address = $address }
-        if ($p.PortName -ne "IP_$address") { $entry.portName = $p.PortName }
-        $lpr = [string] (Get-PropertyValue $port 'LprQueueName')
-        if ("$(Get-PropertyValue $port 'Protocol')" -in @('2', 'LPR') -and $lpr) { $entry.lprQueue = $lpr }
-        elseif ((Get-PropertyValue $port 'PortNumber') -and [int] $port.PortNumber -ne 9100) { $entry.portNumber = [int] $port.PortNumber }
-        if ((Get-PropertyValue $port 'SNMPEnabled') -eq $true) { $entry.snmp = $true }
+        if ($convertedFrom) {
+            # The vendor port's name and settings mean nothing to a Standard
+            # TCP/IP port; Install-Printer's defaults (IP_<address>, RAW 9100) do.
+            $entry.description = "Port converted on export: $convertedFrom on $env:COMPUTERNAME, here a Standard TCP/IP port (RAW 9100)"
+            Write-Warn "Port $convertedFrom is a vendor port - exported as Standard TCP/IP RAW 9100 to $address; print a test page on the target"
+        } else {
+            if ($p.PortName -ne "IP_$address") { $entry.portName = $p.PortName }
+            $lpr = [string] (Get-PropertyValue $port 'LprQueueName')
+            if ("$(Get-PropertyValue $port 'Protocol')" -in @('2', 'LPR') -and $lpr) { $entry.lprQueue = $lpr }
+            elseif ((Get-PropertyValue $port 'PortNumber') -and [int] $port.PortNumber -ne 9100) { $entry.portNumber = [int] $port.PortNumber }
+            if ((Get-PropertyValue $port 'SNMPEnabled') -eq $true) { $entry.snmp = $true }
+        }
         if ($p.Location) { $entry.location = [string] $p.Location }
         if ($p.Comment)  { $entry.comment  = [string] $p.Comment }
         if ($p.Shared) {
