@@ -21,3 +21,6 @@ scripts/SharePoint/Provisioning/*.config.json
 
 # USB toolkit site settings (LocalAdmin password, install share)
 scripts/Deployment/start.local.cmd
+
+# Local working folder (customer exports, matrices) - never in the repo
+/local/
