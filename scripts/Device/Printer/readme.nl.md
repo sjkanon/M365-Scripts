@@ -18,7 +18,7 @@ Gemaakt om zonder toezicht te draaien nadat een golden image een nieuwe server o
 |--------|-------------|
 | [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | De printers van een machine exporteren - instellingen als JSON-bestand, drivers, volledige printtickets - naar één zip in `C:\Temp`, klaar voor `Install-Printer.ps1` op een andere |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Printerdrivers (gedownload van GitHub) en printers installeren zoals beschreven in een JSON-bestand |
-| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | Eén Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`) vanuit een printer x gebruiker-matrix, leden toegevoegd, en de groeps-SID's als rechten in `printers.json` |
+| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | Eén AD- of Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`) vanuit een printer x gebruiker-matrix, leden toegevoegd, en de groeps-SID's als rechten in `printers.json` |
 
 ## Bestanden
 
@@ -290,35 +290,46 @@ Op de doelmachine: pak de zip uit en draai `.\Install-Printer.ps1 -ConfigPath <m
 
 ### New-PrinterGroup.ps1
 
-Zet een printer x gebruiker-matrix - zoals gekopieerd uit Excel - om in één Entra ID-beveiligingsgroep per printer, met de naam `<Prefix><printernaam>` zonder spaties (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), en voegt de aangevinkte gebruikers toe. Met `-ConfigPath` schrijft het elke groep in de vermelding van die printer in `printers.json` als `"permissions": [ { "principal": "<groeps-SID>", "access": "print" } ]`, klaar voor `Install-Printer.ps1`. Standaard een voorbeeld; `-Apply` wijzigt de tenant en het bestand.
+Zet een printer x gebruiker-matrix - zoals gekopieerd uit Excel - om in één beveiligingsgroep per printer, in **Active Directory** of **Entra ID**, met de naam `<Prefix><printernaam>` zonder spaties (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), en voegt de aangevinkte gebruikers toe. Met `-ConfigPath` schrijft het elke groep in de vermelding van die printer in `printers.json` als `"permissions": [ { "principal": <de groep>, "access": "print" } ]`, zodat `Install-Printer.ps1` die groep laat afdrukken en Everyone dat recht afneemt; `manage`-vermeldingen blijven. Standaard een voorbeeld; `-Apply` wijzigt de directory en het bestand.
 
-De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam of UPN), elke niet-lege cel (`x`) betekent toegang. Gescheiden door tab, puntkomma of komma; een kopregel zonder de lege cel linksboven, zoals Excel kopieert, is goed. `Naam (AFDELING)` matcht ook de weergavenaam `Naam`. Een naam die geen of meerdere gebruikers oplevert wordt gemeld en overgeslagen - zet dan de UPN in de kopregel.
+**AD of Entra ID** - een printer-ACL wordt getoetst aan het Windows-aanmeldtoken van de gebruiker, dus de groep moet er een zijn die dat token bevat:
+
+| | Gebruikers melden aan met | Groepen | In `printers.json` |
+|---|---|---|---|
+| `-Directory AD` | een AD-account: domain-joined of hybrid-joined server of sessiehost, klassieke printserver | aangemaakt in `-OU` - kies er een die Entra Connect synchroniseert, dan staan ze ook in Entra ID | `DOMEIN\SG-U-PRINTM-...` |
+| `-Directory Entra` | een Entra ID-account op een Entra-joined apparaat | cloudgroepen | hun SID `S-1-12-1-...`, berekend uit de object-id |
+
+In een hybride omgeving is dat `-Directory AD`: een cloudgroep komt nooit in het token van een AD-aanmelding, en de wachtrij zou iedereen weigeren. `-Directory Entra` waarschuwt als de gebruikers uit de matrix vanuit AD gesynchroniseerd worden. In beide gevallen krijgt een nieuw lid toegang bij de volgende aanmelding.
+
+De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam, UPN, of `DOMEIN\account` voor AD), elke niet-lege cel (`x`) betekent toegang. Gescheiden door tab, puntkomma of komma; een kopregel zonder de lege cel linksboven, zoals Excel kopieert, is goed. `Naam (AFDELING)` matcht ook de weergavenaam `Naam`. Een naam die geen of meerdere gebruikers oplevert wordt gemeld en overgeslagen.
 
 **Parameters**
 
 | Parameter | Omschrijving |
 |-----------|-------------|
 | `-MatrixPath` | Het matrixbestand |
-| `-Prefix` | Voorvoegsel van de groepsnaam (standaard: `SG-U-PRINTM-`) |
-| `-ConfigPath` | `printers.json` om de rechten in te schrijven. Bestaande `manage`/`manageDocuments`-vermeldingen blijven, `Everyone` en andere `print`-vermeldingen worden vervangen; eerst wordt een `.bak` geschreven |
+| `-Directory` | `AD` of `Entra` (standaard) |
+| `-OU` | AD: distinguished name van de OU voor nieuwe groepen. Verplicht zodra er een groep aangemaakt moet worden |
+| `-Prefix` | Voorvoegsel van de groepsnaam (standaard: `SG-U-PRINTM-`). AD beperkt een groepsnaam tot 64 tekens; langere stoppen de run voor er iets verandert |
+| `-ConfigPath` | `printers.json` om de rechten in te schrijven. `manage`/`manageDocuments`-vermeldingen blijven, `Everyone` en andere `print`-vermeldingen worden vervangen; eerst wordt een `.bak` geschreven. Een groep wordt pas geschreven als hij bestaat - Install-Printer weigert een wachtrij aan te maken waarvan de groep niet gevonden wordt |
 | `-RemoveExtraMembers` | Ook groepsleden verwijderen die de matrix niet aanvinkt (standaard: gemeld, met rust gelaten) |
-| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Aanmelden, via `Connect-M365.ps1` zoals in de andere Entra-scripts |
+| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Entra: aanmelden, via `Connect-M365.ps1` zoals in de andere Entra-scripts |
 | `-Apply` | Groepen aanmaken, leden wijzigen, de JSON schrijven. Zonder: alleen rapporteren |
 
 **Voorbeelden**
 
 ```powershell
-# Wat er aangemaakt en toegevoegd zou worden
-.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv
+# Hybride / on-premises: wat er in AD aangemaakt zou worden
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -Directory AD
 
-# De groepen aanmaken en hun SID's in een geëxporteerde printers.json schrijven
-.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv -ConfigPath C:\Temp\export\printers.json -Apply
+# De AD-groepen aanmaken en er het printrecht van de wachtrijen van maken
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -Directory AD -OU 'OU=Printers,OU=Groups,DC=contoso,DC=local' -ConfigPath .\printers.json -Apply
+
+# Entra-joined apparaten: cloudgroepen
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -TenantId contoso.com -ConfigPath .\printers.json -Apply
 ```
 
 **Opmerkingen**
-- **Een Entra ID-groep werkt in een printer-ACL alleen als het Windows-token van de gebruiker hem bevat**: een Entra ID-account dat aanmeldt op een Entra-joined apparaat (ook Entra-joined AVD-sessiehosts), vanaf de eerste aanmelding na het toevoegen. Wie aanmeldt met een Active Directory-account (domain-joined of hybride server, een klassieke printserver) heeft AD-groepen in het token, nooit cloudgroepen - de wachtrij weigert dan iedereen behalve de beheerders. Gebruik daar AD-groepen (`DOMEIN\Groep`)
-- De SID wordt berekend uit de object-id van de groep (`S-1-12-1-` + de GUID als vier 32-bits getallen), de vorm die Windows gebruikt voor Entra ID-groepen
-- **Tenant**: zonder `-TenantId` gebruikt de run de GDAP-klant, anders de tenant waarin je aanmeldt - of die waarin een bestaande Graph-sessie in dat venster al zit. Hij noemt eerst de tenant, en `-Apply` vraagt bevestiging voor er iets aangemaakt wordt (`-Confirm:$false` slaat die vraag over). Geef `-TenantId <domein>` mee om zeker te zijn
-- **Hybride**: gebruikers die vanuit Active Directory gesynchroniseerd worden, melden op domain-joined of hybrid-joined machines aan met hun AD-account, en dat token bevat nooit een cloudgroep. De run waarschuwt als de gevonden gebruikers gesynchroniseerd zijn; maak voor die machines de groepen in AD aan (gesynchroniseerd naar Entra ID) en gebruik `DOMEIN\Groep` als principal
-- Hou de matrix buiten deze repository: er staan echte mensen in. `C:\Temp` is een prima plek
-- Vereiste scopes: `Group.ReadWrite.All`, `User.Read.All`
+- **Waar**: de run noemt eerst het doel - het AD-domein en de domeincontroller die hij gebruikt (de PDC-emulator, zodat een groep die net is aangemaakt er is wanneer leden worden toegevoegd), of de Entra-tenant - en `-Apply` vraagt bevestiging voor er iets wordt aangemaakt (`-Confirm:$false` slaat dat over). Zonder `-TenantId` gebruikt Entra de GDAP-klant, anders de tenant waarin je aanmeldt, of die waarin een bestaande Graph-sessie in dat venster al zit
+- `-Directory AD` heeft de ActiveDirectory-module (RSAT) nodig op een domain-joined machine en draait in Windows PowerShell 5.1; `-Directory Entra` heeft PowerShell 7 en Microsoft Graph nodig (`Group.ReadWrite.All`, `User.Read.All`)
+- Hou de matrix buiten deze repository: er staan echte mensen in. De door git genegeerde map `local/` is een prima plek

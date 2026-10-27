@@ -194,7 +194,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos avec les comptes IT, réparer, signaler à n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos par utilisateur, et ce qu'a fait le watchdog |
-| `N` | Device | Imprimantes — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (pilotes depuis GitHub + imprimantes depuis un fichier JSON) ou [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (imprimantes, paramètres et pilotes de cette machine dans un zip) ou [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (un groupe Entra ID par imprimante) |
+| `N` | Device | Imprimantes — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (pilotes depuis GitHub + imprimantes depuis un fichier JSON) ou [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (imprimantes, paramètres et pilotes de cette machine dans un zip) ou [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (un groupe AD ou Entra ID par imprimante) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules chargés par des scripts mais absents de `RequiredModules.psd1` |
@@ -632,7 +632,7 @@ Deux scripts qui maintiennent en place le disque temporaire éphémère (`D:`) d
 | Script | Doel |
 |---|---|
 | [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | Exporter les imprimantes d'une machine - paramètres en fichier JSON, pilotes, tickets d'impression complets - dans un zip dans `C:\Temp`, prêt pour `Install-Printer.ps1` |
-| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | Un groupe de sécurité Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`) à partir d'une matrice imprimantes x utilisateurs, et les SID des groupes comme autorisations dans `printers.json` |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | Un groupe de sécurité AD ou Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`) à partir d'une matrice imprimantes x utilisateurs, et les SID des groupes comme autorisations dans `printers.json` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
 
 - Un seul JSON indique quels pilotes existent, d'où chacun est téléchargé — un asset de release GitHub, un dossier d'un dépôt GitHub, une URL https quelconque ou un partage — et quelles imprimantes TCP/IP les utilisent. `-Printer` en retient une partie
@@ -842,7 +842,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   │   ├── <a href="scripts/Device/Printer/readme.fr.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← imprimantes, paramètres (JSON) et pilotes de cette machine dans un zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← pilotes d'imprimante (depuis GitHub) + imprimantes depuis un fichier JSON
-    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← un groupe Entra ID par imprimante depuis une matrice imprimantes x utilisateurs
+    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← un groupe AD ou Entra ID par imprimante depuis une matrice imprimantes x utilisateurs
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← chaque champ et chaque source de pilote
     │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.fr.md">readme.md</a>
@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-27 (5)
+| Modification |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) crée aussi les groupes dans **Active Directory** (`-Directory AD`, avec `-OU`), pour que l'impression passe par des groupes dans un environnement hybride. Les utilisateurs s'y connectent avec leur compte AD et le jeton ne porte que des groupes AD, donc les groupes Entra ID qu'il créait jusqu'ici auraient bloqué tout le monde. En mode AD, les groupes arrivent dans `printers.json` sous la forme `DOMAINE\SG-U-PRINTM-...`, créés dans une OU qu'Entra Connect synchronise pour qu'ils existent aussi dans Entra ID ; il fonctionne sous Windows PowerShell 5.1 sur une machine jointe au domaine avec RSAT, utilise partout l'émulateur PDC pour qu'un nouveau groupe soit là quand ses membres sont ajoutés, refuse les noms de groupe au-delà des 64 caractères d'AD, et n'écrit un groupe dans le JSON qu'une fois qu'il existe - sinon Install-Printer refuserait de créer la file. Les utilisateurs peuvent aussi être indiqués comme `DOMAINE\compte`. Le menu demande AD ou Entra |
+| Vérifié : contrôle de syntaxe ; Windows PowerShell 5.1 avec les cmdlets AD simulées sur la vraie matrice 19 x 12 et le vrai export - aperçu, `-Apply` sans `-OU` qui s'arrête avant toute modification, `-Apply` avec une OU qui crée 19 groupes et ajoute les membres, un groupe existant avec un membre non coché laissé en place, et le JSON écrit avec `BVLBVBA\SG-U-PRINTM-...` par file et les entrées `manage` conservées ; ce JSON passe la validation d'Install-Printer. Mode Entra relancé avec Graph simulé sous PowerShell 7, et refusé avec un message clair sous 5.1. **Non** vérifié sur un vrai domaine |
 ### 2026-10-27 (4)
 | Modification |
 |--------|

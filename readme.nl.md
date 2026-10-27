@@ -194,7 +194,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — een multi-session-image / AVD-hosts klaarmaken voor Teams, Outlook en Copilot met FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot, Knipprogramma en Foto's testen met de IT-accounts, herstellen, melden aan n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook, Copilot, Knipprogramma en Foto's gebeurde, en wat de watchdog deed |
-| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers van GitHub + printers vanuit een JSON-bestand) of [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (printers, instellingen en drivers van deze machine naar een zip) of [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (één Entra ID-groep per printer) |
+| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers van GitHub + printers vanuit een JSON-bestand) of [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (printers, instellingen en drivers van deze machine naar een zip) of [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (één AD- of Entra ID-groep per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules die scripts laden maar die niet in `RequiredModules.psd1` staan |
@@ -632,7 +632,7 @@ Twee scripts die de vluchtige tijdelijke schijf (`D:`) van een Azure-VM of AVD-s
 | Script | Doel |
 |---|---|
 | [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | De printers van een machine exporteren - instellingen als JSON-bestand, drivers, volledige printtickets - naar één zip in `C:\Temp`, klaar voor `Install-Printer.ps1` |
-| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | Eén Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`) vanuit een printer x gebruiker-matrix, en de groeps-SID's als rechten in `printers.json` |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | Eén AD- of Entra ID-beveiligingsgroep per printer (`SG-U-PRINTM-<printer>`) vanuit een printer x gebruiker-matrix, en de groeps-SID's als rechten in `printers.json` |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Printerdrivers (gedownload van GitHub) en printers installeren zoals beschreven in een JSON-bestand |
 
 - Eén JSON zegt welke drivers er zijn, waar elk vandaan komt — een GitHub-release-asset, een map in een GitHub-repository, een willekeurige https-URL of een share — en welke TCP/IP-printers ze gebruiken. `-Printer` kiest een deel ervan
@@ -842,7 +842,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   │   ├── <a href="scripts/Device/Printer/readme.nl.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← printers, instellingen (JSON) en drivers van deze machine naar een zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printerdrivers (van GitHub) + printers vanuit een JSON-bestand
-    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← één Entra ID-groep per printer vanuit een printer x gebruiker-matrix
+    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← één AD- of Entra ID-groep per printer vanuit een printer x gebruiker-matrix
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← elk veld en elke driverbron
     │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.nl.md">readme.md</a>
@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (5)
+| Wijziging |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) maakt de groepen ook in **Active Directory** aan (`-Directory AD`, met `-OU`), zodat afdrukken in een hybride omgeving via groepen kan lopen. Daar melden gebruikers aan met hun AD-account en bevat het token alleen AD-groepen, dus de Entra ID-groepen die het tot nu toe maakte zouden iedereen van de wachtrijen hebben buitengesloten. In AD-modus komen de groepen in `printers.json` als `DOMEIN\SG-U-PRINTM-...`, aangemaakt in een OU die Entra Connect synchroniseert zodat ze ook in Entra ID bestaan; het draait in Windows PowerShell 5.1 op een domain-joined machine met RSAT, gebruikt overal de PDC-emulator zodat een nieuwe groep er is wanneer de leden worden toegevoegd, weigert groepsnamen boven de 64 tekens van AD, en schrijft een groep pas in de JSON als hij bestaat - anders weigert Install-Printer de wachtrij aan te maken. Gebruikers mogen ook als `DOMEIN\account` opgegeven worden. Het menu vraagt AD of Entra |
+| Geverifieerd: syntaxcontrole; Windows PowerShell 5.1 met de AD-cmdlets nagebootst tegen de echte matrix van 19 x 12 en de echte export - voorbeeld, `-Apply` zonder `-OU` dat stopt voor er iets verandert, `-Apply` met een OU dat 19 groepen aanmaakt en de leden toevoegt, een bestaande groep met een niet-aangevinkt lid met rust gelaten, en de JSON geschreven met `BVLBVBA\SG-U-PRINTM-...` per wachtrij en met behoud van `manage`-vermeldingen; die JSON komt door de validatie van Install-Printer. Entra-modus opnieuw gedraaid met Graph nagebootst op PowerShell 7, en met een duidelijke melding geweigerd op 5.1. **Niet** geverifieerd tegen een echt domein |
 ### 2026-10-27 (4)
 | Wijziging |
 |--------|

@@ -18,7 +18,7 @@ Built to run unattended after a golden image has provisioned a new server or ses
 |--------|-------------|
 | [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | Export the printers of a machine - settings as a JSON file, drivers, full print tickets - to one zip in `C:\Temp`, ready for `Install-Printer.ps1` on another one |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
-| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | One Entra ID security group per printer (`SG-U-PRINTM-<printer>`) from a printer x user matrix, members added, and the group SIDs written into `printers.json` as permissions |
+| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | One AD or Entra ID security group per printer (`SG-U-PRINTM-<printer>`) from a printer x user matrix, members added, and the group SIDs written into `printers.json` as permissions |
 
 ## Files
 
@@ -290,35 +290,46 @@ On the target machine: unpack the zip and run `.\Install-Printer.ps1 -ConfigPath
 
 ### New-PrinterGroup.ps1
 
-Turns a printer x user matrix - as copied out of Excel - into one Entra ID security group per printer, named `<Prefix><printer name>` with spaces removed (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), and adds the ticked users. With `-ConfigPath` it writes each group into that printer's entry in `printers.json` as `"permissions": [ { "principal": "<group SID>", "access": "print" } ]`, ready for `Install-Printer.ps1`. Preview by default; `-Apply` changes the tenant and the file.
+Turns a printer x user matrix - as copied out of Excel - into one security group per printer, in **Active Directory** or **Entra ID**, named `<Prefix><printer name>` with spaces removed (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), and adds the ticked users. With `-ConfigPath` it writes each group into that printer's entry in `printers.json` as `"permissions": [ { "principal": <the group>, "access": "print" } ]`, so `Install-Printer.ps1` lets that group print and takes printing away from Everyone; `manage` entries are kept. Preview by default; `-Apply` changes the directory and the file.
 
-The matrix: first column the printer names, header row the users (display name or UPN), any non-empty cell (`x`) means access. Tab, semicolon or comma separated; a header without the empty top-left cell, as Excel copies it, is fine. `Name (DEPARTMENT)` also matches the display name `Name`. A name that matches no user, or several, is reported and left out - put the UPN in the header instead.
+**AD or Entra ID** - a printer ACL is checked against the user's Windows sign-in token, so the group must be one that token carries:
+
+| | Users sign in with | Groups | In `printers.json` |
+|---|---|---|---|
+| `-Directory AD` | an AD account: domain-joined or hybrid-joined server or session host, classic print server | created in `-OU` - pick one Entra Connect synchronises and they appear in Entra ID too | `DOMAIN\SG-U-PRINTM-...` |
+| `-Directory Entra` | an Entra ID account on an Entra-joined device | cloud groups | their SID `S-1-12-1-...`, computed from the object id |
+
+In a hybrid environment that is `-Directory AD`: a cloud group never reaches the token of an AD sign-in, and the queue would refuse everyone. `-Directory Entra` warns when the matrix users are synced from AD. Either way a new member gets access at their next sign-in.
+
+The matrix: first column the printer names, header row the users (display name, UPN, or `DOMAIN\account` for AD), any non-empty cell (`x`) means access. Tab, semicolon or comma separated; a header without the empty top-left cell, as Excel copies it, is fine. `Name (DEPARTMENT)` also matches the display name `Name`. A name that matches no user, or several, is reported and left out.
 
 **Parameters**
 
 | Parameter | Description |
 |-----------|-------------|
 | `-MatrixPath` | The matrix file |
-| `-Prefix` | Group name prefix (default: `SG-U-PRINTM-`) |
-| `-ConfigPath` | `printers.json` to write the permissions into. Existing `manage`/`manageDocuments` entries are kept, `Everyone` and other `print` entries replaced; a `.bak` is written first |
+| `-Directory` | `AD` or `Entra` (default) |
+| `-OU` | AD: distinguished name of the OU for new groups. Required as soon as a group has to be created |
+| `-Prefix` | Group name prefix (default: `SG-U-PRINTM-`). AD caps a group name at 64 characters; longer ones stop the run before anything changes |
+| `-ConfigPath` | `printers.json` to write the permissions into. `manage`/`manageDocuments` entries are kept, `Everyone` and other `print` entries replaced; a `.bak` is written first. A group is only written once it exists - Install-Printer refuses to create a queue whose group does not resolve |
 | `-RemoveExtraMembers` | Also remove group members the matrix does not tick (default: reported, left alone) |
-| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Sign-in, through `Connect-M365.ps1` as in the other Entra scripts |
+| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Entra: sign-in, through `Connect-M365.ps1` as in the other Entra scripts |
 | `-Apply` | Create groups, change members, write the JSON. Without it: report only |
 
 **Examples**
 
 ```powershell
-# What would be created and added
-.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv
+# Hybrid / on-premises: what would be created in AD
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -Directory AD
 
-# Create the groups and write their SIDs into an exported printers.json
-.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv -ConfigPath C:\Temp\export\printers.json -Apply
+# Create the AD groups and make them the queues' print permission
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -Directory AD -OU 'OU=Printers,OU=Groups,DC=contoso,DC=local' -ConfigPath .\printers.json -Apply
+
+# Entra-joined devices: cloud groups
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -TenantId contoso.com -ConfigPath .\printers.json -Apply
 ```
 
 **Notes**
-- **An Entra ID group only works in a printer ACL when the user's Windows token carries it**: an Entra ID account signing in to an Entra-joined device (Entra-joined AVD session hosts included), from the next sign-in after being added. A user signing in with an Active Directory account (domain-joined or hybrid server, a classic print server) has AD groups in the token, never cloud groups - the queue then refuses everyone but the administrators. Use AD groups (`DOMAIN\Group`) there
-- The SID is computed from the group's object id (`S-1-12-1-` + the GUID as four 32-bit numbers), the form Windows uses for Entra ID groups
-- **Tenant**: without `-TenantId` the run uses the GDAP customer, else the tenant you sign in to - or the one an existing Graph session in that window is already in. It names the tenant first, and `-Apply` asks before creating anything there (`-Confirm:$false` skips that question). Pass `-TenantId <domain>` to be sure
-- **Hybrid**: users synced from Active Directory sign in to domain-joined or hybrid-joined machines with their AD account, and that token never holds a cloud group. The run warns when the resolved users are synced; for those machines create the groups in AD (synced to Entra ID) and use `DOMAIN\Group` as the principal
-- Keep the matrix out of this repository: it names real people. `C:\Temp` is a fine place for it
-- Required scopes: `Group.ReadWrite.All`, `User.Read.All`
+- **Where**: the run names the target first - the AD domain and the domain controller it uses (the PDC emulator, so a group created a moment ago is there when members are added), or the Entra tenant - and `-Apply` asks before creating anything (`-Confirm:$false` skips that). Without `-TenantId` Entra uses the GDAP customer, else the tenant you sign in to, or one an existing Graph session in that window is already in
+- `-Directory AD` needs the ActiveDirectory module (RSAT) on a domain-joined machine and runs in Windows PowerShell 5.1; `-Directory Entra` needs PowerShell 7 and Microsoft Graph (`Group.ReadWrite.All`, `User.Read.All`)
+- Keep the matrix out of this repository: it names real people. The gitignored `local/` folder is a fine place for it

@@ -194,7 +194,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
-| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) or [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (one Entra ID group per printer) |
+| `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) or [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (one AD or Entra ID group per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
 | `Z` | Startup | [Test-RequiredModules](scripts/Startup/Test-RequiredModules.ps1) — modules scripts load that `RequiredModules.psd1` does not list |
@@ -632,7 +632,7 @@ Two scripts that keep the ephemeral temp disk (`D:`) of an Azure VM or AVD sessi
 | Script | Doel |
 |---|---|
 | [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) | Export the printers of a machine - settings as a JSON file, drivers, full print tickets - to one zip in `C:\Temp`, ready for `Install-Printer.ps1` |
-| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | One Entra ID security group per printer (`SG-U-PRINTM-<printer>`) from a printer x user matrix, and the group SIDs into `printers.json` as permissions |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) | One AD or Entra ID security group per printer (`SG-U-PRINTM-<printer>`) from a printer x user matrix, and the group SIDs into `printers.json` as permissions |
 | [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) | Install printer drivers (downloaded from GitHub) and printers as described in a JSON file |
 
 - One JSON says which drivers exist, where each is downloaded from — a GitHub release asset, a folder in a GitHub repository, any https URL or a share — and which TCP/IP printers use them. `-Printer` picks a subset
@@ -842,7 +842,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   │   ├── <a href="scripts/Device/Printer/readme.md">readme.md</a>
     │   │   ├── <a href="scripts/Device/Printer/Export-Printer.ps1">Export-Printer.ps1</a>             ← this machine's printers, settings (JSON) and drivers to a zip
     │   │   ├── <a href="scripts/Device/Printer/Install-Printer.ps1">Install-Printer.ps1</a>            ← printer drivers (from GitHub) + printers from a JSON file
-    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← one Entra ID group per printer from a printer x user matrix
+    │   │   ├── <a href="scripts/Device/Printer/New-PrinterGroup.ps1">New-PrinterGroup.ps1</a>           ← one AD or Entra ID group per printer from a printer x user matrix
     │   │   └── <a href="scripts/Device/Printer/printers.example.json">printers.example.json</a>          ← every field and every driver source
     │   ├── <a href="scripts/Device/TempDisk/readme.md">TempDisk/</a>
     │   │   ├── <a href="scripts/Device/TempDisk/readme.md">readme.md</a>
@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (5)
+| Change |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) creates the groups in **Active Directory** as well (`-Directory AD`, with `-OU`), so printing can run through groups in a hybrid environment. There users sign in with their AD account and the token carries AD groups only, so the Entra ID groups it made until now would have locked everyone out of the queues. In AD mode the groups land in `printers.json` as `DOMAIN\SG-U-PRINTM-...`, created in an OU Entra Connect synchronises so they exist in Entra ID too; it runs in Windows PowerShell 5.1 on a domain-joined machine with RSAT, uses the PDC emulator throughout so a new group is there when its members are added, refuses group names over AD's 64 characters, and only writes a group into the JSON once it exists - Install-Printer would otherwise refuse to create the queue. Users may also be named `DOMAIN\account`. The menu asks AD or Entra |
+| Verified: syntax check; Windows PowerShell 5.1 with the AD cmdlets mocked against the real 19 x 12 matrix and the real export - preview, `-Apply` without `-OU` stopping before any change, `-Apply` with an OU creating 19 groups and adding the members, an existing group with an unticked member left alone, and the JSON written with `BVLBVBA\SG-U-PRINTM-...` per queue and `manage` entries kept; that JSON passes Install-Printer's validation. Entra mode re-run with Graph mocked on PowerShell 7, and refused with a clear message on 5.1. **Not** verified against a real domain |
 ### 2026-10-27 (4)
 | Change |
 |--------|

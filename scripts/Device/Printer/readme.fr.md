@@ -18,7 +18,7 @@ Conçu pour s'exécuter sans surveillance après qu'une image de référence (go
 |--------|-------------|
 | [`Export-Printer.ps1`](Export-Printer.ps1) ([docs](#export-printerps1)) | Exporter les imprimantes d'une machine - paramètres en fichier JSON, pilotes, tickets d'impression complets - dans un zip dans `C:\Temp`, prêt pour `Install-Printer.ps1` sur une autre |
 | [`Install-Printer.ps1`](Install-Printer.ps1) ([docs](#install-printerps1)) | Installer des pilotes d'imprimante (téléchargés depuis GitHub) et des imprimantes décrits dans un fichier JSON |
-| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | Un groupe de sécurité Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`) à partir d'une matrice imprimantes x utilisateurs, membres ajoutés, et les SID des groupes écrits comme autorisations dans `printers.json` |
+| [`New-PrinterGroup.ps1`](New-PrinterGroup.ps1) ([docs](#new-printergroupps1)) | Un groupe de sécurité AD ou Entra ID par imprimante (`SG-U-PRINTM-<imprimante>`) à partir d'une matrice imprimantes x utilisateurs, membres ajoutés, et les SID des groupes écrits comme autorisations dans `printers.json` |
 
 ## Fichiers
 
@@ -290,35 +290,46 @@ Sur la machine cible : décompresser le zip et lancer `.\Install-Printer.ps1 -Co
 
 ### New-PrinterGroup.ps1
 
-Transforme une matrice imprimantes x utilisateurs - copiée depuis Excel - en un groupe de sécurité Entra ID par imprimante, nommé `<Prefix><nom de l'imprimante>` sans espaces (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), et y ajoute les utilisateurs cochés. Avec `-ConfigPath`, il écrit chaque groupe dans l'entrée de cette imprimante dans `printers.json` sous la forme `"permissions": [ { "principal": "<SID du groupe>", "access": "print" } ]`, prêt pour `Install-Printer.ps1`. Aperçu par défaut ; `-Apply` modifie le tenant et le fichier.
+Transforme une matrice imprimantes x utilisateurs - copiée depuis Excel - en un groupe de sécurité par imprimante, dans **Active Directory** ou **Entra ID**, nommé `<Prefix><nom de l'imprimante>` sans espaces (`Office - Duplex` → `SG-U-PRINTM-Office-Duplex`), et y ajoute les utilisateurs cochés. Avec `-ConfigPath`, il écrit chaque groupe dans l'entrée de cette imprimante dans `printers.json` sous la forme `"permissions": [ { "principal": <le groupe>, "access": "print" } ]`, si bien qu'`Install-Printer.ps1` autorise ce groupe à imprimer et retire ce droit à Everyone ; les entrées `manage` sont conservées. Aperçu par défaut ; `-Apply` modifie l'annuaire et le fichier.
 
-La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utilisateurs (nom d'affichage ou UPN), toute cellule non vide (`x`) signifie un accès. Séparée par tabulation, point-virgule ou virgule ; un en-tête sans la cellule vide en haut à gauche, comme Excel le copie, convient. `Nom (SERVICE)` correspond aussi au nom d'affichage `Nom`. Un nom qui ne correspond à aucun utilisateur, ou à plusieurs, est signalé et ignoré - mettez alors l'UPN dans l'en-tête.
+**AD ou Entra ID** - une ACL d'imprimante est vérifiée contre le jeton de connexion Windows de l'utilisateur, le groupe doit donc être l'un de ceux que ce jeton contient :
+
+| | Les utilisateurs se connectent avec | Groupes | Dans `printers.json` |
+|---|---|---|---|
+| `-Directory AD` | un compte AD : serveur ou hôte de session joint au domaine ou hybride, serveur d'impression classique | créés dans `-OU` - choisissez-en une qu'Entra Connect synchronise, ils apparaissent aussi dans Entra ID | `DOMAINE\SG-U-PRINTM-...` |
+| `-Directory Entra` | un compte Entra ID sur un appareil joint à Entra | groupes cloud | leur SID `S-1-12-1-...`, calculé à partir de l'ID d'objet |
+
+Dans un environnement hybride, c'est `-Directory AD` : un groupe cloud n'atteint jamais le jeton d'une connexion AD, et la file refuserait tout le monde. `-Directory Entra` avertit quand les utilisateurs de la matrice sont synchronisés depuis AD. Dans les deux cas, un nouveau membre obtient l'accès à sa prochaine connexion.
+
+La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utilisateurs (nom d'affichage, UPN, ou `DOMAINE\compte` pour AD), toute cellule non vide (`x`) signifie un accès. Séparée par tabulation, point-virgule ou virgule ; un en-tête sans la cellule vide en haut à gauche, comme Excel le copie, convient. `Nom (SERVICE)` correspond aussi au nom d'affichage `Nom`. Un nom qui ne correspond à aucun utilisateur, ou à plusieurs, est signalé et ignoré.
 
 **Paramètres**
 
 | Paramètre | Description |
 |-----------|-------------|
 | `-MatrixPath` | Le fichier de matrice |
-| `-Prefix` | Préfixe des noms de groupe (par défaut : `SG-U-PRINTM-`) |
-| `-ConfigPath` | `printers.json` dans lequel écrire les autorisations. Les entrées `manage`/`manageDocuments` existantes sont conservées, `Everyone` et les autres entrées `print` remplacées ; un `.bak` est écrit d'abord |
+| `-Directory` | `AD` ou `Entra` (par défaut) |
+| `-OU` | AD : nom distinctif de l'OU des nouveaux groupes. Obligatoire dès qu'un groupe doit être créé |
+| `-Prefix` | Préfixe des noms de groupe (par défaut : `SG-U-PRINTM-`). AD limite un nom de groupe à 64 caractères ; un nom plus long arrête l'exécution avant toute modification |
+| `-ConfigPath` | `printers.json` dans lequel écrire les autorisations. Les entrées `manage`/`manageDocuments` sont conservées, `Everyone` et les autres entrées `print` remplacées ; un `.bak` est écrit d'abord. Un groupe n'est écrit qu'une fois qu'il existe - Install-Printer refuse de créer une file dont le groupe ne se résout pas |
 | `-RemoveExtraMembers` | Retirer aussi les membres que la matrice ne coche pas (par défaut : signalés, laissés en place) |
-| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Connexion, via `Connect-M365.ps1` comme dans les autres scripts Entra |
+| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Entra : connexion, via `Connect-M365.ps1` comme dans les autres scripts Entra |
 | `-Apply` | Créer les groupes, modifier les membres, écrire le JSON. Sans : rapport uniquement |
 
 **Exemples**
 
 ```powershell
-# Ce qui serait créé et ajouté
-.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv
+# Hybride / sur site : ce qui serait créé dans AD
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -Directory AD
 
-# Créer les groupes et écrire leurs SID dans un printers.json exporté
-.\New-PrinterGroup.ps1 -MatrixPath C:\Temp\printer-matrix.tsv -ConfigPath C:\Temp\export\printers.json -Apply
+# Créer les groupes AD et en faire le droit d'impression des files
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -Directory AD -OU 'OU=Printers,OU=Groups,DC=contoso,DC=local' -ConfigPath .\printers.json -Apply
+
+# Appareils joints à Entra : groupes cloud
+.\New-PrinterGroup.ps1 -MatrixPath .\printer-matrix.tsv -TenantId contoso.com -ConfigPath .\printers.json -Apply
 ```
 
 **Remarques**
-- **Un groupe Entra ID ne fonctionne dans une ACL d'imprimante que si le jeton Windows de l'utilisateur le contient** : un compte Entra ID qui se connecte à un appareil joint à Entra (hôtes de session AVD joints à Entra inclus), à partir de la connexion suivant l'ajout. Un utilisateur qui se connecte avec un compte Active Directory (serveur joint au domaine ou hybride, serveur d'impression classique) a des groupes AD dans son jeton, jamais des groupes cloud - la file refuse alors tout le monde sauf les administrateurs. Utilisez-y des groupes AD (`DOMAINE\Groupe`)
-- Le SID est calculé à partir de l'ID d'objet du groupe (`S-1-12-1-` + le GUID en quatre nombres de 32 bits), la forme que Windows utilise pour les groupes Entra ID
-- **Tenant** : sans `-TenantId`, l'exécution utilise le client GDAP, sinon le tenant auquel vous vous connectez - ou celui d'une session Graph déjà ouverte dans cette fenêtre. Elle nomme d'abord le tenant, et `-Apply` demande confirmation avant de créer quoi que ce soit (`-Confirm:$false` saute cette question). Passez `-TenantId <domaine>` pour en être sûr
-- **Hybride** : les utilisateurs synchronisés depuis Active Directory se connectent aux machines jointes au domaine ou hybrides avec leur compte AD, et ce jeton ne contient jamais de groupe cloud. L'exécution avertit quand les utilisateurs trouvés sont synchronisés ; pour ces machines, créez les groupes dans AD (synchronisés vers Entra ID) et utilisez `DOMAINE\Groupe` comme principal
-- Gardez la matrice hors de ce dépôt : elle nomme de vraies personnes. `C:\Temp` convient très bien
-- Scopes requis : `Group.ReadWrite.All`, `User.Read.All`
+- **Où** : l'exécution nomme d'abord la cible - le domaine AD et le contrôleur de domaine utilisé (l'émulateur PDC, pour qu'un groupe tout juste créé soit là quand les membres sont ajoutés), ou le tenant Entra - et `-Apply` demande confirmation avant toute création (`-Confirm:$false` saute cette question). Sans `-TenantId`, Entra utilise le client GDAP, sinon le tenant auquel vous vous connectez, ou celui d'une session Graph déjà ouverte dans cette fenêtre
+- `-Directory AD` nécessite le module ActiveDirectory (RSAT) sur une machine jointe au domaine et fonctionne sous Windows PowerShell 5.1 ; `-Directory Entra` nécessite PowerShell 7 et Microsoft Graph (`Group.ReadWrite.All`, `User.Read.All`)
+- Gardez la matrice hors de ce dépôt : elle nomme de vraies personnes. Le dossier `local/`, ignoré par git, convient très bien

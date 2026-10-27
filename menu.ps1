@@ -167,10 +167,18 @@ $PrinterSubmenu = @(
         if ($drv -match '^[Nn]') { $a['NoDriver'] = $true }
         & "$ROOT\scripts\Device\Printer\Export-Printer.ps1" @a
     }}
-    @{ Key='3'; Label='New-PrinterGroup    — one Entra ID group per printer (SG-U-PRINTM-<printer>) from a printer x user matrix'; Action={
+    @{ Key='3'; Label='New-PrinterGroup    — one AD or Entra ID group per printer (SG-U-PRINTM-<printer>) from a printer x user matrix'; Action={
         $a = @{ MatrixPath = (Read-Host "  Matrix file (tab/; separated, printers x users)") }
-        $tenant = Read-Host "  Tenant (domain or id; empty = the current/GDAP tenant, shown before anything changes)"
-        if ($tenant) { $a['TenantId'] = $tenant }
+        $dir = Read-Host "  AD groups (domain-joined/hybrid, users sign in with AD) or Entra (Entra-joined)? [AD/entra]"
+        if ($dir -match '^[Ee]') {
+            $a['Directory'] = 'Entra'
+            $tenant = Read-Host "  Tenant (domain or id; empty = the current/GDAP tenant, shown before anything changes)"
+            if ($tenant) { $a['TenantId'] = $tenant }
+        } else {
+            $a['Directory'] = 'AD'
+            $ou = Read-Host "  OU for new groups, in Entra Connect's sync scope (empty = preview only)"
+            if ($ou) { $a['OU'] = $ou }
+        }
         $cfg = Read-Host "  printers.json to write the group permissions into (empty = none)"
         if ($cfg) { $a['ConfigPath'] = $cfg }
         $apply = Read-Host "  Create the groups now (not just preview)? [y/N]"
