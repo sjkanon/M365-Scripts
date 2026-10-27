@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-27 (9)
+| Change |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): new `-ClearOrphanedWebRtcRegistration` (off by default, NinjaOne variable `clearOrphanedWebRtcRegistration`). On the session host from entry (8) the retry found no cached copy of WebRTC Redirector 1.33.2302.07001 either, so nothing supported could remove it and 1.56.2603.20001 could not go in. The switch stops and deletes the `RDWebRTCSvc` service and clears the product's Windows Installer registration, after which the new MSI installs clean. The registration cleanup the meeting add-in already had is now the shared `Remove-MsiProductRegistration` |
+| Verified: syntax check; the service name, install folder and custom actions read from the 1.56.2603.20001 MSI (one service, one exe, nothing that needs the old product); `ShouldProcess` from the helper honours `-WhatIf`. **Not** verified on the affected session host: the cleanup and the install after it |
+
 ### 2026-10-27 (8)
 | Change |
 |--------|

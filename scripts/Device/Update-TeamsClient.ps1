@@ -52,8 +52,11 @@
     Service from https://aka.ms/msrdcwebrtcsvc/msi. Both are installed only when
     missing, so a scheduled run on a session host costs no extra download - which also
     means an already installed redirector is not silently upgraded; -Force is what
-    replaces it (older version removed first, because its MSI keeps one ProductCode
-    across versions and plain /i then answers 1638). Without the switch the script
+    replaces it (older version removed first: older MSIs kept one ProductCode across
+    versions and plain /i then answered 1638, and removing first shows whether the old
+    one can come off before anything is installed). An old version Windows Installer
+    can no longer uninstall (1612, cached MSI gone) is left in place without stopping
+    the Teams update; -ClearOrphanedWebRtcRegistration clears it. Without the switch the script
     only points out that the device looks like a session host.
 
     WebRTC is being retired: end of support 1 October 2026, end of availability
@@ -236,7 +239,8 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
       - Script variables arrive as environment variables, so checkboxes named whatIf,
         quiet, checkOnly, force, avdOptimizations, removeClassicTeams, repairOutlookAddIn,
         skipMeetingAddIn, skipSignatureCheck, removeWebRtcRedirector,
-        clearOrphanedAddInRegistration, repairAppxStore, useWinget or useBootstrapperBuild
+        clearOrphanedAddInRegistration, clearOrphanedWebRtcRegistration, repairAppxStore,
+        useWinget or useBootstrapperBuild
         and text fields named workingDir, logPath,
         ring, webRtcUrl or bootstrapperUrl are picked up when the matching parameter
         is not passed.
@@ -282,6 +286,15 @@ All of that happens in step 8, and nothing about the add-in happens before it. T
     Installer\Features and Installer\UserData, its entry under the upgrade code, and
     the Programs and Features entry. Off by default: it edits the Windows Installer
     database, which is a last resort rather than a maintenance step.
+
+.PARAMETER ClearOrphanedWebRtcRegistration
+    The same last resort for the Remote Desktop WebRTC Redirector, when an upgrade
+    finds the old version impossible to uninstall (1612 with its cached MSI gone).
+    Stops and deletes the RDWebRTCSvc service, then removes the product's Windows
+    Installer keys, its upgrade-code entry and the Programs and Features entry, so
+    the new MSI installs as if the old one had never been there. Only acts in that
+    situation and only with -AvdOptimizations. Optimized calls on the host drop for
+    the seconds until the new service starts. Off by default.
 
 .PARAMETER RepairAppxStore
     Repair the AppX package store where it has lost track of MSTeams, so a host that
@@ -426,6 +439,7 @@ param (
     [switch] $RepairOutlookAddIn,
     [switch] $RemoveWebRtcRedirector,
     [switch] $ClearOrphanedAddInRegistration,
+    [switch] $ClearOrphanedWebRtcRegistration,
     [switch] $RepairAppxStore,
     [switch] $UseWinget,
     [switch] $UseBootstrapperBuild,
@@ -535,6 +549,7 @@ if (-not $PSBoundParameters.ContainsKey('RemoveClassicTeams') -and $env:removeCl
 if (-not $PSBoundParameters.ContainsKey('RepairOutlookAddIn') -and $env:repairOutlookAddIn -in $rmmTrue) { $RepairOutlookAddIn = $true }
 if (-not $PSBoundParameters.ContainsKey('RemoveWebRtcRedirector') -and $env:removeWebRtcRedirector -in $rmmTrue) { $RemoveWebRtcRedirector = $true }
 if (-not $PSBoundParameters.ContainsKey('ClearOrphanedAddInRegistration') -and $env:clearOrphanedAddInRegistration -in $rmmTrue) { $ClearOrphanedAddInRegistration = $true }
+if (-not $PSBoundParameters.ContainsKey('ClearOrphanedWebRtcRegistration') -and $env:clearOrphanedWebRtcRegistration -in $rmmTrue) { $ClearOrphanedWebRtcRegistration = $true }
 if (-not $PSBoundParameters.ContainsKey('RepairAppxStore') -and $env:repairAppxStore -in $rmmTrue) { $RepairAppxStore = $true }
 if (-not $PSBoundParameters.ContainsKey('UseWinget')       -and $env:useWinget       -in $rmmTrue) { $UseWinget       = $true }
 if (-not $PSBoundParameters.ContainsKey('UseBootstrapperBuild') -and $env:useBootstrapperBuild -in $rmmTrue) { $UseBootstrapperBuild = $true }
@@ -557,6 +572,7 @@ $simulate         = [bool] $WhatIfPreference
 $teamsExe         = 'teamsbootstrapper.exe'
 $exePath          = Join-Path $WorkingDir $teamsExe
 $webRtcMsi        = Join-Path $WorkingDir 'MsRdcWebRTCSvc_x64.msi'
+$WebRtcServiceName = 'RDWebRTCSvc'
 $exitCode         = 0
 $rebootRequired   = $false
 $transcribing     = $false
@@ -1831,6 +1847,44 @@ function Get-MsiProductRegistration {
                               Keys = @($keys); Values = @($values) }
 }
 
+function Remove-MsiProductRegistration {
+    <#
+        Make Windows Installer forget one product it can no longer uninstall: its
+        product keys, its entry under the upgrade code and its Programs and Features
+        entry. What MsiZap did, scoped to this one product. Returns $false when the
+        product code could not be packed, so nothing was touched.
+    #>
+    param([Parameter(Mandatory)] $Entry)
+
+    $registration = Get-MsiProductRegistration -ProductCode $Entry.ProductCode
+    if (-not $registration) {
+        Write-Warn "Could not work out the packed product code for $($Entry.ProductCode) - leaving the registration alone"
+        return $false
+    }
+
+    foreach ($key in $registration.Keys) {
+        if ($PSCmdlet.ShouldProcess($key, 'Remove the orphaned Windows Installer product key')) {
+            Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $key) { Write-Warn "Could not remove $key" } else { Write-Ok "Removed $key" }
+        }
+    }
+    foreach ($value in $registration.Values) {
+        if ($PSCmdlet.ShouldProcess("$($value.Path)\$($value.Name)", 'Remove the orphaned upgrade-code entry')) {
+            Remove-ItemProperty -Path $value.Path -Name $value.Name -Force -ErrorAction SilentlyContinue
+            Write-Ok "Cleared the upgrade-code entry under $($value.Path)"
+        }
+    }
+    if ($PSCmdlet.ShouldProcess($Entry.RegistryPath, 'Remove the Programs and Features entry')) {
+        Remove-Item -Path $Entry.RegistryPath -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $Entry.RegistryPath) {
+            Write-Warn "Could not remove $($Entry.RegistryPath)"
+        } else {
+            Write-Ok 'Removed the Programs and Features entry'
+        }
+    }
+    return $true
+}
+
 function Get-MsiCachedPackage {
     <#
         Windows Installer's own cached copy of an installed product's MSI, under
@@ -2470,8 +2524,30 @@ try {
                             # install (it would only fail the same way, as 1714) and let
                             # the verification report it.
                             $webRtcStuck = $true
-                            if ($removal.CacheMissing) {
-                                Write-Warn "Could not remove WebRTC Redirector $($webRtcEntry.Version): Windows Installer lost its source (1612) and its cached copy under C:\Windows\Installer is gone too - $($webRtcEntry.Version) stays in place. Uninstall it by hand with the original $($webRtcEntry.Version) MSI (msiexec /x <that msi>) and run again"
+                            if ($removal.CacheMissing -and $ClearOrphanedWebRtcRegistration) {
+                                # The redirector is one service and one exe, so what
+                                # msiexec can no longer do is small enough to do by
+                                # hand: stop and delete the service, forget the product,
+                                # and let the new MSI put both back. Its Upgrade table
+                                # then finds nothing to remove, so 1612 cannot recur.
+                                Write-Warn "Windows Installer cannot uninstall WebRTC Redirector $($webRtcEntry.Version) any more (1612, cached MSI gone) - removing its service and registration so $msiVersion can go in. Optimized calls on this host drop until the new service starts"
+                                $service = Get-Service -Name $WebRtcServiceName -ErrorAction SilentlyContinue
+                                if ($service -and $PSCmdlet.ShouldProcess($WebRtcServiceName, 'Stop and delete the service')) {
+                                    Stop-Service -Name $WebRtcServiceName -Force -ErrorAction SilentlyContinue
+                                    $null = & sc.exe delete $WebRtcServiceName
+                                }
+                                if (Get-Service -Name $WebRtcServiceName -ErrorAction SilentlyContinue) {
+                                    Write-Warn "The $WebRtcServiceName service could not be deleted - $($webRtcEntry.Version) stays in place"
+                                } elseif (Remove-MsiProductRegistration -Entry $webRtcEntry) {
+                                    if (@(Get-WebRtcRedirectorEntry).Count -eq 0) {
+                                        $webRtcStuck = $false
+                                        Write-Ok "WebRTC Redirector $($webRtcEntry.Version) cleared"
+                                    } else {
+                                        Write-Warn 'A WebRTC Redirector registration survived the cleanup - the install is skipped'
+                                    }
+                                }
+                            } elseif ($removal.CacheMissing) {
+                                Write-Warn "Could not remove WebRTC Redirector $($webRtcEntry.Version): Windows Installer lost its source (1612) and its cached copy under C:\Windows\Installer is gone too - $($webRtcEntry.Version) stays in place. -ClearOrphanedWebRtcRegistration removes its service and registration so $msiVersion can go in"
                             } else {
                                 Write-Warn "Could not remove WebRTC Redirector $($webRtcEntry.Version) ($($removal.Message)) - it stays in place and $msiVersion is not installed"
                             }
@@ -2944,32 +3020,10 @@ try {
                             # no longer uninstall itself: forget the registration so
                             # the related-product check stops answering 1638. This is
                             # what MsiZap did, scoped to this one product.
-                            $registration = Get-MsiProductRegistration -ProductCode $entry.ProductCode
-                            if (-not $registration) {
+                            Write-Warn "Windows Installer cannot uninstall $($entry.DisplayName) $($entry.Version) any more (1612, cached MSI gone) - clearing its registration so a reinstall is possible"
+                            if (-not (Remove-MsiProductRegistration -Entry $entry)) {
                                 $addInOrphaned = $true
-                                Write-Warn "Could not work out the packed product code for $($entry.ProductCode) - leaving the registration alone"
                             } else {
-                                Write-Warn "Windows Installer cannot uninstall $($entry.DisplayName) $($entry.Version) any more (1612, cached MSI gone) - clearing its registration so a reinstall is possible"
-                                foreach ($key in $registration.Keys) {
-                                    if ($PSCmdlet.ShouldProcess($key, 'Remove the orphaned Windows Installer product key')) {
-                                        Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
-                                        if (Test-Path $key) { Write-Warn "Could not remove $key" } else { Write-Ok "Removed $key" }
-                                    }
-                                }
-                                foreach ($value in $registration.Values) {
-                                    if ($PSCmdlet.ShouldProcess("$($value.Path)\$($value.Name)", 'Remove the orphaned upgrade-code entry')) {
-                                        Remove-ItemProperty -Path $value.Path -Name $value.Name -Force -ErrorAction SilentlyContinue
-                                        Write-Ok "Cleared the upgrade-code entry under $($value.Path)"
-                                    }
-                                }
-                                if ($PSCmdlet.ShouldProcess($entry.RegistryPath, 'Remove the Programs and Features entry')) {
-                                    Remove-Item -Path $entry.RegistryPath -Recurse -Force -ErrorAction SilentlyContinue
-                                    if (Test-Path $entry.RegistryPath) {
-                                        Write-Warn "Could not remove $($entry.RegistryPath)"
-                                    } else {
-                                        Write-Ok 'Removed the Programs and Features entry'
-                                    }
-                                }
                                 if (@(Get-TeamsMeetingAddInEntry).Count -gt 0) {
                                     $addInOrphaned = $true
                                     Write-Warn 'An add-in registration survived the cleanup - the install will still answer 1638'

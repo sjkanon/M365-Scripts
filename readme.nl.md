@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-27 (9)
+| Wijziging |
+|--------|
+| [`Update-TeamsClient.ps1`](scripts/Device/Update-TeamsClient.ps1): nieuwe `-ClearOrphanedWebRtcRegistration` (standaard uit, NinjaOne-variabele `clearOrphanedWebRtcRegistration`). Op de sessiehost uit item (8) vond de nieuwe poging ook geen gecachte kopie van WebRTC Redirector 1.33.2302.07001, dus niets ondersteunds kon hem verwijderen en 1.56.2603.20001 kon er niet in. De schakelaar stopt en verwijdert de dienst `RDWebRTCSvc` en wist de Windows Installer-registratie van het product, waarna de nieuwe MSI schoon installeert. Het opruimen van de registratie dat de vergaderinvoegtoepassing al had, is nu de gedeelde `Remove-MsiProductRegistration` |
+| Geverifieerd: syntaxcontrole; dienstnaam, installatiemap en custom actions gelezen uit de MSI van 1.56.2603.20001 (één dienst, één exe, niets dat het oude product nodig heeft); `ShouldProcess` vanuit de hulpfunctie respecteert `-WhatIf`. **Niet** geverifieerd op de getroffen sessiehost: het opruimen en de installatie daarna |
+
 ### 2026-10-27 (8)
 | Wijziging |
 |--------|
