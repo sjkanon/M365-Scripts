@@ -148,7 +148,7 @@ A queue can be limited to one or more groups, for example a cheque tray only Fin
 | `-Force` | Reinstall drivers even when the version matches |
 | `-SkipSignatureCheck` | Skip the script's own catalog signature check (Windows still refuses unsigned package drivers) |
 | `-ApplyPermissions` | Apply the JSON's `permissions` (print groups, managers). Without it they are ignored: the printers go in without groups and each queue's ACL is left as it is (Everyone may print) |
-| `-ApplySettings` | Apply each printer's full print ticket (every vendor setting: stapling, finishing, quality, ...) from its `printTicket`, or `settings/<printer>.xml` next to the JSON. First the ticket, then the JSON's duplex/color/paper/tray on top. Applied once per ticket (SHA256 under `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), so later changes by users are not overwritten every run |
+| `-ApplySettings` | Apply each printer's full print ticket (every vendor setting: stapling, finishing, quality, ...) from its `printTicket`, or `settings/<printer>.xml` next to the JSON. First the ticket, then the JSON's duplex/color/paper/tray on top. Applied once per ticket (SHA256 under `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), so later changes by users are not overwritten every run. A ticket the driver refuses is a warning and is not retried until the file changes |
 
 **Examples**
 

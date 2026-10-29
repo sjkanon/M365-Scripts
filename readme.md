@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29 (7)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): fixes from a review of today's changes. An Azure SAS signature no longer ends up in the log, on screen or in the `ConfigPath` registry value (shown as `sig=***`). Drivers, tickets and zips next to a JSON from the GitHub contents API (`api.github.com/.../contents/...`) now download as files instead of their JSON description. `-WhatIf` and `-CheckOnly` unpack a zip config into a temporary folder of their own, so they no longer replace `<WorkingDir>\config` while a real run reads it, and a zip config no longer fails under `-WhatIf`. `-WhatIf -ApplySettings` now shows the ticket step for a new printer. A ticket the driver refuses is marked done, so `-CheckOnly` does not report it as work on every run. A `manage`/`manageDocuments` entry that does not resolve is left out at once instead of after up to 2 minutes of waiting per printer |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1): `-TenantId` given as a domain now matches an existing Graph session of that tenant, and a session without `Group.ReadWrite.All`/`User.Read.All` is not reused but signed in again with them |
+| Verified: syntax and PSScriptAnalyzer; in PowerShell 7 and 5.1 `-WhatIf` runs (folder and zip config, with `-ApplyPermissions -ApplySettings`) and `-CheckOnly` against a real GitHub URL with the signature masked; the earlier URL/ticket tests; New-PrinterGroup's sign-in with mocked Graph (session reused, same tenant by domain, other tenant, missing scopes, GDAP). **Not** verified: a real (elevated) install, applying a ticket, the GitHub contents API with a token |
 ### 2026-10-29 (6)
 | Change |
 |--------|

@@ -148,7 +148,7 @@ Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade
 | `-Force` | Drivers opnieuw installeren, ook als de versie klopt |
 | `-SkipSignatureCheck` | De eigen handtekeningcontrole van de catalogus overslaan (Windows weigert niet-ondertekende pakketdrivers nog steeds) |
 | `-ApplyPermissions` | De `permissions` uit de JSON toepassen (printgroepen, beheerders). Zonder deze schakelaar worden ze genegeerd: de printers gaan erin zonder groepen en de ACL van elke wachtrij blijft zoals hij is (Iedereen mag printen) |
-| `-ApplySettings` | Het volledige printticket van elke printer toepassen (elke fabrikantinstelling: nieten, afwerking, kwaliteit, ...) uit zijn `printTicket`, of `settings/<printer>.xml` naast de JSON. Eerst het ticket, daarna dubbelzijdig/kleur/papier/lade uit de JSON eroverheen. Eén keer per ticket toegepast (SHA256 onder `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), zodat latere wijzigingen van gebruikers niet elke run worden overschreven |
+| `-ApplySettings` | Het volledige printticket van elke printer toepassen (elke fabrikantinstelling: nieten, afwerking, kwaliteit, ...) uit zijn `printTicket`, of `settings/<printer>.xml` naast de JSON. Eerst het ticket, daarna dubbelzijdig/kleur/papier/lade uit de JSON eroverheen. Eén keer per ticket toegepast (SHA256 onder `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), zodat latere wijzigingen van gebruikers niet elke run worden overschreven. Een ticket dat de driver weigert geeft een waarschuwing en wordt pas opnieuw geprobeerd als het bestand wijzigt |
 
 **Voorbeelden**
 

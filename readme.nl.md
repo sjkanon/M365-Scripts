@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29 (7)
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): fixes na een review van de wijzigingen van vandaag. Een Azure SAS-handtekening komt niet meer in de log, op het scherm of in de registerwaarde `ConfigPath` (getoond als `sig=***`). Drivers, tickets en zips naast een JSON uit de GitHub contents API (`api.github.com/.../contents/...`) worden nu als bestand gedownload in plaats van hun JSON-beschrijving. `-WhatIf` en `-CheckOnly` pakken een zip-config uit in een eigen tijdelijke map, zodat ze `<WorkingDir>\config` niet meer vervangen terwijl een echte run die leest, en een zip-config faalt niet meer onder `-WhatIf`. `-WhatIf -ApplySettings` toont nu de ticketstap voor een nieuwe printer. Een ticket dat de driver weigert wordt als gedaan gemarkeerd, zodat `-CheckOnly` het niet elke run als werk meldt. Een `manage`/`manageDocuments`-regel die niet resolvet wordt meteen weggelaten in plaats van na tot 2 minuten wachten per printer |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1): `-TenantId` als domein herkent nu een bestaande Graph-sessie van die tenant, en een sessie zonder `Group.ReadWrite.All`/`User.Read.All` wordt niet hergebruikt maar opnieuw aangemeld met die scopes |
+| Geverifieerd: syntax en PSScriptAnalyzer; in PowerShell 7 en 5.1 `-WhatIf`-runs (map- en zip-config, met `-ApplyPermissions -ApplySettings`) en `-CheckOnly` tegen een echte GitHub-URL met gemaskeerde handtekening; de eerdere URL-/tickettests; het aanmelden van New-PrinterGroup met gemockte Graph (sessie hergebruikt, zelfde tenant via domein, andere tenant, ontbrekende scopes, GDAP). **Niet** geverifieerd: een echte (verhoogde) installatie, het toepassen van een ticket, de GitHub contents API met een token |
 ### 2026-10-29 (6)
 | Wijziging |
 |--------|

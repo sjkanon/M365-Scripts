@@ -148,7 +148,7 @@ Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à
 | `-Force` | Réinstaller les pilotes même si la version correspond |
 | `-SkipSignatureCheck` | Ignorer la vérification de signature du catalogue faite par le script (Windows refuse toujours les pilotes de paquet non signés) |
 | `-ApplyPermissions` | Appliquer les `permissions` du JSON (groupes d'impression, gestionnaires). Sans lui, elles sont ignorées : les imprimantes sont installées sans groupes et l'ACL de chaque file reste telle quelle (Tout le monde peut imprimer) |
-| `-ApplySettings` | Appliquer le ticket d'impression complet de chaque imprimante (chaque paramètre du fabricant : agrafage, finition, qualité, ...) depuis son `printTicket`, ou `settings/<imprimante>.xml` à côté du JSON. D'abord le ticket, puis recto verso/couleur/papier/bac du JSON par-dessus. Appliqué une fois par ticket (SHA256 sous `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), pour que les modifications ultérieures des utilisateurs ne soient pas écrasées à chaque exécution |
+| `-ApplySettings` | Appliquer le ticket d'impression complet de chaque imprimante (chaque paramètre du fabricant : agrafage, finition, qualité, ...) depuis son `printTicket`, ou `settings/<imprimante>.xml` à côté du JSON. D'abord le ticket, puis recto verso/couleur/papier/bac du JSON par-dessus. Appliqué une fois par ticket (SHA256 sous `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), pour que les modifications ultérieures des utilisateurs ne soient pas écrasées à chaque exécution. Un ticket refusé par le pilote donne un avertissement et n'est réessayé que si le fichier change |
 
 **Exemples**
 

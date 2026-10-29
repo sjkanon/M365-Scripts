@@ -1015,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29 (7)
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) : corrections suite à une revue des modifications du jour. Une signature SAS Azure n'apparaît plus dans le journal, à l'écran ni dans la valeur de registre `ConfigPath` (affichée `sig=***`). Les pilotes, tickets et zips à côté d'un JSON de l'API contents de GitHub (`api.github.com/.../contents/...`) sont désormais téléchargés comme fichiers et non comme leur description JSON. `-WhatIf` et `-CheckOnly` décompressent une configuration zip dans leur propre dossier temporaire : ils ne remplacent plus `<WorkingDir>\config` pendant qu'une vraie exécution le lit, et une configuration zip n'échoue plus sous `-WhatIf`. `-WhatIf -ApplySettings` affiche désormais l'étape du ticket pour une nouvelle imprimante. Un ticket refusé par le pilote est marqué comme traité, pour que `-CheckOnly` ne le signale pas comme travail à chaque exécution. Une entrée `manage`/`manageDocuments` non résolue est écartée immédiatement au lieu d'attendre jusqu'à 2 minutes par imprimante |
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) : `-TenantId` donné comme domaine reconnaît désormais une session Graph existante de ce tenant, et une session sans `Group.ReadWrite.All`/`User.Read.All` n'est pas réutilisée mais reconnectée avec ces étendues |
+| Vérifié : syntaxe et PSScriptAnalyzer ; sous PowerShell 7 et 5.1, exécutions `-WhatIf` (configuration dossier et zip, avec `-ApplyPermissions -ApplySettings`) et `-CheckOnly` sur une vraie URL GitHub avec signature masquée ; les tests URL/ticket précédents ; la connexion de New-PrinterGroup avec Graph simulé (session réutilisée, même tenant par domaine, autre tenant, étendues manquantes, GDAP). **Non** vérifié : une vraie installation (élevée), l'application d'un ticket, l'API contents de GitHub avec un jeton |
 ### 2026-10-29 (6)
 | Modification |
 |--------|

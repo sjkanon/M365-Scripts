@@ -427,6 +427,8 @@ $MarkerPath = 'HKLM:\SOFTWARE\M365-Scripts\InstallPrinter'
 # and where the hash of the last one applied is kept.
 $script:printTickets = @{}
 $TicketMarkerPath    = "$MarkerPath\PrintTickets"
+# Where a dry run or check unpacks a zip export, removed at the end.
+$script:scratchFolders = [System.Collections.Generic.List[string]]::new()
 
 # -- Output --------------------------------------------------------------------
 # -Quiet holds every line back until something worth reporting happens. The log
@@ -473,7 +475,7 @@ function Start-LogFile {
             Move-Item -LiteralPath $file -Destination "$file.old" -Force
         }
         $script:logFile = $file
-        Write-Log "--- Install-Printer started (user $env:USERNAME, config $ConfigPath$(if ($Printer) { ", printers $($Printer -join ', ')" })) ---"
+        Write-Log "--- Install-Printer started (user $env:USERNAME, config $(Hide-UrlSecret $ConfigPath)$(if ($Printer) { ", printers $($Printer -join ', ')" })) ---"
     } catch {
         Write-Warning "Could not open the log in ${LogPath}: $($_.Exception.Message)"
     }
@@ -626,6 +628,13 @@ function Enter-SingleRun {
 
 # -- Downloads -----------------------------------------------------------------
 
+function Hide-UrlSecret {
+    <# A URL for the log, the screen and the registry: an Azure SAS signature is a
+       password, the rest of the URL is kept so it can still be recognised. #>
+    param([string] $Url)
+    return ($Url -replace '(?i)([?&]sig=)[^&]*', '$1***')
+}
+
 function Get-RequestParameter {
     <# Headers and proxy for one request; the token only travels to GitHub itself. #>
     param([Parameter(Mandatory)] [string] $Uri, [string] $Accept)
@@ -650,7 +659,10 @@ function Invoke-Download {
     <# One file to disk over https, with the right headers and without a progress bar. #>
     param([Parameter(Mandatory)] [string] $Uri, [Parameter(Mandatory)] [string] $Path, [string] $Accept)
 
-    if ($Uri -notmatch '^https://') { throw "Download URL must be https: $Uri" }
+    if ($Uri -notmatch '^https://') { throw "Download URL must be https: $(Hide-UrlSecret $Uri)" }
+    # A file next to a JSON from the contents API comes from that API too, which
+    # answers with a description of the file unless asked for the file itself.
+    if (-not $Accept -and ([uri] $Uri).Host -eq 'api.github.com') { $Accept = 'application/vnd.github.raw' }
     Enable-Tls12
     $progressBackup     = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
@@ -658,7 +670,7 @@ function Invoke-Download {
         $parent = Split-Path $Path -Parent
         if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
         $request = Get-RequestParameter -Uri $Uri -Accept $Accept
-        Invoke-WithRetry -What $Uri -Action {
+        Invoke-WithRetry -What (Hide-UrlSecret $Uri) -Action {
             # A partial file from a failed attempt must not be mistaken for a download.
             Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
             Invoke-WebRequest @request -OutFile $Path
@@ -677,7 +689,7 @@ function Invoke-Download {
         } elseif ($message -match '407') {
             ' - the proxy wants authentication; check -Proxy and that the computer account may use it'
         } else { '' }
-        throw "Download failed ($Uri): $message$hint"
+        throw "Download failed ($(Hide-UrlSecret $Uri)): $(Hide-UrlSecret $message)$hint"
     } finally {
         $ProgressPreference = $progressBackup
     }
@@ -857,7 +869,9 @@ function Expand-Package {
         return
     }
     try {
-        Expand-Archive -LiteralPath $File -DestinationPath $Destination -Force
+        # Into a working folder only; a script-scope -WhatIf does not stop at the
+        # module boundary and would leave the folder empty.
+        Expand-Archive -LiteralPath $File -DestinationPath $Destination -Force -WhatIf:$false
     } catch {
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
@@ -1454,8 +1468,10 @@ function Resolve-PrinterGrant {
         if ($null -eq $entry) { continue }
         # Only who may print is worth stopping the queue for. A manager that does
         # not resolve here - typically the admin account an exported queue was
-        # created with - is left out, so the queue goes in with fewer managers.
-        try { $sid = Resolve-Principal -Name ([string] $entry.principal) -RetrySeconds $RetrySeconds }
+        # created with - is left out, so the queue goes in with fewer managers;
+        # and without waiting for the domain, which would cost minutes per queue.
+        $wait = if ([string] $entry.access -eq 'print') { $RetrySeconds } else { 0 }
+        try { $sid = Resolve-Principal -Name ([string] $entry.principal) -RetrySeconds $wait }
         catch {
             if ([string] $entry.access -eq 'print') { throw }
             Write-Warn "  '$($entry.principal)' ($($entry.access)) cannot be resolved on this machine - left out of '$($Spec.name)'"
@@ -1580,7 +1596,7 @@ function Get-PrintTicket {
             } catch {
                 if ($given) { Write-Warn "'$($Spec.name)': print ticket not downloaded: $($_.Exception.Message)" }
                 return $null
-            } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+            } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue -WhatIf:$false }
         }
 
         [xml] $xml = $text
@@ -1592,7 +1608,7 @@ function Get-PrintTicket {
     $sha  = [Security.Cryptography.SHA256]::Create()
     $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)) | ForEach-Object { $_.ToString('X2') })
     $sha.Dispose()
-    return [PSCustomObject]@{ Text = $text; Hash = $hash; Source = $relative }
+    return [PSCustomObject]@{ Text = $text; Hash = $hash; Source = (Hide-UrlSecret $relative) }
 }
 
 function Get-AppliedTicketHash {
@@ -1619,7 +1635,13 @@ function Set-PrintTicket {
         Set-ItemProperty -Path $TicketMarkerPath -Name ([string] $Spec.name) -Value $Ticket.Hash
         Write-Ok "Print settings of '$($Spec.name)' applied from $($Ticket.Source)"
     } catch {
-        Write-Warn "Could not apply the print settings of '$($Spec.name)' from $($Ticket.Source): $($_.Exception.Message) - the printer itself is installed"
+        # Marked as done anyway: a driver that refuses this ticket refuses it on
+        # every run, and retrying would keep -CheckOnly reporting work forever.
+        try {
+            if (-not (Test-Path $TicketMarkerPath)) { New-Item -Path $TicketMarkerPath -Force | Out-Null }
+            Set-ItemProperty -Path $TicketMarkerPath -Name ([string] $Spec.name) -Value $Ticket.Hash
+        } catch { }
+        Write-Warn "Could not apply the print settings of '$($Spec.name)' from $($Ticket.Source): $($_.Exception.Message) - the printer itself is installed; tried again when the ticket changes"
     }
 }
 
@@ -1900,8 +1922,7 @@ function Set-PrinterFromSpec {
     # -ApplySettings: the full ticket first, so the JSON's own fields below land
     # on top of it. Once per ticket, not on every run.
     $ticket = $script:printTickets[[string] $Spec.name]
-    if ($ticket -and (Get-Printer -Name $Spec.name -ErrorAction SilentlyContinue) -and
-        ($createdNow -or (Get-AppliedTicketHash -Name $Spec.name) -ne $ticket.Hash)) {
+    if ($ticket -and ($createdNow -or (Get-AppliedTicketHash -Name $Spec.name) -ne $ticket.Hash)) {
         Set-PrintTicket -Spec $Spec -Ticket $ticket
     }
 
@@ -1961,7 +1982,7 @@ function Set-SuccessMarker {
         $sha.Dispose()
         if (-not (Test-Path $MarkerPath)) { New-Item -Path $MarkerPath -Force | Out-Null }
         Set-ItemProperty -Path $MarkerPath -Name 'ConfigSha256' -Value $hash
-        Set-ItemProperty -Path $MarkerPath -Name 'ConfigPath'   -Value $ConfigPath
+        Set-ItemProperty -Path $MarkerPath -Name 'ConfigPath'   -Value (Hide-UrlSecret $ConfigPath)
         Set-ItemProperty -Path $MarkerPath -Name 'LastSuccess'  -Value (Get-Date).ToString('s')
         Set-ItemProperty -Path $MarkerPath -Name 'Printers'     -Value (@($Printers | ForEach-Object { $_.name }) -join '; ')
     } catch {
@@ -1988,7 +2009,7 @@ function Read-Configuration {
         elseif (Test-Path -LiteralPath $file -PathType Container) { $file = Find-ConfigFile -Folder $file }
         return [PSCustomObject]@{ Text = Get-Content -LiteralPath $file -Raw -Encoding UTF8; Folder = Split-Path $file -Parent; BaseUri = $null }
     }
-    if ($ConfigPath -notmatch '^https://') { throw "ConfigPath URL must be https: $ConfigPath" }
+    if ($ConfigPath -notmatch '^https://') { throw "ConfigPath URL must be https: $(Hide-UrlSecret $ConfigPath)" }
 
     # -- Over https: GitHub, an Azure Storage blob (with its SAS token), any web
     #    server. A URL without a file name is a folder that holds printers.json.
@@ -2014,7 +2035,7 @@ function Read-Configuration {
             Write-Warn "$($_.Exception.Message)"
             Write-Warn "Using the export extracted at $((Get-Item -LiteralPath $file).LastWriteTime.ToString('yyyy-MM-dd HH:mm')) ($previous) - changes made since then are not applied by this run"
         } finally {
-            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue -WhatIf:$false
         }
         return [PSCustomObject]@{ Text = Get-Content -LiteralPath $file -Raw -Encoding UTF8; Folder = Split-Path $file -Parent; BaseUri = $null }
     }
@@ -2038,7 +2059,7 @@ function Read-Configuration {
         Write-Warn "Using the copy cached at $((Get-Item -LiteralPath $cache).LastWriteTime.ToString('yyyy-MM-dd HH:mm')) ($cache) - changes made to the JSON since then are not applied by this run"
         return [PSCustomObject]@{ Text = Get-Content -LiteralPath $cache -Raw -Encoding UTF8; Folder = $null; BaseUri = $uri }
     } finally {
-        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue -WhatIf:$false
     }
 }
 
@@ -2058,13 +2079,24 @@ function Expand-ConfigPackage {
     # Working data, not a change to the machine: also extracted under -WhatIf,
     # so a dry run can read the export.
     $WhatIfPreference = $false
+    # A dry run or check does not take the one-run lock, so it unpacks into a
+    # folder of its own instead of replacing the one a real run may be reading.
+    if ($simulate -or $CheckOnly) {
+        $own = Join-Path ([IO.Path]::GetTempPath()) ('printers_config_{0}' -f [guid]::NewGuid().ToString('N'))
+        $script:scratchFolders.Add($own)
+        Expand-Package -File $Zip -Destination $own
+        return Find-ConfigFile -Folder $own
+    }
     $target = Join-Path $WorkingDir 'config'
     $fresh  = "$target.new"
     Remove-Item -LiteralPath $fresh -Recurse -Force -ErrorAction SilentlyContinue
     Expand-Package -File $Zip -Destination $fresh
-    $file = Find-ConfigFile -Folder $fresh
     # Only an export that holds a printers.json replaces the last good one.
+    $null = Find-ConfigFile -Folder $fresh
     Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+    # A file still in use leaves part of the old folder; moving into it would
+    # nest the new export inside the old one.
+    if (Test-Path -LiteralPath $target) { throw "Could not replace $target - a file in it is in use" }
     Move-Item -LiteralPath $fresh -Destination $target
     Write-Ok "Extracted $(Split-Path $Zip -Leaf) to $target"
     return Find-ConfigFile -Folder $target
@@ -2258,8 +2290,9 @@ try {
     Write-Step '1. Configuration'
     $loaded       = Read-Configuration
     $configFolder = $loaded.Folder
-    if (-not "$($loaded.Text)".Trim()) { throw "$ConfigPath is empty" }
-    try { $config = $loaded.Text | ConvertFrom-Json } catch { throw "$ConfigPath is not valid JSON: $($_.Exception.Message)" }
+    $shownConfig  = Hide-UrlSecret $ConfigPath
+    if (-not "$($loaded.Text)".Trim()) { throw "$shownConfig is empty" }
+    try { $config = $loaded.Text | ConvertFrom-Json } catch { throw "$shownConfig is not valid JSON: $($_.Exception.Message)" }
 
     $check = Test-Configuration -Config $config
     foreach ($warning in $check.Warnings) { Write-Warn $warning }
@@ -2270,7 +2303,7 @@ try {
 
     $allDrivers  = @(@(Get-PropertyValue $config 'drivers')  | Where-Object { $_ })
     $allPrinters = @(@(Get-PropertyValue $config 'printers') | Where-Object { $_ })
-    Write-Ok "$ConfigPath - $($allDrivers.Count) driver(s), $($allPrinters.Count) printer(s)"
+    Write-Ok "$shownConfig - $($allDrivers.Count) driver(s), $($allPrinters.Count) printer(s)"
 
     # Without -ApplyPermissions: every printer as if it had no "permissions"
     # field, so the queue's ACL is left as Windows (or an admin) set it -
@@ -2474,6 +2507,7 @@ try {
 } finally {
     if ($mutexOwned) { try { $mutex.ReleaseMutex() } catch { } }
     if ($mutex) { $mutex.Dispose() }
+    foreach ($folder in $script:scratchFolders) { Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
     Write-Log "--- Install-Printer finished with exit code $exitCode ---"
 }
 

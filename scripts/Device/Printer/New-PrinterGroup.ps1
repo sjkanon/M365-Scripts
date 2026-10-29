@@ -396,12 +396,27 @@ if ($Directory -eq 'AD') {
         $cid = Get-Variable -Name cid -Scope Global -ValueOnly -ErrorAction SilentlyContinue
         $TenantId = if ($cid) { $cid } else { $env:M365_CUSTOMER_TENANTID }
     }
+    $scopes = 'Group.ReadWrite.All', 'User.Read.All'
     try {
         $ctx = Get-MgContext
-        if ($ctx -and (-not $TenantId -or $ctx.TenantId -eq $TenantId)) {
+        # The session names its tenant by ID; -TenantId may be a domain, which
+        # Entra's sign-in metadata turns into that ID.
+        $tenantGuid = $TenantId
+        if ($ctx -and $TenantId -and $TenantId -notmatch '^[0-9a-fA-F-]{36}$') {
+            try {
+                $issuer     = (Invoke-RestMethod -Uri "https://login.microsoftonline.com/$TenantId/v2.0/.well-known/openid-configuration" -ErrorAction Stop).issuer
+                $tenantGuid = ([uri] $issuer).Segments[1].TrimEnd('/')
+            } catch { $tenantGuid = $TenantId }
+        }
+        # A session without these scopes would fail halfway through -Apply.
+        $missing = @(if ($ctx) { $scopes | Where-Object { $_ -notin @($ctx.Scopes) } })
+        if ($ctx -and (-not $TenantId -or $ctx.TenantId -eq $tenantGuid) -and $missing.Count -eq 0) {
             $graph = [PSCustomObject]@{ ConnectedHere = $false; Account = $ctx.Account }
         } else {
-            $p = @{ Scopes = 'Group.ReadWrite.All', 'User.Read.All'; NoWelcome = $true; ContextScope = 'Process'; ErrorAction = 'Stop' }
+            if ($ctx -and $missing.Count -gt 0 -and (-not $TenantId -or $ctx.TenantId -eq $tenantGuid)) {
+                Write-Warn "The Graph session of $($ctx.Account) lacks $($missing -join ', ') - signing in again with them"
+            }
+            $p = @{ Scopes = $scopes; NoWelcome = $true; ContextScope = 'Process'; ErrorAction = 'Stop' }
             if ($TenantId) { $p['TenantId'] = $TenantId }
             Connect-MgGraph @p | Out-Null
             $graph = [PSCustomObject]@{ ConnectedHere = $true; Account = (Get-MgContext).Account }
