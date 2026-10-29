@@ -1,4 +1,4 @@
-﻿[English](readme.md) · [Nederlands](readme.nl.md) · **Français**
+[English](readme.md) · [Nederlands](readme.nl.md) · **Français**
 
 # M365-Scripts
 
@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29
+| Modification |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1) : `-Directory Entra` ne charge plus `Startup/Connect-M365.ps1` ; la connexion (GDAP ou un compte administrateur ordinaire comme `admin@tenant.onmicrosoft.com`) se fait en dehors de ce dossier. Une session Graph existante pour le tenant cible est réutilisée, sinon le script se connecte avec `Connect-MgGraph` et se déconnecte à la fin. `-TenantId` vaut par défaut `$global:cid` / `$env:M365_CUSTOMER_TENANTID`. `-AppOnly`, `-ClientId` et `-CertificateThumbprint` sont supprimés : connexion déléguée uniquement, sans inscription d'application ni certificat |
+| Vérifié : contrôle de syntaxe ; une exécution complète contre des cmdlets Graph simulées - avec une session existante (aperçu : réutilisée, ni connexion ni déconnexion) et sans (`-Apply` : connexion interactive au tenant `$global:cid` avec `Group.ReadWrite.All`/`User.Read.All`, groupe créé, membre ajouté et retiré, printers.json écrit avec les SID et l'entrée `manage` existante conservée, déconnexion à la fin). **Non** vérifié sur un tenant réel |
 ### 2026-10-27 (9)
 | Modification |
 |--------|

@@ -114,16 +114,6 @@
     names the tenant (or the AD domain) first, and -Apply asks before creating
     anything there (-Confirm:$false skips that question).
 
-.PARAMETER ClientId
-    -Directory Entra: app registration for app-only sign-in, with -CertificateThumbprint.
-
-.PARAMETER CertificateThumbprint
-    Certificate thumbprint for -ClientId.
-
-.PARAMETER AppOnly
-    -Directory Entra: app-only sign-in with ClientId and CertificateThumbprint from
-    graph.appid.json.
-
 .PARAMETER Apply
     Create the groups, change their members and write the JSON. Without it, only
     report.
@@ -168,9 +158,6 @@ param(
     [string] $ConfigPath,
     [switch] $RemoveExtraMembers,
     [string] $TenantId,
-    [string] $ClientId,
-    [string] $CertificateThumbprint,
-    [switch] $AppOnly,
     [switch] $Apply
 )
 
@@ -401,21 +388,22 @@ if ($Directory -eq 'AD') {
         Write-Bad '-Directory Entra needs PowerShell 7 (pwsh). For AD groups use -Directory AD, which runs in Windows PowerShell too.'
         exit 1
     }
-    # In the repository the shared sign-in helper is used. Copied on its own -
-    # next to a printer export on a USB stick - the script signs in directly.
-    $connectHelper = Join-Path $PSScriptRoot '..\..\Startup\Connect-M365.ps1'
+    # Sign-in (GDAP, or a normal admin account of the tenant) is done outside this
+    # script: an existing Graph session is reused, otherwise the script signs in itself
+    # interactively (e.g. admin@tenant.onmicrosoft.com) and signs out at the end.
+    if (-not $TenantId) {
+        $cid = Get-Variable -Name cid -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+        $TenantId = if ($cid) { $cid } else { $env:M365_CUSTOMER_TENANTID }
+    }
     try {
-        if (Test-Path -LiteralPath $connectHelper) {
-            . $connectHelper
-            $graph = Connect-M365Graph -Scopes 'Group.ReadWrite.All', 'User.Read.All' -TenantId $TenantId `
-                -ClientId $ClientId -CertificateThumbprint $CertificateThumbprint -AppOnly:$AppOnly
+        $ctx = Get-MgContext
+        if ($ctx -and (-not $TenantId -or $ctx.TenantId -eq $TenantId)) {
+            $graph = [PSCustomObject]@{ ConnectedHere = $false; Account = $ctx.Account }
         } else {
-            $p = @{ NoWelcome = $true; ContextScope = 'Process'; ErrorAction = 'Stop' }
+            $p = @{ Scopes = 'Group.ReadWrite.All', 'User.Read.All'; NoWelcome = $true; ContextScope = 'Process'; ErrorAction = 'Stop' }
             if ($TenantId) { $p['TenantId'] = $TenantId }
-            if ($ClientId) { $p['ClientId'] = $ClientId; $p['CertificateThumbprint'] = $CertificateThumbprint }
-            else { $p['Scopes'] = 'Group.ReadWrite.All', 'User.Read.All' }
             Connect-MgGraph @p | Out-Null
-            $graph = [PSCustomObject]@{ ConnectedHere = $true; Account = (Get-MgContext).Account; Standalone = $true }
+            $graph = [PSCustomObject]@{ ConnectedHere = $true; Account = (Get-MgContext).Account }
         }
     } catch {
         Write-Bad "Could not connect to Microsoft Graph: $($_.Exception.Message)"
@@ -600,8 +588,7 @@ try {
     Write-Bad "Aborted: $($_.Exception.Message)"
     $exitCode = 1
 } finally {
-    if ($graph -and (Get-PropertyValue $graph 'Standalone')) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
-    elseif ($graph) { Disconnect-M365Graph $graph }
+    if ($graph -and $graph.ConnectedHere) { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null }
 }
 Write-Host ''
 exit $exitCode

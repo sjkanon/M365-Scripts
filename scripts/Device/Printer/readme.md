@@ -315,7 +315,7 @@ The matrix: first column the printer names, header row the users (display name, 
 | `-Prefix` | Group name prefix (default: `SG-U-PRINTM-`). AD caps a group name at 64 characters; longer ones stop the run before anything changes |
 | `-ConfigPath` | `printers.json` to write the permissions into. `manage`/`manageDocuments` entries are kept, `Everyone` and other `print` entries replaced; a `.bak` is written first. A group is only written once it exists - Install-Printer refuses to create a queue whose group does not resolve |
 | `-RemoveExtraMembers` | Also remove group members the matrix does not tick (default: reported, left alone) |
-| `-TenantId`, `-ClientId`, `-CertificateThumbprint`, `-AppOnly` | Entra: sign-in, through `Connect-M365.ps1` as in the other Entra scripts |
+| `-TenantId` | Entra: target tenant; `-TenantId` defaults to the GDAP customer tenant (`$global:cid` / `$env:M365_CUSTOMER_TENANTID`) |
 | `-Apply` | Create groups, change members, write the JSON. Without it: report only |
 
 **Examples**
@@ -335,5 +335,5 @@ The matrix: first column the printer names, header row the users (display name, 
 - **Cloud Sync for `-AdWriteback`**: put the groups in the configuration's scope (selected groups, or all groups with a filter such as `displayName` REGEX MATCH `^SG-U-PRINTM-`); turn on **Provision membership to on-premises users** - it is off by default, and without it the AD copies stay empty; and add a `sAMAccountName` mapping (e.g. `[displayName]`), or the AD copy gets a random name - which works, but reads badly in an ACL. The AD copy is found by `displayName` and its `msDS-ExternalDirectoryObjectId`; a group not written back yet is reported and left out of the JSON - run again after the next provisioning cycle
 - **Where**: the run names the target first - the AD domain and the domain controller it uses (the PDC emulator, so a group created a moment ago is there when members are added), or the Entra tenant - and `-Apply` asks before creating anything (`-Confirm:$false` skips that). Without `-TenantId` Entra uses the GDAP customer, else the tenant you sign in to, or one an existing Graph session in that window is already in
 - `-Directory AD` needs the ActiveDirectory module (RSAT) on a domain-joined machine and runs in Windows PowerShell 5.1; `-Directory Entra` needs PowerShell 7 and Microsoft Graph (`Group.ReadWrite.All`, `User.Read.All`)
-- Copied on its own (next to an export, without the rest of the repository), `-Directory Entra` signs in with `Connect-MgGraph` directly instead of through `Connect-M365.ps1`
+- `-Directory Entra` does not use `Connect-M365.ps1`: sign-in (GDAP or a normal admin account) is done beforehand. An existing Graph session for the target tenant is reused; otherwise the script signs in interactively with `Connect-MgGraph` itself (for example as `admin@tenant.onmicrosoft.com`) and signs out again at the end
 - Keep the matrix out of this repository: it names real people. The gitignored `local/` folder is a fine place for it

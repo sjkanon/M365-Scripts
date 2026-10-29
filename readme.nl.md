@@ -1,4 +1,4 @@
-﻿[English](readme.md) · **Nederlands** · [Français](readme.fr.md)
+[English](readme.md) · **Nederlands** · [Français](readme.fr.md)
 
 # M365-Scripts
 
@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29
+| Wijziging |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1): `-Directory Entra` laadt `Startup/Connect-M365.ps1` niet meer; aanmelden (GDAP of een gewoon beheerdersaccount zoals `admin@tenant.onmicrosoft.com`) gebeurt buiten deze map. Een bestaande Graph-sessie voor de doeltenant wordt hergebruikt, anders meldt het script aan met `Connect-MgGraph` en aan het eind af. `-TenantId` is standaard `$global:cid` / `$env:M365_CUSTOMER_TENANTID`. `-AppOnly`, `-ClientId` en `-CertificateThumbprint` zijn verwijderd: alleen delegated aanmelden, geen app-registratie of certificaat |
+| Geverifieerd: syntaxcontrole; een volledige run tegen gemockte Graph-cmdlets - met een bestaande sessie (preview: hergebruikt, geen aan- of afmelden) en zonder (`-Apply`: interactief aanmelden bij de `$global:cid`-tenant met `Group.ReadWrite.All`/`User.Read.All`, groep aangemaakt, lid toegevoegd en verwijderd, printers.json geschreven met de SID's en de bestaande `manage`-regel behouden, aan het eind afgemeld). **Niet** geverifieerd op een live tenant |
 ### 2026-10-27 (9)
 | Wijziging |
 |--------|

@@ -1,4 +1,4 @@
-﻿**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
+**English** · [Nederlands](readme.nl.md) · [Français](readme.fr.md)
 
 # M365-Scripts
 
@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29
+| Change |
+|--------|
+| [`New-PrinterGroup.ps1`](scripts/Device/Printer/New-PrinterGroup.ps1): `-Directory Entra` no longer dot-sources `Startup/Connect-M365.ps1`; sign-in (GDAP or a normal admin account such as `admin@tenant.onmicrosoft.com`) is done outside this directory. An existing Graph session for the target tenant is reused, otherwise the script signs in with `Connect-MgGraph` and signs out at the end. `-TenantId` defaults to `$global:cid` / `$env:M365_CUSTOMER_TENANTID`. `-AppOnly`, `-ClientId` and `-CertificateThumbprint` are removed: sign-in is delegated only, no app registration or certificate |
+| Verified: syntax check; a full run against mocked Graph cmdlets - with an existing session (preview: reused, no sign-in, no sign-out) and without one (`-Apply`: interactive sign-in to the `$global:cid` tenant with `Group.ReadWrite.All`/`User.Read.All`, group created, member added and removed, printers.json written with the SIDs and the existing `manage` entry kept, signed out at the end). **Not** verified on a live tenant |
 ### 2026-10-27 (9)
 | Change |
 |--------|
