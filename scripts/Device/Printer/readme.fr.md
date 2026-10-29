@@ -74,7 +74,7 @@ Un appareil déjà conforme ne coûte qu'une lecture du JSON. Rien n'est téléc
 | `githubRelease` | `repository` (`propriétaire/nom`), `tag` (par défaut `latest`), `asset` (nom, caractères génériques autorisés — doit correspondre à un seul asset) |
 | `github` | `repository`, `path` (un `.zip` ou un dossier contenant l'INF), `ref` (branche/tag/commit, par défaut : la branche par défaut) |
 | `url` | `url` (https) — un `.zip`, un `.cab` ou un fichier seul |
-| `path` | `path` vers un dossier ou un `.zip` ; les chemins relatifs partent du dossier du JSON |
+| `path` | `path` vers un dossier ou un `.zip` ; les chemins relatifs partent de l'emplacement du JSON - son dossier sur disque, ou son URL (avec le jeton SAS ou une autre requête reprise). En https, ce doit être un fichier (`.zip`), pas un dossier |
 | *(toutes)* | `sha256` — facultatif, vérifié avant l'extraction (fichiers seuls uniquement) |
 
 | Champ imprimante | Description |
@@ -127,7 +127,7 @@ Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à
 | `manage` | Aussi modifier l'imprimante elle-même (paramètres, partage, autorisations) |
 
 - `principal` est `DOMAINE\Groupe`, un utilisateur ou groupe local, ou un **SID**. Un groupe Entra ID ne peut être indiqué que par son SID (`S-1-12-1-…`, depuis Entra ID ou `whoami /groups` d'un membre). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` et `SYSTEM` sont compris en anglais, sur un Windows de n'importe quelle langue
-- Les principaux listés reçoivent cet accès ; **Everyone et tout autre utilisateur ou groupe perdent le leur**, y compris le compte qui a installé l'imprimante. Administrators, SYSTEM, CREATOR OWNER, les packages d'application et les identités de service gardent toujours leur accès — l'impression depuis des applications empaquetées comme le nouvel Outlook dépend de ces entrées, elles ne sont donc jamais supprimées. `[]` signifie administrateurs uniquement. Un principal `print` introuvable bloque cette file (fail closed) ; un principal `manage` ou `manageDocuments` - comme le compte administrateur avec lequel une file exportée a été créée - est omis avec un avertissement et la file est installée
+- Uniquement avec `-ApplyPermissions` (NinjaOne `applyPermissions`) ; sans lui, le champ est ignoré et l'ACL reste telle quelle, de sorte qu'un seul JSON sert aux clients avec et sans groupes d'impression. Les principaux listés reçoivent cet accès ; **Everyone et tout autre utilisateur ou groupe perdent le leur**, y compris le compte qui a installé l'imprimante. Administrators, SYSTEM, CREATOR OWNER, les packages d'application et les identités de service gardent toujours leur accès — l'impression depuis des applications empaquetées comme le nouvel Outlook dépend de ces entrées, elles ne sont donc jamais supprimées. `[]` signifie administrateurs uniquement. Un principal `print` introuvable bloque cette file (fail closed) ; un principal `manage` ou `manageDocuments` - comme le compte administrateur avec lequel une file exportée a été créée - est omis avec un avertissement et la file est installée
 - **Échec sécurisé :** un groupe introuvable empêche la création de cette file (`-CheckOnly` le signale à l'avance), et une nouvelle file dont les autorisations ne peuvent être définies est supprimée plutôt que laissée ouverte à tous. Une file existante garde ses anciennes autorisations et l'exécution échoue. Au premier démarrage, un nom introuvable est retenté jusqu'à 2 minutes, le temps qu'un contrôleur de domaine soit joignable
 - Comparaison par le sens, pas par le texte : Windows peut enregistrer une entrée autrement qu'elle a été donnée, et cela ne compte pas comme une modification. Les autorisations sont vérifiées à chaque exécution, donc un groupe ajouté à la main dans les propriétés de l'imprimante est retiré — le JSON fait foi
 - Les autorisations décident qui peut imprimer sur la file. Qu'un utilisateur sans accès la *voie* encore dans la liste dépend de l'application et n'est pas contrôlé par ce script
@@ -136,7 +136,7 @@ Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à
 
 | Paramètre | Description |
 |-----------|-------------|
-| `-ConfigPath` | Le JSON : chemin local/UNC ou URL https (p. ex. un lien raw dans le même dépôt GitHub) |
+| `-ConfigPath` | D'où viennent les imprimantes : `printers.json`, un dossier qui le contient, ou un zip d'export - sur disque, sur un partage ou en https (GitHub raw, un blob Azure Storage avec son jeton SAS, tout serveur web). Une URL sans nom de fichier est un dossier contenant `printers.json` |
 | `-Printer` | Uniquement ces imprimantes du JSON (noms, caractères génériques autorisés). Par défaut : toutes |
 | `-GitHubToken` | Jeton pour un dépôt privé (à défaut, `$env:GITHUB_TOKEN`). Envoyé uniquement aux hôtes de GitHub, jamais à une source `url` |
 | `-Proxy` | Proxy pour chaque téléchargement, p. ex. `http://proxy.contoso.local:8080`. En SYSTEM, il n'y a pas de proxy utilisateur à reprendre ; utilise les informations d'identification du compte ordinateur |
@@ -147,7 +147,7 @@ Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à
 | `-Quiet` | N'afficher rien sauf s'il y a du travail ou un échec |
 | `-Force` | Réinstaller les pilotes même si la version correspond |
 | `-SkipSignatureCheck` | Ignorer la vérification de signature du catalogue faite par le script (Windows refuse toujours les pilotes de paquet non signés) |
-| `-SkipPermissions` | Ignorer chaque champ `permissions` du JSON : installer sans groupes et laisser l'ACL de chaque file telle quelle (Tout le monde peut imprimer) |
+| `-ApplyPermissions` | Appliquer les `permissions` du JSON (groupes d'impression, gestionnaires). Sans lui, elles sont ignorées : les imprimantes sont installées sans groupes et l'ACL de chaque file reste telle quelle (Tout le monde peut imprimer) |
 
 **Exemples**
 
@@ -237,7 +237,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` exécute le code propre au pilote du fabricant et se bloque avec certains pilotes universels ; il s'exécute donc dans un job avec un délai de 2 minutes. Un échec à cet endroit est un avertissement — l'imprimante est installée malgré tout
 - L'imprimante par défaut est un réglage par utilisateur et n'est volontairement pas gérée : en SYSTEM, il n'y a pas d'utilisateur pour qui la définir
 - Lancé en 32 bits (Intune Management Extension, certains agents RMM), le script se relance en 64 bits, car `pnputil` n'existe pas sous SysWOW64. Lancé à la main sans élévation, il la demande
-- Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `skipPermissions`
+- Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`
 - `-CheckOnly` sert de contrôle de santé pour une condition RMM ou une tâche de détection planifiée : le code de sortie `2` signifie que l'appareil ne correspond pas au JSON
 
 ---
@@ -248,13 +248,13 @@ L'inverse de `Install-Printer.ps1` : lit les imprimantes de cette machine et éc
 
 | Dans le zip | Contenu |
 |-------------|---------|
-| `printers.json` | Les imprimantes et leurs paramètres au format d'Install-Printer : pilote, adresse, nom/numéro de port, file LPR, SNMP, emplacement, commentaire, partage, recto verso, couleur, format de papier, bac par défaut (`inputBin`) et autorisations. Chaque pilote pointe vers son propre dossier dans le zip (`"type": "path"`) |
-| `drivers\<nom du pilote>\` | Le package de pilote complet tel que le magasin de pilotes le conserve : INF, catalogue signé et binaires - ce à partir de quoi `pnputil` installe. Les pilotes fournis avec Windows (`ntprint.inf`, `prnms*.inf`) ne sont pas copiés |
+| `printers.json` | Les imprimantes et leurs paramètres au format d'Install-Printer : pilote, adresse, nom/numéro de port, file LPR, SNMP, emplacement, commentaire, partage, recto verso, couleur, format de papier, bac par défaut (`inputBin`) et autorisations. Chaque pilote pointe vers son propre zip à côté (`"type": "path"`, `drivers/<nom>.zip`) |
+| `drivers\<nom du pilote>.zip` | Le package de pilote complet tel que le magasin de pilotes le conserve : INF, catalogue signé et binaires - ce à partir de quoi `pnputil` installe. Les pilotes fournis avec Windows (`ntprint.inf`, `prnms*.inf`) ne sont pas copiés |
 | `settings\<imprimante>.xml` | Le ticket d'impression par défaut complet de chaque imprimante, y compris chaque paramètre du fabricant que les champs JSON ne couvrent pas |
 | `inventory.json` | Tout ce qui a été lu, aussi pour les imprimantes que le JSON ne peut pas décrire (WSD, USB, PDF, OneNote, fax, connexions à un serveur d'impression), avec la raison de leur absence de `printers.json` et le `PermissionSDDL` brut |
 | `<ordinateur>.printerExport` | Uniquement avec `-PrintBrm` : la sauvegarde Printer Migration propre à Windows |
 
-Sur la machine cible : décompresser le zip et lancer `.\Install-Printer.ps1 -ConfigPath <dossier>\printers.json -CheckOnly`, puis sans `-CheckOnly`. Les chemins relatifs des pilotes sont résolus par rapport au dossier du JSON.
+Sur la machine cible : `.\Install-Printer.ps1 -ConfigPath <le zip> -CheckOnly`, puis sans `-CheckOnly` - le zip tel quel (local, UNC ou une URL), ou décompressé sur un partage, dans un dépôt GitHub ou un conteneur Azure Storage avec `-ConfigPath` pointant vers son `printers.json`. Les chemins relatifs des pilotes sont résolus par rapport à l'emplacement du JSON. Les dossiers de pilotes d'un export plus ancien ne fonctionnent que depuis le disque : en https, un dossier ne peut pas être téléchargé.
 
 **Paramètres**
 
@@ -314,7 +314,7 @@ La matrice : première colonne les noms d'imprimante, ligne d'en-tête les utili
 | `-OU` | AD : nom distinctif de l'OU des nouveaux groupes. Obligatoire dès qu'un groupe doit être créé |
 | `-AdWriteback` | Entra : les groupes arrivent dans AD via Cloud Sync ; met leurs copies AD dans `printers.json` et vérifie que les membres sont arrivés. Nécessite Graph (PowerShell 7) et le module ActiveDirectory sur la même machine jointe au domaine |
 | `-Prefix` | Préfixe des noms de groupe (par défaut : `SG-U-PRINTM-`). AD limite un nom de groupe à 64 caractères ; un nom plus long arrête l'exécution avant toute modification |
-| `-ConfigPath` | `printers.json` dans lequel écrire les autorisations. Les entrées `manage`/`manageDocuments` sont conservées, `Everyone` et les autres entrées `print` remplacées ; un `.bak` est écrit d'abord. Un groupe n'est écrit qu'une fois qu'il existe - Install-Printer refuse de créer une file dont le groupe ne se résout pas |
+| `-ConfigPath` | `printers.json` dans lequel écrire les autorisations. Les entrées `manage`/`manageDocuments` sont conservées, `Everyone` et les autres entrées `print` remplacées ; un `.bak` est écrit d'abord. Un groupe n'est écrit qu'une fois qu'il existe - Install-Printer refuse de créer une file dont le groupe ne se résout pas. Install-Printer ne les applique qu'avec `-ApplyPermissions` |
 | `-RemoveExtraMembers` | Retirer aussi les membres que la matrice ne coche pas (par défaut : signalés, laissés en place) |
 | `-TenantId` | Entra : tenant cible ; `-TenantId` vaut par défaut le tenant client GDAP (`$global:cid` / `$env:M365_CUSTOMER_TENANTID`) |
 | `-Apply` | Créer les groupes, modifier les membres, écrire le JSON. Sans : rapport uniquement |

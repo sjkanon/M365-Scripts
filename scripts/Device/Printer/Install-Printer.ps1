@@ -69,17 +69,20 @@
     color. "Office - letterhead" on tray 2 next to "Office" on tray 1 is the
     usual case: users pick the queue, not the tray.
 
-    Who may use a queue: "permissions": [ { "principal": "CONTOSO\\Finance",
-    "access": "print" } ], with access print, manageDocuments or manage, and the
-    principal as DOMAIN\Group, a local name, or a SID (the only way to name an
-    Entra ID group). Listed principals get that access; Everyone and every other
-    user or group lose it. Administrators, SYSTEM, CREATOR OWNER, app packages and
-    service identities always keep theirs - printing from packaged apps such as
-    new Outlook depends on them. Without the field the ACL is left alone; [] means
-    administrators only. -SkipPermissions ignores the field for the whole run. This fails closed: a print group that does not resolve stops
-    that queue from being created (a manage or manageDocuments entry that does
-    not resolve is left out with a warning), and a new queue whose permissions cannot be
-    set is removed again rather than left open to everyone.
+    Who may use a queue - only with -ApplyPermissions; without it the field is
+    ignored and every queue's ACL is left as it is (Everyone may print), so one
+    JSON serves customers with and without print groups. "permissions": [ {
+    "principal": "CONTOSO\\Finance", "access": "print" } ], with access print,
+    manageDocuments or manage, and the principal as DOMAIN\Group, a local name,
+    or a SID (the only way to name an Entra ID group). Listed principals get that
+    access; Everyone and every other user or group lose it. Administrators,
+    SYSTEM, CREATOR OWNER, app packages and service identities always keep
+    theirs - printing from packaged apps such as new Outlook depends on them.
+    Without the field the ACL is left alone; [] means administrators only. This
+    fails closed: a print group that does not resolve stops that queue from
+    being created (a manage or manageDocuments entry that does not resolve is
+    left out with a warning), and a new queue whose permissions cannot be set is
+    removed again rather than left open to everyone.
 
     After a golden image
     --------------------
@@ -128,7 +131,9 @@
                      (branch/tag/commit, default: the repository's default branch)
       url            url (https), downloads one file - .zip, .cab or a lone file
       path           path to a folder or .zip; relative paths resolve against the
-                     folder of the JSON file
+                     folder of the JSON file, or - for a JSON fetched over https -
+                     its URL (a .zip or other file then; a folder cannot be
+                     downloaded)
 
     A private repository needs a token with read access to its contents:
     -GitHubToken, or the environment variable GITHUB_TOKEN. The token is only ever
@@ -140,7 +145,7 @@
     Script variables arrive as environment variables and are used when the matching
     parameter is not passed: configPath, printer (comma separated), githubToken,
     workingDir, logPath, waitSeconds, proxy, and the checkboxes checkOnly, whatIf,
-    quiet, force, skipSignatureCheck and skipPermissions. Started 32-bit, the script relaunches
+    quiet, force, skipSignatureCheck and applyPermissions. Started 32-bit, the script relaunches
     itself 64-bit - pnputil does not exist under SysWOW64. Started by hand without
     elevation, it asks for it.
 
@@ -151,8 +156,16 @@
         2  -CheckOnly only: work is due
 
 .PARAMETER ConfigPath
-    The JSON file: a local or UNC path, or an https URL. Mandatory unless the RMM
-    variable configPath supplies it.
+    Where the printers come from, in any of these forms - on disk, on a share,
+    or over https (GitHub, an Azure Storage blob with its SAS token, any web
+    server):
+      - the JSON file itself
+      - a folder that holds printers.json
+      - an export zip from Export-Printer (extracted to <WorkingDir>\config)
+    Relative driver paths in the JSON ("path": "drivers/HP.zip") resolve against
+    where the JSON is: its folder on disk, or its URL - with the SAS token or
+    other query carried over. Mandatory unless the RMM variable configPath
+    supplies it.
 
 .PARAMETER Printer
     Only these printers from the JSON (names, wildcards allowed). Default: all of
@@ -190,11 +203,11 @@
     Do not require a valid signature on the driver's catalog file. Windows itself
     still refuses an unsigned package driver; this only skips the script's own check.
 
-.PARAMETER SkipPermissions
-    Ignore every "permissions" field in the JSON: the printers are installed
-    without groups and each queue's ACL is left alone (Everyone may print), as if
-    the field were not there. For a JSON that New-PrinterGroup filled in, on a
-    machine where the groups are not wanted or do not resolve.
+.PARAMETER ApplyPermissions
+    Apply the "permissions" of the JSON: print groups, managers. Without it they
+    are ignored and the printers go in without groups - each queue's ACL is left
+    as it is (Everyone may print). Use it where the customer works with print
+    groups (New-PrinterGroup).
 
 .PARAMETER WaitSeconds
     How long a freshly provisioned machine is given to get ready: the Print Spooler
@@ -242,7 +255,7 @@ param (
     [switch]   $Quiet,
     [switch]   $Force,
     [switch]   $SkipSignatureCheck,
-    [switch]   $SkipPermissions,
+    [switch]   $ApplyPermissions,
     [ValidateRange(0, 3600)]
     [int]      $WaitSeconds = 300
 )
@@ -319,7 +332,7 @@ if (-not $PSBoundParameters.ContainsKey('CheckOnly')          -and $env:checkOnl
 if (-not $PSBoundParameters.ContainsKey('Quiet')              -and $env:quiet              -in $rmmTrue) { $Quiet              = $true }
 if (-not $PSBoundParameters.ContainsKey('Force')              -and $env:force              -in $rmmTrue) { $Force              = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
-if (-not $PSBoundParameters.ContainsKey('SkipPermissions')    -and $env:skipPermissions    -in $rmmTrue) { $SkipPermissions    = $true }
+if (-not $PSBoundParameters.ContainsKey('ApplyPermissions')   -and $env:applyPermissions   -in $rmmTrue) { $ApplyPermissions   = $true }
 if (-not $PSBoundParameters.ContainsKey('ConfigPath')         -and $env:configPath)  { $ConfigPath  = $env:configPath }
 if (-not $PSBoundParameters.ContainsKey('Printer')            -and $env:printer)     { $Printer     = @($env:printer -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)  { $WorkingDir  = $env:workingDir }
@@ -858,7 +871,7 @@ function Save-DriverSource {
         Bring one driver's files onto this machine and return the folder that
         holds them, extracted.
     #>
-    param([Parameter(Mandatory)] $Driver, [string] $ConfigFolder, [Parameter(Mandatory)] [string] $Folder)
+    param([Parameter(Mandatory)] $Driver, [string] $ConfigFolder, [uri] $ConfigUri, [Parameter(Mandatory)] [string] $Folder)
 
     $source   = $Driver.source
     $type     = [string] $source.type
@@ -877,12 +890,24 @@ function Save-DriverSource {
             Write-Ok ("Downloaded {0} ({1:N1} MB)" -f $name, ((Get-Item -LiteralPath $file).Length / 1MB))
             $file
         }
+        { $_ -eq 'path' -and -not [IO.Path]::IsPathRooted([string] $source.path) -and -not $ConfigFolder } {
+            # Relative to a JSON that came over https: the driver sits next to it
+            # - in the same repository, storage container or web folder.
+            if (-not $ConfigUri) { throw "Relative path '$($source.path)' has nothing to resolve against" }
+            $url  = Resolve-RelativeUri -Base $ConfigUri -Relative ([string] $source.path)
+            $name = [uri]::UnescapeDataString((Split-Path ([uri] $url).AbsolutePath -Leaf))
+            if (-not [IO.Path]::GetExtension($name)) {
+                throw "'$($source.path)' is a folder, which cannot be downloaded over https - zip it (Export-Printer writes drivers as .zip) or run from a copy on disk"
+            }
+            $file = Join-Path $download $name
+            Invoke-Download -Uri $url -Path $file
+            Write-Ok ("Downloaded {0} ({1:N1} MB) next to the JSON" -f $name, ((Get-Item -LiteralPath $file).Length / 1MB))
+            $file
+            break
+        }
         'path' {
             $local = [string] $source.path
-            if (-not [IO.Path]::IsPathRooted($local)) {
-                if (-not $ConfigFolder) { throw "Relative path '$local' needs a JSON file on disk to resolve against, not a URL" }
-                $local = Join-Path $ConfigFolder $local
-            }
+            if (-not [IO.Path]::IsPathRooted($local)) { $local = Join-Path $ConfigFolder $local }
             if (-not (Test-Path -LiteralPath $local)) { throw "Driver path not found (or not reachable from this account): $local" }
             Copy-Item -LiteralPath $local -Destination $download -Recurse -Force
             Write-Ok "Copied $local"
@@ -1846,18 +1871,49 @@ function Read-Configuration {
     #>
     $cache = Join-Path $WorkingDir 'printers.cache.json'
 
+    # -- On disk or a share: a JSON file, a folder holding printers.json, or an
+    #    export zip. Relative driver paths resolve against the JSON's folder.
     if ($ConfigPath -notmatch '^[a-z]+://') {
-        if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) { throw "Configuration not found (or not reachable from this account): $ConfigPath" }
-        return [PSCustomObject]@{
-            Text   = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8
-            Folder = Split-Path (Resolve-Path -LiteralPath $ConfigPath).ProviderPath -Parent
-        }
+        if (-not (Test-Path -LiteralPath $ConfigPath)) { throw "Configuration not found (or not reachable from this account): $ConfigPath" }
+        $file = (Resolve-Path -LiteralPath $ConfigPath).ProviderPath
+        if ([IO.Path]::GetExtension($file) -eq '.zip') { $file = Expand-ConfigPackage -Zip $file }
+        elseif (Test-Path -LiteralPath $file -PathType Container) { $file = Find-ConfigFile -Folder $file }
+        return [PSCustomObject]@{ Text = Get-Content -LiteralPath $file -Raw -Encoding UTF8; Folder = Split-Path $file -Parent; BaseUri = $null }
     }
     if ($ConfigPath -notmatch '^https://') { throw "ConfigPath URL must be https: $ConfigPath" }
 
+    # -- Over https: GitHub, an Azure Storage blob (with its SAS token), any web
+    #    server. A URL without a file name is a folder that holds printers.json.
+    $uri  = [uri] $ConfigPath
+    $leaf = [uri]::UnescapeDataString(($uri.AbsolutePath -split '/')[-1])
+    if (-not [IO.Path]::GetExtension($leaf)) {
+        $uri  = [uri] (Resolve-RelativeUri -Base ([uri] ($uri.GetLeftPart([UriPartial]::Path).TrimEnd('/') + '/' + $uri.Query)) -Relative 'printers.json')
+        $leaf = 'printers.json'
+    }
+
+    if ([IO.Path]::GetExtension($leaf) -eq '.zip') {
+        # The whole export as one zip. Its extracted copy is the fallback when the
+        # URL cannot be reached on a later run.
+        $temp = Join-Path ([IO.Path]::GetTempPath()) ('printers_{0}.zip' -f [guid]::NewGuid().ToString('N'))
+        try {
+            Invoke-Download -Uri $uri.AbsoluteUri -Path $temp
+            Test-DownloadedFile -Path $temp
+            $file = Expand-ConfigPackage -Zip $temp
+        } catch {
+            $previous = Join-Path $WorkingDir 'config'
+            $file = if (Test-Path -LiteralPath $previous) { try { Find-ConfigFile -Folder $previous } catch { $null } }
+            if (-not $file) { throw }
+            Write-Warn "$($_.Exception.Message)"
+            Write-Warn "Using the export extracted at $((Get-Item -LiteralPath $file).LastWriteTime.ToString('yyyy-MM-dd HH:mm')) ($previous) - changes made since then are not applied by this run"
+        } finally {
+            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        }
+        return [PSCustomObject]@{ Text = Get-Content -LiteralPath $file -Raw -Encoding UTF8; Folder = Split-Path $file -Parent; BaseUri = $null }
+    }
+
     $temp = Join-Path ([IO.Path]::GetTempPath()) ('printers_{0}.json' -f [guid]::NewGuid().ToString('N'))
     try {
-        Invoke-Download -Uri $ConfigPath -Path $temp -Accept 'application/vnd.github.raw'
+        Invoke-Download -Uri $uri.AbsoluteUri -Path $temp -Accept 'application/vnd.github.raw'
         $text = Get-Content -LiteralPath $temp -Raw -Encoding UTF8
         if (-not ($simulate -or $CheckOnly)) {
             # Only a file that parses is worth falling back on later.
@@ -1867,15 +1923,58 @@ function Read-Configuration {
                 Copy-Item -LiteralPath $temp -Destination $cache -Force
             } catch { }
         }
-        return [PSCustomObject]@{ Text = $text; Folder = $null }
+        return [PSCustomObject]@{ Text = $text; Folder = $null; BaseUri = $uri }
     } catch {
         if (-not (Test-Path -LiteralPath $cache)) { throw }
         Write-Warn "$($_.Exception.Message)"
         Write-Warn "Using the copy cached at $((Get-Item -LiteralPath $cache).LastWriteTime.ToString('yyyy-MM-dd HH:mm')) ($cache) - changes made to the JSON since then are not applied by this run"
-        return [PSCustomObject]@{ Text = Get-Content -LiteralPath $cache -Raw -Encoding UTF8; Folder = $null }
+        return [PSCustomObject]@{ Text = Get-Content -LiteralPath $cache -Raw -Encoding UTF8; Folder = $null; BaseUri = $uri }
     } finally {
         Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Find-ConfigFile {
+    <# printers.json in a folder, or in the one folder an unpacked zip often wraps it in. #>
+    param([Parameter(Mandatory)] [string] $Folder)
+    $direct = Join-Path $Folder 'printers.json'
+    if (Test-Path -LiteralPath $direct -PathType Leaf) { return $direct }
+    $nested = @(Get-ChildItem -LiteralPath $Folder -Filter 'printers.json' -Recurse -Depth 1 -File -ErrorAction SilentlyContinue)
+    if ($nested.Count -eq 1) { return $nested[0].FullName }
+    throw "No printers.json in $Folder$(if ($nested.Count -gt 1) { " (found $($nested.Count) one level down - point -ConfigPath at the one you mean)" })"
+}
+
+function Expand-ConfigPackage {
+    <# An export zip into <WorkingDir>\config, replacing the previous one; returns its printers.json. #>
+    param([Parameter(Mandatory)] [string] $Zip)
+    # Working data, not a change to the machine: also extracted under -WhatIf,
+    # so a dry run can read the export.
+    $WhatIfPreference = $false
+    $target = Join-Path $WorkingDir 'config'
+    $fresh  = "$target.new"
+    Remove-Item -LiteralPath $fresh -Recurse -Force -ErrorAction SilentlyContinue
+    Expand-Package -File $Zip -Destination $fresh
+    $file = Find-ConfigFile -Folder $fresh
+    # Only an export that holds a printers.json replaces the last good one.
+    Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+    Move-Item -LiteralPath $fresh -Destination $target
+    Write-Ok "Extracted $(Split-Path $Zip -Leaf) to $target"
+    return Find-ConfigFile -Folder $target
+}
+
+function Resolve-RelativeUri {
+    <#
+        A path from the JSON against the URL the JSON came from. A SAS token
+        (Azure Storage) or other query on the base is carried over, since every
+        blob in the container needs it; a relative path with its own query keeps that.
+    #>
+    param([Parameter(Mandatory)] [uri] $Base, [Parameter(Mandatory)] [string] $Relative)
+    $parts  = $Relative.Replace('\', '/').TrimStart('/') -split '\?', 2
+    $path   = ($parts[0] -split '/' | ForEach-Object { [uri]::EscapeDataString([uri]::UnescapeDataString($_)) }) -join '/'
+    $folder = [uri] ($Base.GetLeftPart([UriPartial]::Path) -replace '[^/]*$', '')
+    $result = [uri]::new($folder, $path).AbsoluteUri
+    if ($parts.Count -gt 1) { return "$($result)?$($parts[1])" }
+    return "$result$($Base.Query)"
 }
 
 function Test-Configuration {
@@ -2065,12 +2164,13 @@ try {
     $allPrinters = @(@(Get-PropertyValue $config 'printers') | Where-Object { $_ })
     Write-Ok "$ConfigPath - $($allDrivers.Count) driver(s), $($allPrinters.Count) printer(s)"
 
-    # Without groups: every printer as if it had no "permissions" field, so the
-    # queue's ACL is left as Windows (or an admin) set it - Everyone may print.
-    if ($SkipPermissions) {
+    # Without -ApplyPermissions: every printer as if it had no "permissions"
+    # field, so the queue's ACL is left as Windows (or an admin) set it -
+    # Everyone may print. Print groups are a choice per customer, not a default.
+    if (-not $ApplyPermissions) {
         $withPermissions = @($allPrinters | Where-Object { $null -ne (Get-PropertyValue $_ 'permissions') })
         foreach ($p in $withPermissions) { $p.PSObject.Properties.Remove('permissions') }
-        if ($withPermissions.Count -gt 0) { Write-Skip "Permissions of $($withPermissions.Count) printer(s) ignored (-SkipPermissions) - their ACL is left alone" }
+        if ($withPermissions.Count -gt 0) { Write-Skip "Permissions of $($withPermissions.Count) printer(s) not applied - their ACL is left alone (-ApplyPermissions applies them)" }
     }
 
     # The @() goes around the whole if: one match inside the branch alone comes
@@ -2164,7 +2264,7 @@ try {
         $folder = $null
         try {
             $folder    = New-DriverFolder -Name $driver.name
-            $files     = Save-DriverSource -Driver $driver -ConfigFolder $configFolder -Folder $folder
+            $files     = Save-DriverSource -Driver $driver -ConfigFolder $configFolder -ConfigUri $loaded.BaseUri -Folder $folder
             $candidate = Find-DriverInf -Folder $files -Driver $driver
             Write-Ok "INF: $($candidate.File.FullName.Substring($files.Length).TrimStart('\'))"
             Test-DriverCatalog -Candidate $candidate

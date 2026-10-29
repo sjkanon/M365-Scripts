@@ -1015,6 +1015,13 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29 (5)
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) : `-ConfigPath` prend les imprimantes n'importe où - `printers.json`, un dossier qui le contient, ou un zip d'Export-Printer, sur disque, sur un partage ou en https (GitHub raw, un blob Azure Storage avec son jeton SAS, tout serveur web ; une URL sans nom de fichier est un dossier). Les chemins relatifs des pilotes partent de l'emplacement du JSON : son dossier, ou son URL avec le jeton SAS ou une autre requête reprise. Auparavant, un `path` relatif ne fonctionnait que pour un JSON sur disque, et un zip d'export devait d'abord être décompressé à la main |
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) : chaque pilote est exporté en `drivers/<nom>.zip` au lieu d'un dossier, car un dossier ne peut pas être téléchargé en https. L'export décompressé peut désormais être placé dans un dépôt GitHub ou un conteneur de stockage et installé depuis son URL. Les dossiers de pilotes des anciens exports fonctionnent toujours depuis le disque |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) : les autorisations sont opt-in. `-ApplyPermissions` (NinjaOne `applyPermissions`) applique les `permissions` du JSON ; sans lui, elles sont ignorées et l'ACL de chaque file reste telle quelle, de sorte qu'un seul JSON sert aux clients avec et sans groupes d'impression. Remplace `-SkipPermissions` de l'entrée (2), qui faisait l'inverse. **Changement de comportement** : un déploiement qui compte sur `permissions` doit ajouter `-ApplyPermissions` |
+| Vérifié : contrôle de syntaxe des deux scripts ; sous PowerShell 7 et 5.1, la résolution d'URL (blob avec SAS - jeton conservé, espaces et `\` gérés -, GitHub raw, un chemin avec sa propre requête, une URL de dossier) et `-ConfigPath` en fichier JSON, dossier et zip d'export (extrait dans `<WorkingDir>\config`). **Non** vérifié : un vrai téléchargement depuis un blob ou GitHub, une installation complète, et un nouvel export avec pilotes zippés |
 ### 2026-10-29 (4)
 | Modification |
 |--------|

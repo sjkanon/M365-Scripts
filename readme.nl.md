@@ -1015,6 +1015,13 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29 (5)
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): `-ConfigPath` haalt de printers overal vandaan - `printers.json`, een map waarin die staat, of een Export-Printer-zip, op schijf, op een share of via https (GitHub raw, een Azure Storage-blob met SAS-token, elke webserver; een URL zonder bestandsnaam is een map). Relatieve driverpaden gelden ten opzichte van waar de JSON staat: zijn map, of zijn URL met het SAS-token of een andere query erbij. Voorheen werkte een relatief `path` alleen bij een JSON op schijf, en moest een exportzip eerst met de hand worden uitgepakt |
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1): elke driver gaat als `drivers/<naam>.zip` in de export in plaats van als map, omdat een map niet via https te downloaden is. De uitgepakte export kan nu in een GitHub-repository of storage-container worden gezet en vanaf zijn URL worden geïnstalleerd. Drivermappen uit oudere exports werken nog steeds vanaf schijf |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): rechten zijn opt-in. `-ApplyPermissions` (NinjaOne `applyPermissions`) past de `permissions` uit de JSON toe; zonder worden ze genegeerd en blijft de ACL van elke wachtrij zoals hij is, zodat één JSON dient voor klanten met en zonder printgroepen. Vervangt `-SkipPermissions` uit item (2), dat het andersom deed. **Gedragswijziging**: een uitrol die op `permissions` rekent moet `-ApplyPermissions` toevoegen |
+| Geverifieerd: syntaxcontrole van beide scripts; in PowerShell 7 en 5.1 de URL-resolutie (blob met SAS - token behouden, spaties en `\` afgehandeld -, GitHub raw, een pad met eigen query, een map-URL) en `-ConfigPath` als JSON-bestand, map en exportzip (uitgepakt naar `<WorkingDir>\config`). **Niet** geverifieerd: een echte download van een blob of GitHub, een volledige installatie, en een nieuwe export met gezipte drivers |
 ### 2026-10-29 (4)
 | Wijziging |
 |--------|

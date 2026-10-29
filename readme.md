@@ -1015,6 +1015,13 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29 (5)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): `-ConfigPath` takes the printers from anywhere - `printers.json`, a folder holding it, or an Export-Printer zip, on disk, on a share or over https (GitHub raw, an Azure Storage blob with its SAS token, any web server; a URL without a file name is a folder). Relative driver paths resolve against where the JSON is: its folder, or its URL with the SAS token or other query carried over. Before, a relative `path` only worked for a JSON on disk, and an export zip had to be unpacked by hand first |
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1): each driver goes into the export as `drivers/<name>.zip` instead of a folder, because a folder cannot be downloaded over https. The unpacked export can now be put in a GitHub repository or storage container and installed from its URL. Driver folders from older exports still work from disk |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): permissions are opt-in. `-ApplyPermissions` (NinjaOne `applyPermissions`) applies the JSON's `permissions`; without it they are ignored and each queue's ACL is left as it is, so one JSON serves customers with and without print groups. Replaces `-SkipPermissions` from entry (2), which had it the other way round. **Behaviour change**: a deployment that relies on `permissions` must add `-ApplyPermissions` |
+| Verified: syntax check of both scripts; in PowerShell 7 and 5.1 the URL resolution (blob with SAS - token kept, spaces and `\` handled -, GitHub raw, a path with its own query, a folder URL) and `-ConfigPath` as JSON file, folder and export zip (extracted to `<WorkingDir>\config`). **Not** verified: a real download from a blob or GitHub, a full install, and a new export with zipped drivers |
 ### 2026-10-29 (4)
 | Change |
 |--------|

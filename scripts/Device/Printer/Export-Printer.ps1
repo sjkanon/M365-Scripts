@@ -12,12 +12,15 @@
                       format: driver, address, port name and number, LPR queue,
                       SNMP, location, comment, sharing, duplex, colour, paper size,
                       default tray and permissions. Every driver points at its
-                      folder in the zip ("type": "path"), so after unpacking
+                      zip next to it ("type": "path"), so
 
-                          .\Install-Printer.ps1 -ConfigPath <folder>\printers.json
+                          .\Install-Printer.ps1 -ConfigPath <the export zip>
 
-                      installs the same drivers and printers on another machine.
-      drivers\        One folder per driver: the complete driver package as the
+                      installs the same drivers and printers on another machine -
+                      the zip itself, or its contents unpacked on a share, in a
+                      GitHub repository or an Azure Storage container, with
+                      -ConfigPath pointing at printers.json there.
+      drivers\        One zip per driver: the complete driver package as the
                       driver store holds it - INF, catalog and binaries - which is
                       what pnputil installs from. Drivers that ship with Windows
                       (ntprint.inf, prnms*.inf) are not copied: every machine has them.
@@ -557,20 +560,23 @@ try {
 
         $package = Split-Path $inf -Parent
         if (-not (Test-Path -LiteralPath $package)) { Write-Bad "'$name': the driver store folder $package is gone"; $exitCode = 1; continue }
-        $folder = 'drivers\' + (ConvertTo-SafeName $name)
+        # One zip per driver, not a folder: a folder cannot be downloaded over
+        # https, so only a zip lets the unpacked export be served from GitHub, an
+        # Azure Storage container or a web server as well as from a share.
+        $file = 'drivers/' + (ConvertTo-SafeName $name) + '.zip'
         try {
-            Copy-Item -LiteralPath $package -Destination (Join-Path $stage $folder) -Recurse -Force
+            Compress-Archive -Path (Join-Path $package '*') -DestinationPath (Join-Path $stage $file) -CompressionLevel Optimal -Force
         } catch {
-            Write-Bad "'$name': copying $package failed - $($_.Exception.Message)"
+            Write-Bad "'$name': packing $package failed - $($_.Exception.Message)"
             $exitCode = 1
             continue
         }
         $version = ConvertFrom-DriverVersion (Get-PropertyValue $driver 'DriverVersion')
-        $size    = (Get-ChildItem -LiteralPath (Join-Path $stage $folder) -Recurse -File | Measure-Object Length -Sum).Sum
+        $size    = (Get-Item -LiteralPath (Join-Path $stage $file)).Length
         $entry   = [ordered]@{ name = $name }
         if ($version) { $entry.version = $version.ToString() }
         $entry.inf    = Split-Path $inf -Leaf
-        $entry.source = [ordered]@{ type = 'path'; path = $folder }
+        $entry.source = [ordered]@{ type = 'path'; path = $file }
         $jsonDrivers.Add($entry)
         Write-Ok ("'{0}' {1} ({2:N1} MB, {3})" -f $name, $version, ($size / 1MB), (Split-Path $inf -Leaf))
     }
@@ -618,8 +624,8 @@ try {
     Write-Host ("  {0} printer(s) and {1} driver(s) in printers.json{2}" -f $jsonPrinters.Count, $jsonDrivers.Count,
                 $(if ($skipped) { ", $skipped printer(s) only in inventory.json" })) -ForegroundColor Cyan
     if ($jsonPrinters.Count -gt 0) {
-        Write-Host '  On the target: unpack the zip, then' -ForegroundColor Gray
-        Write-Host '      .\Install-Printer.ps1 -ConfigPath <folder>\printers.json -CheckOnly' -ForegroundColor Gray
+        Write-Host '  On the target - the zip as it is, or unpacked on a share, GitHub or a storage container:' -ForegroundColor Gray
+        Write-Host "      .\Install-Printer.ps1 -ConfigPath <path or URL of $(Split-Path $zip -Leaf), or of its printers.json> -CheckOnly" -ForegroundColor Gray
     }
 } catch {
     Write-Host ''

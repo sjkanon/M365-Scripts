@@ -74,7 +74,7 @@ Een apparaat dat al in orde is, kost één keer de JSON lezen. Er wordt niets ge
 | `githubRelease` | `repository` (`eigenaar/naam`), `tag` (standaard `latest`), `asset` (naam, wildcards toegestaan — moet precies één asset opleveren) |
 | `github` | `repository`, `path` (een `.zip` of een map met de INF), `ref` (branch/tag/commit, standaard: de standaardbranch) |
 | `url` | `url` (https) — een `.zip`, `.cab` of los bestand |
-| `path` | `path` naar een map of `.zip`; relatieve paden gelden ten opzichte van de map van de JSON |
+| `path` | `path` naar een map of `.zip`; relatieve paden gelden ten opzichte van waar de JSON staat - zijn map op schijf, of zijn URL (met het SAS-token of een andere query erbij). Via https moet het een bestand zijn (`.zip`), geen map |
 | *(alle)* | `sha256` — optioneel, gecontroleerd vóór het uitpakken (alleen losse bestanden) |
 
 | Printerveld | Omschrijving |
@@ -127,7 +127,7 @@ Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade
 | `manage` | Ook de printer zelf wijzigen (instellingen, delen, rechten) |
 
 - `principal` is `DOMEIN\Groep`, een lokale gebruiker of groep, of een **SID**. Een Entra ID-groep kan alleen via de SID worden opgegeven (`S-1-12-1-…`, uit Entra ID of uit `whoami /groups` van een lid). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` en `SYSTEM` worden in het Engels begrepen, op Windows in elke taal
-- Wie in de lijst staat krijgt die toegang; **Everyone en elke andere gebruiker of groep verliest de zijne**, ook het account dat de printer toevallig heeft geïnstalleerd. Administrators, SYSTEM, CREATOR OWNER, app-pakketten en service-identiteiten houden altijd hun toegang — afdrukken vanuit apps zoals de nieuwe Outlook hangt van die vermeldingen af, dus die worden nooit verwijderd. `[]` betekent alleen beheerders. Een `print`-principal die niet te vinden is houdt die wachtrij tegen (fail closed); een `manage`- of `manageDocuments`-principal - zoals het beheerdersaccount waarmee een geëxporteerde wachtrij is aangemaakt - wordt met een waarschuwing weggelaten en de wachtrij gaat er gewoon in
+- Alleen met `-ApplyPermissions` (NinjaOne `applyPermissions`); zonder wordt het veld genegeerd en blijft de ACL met rust, zodat één JSON dient voor klanten met en zonder printgroepen. Wie in de lijst staat krijgt die toegang; **Everyone en elke andere gebruiker of groep verliest de zijne**, ook het account dat de printer toevallig heeft geïnstalleerd. Administrators, SYSTEM, CREATOR OWNER, app-pakketten en service-identiteiten houden altijd hun toegang — afdrukken vanuit apps zoals de nieuwe Outlook hangt van die vermeldingen af, dus die worden nooit verwijderd. `[]` betekent alleen beheerders. Een `print`-principal die niet te vinden is houdt die wachtrij tegen (fail closed); een `manage`- of `manageDocuments`-principal - zoals het beheerdersaccount waarmee een geëxporteerde wachtrij is aangemaakt - wordt met een waarschuwing weggelaten en de wachtrij gaat er gewoon in
 - **Faalt veilig:** een groep die niet gevonden wordt houdt die wachtrij tegen (`-CheckOnly` meldt dat vooraf), en een nieuwe wachtrij waarvan de rechten niet ingesteld kunnen worden wordt weer verwijderd in plaats van open te blijven staan voor iedereen. Een bestaande wachtrij houdt zijn oude rechten en de run faalt. Bij een eerste opstart wordt een onbekende naam tot 2 minuten opnieuw geprobeerd, voor een domeincontroller die nog niet bereikbaar is
 - Vergeleken op betekenis, niet op tekst: Windows mag een vermelding anders opslaan dan ze werd opgegeven, en dat telt niet als wijziging. De rechten worden bij elke run gecontroleerd, dus een groep die met de hand in de printereigenschappen is toegevoegd wordt weer weggehaald — de JSON is leidend
 - De rechten bepalen wie op de wachtrij mag afdrukken. Of een gebruiker zonder toegang hem nog wel *ziet* in de lijst hangt van de applicatie af en valt buiten dit script
@@ -136,7 +136,7 @@ Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade
 
 | Parameter | Omschrijving |
 |-----------|-------------|
-| `-ConfigPath` | De JSON: lokaal/UNC-pad of https-URL (bv. een raw-link in dezelfde GitHub-repository) |
+| `-ConfigPath` | Waar de printers vandaan komen: `printers.json`, een map waarin die staat, of een exportzip - op schijf, op een share of via https (GitHub raw, een Azure Storage-blob met SAS-token, elke webserver). Een URL zonder bestandsnaam is een map met `printers.json` |
 | `-Printer` | Alleen deze printers uit de JSON (namen, wildcards toegestaan). Standaard: alle |
 | `-GitHubToken` | Token voor een privé-repository (valt terug op `$env:GITHUB_TOKEN`). Wordt alleen naar GitHubs eigen hosts gestuurd, nooit naar een `url`-bron |
 | `-Proxy` | Proxy voor elke download, bv. `http://proxy.contoso.local:8080`. Als SYSTEM is er geen gebruikersproxy om over te nemen; gebruikt de referenties van het computeraccount |
@@ -147,7 +147,7 @@ Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade
 | `-Quiet` | Niets tonen tenzij er werk is of iets faalt |
 | `-Force` | Drivers opnieuw installeren, ook als de versie klopt |
 | `-SkipSignatureCheck` | De eigen handtekeningcontrole van de catalogus overslaan (Windows weigert niet-ondertekende pakketdrivers nog steeds) |
-| `-SkipPermissions` | Elk `permissions`-veld in de JSON negeren: installeren zonder groepen en de ACL van elke wachtrij met rust laten (Iedereen mag printen) |
+| `-ApplyPermissions` | De `permissions` uit de JSON toepassen (printgroepen, beheerders). Zonder deze schakelaar worden ze genegeerd: de printers gaan erin zonder groepen en de ACL van elke wachtrij blijft zoals hij is (Iedereen mag printen) |
 
 **Voorbeelden**
 
@@ -237,7 +237,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` voert de eigen code van de driver van de leverancier uit en blijft bij sommige universele drivers hangen, dus het draait in een job met een time-out van 2 minuten. Een fout daar is een waarschuwing — de printer is evengoed geïnstalleerd
 - De standaardprinter is een instelling per gebruiker en wordt bewust niet ingesteld: als SYSTEM is er geen gebruiker om hem voor in te stellen
 - Gestart als 32-bit (Intune Management Extension, sommige RMM-agents) start het script zichzelf opnieuw als 64-bit, omdat `pnputil` niet bestaat onder SysWOW64. Handmatig gestart zonder verhoogde rechten vraagt het daarom
-- NinjaOne-scriptvariabelen: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, en de selectievakjes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `skipPermissions`
+- NinjaOne-scriptvariabelen: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, en de selectievakjes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`
 - `-CheckOnly` is de gezondheidscontrole voor een RMM-conditie of een geplande detectietaak: exitcode `2` betekent dat het apparaat niet overeenkomt met de JSON
 
 ---
@@ -248,13 +248,13 @@ Het omgekeerde van `Install-Printer.ps1`: leest de printers van deze machine en 
 
 | In de zip | Inhoud |
 |-----------|--------|
-| `printers.json` | De printers en hun instellingen in het formaat van Install-Printer: driver, adres, poortnaam/-nummer, LPR-wachtrij, SNMP, locatie, opmerking, delen, dubbelzijdig, kleur, papierformaat, standaardlade (`inputBin`) en rechten. Elke driver verwijst naar zijn eigen map in de zip (`"type": "path"`) |
-| `drivers\<drivernaam>\` | Het complete driverpakket zoals de driver store het bewaart: INF, ondertekende catalogus en binaries - waar `pnputil` van installeert. Drivers die met Windows meekomen (`ntprint.inf`, `prnms*.inf`) worden niet gekopieerd |
+| `printers.json` | De printers en hun instellingen in het formaat van Install-Printer: driver, adres, poortnaam/-nummer, LPR-wachtrij, SNMP, locatie, opmerking, delen, dubbelzijdig, kleur, papierformaat, standaardlade (`inputBin`) en rechten. Elke driver verwijst naar zijn eigen zip ernaast (`"type": "path"`, `drivers/<naam>.zip`) |
+| `drivers\<drivernaam>.zip` | Het complete driverpakket zoals de driver store het bewaart: INF, ondertekende catalogus en binaries - waar `pnputil` van installeert. Drivers die met Windows meekomen (`ntprint.inf`, `prnms*.inf`) worden niet gekopieerd |
 | `settings\<printer>.xml` | Het volledige standaard printticket per printer, met elke fabrikantinstelling die de JSON-velden niet dekken |
 | `inventory.json` | Alles wat gelezen is, ook van printers die de JSON niet kan beschrijven (WSD, USB, PDF, OneNote, fax, verbindingen met een printserver), met de reden waarom ze niet in `printers.json` staan en de ruwe `PermissionSDDL` |
 | `<computer>.printerExport` | Alleen met `-PrintBrm`: de eigen Printer Migration-back-up van Windows |
 
-Op de doelmachine: pak de zip uit en draai `.\Install-Printer.ps1 -ConfigPath <map>\printers.json -CheckOnly`, daarna zonder `-CheckOnly`. De relatieve driverpaden worden opgelost ten opzichte van de map van de JSON.
+Op de doelmachine: `.\Install-Printer.ps1 -ConfigPath <de zip> -CheckOnly`, daarna zonder `-CheckOnly` - de zip zoals hij is (lokaal, UNC of een URL), of uitgepakt op een share, in een GitHub-repository of een Azure Storage-container met `-ConfigPath` naar de `printers.json` daar. De relatieve driverpaden worden opgelost ten opzichte van waar de JSON staat. Drivermappen uit een oudere export werken alleen vanaf schijf: via https kan een map niet gedownload worden.
 
 **Parameters**
 
@@ -314,7 +314,7 @@ De matrix: eerste kolom de printernamen, kopregel de gebruikers (weergavenaam, U
 | `-OU` | AD: distinguished name van de OU voor nieuwe groepen. Verplicht zodra er een groep aangemaakt moet worden |
 | `-AdWriteback` | Entra: de groepen komen via Cloud Sync in AD; zet hun AD-kopieën in `printers.json` en controleer of de leden aangekomen zijn. Heeft Graph (PowerShell 7) en de ActiveDirectory-module op dezelfde domain-joined machine nodig |
 | `-Prefix` | Voorvoegsel van de groepsnaam (standaard: `SG-U-PRINTM-`). AD beperkt een groepsnaam tot 64 tekens; langere stoppen de run voor er iets verandert |
-| `-ConfigPath` | `printers.json` om de rechten in te schrijven. `manage`/`manageDocuments`-vermeldingen blijven, `Everyone` en andere `print`-vermeldingen worden vervangen; eerst wordt een `.bak` geschreven. Een groep wordt pas geschreven als hij bestaat - Install-Printer weigert een wachtrij aan te maken waarvan de groep niet gevonden wordt |
+| `-ConfigPath` | `printers.json` om de rechten in te schrijven. `manage`/`manageDocuments`-vermeldingen blijven, `Everyone` en andere `print`-vermeldingen worden vervangen; eerst wordt een `.bak` geschreven. Een groep wordt pas geschreven als hij bestaat - Install-Printer weigert een wachtrij aan te maken waarvan de groep niet gevonden wordt. Install-Printer past ze alleen toe met `-ApplyPermissions` |
 | `-RemoveExtraMembers` | Ook groepsleden verwijderen die de matrix niet aanvinkt (standaard: gemeld, met rust gelaten) |
 | `-TenantId` | Entra: doeltenant; `-TenantId` is standaard de GDAP-klanttenant (`$global:cid` / `$env:M365_CUSTOMER_TENANTID`) |
 | `-Apply` | Groepen aanmaken, leden wijzigen, de JSON schrijven. Zonder: alleen rapporteren |

@@ -30,7 +30,8 @@
          does not tick are reported and left alone, unless -RemoveExtraMembers.
       3. With -ConfigPath: the printer's entry in printers.json gets
          "permissions": [ { "principal": <the group>, "access": "print" } ], so
-         Install-Printer gives that group print access and takes it from Everyone.
+         Install-Printer -ApplyPermissions gives that group print access and
+         takes it from Everyone (without -ApplyPermissions it ignores them).
          Entries with manage or manageDocuments that are not Everyone are kept.
          The file is backed up to printers.json.bak first.
 

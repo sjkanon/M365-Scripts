@@ -74,7 +74,7 @@ A device that is already in order costs one read of the JSON. Nothing is downloa
 | `githubRelease` | `repository` (`owner/name`), `tag` (default `latest`), `asset` (name, wildcards allowed — must match exactly one) |
 | `github` | `repository`, `path` (a `.zip` or a folder holding the INF), `ref` (branch/tag/commit, default: the default branch) |
 | `url` | `url` (https) — a `.zip`, `.cab` or single file |
-| `path` | `path` to a folder or `.zip`; relative paths resolve against the folder of the JSON |
+| `path` | `path` to a folder or `.zip`; relative paths resolve against where the JSON is - its folder on disk, or its URL (with the SAS token or other query carried over). Over https it must be a file (`.zip`), not a folder |
 | *(all)* | `sha256` — optional, checked before extracting (single files only) |
 
 | Printer field | Description |
@@ -127,7 +127,7 @@ A queue can be limited to one or more groups, for example a cheque tray only Fin
 | `manage` | Also change the printer itself (settings, sharing, permissions) |
 
 - `principal` is `DOMAIN\Group`, a local user or group, or a **SID**. An Entra ID group can only be given by its SID (`S-1-12-1-…`, from Entra ID or `whoami /groups` of a member). `Everyone`, `Authenticated Users`, `Users`, `Interactive`, `Administrators` and `SYSTEM` are understood in English on a Windows of any language
-- Listed principals get that access; **Everyone and every other user or group lose theirs**, including the account that happened to install the printer. Administrators, SYSTEM, CREATOR OWNER, app packages and service identities always keep their access — printing from packaged apps such as new Outlook depends on those entries, so they are never removed. `[]` means administrators only. A `print` principal that does not resolve stops that queue (fail closed); a `manage` or `manageDocuments` one - such as the admin account an exported queue was created with - is left out with a warning and the queue goes in
+- Only with `-ApplyPermissions` (NinjaOne `applyPermissions`); without it the field is ignored and the ACL is left alone, so one JSON serves customers with and without print groups. Listed principals get that access; **Everyone and every other user or group lose theirs**, including the account that happened to install the printer. Administrators, SYSTEM, CREATOR OWNER, app packages and service identities always keep their access — printing from packaged apps such as new Outlook depends on those entries, so they are never removed. `[]` means administrators only. A `print` principal that does not resolve stops that queue (fail closed); a `manage` or `manageDocuments` one - such as the admin account an exported queue was created with - is left out with a warning and the queue goes in
 - **Fails closed:** a group that does not resolve stops that queue from being created (`-CheckOnly` reports it in advance), and a new queue whose permissions cannot be set is removed again rather than left open to everyone. An existing queue keeps its old permissions and the run fails. On a first boot an unresolved name is retried for up to 2 minutes, for a domain controller that is not reachable yet
 - Compared by meaning, not by text: Windows may store an entry differently from how it was given, and that does not count as a change. The permissions are checked on every run, so a group added by hand in the printer's properties is taken away again — the JSON is the source of truth
 - The permissions decide who may print to the queue. Whether a user without access still *sees* it in the list depends on the application and is not something this script controls
@@ -136,7 +136,7 @@ A queue can be limited to one or more groups, for example a cheque tray only Fin
 
 | Parameter | Description |
 |-----------|-------------|
-| `-ConfigPath` | The JSON: local/UNC path or https URL (e.g. a raw link in the same GitHub repository) |
+| `-ConfigPath` | Where the printers come from: `printers.json`, a folder holding it, or an export zip - on disk, on a share or over https (GitHub raw, an Azure Storage blob with its SAS token, any web server). A URL without a file name is a folder with `printers.json` |
 | `-Printer` | Only these printers from the JSON (names, wildcards allowed). Default: all |
 | `-GitHubToken` | Token for a private repository (falls back to `$env:GITHUB_TOKEN`). Only sent to GitHub's own hosts, never to a `url` source |
 | `-Proxy` | Proxy for every download, e.g. `http://proxy.contoso.local:8080`. As SYSTEM there is no user proxy to inherit; uses the computer account's credentials |
@@ -147,7 +147,7 @@ A queue can be limited to one or more groups, for example a cheque tray only Fin
 | `-Quiet` | Print nothing unless there is work or a failure |
 | `-Force` | Reinstall drivers even when the version matches |
 | `-SkipSignatureCheck` | Skip the script's own catalog signature check (Windows still refuses unsigned package drivers) |
-| `-SkipPermissions` | Ignore every `permissions` field in the JSON: install without groups and leave each queue's ACL alone (Everyone may print) |
+| `-ApplyPermissions` | Apply the JSON's `permissions` (print groups, managers). Without it they are ignored: the printers go in without groups and each queue's ACL is left as it is (Everyone may print) |
 
 **Examples**
 
@@ -237,7 +237,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` runs the vendor driver's own code and hangs on some universal drivers, so it runs in a job with a 2-minute timeout. A failure there is a warning — the printer is installed all the same
 - Default printer is a per-user setting and is deliberately not handled: as SYSTEM there is no user to set it for
 - Started 32-bit (Intune Management Extension, some RMM agents), the script relaunches itself 64-bit, because `pnputil` does not exist under SysWOW64. Started by hand without elevation, it asks for it
-- NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `skipPermissions`
+- NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`
 - `-CheckOnly` is the health check for an RMM condition or a scheduled detection job: exit `2` means the device does not match the JSON
 
 ---
@@ -248,13 +248,13 @@ The reverse of `Install-Printer.ps1`: reads the printers of this machine and wri
 
 | In the zip | Contents |
 |------------|----------|
-| `printers.json` | The printers and their settings in Install-Printer's format: driver, address, port name/number, LPR queue, SNMP, location, comment, sharing, duplex, colour, paper size, default tray (`inputBin`) and permissions. Each driver points at its own folder in the zip (`"type": "path"`) |
-| `drivers\<driver name>\` | The complete driver package as the driver store holds it: INF, signed catalog and binaries - what `pnputil` installs from. Drivers that ship with Windows (`ntprint.inf`, `prnms*.inf`) are not copied |
+| `printers.json` | The printers and their settings in Install-Printer's format: driver, address, port name/number, LPR queue, SNMP, location, comment, sharing, duplex, colour, paper size, default tray (`inputBin`) and permissions. Each driver points at its own zip next to it (`"type": "path"`, `drivers/<name>.zip`) |
+| `drivers\<driver name>.zip` | The complete driver package as the driver store holds it: INF, signed catalog and binaries - what `pnputil` installs from. Drivers that ship with Windows (`ntprint.inf`, `prnms*.inf`) are not copied |
 | `settings\<printer>.xml` | The full default print ticket per printer, including every vendor setting the JSON fields do not cover |
 | `inventory.json` | Everything that was read, also for printers the JSON cannot describe (WSD, USB, PDF, OneNote, fax, print server connections), with the reason they are not in `printers.json` and the raw `PermissionSDDL` |
 | `<computer>.printerExport` | Only with `-PrintBrm`: Windows' own Printer Migration backup |
 
-On the target machine: unpack the zip and run `.\Install-Printer.ps1 -ConfigPath <folder>\printers.json -CheckOnly`, then without `-CheckOnly`. The relative driver paths resolve against the folder of the JSON.
+On the target machine: `.\Install-Printer.ps1 -ConfigPath <the zip> -CheckOnly`, then without `-CheckOnly` - the zip as it is (local, UNC or a URL), or unpacked on a share, in a GitHub repository or an Azure Storage container with `-ConfigPath` pointing at its `printers.json`. The relative driver paths resolve against wherever the JSON is. Driver folders from an older export only work from disk: over https a folder cannot be downloaded.
 
 **Parameters**
 
@@ -314,7 +314,7 @@ The matrix: first column the printer names, header row the users (display name, 
 | `-OU` | AD: distinguished name of the OU for new groups. Required as soon as a group has to be created |
 | `-AdWriteback` | Entra: the groups reach AD through Cloud Sync; put their AD copies in `printers.json` and check that the members arrived. Needs Graph (PowerShell 7) and the ActiveDirectory module on the same domain-joined machine |
 | `-Prefix` | Group name prefix (default: `SG-U-PRINTM-`). AD caps a group name at 64 characters; longer ones stop the run before anything changes |
-| `-ConfigPath` | `printers.json` to write the permissions into. `manage`/`manageDocuments` entries are kept, `Everyone` and other `print` entries replaced; a `.bak` is written first. A group is only written once it exists - Install-Printer refuses to create a queue whose group does not resolve |
+| `-ConfigPath` | `printers.json` to write the permissions into. `manage`/`manageDocuments` entries are kept, `Everyone` and other `print` entries replaced; a `.bak` is written first. A group is only written once it exists - Install-Printer refuses to create a queue whose group does not resolve. Install-Printer only applies them with `-ApplyPermissions` |
 | `-RemoveExtraMembers` | Also remove group members the matrix does not tick (default: reported, left alone) |
 | `-TenantId` | Entra: target tenant; `-TenantId` defaults to the GDAP customer tenant (`$global:cid` / `$env:M365_CUSTOMER_TENANTID`) |
 | `-Apply` | Create groups, change members, write the JSON. Without it: report only |
