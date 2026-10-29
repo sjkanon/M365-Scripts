@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29 (4)
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) : un principal `manage` ou `manageDocuments` introuvable est omis avec un avertissement au lieu de bloquer la file. Un printers.json exporté avant l'entrée (3) peut contenir le compte avec lequel la file a été créée (`BVL\icteadmin` en manage) ; là où ce compte n'existe pas, la file n'était pas installée du tout. Seul un principal `print` échoue encore de façon fermée, car on ne sait alors pas qui peut imprimer |
+| Vérifié : contrôle de syntaxe ; sous PowerShell 7 et 5.1, `BVL\icteadmin` (manage) + Everyone (print) donne un avertissement et l'accès Everyone=print, et un groupe d'impression introuvable bloque toujours la file. **Non** vérifié sur la machine BVL |
 ### 2026-10-29 (3)
 | Modification |
 |--------|

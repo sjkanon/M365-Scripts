@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29 (4)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): a `manage` or `manageDocuments` principal that does not resolve is left out with a warning instead of stopping the queue. A printers.json exported before entry (3) can hold the account the queue was created with (`BVL\icteadmin` as manage); where that account does not exist the queue was not installed at all. Only a `print` principal still fails closed, because there it is unclear who may print |
+| Verified: syntax check; in PowerShell 7 and 5.1 `BVL\icteadmin` (manage) + Everyone (print) gives a warning and the grant Everyone=print, and an unresolvable print group still stops the queue. **Not** verified on the BVL machine |
 ### 2026-10-29 (3)
 | Change |
 |--------|

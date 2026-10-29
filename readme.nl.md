@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29 (4)
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): een `manage`- of `manageDocuments`-principal die niet te vinden is wordt met een waarschuwing weggelaten in plaats van de wachtrij tegen te houden. Een printers.json die vóór item (3) is geëxporteerd kan het account bevatten waarmee de wachtrij is aangemaakt (`BVL\icteadmin` als manage); waar dat account niet bestaat werd de wachtrij helemaal niet geïnstalleerd. Alleen een `print`-principal faalt nog gesloten, omdat dan onduidelijk is wie mag afdrukken |
+| Geverifieerd: syntaxcontrole; in PowerShell 7 en 5.1 geeft `BVL\icteadmin` (manage) + Everyone (print) een waarschuwing en de toekenning Everyone=print, en een onvindbare printgroep houdt de wachtrij nog steeds tegen. **Niet** geverifieerd op de BVL-machine |
 ### 2026-10-29 (3)
 | Wijziging |
 |--------|

@@ -76,8 +76,9 @@
     user or group lose it. Administrators, SYSTEM, CREATOR OWNER, app packages and
     service identities always keep theirs - printing from packaged apps such as
     new Outlook depends on them. Without the field the ACL is left alone; [] means
-    administrators only. -SkipPermissions ignores the field for the whole run. This fails closed: a group that does not resolve stops
-    that queue from being created, and a new queue whose permissions cannot be
+    administrators only. -SkipPermissions ignores the field for the whole run. This fails closed: a print group that does not resolve stops
+    that queue from being created (a manage or manageDocuments entry that does
+    not resolve is left out with a warning), and a new queue whose permissions cannot be
     set is removed again rather than left open to everyone.
 
     After a golden image
@@ -1408,7 +1409,15 @@ function Resolve-PrinterGrant {
     $grants = [System.Collections.Generic.List[object]]::new()
     foreach ($entry in @(Get-PropertyValue $Spec 'permissions')) {
         if ($null -eq $entry) { continue }
-        $sid = Resolve-Principal -Name ([string] $entry.principal) -RetrySeconds $RetrySeconds
+        # Only who may print is worth stopping the queue for. A manager that does
+        # not resolve here - typically the admin account an exported queue was
+        # created with - is left out, so the queue goes in with fewer managers.
+        try { $sid = Resolve-Principal -Name ([string] $entry.principal) -RetrySeconds $RetrySeconds }
+        catch {
+            if ([string] $entry.access -eq 'print') { throw }
+            Write-Warn "  '$($entry.principal)' ($($entry.access)) cannot be resolved on this machine - left out of '$($Spec.name)'"
+            continue
+        }
         if (Test-ProtectedSid $sid) {
             Write-Skip "  '$($entry.principal)' always keeps full control of '$($Spec.name)' - no need to list it"
             continue
