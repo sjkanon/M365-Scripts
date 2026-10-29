@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29 (3)
+| Modification |
+|--------|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) : le compte avec lequel une file a été créée n'apparaît plus dans printers.json. Windows accorde « manage » au créateur de la file ; un export depuis une machine configurée avec un compte administrateur (comme `icteadmin`) écrivait donc `permissions` avec ce compte et Everyone - la file ne ressemblait plus au défaut, et sur une cible où le compte ne se résout pas, Install-Printer refusait la file. « manage » est désormais omis pour un compte du groupe local Administrators (directement ou via un groupe de domaine ; Administrators garde de toute façon le contrôle total) et pour un compte local qui n'existe plus (le compte d'installation d'une image, un simple SID). Une file où seul Everyone imprime n'a plus aucune `permissions` |
+| Vérifié : contrôle de syntaxe ; sur cette machine sous PowerShell 7 et 5.1 - le créateur `AzureAD\SjoerdKanon` (administrateur via un groupe Entra) sur AnyDesk Printer et OneNote, et le compte d'installation supprimé `S-1-5-21-...-1000` sur Microsoft Print to PDF et Fax, sont omis et les quatre ressortent au défaut. **Non** vérifié sur la machine BVL avec `icteadmin` |
 ### 2026-10-29 (2)
 | Modification |
 |--------|

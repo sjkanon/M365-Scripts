@@ -42,7 +42,9 @@
     (Everyone may print), as DOMAIN\Group, or as a SID where the name does not
     translate - an Entra ID group is only known by its SID. Administrators,
     SYSTEM, CREATOR OWNER and app identities are left out, as Install-Printer
-    always keeps them.
+    always keeps them. So is "manage" for an account in the local Administrators
+    group (directly or through a domain group): Windows grants that to the account
+    that created the queue, which says nothing about who should print.
 
     Nothing on the machine is changed. Print defaults are read in a job with a
     timeout: that is vendor driver code, which hangs on some universal drivers.
@@ -265,6 +267,50 @@ function Test-ProtectedSid {
     return ($Sid -like 'S-1-15-*' -or $Sid -like 'S-1-5-99-*' -or $Sid -like 'S-1-5-80-*')
 }
 
+$script:localAdminSids = $null
+# This machine's own account domain (S-1-5-21-...), from the built-in Administrator.
+$script:machineSid = $null
+try {
+    $builtinAdmin      = @(Get-CimInstance Win32_UserAccount -Filter "LocalAccount=True AND SID LIKE 'S-1-5-21-%-500'" -ErrorAction Stop)[0]
+    $script:machineSid = ([Security.Principal.SecurityIdentifier]::new($builtinAdmin.SID)).AccountDomainSid.Value
+} catch { }
+
+function Test-LocalAdministrator {
+    <#
+        Whether an account is in this machine's Administrators group, directly or
+        through a (domain) group in it. Windows gives the account that creates a
+        printer "manage" on it; when that is an administrator - and only they can
+        create one - the entry adds nothing to what Administrators already has.
+    #>
+    param([Parameter(Mandatory)] [string] $Sid)
+
+    if ($null -eq $script:localAdminSids) {
+        $script:localAdminSids = @()
+        try {
+            $name  = ([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')).Translate([Security.Principal.NTAccount]).Value.Split('\')[-1]
+            $group = [ADSI] "WinNT://$env:COMPUTERNAME/$name,group"
+            $script:localAdminSids = @($group.Invoke('Members') | ForEach-Object {
+                ([Security.Principal.SecurityIdentifier]::new([byte[]] ([ADSI] $_).objectSid.Value, 0)).Value
+            })
+        } catch { Write-Warn "Members of Administrators not readable: $($_.Exception.Message)" }
+    }
+    if ($Sid -in $script:localAdminSids) { return $true }
+
+    # Nested: the account's own groups, through a domain group in Administrators.
+    try {
+        Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+        $am = 'System.DirectoryServices.AccountManagement'
+        foreach ($type in 'Domain', 'Machine') {
+            try { $context = New-Object "$am.PrincipalContext" ([Enum]::Parse("$am.ContextType" -as [type], $type)) } catch { continue }
+            $account = ("$am.Principal" -as [type])::FindByIdentity($context, ("$am.IdentityType" -as [type])::Sid, $Sid)
+            if (-not $account) { continue }
+            $groups = if ($account -is ("$am.UserPrincipal" -as [type])) { $account.GetAuthorizationGroups() } else { $account.GetGroups() }
+            if (@($groups | Where-Object { $_.Sid.Value -in $script:localAdminSids }).Count -gt 0) { return $true }
+        }
+    } catch { }
+    return $false
+}
+
 function Get-PrinterPermission {
     <#
         The queue's ACL as Install-Printer's "permissions" list, or $null when it
@@ -291,6 +337,22 @@ function Get-PrinterPermission {
                  else { $null }
         if (-not $level) { continue }
         if (-not $map.Contains($sid) -or $rank[$level] -gt $rank[$map[$sid]]) { $map[$sid] = $level }
+    }
+    # The account that created the queue (often the admin account it was set up
+    # with) is no permission anyone chose: as an administrator it keeps full
+    # control anyway, and its name may resolve nowhere else.
+    # A local account that no longer exists - the one Windows setup created the
+    # queue with - is left out too: its SID means nothing on any other machine.
+    foreach ($sid in @($map.Keys)) {
+        if ($map[$sid] -ne 'manage' -or $sid -eq 'S-1-1-0') { continue }
+        $name = $null
+        try { $name = ([Security.Principal.SecurityIdentifier]::new($sid)).Translate([Security.Principal.NTAccount]).Value } catch { }
+        if (-not $name -and $script:machineSid -and $sid -like "$($script:machineSid)-*") {
+            Write-Skip "  '$sid' (manage) is a local account of this machine that no longer exists - left out"
+        } elseif (Test-LocalAdministrator $sid) {
+            Write-Skip "  '$(if ($name) { $name } else { $sid })' (manage) is a member of Administrators - left out, Administrators keeps full control"
+        } else { continue }
+        $map.Remove($sid)
     }
     if ($map.Count -eq 1 -and $map.Contains('S-1-1-0') -and $map['S-1-1-0'] -eq 'print') { return $null }
 

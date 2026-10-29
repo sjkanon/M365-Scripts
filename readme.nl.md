@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29 (3)
+| Wijziging |
+|--------|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1): het account waarmee een wachtrij is aangemaakt komt niet meer in printers.json. Windows geeft de maker "manage" op de wachtrij, dus een export van een machine die met een beheerdersaccount (zoals `icteadmin`) is ingericht schreef `permissions` met dat account en Everyone - de wachtrij leek dan niet meer de standaard, en op een doel waar het account niet bestaat weigerde Install-Printer de wachtrij. "manage" blijft nu weg voor een account in de lokale groep Administrators (rechtstreeks of via een domeingroep; Administrators houdt sowieso volledig beheer) en voor een lokaal account dat niet meer bestaat (het installatieaccount van een image, alleen nog een kale SID). Een wachtrij met verder alleen Everyone die mag afdrukken krijgt helemaal geen `permissions` |
+| Geverifieerd: syntaxcontrole; op deze machine in PowerShell 7 en 5.1 - de maker `AzureAD\SjoerdKanon` (beheerder via een Entra-groep) op AnyDesk Printer en OneNote, en het verwijderde installatieaccount `S-1-5-21-...-1000` op Microsoft Print to PDF en Fax, blijven weg en alle vier komen uit als standaard. **Niet** geverifieerd op de BVL-machine met `icteadmin` |
 ### 2026-10-29 (2)
 | Wijziging |
 |--------|

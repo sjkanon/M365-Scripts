@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29 (3)
+| Change |
+|--------|
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1): the account a queue was created with no longer ends up in printers.json. Windows gives the creator "manage" on the queue, so an export from a machine set up with an admin account (such as `icteadmin`) wrote `permissions` with that account and Everyone - the queue no longer looked like the default, and on a target where the account does not resolve Install-Printer refused the queue. "manage" is now left out for an account in the local Administrators group (directly or through a domain group; Administrators keeps full control anyway) and for a local account that no longer exists (an image's setup account, only a bare SID). A queue that is otherwise Everyone printing gets no `permissions` at all |
+| Verified: syntax check; on this machine in PowerShell 7 and 5.1 - the creator `AzureAD\SjoerdKanon` (admin through an Entra group) on AnyDesk Printer and OneNote, and the removed setup account `S-1-5-21-...-1000` on Microsoft Print to PDF and Fax, are left out and all four come out as the default. **Not** verified on the BVL machine with `icteadmin` |
 ### 2026-10-29 (2)
 | Change |
 |--------|
