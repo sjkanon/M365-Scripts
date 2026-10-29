@@ -147,6 +147,7 @@ Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade
 | `-Quiet` | Niets tonen tenzij er werk is of iets faalt |
 | `-Force` | Drivers opnieuw installeren, ook als de versie klopt |
 | `-SkipSignatureCheck` | De eigen handtekeningcontrole van de catalogus overslaan (Windows weigert niet-ondertekende pakketdrivers nog steeds) |
+| `-SkipPermissions` | Elk `permissions`-veld in de JSON negeren: installeren zonder groepen en de ACL van elke wachtrij met rust laten (Iedereen mag printen) |
 
 **Voorbeelden**
 
@@ -236,7 +237,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` voert de eigen code van de driver van de leverancier uit en blijft bij sommige universele drivers hangen, dus het draait in een job met een time-out van 2 minuten. Een fout daar is een waarschuwing — de printer is evengoed geïnstalleerd
 - De standaardprinter is een instelling per gebruiker en wordt bewust niet ingesteld: als SYSTEM is er geen gebruiker om hem voor in te stellen
 - Gestart als 32-bit (Intune Management Extension, sommige RMM-agents) start het script zichzelf opnieuw als 64-bit, omdat `pnputil` niet bestaat onder SysWOW64. Handmatig gestart zonder verhoogde rechten vraagt het daarom
-- NinjaOne-scriptvariabelen: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, en de selectievakjes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
+- NinjaOne-scriptvariabelen: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, en de selectievakjes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `skipPermissions`
 - `-CheckOnly` is de gezondheidscontrole voor een RMM-conditie of een geplande detectietaak: exitcode `2` betekent dat het apparaat niet overeenkomt met de JSON
 
 ---

@@ -76,7 +76,7 @@
     user or group lose it. Administrators, SYSTEM, CREATOR OWNER, app packages and
     service identities always keep theirs - printing from packaged apps such as
     new Outlook depends on them. Without the field the ACL is left alone; [] means
-    administrators only. This fails closed: a group that does not resolve stops
+    administrators only. -SkipPermissions ignores the field for the whole run. This fails closed: a group that does not resolve stops
     that queue from being created, and a new queue whose permissions cannot be
     set is removed again rather than left open to everyone.
 
@@ -139,7 +139,7 @@
     Script variables arrive as environment variables and are used when the matching
     parameter is not passed: configPath, printer (comma separated), githubToken,
     workingDir, logPath, waitSeconds, proxy, and the checkboxes checkOnly, whatIf,
-    quiet, force and skipSignatureCheck. Started 32-bit, the script relaunches
+    quiet, force, skipSignatureCheck and skipPermissions. Started 32-bit, the script relaunches
     itself 64-bit - pnputil does not exist under SysWOW64. Started by hand without
     elevation, it asks for it.
 
@@ -189,6 +189,12 @@
     Do not require a valid signature on the driver's catalog file. Windows itself
     still refuses an unsigned package driver; this only skips the script's own check.
 
+.PARAMETER SkipPermissions
+    Ignore every "permissions" field in the JSON: the printers are installed
+    without groups and each queue's ACL is left alone (Everyone may print), as if
+    the field were not there. For a JSON that New-PrinterGroup filled in, on a
+    machine where the groups are not wanted or do not resolve.
+
 .PARAMETER WaitSeconds
     How long a freshly provisioned machine is given to get ready: the Print Spooler
     to start, the network to answer downloads, and another run of this script to
@@ -235,6 +241,7 @@ param (
     [switch]   $Quiet,
     [switch]   $Force,
     [switch]   $SkipSignatureCheck,
+    [switch]   $SkipPermissions,
     [ValidateRange(0, 3600)]
     [int]      $WaitSeconds = 300
 )
@@ -311,6 +318,7 @@ if (-not $PSBoundParameters.ContainsKey('CheckOnly')          -and $env:checkOnl
 if (-not $PSBoundParameters.ContainsKey('Quiet')              -and $env:quiet              -in $rmmTrue) { $Quiet              = $true }
 if (-not $PSBoundParameters.ContainsKey('Force')              -and $env:force              -in $rmmTrue) { $Force              = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
+if (-not $PSBoundParameters.ContainsKey('SkipPermissions')    -and $env:skipPermissions    -in $rmmTrue) { $SkipPermissions    = $true }
 if (-not $PSBoundParameters.ContainsKey('ConfigPath')         -and $env:configPath)  { $ConfigPath  = $env:configPath }
 if (-not $PSBoundParameters.ContainsKey('Printer')            -and $env:printer)     { $Printer     = @($env:printer -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)  { $WorkingDir  = $env:workingDir }
@@ -2047,6 +2055,14 @@ try {
     $allDrivers  = @(@(Get-PropertyValue $config 'drivers')  | Where-Object { $_ })
     $allPrinters = @(@(Get-PropertyValue $config 'printers') | Where-Object { $_ })
     Write-Ok "$ConfigPath - $($allDrivers.Count) driver(s), $($allPrinters.Count) printer(s)"
+
+    # Without groups: every printer as if it had no "permissions" field, so the
+    # queue's ACL is left as Windows (or an admin) set it - Everyone may print.
+    if ($SkipPermissions) {
+        $withPermissions = @($allPrinters | Where-Object { $null -ne (Get-PropertyValue $_ 'permissions') })
+        foreach ($p in $withPermissions) { $p.PSObject.Properties.Remove('permissions') }
+        if ($withPermissions.Count -gt 0) { Write-Skip "Permissions of $($withPermissions.Count) printer(s) ignored (-SkipPermissions) - their ACL is left alone" }
+    }
 
     # The @() goes around the whole if: one match inside the branch alone comes
     # out as a bare object, and its .Count throws under Set-StrictMode.

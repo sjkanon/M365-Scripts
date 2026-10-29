@@ -1015,6 +1015,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29 (2)
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) : nouveau `-SkipPermissions` (case à cocher NinjaOne `skipPermissions`). Il ignore chaque champ `permissions` du JSON : les imprimantes sont installées sans groupes et l'ACL de chaque file reste telle quelle (Tout le monde peut imprimer) - un seul JSON pour les clients qui travaillent avec des groupes d'impression et pour ceux qui ne le font pas. Auparavant, un JSON avec `permissions` les appliquait toujours, et un groupe introuvable empêchait la création de la file. Une file qui a déjà une ACL de groupe la garde : le commutateur ne la remet pas à Tout le monde |
+| Vérifié : contrôle de syntaxe ; sous `Set-StrictMode`, le champ est retiré des imprimantes qui l'ont et les autres restent intactes. **Non** vérifié sur une machine |
 ### 2026-10-29
 | Modification |
 |--------|

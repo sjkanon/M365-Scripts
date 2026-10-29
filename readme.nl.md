@@ -1015,6 +1015,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29 (2)
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): nieuwe `-SkipPermissions` (NinjaOne-selectievakje `skipPermissions`). Negeert elk `permissions`-veld in de JSON, zodat de printers zonder groepen worden geïnstalleerd en de ACL van elke wachtrij met rust wordt gelaten (Iedereen mag printen) - één JSON voor klanten die met printgroepen werken en klanten die dat niet doen. Voorheen paste een JSON met `permissions` die altijd toe, en een groep die niet te vinden was hield de wachtrij tegen. Een wachtrij die al een groeps-ACL heeft houdt die: de schakelaar zet hem niet terug naar Iedereen |
+| Geverifieerd: syntaxcontrole; onder `Set-StrictMode` wordt het veld verwijderd bij de printers die het hebben en blijven de andere ongemoeid. **Niet** geverifieerd op een machine |
 ### 2026-10-29
 | Wijziging |
 |--------|

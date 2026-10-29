@@ -1015,6 +1015,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29 (2)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): new `-SkipPermissions` (NinjaOne checkbox `skipPermissions`). It ignores every `permissions` field in the JSON, so the printers go in without groups and each queue's ACL is left alone (Everyone may print) - one JSON for customers that work with print groups and for those that do not. Before, a JSON with `permissions` always applied them, and a group that did not resolve stopped the queue from being created. A queue that already has a group ACL keeps it: the switch does not reset it to Everyone |
+| Verified: syntax check; under `Set-StrictMode` the field is removed from the printers that have it and the others are untouched. **Not** verified on a machine |
 ### 2026-10-29
 | Change |
 |--------|

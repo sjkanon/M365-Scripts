@@ -147,6 +147,7 @@ Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à
 | `-Quiet` | N'afficher rien sauf s'il y a du travail ou un échec |
 | `-Force` | Réinstaller les pilotes même si la version correspond |
 | `-SkipSignatureCheck` | Ignorer la vérification de signature du catalogue faite par le script (Windows refuse toujours les pilotes de paquet non signés) |
+| `-SkipPermissions` | Ignorer chaque champ `permissions` du JSON : installer sans groupes et laisser l'ACL de chaque file telle quelle (Tout le monde peut imprimer) |
 
 **Exemples**
 
@@ -236,7 +237,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` exécute le code propre au pilote du fabricant et se bloque avec certains pilotes universels ; il s'exécute donc dans un job avec un délai de 2 minutes. Un échec à cet endroit est un avertissement — l'imprimante est installée malgré tout
 - L'imprimante par défaut est un réglage par utilisateur et n'est volontairement pas gérée : en SYSTEM, il n'y a pas d'utilisateur pour qui la définir
 - Lancé en 32 bits (Intune Management Extension, certains agents RMM), le script se relance en 64 bits, car `pnputil` n'existe pas sous SysWOW64. Lancé à la main sans élévation, il la demande
-- Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
+- Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `skipPermissions`
 - `-CheckOnly` sert de contrôle de santé pour une condition RMM ou une tâche de détection planifiée : le code de sortie `2` signifie que l'appareil ne correspond pas au JSON
 
 ---

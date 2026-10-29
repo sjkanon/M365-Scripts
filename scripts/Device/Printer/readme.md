@@ -147,6 +147,7 @@ A queue can be limited to one or more groups, for example a cheque tray only Fin
 | `-Quiet` | Print nothing unless there is work or a failure |
 | `-Force` | Reinstall drivers even when the version matches |
 | `-SkipSignatureCheck` | Skip the script's own catalog signature check (Windows still refuses unsigned package drivers) |
+| `-SkipPermissions` | Ignore every `permissions` field in the JSON: install without groups and leave each queue's ACL alone (Everyone may print) |
 
 **Examples**
 
@@ -236,7 +237,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` runs the vendor driver's own code and hangs on some universal drivers, so it runs in a job with a 2-minute timeout. A failure there is a warning — the printer is installed all the same
 - Default printer is a per-user setting and is deliberately not handled: as SYSTEM there is no user to set it for
 - Started 32-bit (Intune Management Extension, some RMM agents), the script relaunches itself 64-bit, because `pnputil` does not exist under SysWOW64. Started by hand without elevation, it asks for it
-- NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`
+- NinjaOne script variables: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, and the checkboxes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `skipPermissions`
 - `-CheckOnly` is the health check for an RMM condition or a scheduled detection job: exit `2` means the device does not match the JSON
 
 ---
