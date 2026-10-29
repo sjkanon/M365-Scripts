@@ -25,7 +25,9 @@
                       what pnputil installs from. Drivers that ship with Windows
                       (ntprint.inf, prnms*.inf) are not copied: every machine has them.
       settings\       Per printer the full default print ticket (<name>.xml), with
-                      every vendor setting that the JSON fields do not cover.
+                      every vendor setting that the JSON fields do not cover. The
+                      printer's "printTicket" points at it; Install-Printer
+                      applies it with -ApplySettings.
       inventory.json  Everything that was read, also for printers the JSON cannot
                       describe: WSD, USB, PDF, OneNote, fax, connections to a print
                       server. Their raw settings are here, with the reason why they
@@ -461,12 +463,14 @@ try {
         # Print defaults and the full ticket: read for every local queue, also
         # those that cannot go into printers.json - the inventory keeps them.
         $defaults = $null
+        $ticket   = $null
         if ("$($p.Type)" -ne 'Connection') {
             try {
                 $defaults = Get-PrintDefault -Name $p.Name
-                $ticketFile = Join-Path $stage ("settings\{0}.xml" -f (ConvertTo-SafeName $p.Name))
-                [IO.File]::WriteAllText($ticketFile, $defaults.Ticket, [Text.UTF8Encoding]::new($false))
+                $ticket   = 'settings/{0}.xml' -f (ConvertTo-SafeName $p.Name)
+                [IO.File]::WriteAllText((Join-Path $stage $ticket), $defaults.Ticket, [Text.UTF8Encoding]::new($false))
             } catch {
+                $ticket = $null
                 Write-Warn "Print defaults not readable: $($_.Exception.Message)"
             }
         }
@@ -535,6 +539,9 @@ try {
             if ($defaults.Paper -and $defaults.Paper -ne 'Unknown') { $entry.paperSize = $defaults.Paper }
             if ($defaults.InputBin) { $entry.inputBin = $defaults.InputBin }
         }
+        # Every vendor setting the fields above do not cover; Install-Printer
+        # applies it with -ApplySettings.
+        if ($ticket) { $entry.printTicket = $ticket }
         if ($null -ne $permissions) { $entry.permissions = $permissions }
         $jsonPrinters.Add($entry)
         $usedDrivers[$p.DriverName] = $true

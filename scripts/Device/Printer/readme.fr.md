@@ -148,6 +148,7 @@ Une file peut être réservée à un ou plusieurs groupes, par exemple un bac à
 | `-Force` | Réinstaller les pilotes même si la version correspond |
 | `-SkipSignatureCheck` | Ignorer la vérification de signature du catalogue faite par le script (Windows refuse toujours les pilotes de paquet non signés) |
 | `-ApplyPermissions` | Appliquer les `permissions` du JSON (groupes d'impression, gestionnaires). Sans lui, elles sont ignorées : les imprimantes sont installées sans groupes et l'ACL de chaque file reste telle quelle (Tout le monde peut imprimer) |
+| `-ApplySettings` | Appliquer le ticket d'impression complet de chaque imprimante (chaque paramètre du fabricant : agrafage, finition, qualité, ...) depuis son `printTicket`, ou `settings/<imprimante>.xml` à côté du JSON. D'abord le ticket, puis recto verso/couleur/papier/bac du JSON par-dessus. Appliqué une fois par ticket (SHA256 sous `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), pour que les modifications ultérieures des utilisateurs ne soient pas écrasées à chaque exécution |
 
 **Exemples**
 
@@ -237,7 +238,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` exécute le code propre au pilote du fabricant et se bloque avec certains pilotes universels ; il s'exécute donc dans un job avec un délai de 2 minutes. Un échec à cet endroit est un avertissement — l'imprimante est installée malgré tout
 - L'imprimante par défaut est un réglage par utilisateur et n'est volontairement pas gérée : en SYSTEM, il n'y a pas d'utilisateur pour qui la définir
 - Lancé en 32 bits (Intune Management Extension, certains agents RMM), le script se relance en 64 bits, car `pnputil` n'existe pas sous SysWOW64. Lancé à la main sans élévation, il la demande
-- Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`
+- Variables de script NinjaOne : `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, et les cases à cocher `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`, `applySettings`
 - `-CheckOnly` sert de contrôle de santé pour une condition RMM ou une tâche de détection planifiée : le code de sortie `2` signifie que l'appareil ne correspond pas au JSON
 
 ---
@@ -250,7 +251,7 @@ L'inverse de `Install-Printer.ps1` : lit les imprimantes de cette machine et éc
 |-------------|---------|
 | `printers.json` | Les imprimantes et leurs paramètres au format d'Install-Printer : pilote, adresse, nom/numéro de port, file LPR, SNMP, emplacement, commentaire, partage, recto verso, couleur, format de papier, bac par défaut (`inputBin`) et autorisations. Chaque pilote pointe vers son propre zip à côté (`"type": "path"`, `drivers/<nom>.zip`) |
 | `drivers\<nom du pilote>.zip` | Le package de pilote complet tel que le magasin de pilotes le conserve : INF, catalogue signé et binaires - ce à partir de quoi `pnputil` installe. Les pilotes fournis avec Windows (`ntprint.inf`, `prnms*.inf`) ne sont pas copiés |
-| `settings\<imprimante>.xml` | Le ticket d'impression par défaut complet de chaque imprimante, y compris chaque paramètre du fabricant que les champs JSON ne couvrent pas |
+| `settings\<imprimante>.xml` | Le ticket d'impression par défaut complet de chaque imprimante, y compris chaque paramètre du fabricant que les champs JSON ne couvrent pas. Le `printTicket` de l'imprimante pointe vers lui ; Install-Printer l'applique avec `-ApplySettings` |
 | `inventory.json` | Tout ce qui a été lu, aussi pour les imprimantes que le JSON ne peut pas décrire (WSD, USB, PDF, OneNote, fax, connexions à un serveur d'impression), avec la raison de leur absence de `printers.json` et le `PermissionSDDL` brut |
 | `<ordinateur>.printerExport` | Uniquement avec `-PrintBrm` : la sauvegarde Printer Migration propre à Windows |
 

@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-29 (6)
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): new `-ApplySettings` (NinjaOne `applySettings`) applies each printer's full print ticket - every vendor setting, also those the JSON fields do not cover. The ticket is the printer's new `printTicket` field, or `settings/<printer>.xml` next to the JSON for exports from before that field, fetched like the drivers (disk, share, https with a SAS token). It goes first, the JSON's duplex/color/paper/tray on top. It is applied once per ticket: its SHA256 is kept under `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`, so later changes are not overwritten every run. Before, Export-Printer wrote the tickets but nothing applied them |
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1): each printer in printers.json gets `"printTicket": "settings/<printer>.xml"` |
+| Verified: syntax check; in PowerShell 7 and 5.1 loading the ticket from the field, from the `settings/` fallback (with a name that has `/` in it), a missing fallback (quietly nothing), a missing given file (warning) and an HTML page instead of a ticket (refused); the URL of a ticket next to a blob JSON keeps the SAS token. **Not** verified: applying a ticket (`Set-PrintConfiguration -PrintTicketXml` needs elevation, this session was not elevated) and a full run |
 ### 2026-10-29 (5)
 | Change |
 |--------|

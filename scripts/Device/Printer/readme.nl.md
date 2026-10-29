@@ -148,6 +148,7 @@ Een wachtrij kan beperkt worden tot één of meer groepen, bijvoorbeeld een lade
 | `-Force` | Drivers opnieuw installeren, ook als de versie klopt |
 | `-SkipSignatureCheck` | De eigen handtekeningcontrole van de catalogus overslaan (Windows weigert niet-ondertekende pakketdrivers nog steeds) |
 | `-ApplyPermissions` | De `permissions` uit de JSON toepassen (printgroepen, beheerders). Zonder deze schakelaar worden ze genegeerd: de printers gaan erin zonder groepen en de ACL van elke wachtrij blijft zoals hij is (Iedereen mag printen) |
+| `-ApplySettings` | Het volledige printticket van elke printer toepassen (elke fabrikantinstelling: nieten, afwerking, kwaliteit, ...) uit zijn `printTicket`, of `settings/<printer>.xml` naast de JSON. Eerst het ticket, daarna dubbelzijdig/kleur/papier/lade uit de JSON eroverheen. Eén keer per ticket toegepast (SHA256 onder `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`), zodat latere wijzigingen van gebruikers niet elke run worden overschreven |
 
 **Voorbeelden**
 
@@ -237,7 +238,7 @@ az vm run-command invoke -g <resource-group> -n <vm> --command-id RunPowerShellS
 - `Set-PrintConfiguration` voert de eigen code van de driver van de leverancier uit en blijft bij sommige universele drivers hangen, dus het draait in een job met een time-out van 2 minuten. Een fout daar is een waarschuwing — de printer is evengoed geïnstalleerd
 - De standaardprinter is een instelling per gebruiker en wordt bewust niet ingesteld: als SYSTEM is er geen gebruiker om hem voor in te stellen
 - Gestart als 32-bit (Intune Management Extension, sommige RMM-agents) start het script zichzelf opnieuw als 64-bit, omdat `pnputil` niet bestaat onder SysWOW64. Handmatig gestart zonder verhoogde rechten vraagt het daarom
-- NinjaOne-scriptvariabelen: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, en de selectievakjes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`
+- NinjaOne-scriptvariabelen: `configPath`, `printer`, `githubToken`, `workingDir`, `logPath`, `waitSeconds`, `proxy`, en de selectievakjes `checkOnly`, `whatIf`, `quiet`, `force`, `skipSignatureCheck`, `applyPermissions`, `applySettings`
 - `-CheckOnly` is de gezondheidscontrole voor een RMM-conditie of een geplande detectietaak: exitcode `2` betekent dat het apparaat niet overeenkomt met de JSON
 
 ---
@@ -250,7 +251,7 @@ Het omgekeerde van `Install-Printer.ps1`: leest de printers van deze machine en 
 |-----------|--------|
 | `printers.json` | De printers en hun instellingen in het formaat van Install-Printer: driver, adres, poortnaam/-nummer, LPR-wachtrij, SNMP, locatie, opmerking, delen, dubbelzijdig, kleur, papierformaat, standaardlade (`inputBin`) en rechten. Elke driver verwijst naar zijn eigen zip ernaast (`"type": "path"`, `drivers/<naam>.zip`) |
 | `drivers\<drivernaam>.zip` | Het complete driverpakket zoals de driver store het bewaart: INF, ondertekende catalogus en binaries - waar `pnputil` van installeert. Drivers die met Windows meekomen (`ntprint.inf`, `prnms*.inf`) worden niet gekopieerd |
-| `settings\<printer>.xml` | Het volledige standaard printticket per printer, met elke fabrikantinstelling die de JSON-velden niet dekken |
+| `settings\<printer>.xml` | Het volledige standaard printticket per printer, met elke fabrikantinstelling die de JSON-velden niet dekken. De `printTicket` van de printer verwijst ernaar; Install-Printer past het toe met `-ApplySettings` |
 | `inventory.json` | Alles wat gelezen is, ook van printers die de JSON niet kan beschrijven (WSD, USB, PDF, OneNote, fax, verbindingen met een printserver), met de reden waarom ze niet in `printers.json` staan en de ruwe `PermissionSDDL` |
 | `<computer>.printerExport` | Alleen met `-PrintBrm`: de eigen Printer Migration-back-up van Windows |
 

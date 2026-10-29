@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-10-29 (6)
+| Wijziging |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): nieuwe `-ApplySettings` (NinjaOne `applySettings`) past het volledige printticket van elke printer toe - elke fabrikantinstelling, ook die de JSON-velden niet dekken. Het ticket is het nieuwe veld `printTicket` van de printer, of `settings/<printer>.xml` naast de JSON voor exports van vóór dat veld, opgehaald zoals de drivers (schijf, share, https met SAS-token). Het gaat eerst, dubbelzijdig/kleur/papier/lade uit de JSON eroverheen. Het wordt één keer per ticket toegepast: de SHA256 staat onder `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`, zodat latere wijzigingen niet elke run worden overschreven. Voorheen schreef Export-Printer de tickets, maar paste niets ze toe |
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1): elke printer in printers.json krijgt `"printTicket": "settings/<printer>.xml"` |
+| Geverifieerd: syntaxcontrole; in PowerShell 7 en 5.1 het laden van het ticket uit het veld, uit de `settings/`-terugval (met een naam waar `/` in staat), een ontbrekende terugval (stil niets), een ontbrekend opgegeven bestand (waarschuwing) en een HTML-pagina in plaats van een ticket (geweigerd); de URL van een ticket naast een blob-JSON houdt het SAS-token. **Niet** geverifieerd: het toepassen van een ticket (`Set-PrintConfiguration -PrintTicketXml` vraagt verhoogde rechten, deze sessie had die niet) en een volledige run |
 ### 2026-10-29 (5)
 | Wijziging |
 |--------|

@@ -145,7 +145,7 @@
     Script variables arrive as environment variables and are used when the matching
     parameter is not passed: configPath, printer (comma separated), githubToken,
     workingDir, logPath, waitSeconds, proxy, and the checkboxes checkOnly, whatIf,
-    quiet, force, skipSignatureCheck and applyPermissions. Started 32-bit, the script relaunches
+    quiet, force, skipSignatureCheck, applyPermissions and applySettings. Started 32-bit, the script relaunches
     itself 64-bit - pnputil does not exist under SysWOW64. Started by hand without
     elevation, it asks for it.
 
@@ -209,6 +209,18 @@
     as it is (Everyone may print). Use it where the customer works with print
     groups (New-PrinterGroup).
 
+.PARAMETER ApplySettings
+    Apply each printer's full print ticket - every vendor setting, also those the
+    JSON fields do not cover (stapling, finishing, quality, ...). The ticket is
+    the printer's "printTicket" (a path or URL, relative to the JSON), or
+    settings/<printer name>.xml next to the JSON as Export-Printer writes it. It
+    goes first; duplex, color, paperSize and inputBin from the JSON are set on
+    top of it. A ticket is applied once: its SHA256 is kept under
+    HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets and it is applied
+    again only when it changes, so what users change later is not overwritten on
+    every run. A ticket comes from one driver; with another driver version the
+    driver ignores what it does not know.
+
 .PARAMETER WaitSeconds
     How long a freshly provisioned machine is given to get ready: the Print Spooler
     to start, the network to answer downloads, and another run of this script to
@@ -256,6 +268,7 @@ param (
     [switch]   $Force,
     [switch]   $SkipSignatureCheck,
     [switch]   $ApplyPermissions,
+    [switch]   $ApplySettings,
     [ValidateRange(0, 3600)]
     [int]      $WaitSeconds = 300
 )
@@ -333,6 +346,7 @@ if (-not $PSBoundParameters.ContainsKey('Quiet')              -and $env:quiet   
 if (-not $PSBoundParameters.ContainsKey('Force')              -and $env:force              -in $rmmTrue) { $Force              = $true }
 if (-not $PSBoundParameters.ContainsKey('SkipSignatureCheck') -and $env:skipSignatureCheck -in $rmmTrue) { $SkipSignatureCheck = $true }
 if (-not $PSBoundParameters.ContainsKey('ApplyPermissions')   -and $env:applyPermissions   -in $rmmTrue) { $ApplyPermissions   = $true }
+if (-not $PSBoundParameters.ContainsKey('ApplySettings')      -and $env:applySettings      -in $rmmTrue) { $ApplySettings      = $true }
 if (-not $PSBoundParameters.ContainsKey('ConfigPath')         -and $env:configPath)  { $ConfigPath  = $env:configPath }
 if (-not $PSBoundParameters.ContainsKey('Printer')            -and $env:printer)     { $Printer     = @($env:printer -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 if (-not $PSBoundParameters.ContainsKey('WorkingDir')         -and $env:workingDir)  { $WorkingDir  = $env:workingDir }
@@ -382,7 +396,7 @@ $KnownSourceFields  = @{
     path          = @('type', 'path', 'sha256')
 }
 $KnownPrinterFields = @('name', 'driver', 'address', 'portName', 'portNumber', 'lprQueue', 'snmp', 'location',
-                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'inputBin', 'permissions',
+                        'comment', 'shared', 'shareName', 'duplex', 'color', 'paperSize', 'inputBin', 'permissions', 'printTicket',
                         'ensure', 'description')
 $KnownPermissionFields = @('principal', 'access')
 
@@ -409,6 +423,10 @@ $DuplexValues       = @('OneSided', 'TwoSidedLongEdge', 'TwoSidedShortEdge')
 
 # Written after every clean run, for detection rules - see Set-SuccessMarker.
 $MarkerPath = 'HKLM:\SOFTWARE\M365-Scripts\InstallPrinter'
+# -ApplySettings: per printer the print ticket to apply ({ Text; Hash; Source }),
+# and where the hash of the last one applied is kept.
+$script:printTickets = @{}
+$TicketMarkerPath    = "$MarkerPath\PrintTickets"
 
 # -- Output --------------------------------------------------------------------
 # -Quiet holds every line back until something worth reporting happens. The log
@@ -1527,6 +1545,84 @@ function Get-PrinterAclPlan {
     }
 }
 
+function Get-PrintTicket {
+    <#
+        -ApplySettings: a printer's full print ticket as { Text; Hash; Source }, or
+        $null. From its "printTicket", or - for an export from before that field -
+        settings/<name>.xml next to the JSON, which may just not be there: then
+        quietly nothing. Fetched the way the drivers are: from disk, a share, or
+        over https relative to the JSON's URL (a SAS token carried over).
+    #>
+    param([Parameter(Mandatory)] $Spec, [string] $ConfigFolder, [uri] $ConfigUri)
+
+    $given    = [string] (Get-PropertyValue $Spec 'printTicket')
+    $relative = if ($given) { $given } else { 'settings/{0}.xml' -f (([string] $Spec.name -replace '[\\/:*?"<>|]', '_').Trim().TrimEnd('.')) }
+    $text     = $null
+    try {
+        if ($relative -match '^https://') {
+            $source = $relative
+        } elseif ([IO.Path]::IsPathRooted($relative) -or $ConfigFolder) {
+            $source = if ([IO.Path]::IsPathRooted($relative)) { $relative } else { Join-Path $ConfigFolder $relative }
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+                if ($given) { Write-Warn "'$($Spec.name)': print ticket not found: $source" }
+                return $null
+            }
+            $text = Get-Content -LiteralPath $source -Raw -Encoding UTF8
+        } elseif ($ConfigUri) {
+            $source = Resolve-RelativeUri -Base $ConfigUri -Relative $relative
+        } else { return $null }
+
+        if ($null -eq $text) {
+            $temp = Join-Path ([IO.Path]::GetTempPath()) ('ticket_{0}.xml' -f [guid]::NewGuid().ToString('N'))
+            try {
+                Invoke-Download -Uri $source -Path $temp
+                $text = Get-Content -LiteralPath $temp -Raw -Encoding UTF8
+            } catch {
+                if ($given) { Write-Warn "'$($Spec.name)': print ticket not downloaded: $($_.Exception.Message)" }
+                return $null
+            } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+        }
+
+        [xml] $xml = $text
+        if ($xml.DocumentElement.LocalName -ne 'PrintTicket') { throw "it is a <$($xml.DocumentElement.LocalName)>, not a <psf:PrintTicket>" }
+    } catch {
+        Write-Warn "'$($Spec.name)': print ticket $relative is not usable - $($_.Exception.Message)"
+        return $null
+    }
+    $sha  = [Security.Cryptography.SHA256]::Create()
+    $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)) | ForEach-Object { $_.ToString('X2') })
+    $sha.Dispose()
+    return [PSCustomObject]@{ Text = $text; Hash = $hash; Source = $relative }
+}
+
+function Get-AppliedTicketHash {
+    param([Parameter(Mandatory)] [string] $Name)
+    try { return [string] (Get-ItemPropertyValue -Path $TicketMarkerPath -Name $Name -ErrorAction Stop) } catch { return $null }
+}
+
+function Set-PrintTicket {
+    <#
+        The ticket as the printer's default for every user, then its hash under
+        $TicketMarkerPath so the next run leaves it - and whatever was changed
+        since - alone. Vendor driver code, so in a job with a timeout; a failure
+        is a warning, the printer itself is installed and prints.
+    #>
+    param([Parameter(Mandatory)] $Spec, [Parameter(Mandatory)] $Ticket)
+
+    if (-not $PSCmdlet.ShouldProcess($Spec.name, "Set-PrintConfiguration -PrintTicketXml ($($Ticket.Source))")) { return }
+    try {
+        $null = Invoke-WithTimeout -Seconds 120 -ArgumentList $Spec.name, $Ticket.Text -ScriptBlock {
+            param($Name, $Xml)
+            Set-PrintConfiguration -PrinterName $Name -PrintTicketXml $Xml -ErrorAction Stop
+        }
+        if (-not (Test-Path $TicketMarkerPath)) { New-Item -Path $TicketMarkerPath -Force | Out-Null }
+        Set-ItemProperty -Path $TicketMarkerPath -Name ([string] $Spec.name) -Value $Ticket.Hash
+        Write-Ok "Print settings of '$($Spec.name)' applied from $($Ticket.Source)"
+    } catch {
+        Write-Warn "Could not apply the print settings of '$($Spec.name)' from $($Ticket.Source): $($_.Exception.Message) - the printer itself is installed"
+    }
+}
+
 function Get-PrinterState {
     <# What differs between the printer as it is and as the JSON wants it. #>
     param([Parameter(Mandatory)] $Spec)
@@ -1588,6 +1684,10 @@ function Get-PrinterState {
     # Only these need Set-Printer; a queue that differs only in its tray, print
     # defaults or permissions is left alone by it.
     $state.PropertyDrift = $changes.Count -gt $countBefore
+
+    # A ticket counts as a change only until it has been applied once.
+    $ticket = $script:printTickets[[string] $Spec.name]
+    if ($ticket -and (Get-AppliedTicketHash -Name $Spec.name) -ne $ticket.Hash) { $changes.Add("print settings from $($ticket.Source) not applied yet") }
 
     $duplex = Get-PropertyValue $Spec 'duplex'
     $color  = Get-PropertyValue $Spec 'color'
@@ -1795,6 +1895,14 @@ function Set-PrinterFromSpec {
                 throw "Could not set the permissions of '$($Spec.name)' ($reason) - its previous permissions are still in place"
             }
         }
+    }
+
+    # -ApplySettings: the full ticket first, so the JSON's own fields below land
+    # on top of it. Once per ticket, not on every run.
+    $ticket = $script:printTickets[[string] $Spec.name]
+    if ($ticket -and (Get-Printer -Name $Spec.name -ErrorAction SilentlyContinue) -and
+        ($createdNow -or (Get-AppliedTicketHash -Name $Spec.name) -ne $ticket.Hash)) {
+        Set-PrintTicket -Spec $Spec -Ticket $ticket
     }
 
     # Print defaults for every user of this printer. Only what the JSON sets is
@@ -2092,7 +2200,7 @@ function Test-Configuration {
             $value = Get-PropertyValue $p $flag
             if ($null -ne $value -and $value -isnot [bool]) { $problems.Add("$who '$flag' must be true or false (without quotes)") }
         }
-        foreach ($text in 'location', 'comment', 'shareName', 'paperSize', 'inputBin', 'lprQueue') {
+        foreach ($text in 'location', 'comment', 'shareName', 'paperSize', 'inputBin', 'lprQueue', 'printTicket') {
             $value = Get-PropertyValue $p $text
             if ($null -ne $value -and $value -isnot [string]) { $problems.Add("$who '$text' must be text") }
         }
@@ -2191,6 +2299,14 @@ try {
     Write-Out ''
     Write-Step '2. Preflight'
     Wait-PrintSpooler
+
+    if ($ApplySettings) {
+        foreach ($spec in @($printers | Where-Object { -not (Test-PrinterAbsent $_) })) {
+            $ticket = Get-PrintTicket -Spec $spec -ConfigFolder $configFolder -ConfigUri $loaded.BaseUri
+            if ($ticket) { $script:printTickets[[string] $spec.name] = $ticket }
+        }
+        Write-Ok "Print settings (-ApplySettings): $($script:printTickets.Count) of $(@($printers | Where-Object { -not (Test-PrinterAbsent $_) }).Count) printer(s) have a print ticket"
+    }
 
     $neededNames = @($printers | Where-Object { -not (Test-PrinterAbsent $_) } | ForEach-Object { [string] $_.driver } | Select-Object -Unique)
     $drivers     = @($allDrivers | Where-Object { $_.name -in $neededNames -or (Get-PropertyValue $_ 'install') -eq $true })

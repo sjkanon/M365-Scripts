@@ -1015,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-10-29 (6)
+| Modification |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1) : nouveau `-ApplySettings` (NinjaOne `applySettings`) applique le ticket d'impression complet de chaque imprimante - chaque paramètre du fabricant, y compris ceux que les champs JSON ne couvrent pas. Le ticket est le nouveau champ `printTicket` de l'imprimante, ou `settings/<imprimante>.xml` à côté du JSON pour les exports antérieurs à ce champ, récupéré comme les pilotes (disque, partage, https avec jeton SAS). Il passe en premier, recto verso/couleur/papier/bac du JSON par-dessus. Il est appliqué une fois par ticket : son SHA256 est conservé sous `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\PrintTickets`, pour que les modifications ultérieures ne soient pas écrasées à chaque exécution. Auparavant, Export-Printer écrivait les tickets mais rien ne les appliquait |
+| [`Export-Printer.ps1`](scripts/Device/Printer/Export-Printer.ps1) : chaque imprimante de printers.json reçoit `"printTicket": "settings/<imprimante>.xml"` |
+| Vérifié : contrôle de syntaxe ; sous PowerShell 7 et 5.1, le chargement du ticket depuis le champ, depuis le repli `settings/` (avec un nom contenant `/`), un repli absent (rien, sans bruit), un fichier indiqué absent (avertissement) et une page HTML au lieu d'un ticket (refusée) ; l'URL d'un ticket à côté d'un JSON en blob garde le jeton SAS. **Non** vérifié : l'application d'un ticket (`Set-PrintConfiguration -PrintTicketXml` demande l'élévation, cette session ne l'avait pas) et une exécution complète |
 ### 2026-10-29 (5)
 | Modification |
 |--------|
