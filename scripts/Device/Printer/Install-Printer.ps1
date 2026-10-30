@@ -118,6 +118,13 @@
         some universal drivers, so both run in a job with a timeout.
       - A driver that fails takes only its own printers down; the rest still go in,
         and the exit code reports the failure.
+      - Printers are found by their exact name: "Office [A3]" is not read as a
+        wildcard pattern that matches some other queue.
+      - A print default or tray the driver does not take (colour on a mono
+        printer) is read back, reported once and recorded under
+        HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\RefusedSettings, so later runs
+        - and -CheckOnly - do not count it as work forever. A new value in the
+        JSON, another driver or -Force tries it again.
       - Every real run is logged to one appended, rotated file, so an unattended
         first boot can be read back afterwards.
       - A clean run records the SHA256 of the JSON it applied under
@@ -197,7 +204,8 @@
     gets the full story either way.
 
 .PARAMETER Force
-    Reinstall the drivers even when the installed version already matches.
+    Reinstall the drivers even when the installed version already matches, and
+    try again the print defaults and trays a driver refused on an earlier run.
 
 .PARAMETER SkipSignatureCheck
     Do not require a valid signature on the driver's catalog file. Windows itself
@@ -315,10 +323,16 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
     exit 1
 }
 
+# Whether anyone can answer a question. UserInteractive alone is not enough: a
+# scheduled task as the logged-on user runs "powershell -NonInteractive" with it
+# true, and Read-Host then throws instead of asking.
+$canPrompt = [Environment]::UserInteractive -and
+             @([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^[-/]noni' }).Count -eq 0
+
 # -- Elevation -----------------------------------------------------------------
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not ([Security.Principal.WindowsPrincipal] $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    if (-not [Environment]::UserInteractive) {
+    if (-not $canPrompt) {
         Write-Error 'Administrator rights are required. Run the script as System or from an elevated session.'
         exit 1
     }
@@ -361,6 +375,16 @@ if (-not $ConfigPath) {
 }
 if ($Proxy -and $Proxy -notmatch '^https?://[^\s/]+') {
     Write-Error "Proxy must look like http://host:port, got '$Proxy'"
+    exit 1
+}
+# Relative folders made absolute once, against the current location: the .NET
+# calls further down (ZipFile, IO.File) resolve them against the process folder
+# instead - System32 for a run as System.
+try {
+    $WorkingDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WorkingDir)
+    $LogPath    = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($LogPath)
+} catch {
+    Write-Error "WorkingDir or LogPath is not a usable path: $($_.Exception.Message)"
     exit 1
 }
 
@@ -427,6 +451,9 @@ $MarkerPath = 'HKLM:\SOFTWARE\M365-Scripts\InstallPrinter'
 # and where the hash of the last one applied is kept.
 $script:printTickets = @{}
 $TicketMarkerPath    = "$MarkerPath\PrintTickets"
+# Print defaults a driver did not take (colour on a mono printer), so they are
+# not retried on every run - see Test-SettingRefused.
+$RefusedMarkerPath   = "$MarkerPath\RefusedSettings"
 # Where a dry run or check unpacks a zip export, removed at the end.
 $script:scratchFolders = [System.Collections.Generic.List[string]]::new()
 
@@ -488,6 +515,18 @@ function Get-PropertyValue {
     if ($null -eq $Object) { return $null }
     if ($Object.PSObject.Properties.Name -notcontains $Name) { return $null }
     return $Object.$Name
+}
+
+function Test-FieldSet {
+    <#
+        Whether a JSON field is there and not null. Not "$null -ne (Get-PropertyValue
+        ...)": a function's output is unrolled, so an empty list ("permissions": [])
+        comes back as nothing and reads as a field that is not there at all.
+    #>
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $false }
+    if ($Object.PSObject.Properties.Name -notcontains $Name) { return $false }
+    return ($null -ne $Object.$Name)
 }
 
 function Test-JsonObject {
@@ -595,13 +634,38 @@ function Invoke-WithTimeout {
     $job = Start-Job -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
     try {
         if (-not (Wait-Job -Job $job -Timeout $Seconds)) {
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            # -WhatIf:$false: under a script-wide -WhatIf these would only report,
+            # and a hung job would be left running for the rest of the dry run.
+            Stop-Job -Job $job -ErrorAction SilentlyContinue -WhatIf:$false -Confirm:$false
             throw "did not finish within $Seconds seconds - the printer driver hangs on it"
         }
         return (Receive-Job -Job $job -ErrorAction Stop)
     } finally {
-        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue -WhatIf:$false -Confirm:$false
     }
+}
+
+function New-RunMutex {
+    <#
+        The machine-wide lock, open to SYSTEM and Administrators whoever creates
+        it. With the default ACL a lock made by a run as System grants an admin
+        only read access, so a run started by hand during an RMM job failed with
+        "access denied" instead of waiting its turn. PowerShell 7 has no
+        constructor that takes an ACL; there it is the default one.
+    #>
+    $name = 'Global\M365Scripts-Install-Printer'
+    try {
+        $security = [Security.AccessControl.MutexSecurity]::new()
+        foreach ($sid in 'S-1-5-18', 'S-1-5-32-544') {
+            $security.AddAccessRule([Security.AccessControl.MutexAccessRule]::new(
+                [Security.Principal.SecurityIdentifier]::new($sid),
+                [Security.AccessControl.MutexRights]::FullControl,
+                [Security.AccessControl.AccessControlType]::Allow))
+        }
+        $created = $false
+        return [Threading.Mutex]::new($false, $name, [ref] $created, $security)
+    } catch [UnauthorizedAccessException] { throw } catch { }
+    return [Threading.Mutex]::new($false, $name)
 }
 
 function Enter-SingleRun {
@@ -610,12 +674,25 @@ function Enter-SingleRun {
         together would otherwise both see the same driver missing and both run
         pnputil on it. The second one waits its turn, up to -WaitSeconds.
     #>
-    $script:mutex = [Threading.Mutex]::new($false, 'Global\M365Scripts-Install-Printer')
+    $deadline = (Get-Date).AddSeconds([math]::Max($WaitSeconds, 1))
+    $warned   = $false
+    while (-not $script:mutex) {
+        try { $script:mutex = New-RunMutex }
+        catch [UnauthorizedAccessException] {
+            # Created by a run under another account without the ACL below - an
+            # older version of this script, or PowerShell 7. It cannot be opened,
+            # only waited out: it is gone the moment that run ends.
+            if ((Get-Date) -gt $deadline) { throw "Another Install-Printer run (under another account) is still busy after $WaitSeconds seconds." }
+            if (-not $warned) { Write-Warn 'Another Install-Printer run is busy on this machine - waiting for it to finish'; $warned = $true }
+            Start-Sleep -Seconds 5
+        }
+    }
     try {
         $script:mutexOwned = $script:mutex.WaitOne(0)
         if (-not $script:mutexOwned) {
-            Write-Warn 'Another Install-Printer run is busy on this machine - waiting for it to finish'
-            $script:mutexOwned = $script:mutex.WaitOne([math]::Max($WaitSeconds, 1) * 1000)
+            if (-not $warned) { Write-Warn 'Another Install-Printer run is busy on this machine - waiting for it to finish' }
+            $remaining = [math]::Max([int] ($deadline - (Get-Date)).TotalMilliseconds, 1000)
+            $script:mutexOwned = $script:mutex.WaitOne($remaining)
         }
     } catch [Threading.AbandonedMutexException] {
         # The previous run was killed mid-way. The lock is ours now; the state it
@@ -667,12 +744,13 @@ function Invoke-Download {
     $progressBackup     = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
     try {
+        # Working files only, so also under -WhatIf: a dry run reads the JSON too.
         $parent = Split-Path $Path -Parent
-        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force -WhatIf:$false | Out-Null }
         $request = Get-RequestParameter -Uri $Uri -Accept $Accept
         Invoke-WithRetry -What (Hide-UrlSecret $Uri) -Action {
             # A partial file from a failed attempt must not be mistaken for a download.
-            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue -WhatIf:$false
             Invoke-WebRequest @request -OutFile $Path
         }
         if (-not (Test-Path -LiteralPath $Path) -or (Get-Item -LiteralPath $Path).Length -eq 0) {
@@ -857,6 +935,20 @@ function Test-FileHash {
     Write-Ok "SHA256 matches ($actual)"
 }
 
+function Invoke-NativeCommand {
+    <#
+        A console program with its output and exit code. Windows PowerShell 5.1
+        turns every stderr line of "2>&1" into an error record, and under
+        $ErrorActionPreference = 'Stop' the first one aborts the call before its
+        exit code can be read - a warning from pnputil would read as a failure.
+    #>
+    param([Parameter(Mandatory)] [string] $FilePath, [string[]] $ArgumentList = @())
+
+    $ErrorActionPreference = 'Continue'
+    $output = @(& $FilePath @ArgumentList 2>&1 | ForEach-Object { "$_" })
+    return [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}
+
 function Expand-Package {
     <# A zip or cab into a folder. Expand-Archive first, the .NET extractor when the
        module is unavailable or chokes, which happens on stripped-down images. #>
@@ -864,8 +956,8 @@ function Expand-Package {
 
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     if ([IO.Path]::GetExtension($File) -eq '.cab') {
-        $output = & "$env:WINDIR\System32\expand.exe" -F:* $File $Destination 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "expand.exe could not extract $(Split-Path $File -Leaf) (exit code $LASTEXITCODE): $($output -join ' ')" }
+        $result = Invoke-NativeCommand -FilePath "$env:WINDIR\System32\expand.exe" -ArgumentList '-F:*', $File, $Destination
+        if ($result.ExitCode -ne 0) { throw "expand.exe could not extract $(Split-Path $File -Leaf) (exit code $($result.ExitCode)): $($result.Output -join ' ')" }
         return
     }
     try {
@@ -977,8 +1069,10 @@ function Get-InstalledPrinterDriver {
        server keeps for 32-bit clients under the very same name. #>
     param([Parameter(Mandatory)] [string] $Name)
 
-    $driver = @(Get-PrinterDriver -Name $Name -ErrorAction SilentlyContinue |
-                Where-Object { -not (Get-PropertyValue $_ 'PrinterEnvironment') -or $_.PrinterEnvironment -eq $NativeArch.Environment }) |
+    # -Name takes wildcards; a name with [ ] in it is matched exactly instead.
+    $query  = if ([Management.Automation.WildcardPattern]::ContainsWildcardCharacters($Name)) { @{} } else { @{ Name = $Name } }
+    $driver = @(Get-PrinterDriver @query -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -eq $Name -and (-not (Get-PropertyValue $_ 'PrinterEnvironment') -or $_.PrinterEnvironment -eq $NativeArch.Environment) }) |
               Select-Object -First 1
     if (-not $driver) { return $null }
     return [PSCustomObject]@{
@@ -990,14 +1084,15 @@ function Get-InstalledPrinterDriver {
 
 function Get-InfSection {
     <# The lines of one INF section, comments stripped. #>
-    param([Parameter(Mandatory)] [string] $Text, [Parameter(Mandatory)] [string] $Name)
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text, [Parameter(Mandatory)] [string] $Name)
 
     # Concatenated rather than interpolated: inside double quotes the "$(" of the
-    # end-of-line anchor would be read as a PowerShell subexpression.
-    $pattern = '(?ims)^\s*\[' + [regex]::Escape($Name) + '\][ \t]*\r?$(.*?)(?=^\s*\[|\z)'
+    # end-of-line anchor would be read as a PowerShell subexpression. A comment
+    # after the header ("[Manufacturer] ; HP") is allowed, as INF syntax allows it.
+    $pattern = '(?ims)^\s*\[' + [regex]::Escape($Name) + '\][ \t]*(;[^\r\n]*)?\r?$(?<body>.*?)(?=^\s*\[|\z)'
     $match   = [regex]::Match($Text, $pattern)
     if (-not $match.Success) { return @() }
-    return @($match.Groups[1].Value -split "`r?`n" | ForEach-Object { ($_ -replace ';.*$', '').Trim() } | Where-Object { $_ })
+    return @($match.Groups['body'].Value -split "`r?`n" | ForEach-Object { ($_ -replace ';.*$', '').Trim() } | Where-Object { $_ })
 }
 
 function Get-InfInfo {
@@ -1009,7 +1104,7 @@ function Get-InfInfo {
     #>
     param([Parameter(Mandatory)] $Inf)
 
-    $text = Get-Content -LiteralPath $Inf.FullName -Raw
+    $text = [string] (Get-Content -LiteralPath $Inf.FullName -Raw)
 
     $strings = @{}
     foreach ($line in Get-InfSection -Text $text -Name 'Strings') {
@@ -1044,8 +1139,10 @@ function Get-InfInfo {
     }
 
     $catalogs = @{}
-    foreach ($m in [regex]::Matches($text, '(?im)^\s*CatalogFile(\.[\w]+)?\s*=\s*([^\s;]+)')) {
-        $catalogs[$m.Groups[1].Value.TrimStart('.')] = $m.Groups[2].Value
+    # The decoration may carry an OS version ("CatalogFile.NTamd64.10.0"), and
+    # the file name may be quoted.
+    foreach ($m in [regex]::Matches($text, '(?im)^\s*CatalogFile(\.[\w.]+)?\s*=\s*("[^"]+"|[^\s;]+)')) {
+        $catalogs[$m.Groups[1].Value.TrimStart('.')] = $m.Groups[2].Value.Trim('"')
     }
 
     return [PSCustomObject]@{
@@ -1060,6 +1157,15 @@ function Test-InfForThisMachine {
     <# Whether an INF can install on this architecture at all. #>
     param([Parameter(Mandatory)] $Info)
     return [bool] (@($Info.Decorations | Where-Object { $_ -like "$($NativeArch.Decoration)*" }).Count -gt 0)
+}
+
+function Get-RelativePath {
+    <# A file's path below a folder, for the output - the full path when it is not
+       below it in the same spelling (an 8.3 short name in the folder, say). #>
+    param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Folder)
+    $prefix = $Folder.TrimEnd('\') + '\'
+    if ($Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { return $Path.Substring($prefix.Length) }
+    return $Path
 }
 
 function Find-DriverInf {
@@ -1091,7 +1197,11 @@ function Find-DriverInf {
     $matching = [System.Collections.Generic.List[object]]::new()
     $otherArch = $false
     foreach ($inf in $pool) {
-        $info = Get-InfInfo -Inf $inf
+        # One unreadable INF among a vendor's dozens - a stray, an empty one, a
+        # locked file - must not take the driver down; the one that matters is
+        # judged on its own.
+        try { $info = Get-InfInfo -Inf $inf }
+        catch { Write-Skip "  $($inf.Name) could not be read ($($_.Exception.Message)) - skipped"; continue }
         foreach ($model in $info.Models) { $declared.Add($model) }
         if (@($info.Models | Where-Object { $_ -eq $Driver.name }).Count -eq 0) { continue }
         if (-not (Test-InfForThisMachine $info)) { $otherArch = $true; continue }
@@ -1116,7 +1226,7 @@ function Find-DriverInf {
         # packages nest the real driver deepest under language and OS folders.
         $byFolder = @($matching | Where-Object { $_.File.DirectoryName -match "(?i)\\($($NativeArch.Folder))(\\|$)" })
         $pick     = if ($byFolder.Count -gt 0) { $byFolder[0] } else { @($matching | Sort-Object { $_.File.FullName.Length })[0] }
-        Write-Skip "  $($matching.Count) INFs declare it - using $($pick.File.FullName.Substring($Folder.Length).TrimStart('\')); set 'inf' in the JSON to choose"
+        Write-Skip "  $($matching.Count) INFs declare it - using $(Get-RelativePath -Path $pick.File.FullName -Folder $Folder); set 'inf' in the JSON to choose"
         return $pick
     }
     return $matching[0]
@@ -1169,9 +1279,9 @@ function Install-DriverPackage {
     $pnputil = Join-Path $env:WINDIR 'System32\pnputil.exe'
     if (-not (Test-Path -LiteralPath $pnputil)) { throw "pnputil.exe is not at $pnputil" }
 
-    $output = & $pnputil /add-driver $Inf.FullName /install 2>&1
-    $code   = $LASTEXITCODE
-    foreach ($line in @($output)) {
+    $result = Invoke-NativeCommand -FilePath $pnputil -ArgumentList '/add-driver', $Inf.FullName, '/install'
+    $code   = $result.ExitCode
+    foreach ($line in $result.Output) {
         $text = "$line".Trim()
         if ($text) { Write-Skip "  pnputil: $text" }
     }
@@ -1202,6 +1312,35 @@ function Install-DriverPackage {
 }
 
 # -- Printers ------------------------------------------------------------------
+
+function Get-PrinterByName {
+    <#
+        One printer by its exact name, or $null. Get-Printer -Name takes
+        wildcards: "Office [A3]" matched "Office A" and never itself, so the run
+        tried to add an existing printer on every run. Set-Printer and
+        Remove-Printer have the same -Name, and get this object instead.
+    #>
+    param([Parameter(Mandatory)] [string] $Name, [switch] $Full)
+
+    $query = @{ Full = [bool] $Full }
+    if (-not [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($Name)) { $query['Name'] = $Name }
+    return @(Get-Printer @query -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $Name }) | Select-Object -First 1
+}
+
+function Set-PrinterByName {
+    <# Set-Printer on the printer with exactly this name - see Get-PrinterByName. #>
+    param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] [hashtable] $Settings)
+
+    $target = Get-PrinterByName -Name $Name
+    if (-not $target) { throw "Printer '$Name' does not exist" }
+    Set-Printer -InputObject $target @Settings -ErrorAction Stop
+}
+
+function Remove-PrinterByName {
+    param([Parameter(Mandatory)] [string] $Name)
+    $target = Get-PrinterByName -Name $Name
+    if ($target) { Remove-Printer -InputObject $target -ErrorAction Stop }
+}
 
 function Get-PortName {
     param([Parameter(Mandatory)] $Spec)
@@ -1527,8 +1666,9 @@ function Get-PrinterAclPlan {
     #>
     param([Parameter(Mandatory)] [string] $Name, [Parameter(Mandatory)] [AllowEmptyCollection()] $Grants)
 
-    $printer = Get-Printer -Name $Name -Full -ErrorAction Stop
-    $sddl    = [string] (Get-PropertyValue $printer 'PermissionSDDL')
+    $printer = Get-PrinterByName -Name $Name -Full
+    if (-not $printer) { throw "Printer '$Name' does not exist" }
+    $sddl   = [string] (Get-PropertyValue $printer 'PermissionSDDL')
     if (-not $sddl) { throw "Windows returns no permissions for '$Name'" }
 
     $current = [Security.AccessControl.RawSecurityDescriptor]::new($sddl)
@@ -1616,6 +1756,35 @@ function Get-AppliedTicketHash {
     try { return [string] (Get-ItemPropertyValue -Path $TicketMarkerPath -Name $Name -ErrorAction Stop) } catch { return $null }
 }
 
+function Test-SettingRefused {
+    <#
+        Whether this printer's driver refused this exact value before. Such a
+        setting is reported once and then left alone: retrying it cannot succeed,
+        and counting it as work kept -CheckOnly at exit code 2 forever. Bound to
+        the driver name, so another driver gets a fresh try; -Force retries all.
+    #>
+    param([Parameter(Mandatory)] $Spec, [Parameter(Mandatory)] [string] $Setting, [Parameter(Mandatory)] [string] $Value)
+    if ($Force) { return $false }
+    try { $stored = [string] (Get-ItemPropertyValue -Path $RefusedMarkerPath -Name "$($Spec.name)|$Setting" -ErrorAction Stop) }
+    catch { return $false }
+    return ($stored -eq "$Value|$($Spec.driver)")
+}
+
+function Set-SettingRefused {
+    <# Record (or, once it took, clear) a setting the driver refused. #>
+    param([Parameter(Mandatory)] $Spec, [Parameter(Mandatory)] [string] $Setting, [Parameter(Mandatory)] [string] $Value, [bool] $Refused)
+    if ($simulate -or $CheckOnly) { return }
+    try {
+        $name = "$($Spec.name)|$Setting"
+        if ($Refused) {
+            if (-not (Test-Path $RefusedMarkerPath)) { New-Item -Path $RefusedMarkerPath -Force | Out-Null }
+            Set-ItemProperty -Path $RefusedMarkerPath -Name $name -Value "$Value|$($Spec.driver)"
+        } elseif (Test-Path $RefusedMarkerPath) {
+            Remove-ItemProperty -Path $RefusedMarkerPath -Name $name -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+
 function Set-PrintTicket {
     <#
         The ticket as the printer's default for every user, then its hash under
@@ -1645,12 +1814,31 @@ function Set-PrintTicket {
     }
 }
 
+function Get-WantedPrintDefault {
+    <#
+        The print defaults the JSON sets, each as { Setting; Label; Value;
+        Parameter; Argument }: Setting is the name Get-PrintSetting reports it
+        under, Value its text for comparing and for Test-SettingRefused,
+        Parameter/Argument what Set-PrintConfiguration takes.
+    #>
+    param([Parameter(Mandatory)] $Spec)
+
+    $list   = [System.Collections.Generic.List[object]]::new()
+    $duplex = Get-PropertyValue $Spec 'duplex'
+    $color  = Get-PropertyValue $Spec 'color'
+    $paper  = Get-PropertyValue $Spec 'paperSize'
+    if ($duplex)         { $list.Add([PSCustomObject]@{ Setting = 'Duplex'; Label = 'duplex';     Value = [string] $duplex;   Parameter = 'DuplexingMode'; Argument = [string] $duplex }) }
+    if ($null -ne $color) { $list.Add([PSCustomObject]@{ Setting = 'Color';  Label = 'color';      Value = "$([bool] $color)"; Parameter = 'Color';         Argument = [bool] $color }) }
+    if ($paper)          { $list.Add([PSCustomObject]@{ Setting = 'Paper';  Label = 'paper size'; Value = [string] $paper;    Parameter = 'PaperSize';     Argument = [string] $paper }) }
+    return ,$list
+}
+
 function Get-PrinterState {
     <# What differs between the printer as it is and as the JSON wants it. #>
     param([Parameter(Mandatory)] $Spec)
 
     $portName = Get-PortName $Spec
-    $existing = Get-Printer -Name $Spec.name -ErrorAction SilentlyContinue
+    $existing = Get-PrinterByName -Name $Spec.name
     $port     = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
     $changes  = [System.Collections.Generic.List[string]]::new()
     $state    = [PSCustomObject]@{
@@ -1679,7 +1867,7 @@ function Get-PrinterState {
         $changes.Add('printer does not exist')
         # A group that does not resolve stops the install later on (fail closed),
         # so a check run should say so now rather than report a plain install.
-        if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+        if (Test-FieldSet $Spec 'permissions') {
             try { $null = Resolve-PrinterGrant -Spec $Spec }
             catch { Write-Bad "'$($Spec.name)' will not be installed: $($_.Exception.Message)" }
         }
@@ -1711,15 +1899,17 @@ function Get-PrinterState {
     $ticket = $script:printTickets[[string] $Spec.name]
     if ($ticket -and (Get-AppliedTicketHash -Name $Spec.name) -ne $ticket.Hash) { $changes.Add("print settings from $($ticket.Source) not applied yet") }
 
-    $duplex = Get-PropertyValue $Spec 'duplex'
-    $color  = Get-PropertyValue $Spec 'color'
-    $paper  = Get-PropertyValue $Spec 'paperSize'
-    if ($duplex -or $null -ne $color -or $paper) {
+    $defaults = Get-WantedPrintDefault -Spec $Spec
+    if ($defaults.Count -gt 0) {
         try {
             $current = Get-PrintSetting -Name $Spec.name
-            if ($duplex -and $current.Duplex -ne $duplex)                     { $changes.Add("duplex is $($current.Duplex)") }
-            if ($null -ne $color -and [bool] $color -ne [bool] $current.Color) { $changes.Add("color is $($current.Color)") }
-            if ($paper -and $current.Paper -ne $paper)                         { $changes.Add("paper size is $($current.Paper)") }
+            foreach ($wanted in $defaults) {
+                $now = "$($current.($wanted.Setting))"
+                if ($now -eq $wanted.Value) { continue }
+                if (Test-SettingRefused -Spec $Spec -Setting $wanted.Setting -Value $wanted.Value) {
+                    Write-Skip "  '$($Spec.name)': the driver refused $($wanted.Label) $($wanted.Value) before and keeps $now - not retried (-Force retries it)"
+                } else { $changes.Add("$($wanted.Label) is $now") }
+            }
         } catch {
             # Unreadable is not the same as wrong: no change is claimed, so a
             # driver that cannot report its settings does not loop every run.
@@ -1735,7 +1925,10 @@ function Get-PrinterState {
             # A tray the driver does not know is reported, not counted as a
             # change: setting it cannot succeed, so it would loop every run.
             if (-not $bin) { Write-Warn "'$($Spec.name)': the driver has no tray '$inputBin' - it offers $(Format-InputBinList $info)" }
-            elseif (-not (Test-InputBinCurrent -Info $info -Bin $bin)) { $changes.Add("default tray is not '$($bin.Display)'") }
+            elseif (Test-InputBinCurrent -Info $info -Bin $bin) { }
+            elseif (Test-SettingRefused -Spec $Spec -Setting 'InputBin' -Value ([string] $inputBin)) {
+                Write-Skip "  '$($Spec.name)': the driver did not take the tray '$($bin.Display)' before - not retried (-Force retries it)"
+            } else { $changes.Add("default tray is not '$($bin.Display)'") }
         } catch {
             Write-Warn "Could not read the trays of '$($Spec.name)': $($_.Exception.Message)"
         }
@@ -1744,7 +1937,7 @@ function Get-PrinterState {
     # Who may use the queue. Unlike the print defaults, a permission that cannot
     # be checked is reported loudly: a queue meant for one group that is open to
     # everyone is a security problem, not a cosmetic one.
-    if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+    if (Test-FieldSet $Spec 'permissions') {
         try {
             $plan = Get-PrinterAclPlan -Name $Spec.name -Grants (Resolve-PrinterGrant -Spec $Spec)
             if ($plan.Changed) { $changes.Add("permissions: $($plan.Summary)") }
@@ -1814,7 +2007,7 @@ function Remove-PrinterFromSpec {
         # Jobs still in the queue keep a printer in "pending deletion" for as long
         # as they stay there; clearing them first makes the removal immediate.
         Get-PrintJob -PrinterName $Spec.name -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue
-        Invoke-SpoolerAction -What 'Remove-Printer' -Action { Remove-Printer -Name $Spec.name -ErrorAction Stop }
+        Invoke-SpoolerAction -What 'Remove-Printer' -Action { Remove-PrinterByName -Name $Spec.name }
         Write-Ok "Printer '$($Spec.name)' removed"
     }
     Remove-UnusedPort -PortName $State.CurrentPort
@@ -1827,7 +2020,7 @@ function Set-PrinterFromSpec {
     # that cannot be restricted to Finance is better not created at all than
     # created open to everyone. On a first boot the domain gets time to answer.
     $grants = $null
-    if ($null -ne (Get-PropertyValue $Spec 'permissions')) {
+    if (Test-FieldSet $Spec 'permissions') {
         $retry  = if ($simulate) { 0 } else { [math]::Min($WaitSeconds, 120) }
         $grants = Resolve-PrinterGrant -Spec $Spec -RetrySeconds $retry
     }
@@ -1850,10 +2043,10 @@ function Set-PrinterFromSpec {
         if ($PSCmdlet.ShouldProcess($portName, "Rebuild the port for $($Spec.address)")) {
             $temporary = "$portName`_new"
             if (-not (Get-PrinterPort -Name $temporary -ErrorAction SilentlyContinue)) { Add-PortFromSpec -Spec $Spec -PortName $temporary }
-            if ($State.Exists) { Invoke-SpoolerAction -What 'Set-Printer' -Action { Set-Printer -Name $Spec.name -PortName $temporary -ErrorAction Stop } }
+            if ($State.Exists) { Invoke-SpoolerAction -What 'Set-Printer' -Action { Set-PrinterByName -Name $Spec.name -Settings @{ PortName = $temporary } } }
             Invoke-SpoolerAction -What 'Remove-PrinterPort' -Action { Remove-PrinterPort -Name $portName -ErrorAction Stop }
             Add-PortFromSpec -Spec $Spec -PortName $portName
-            if ($State.Exists) { Invoke-SpoolerAction -What 'Set-Printer' -Action { Set-Printer -Name $Spec.name -PortName $portName -ErrorAction Stop } }
+            if ($State.Exists) { Invoke-SpoolerAction -What 'Set-Printer' -Action { Set-PrinterByName -Name $Spec.name -Settings @{ PortName = $portName } } }
             try { Remove-PrinterPort -Name $temporary -ErrorAction Stop } catch { Write-Skip "  Temporary port $temporary is removed on a later run" }
             Write-Ok "Port $portName now points at $($Spec.address)"
         }
@@ -1881,7 +2074,7 @@ function Set-PrinterFromSpec {
         }
     } elseif (($State.PropertyDrift -or $State.PortDrift) -and $PSCmdlet.ShouldProcess($Spec.name, "Set-Printer ($($State.Changes -join '; '))")) {
         Invoke-SpoolerAction -What 'Set-Printer' -Action {
-            Set-Printer -Name $Spec.name -DriverName $Spec.driver -PortName $portName @extra -ErrorAction Stop
+            Set-PrinterByName -Name $Spec.name -Settings (@{ DriverName = [string] $Spec.driver; PortName = $portName } + $extra)
         }
         Write-Ok "Printer '$($Spec.name)' corrected"
         # With default port names a new address is a new port; the old one is
@@ -1895,7 +2088,7 @@ function Set-PrinterFromSpec {
     # ruled out. An existing queue keeps its old ACL and the run fails loudly.
     if ($null -ne $grants) {
         $who = if ($grants.Count -gt 0) { ($grants | ForEach-Object { "$($_.Principal) ($($_.Access))" }) -join ', ' } else { 'administrators only' }
-        if (-not (Get-Printer -Name $Spec.name -ErrorAction SilentlyContinue)) {
+        if (-not (Get-PrinterByName -Name $Spec.name)) {
             $null = $PSCmdlet.ShouldProcess($Spec.name, "Restrict to $who")
         } else {
             try {
@@ -1904,14 +2097,14 @@ function Set-PrinterFromSpec {
                     Write-Skip "  Permissions of '$($Spec.name)' are already as configured"
                 } elseif ($PSCmdlet.ShouldProcess($Spec.name, "Set permissions ($($plan.Summary))")) {
                     Invoke-SpoolerAction -What 'Set-Printer -PermissionSDDL' -Action {
-                        Set-Printer -Name $Spec.name -PermissionSDDL $plan.Sddl -ErrorAction Stop
+                        Set-PrinterByName -Name $Spec.name -Settings @{ PermissionSDDL = $plan.Sddl }
                     }
                     Write-Ok "Permissions of '$($Spec.name)': $($plan.Summary)"
                 }
             } catch {
                 $reason = $_.Exception.Message
                 if ($createdNow) {
-                    try { Remove-Printer -Name $Spec.name -ErrorAction Stop } catch { }
+                    try { Remove-PrinterByName -Name $Spec.name } catch { }
                     throw "Could not restrict '$($Spec.name)' to $who ($reason) - the new printer was removed again rather than left open to everyone"
                 }
                 throw "Could not set the permissions of '$($Spec.name)' ($reason) - its previous permissions are still in place"
@@ -1929,19 +2122,40 @@ function Set-PrinterFromSpec {
     # Print defaults for every user of this printer. Only what the JSON sets is
     # touched; what the driver does not support or hangs on is a warning, because
     # the printer itself is installed by now and prints.
-    $config = @{}
-    if (Get-PropertyValue $Spec 'duplex')            { $config['DuplexingMode'] = [string] $Spec.duplex }
-    if ($null -ne (Get-PropertyValue $Spec 'color')) { $config['Color'] = [bool] $Spec.color }
-    if (Get-PropertyValue $Spec 'paperSize')         { $config['PaperSize'] = [string] $Spec.paperSize }
+    $defaults = @((Get-WantedPrintDefault -Spec $Spec) | Where-Object { -not (Test-SettingRefused -Spec $Spec -Setting $_.Setting -Value $_.Value) })
+    $config   = @{}
+    foreach ($wanted in $defaults) { $config[$wanted.Parameter] = $wanted.Argument }
     if ($config.Count -gt 0 -and $PSCmdlet.ShouldProcess($Spec.name, "Set-PrintConfiguration ($(($config.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', '))")) {
+        $failure = $null
         try {
             $null = Invoke-WithTimeout -Seconds 120 -ArgumentList $Spec.name, $config -ScriptBlock {
                 param($Name, $Settings)
                 Set-PrintConfiguration -PrinterName $Name @Settings -ErrorAction Stop
             }
+        } catch { $failure = $_.Exception.Message }
+
+        # Read back: a driver can drop a value without an error (colour on a mono
+        # printer), or fail on one and keep the rest. What it did not take is
+        # recorded, so the next run does not try again and report work forever.
+        $current = $null
+        try { $current = Get-PrintSetting -Name $Spec.name } catch { }
+        if ($current) {
+            $refused = [System.Collections.Generic.List[string]]::new()
+            foreach ($wanted in $defaults) {
+                $now  = "$($current.($wanted.Setting))"
+                $took = $now -eq $wanted.Value
+                Set-SettingRefused -Spec $Spec -Setting $wanted.Setting -Value $wanted.Value -Refused (-not $took)
+                if (-not $took) { $refused.Add("$($wanted.Label) $($wanted.Value) (it keeps $now)") }
+            }
+            if ($refused.Count -eq 0) { Write-Ok "Print defaults set for '$($Spec.name)'" }
+            else {
+                Write-Warn ("The driver of '$($Spec.name)' did not take $($refused -join ', ')$(if ($failure) { ": $failure" })" +
+                            ' - the printer itself is installed; not retried until the JSON or the driver changes (-Force retries it)')
+            }
+        } elseif ($failure) {
+            Write-Warn "Could not set the print defaults for '$($Spec.name)': $failure - the printer itself is installed"
+        } else {
             Write-Ok "Print defaults set for '$($Spec.name)'"
-        } catch {
-            Write-Warn "Could not set the print defaults for '$($Spec.name)': $($_.Exception.Message) - the printer itself is installed"
         }
     }
 
@@ -1956,10 +2170,17 @@ function Set-PrinterFromSpec {
                 Write-Warn "'$($Spec.name)': the driver has no tray '$inputBin' - it offers $(Format-InputBinList $info). Use one of those names in the JSON"
             } elseif (Test-InputBinCurrent -Info $info -Bin $bin) {
                 Write-Skip "  Default tray of '$($Spec.name)' is already '$($bin.Display)'"
+                Set-SettingRefused -Spec $Spec -Setting 'InputBin' -Value ([string] $inputBin) -Refused $false
+            } elseif (Test-SettingRefused -Spec $Spec -Setting 'InputBin' -Value ([string] $inputBin)) {
+                Write-Skip "  Default tray of '$($Spec.name)': the driver did not take '$($bin.Display)' before - not retried (-Force retries it)"
             } elseif ($PSCmdlet.ShouldProcess($Spec.name, "default tray -> '$($bin.Display)' ($($bin.Local), $($bin.Features -join '/'))")) {
-                Set-InputBin -Name $Spec.name -Bin $bin
-                if (Test-InputBinCurrent -Info (Get-InputBinInfo -Name $Spec.name) -Bin $bin) { Write-Ok "Default tray of '$($Spec.name)' set to '$($bin.Display)'" }
-                else { Write-Warn "'$($Spec.name)': the driver accepted the tray '$($bin.Display)' but its default ticket does not show it - check the printer's preferences" }
+                $failure = $null
+                try { Set-InputBin -Name $Spec.name -Bin $bin } catch { $failure = $_.Exception.Message }
+                $took = Test-InputBinCurrent -Info (Get-InputBinInfo -Name $Spec.name) -Bin $bin
+                Set-SettingRefused -Spec $Spec -Setting 'InputBin' -Value ([string] $inputBin) -Refused (-not $took)
+                if ($took) { Write-Ok "Default tray of '$($Spec.name)' set to '$($bin.Display)'" }
+                elseif ($failure) { Write-Warn "'$($Spec.name)': the driver did not take the tray '$($bin.Display)': $failure - not retried until the JSON or the driver changes (-Force retries it)" }
+                else { Write-Warn "'$($Spec.name)': the driver accepted the tray '$($bin.Display)' but its default ticket does not show it - check the printer's preferences; not retried until the JSON or the driver changes" }
             }
         } catch {
             Write-Warn "Could not set the default tray of '$($Spec.name)': $($_.Exception.Message) - the printer itself is installed"
@@ -2183,6 +2404,15 @@ function Test-Configuration {
         if ($hash -and [string] $hash -notmatch '^[0-9A-Fa-f]{64}$') { $problems.Add("$who 'sha256' must be 64 hexadecimal characters") }
     }
 
+    # The sizes Set-PrintConfiguration takes, from its own parameter type; when the
+    # module cannot be read the value is left to the per-printer warning.
+    $paperSizes = @()
+    try {
+        $paperType = (Get-Command Set-PrintConfiguration -ErrorAction Stop).Parameters['PaperSize'].ParameterType
+        if ($paperType.IsGenericType) { $paperType = $paperType.GetGenericArguments()[0] }
+        if ($paperType.IsEnum) { $paperSizes = [enum]::GetNames($paperType) }
+    } catch { }
+
     $printerNames = @{}
     $ports        = @{}
     $index = 0
@@ -2224,10 +2454,18 @@ function Test-Configuration {
             $problems.Add("$who portNumber must be 1-65535")
         }
         $portName = Get-PropertyValue $p 'portName'
-        if ($portName -and [string] $portName -match '[\\,]') { $problems.Add("$who portName may not contain \ or ,") }
+        # [ ] * ? because the port cmdlets read a name as a wildcard pattern.
+        if ($portName -and [string] $portName -match '[\\,\[\]*?]') { $problems.Add("$who portName may not contain \ , [ ] * or ?") }
 
         $duplex = Get-PropertyValue $p 'duplex'
         if ($null -ne $duplex -and $duplex -notin $DuplexValues) { $problems.Add("$who duplex must be one of $($DuplexValues -join ', ')") }
+        # Checked here rather than failing per printer later: an unknown size is
+        # a typo, and every run would try - and fail - to set it again.
+        $paper = Get-PropertyValue $p 'paperSize'
+        if ($paper -is [string] -and $paperSizes.Count -gt 0 -and $paper -notin $paperSizes) {
+            $close = @($paperSizes | Where-Object { $_ -like "*$($paper -replace '[^\w]', '')*" } | Select-Object -First 6)
+            $problems.Add("$who paperSize '$paper' is not one Windows knows$(if ($close.Count -gt 0) { " - did you mean $($close -join ', ')?" } else { ' (A4, A3, Letter, Legal, ...)' })")
+        }
         foreach ($flag in 'color', 'shared', 'snmp') {
             $value = Get-PropertyValue $p $flag
             if ($null -ne $value -and $value -isnot [bool]) { $problems.Add("$who '$flag' must be true or false (without quotes)") }
@@ -2240,8 +2478,9 @@ function Test-Configuration {
 
         # Permissions: a list of { principal, access }. [] is allowed and means
         # "administrators only"; leaving the field out leaves the ACL alone.
-        $permissions = Get-PropertyValue $p 'permissions'
-        if ($null -ne $permissions) {
+        if (Test-FieldSet $p 'permissions') {
+            # Read directly, not through Get-PropertyValue, so [] stays a list.
+            $permissions = $p.permissions
             if ($permissions -isnot [array] -and -not (Test-JsonObject $permissions)) {
                 $problems.Add("$who 'permissions' must be a list of { `"principal`": ..., `"access`": ... }")
             } else {
@@ -2309,7 +2548,7 @@ try {
     # field, so the queue's ACL is left as Windows (or an admin) set it -
     # Everyone may print. Print groups are a choice per customer, not a default.
     if (-not $ApplyPermissions) {
-        $withPermissions = @($allPrinters | Where-Object { $null -ne (Get-PropertyValue $_ 'permissions') })
+        $withPermissions = @($allPrinters | Where-Object { Test-FieldSet $_ 'permissions' })
         foreach ($p in $withPermissions) { $p.PSObject.Properties.Remove('permissions') }
         if ($withPermissions.Count -gt 0) { Write-Skip "Permissions of $($withPermissions.Count) printer(s) not applied - their ACL is left alone (-ApplyPermissions applies them)" }
     }
@@ -2392,7 +2631,7 @@ try {
     }
 
     Show-HeldOutput
-    if (-not $simulate -and -not $confirmSuppressed -and [Environment]::UserInteractive) {
+    if (-not $simulate -and -not $confirmSuppressed -and $canPrompt) {
         Write-Out ''
         $answer = Read-Host ("  Install {0} driver(s) and set up {1} printer(s)? [y/N]" -f $driverWork.Count, $printerWork.Count)
         if ($answer -notmatch '^[Yy]') {
@@ -2415,7 +2654,7 @@ try {
             $folder    = New-DriverFolder -Name $driver.name
             $files     = Save-DriverSource -Driver $driver -ConfigFolder $configFolder -ConfigUri $loaded.BaseUri -Folder $folder
             $candidate = Find-DriverInf -Folder $files -Driver $driver
-            Write-Ok "INF: $($candidate.File.FullName.Substring($files.Length).TrimStart('\'))"
+            Write-Ok "INF: $(Get-RelativePath -Path $candidate.File.FullName -Folder $files)"
             Test-DriverCatalog -Candidate $candidate
             Install-DriverPackage -Inf $candidate.File -DriverName $driver.name
 

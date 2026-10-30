@@ -1015,6 +1015,15 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-10-30
+| Change |
+|--------|
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): printers are found, changed and removed by their exact name. `Get-Printer -Name` reads a name as a wildcard pattern, so a queue such as `Office [A3]` was never found and was added again (and failed) on every run |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): `"permissions": []` now means administrators only, as documented. Before, the empty list was unrolled to nothing and read as a missing field, so the ACL was left alone and Everyone could still print |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): duplex, colour, paper size and tray are read back after setting them. What the driver did not take is reported once and recorded under `HKLM:\SOFTWARE\M365-Scripts\InstallPrinter\RefusedSettings` instead of counting as work on every run, which kept `-CheckOnly` at exit code 2 forever. A new value, another driver or `-Force` tries it again. An unknown `paperSize` is now an error in the JSON check, with the nearest names |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): the one-run lock is created open to SYSTEM and Administrators, so a run started by hand while an RMM run is busy waits instead of failing with "access denied"; a lock it cannot open is waited out |
+| [`Install-Printer.ps1`](scripts/Device/Printer/Install-Printer.ps1): smaller hardening. pnputil/expand.exe output on stderr no longer aborts the call in Windows PowerShell 5.1 before the exit code is read; an empty or unreadable INF in a vendor package is skipped instead of failing the driver; INF section headers with a comment and `CatalogFile.NTamd64.10.0` / quoted catalog names are understood; driver names with `[ ]` are matched exactly; `portName` may not contain `[ ] * ?`; relative `-WorkingDir`/`-LogPath` are made absolute; `-NonInteractive` never prompts; under `-WhatIf` a hung job is stopped and no "What if" lines appear for working files |
+| Verified: syntax check; in PowerShell 7 and 5.1 the JSON check (`[]` seen as set, unknown `paperSize`, `portName` with brackets), exact-name lookup against the printers on this machine (a bracketed pattern no longer matches), `-Full` still returns the SDDL, the INF parser on a test package with an empty INF, a header comment and a versioned, quoted catalog, a native command writing to stderr (exit code read), and the lock with its ACL (5.1) and without (7). **Not** verified: a real (elevated) install, the read-back of refused settings against a real driver, and two overlapping runs under different accounts |
 ### 2026-10-29 (7)
 | Change |
 |--------|
