@@ -1015,6 +1015,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.fr.md#watch-m365appsps1) : une inscription de package échouée est signalée une fois au lieu de deux. Windows écrit pour le même échec AppXDeploymentServer `401` avec le `0x80073CF9` générique et `404` avec la cause (`0x80070490`) ; les événements étaient comptés par code, donc chaque utilisateur avait deux lignes `[FAIL]` et chaque rapport citait chaque échec deux fois. Désormais un par utilisateur, package et seconde, sous la cause quand l'un des deux la nomme |
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.fr.md#watch-m365appsps1) : `DismInitialize failed 0xc0040009` de `Get-AppxProvisionedPackage` n'interrompt plus l'exécution immédiatement - la demande est répétée jusqu'à deux fois, à 15 secondes d'intervalle. Vu une fois en deux semaines de journaux sur un hôte de session ; l'exécution suivante était correcte |
+| Vérifié : contrôle de syntaxe ; le regroupement des événements sous PowerShell 7 et 5.1 avec des paires 401/404 simulées (dans les deux ordres) et un 401 seul - un constat chacun, avec `0x80070490` quand la paire l'avait. Pas encore exécuté sur un hôte de session ; la répétition DISM n'est pas reproduite |
 ### 2026-10-30
 | Modification |
 |--------|

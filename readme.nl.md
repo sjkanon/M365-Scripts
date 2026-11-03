@@ -1015,6 +1015,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1): een mislukte pakketregistratie wordt één keer gemeld in plaats van twee keer. Windows schrijft voor dezelfde mislukking AppXDeploymentServer `401` met de algemene `0x80073CF9` en `404` met de oorzaak (`0x80070490`); de events werden per code geteld, dus elke gebruiker kreeg twee `[FAIL]`-regels en elk rapport noemde elke mislukking dubbel. Nu één per gebruiker, pakket en seconde, onder de oorzaak als een van de twee die noemt |
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1): `DismInitialize failed 0xc0040009` van `Get-AppxProvisionedPackage` breekt de run niet meer meteen af - het wordt tot twee keer opnieuw gevraagd, 15 seconden uit elkaar. Eén keer gezien in twee weken logs van een sessiehost; de volgende run ging goed |
+| Geverifieerd: syntaxcontrole; het groeperen van events in PowerShell 7 en 5.1 tegen gesimuleerde 401/404-paren (in beide volgordes) en een losse 401 - telkens één bevinding, met `0x80070490` waar het paar die had. Nog niet gedraaid op een sessiehost; de DISM-herhaling is niet nagebootst |
 ### 2026-10-30
 | Wijziging |
 |--------|

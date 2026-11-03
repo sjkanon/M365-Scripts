@@ -1015,6 +1015,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1): a failed package registration is reported once instead of twice. Windows writes AppXDeploymentServer `401` with the generic `0x80073CF9` and `404` with the cause (`0x80070490`) for the same failure; the events were counted per code, so every user showed two `[FAIL]` lines and every report named each failure twice. Now one per user, package and second, under the cause when one of the two names it |
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1): `DismInitialize failed 0xc0040009` from `Get-AppxProvisionedPackage` no longer aborts the run at once - it is asked again up to twice, 15 seconds apart. Seen once in two weeks of logs on a session host; the next run was fine |
+| Verified: syntax check; the event grouping in PowerShell 7 and 5.1 against simulated 401/404 pairs (in either order) and a lone 401 - one finding each, with `0x80070490` where the pair had it. Not yet run on a session host; the DISM retry is not reproduced |
 ### 2026-10-30
 | Change |
 |--------|

@@ -904,9 +904,12 @@ function Get-OpenFailure {
         that failed (AppXDeploymentServer 401 - package at 1, HRESULT at 3; 404 -
         package at 1, HRESULT at 2), minus $BenignAppxCodes. Fields, not message text:
         the text is translated on a Dutch or French Windows. One failure writes both
-        401 and 404, so they are counted once per user, package, code and second. The
-        user is the event's own SID; System (FSLogix registering at sign-in) becomes
-        the host. One finding per user, app, kind and code, naming the build asked for.
+        401 and 404, the one with the generic 0x80073CF9 ("install failed"), the other
+        often with the cause (0x80070490): they are counted once per user, package and
+        second, under the cause when one of them names it - counted per code, every
+        failure was reported twice. The user is the event's own SID; System (FSLogix
+        registering at sign-in) becomes the host. One finding per user, app, kind and
+        code, naming the build asked for.
 
         Our own re-registration of a user's package can itself log a failure on the
         way (one staged build missing) and still end Ok - which the next run took for
@@ -937,8 +940,8 @@ function Get-OpenFailure {
             [PSCustomObject]@{ Kind = 'RegisterFailed'; Target = [string] $values[1]; Code = Format-HResult $values[$codeAt]; Record = $record }
         }
     )
-    $seen  = @{}
-    $found = @(foreach ($row in $rows) {
+    $seen = [ordered]@{}
+    foreach ($row in $rows) {
         if ($row.Code -in $BenignAppxCodes) { continue }
         $entry = $null; $package = $null
         foreach ($candidate in $Apps) {
@@ -952,15 +955,18 @@ function Get-OpenFailure {
             $ownTime = [datetime]::Parse([string] $own, $null, [Globalization.DateTimeStyles]::RoundtripKind)
             if ($row.Record.TimeCreated -le $ownTime.AddMinutes(3)) { continue }
         }
-        $key = '{0}|{1}|{2}|{3:yyyyMMddHHmmss}' -f $sid, $row.Target, $row.Code, $row.Record.TimeCreated
-        if ($seen.ContainsKey($key)) { continue }
-        $seen[$key] = $true
+        $key = '{0}|{1}|{2}|{3:yyyyMMddHHmmss}' -f $sid, $row.Kind, $row.Target, $row.Record.TimeCreated
+        if ($seen.Contains($key)) {
+            if ($seen[$key].Code -eq '0x80073CF9' -and $row.Code -ne '0x80073CF9') { $seen[$key].Code = $row.Code }
+            continue
+        }
         # Name_Version_Arch_ResourceId_PublisherId: the build asked for, when the event names one.
         $parts   = $row.Target -split '_'
         $version = if ($parts.Count -ge 2 -and $parts[1] -match '^\d+(\.\d+){3}$') { $parts[1] } else { '' }
-        [PSCustomObject]@{ Sid = $sid; App = $entry.App; Package = $package; Kind = $row.Kind; Code = $row.Code; Time = $row.Record.TimeCreated
-                           Version = $version; FullName = $row.Target }
-    })
+        $seen[$key] = [PSCustomObject]@{ Sid = $sid; App = $entry.App; Package = $package; Kind = $row.Kind; Code = $row.Code; Time = $row.Record.TimeCreated
+                                         Version = $version; FullName = $row.Target }
+    }
+    $found = @($seen.Values)
     if ($found.Count -eq 0) { return }
 
     # Builds users ask for that this host does not have (see above).
@@ -1116,7 +1122,18 @@ function Get-Finding {
     param($Sessions)
     # A fresh read: the read-back after a repair must not see the answers from before it.
     $script:packageCache = @{}
-    $provisioned = @(Get-AppxProvisionedPackage -Online | ForEach-Object { $_.DisplayName })
+    # DISM can refuse a session for a moment (DismInitialize 0xc0040009, once in two weeks
+    # on a busy host), which aborted the whole run: ask again before giving up.
+    $provisioned = $null
+    for ($try = 1; $null -eq $provisioned; $try++) {
+        try {
+            $provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop | ForEach-Object { $_.DisplayName })
+        } catch {
+            if ($try -ge 3 -or $_.Exception.Message -notmatch 'DismInitialize') { throw }
+            Write-Warn "Get-AppxProvisionedPackage: $($_.Exception.Message) - again in 15 seconds"
+            Start-Sleep -Seconds 15
+        }
+    }
     # Read afresh each time: the read-back after a repair must see what the repair did.
     if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot -Refresh | Out-Null }
     Write-Step 'Host'
