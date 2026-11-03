@@ -622,8 +622,8 @@ Paste this in an elevated PowerShell on the session host, or run it from the RMM
 
 ```powershell
 # Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
-$commit = '4e6db8457c7932d0d52aa9890bd6ba76afb21e8f'
-$sha256 = 'A9D610769E27C163D55BFD82EC7719AEB02540AE322710C816E61D5D25BCA066'
+$commit = 'ce268d3d47d1ddee4a2b4da04fc28053cfa6a899'
+$sha256 = '610A0AFCE0C72A978D7C75372019AAC527B98385ADDDBE83C91FD0803E2F4340'
 $file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
