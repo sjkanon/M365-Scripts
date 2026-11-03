@@ -1021,6 +1021,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (6)
+| Change |
+|--------|
+| [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.md#install-m365appswatchdogps1) run on its own installs the scripts at `c331d22` (the five-app `Repair-M365AppsHost.ps1`); the block to paste on a host is pinned to that installer (`4d5c7ee`) and passes `-App Teams,Outlook,Copilot,SnippingTool,Photos`, so every host watches all five - LEM-AVD-6's `config.json` had Snipping Tool left out |
+| Verified: the paste block end to end in Windows PowerShell 5.1 with `-WhatIf` - installer and all four files from GitHub, every SHA-256 matching, the app list arriving as five apps. Not yet run on a session host |
 ### 2026-11-03 (5)
 | Change |
 |--------|

@@ -626,18 +626,18 @@ Se termine par un tableau sur tous les hôtes : installé, paramètres conservé
 
 **Sur un hôte sans checkout**
 
-Collez ceci dans un PowerShell élevé sur l'hôte de session, ou exécutez-le depuis le RMM en tant que System. Il télécharge ce seul script à un commit épinglé et vérifie son SHA-256 ; le script récupère ensuite les quatre autres depuis GitHub au commit épinglé en lui, chacun vérifié par SHA-256, les installe en conservant les paramètres de l'hôte, puis répare et teste l'hôte. `-Then Check` au lieu de `-Then Repair` ne fait que regarder ; ajoutez `-Restart` sur un hôte en mode drainage. Un nouvel hôte a aussi besoin de `-WebhookUrl` et `-WebhookToken`.
+Collez ceci dans un PowerShell élevé sur l'hôte de session, ou exécutez-le depuis le RMM en tant que System. Il télécharge ce seul script à un commit épinglé et vérifie son SHA-256 ; le script récupère ensuite les quatre autres depuis GitHub au commit épinglé en lui, chacun vérifié par SHA-256, les installe en conservant les paramètres de l'hôte, puis répare et teste l'hôte. `-Then Check` au lieu de `-Then Repair` ne fait que regarder ; ajoutez `-Restart` sur un hôte en mode drainage. Un nouvel hôte a aussi besoin de `-WebhookUrl` et `-WebhookToken`. `-App` avec les cinq fait surveiller Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos par chaque hôte - aussi un hôte dont le `config.json` a été écrit avant l'ajout d'une application, ou sans.
 
 ```powershell
 # Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
-$commit = 'be1d7287f1a3050af89e174a1d5604063d09f0e7'
-$sha256 = 'FDE6FDD6C4320E2DC9E47CA11A47D742FEA83DF89BCE14AEAED1AA101DA5D4E1'
+$commit = '4d5c7ee1e955a17afb02a4d80298f897ad4dcb63'
+$sha256 = '3F2DFF7EB383034F09D12F200A545066E3BF40415FD39D3BABF3A0C88C005AAD'
 $file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
 if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
 Set-ExecutionPolicy -Scope Process Bypass -Force
-& $file -Then Repair -Confirm:$false
+& $file -App Teams,Outlook,Copilot,SnippingTool,Photos -Then Repair -Confirm:$false
 ```
 
 **Paramètres**

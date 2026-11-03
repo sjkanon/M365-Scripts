@@ -1021,6 +1021,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (6)
+| Modification |
+|--------|
+| [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.fr.md#install-m365appswatchdogps1) seul installe les scripts à `c331d22` (le `Repair-M365AppsHost.ps1` à cinq applications) ; le bloc à coller sur un hôte est épinglé sur cet installateur (`4d5c7ee`) et passe `-App Teams,Outlook,Copilot,SnippingTool,Photos`, pour que chaque hôte surveille les cinq - dans le `config.json` de LEM-AVD-6, l'Outil Capture d'écran manquait |
+| Vérifié : le bloc à coller de bout en bout sous Windows PowerShell 5.1 avec `-WhatIf` - installateur et les quatre fichiers depuis GitHub, chaque SHA-256 correspondant, la liste d'applications arrivant comme cinq applications. Pas encore exécuté sur un hôte de session |
 ### 2026-11-03 (5)
 | Modification |
 |--------|

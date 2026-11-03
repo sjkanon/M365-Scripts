@@ -1021,6 +1021,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (6)
+| Wijziging |
+|--------|
+| [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.nl.md#install-m365appswatchdogps1) op zichzelf installeert de scripts op `c331d22` (de `Repair-M365AppsHost.ps1` voor vijf apps); het blok om op een host te plakken is vastgepind op die installer (`4d5c7ee`) en geeft `-App Teams,Outlook,Copilot,SnippingTool,Photos` mee, zodat elke host alle vijf bewaakt - in `config.json` van LEM-AVD-6 ontbrak Knipprogramma |
+| Geverifieerd: het plakblok van begin tot eind in Windows PowerShell 5.1 met `-WhatIf` - installer en alle vier de bestanden van GitHub, elke SHA-256 klopt, de app-lijst komt aan als vijf apps. Nog niet gedraaid op een sessiehost |
 ### 2026-11-03 (5)
 | Wijziging |
 |--------|
