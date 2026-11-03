@@ -33,7 +33,7 @@
       5. Then      -Then Check: Repair-M365AppsHost.ps1 -CheckOnly. -Then Repair: the
                    full repair and test (FSLogix InstallAppxPackages = 0, package
                    store, Teams and Outlook at the newest build, a watchdog run), with
-                   -Restart when given. One host after the other, so a restart never
+                   -Restart and -StoreLatest when given. One host after the other, so a restart never
                    takes the whole pool down at once.
 
     Ends with one table across the hosts.
@@ -69,6 +69,13 @@
 
 .PARAMETER Restart
     With -Then Repair: restart a host when a restart is due and nobody is signed in.
+
+.PARAMETER StoreLatest
+    With -Then Repair: Photos and Snipping Tool at the current Microsoft Store build,
+    provisioned complete on each host (Repair-M365AppsHost.ps1 -StoreLatest). winget
+    asks for an Entra account that is Global, User or License Administrator, so only
+    on this machine: over -ComputerName nobody can answer that sign-in - there, run
+    Repair-AppxPackageStore.ps1 -ComputerName ... -Name snippingtool,photos -Provision.
 
 .PARAMETER WorkingDir
     The watchdog's folder on the hosts. Default C:\IT\AppWatchdog.
@@ -107,6 +114,7 @@ param (
     [ValidateSet('None', 'Check', 'Repair')]
     [string]       $Then = 'None',
     [switch]       $Restart,
+    [switch]       $StoreLatest,
     [string]       $WorkingDir = 'C:\IT\AppWatchdog'
 )
 
@@ -250,9 +258,9 @@ $InstallBlock = {
 }
 
 $ThenBlock = {
-    param([string] $WorkingDir, [string] $Then, [bool] $Restart)
+    param([string] $WorkingDir, [string] $Then, [bool] $Restart, [bool] $StoreLatest)
     $params = @{}
-    if ($Then -eq 'Check') { $params['CheckOnly'] = $true } else { $params['Confirm'] = $false; if ($Restart) { $params['Restart'] = $true } }
+    if ($Then -eq 'Check') { $params['CheckOnly'] = $true } else { $params['Confirm'] = $false; if ($Restart) { $params['Restart'] = $true }; if ($StoreLatest) { $params['StoreLatest'] = $true } }
     & (Join-Path $WorkingDir 'Repair-M365AppsHost.ps1') @params | Out-Host
     return $LASTEXITCODE
 }
@@ -262,6 +270,12 @@ $targets = if ($ComputerName) { @($ComputerName) } else { @($env:COMPUTERNAME) }
 Write-Host ''
 Write-Host ("  M365 app watchdog - install from {0}{1} - {2}" -f $PSScriptRoot, $(if ($Commit) { " ($Commit)" } else { '' }), ($targets -join ', ')) -ForegroundColor Cyan
 if ($Restart -and $Then -ne 'Repair') { Write-Warn '-Restart only counts with -Then Repair - ignored' }
+if ($StoreLatest -and $Then -ne 'Repair') { Write-Warn '-StoreLatest only counts with -Then Repair - ignored' }
+if ($StoreLatest -and $ComputerName) {
+    if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
+    Write-Error '-StoreLatest needs an Entra sign-in nobody can answer over remoting - run it on each host, or Repair-AppxPackageStore.ps1 -ComputerName ... -Name snippingtool,photos -Provision from here'
+    exit 1
+}
 
 if (-not $ComputerName) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -316,7 +330,7 @@ foreach ($target in $targets) {
 
         if ($Then -ne 'None') {
             Write-Step "5. Then - $Then"
-            $code = & $run $ThenBlock @($WorkingDir, $Then, [bool] $Restart)
+            $code = & $run $ThenBlock @($WorkingDir, $Then, [bool] $Restart, [bool] $StoreLatest)
             $row.Then = switch ($code) { 0 { 'healthy' } 2 { 'healthy, restart due' } default { "exit $code" } }
         }
     } catch {

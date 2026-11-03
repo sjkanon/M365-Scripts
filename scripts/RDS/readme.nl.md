@@ -580,6 +580,7 @@ Alleen de apps in `config.json` van de watchdog worden bekeken: een app die bewu
 | `-CheckOnly` | Stap 1 en 5 en een watchdog-run met `-NoRepair`: er verandert niets. `-WhatIf` doet hetzelfde |
 | `-KeepAppxReplay` | `InstallAppxPackages` laten zoals het is (stap 2 overgeslagen) |
 | `-KeepStoreUpdates` | De automatische app-updates van de Store laten zoals ze zijn (stap 2b overgeslagen) |
+| `-StoreLatest` | Stap 3: Foto's en Knipprogramma op de huidige Microsoft Store-build, compleet klaargezet voor alle gebruikers (`Repair-AppxPackageStore.ps1 -Provision`, winget-download uit msstore) en geregistreerd voor iedereen die is aangemeld. winget vraagt een Entra-account dat Global, User of License Administrator is - draai het interactief. Voor gebruikers op een Store-build waarvan de bundle weg is: elke registratie ervan laat Windows iedereen erheen zetten en faalt met `0x80070490` |
 | `-NoUserRepair` | Foto's en Knipprogramma in niemands sessie herstellen (stap 3b overgeslagen) |
 | `-NoReport` | Het rapport niet naar n8n sturen (stap 6 overgeslagen) |
 | `-Restart` | De host aan het eind herstarten als dat nodig is en er geen gebruiker is aangemeld |
@@ -650,6 +651,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 | `-IntervalMinutes` | Hoe vaak de taak draait (standaard: het interval van de bestaande taak, anders `30`) |
 | `-Then` | `None` (standaard), `Check` of `Repair` |
 | `-Restart` | Met `-Then Repair`: een host herstarten als dat nodig is en er niemand is aangemeld |
+| `-StoreLatest` | Met `-Then Repair`: `Repair-M365AppsHost.ps1 -StoreLatest` op elke host. Alleen op de host zelf (het plakblok): over `-ComputerName` kan niemand de Entra-aanmelding beantwoorden |
 | `-WorkingDir` | De map van de watchdog op de hosts (standaard: `C:\IT\AppWatchdog`) |
 
 **Voorbeelden**

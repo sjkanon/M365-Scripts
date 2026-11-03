@@ -1021,6 +1021,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (10)
+| Wijziging |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.nl.md#repair-m365appshostps1) en [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.nl.md#install-m365appswatchdogps1) krijgen `-StoreLatest`: Foto's en Knipprogramma op de huidige Microsoft Store-build, compleet klaargezet (bundle, frameworks, licentie) en geregistreerd voor iedereen die is aangemeld - één plakblok per host doet het voor iedereen. Oorzaak op LEM-AVD-6: toen itce.test zich aanmeldde, werd elke aangemelde gebruiker naar Store-builds Foto's 2026.11090 en Knipprogramma 11.2608 gezet waarvan de bundle weg was, en elke registratie faalde met `0x80070490`; ze terugzetten naar de klaargezette build hield maar tot de volgende aanmelding. Compleet klaargezet vanuit de Store registreren de builds weer |
+| Geverifieerd: op LEM-AVD-6 met de hand (`Repair-AppxPackageStore.ps1 -Name snippingtool,photos -Provision`, daarna `Repair-M365AppsHost.ps1`) - Foto's en Knipprogramma werken weer. Syntaxcontrole; in Windows PowerShell 5.1 de verdeling in stap 3 met en zonder `-StoreLatest`. De schakelaar zelf nog niet gedraaid op een sessiehost |
 ### 2026-11-03 (9)
 | Wijziging |
 |--------|

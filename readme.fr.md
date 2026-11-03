@@ -1021,6 +1021,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (10)
+| Modification |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.fr.md#repair-m365appshostps1) et [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.fr.md#install-m365appswatchdogps1) reçoivent `-StoreLatest` : Photos et l'Outil Capture d'écran à la build actuelle du Microsoft Store, provisionnés complets (bundle, frameworks, licence) et inscrits pour chaque utilisateur connecté - un bloc à coller par hôte le fait pour tout le monde. Cause sur LEM-AVD-6 : quand itce.test s'est connecté, chaque utilisateur connecté a été mis sur les builds du Store Photos 2026.11090 et Outil Capture d'écran 11.2608 dont le bundle avait disparu, et chaque inscription échouait avec `0x80070490` ; les remettre sur la build provisionnée ne tenait que jusqu'à la connexion suivante. Provisionnées complètes depuis le Store, les builds s'inscrivent à nouveau |
+| Vérifié : sur LEM-AVD-6 à la main (`Repair-AppxPackageStore.ps1 -Name snippingtool,photos -Provision`, puis `Repair-M365AppsHost.ps1`) - Photos et l'Outil Capture d'écran fonctionnent à nouveau. Contrôle de syntaxe ; sous Windows PowerShell 5.1 la répartition de l'étape 3 avec et sans `-StoreLatest`. Le commutateur lui-même pas encore exécuté sur un hôte de session |
 ### 2026-11-03 (9)
 | Modification |
 |--------|

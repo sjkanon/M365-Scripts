@@ -1021,6 +1021,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (10)
+| Change |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.md#repair-m365appshostps1) and [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.md#install-m365appswatchdogps1) get `-StoreLatest`: Photos and Snipping Tool at the current Microsoft Store build, provisioned complete (bundle, frameworks, license) and registered for everyone signed in - one paste block per host does it for everyone. Cause on LEM-AVD-6: when itce.test signed in, every signed-in user was moved onto Store builds Photos 2026.11090 and Snipping Tool 11.2608 whose bundle was gone, and each registration failed with `0x80070490`; moving them back to the provisioned build only lasted until the next sign-in. Provisioned complete from the Store, the builds register again |
+| Verified: on LEM-AVD-6 by hand (`Repair-AppxPackageStore.ps1 -Name snippingtool,photos -Provision`, then `Repair-M365AppsHost.ps1`) - Photos and Snipping Tool work again. Syntax check; in Windows PowerShell 5.1 the step 3 split with and without `-StoreLatest`. The switch itself not yet run on a session host |
 ### 2026-11-03 (9)
 | Change |
 |--------|

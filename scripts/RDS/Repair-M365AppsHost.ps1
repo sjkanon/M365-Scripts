@@ -31,7 +31,10 @@
                     Photos and Snipping Tool without -Provision - their store is cleaned,
                     no Store download (that needs an Entra admin) - or, when one is not
                     provisioned, -Provision -FromHost: provisioned again from the
-                    Microsoft-signed build already on the host; Copilot, when the
+                    Microsoft-signed build already on the host. -StoreLatest: both
+                    with -Provision instead, at the current Microsoft Store build,
+                    downloaded complete (bundle, frameworks, license) after an Entra
+                    sign-in, and registered for everyone signed in; Copilot, when the
                     unified app is not on the host, -Name copilot -Provision (Edge
                     Update installs it). No -RemoveOld: nothing is taken away from a
                     user who still has an older build open.
@@ -62,6 +65,15 @@
 .PARAMETER KeepStoreUpdates
     Leave the Microsoft Store's automatic app updates as they are (step 2b skipped).
 
+.PARAMETER StoreLatest
+    Step 3: Photos and Snipping Tool at the current Microsoft Store build, provisioned
+    complete for all users (Repair-AppxPackageStore.ps1 -Provision: winget download
+    from the msstore source). winget asks for an Entra account that is Global, User or
+    License Administrator, so run it interactively. Use it when users ended up on a
+    Store build whose bundle is gone: each registration of that build makes Windows
+    move everyone onto it and fails with 0x80070490 - provisioned complete, the build
+    registers again.
+
 .PARAMETER NoUserRepair
     Do not repair Photos and Snipping Tool in anyone's session (step 3b skipped).
 
@@ -86,6 +98,10 @@
     .\Repair-M365AppsHost.ps1 -Confirm:$false
 
 .EXAMPLE
+    # The same, with Photos and Snipping Tool at the current Store build (Entra sign-in)
+    .\Repair-M365AppsHost.ps1 -StoreLatest -Confirm:$false
+
+.EXAMPLE
     # The same on a drained host, and restart it when that is due
     .\Repair-M365AppsHost.ps1 -Restart -Confirm:$false
 
@@ -101,6 +117,7 @@ param (
     [switch] $CheckOnly,
     [switch] $KeepAppxReplay,
     [switch] $KeepStoreUpdates,
+    [switch] $StoreLatest,
     [switch] $NoUserRepair,
     [switch] $NoReport,
     [switch] $Restart,
@@ -726,14 +743,17 @@ try {
             # when it is not provisioned or a newer build than the provisioned one is
             # there (a Store update of a user's) - so everyone ends on the newest - and
             # otherwise only their store cleaned.
+            # -StoreLatest: from the Store, complete, whatever the host has.
+            $storeApps = @(if ($StoreLatest) { @{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App } | ForEach-Object { $_.Value } })
             $newest    = @(foreach ($e in @($UserApps | Where-Object { $_.App -in $Apps.App })) {
                              $b = @(Get-MainBuild $e)
                              if ($e.App -in $missingOnHost -or ($b.Count -gt 0 -and -not $b[0].Provisioned)) { $e.App }
                          })
-            $fromHost  = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -in $newest } | ForEach-Object { $_.Value })
-            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -notin $newest } | ForEach-Object { $_.Value })
+            $fromHost  = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -in $newest -and $_.Value -notin $storeApps } | ForEach-Object { $_.Value })
+            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -notin $newest -and $_.Value -notin $storeApps } | ForEach-Object { $_.Value })
             foreach ($call in @(
                 if ($latest.Count) { [ordered]@{ Name = $latest; Latest = $true; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
+                if ($storeApps.Count) { [ordered]@{ Name = $storeApps; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 if ($fromHost.Count) { [ordered]@{ Name = $fromHost; Provision = $true; FromHost = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 if ($storeOnly.Count) { [ordered]@{ Name = $storeOnly; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 # Only when the unified app is not there: -Provision writes Edge Update's install policy.

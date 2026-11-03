@@ -574,6 +574,7 @@ Only the apps in the watchdog's `config.json` are looked at: one left out on pur
 | `-CheckOnly` | Steps 1 and 5 and a watchdog run with `-NoRepair`: nothing is changed. `-WhatIf` does the same |
 | `-KeepAppxReplay` | Leave `InstallAppxPackages` as it is (step 2 skipped) |
 | `-KeepStoreUpdates` | Leave the Store's automatic app updates as they are (step 2b skipped) |
+| `-StoreLatest` | Step 3: Photos and Snipping Tool at the current Microsoft Store build, provisioned complete for all users (`Repair-AppxPackageStore.ps1 -Provision`, winget download from msstore) and registered for everyone signed in. winget asks for an Entra account that is Global, User or License Administrator - run it interactively. For users on a Store build whose bundle is gone: each registration of it makes Windows move everyone onto it and fails with `0x80070490` |
 | `-NoUserRepair` | Repair Photos and Snipping Tool in nobody's session (step 3b skipped) |
 | `-NoReport` | Do not send the report to n8n (step 6 skipped) |
 | `-Restart` | Restart the host at the end when a restart is due and no user is signed in |
@@ -644,6 +645,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 | `-IntervalMinutes` | How often the task runs (default: the interval of the existing task, else `30`) |
 | `-Then` | `None` (default), `Check` or `Repair` |
 | `-Restart` | With `-Then Repair`: restart a host when a restart is due and nobody is signed in |
+| `-StoreLatest` | With `-Then Repair`: `Repair-M365AppsHost.ps1 -StoreLatest` on each host. Only on the host itself (the paste block): over `-ComputerName` nobody can answer the Entra sign-in |
 | `-WorkingDir` | The watchdog's folder on the hosts (default: `C:\IT\AppWatchdog`) |
 
 **Examples**

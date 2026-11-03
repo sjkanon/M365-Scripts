@@ -588,6 +588,7 @@ Seules les applications du `config.json` du watchdog sont examinées : une appli
 | `-CheckOnly` | Les étapes 1 et 5 et une exécution du watchdog avec `-NoRepair` : rien n'est modifié. `-WhatIf` fait de même |
 | `-KeepAppxReplay` | Laisser `InstallAppxPackages` tel quel (étape 2 ignorée) |
 | `-KeepStoreUpdates` | Laisser les mises à jour automatiques du Store telles quelles (étape 2b ignorée) |
+| `-StoreLatest` | Étape 3 : Photos et l'Outil Capture d'écran à la build actuelle du Microsoft Store, provisionnés complets pour tous les utilisateurs (`Repair-AppxPackageStore.ps1 -Provision`, téléchargement winget depuis msstore) et inscrits pour chaque utilisateur connecté. winget demande un compte Entra Global, User ou License Administrator - à exécuter de façon interactive. Pour des utilisateurs sur une build du Store dont le bundle a disparu : chaque inscription de celle-ci fait passer tout le monde dessus par Windows et échoue avec `0x80070490` |
 | `-NoUserRepair` | Ne réparer Photos et l'Outil Capture d'écran dans aucune session (étape 3b ignorée) |
 | `-NoReport` | Ne pas envoyer le rapport à n8n (étape 6 ignorée) |
 | `-Restart` | Redémarrer l'hôte à la fin quand un redémarrage est dû et qu'aucun utilisateur n'est connecté |
@@ -658,6 +659,7 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 | `-IntervalMinutes` | Fréquence d'exécution de la tâche (par défaut : l'intervalle de la tâche existante, sinon `30`) |
 | `-Then` | `None` (par défaut), `Check` ou `Repair` |
 | `-Restart` | Avec `-Then Repair` : redémarrer un hôte quand un redémarrage est dû et que personne n'est connecté |
+| `-StoreLatest` | Avec `-Then Repair` : `Repair-M365AppsHost.ps1 -StoreLatest` sur chaque hôte. Uniquement sur l'hôte lui-même (le bloc à coller) : via `-ComputerName`, personne ne peut répondre à la connexion Entra |
 | `-WorkingDir` | Le dossier du watchdog sur les hôtes (par défaut : `C:\IT\AppWatchdog`) |
 
 **Exemples**
