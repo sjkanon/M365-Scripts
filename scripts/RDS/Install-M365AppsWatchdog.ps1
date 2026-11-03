@@ -6,8 +6,10 @@
     straight after.
 
 .DESCRIPTION
-    Puts the four scripts of this checkout in -WorkingDir (C:\IT\AppWatchdog) on each
-    host and registers the watchdog task with Watch-M365Apps.ps1 -Install:
+    Puts four scripts in -WorkingDir (C:\IT\AppWatchdog) on each host and registers the
+    watchdog task with Watch-M365Apps.ps1 -Install. From the checkout this script is
+    in; downloaded on its own to a session host - no checkout - from GitHub at the
+    commit pinned below, each file refused unless its SHA-256 matches:
 
       Watch-M365Apps.ps1           the watchdog (scheduled task, as System)
       Repair-AppxPackageStore.ps1  its host repair (scripts\Device)
@@ -85,8 +87,9 @@
 
 .NOTES
     Author  : Sjoerd Kanon
-    Platform: Windows PowerShell 5.1 or PowerShell 7, run from a checkout of this repo;
-              the hosts: Windows 11 Enterprise multi-session / Windows Server with FSLogix
+    Platform: Windows PowerShell 5.1 or PowerShell 7, from a checkout of this repo or on
+              its own on the host (GitHub reachable); the hosts: Windows 11 Enterprise
+              multi-session / Windows Server with FSLogix
     Exit    : 0 installed everywhere (and Then healthy), 1 a host failed, 2 installed
               and healthy but a host needs a restart
 #>
@@ -117,19 +120,66 @@ function Write-Skip { param([string] $Message) Write-Host "  [SKIP] $Message" -F
 function Write-Warn { param([string] $Message) Write-Host "  [WARN] $Message" -ForegroundColor Yellow }
 function Write-Bad  { param([string] $Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
+function Get-Sha256 {
+    <# Not Get-FileHash: under -WhatIf, Windows PowerShell 5.1's returns nothing. #>
+    param([string] $Path)
+    $stream = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        return -join @($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('X2') })
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 # -- What is installed ---------------------------------------------------------------
-$Sources = [ordered]@{
-    'Watch-M365Apps.ps1'          = Join-Path $PSScriptRoot 'Watch-M365Apps.ps1'
-    'Repair-AppxPackageStore.ps1' = Join-Path (Split-Path $PSScriptRoot) 'Device\Repair-AppxPackageStore.ps1'
-    'Get-M365AppsLog.ps1'         = Join-Path $PSScriptRoot 'Get-M365AppsLog.ps1'
-    'Repair-M365AppsHost.ps1'     = Join-Path $PSScriptRoot 'Repair-M365AppsHost.ps1'
+# Without a checkout - this script downloaded on its own to a session host - the four
+# scripts come from GitHub at this commit, each refused unless its SHA-256 matches.
+# Move the commit and the hashes together.
+$Pin = @{
+    Commit = 'e500253aa01b75c4277ac13748d807e4a90bec9d'
+    Files  = [ordered]@{
+        'Watch-M365Apps.ps1'          = @{ Path = 'scripts/RDS/Watch-M365Apps.ps1';             Hash = '371207FD6C9641AE4ADBEA8E29453584CF55F77DBE0E96216CA76051116AF10C' }
+        'Repair-AppxPackageStore.ps1' = @{ Path = 'scripts/Device/Repair-AppxPackageStore.ps1'; Hash = 'B512C5EE1B438AD1BE6D9CF6817F098C41FBEFD1B12EC8810D502D0679126897' }
+        'Get-M365AppsLog.ps1'         = @{ Path = 'scripts/RDS/Get-M365AppsLog.ps1';            Hash = '7A77015B171FFFBBDCA60BACE23DD017DE1ED337D8AA2311F5E84CB8F359FA4F' }
+        'Repair-M365AppsHost.ps1'     = @{ Path = 'scripts/RDS/Repair-M365AppsHost.ps1';        Hash = '78724C77E688F741F4608699A3D67F4CC7D6AC684668F273F5A96346F65AA2B1' }
+    }
 }
-foreach ($entry in $Sources.GetEnumerator()) {
-    if (-not (Test-Path $entry.Value)) { Write-Error "$($entry.Value) not found - run this from a checkout of the repo"; exit 1 }
+$Sources = [ordered]@{}
+$Hashes  = @{}
+$staging = $null
+if (Test-Path (Join-Path $PSScriptRoot '..\..\menu.ps1')) {
+    foreach ($name in $Pin.Files.Keys) {
+        $path = Join-Path $PSScriptRoot ($Pin.Files[$name].Path -replace '^scripts/RDS/', '' -replace '^scripts/Device/', '..\Device\')
+        if (-not (Test-Path $path)) { Write-Error "$path not found in this checkout"; exit 1 }
+        $Sources[$name] = $path
+        $Hashes[$name]  = Get-Sha256 $path
+    }
+    $Commit = try { (& git -C $PSScriptRoot log -1 --format='%h %cs' 2>$null) } catch { '' }
+} else {
+    $staging = Join-Path $env:TEMP ('M365AppsWatchdog_{0}' -f [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $staging -Force -WhatIf:$false | Out-Null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    foreach ($name in $Pin.Files.Keys) {
+        $url    = 'https://raw.githubusercontent.com/sjkanon/M365-Scripts/{0}/{1}' -f $Pin.Commit, $Pin.Files[$name].Path
+        $target = Join-Path $staging $name
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $target -UseBasicParsing
+        } catch {
+            Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false
+            Write-Error "$name could not be downloaded from $url - $($_.Exception.Message)"; exit 1
+        }
+        $hash = Get-Sha256 $target
+        if ($hash -ne $Pin.Files[$name].Hash) {
+            Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false
+            Write-Error "$name from GitHub has SHA-256 $hash, expected $($Pin.Files[$name].Hash) - nothing installed"; exit 1
+        }
+        $Sources[$name] = $target
+        # The pinned hash, not the staged file's: the host checks against what was pinned.
+        $Hashes[$name]  = $Pin.Files[$name].Hash
+    }
+    $Commit = '{0} from GitHub, SHA-256 verified' -f $Pin.Commit.Substring(0, 7)
 }
-$Hashes = @{}
-foreach ($entry in $Sources.GetEnumerator()) { $Hashes[$entry.Key] = (Get-FileHash -Path $entry.Value -Algorithm SHA256).Hash }
-$Commit = try { (& git -C $PSScriptRoot log -1 --format='%h %cs' 2>$null) } catch { '' }
 
 # Settings given here, passed on to -Install over what config.json says.
 $Override = @{}
@@ -216,11 +266,15 @@ if ($Restart -and $Then -ne 'Repair') { Write-Warn '-Restart only counts with -T
 if (-not $ComputerName) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal] $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
         Write-Error 'Administrator rights are required. Run the script from an elevated session.'
         exit 1
     }
 }
-if (-not $PSCmdlet.ShouldProcess(($targets -join ', '), "Install the watchdog in $WorkingDir$(if ($Then -ne 'None') { ", then $Then" })")) { exit 0 }
+if (-not $PSCmdlet.ShouldProcess(($targets -join ', '), "Install the watchdog in $WorkingDir$(if ($Then -ne 'None') { ", then $Then" })")) {
+    if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
+    exit 0
+}
 
 $results = [System.Collections.Generic.List[object]]::new()
 foreach ($target in $targets) {
@@ -273,6 +327,7 @@ foreach ($target in $targets) {
     }
     $results.Add($row)
 }
+if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
 
 Write-Step 'Summary'
 $results | Format-Table Host, Installed, Settings, Webhook, Interval, Then, Detail -AutoSize -Wrap | Out-String -Width 200 | Write-Host
