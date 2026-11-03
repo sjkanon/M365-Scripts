@@ -629,8 +629,8 @@ Plak dit in een PowerShell met verhoogde rechten op de sessiehost, of draai het 
 
 ```powershell
 # Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
-$commit = 'ce268d3d47d1ddee4a2b4da04fc28053cfa6a899'
-$sha256 = '610A0AFCE0C72A978D7C75372019AAC527B98385ADDDBE83C91FD0803E2F4340'
+$commit = '108d9876c0efc7e0bb2f53820da39f0c024038f8'
+$sha256 = 'E1EC0C51EA11656F44D1953F3769BC2EC592F83DF67F0574D95A2950B344F0D3'
 $file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
