@@ -19,6 +19,7 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Check and prepare a Windows 11 multi-session image or AVD session host so new Teams, new Outlook and Copilot keep working with FSLogix — FSLogix itself is left alone |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook, Copilot, Snipping Tool and Photos with our own account (`itceadmin`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
 | [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collects, read only, what happened with new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session host — per user what is registered and running, the events, and what the watchdog did and would conclude, with its blind spots — into one zip |
+| [`Repair-M365AppsHost.ps1`](Repair-M365AppsHost.ps1) ([docs](#repair-m365appshostps1)) | Repairs and tests in one go everything the watchdog keeps reporting on a session host - FSLogix stops replaying AppX packages, the package store, Teams and Outlook at the newest build, then a watchdog run as the test - and says whether the host needs a restart |
 
 ---
 
@@ -539,3 +540,49 @@ Output in `-OutputPath` (falls back to `%TEMP%`): `summary.txt` (the screen), `s
 - The webhook URL and token are masked in the copy of `config.json`.
 - Comparable to the AppX and FSLogix parts of Microsoft's MSRD-Collect, but limited to
   these three apps and set against what the watchdog does.
+
+### Repair-M365AppsHost.ps1
+
+Everything the app watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) keeps reporting on a
+session host, repaired and tested in one go - and whether the host needs a restart. For a host
+where the watchdog is installed: it uses the scripts in `C:\IT\AppWatchdog` and the watchdog
+task itself, so the test is exactly the run that happens every 30 minutes.
+
+| Step | What |
+|------|------|
+| 1. Before | FSLogix `InstallAppxPackages`, the provisioned build per app, per app how many signed-in users have it installed (and who does not), failed registrations in the last 24 hours (a `401`/`404` pair counted once), and whether a restart is due |
+| 2. FSLogix | `InstallAppxPackages = 0` under `HKLM\SOFTWARE\FSLogix\Profiles`, after a `.reg` backup in `Repair\`. FSLogix stops replaying the packages saved in the profile at sign-in - the replay behind the daily *FSLogix could not register Microsoft.OutlookForWindows* (`0x80073CF9` / `0x80070490`) while Windows registers the provisioned build anyway. Store apps users installed themselves no longer follow them; provisioned apps are not affected. From the next sign-in. A policy key (`HKLM\SOFTWARE\Policies\FSLogix\Profiles`) that sets it otherwise is named, not changed |
+| 3. Repair | The watchdog task is disabled while `Repair-AppxPackageStore.ps1` runs - Teams and Outlook with `-Latest -Provision`, Photos and Snipping Tool without `-Provision` (store cleaned, no Store download) - and enabled again afterwards, also when the run fails. No `-RemoveOld`: nothing is taken from a user who still has an older build open |
+| 4. Test | The watchdog task is started and waited for (`-WaitMinutes`): every signed-in user checked and repaired in their session where needed, our own account's apps started. Its exit code and what it still reports are shown; when our own account is not signed in, it says the apps were not started |
+| 5. After | The snapshot of step 1 again, and the restart verdict: the package store was edited since the last boot (a `.reg` backup from `Repair-AppxPackageStore` newer than the boot), or Windows servicing / Windows Update has a restart pending. With `-Restart` the host restarts in 30 seconds when that is so and nobody is signed in |
+
+Only the apps in the watchdog's `config.json` are looked at: one left out on purpose is not a fault.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-CheckOnly` | Steps 1 and 5 and a watchdog run with `-NoRepair`: nothing is changed. `-WhatIf` does the same |
+| `-KeepAppxReplay` | Leave `InstallAppxPackages` as it is (step 2 skipped) |
+| `-Restart` | Restart the host at the end when a restart is due and no user is signed in |
+| `-WaitMinutes` | How long to wait for a busy watchdog run and for the test run (default: `20`) |
+| `-WorkingDir` | The watchdog's folder (default: `C:\IT\AppWatchdog`) |
+
+**Examples**
+
+```powershell
+# What would be repaired, and is a restart due? Changes nothing.
+.\Repair-M365AppsHost.ps1 -CheckOnly
+
+# Repair and test everything, without asking
+.\Repair-M365AppsHost.ps1 -Confirm:$false
+
+# On a drained host: the same, and restart it when that is due
+.\Repair-M365AppsHost.ps1 -Restart -Confirm:$false
+```
+
+**Notes**
+- Exit code `0` healthy and no restart due, `1` something still broken or the run failed, `2` healthy but a restart is due and not done.
+- Run it on every host in the pool, and set `InstallAppxPackages = 0` in the GPO / Intune policy as well: one host that still replays keeps the old errors coming for whoever signs in there.
+- `Failed24h` looks back 24 hours, so it only drops as sign-ins without failures come in - compare it the next day.
+- The log is `C:\IT\AppWatchdog\Logs\Repair-M365AppsHost_<date>_<time>.log`; the watchdog run's own lines are in its daily log.

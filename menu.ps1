@@ -818,6 +818,21 @@ $menu = @(
             return $a
         }
     }
+    [PSCustomObject]@{ Key='+'; FKey=$null; Category='Device'
+        Label='M365AppsHostRepair  — repair and test Teams, Outlook, Photos on this session host in one go, and say whether it needs a restart'
+        Script="$ROOT\scripts\RDS\Repair-M365AppsHost.ps1"
+        Params={
+            Write-Host '  1  Check only - change nothing'
+            Write-Host '  2  Repair and test'
+            Write-Host '  3  Repair and test, then restart when due and nobody is signed in'
+            $choice = Read-Host '  Choice [1]'
+            switch ($choice) {
+                '2' { return @{ Confirm = $false } }   # already answered here, don't ask twice
+                '3' { return @{ Restart = $true; Confirm = $false } }
+                default { return @{ CheckOnly = $true } }
+            }
+        }
+    }
     [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
         Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
         Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"

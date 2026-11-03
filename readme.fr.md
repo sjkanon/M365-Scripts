@@ -194,6 +194,7 @@ Le lanceur ([`menu.ps1`](menu.ps1)) couvre tous les outils de ce dépôt. Appuye
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — préparer une image multisession / des hôtes AVD pour Teams, Outlook et Copilot avec FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog : tester Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos avec les comptes IT, réparer, signaler à n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collecter ce qui s'est passé avec Teams, Outlook, Copilot, l'Outil Capture d'écran et Photos par utilisateur, et ce qu'a fait le watchdog |
+| `+` | Device | [Repair-M365AppsHost](scripts/RDS/Repair-M365AppsHost.ps1) — réparer et tester Teams, Outlook et Photos sur cet hôte de session en une fois, et dire s'il doit redémarrer |
 | `N` | Device | Imprimantes — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (pilotes depuis GitHub + imprimantes depuis un fichier JSON) ou [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (imprimantes, paramètres et pilotes de cette machine dans un zip) ou [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (un groupe AD ou Entra ID par imprimante) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — vérifier/mettre à jour les modules requis, au choix aussi tous les autres modules installés |
@@ -484,6 +485,7 @@ Scripts d'audit et de diagnostic, classés par charge de travail. Se connectent 
   - Signale chaque plantage et blocage des trois applications sur l'hôte (Application Error 1000 / Application Hang 1002), y compris ceux des clients, regroupés par application, module et code d'exception
 
 - Collecteur de journaux ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — lecture seule, après une plainte : par utilisateur ce qui est inscrit et lancé, les événements AppX/AppReadiness/FSLogix, registre et journaux, et la tâche, l'état et les journaux du watchdog — confrontés à ce que conclurait le watchdog, avec ses angles morts (comme l'application Copilot unifiée) ; un seul zip
+- Réparation de l'hôte en une fois ([`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1)) — sur un hôte avec le watchdog : FSLogix `InstallAppxPackages = 0` (sauvegardé), le magasin de packages et Teams / Outlook à la build la plus récente, une exécution du watchdog comme test, un avant/après par application et utilisateur, et si un redémarrage est dû (`-Restart` quand personne n'est connecté)
 
 ---
 
@@ -869,6 +871,7 @@ Chaque dossier a son propre [`readme.md`](readme.md) — cette arborescence est 
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← diagnostic des profils FSLogix / Azure Files
     │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← collecteur : applis par utilisateur vs. le watchdog
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← réduire les disques FSLogix, vérifier la compaction
+    │   ├── <a href="scripts/RDS/Repair-M365AppsHost.ps1">Repair-M365AppsHost.ps1</a>           ← réparer + tester les applis M365 d'un hôte, verdict redémarrage
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnostic des échecs de connexion RDP/RDWeb
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot compatibles FSLogix sur l'image
     │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog : Teams / Outlook / Copilot, réparation, n8n
@@ -1015,6 +1018,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (2)
+| Modification |
+|--------|
+| Nouveau [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.fr.md#repair-m365appshostps1) : tout ce que le watchdog continue de signaler sur un hôte de session, réparé et testé en une fois. Un avant/après par application (build provisionnée, utilisateurs connectés qui l'ont, inscriptions échouées sur 24 heures), FSLogix `InstallAppxPackages = 0` après une sauvegarde `.reg` (le rejeu derrière les `0x80073CF9` / `0x80070490` quotidiens d'Outlook à la connexion), `Repair-AppxPackageStore.ps1` pour Teams / Outlook (`-Latest -Provision`) et Photos / l'Outil Capture d'écran (magasin seulement) pendant que la tâche du watchdog est suspendue, puis la tâche du watchdog elle-même comme test, et si un redémarrage est dû - avec `-Restart` seulement quand personne n'est connecté. Touche de menu `+` |
+| Vérifié : contrôle de syntaxe ; sous Windows PowerShell 5.1 les fonctions de lecture sur ce poste (utilisateurs connectés, valeur FSLogix, signaux de redémarrage, nombre d'événements), et l'instantané par application avec des données AppX simulées (build provisionnée la plus récente choisie, un utilisateur sans l'application nommé, une paire `401`/`404` comptée une fois, applications hors du `config.json` du watchdog écartées). Pas encore exécuté sur un hôte de session : la réparation, la suspension de la tâche et l'exécution de test du watchdog ne sont pas testées |
 ### 2026-11-03
 | Modification |
 |--------|

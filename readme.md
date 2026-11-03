@@ -194,6 +194,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `J` | Device | [Update-SessionHostImage](scripts/RDS/Update-SessionHostImage.ps1) — prepare a multi-session image / AVD hosts for Teams, Outlook and Copilot with FSLogix |
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
+| `+` | Device | [Repair-M365AppsHost](scripts/RDS/Repair-M365AppsHost.ps1) — repair and test Teams, Outlook and Photos on this session host in one go, and say whether it needs a restart |
 | `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) or [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (one AD or Entra ID group per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -484,6 +485,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
   - Reports every crash and hang of the three apps on the host (Application Error 1000 / Application Hang 1002), customers' included, grouped per app, module and exception code
 
 - App log collector ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — read only, after a complaint: per user what is registered and running, the AppX/AppReadiness/FSLogix events, registry and logs, and the watchdog's task, state and logs — set against what the watchdog would conclude, with its blind spots (e.g. the unified Copilot app); one zip
+- Host repair in one go ([`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1)) — on a host with the watchdog: FSLogix `InstallAppxPackages = 0` (backed up), the package store and Teams / Outlook at the newest build, a watchdog run as the test, a before/after per app and user, and whether a restart is due (`-Restart` when nobody is signed in)
 
 ---
 
@@ -869,6 +871,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← FSLogix / Azure Files profile diagnostics
     │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← log collector: apps per user vs. the watchdog
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← shrink FSLogix profile disks, check compaction
+    │   ├── <a href="scripts/RDS/Repair-M365AppsHost.ps1">Repair-M365AppsHost.ps1</a>           ← repair + test the M365 apps on a host, restart verdict
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← RDP/RDWeb login failure diagnostics
     │   ├── <a href="scripts/RDS/Update-SessionHostImage.ps1">Update-SessionHostImage.ps1</a>       ← Teams / Outlook / Copilot fit for FSLogix on the image
     │   ├── <a href="scripts/RDS/Watch-M365Apps.ps1">Watch-M365Apps.ps1</a>                ← watchdog: Teams / Outlook / Copilot, repair, n8n
@@ -1015,6 +1018,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (2)
+| Change |
+|--------|
+| New [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.md#repair-m365appshostps1): everything the watchdog keeps reporting on a session host, repaired and tested in one go. A before/after per app (provisioned build, signed-in users that have it, failed registrations in 24 hours), FSLogix `InstallAppxPackages = 0` after a `.reg` backup (the replay behind the daily Outlook `0x80073CF9` / `0x80070490` at sign-in), `Repair-AppxPackageStore.ps1` for Teams / Outlook (`-Latest -Provision`) and Photos / Snipping Tool (store only) with the watchdog task held meanwhile, then the watchdog task itself as the test, and whether a restart is due - with `-Restart` only when nobody is signed in. Menu key `+` |
+| Verified: syntax check; in Windows PowerShell 5.1 the readers on this workstation (signed-in users, FSLogix value, restart signals, event count), and the per-app snapshot against mocked AppX data (newest provisioned build picked, a user without the app named, a `401`/`404` pair counted once, apps outside the watchdog's `config.json` left out). Not yet run on a session host: the repair, the task hold and the watchdog test run are untested |
 ### 2026-11-03
 | Change |
 |--------|

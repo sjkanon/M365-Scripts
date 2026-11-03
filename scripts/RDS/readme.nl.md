@@ -19,6 +19,7 @@ Scripts voor diagnose, monitoring en het klaarmaken van RDP- / RD Web Access-inf
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Een Windows 11 multi-session-image of AVD-sessiehost controleren en klaarmaken, zodat de nieuwe Teams, de nieuwe Outlook en Copilot blijven werken met FSLogix — FSLogix zelf blijft ongemoeid |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (geplande taak) — test de nieuwe Teams, de nieuwe Outlook, Copilot, Knipprogramma (Snipping Tool) en Foto's (Photos) met ons eigen account (`itceadmin`) op een sessiehost, herstelt wat stuk is voordat een klant er last van heeft, en meldt het aan n8n |
 | [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Verzamelt, alleen lezend, wat er met de nieuwe Teams, de nieuwe Outlook, Copilot, Knipprogramma (Snipping Tool) en Foto's (Photos) op een sessiehost gebeurd is — per gebruiker wat er geregistreerd is en draait, de events, en wat de watchdog deed en zou concluderen, met zijn blinde vlekken — in één zip |
+| [`Repair-M365AppsHost.ps1`](Repair-M365AppsHost.ps1) ([docs](#repair-m365appshostps1)) | Herstelt en test in één keer alles wat de watchdog op een sessiehost blijft melden - FSLogix speelt geen AppX-pakketten meer af, de package store, Teams en Outlook op de nieuwste build, daarna een watchdog-run als test - en zegt of de host een herstart nodig heeft |
 
 ---
 
@@ -545,3 +546,49 @@ Uitvoer in `-OutputPath` (anders `%TEMP%`): `summary.txt` (het scherm), `session
 - De webhook-URL en het token zijn gemaskeerd in de kopie van `config.json`.
 - Vergelijkbaar met de AppX- en FSLogix-delen van Microsofts MSRD-Collect, maar beperkt tot
   deze drie apps en afgezet tegen wat de watchdog doet.
+
+### Repair-M365AppsHost.ps1
+
+Alles wat de app-watchdog ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) op een sessiehost blijft
+melden, in één keer hersteld en getest - en of de host een herstart nodig heeft. Voor een host
+waar de watchdog geïnstalleerd is: het gebruikt de scripts in `C:\IT\AppWatchdog` en de
+watchdog-taak zelf, dus de test is precies de run die elke 30 minuten draait.
+
+| Stap | Wat |
+|------|-----|
+| 1. Ervoor | FSLogix `InstallAppxPackages`, de klaargezette build per app, per app hoeveel aangemelde gebruikers hem geïnstalleerd hebben (en wie niet), mislukte registraties in de laatste 24 uur (een `401`/`404`-paar één keer geteld), en of een herstart nodig is |
+| 2. FSLogix | `InstallAppxPackages = 0` onder `HKLM\SOFTWARE\FSLogix\Profiles`, na een `.reg`-back-up in `Repair\`. FSLogix speelt de in het profiel bewaarde pakketten bij aanmelden niet meer opnieuw af - dat afspelen zit achter de dagelijkse *FSLogix could not register Microsoft.OutlookForWindows* (`0x80073CF9` / `0x80070490`), terwijl Windows de klaargezette build toch registreert. Store-apps die gebruikers zelf installeerden gaan niet meer met hen mee; klaargezette apps blijven werken. Vanaf de volgende aanmelding. Een beleidssleutel (`HKLM\SOFTWARE\Policies\FSLogix\Profiles`) die het anders zet wordt genoemd, niet veranderd |
+| 3. Herstel | De watchdog-taak staat uit zolang `Repair-AppxPackageStore.ps1` draait - Teams en Outlook met `-Latest -Provision`, Foto's en Knipprogramma zonder `-Provision` (store opgeschoond, geen Store-download) - en gaat daarna weer aan, ook als de run mislukt. Geen `-RemoveOld`: er wordt niets weggehaald bij een gebruiker die nog een oudere build open heeft |
+| 4. Test | De watchdog-taak wordt gestart en afgewacht (`-WaitMinutes`): elke aangemelde gebruiker gecontroleerd en waar nodig in zijn sessie hersteld, de apps van ons eigen account gestart. Zijn exitcode en wat hij nog meldt worden getoond; is ons eigen account niet aangemeld, dan staat er dat de apps niet gestart zijn |
+| 5. Erna | De momentopname van stap 1 opnieuw, en het oordeel over herstarten: de package store is sinds de laatste opstart bewerkt (een `.reg`-back-up van `Repair-AppxPackageStore` nieuwer dan de opstart), of Windows-onderhoud / Windows Update wacht op een herstart. Met `-Restart` herstart de host na 30 seconden als dat zo is en er niemand is aangemeld |
+
+Alleen de apps in `config.json` van de watchdog worden bekeken: een app die bewust is weggelaten is geen fout.
+
+**Parameters**
+
+| Parameter | Omschrijving |
+|-----------|--------------|
+| `-CheckOnly` | Stap 1 en 5 en een watchdog-run met `-NoRepair`: er verandert niets. `-WhatIf` doet hetzelfde |
+| `-KeepAppxReplay` | `InstallAppxPackages` laten zoals het is (stap 2 overgeslagen) |
+| `-Restart` | De host aan het eind herstarten als dat nodig is en er geen gebruiker is aangemeld |
+| `-WaitMinutes` | Hoe lang te wachten op een watchdog-run die bezig is en op de testrun (standaard: `20`) |
+| `-WorkingDir` | De map van de watchdog (standaard: `C:\IT\AppWatchdog`) |
+
+**Voorbeelden**
+
+```powershell
+# Wat zou er hersteld worden, en is een herstart nodig? Verandert niets.
+.\Repair-M365AppsHost.ps1 -CheckOnly
+
+# Alles herstellen en testen, zonder te vragen
+.\Repair-M365AppsHost.ps1 -Confirm:$false
+
+# Op een host in drain-modus: hetzelfde, en herstarten als dat nodig is
+.\Repair-M365AppsHost.ps1 -Restart -Confirm:$false
+```
+
+**Opmerkingen**
+- Exitcode `0` gezond en geen herstart nodig, `1` er is nog iets kapot of de run mislukte, `2` gezond maar een herstart is nodig en niet gedaan.
+- Draai het op elke host in de pool, en zet `InstallAppxPackages = 0` ook in het GPO- / Intune-beleid: één host die nog afspeelt blijft de oude fouten geven voor wie zich daar aanmeldt.
+- `Failed24h` kijkt 24 uur terug, dus het daalt pas naarmate er aanmeldingen zonder fouten bijkomen - vergelijk het de volgende dag.
+- De log is `C:\IT\AppWatchdog\Logs\Repair-M365AppsHost_<datum>_<tijd>.log`; de regels van de watchdog-run zelf staan in zijn daglog.

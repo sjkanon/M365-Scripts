@@ -19,6 +19,7 @@ Scripts de diagnostic, de supervision et de préparation pour l'infrastructure R
 | [`Update-SessionHostImage.ps1`](Update-SessionHostImage.ps1) ([docs](#update-sessionhostimageps1)) | Vérifier et préparer une image Windows 11 multisession ou un hôte de session AVD pour que le nouveau Teams, le nouvel Outlook et Copilot continuent de fonctionner avec FSLogix — FSLogix lui-même n'est pas modifié |
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (tâche planifiée) — teste le nouveau Teams, le nouvel Outlook, Copilot, l'Outil Capture d'écran (Snipping Tool) et Photos avec notre propre compte (`itceadmin`) sur un hôte de session, répare ce qui est cassé avant qu'un client ne le subisse, et le signale à n8n |
 | [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collecte, en lecture seule, ce qui s'est passé avec le nouveau Teams, le nouvel Outlook, Copilot, l'Outil Capture d'écran (Snipping Tool) et Photos sur un hôte de session — par utilisateur ce qui est inscrit et lancé, les événements, et ce que le watchdog a fait et conclurait, avec ses angles morts — dans un seul zip |
+| [`Repair-M365AppsHost.ps1`](Repair-M365AppsHost.ps1) ([docs](#repair-m365appshostps1)) | Répare et teste en une fois tout ce que le watchdog continue de signaler sur un hôte de session - FSLogix ne rejoue plus les packages AppX, le magasin de packages, Teams et Outlook à la build la plus récente, puis une exécution du watchdog comme test - et dit si l'hôte doit redémarrer |
 
 ---
 
@@ -553,3 +554,49 @@ Sortie dans `-OutputPath` (sinon `%TEMP%`) : `summary.txt` (l'écran), `sessions
 - L'URL du webhook et le jeton sont masqués dans la copie de `config.json`.
 - Comparable aux parties AppX et FSLogix de MSRD-Collect de Microsoft, mais limité à ces
   trois applications et confronté à ce que fait le watchdog.
+
+### Repair-M365AppsHost.ps1
+
+Tout ce que le watchdog des applications ([`Watch-M365Apps.ps1`](#watch-m365appsps1)) continue
+de signaler sur un hôte de session, réparé et testé en une fois - et si l'hôte doit redémarrer.
+Pour un hôte où le watchdog est installé : il utilise les scripts de `C:\IT\AppWatchdog` et la
+tâche du watchdog elle-même, donc le test est exactement l'exécution qui a lieu toutes les 30 minutes.
+
+| Étape | Quoi |
+|-------|------|
+| 1. Avant | FSLogix `InstallAppxPackages`, la build provisionnée par application, par application combien d'utilisateurs connectés l'ont installée (et qui ne l'a pas), les inscriptions échouées des dernières 24 heures (une paire `401`/`404` comptée une fois), et si un redémarrage est dû |
+| 2. FSLogix | `InstallAppxPackages = 0` sous `HKLM\SOFTWARE\FSLogix\Profiles`, après une sauvegarde `.reg` dans `Repair\`. FSLogix ne rejoue plus à la connexion les packages enregistrés dans le profil - ce rejeu est derrière le quotidien *FSLogix could not register Microsoft.OutlookForWindows* (`0x80073CF9` / `0x80070490`), alors que Windows inscrit de toute façon la build provisionnée. Les applications du Store installées par les utilisateurs eux-mêmes ne les suivent plus ; les applications provisionnées ne sont pas concernées. À partir de la connexion suivante. Une clé de stratégie (`HKLM\SOFTWARE\Policies\FSLogix\Profiles`) qui le définit autrement est signalée, pas modifiée |
+| 3. Réparation | La tâche du watchdog est désactivée pendant que `Repair-AppxPackageStore.ps1` s'exécute - Teams et Outlook avec `-Latest -Provision`, Photos et l'Outil Capture d'écran sans `-Provision` (magasin nettoyé, pas de téléchargement du Store) - puis réactivée, même si l'exécution échoue. Pas de `-RemoveOld` : rien n'est retiré à un utilisateur qui a encore une ancienne build ouverte |
+| 4. Test | La tâche du watchdog est lancée et attendue (`-WaitMinutes`) : chaque utilisateur connecté est vérifié et réparé dans sa session si nécessaire, les applications de notre propre compte sont lancées. Son code de sortie et ce qu'il signale encore sont affichés ; quand notre propre compte n'est pas connecté, il indique que les applications n'ont pas été lancées |
+| 5. Après | L'instantané de l'étape 1 à nouveau, et le verdict sur le redémarrage : le magasin de packages a été modifié depuis le dernier démarrage (une sauvegarde `.reg` de `Repair-AppxPackageStore` plus récente que le démarrage), ou la maintenance Windows / Windows Update attend un redémarrage. Avec `-Restart` l'hôte redémarre après 30 secondes si c'est le cas et que personne n'est connecté |
+
+Seules les applications du `config.json` du watchdog sont examinées : une application laissée de côté volontairement n'est pas une erreur.
+
+**Paramètres**
+
+| Paramètre | Description |
+|-----------|-------------|
+| `-CheckOnly` | Les étapes 1 et 5 et une exécution du watchdog avec `-NoRepair` : rien n'est modifié. `-WhatIf` fait de même |
+| `-KeepAppxReplay` | Laisser `InstallAppxPackages` tel quel (étape 2 ignorée) |
+| `-Restart` | Redémarrer l'hôte à la fin quand un redémarrage est dû et qu'aucun utilisateur n'est connecté |
+| `-WaitMinutes` | Combien de temps attendre une exécution du watchdog en cours et l'exécution de test (par défaut : `20`) |
+| `-WorkingDir` | Le dossier du watchdog (par défaut : `C:\IT\AppWatchdog`) |
+
+**Exemples**
+
+```powershell
+# Qu'est-ce qui serait réparé, et un redémarrage est-il dû ? Ne modifie rien.
+.\Repair-M365AppsHost.ps1 -CheckOnly
+
+# Tout réparer et tester, sans demander
+.\Repair-M365AppsHost.ps1 -Confirm:$false
+
+# Sur un hôte en mode drainage : la même chose, et redémarrer si c'est dû
+.\Repair-M365AppsHost.ps1 -Restart -Confirm:$false
+```
+
+**Remarques**
+- Code de sortie `0` sain et pas de redémarrage dû, `1` quelque chose est encore cassé ou l'exécution a échoué, `2` sain mais un redémarrage est dû et n'a pas été fait.
+- Exécutez-le sur chaque hôte du pool, et définissez aussi `InstallAppxPackages = 0` dans la stratégie GPO / Intune : un seul hôte qui rejoue encore continue de produire les anciennes erreurs pour qui s'y connecte.
+- `Failed24h` remonte 24 heures, il ne baisse donc qu'au fil des connexions sans échec - comparez-le le lendemain.
+- Le journal est `C:\IT\AppWatchdog\Logs\Repair-M365AppsHost_<date>_<heure>.log` ; les lignes de l'exécution du watchdog elle-même sont dans son journal quotidien.
