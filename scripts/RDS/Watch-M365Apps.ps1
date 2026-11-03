@@ -30,11 +30,11 @@
                      signature-checked), and Edge Update is asked to check now for the
                      unified Copilot app. Every run: when our own account has an older
                      build than the host provisions and the app is closed, it is
-                     registered again from the provisioned main package in our session,
-                     and step 2 starts the new build once and closes it again - a build
-                     that does not run is found by us, not by a customer at their next
-                     sign-in. An app that is open is not closed for it: it is updated
-                     at a run where it is closed. Customers are never updated by the
+                     registered again from the provisioned main package in our session -
+                     a build that does not register is found by us, not by a customer
+                     at their next sign-in. It is not started for it, and an app that
+                     is open is not closed for it: it is updated at a run where it is
+                     closed. Customers are never updated by the
                      watchdog: Windows gives them the new build at their next sign-in.
                      A new build on the host - from this step or on its own - is
                      reported once, with what it was before. Snipping Tool and Photos
@@ -44,15 +44,16 @@
                      explorer.exe), per app: the package is registered for that user,
                      its files are there and its status is Ok - for Copilot its
                      identity package, when the host has one (its files are
-                     machine-wide). An app that is not running is started there only
-                     with a reason - this run updated or repaired it, or Windows
-                     refused an open of theirs since the last run - (shell:AppsFolder\
-                     <AUMID>, or copilotapp.exe itself, through a one-off task in the
-                     user's own session), must still be running 15 seconds later, and
-                     is closed again unless they had tried to open it. Without a
-                     reason it was closed or is not in use, and is left closed: the
-                     account may be someone's working session. Nothing that runs is
-                     ever closed, for an update either.
+                     machine-wide). An app that is not running is only started when
+                     they tried to open it themselves in the last 30 minutes and
+                     Windows refused (as for a customer in step 3): then it is
+                     repaired, opened for them (shell:AppsFolder\<AUMID>, or
+                     copilotapp.exe itself, through a one-off task in the user's own
+                     session), must still be running 15 seconds later, and stays open.
+                     Otherwise it was closed or is not in use and is left closed -
+                     after an update or a repair too: the account may be someone's
+                     working session. Nothing that runs is ever closed, for an update
+                     either.
       2b. Users      Every other signed-in user (customers), once signed in for 10
                      minutes: the same registration check, without starting anything.
                      And every attempt since the last run, by any user, to open one of
@@ -692,39 +693,31 @@ function Test-UserPackage {
     return $false
 }
 
-# Why our own account's app may be started this run, per "SID|App": 'updated' or
-# 'repaired' (by this run), or 'opened by them' (Windows refused an open of theirs since
-# the last run). An app that is not running without one of these was closed or is not
-# in use, and is not started: the account may be someone's working session.
-$script:launchReasons = @{}
-function Set-LaunchReason {
-    <# 'opened by them' wins: then the app stays open after the test, as they wanted it. #>
-    param([string] $Sid, [string] $App, [string] $Reason)
-    if ($Reason -eq 'opened by them' -or -not $script:launchReasons.ContainsKey("$Sid|$App")) { $script:launchReasons["$Sid|$App"] = $Reason }
-}
-function Get-LaunchReason { param($Session, [string] $App) return $script:launchReasons[('{0}|{1}' -f $Session.Sid, $App)] }
-function Clear-LaunchReason { param($Session, [string] $App) $script:launchReasons.Remove(('{0}|{1}' -f $Session.Sid, $App)) }
+# Apps our own account tried to open since the last run and Windows refused, per
+# "SID|App": only those are started by the launch test - and left open, as they wanted
+# them. Any other app that is not running was closed or is not in use and is not
+# started, after an update or a repair either: the account may be someone's working
+# session.
+$script:launchWanted = @{}
+function Set-LaunchWanted { param([string] $Sid, [string] $App) $script:launchWanted["$Sid|$App"] = $true }
+function Test-LaunchWanted { param($Session, [string] $App) return $script:launchWanted.ContainsKey(('{0}|{1}' -f $Session.Sid, $App)) }
+function Clear-LaunchWanted { param($Session, [string] $App) $script:launchWanted.Remove(('{0}|{1}' -f $Session.Sid, $App)) }
 
 function Test-AppStart {
     <#
         Start the app in the user's session; it has to come up and still be there 15
         seconds later. By its AUMID, or by its executable when the entry has a Path
-        (the unified Copilot app without an identity package). -Close: what the test
-        started is closed again afterwards - only those processes, not one the user had
-        open - so a test does not leave an app open that nobody asked for.
+        (the unified Copilot app without an identity package).
     #>
-    param($Session, $Entry, [switch] $Close)
+    param($Session, $Entry)
     $path   = Get-PropertyValue $Entry 'Path'
     $target = if ($path) { '"{0}"' -f $path } else { "shell:AppsFolder\$($Entry.Aumid)" }
-    $had    = @(Get-SessionProcess $Session $Entry.Exe | ForEach-Object { $_.Id })
     Invoke-AsUser -Session $Session -Execute 'explorer.exe' -Argument $target -WaitSeconds 30 | Out-Null
     $deadline = (Get-Date).AddSeconds($LaunchSeconds)
     while ((Get-Date) -lt $deadline -and @(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { Start-Sleep -Seconds 3 }
     if (@(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { return $false }
     Start-Sleep -Seconds 15
-    $ok = @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
-    if ($Close) { Get-SessionProcess $Session $Entry.Exe | Where-Object { $_.Id -notin $had } | Stop-Process -Force -ErrorAction SilentlyContinue }
-    return $ok
+    return @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
 }
 
 function Get-ProcessVersion {
@@ -904,8 +897,7 @@ function Update-AccountApp {
                 $now = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
                        ForEach-Object { [version] $_.Version } | Sort-Object -Descending | Select-Object -First 1
                 if ($now -and $now -ge $want) {
-                    Write-Ok "$($entry.App) $now registered for $($session.Account) - tested below, then closed again"
-                    Set-LaunchReason $session.Sid $entry.App 'updated'
+                    Write-Ok "$($entry.App) $now registered for $($session.Account) - not started: it was closed"
                     $actions.Add("Update: $($session.Account) $($entry.App) $have -> $now")
                 } else {
                     Write-Warn "$($entry.App) for $($session.Account) is still $now after registering $want"
@@ -1147,11 +1139,10 @@ function Test-UserApp {
     if (-not $appEntry) { Write-Warn "$($Entry.App) $($pkg.Version) registered, but its manifest names no executable - not started"; return }
     if (@(Get-SessionProcess $Session $appEntry.Exe).Count -gt 0) { Write-Ok "$($Entry.App) $($pkg.Version) running"; return }
     if ($SkipLaunchTest) { Write-Ok "$($Entry.App) $($pkg.Version) registered (not running, launch test off)"; return }
-    $reason = Get-LaunchReason $Session $Entry.App
-    if (-not $reason) { Write-Ok "$($Entry.App) $($pkg.Version) registered, not running - not started: closed or not in use"; return }
-    if (Test-AppStart $Session $appEntry -Close:($reason -ne 'opened by them')) {
-        Write-Ok "$($Entry.App) $($pkg.Version) starts ($reason)$(if ($reason -ne 'opened by them') { ' - closed again' })"
-        Clear-LaunchReason $Session $Entry.App
+    if (-not (Test-LaunchWanted $Session $Entry.App)) { Write-Ok "$($Entry.App) $($pkg.Version) registered, not running - not started: closed or not in use"; return }
+    if (Test-AppStart $Session $appEntry) {
+        Write-Ok "$($Entry.App) $($pkg.Version) opened for them - they had tried to open it"
+        Clear-LaunchWanted $Session $Entry.App
         return
     }
     New-Finding $Session.Account $Entry.App 'WontStart' "$($pkg.Version) is registered but $($appEntry.Exe).exe did not start or did not stay up" $pkg.Name -Sid $Session.Sid
@@ -1189,12 +1180,11 @@ function Test-UserCopilot {
     $running = @(Get-SessionProcess $Session $exe)
     if ($running.Count -gt 0) { Write-Ok "Copilot $(Get-ProcessVersion $running) running"; return }
     if ($SkipLaunchTest) { Write-Ok "Copilot $($copilot.Version) installed (not running, launch test off)"; return }
-    $reason = Get-LaunchReason $Session 'Copilot'
-    if (-not $reason) { Write-Ok "Copilot $($copilot.Version) installed, not running - not started: closed or not in use"; return }
+    if (-not (Test-LaunchWanted $Session 'Copilot')) { Write-Ok "Copilot $($copilot.Version) installed, not running - not started: closed or not in use"; return }
     $appEntry = Get-LaunchEntry $Session ([PSCustomObject]@{ App = 'Copilot'; Packages = @($copilot.Package | Where-Object { $_ }) })
-    if ($appEntry -and (Test-AppStart $Session $appEntry -Close:($reason -ne 'opened by them'))) {
-        Write-Ok "Copilot $($copilot.Version) starts ($reason)$(if ($reason -ne 'opened by them') { ' - closed again' })"
-        Clear-LaunchReason $Session 'Copilot'
+    if ($appEntry -and (Test-AppStart $Session $appEntry)) {
+        Write-Ok "Copilot $($copilot.Version) opened for them - they had tried to open it"
+        Clear-LaunchWanted $Session 'Copilot'
         return
     }
     New-Finding $Session.Account 'Copilot' 'WontStart' "unified app $($copilot.Version) is installed but $CopilotExe did not start or did not stay up" $copilot.Package -Family $copilot.Family -Sid $Session.Sid
@@ -1446,8 +1436,6 @@ function Invoke-Repair {
         if ($command) { Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null }
         # Also for our own account: Get-OpenFailure leaves out what this repair itself logs.
         $State.UserRepairs[$key] = (Get-Date).ToString('o')
-        # Our own account: the read-back starts it once to see the repair work, then closes it.
-        if (-not $finding.Customer) { Set-LaunchReason $finding.Sid $finding.App 'repaired' }
 
         # The headless console does not pass the exit code on: the package itself says
         # whether it worked. A reset or restart is judged by the launch test in the read-back.
@@ -1943,8 +1931,12 @@ try {
     Write-Step ('Apps users could not open since {0:yyyy-MM-dd HH:mm}' -f $since)
     $openFailures = @(Get-OpenFailure -Since $since -Until $until -Sessions $sessions -OwnRepairs $state.UserRepairs)
     if ($openFailures.Count -eq 0) { Write-Ok 'None' }
-    # Our own account tried to open it: the launch test may start it, and leaves it open.
-    foreach ($f in @($openFailures | Where-Object { $_.Problem -eq 'WontOpen' -and $_.Sid -and -not $_.Customer })) { Set-LaunchReason $f.Sid $f.App 'opened by them' }
+    # Our own account tried to open it: the launch test opens it for them once it works -
+    # by the same rule as for a customer: a recent attempt of their own, not the autostart.
+    foreach ($f in @($openFailures | Where-Object { $_.Problem -eq 'WontOpen' -and $_.Sid -and -not $_.Customer })) {
+        $session = @($sessions | Where-Object { $_.Sid -eq $f.Sid }) | Select-Object -First 1
+        if ($session -and -not (Test-UserAttempt -Finding $f -Session $session)) { Set-LaunchWanted $f.Sid $f.App }
+    }
 
     $crashes = @()
     if ($CrashThreshold -gt 0) {

@@ -38,9 +38,9 @@
       4. Test       The watchdog task itself is started - as System, with its own
                     config.json, so it is exactly the run that happens every 30 minutes:
                     every signed-in user is checked, repaired in their session where
-                    needed, and an app of our own account (itceadmin) that this run
-                    updated or repaired is started once and closed again - nothing
-                    that is fine is started. Its exit code and what it still reports
+                    needed, and an app that someone tried to open in the last 30
+                    minutes and Windows refused is opened for them once it works -
+                    nothing else is started. Its exit code and what it still reports
                     are shown.
       5. After      The snapshot of step 1 again, side by side with before, and whether
                     a restart is due: Repair-AppxPackageStore edited the package store
@@ -131,8 +131,8 @@ $BenignAppxCodes  = @('0x80073D02', '0x80073CFB', '0x80073D06')
 $StorePolicy      = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
 # Repaired per user in step 3b: no installer, so the Store updates them per user.
 $UserApps = @(
-    [PSCustomObject]@{ App = 'Photos';       Package = 'Microsoft.Windows.Photos'; Aumid = 'Microsoft.Windows.Photos_8wekyb3d8bbwe!App'; Exe = 'Photos' }
-    [PSCustomObject]@{ App = 'SnippingTool'; Package = 'Microsoft.ScreenSketch';   Aumid = 'Microsoft.ScreenSketch_8wekyb3d8bbwe!App';   Exe = 'SnippingTool' }
+    [PSCustomObject]@{ App = 'Photos';       Package = 'Microsoft.Windows.Photos'; Exe = 'Photos' }
+    [PSCustomObject]@{ App = 'SnippingTool'; Package = 'Microsoft.ScreenSketch';   Exe = 'SnippingTool' }
 )
 # What this run did and found, sent to n8n at the end.
 $Report = [ordered]@{ source = 'Repair-M365AppsHost'; host = $env:COMPUTERNAME; time = (Get-Date).ToString('o'); actions = [System.Collections.Generic.List[string]]::new() }
@@ -516,26 +516,6 @@ function Get-UserAppState {
     }
 }
 
-function Test-UserAppStart {
-    <#
-        After a repair, for our own account only: start the app in their session; it has
-        to come up and still run 10 seconds later. Then what the test started is closed
-        again - only those processes - so nothing stays open that nobody asked for.
-    #>
-    param([string] $Sid, $Entry)
-    $session = Get-SessionId $Sid
-    if ($null -eq $session) { return $false }
-    $mine = { @(Get-Process -Name $Entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }) }
-    $had  = @(& $mine | ForEach-Object { $_.Id })
-    Start-UserTask -Sid $Sid -Execute 'explorer.exe' -Argument "shell:AppsFolder\$($Entry.Aumid)" -WaitSeconds 30 | Out-Null
-    $deadline = (Get-Date).AddSeconds(45)
-    while ((Get-Date) -lt $deadline -and @(& $mine).Count -eq 0) { Start-Sleep -Seconds 3 }
-    Start-Sleep -Seconds 10
-    $ok = @(& $mine).Count -gt 0
-    & $mine | Where-Object { $_.Id -notin $had } | Stop-Process -Force -ErrorAction SilentlyContinue
-    return $ok
-}
-
 function Repair-UserApp {
     <#
         One app for one user, in their session, nothing closed: a build newer than the
@@ -730,20 +710,19 @@ try {
                         $row.result = 'not touched, the repair failed for our own account'; $Report.users.Add($row); $exitCode = 1; continue
                     }
                     $session = Get-SessionId $state.Sid
-                    if (-not $ours -and @(Get-Process -Name $entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -gt 0) {
+                    # Open for them - our own account included, someone may work in it.
+                    if (@(Get-Process -Name $entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -gt 0) {
                         Write-Skip 'open for them right now - not touched, the watchdog tries again later'
                         $row.result = 'open for them, not touched'; $Report.users.Add($row); continue
                     }
                     if (-not $PSCmdlet.ShouldProcess("$($state.User) - $($entry.App)", 'Repair in their session')) { continue }
+                    # Not started afterwards: the watchdog run in step 4 opens it for whoever
+                    # tried to open it in the last 30 minutes, and nothing for anyone else.
                     $fixed = Repair-UserApp -State $state -Entry $entry -Users $usersNow -Since (Get-Date).AddHours(-24)
-                    if ($fixed -and $ours) {
-                        $fixed = Test-UserAppStart -Sid $state.Sid -Entry $entry
-                        if ($fixed) { Write-Ok "$($entry.App) for $($state.User): starts" } else { Write-Bad "$($entry.App) for $($state.User): registered, but it does not start" }
-                    }
                     if (-not $fixed) { $exitCode = 1; if ($ours) { $oursFailed = $true } }
                     $now = @(Get-UserAppState -Users @{ $state.Sid = $state.User } -Entry $entry -Since (Get-Date).AddSeconds(-5)) | Select-Object -First 1
                     $row.after  = if ($now) { $now.Version } else { '' }
-                    $row.result = if (-not $fixed) { 'still broken' } elseif ($ours) { 'repaired, starts' } else { 'repaired' }
+                    $row.result = if ($fixed) { 'repaired' } else { 'still broken' }
                     Add-Action "$($state.User) $($entry.App): $($row.result) ($($row.before) -> $($row.after))"
                     $Report.users.Add($row)
                 }
