@@ -1021,6 +1021,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (5)
+| Change |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.md#repair-m365appshostps1) checks and repairs all five apps: Copilot is in the before/after (the unified app's version from Edge Update, `copilotapp.exe` on disk, a Start menu entry for all users) and is installed with `Repair-AppxPackageStore -Name copilot -Provision` when it is not on the host; Photos or Snipping Tool that is not provisioned is provisioned again with `-Provision -FromHost` instead of only having its store cleaned. Before, Copilot was left to the watchdog run and a missing Photos or Snipping Tool stayed missing |
+| Verified: syntax check; in Windows PowerShell 5.1 the Copilot reader against the unified app on this workstation (version, path, no all-users Start menu entry - named), the snapshot against mocked AppX data with Photos not provisioned (Photos to `-FromHost`, Snipping Tool store only, no Copilot install). Not yet run on a session host |
 ### 2026-11-03 (4)
 | Change |
 |--------|

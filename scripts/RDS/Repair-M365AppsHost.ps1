@@ -11,9 +11,12 @@
     the watchdog itself would not, apart from step 2. In order:
 
       1. Before     A snapshot: FSLogix InstallAppxPackages, the provisioned build of
-                    each app, per app how many of the signed-in users have it
-                    installed (and who does not), failed package registrations in the
-                    last 24 hours, and the signals that a restart is due.
+                    Teams, Outlook, Photos and Snipping Tool, per app how many of the
+                    signed-in users have it installed (and who does not), failed
+                    package registrations in the last 24 hours; for Copilot the unified
+                    app Edge Update installs machine-wide (version, copilotapp.exe, a
+                    Start menu entry for all users); and the signals that a restart is
+                    due.
       2. FSLogix    InstallAppxPackages = 0 under HKLM\SOFTWARE\FSLogix\Profiles, after
                     a .reg backup of that key. FSLogix then stops replaying the
                     packages saved in the profile at sign-in - the replay behind the
@@ -24,10 +27,14 @@
                     next sign-in. -KeepAppxReplay leaves it as it is.
       3. Repair     The watchdog task is held (disabled) so it cannot run a repair at
                     the same time, then Repair-AppxPackageStore.ps1: Teams and Outlook
-                    with -Latest -Provision (the newest build, signature-checked), and
+                    with -Latest -Provision (the newest build, signature-checked);
                     Photos and Snipping Tool without -Provision - their store is cleaned,
-                    no Store download (that needs an Entra admin). No -RemoveOld:
-                    nothing is taken away from a user who still has an older build open.
+                    no Store download (that needs an Entra admin) - or, when one is not
+                    provisioned, -Provision -FromHost: provisioned again from the
+                    Microsoft-signed build already on the host; Copilot, when the
+                    unified app is not on the host, -Name copilot -Provision (Edge
+                    Update installs it). No -RemoveOld: nothing is taken away from a
+                    user who still has an older build open.
       4. Test       The watchdog task itself is started - as System, with its own
                     config.json, so it is exactly the run that happens every 30 minutes:
                     every signed-in user is checked, repaired in their session where
@@ -97,7 +104,11 @@ $Apps = @(
     [PSCustomObject]@{ App = 'Outlook';      Package = 'Microsoft.OutlookForWindows' }
     [PSCustomObject]@{ App = 'Photos';       Package = 'Microsoft.Windows.Photos' }
     [PSCustomObject]@{ App = 'SnippingTool'; Package = 'Microsoft.ScreenSketch' }
+    # The unified app, installed machine-wide by Edge Update: no package of its own.
+    [PSCustomObject]@{ App = 'Copilot';      Package = '' }
 )
+$CopilotGuid = '{C50565E9-CCCF-44B4-BA15-5AC5C6569197}'
+$CopilotExe  = 'copilotapp.exe'
 $TaskName         = 'M365 App Watchdog'
 $FslogixProfiles  = 'HKLM:\SOFTWARE\FSLogix\Profiles'
 $FslogixPolicy    = 'HKLM:\SOFTWARE\Policies\FSLogix\Profiles'
@@ -194,7 +205,7 @@ function Get-RegisterFailure {
         if ($values.Count -le $codeAt) { continue }
         $code = '0x{0:X8}' -f ([long] $values[$codeAt] -band [long] 4294967295)
         if ($code -in $BenignAppxCodes) { continue }
-        $entry = @($Apps | Where-Object { [string] $values[1] -like "$($_.Package)_*" }) | Select-Object -First 1
+        $entry = @($Apps | Where-Object { $_.Package -and [string] $values[1] -like "$($_.Package)_*" }) | Select-Object -First 1
         if (-not $entry) { continue }
         $seen['{0}|{1}|{2:yyyyMMddHHmmss}' -f $record.UserId, $values[1], $record.TimeCreated] = $entry.App
     }
@@ -203,12 +214,62 @@ function Get-RegisterFailure {
     return $count
 }
 
+function Get-UnifiedCopilot {
+    <#
+        The unified Copilot app as the watchdog finds it: the version Edge Update
+        reports, copilotapp.exe (App Paths, or Microsoft\<app>\Application under Program
+        Files), and a Start menu entry for all users pointing at it. $null when Edge
+        Update reports no version.
+    #>
+    $version = $null
+    foreach ($root in 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients', 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients') {
+        $pv = Get-PropertyValue (Get-ItemProperty (Join-Path $root $CopilotGuid) -ErrorAction SilentlyContinue) 'pv'
+        if ($pv -and $pv -ne '0.0.0.0') { $version = [string] $pv; break }
+    }
+    if (-not $version) { return $null }
+    $candidates = @()
+    $appPath = Get-PropertyValue (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\$CopilotExe" -ErrorAction SilentlyContinue) '(default)'
+    if ($appPath) { $candidates += ([string] $appPath).Trim('"') }
+    foreach ($programs in @(${env:ProgramFiles(x86)}, $env:ProgramFiles) | Where-Object { $_ }) {
+        $candidates += @(Get-ChildItem (Join-Path $programs 'Microsoft') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName "Application\$CopilotExe" })
+    }
+    $path = @($candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) }) | Select-Object -First 1
+    $shortcut = $null
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($lnk in @(Get-ChildItem -Path (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs') -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)) {
+            if ($shell.CreateShortcut($lnk.FullName).TargetPath -like "*\$CopilotExe") { $shortcut = $lnk.FullName; break }
+        }
+    } catch { }
+    [PSCustomObject]@{ Version = $version; Path = $path; Shortcut = $shortcut }
+}
+
 function Get-HostSnapshot {
-    <# Per app: the provisioned build, and how many signed-in users have it installed. #>
+    <#
+        Per app: the provisioned build, and how many signed-in users have it installed.
+        Copilot: the unified app on the host - for everyone, so no per-user count; Note
+        says what is missing.
+    #>
     param([hashtable] $Users)
     $provisioned = @(Get-AppxProvisionedPackage -Online)
     $failures    = Get-RegisterFailure -Since (Get-Date).AddHours(-24)
     foreach ($entry in $Apps) {
+        if ($entry.App -eq 'Copilot') {
+            $copilot = Get-UnifiedCopilot
+            $note    = if (-not $copilot) { 'Edge Update reports no unified Copilot app' }
+                       elseif (-not $copilot.Path) { "$CopilotExe is nowhere on the host" }
+                       elseif (-not $copilot.Shortcut) { 'no Start menu entry for all users - users cannot find it' }
+                       else { '' }
+            [PSCustomObject]@{
+                App         = 'Copilot'
+                Provisioned = if ($copilot -and $copilot.Path) { "unified app $($copilot.Version)" } else { 'NOT installed' }
+                Users       = 'machine-wide'
+                Missing     = ''
+                Failed24h   = 0
+                Note        = $note
+            }
+            continue
+        }
         $build = @($provisioned | Where-Object { $_.DisplayName -eq $entry.Package } | Sort-Object { [version] $_.Version } -Descending) | Select-Object -First 1
         $known = @(Get-AppxPackage -AllUsers -Name $entry.Package -ErrorAction SilentlyContinue | ForEach-Object { $_.PackageUserInformation } |
                    Where-Object { [string] $_.InstallState -eq 'Installed' } | ForEach-Object { $_.UserSecurityId.Sid })
@@ -219,6 +280,7 @@ function Get-HostSnapshot {
             Users       = '{0}/{1}' -f ($Users.Count - $missing.Count), $Users.Count
             Missing     = $missing -join ', '
             Failed24h   = [int] $failures[$entry.App]
+            Note        = if ($build) { '' } else { 'new profiles do not get it' }
         }
     }
 }
@@ -243,7 +305,7 @@ function Write-Snapshot {
     param([string] $Title, $Snapshot, $Replay)
     Write-Step $Title
     Write-Host "  FSLogix InstallAppxPackages: $($Replay.Text)"
-    $Snapshot | Format-Table App, Provisioned, Users, Failed24h, Missing -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+    $Snapshot | Format-Table App, Provisioned, Users, Failed24h, Missing, Note -AutoSize -Wrap | Out-String -Width 220 | Write-Host
 }
 
 # -- The watchdog --------------------------------------------------------------------
@@ -358,19 +420,26 @@ try {
         }
 
         # -- 3. Repair -----------------------------------------------------------
-        Write-Step '3. Repair - the package store, Teams and Outlook at the newest build'
-        if ($PSCmdlet.ShouldProcess("$env:COMPUTERNAME - Repair-AppxPackageStore for Teams, Outlook, Photos, Snipping Tool", 'Repair')) {
+        Write-Step '3. Repair - the package store, Teams and Outlook at the newest build, what is not provisioned'
+        if ($PSCmdlet.ShouldProcess("$env:COMPUTERNAME - Repair-AppxPackageStore for $(@($Apps.App) -join ', ')", 'Repair')) {
             # Held, so the task cannot start a repair of its own halfway through ours.
             Disable-ScheduledTask -TaskName $TaskName | Out-Null
             $held = $true
             # A trigger may have started it just before: disabling does not stop a run.
             if (-not (Wait-WatchdogIdle)) { throw "the watchdog task is still running after $WaitMinutes minutes - try again later" }
             $repairDir = Join-Path $WorkingDir 'Repair'
+            $missingOnHost = @($before | Where-Object { $_.Provisioned -like 'NOT *' } | ForEach-Object { $_.App })
             $latest    = @(@{ Teams = 'teams'; Outlook = 'outlook' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App } | ForEach-Object { $_.Value })
-            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App } | ForEach-Object { $_.Value })
+            # No installer: provisioned again from the build on the host when it is not
+            # provisioned, otherwise only their store cleaned.
+            $fromHost  = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -in $missingOnHost } | ForEach-Object { $_.Value })
+            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -notin $missingOnHost } | ForEach-Object { $_.Value })
             foreach ($call in @(
                 if ($latest.Count) { [ordered]@{ Name = $latest; Latest = $true; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
+                if ($fromHost.Count) { [ordered]@{ Name = $fromHost; Provision = $true; FromHost = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 if ($storeOnly.Count) { [ordered]@{ Name = $storeOnly; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
+                # Only when the unified app is not there: -Provision writes Edge Update's install policy.
+                if ('Copilot' -in $Apps.App -and 'Copilot' -in $missingOnHost) { [ordered]@{ Name = @('copilot'); Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
             )) {
                 $command = ConvertTo-ScriptCommand -Path $repair -Parameters $call
                 Write-Step $command
@@ -405,8 +474,10 @@ try {
     $after = @(Get-HostSnapshot -Users $users)
     Write-Snapshot -Title ('5. After - {0} user(s) signed in' -f $users.Count) -Snapshot $after -Replay (Get-AppxReplay)
     foreach ($row in $after) {
-        if ($row.Provisioned -eq 'NOT provisioned') { Write-Bad "$($row.App) is not provisioned - new profiles do not get it"; $exitCode = 1 }
+        if ($row.Provisioned -like 'NOT *') { Write-Bad "$($row.App) - $($row.Provisioned.ToLower()): $($row.Note)"; $exitCode = 1 }
+        elseif ($row.Note) { Write-Bad "$($row.App) - $($row.Note)"; $exitCode = 1 }
         if ($row.Missing) { Write-Bad "$($row.App) not installed for: $($row.Missing)"; $exitCode = 1 }
+        if (-not $row.Note -and -not $row.Missing -and $row.Provisioned -notlike 'NOT *') { Write-Ok "$($row.App) - $($row.Provisioned), $($row.Users)" }
     }
     Write-Skip 'Failed24h counts the last 24 hours, so it only drops as sign-ins without failures come in - compare it tomorrow'
 

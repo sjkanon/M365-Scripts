@@ -1021,6 +1021,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (5)
+| Wijziging |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.nl.md#repair-m365appshostps1) controleert en herstelt alle vijf de apps: Copilot staat in het voor/na (de versie van de unified app volgens Edge Update, `copilotapp.exe` op schijf, een Start-menu-item voor alle gebruikers) en wordt geïnstalleerd met `Repair-AppxPackageStore -Name copilot -Provision` als hij niet op de host staat; Foto's of Knipprogramma die niet klaargezet is wordt opnieuw klaargezet met `-Provision -FromHost` in plaats van alleen de store op te schonen. Voorheen werd Copilot aan de watchdog-run overgelaten en bleef een ontbrekend Foto's of Knipprogramma ontbreken |
+| Geverifieerd: syntaxcontrole; in Windows PowerShell 5.1 de Copilot-lezer tegen de unified app op dit werkstation (versie, pad, geen Start-menu-item voor alle gebruikers - genoemd), de momentopname tegen nagebootste AppX-gegevens met Foto's niet klaargezet (Foto's naar `-FromHost`, Knipprogramma alleen de store, geen Copilot-installatie). Nog niet gedraaid op een sessiehost |
 ### 2026-11-03 (4)
 | Wijziging |
 |--------|

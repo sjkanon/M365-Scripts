@@ -1021,6 +1021,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (5)
+| Modification |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.fr.md#repair-m365appshostps1) vérifie et répare les cinq applications : Copilot figure dans l'avant/après (la version de l'application unifiée selon Edge Update, `copilotapp.exe` sur le disque, une entrée du menu Démarrer pour tous les utilisateurs) et est installé avec `Repair-AppxPackageStore -Name copilot -Provision` quand il n'est pas sur l'hôte ; Photos ou l'Outil Capture d'écran non provisionné est à nouveau provisionné avec `-Provision -FromHost` au lieu d'un simple nettoyage du magasin. Auparavant, Copilot était laissé à l'exécution du watchdog et un Photos ou Outil Capture d'écran manquant le restait |
+| Vérifié : contrôle de syntaxe ; sous Windows PowerShell 5.1 le lecteur Copilot avec l'application unifiée de ce poste (version, chemin, pas d'entrée du menu Démarrer pour tous les utilisateurs - signalé), l'instantané avec des données AppX simulées où Photos n'est pas provisionné (Photos vers `-FromHost`, l'Outil Capture d'écran magasin seulement, pas d'installation de Copilot). Pas encore exécuté sur un hôte de session |
 ### 2026-11-03 (4)
 | Modification |
 |--------|
