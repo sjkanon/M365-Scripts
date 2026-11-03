@@ -57,6 +57,15 @@
 .PARAMETER KeepAppxReplay
     Leave FSLogix InstallAppxPackages as it is (step 2 skipped).
 
+.PARAMETER KeepStoreUpdates
+    Leave the Microsoft Store's automatic app updates as they are (step 2b skipped).
+
+.PARAMETER NoUserRepair
+    Do not repair Photos and Snipping Tool in anyone's session (step 3b skipped).
+
+.PARAMETER NoReport
+    Do not send the run's report to n8n (the diagnose webhook next to the watchdog's).
+
 .PARAMETER Restart
     Restart the host at the end when a restart is due and no user is signed in.
 
@@ -89,6 +98,9 @@
 param (
     [switch] $CheckOnly,
     [switch] $KeepAppxReplay,
+    [switch] $KeepStoreUpdates,
+    [switch] $NoUserRepair,
+    [switch] $NoReport,
     [switch] $Restart,
     [ValidateRange(5, 120)]
     [int]    $WaitMinutes = 20,
@@ -114,6 +126,38 @@ $FslogixProfiles  = 'HKLM:\SOFTWARE\FSLogix\Profiles'
 $FslogixPolicy    = 'HKLM:\SOFTWARE\Policies\FSLogix\Profiles'
 # Deployment results that are not a fault, as in the watchdog.
 $BenignAppxCodes  = @('0x80073D02', '0x80073CFB', '0x80073D06')
+$StorePolicy      = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
+# Repaired per user in step 3b: no installer, so the Store updates them per user.
+$UserApps = @(
+    [PSCustomObject]@{ App = 'Photos';       Package = 'Microsoft.Windows.Photos'; Aumid = 'Microsoft.Windows.Photos_8wekyb3d8bbwe!App'; Exe = 'Photos' }
+    [PSCustomObject]@{ App = 'SnippingTool'; Package = 'Microsoft.ScreenSketch';   Aumid = 'Microsoft.ScreenSketch_8wekyb3d8bbwe!App';   Exe = 'SnippingTool' }
+)
+# What this run did and found, sent to n8n at the end.
+$Report = [ordered]@{ source = 'Repair-M365AppsHost'; host = $env:COMPUTERNAME; time = (Get-Date).ToString('o'); actions = [System.Collections.Generic.List[string]]::new() }
+function Add-Action { param([string] $Line) $Report.actions.Add($Line) }
+
+function Send-Report {
+    <#
+        The run's report to n8n: the diagnose webhook next to the watchdog's (its URL with
+        app-watchdog replaced by diag), with the watchdog's token, both from config.json.
+        n8n keeps it in its log table, so a host where something went wrong shows there.
+    #>
+    param([int] $ExitCode)
+    if ($NoReport) { return }
+    try {
+        $config = Get-Content -Path (Join-Path $WorkingDir 'config.json') -Raw | ConvertFrom-Json
+        $url    = [string] (Get-PropertyValue $config 'WebhookUrl')
+        if (-not $url -or $url -notmatch 'app-watchdog') { Write-Skip 'No watchdog webhook in config.json to send the report next to - not sent'; return }
+        $Report.exitCode = $ExitCode
+        $Report.status   = switch ($ExitCode) { 0 { 'ok' } 2 { 'restart due' } default { 'problem' } }
+        $body = [Text.Encoding]::UTF8.GetBytes(($Report | ConvertTo-Json -Depth 6 -Compress))
+        Invoke-RestMethod -Uri ($url -replace 'app-watchdog', 'diag') -Method Post -Headers @{ 'X-Watchdog-Token' = [string] (Get-PropertyValue $config 'WebhookToken') } `
+            -ContentType 'application/json; charset=utf-8' -Body $body -TimeoutSec 30 | Out-Null
+        Write-Ok "Report sent to n8n ($('{0:N0}' -f ($body.Length / 1KB)) KB)"
+    } catch {
+        Write-Warn "Report not sent to n8n: $($_.Exception.Message)"
+    }
+}
 
 # -- Output ------------------------------------------------------------------------
 function Write-Step { param([string] $Message) Write-Host ''; Write-Host "  $Message" -ForegroundColor Cyan }
@@ -349,6 +393,177 @@ function Get-WatchdogLog {
     return $run -split '\r?\n'
 }
 
+# -- Photos and Snipping Tool per user ---------------------------------------------------
+function Get-VersionTail {
+    <#
+        The last three parts of a version. A bundle and its main package differ in the
+        first (Snipping Tool: bundle 2022.2608.41.0, main package 11.2608.41.0), so
+        builds are compared on these.
+    #>
+    param($Version)
+    $v = [version] [string] $Version
+    return [version] ('{0}.{1}.{2}' -f $v.Minor, [Math]::Max(0, $v.Build), [Math]::Max(0, $v.Revision))
+}
+
+function Get-SessionId {
+    <# The session of this user's explorer.exe, $null when they have none. #>
+    param([string] $Sid)
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe'")) {
+        if ((Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction SilentlyContinue).Sid -eq $Sid) { return [int] $process.SessionId }
+    }
+    return $null
+}
+
+function Start-UserTask {
+    <#
+        A program run as this user in their own session: a one-off task with their SID
+        and an interactive token - no password, only while they are signed in - as the
+        watchdog does it. Waits up to $WaitSeconds; the task is removed either way.
+    #>
+    param([string] $Sid, [string] $Execute, [string] $Argument, [int] $WaitSeconds = 180)
+    $name = 'Repair-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $path = '\M365AppsRepair\'
+    try {
+        $principal = New-ScheduledTaskPrincipal -UserId $Sid -LogonType Interactive -RunLevel Limited
+        $action    = New-ScheduledTaskAction -Execute $Execute -Argument $Argument
+        $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        Register-ScheduledTask -TaskName $name -TaskPath $path -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+        $started = Get-Date
+        Start-ScheduledTask -TaskName $name -TaskPath $path
+        do {
+            Start-Sleep -Seconds 2
+            $info = Get-ScheduledTaskInfo -TaskName $name -TaskPath $path
+            $done = (Get-ScheduledTask -TaskName $name -TaskPath $path).State -ne 'Running' -and $info.LastRunTime -ge $started.AddSeconds(-1)
+        } until ($done -or (Get-Date) -gt $started.AddSeconds($WaitSeconds))
+        return $done
+    } catch {
+        Write-Warn "No task in that session: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Unregister-ScheduledTask -TaskName $name -TaskPath $path -Confirm:$false -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-AsSessionUser {
+    <#
+        PowerShell run as this user in their session, without a window (conhost
+        --headless), passed encoded so no quoting can break it. A task passes no output
+        on, so what it writes goes to a file in their own profile and comes back here.
+    #>
+    param([string] $Sid, [string] $Script)
+    $profilePath = [string] (Get-CimInstance Win32_UserProfile -Filter "SID = '$Sid'").LocalPath
+    if (-not $profilePath) { return @('no profile folder for this user') }
+    $out = Join-Path $profilePath ('AppData\Local\Temp\M365AppsRepair_{0}.txt' -f [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $wrapped = "& { `$ErrorActionPreference = 'Continue'; $Script } *>&1 | ForEach-Object { [string] `$_ } | Out-File -LiteralPath '$out' -Encoding UTF8"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($wrapped))
+    $done = Start-UserTask -Sid $Sid -Execute (Join-Path $env:WINDIR 'System32\conhost.exe') -Argument ('--headless "{0}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {1}' -f $nativeShell, $encoded)
+    $lines = @(if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Encoding UTF8 })
+    Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+    if (-not $done) { $lines += 'did not finish within 3 minutes' }
+    return $lines
+}
+
+function Get-MainBuild {
+    <#
+        Every main package of this app on disk, newest first, and which of them is the
+        provisioned build (matched on the version tail: the provisioned entry can be the
+        bundle).
+    #>
+    param($Entry)
+    $provisioned = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $Entry.Package } | Sort-Object { [version] $_.Version } -Descending) | Select-Object -First 1
+    $tail = if ($provisioned) { Get-VersionTail $provisioned.Version } else { $null }
+    @(Get-AppxPackage -AllUsers -Name $Entry.Package -PackageTypeFilter Main -ErrorAction SilentlyContinue |
+      Where-Object { $_.InstallLocation -and (Test-Path -LiteralPath (Join-Path $_.InstallLocation 'AppxManifest.xml')) } |
+      Sort-Object { [version] $_.Version } -Descending | ForEach-Object {
+        [PSCustomObject]@{ Package = $_; Manifest = Join-Path $_.InstallLocation 'AppxManifest.xml'; Provisioned = [bool] ($tail -and (Get-VersionTail $_.Version) -eq $tail) }
+    })
+}
+
+function Get-UserAppState {
+    <#
+        Per signed-in user, for one app: the build registered for them, and why it needs
+        a repair ('' when it does not): not registered, its files gone, a status other
+        than Ok, a Store build newer than the host provisions whose bundle is no longer
+        on the host (registering it again fails with 0x80070490 - itceadmin's Photos on
+        LEM-AVD-6), or a registration of it that failed for them since $Since.
+    #>
+    param([hashtable] $Users, $Entry, [datetime] $Since)
+    $builds  = @(Get-MainBuild $Entry)
+    $provTail = @($builds | Where-Object { $_.Provisioned } | ForEach-Object { Get-VersionTail $_.Package.Version }) | Select-Object -First 1
+    $bundles = @(Get-AppxPackage -AllUsers -Name $Entry.Package -PackageTypeFilter Bundle -ErrorAction SilentlyContinue |
+                 Where-Object { $_.InstallLocation -and (Test-Path -LiteralPath $_.InstallLocation) } | ForEach-Object { Get-VersionTail $_.Version })
+    $failed  = @{}
+    foreach ($record in @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-AppXDeploymentServer/Operational'; Id = 401, 404; StartTime = $Since } -ErrorAction SilentlyContinue)) {
+        $values = @($record.Properties | ForEach-Object { $_.Value })
+        $codeAt = if ($record.Id -eq 401) { 3 } else { 2 }
+        if ($values.Count -le $codeAt -or [string] $values[1] -notlike "$($Entry.Package)_*") { continue }
+        if (('0x{0:X8}' -f ([long] $values[$codeAt] -band [long] 4294967295)) -in $BenignAppxCodes) { continue }
+        $failed[[string] $record.UserId] = $true
+    }
+    $all = @(Get-AppxPackage -AllUsers -Name $Entry.Package -PackageTypeFilter Main -ErrorAction SilentlyContinue)
+    foreach ($sid in @($Users.Keys | Sort-Object { $Users[$_] })) {
+        $mine = @($all | Where-Object { @($_.PackageUserInformation | Where-Object { $_.UserSecurityId.Sid -eq $sid -and [string] $_.InstallState -eq 'Installed' }).Count -gt 0 } |
+                  Sort-Object { [version] $_.Version } -Descending) | Select-Object -First 1
+        $why = ''
+        if (-not $mine) { $why = 'not registered' }
+        elseif (-not ($mine.InstallLocation -and (Test-Path -LiteralPath $mine.InstallLocation))) { $why = 'its files are gone' }
+        elseif ([string] $mine.Status -and [string] $mine.Status -ne 'Ok') { $why = "status $($mine.Status)" }
+        elseif ($provTail -and (Get-VersionTail $mine.Version) -gt $provTail -and (Get-VersionTail $mine.Version) -notin $bundles) { $why = "Store build $($mine.Version), newer than the host provisions, its bundle gone from the host" }
+        elseif ($failed.ContainsKey($sid)) { $why = 'a registration of it failed for them' }
+        [PSCustomObject]@{ Sid = $sid; User = $Users[$sid]; App = $Entry.App; Version = if ($mine) { [string] $mine.Version } else { '' }; Why = $why }
+    }
+}
+
+function Test-UserAppStart {
+    <# Start the app in this user's session; it has to come up and still run 10 seconds later. #>
+    param([string] $Sid, $Entry)
+    $session = Get-SessionId $Sid
+    if ($null -eq $session) { return $false }
+    Start-UserTask -Sid $Sid -Execute 'explorer.exe' -Argument "shell:AppsFolder\$($Entry.Aumid)" -WaitSeconds 30 | Out-Null
+    $deadline = (Get-Date).AddSeconds(45)
+    while ((Get-Date) -lt $deadline -and @(Get-Process -Name $Entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -eq 0) { Start-Sleep -Seconds 3 }
+    Start-Sleep -Seconds 10
+    return @(Get-Process -Name $Entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -gt 0
+}
+
+function Repair-UserApp {
+    <#
+        One app for one user, in their session, nothing closed: a build newer than the
+        provisioned one is removed for them only, then the provisioned main package is
+        registered from its own manifest - not by family, which takes the newest build
+        Windows lists and fails on its missing bundle. Checked again afterwards; still
+        broken, every other build on the host is tried, newest first, each checked.
+        Returns $true when the app is registered and Ok for them at the end.
+    #>
+    param($State, $Entry, [hashtable] $Users, [datetime] $Since)
+    $builds = @(Get-MainBuild $Entry)
+    $order  = @(@($builds | Where-Object { $_.Provisioned }) + @($builds | Where-Object { -not $_.Provisioned }))
+    if ($order.Count -eq 0) { Write-Bad "$($Entry.App): no build with a manifest on this host"; Add-Action "$($State.User) $($Entry.App): no build on the host to register"; return $false }
+    $attempt = 0
+    foreach ($build in $order) {
+        $attempt++
+        $remove = if ($State.Version -and (Get-VersionTail $State.Version) -gt (Get-VersionTail $build.Package.Version)) { 'yes' } else { '' }
+        $script = @"
+`$name = '$($Entry.Package)'
+`$mine = @(Get-AppxPackage -Name `$name | Sort-Object { [version] `$_.Version } -Descending) | Select-Object -First 1
+'before: ' + `$(if (`$mine) { "`$(`$mine.PackageFullName) `$(`$mine.Status)" } else { 'not registered' })
+if ('$remove' -and `$mine) { try { Remove-AppxPackage -Package `$mine.PackageFullName -ErrorAction Stop; "removed `$(`$mine.PackageFullName)" } catch { "remove failed: `$(`$_.Exception.Message)" } }
+try { Add-AppxPackage -DisableDevelopmentMode -Register '$($build.Manifest)' -ErrorAction Stop; 'registered $($build.Package.PackageFullName)' } catch { "register failed: `$(`$_.Exception.Message)" }
+`$now = @(Get-AppxPackage -Name `$name | Sort-Object { [version] `$_.Version } -Descending) | Select-Object -First 1
+'after: ' + `$(if (`$now) { "`$(`$now.PackageFullName) `$(`$now.Status)" } else { 'not registered' })
+"@
+        Write-Skip "attempt $attempt - $($build.Package.PackageFullName)$(if ($remove) { ', newer build removed for them first' })"
+        foreach ($line in @(Invoke-AsSessionUser -Sid $State.Sid -Script $script)) { Write-Host "         $line" }
+        Add-Action "$($State.User) $($Entry.App): attempt $attempt with $($build.Package.PackageFullName)"
+        # Checked again: registered and Ok, and no new failed registration for them.
+        $check = @(Get-UserAppState -Users @{ $State.Sid = $State.User } -Entry $Entry -Since (Get-Date).AddSeconds(-5)) | Select-Object -First 1
+        if ($check -and -not $check.Why) { Write-Ok "$($Entry.App) for $($State.User): $($check.Version) registered and Ok"; return $true }
+        Write-Warn "$($Entry.App) for $($State.User): still $(if ($check) { $check.Why } else { 'unknown' }) after attempt $attempt"
+        $State = if ($check) { $check } else { $State }
+    }
+    return $false
+}
+
 # -- One run -------------------------------------------------------------------------
 $watchdog = Join-Path $WorkingDir 'Watch-M365Apps.ps1'
 $repair   = Join-Path $WorkingDir 'Repair-AppxPackageStore.ps1'
@@ -369,15 +584,17 @@ if ($WhatIfPreference) { $CheckOnly = [switch] $true }
 $logDir = Join-Path $WorkingDir 'Logs'
 New-Item -ItemType Directory -Path $logDir -Force -WhatIf:$false | Out-Null
 $transcribing = $false
+$Report.log   = Join-Path $logDir ('Repair-M365AppsHost_{0:yyyyMMdd_HHmmss}.log' -f (Get-Date))
 try {
-    Start-Transcript -Path (Join-Path $logDir ('Repair-M365AppsHost_{0:yyyyMMdd_HHmmss}.log' -f (Get-Date))) -WhatIf:$false | Out-Null
+    Start-Transcript -Path $Report.log -WhatIf:$false | Out-Null
     $transcribing = $true
 } catch {
     Write-Warn "No transcript: $($_.Exception.Message)"
 }
 
-$exitCode = 0
-$held     = $false
+$exitCode   = 0
+$held       = $false
+$restartNow = $false
 try {
     Write-Host ''
     Write-Host ("  M365 apps - repair and test - {0} - {1:yyyy-MM-dd HH:mm}{2}" -f $env:COMPUTERNAME, (Get-Date), $(if ($CheckOnly) { ' - check only' } else { '' })) -ForegroundColor Cyan
@@ -419,6 +636,30 @@ try {
             Write-Warn "$FslogixPolicy sets InstallAppxPackages = $($replayBefore.Policy) - change it in that policy (GPO / Intune), or it may come back"
         }
 
+        # -- 2b. Store -----------------------------------------------------------
+        # The Store updated Photos and Snipping Tool per user to builds whose bundle the
+        # host does not keep; registering them again then fails with 0x80070490.
+        Write-Step '2b. Store - no automatic app updates on a shared host'
+        $autoDownload = Get-PropertyValue (Get-ItemProperty $StorePolicy -ErrorAction SilentlyContinue) 'AutoDownload'
+        if ($KeepStoreUpdates) {
+            Write-Skip "-KeepStoreUpdates: AutoDownload stays $(if ($null -eq $autoDownload) { 'not set' } else { $autoDownload })"
+        } elseif ($autoDownload -eq 2) {
+            Write-Ok 'Automatic Store app updates are already off (AutoDownload = 2)'
+        } elseif ($PSCmdlet.ShouldProcess("$env:COMPUTERNAME - $StorePolicy\AutoDownload = 2", 'Set')) {
+            $backupDir = Join-Path $WorkingDir 'Repair'
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+            if (Test-Path $StorePolicy) {
+                $backup = Join-Path $backupDir ('WindowsStore-Policy_{0:yyyyMMdd_HHmmss}.reg' -f (Get-Date))
+                & reg.exe export 'HKLM\SOFTWARE\Policies\Microsoft\WindowsStore' $backup /y | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "$StorePolicy not backed up - not changed" }
+            } else {
+                New-Item -Path $StorePolicy -Force | Out-Null
+            }
+            New-ItemProperty -Path $StorePolicy -Name 'AutoDownload' -Value 2 -PropertyType DWord -Force | Out-Null
+            Write-Ok 'AutoDownload = 2 - users keep the build the host provisions'
+            Add-Action 'Store: AutoDownload = 2 (automatic app updates off)'
+        }
+
         # -- 3. Repair -----------------------------------------------------------
         Write-Step '3. Repair - the package store, Teams and Outlook at the newest build, what is not provisioned'
         if ($PSCmdlet.ShouldProcess("$env:COMPUTERNAME - Repair-AppxPackageStore for $(@($Apps.App) -join ', ')", 'Repair')) {
@@ -449,6 +690,62 @@ try {
             }
             Enable-ScheduledTask -TaskName $TaskName | Out-Null
             $held = $false
+        }
+
+        # -- 3b. Users -----------------------------------------------------------
+        Write-Step '3b. Users - Photos and Snipping Tool in each session: check, repair, check again'
+        $watchedAccounts = @(if (Test-Path $configPath) { Get-PropertyValue (Get-Content -Path $configPath -Raw | ConvertFrom-Json) 'Account' })
+        $isOurs = { param($user) @($watchedAccounts | Where-Object { $_ -and ($user -ieq $_ -or $user -like "*\$_") }).Count -gt 0 }
+        $Report.users = [System.Collections.Generic.List[object]]::new()
+        if ($NoUserRepair) {
+            Write-Skip "-NoUserRepair: no session touched"
+        } else {
+            $usersNow = Get-SignedInUser
+            foreach ($entry in @($UserApps | Where-Object { $_.App -in $Apps.App })) {
+                $states = @(Get-UserAppState -Users $usersNow -Entry $entry -Since (Get-Date).AddHours(-24))
+                # Our own account first: a repair that does not work shows on it, not on a customer.
+                $states = @(@($states | Where-Object { & $isOurs $_.User }) + @($states | Where-Object { -not (& $isOurs $_.User) }))
+                $oursFailed = $false
+                foreach ($state in $states) {
+                    $ours = & $isOurs $state.User
+                    $row  = [ordered]@{ user = $state.User; app = $entry.App; before = $state.Version; why = $state.Why; result = '' }
+                    if (-not $state.Why -and $ours) {
+                        # Registered and Ok - and does it start? Only ever tested for our own account.
+                        if (Test-UserAppStart -Sid $state.Sid -Entry $entry) {
+                            Write-Ok "$($entry.App) for $($state.User): $($state.Version), starts"
+                            $row.result = 'ok, starts'; $Report.users.Add($row); continue
+                        }
+                        $state.Why = 'registered and Ok, but it does not start'
+                        $row.why   = $state.Why
+                    }
+                    if (-not $state.Why) {
+                        Write-Ok "$($entry.App) for $($state.User): $($state.Version)"
+                        $row.result = 'ok'; $Report.users.Add($row); continue
+                    }
+                    Write-Warn "$($entry.App) for $($state.User): $($state.Why)"
+                    if (-not $ours -and $oursFailed) {
+                        Write-Skip 'not touched - the same repair did not work for our own account'
+                        $row.result = 'not touched, the repair failed for our own account'; $Report.users.Add($row); $exitCode = 1; continue
+                    }
+                    $session = Get-SessionId $state.Sid
+                    if (-not $ours -and @(Get-Process -Name $entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -gt 0) {
+                        Write-Skip 'open for them right now - not touched, the watchdog tries again later'
+                        $row.result = 'open for them, not touched'; $Report.users.Add($row); continue
+                    }
+                    if (-not $PSCmdlet.ShouldProcess("$($state.User) - $($entry.App)", 'Repair in their session')) { continue }
+                    $fixed = Repair-UserApp -State $state -Entry $entry -Users $usersNow -Since (Get-Date).AddHours(-24)
+                    if ($fixed -and $ours) {
+                        $fixed = Test-UserAppStart -Sid $state.Sid -Entry $entry
+                        if ($fixed) { Write-Ok "$($entry.App) for $($state.User): starts" } else { Write-Bad "$($entry.App) for $($state.User): registered, but it does not start" }
+                    }
+                    if (-not $fixed) { $exitCode = 1; if ($ours) { $oursFailed = $true } }
+                    $now = @(Get-UserAppState -Users @{ $state.Sid = $state.User } -Entry $entry -Since (Get-Date).AddSeconds(-5)) | Select-Object -First 1
+                    $row.after  = if ($now) { $now.Version } else { '' }
+                    $row.result = if (-not $fixed) { 'still broken' } elseif ($ours) { 'repaired, starts' } else { 'repaired' }
+                    Add-Action "$($state.User) $($entry.App): $($row.result) ($($row.before) -> $($row.after))"
+                    $Report.users.Add($row)
+                }
+            }
         }
 
         # -- 4. Test -------------------------------------------------------------
@@ -494,19 +791,26 @@ try {
             Write-Warn ('Not restarted: {0} user(s) signed in ({1}) - drain the host first' -f $users.Count, (@($users.Values | Sort-Object) -join ', '))
             if ($exitCode -eq 0) { $exitCode = 2 }
         } elseif ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, 'Restart')) {
-            Write-Ok 'Restarting in 30 seconds'
-            if ($transcribing) { try { Stop-Transcript | Out-Null } catch { }; $transcribing = $false }
-            & shutdown.exe /r /t 30 /c 'Repair-M365AppsHost: package store edited, restart so the deployment engine rereads it' /d p:4:1
+            Write-Ok 'Restarting in 30 seconds, once the report is sent'
+            $restartNow = $true
         } else {
             if ($exitCode -eq 0) { $exitCode = 2 }
         }
     }
+    $Report.before   = $before
+    $Report.after    = $after
+    $Report.restart  = @($reasons)
+    $Report.restarted = [bool] $restartNow
+    $Report.watchdog = [ordered]@{ exitCode = $test.Code; lines = @($test.Lines | Where-Object { $_ -match '\[(FAIL|WARN)\]|problem\(s\) left|Everything (healthy|repaired)' } | ForEach-Object { $_.Trim() } | Select-Object -First 40) }
 } catch {
     Write-Bad ('Aborted at line {0}: {1}' -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message)
+    $Report.error = 'line {0}: {1}' -f $_.InvocationInfo.ScriptLineNumber, $_.Exception.Message
     $exitCode = 1
 } finally {
     # Never leave the watchdog switched off.
     if ($held) { try { Enable-ScheduledTask -TaskName $TaskName | Out-Null } catch { Write-Bad "Task '$TaskName' could not be enabled again - enable it by hand" } }
+    if (-not $CheckOnly) { Send-Report -ExitCode $exitCode }
     if ($transcribing) { try { Stop-Transcript | Out-Null } catch { } }
 }
+if ($restartNow) { & shutdown.exe /r /t 30 /c 'Repair-M365AppsHost: package store edited, restart so the deployment engine rereads it' /d p:4:1 }
 exit $exitCode

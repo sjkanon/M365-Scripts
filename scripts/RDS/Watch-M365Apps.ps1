@@ -487,7 +487,8 @@ function Get-UnifiedCopilot {
     $package = $null
     foreach ($pkg in @(Get-AppxPackage -AllUsers -Name '*Copilot*' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $OldCopilotPackages })) {
         try {
-            $manifest = Get-AppxPackageManifest -Package $pkg -ErrorAction Stop
+            $manifest = Read-PackageManifest $pkg
+            if (-not $manifest) { continue }
             $exes = @($manifest.Package.Applications.Application | ForEach-Object { ([string] $_.GetAttribute('Executable') -split '[\\/]')[-1] })
             if ($exes -contains $CopilotExe) { $package = $pkg; break }
         } catch { }
@@ -564,6 +565,21 @@ function Resolve-UserName {
     return $Sid
 }
 
+function Read-PackageManifest {
+    <#
+        AppxManifest.xml from the package's own folder, $null when there is none. Not
+        Get-AppxPackageManifest: run as System it looks the package up for System, which
+        has none of the apps registered - every manifest came back empty, and the launch
+        test said "its manifest names no executable" for Teams, Outlook and Photos.
+    #>
+    param($Package)
+    $location = [string] (Get-PropertyValue $Package 'InstallLocation')
+    if (-not $location) { return $null }
+    $path = Join-Path $location 'AppxManifest.xml'
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    return [xml] (Get-Content -LiteralPath $path -Raw -Encoding UTF8)
+}
+
 function Get-AppEntry {
     <#
         The AUMID to start and the process name to look for, from the package manifest:
@@ -572,11 +588,15 @@ function Get-AppEntry {
     #>
     param($Package)
     try {
-        $manifest = Get-AppxPackageManifest -Package $Package -ErrorAction Stop
-        $entry    = @($manifest.Package.Applications.Application | Where-Object {
+        $manifest = Read-PackageManifest $Package
+        if (-not $manifest) { return $null }
+        $all      = @($manifest.Package.Applications.Application)
+        $entry    = @($all | Where-Object {
                         $visual = @($_.ChildNodes | Where-Object { $_.LocalName -eq 'VisualElements' }) | Select-Object -First 1
                         -not $visual -or $visual.GetAttribute('AppListEntry') -ne 'none'
                     }) | Select-Object -First 1
+        # Photos has one application, and it is AppListEntry="none" too.
+        if (-not $entry -and $all.Count -eq 1) { $entry = $all[0] }
         if (-not $entry) { return $null }
         $exe      = ([string] $entry.GetAttribute('Executable') -split '[\\/]')[-1]
         if (-not $exe) { return $null }
@@ -725,6 +745,29 @@ function Get-ProvisionedBuild {
         }
     }
     return $builds
+}
+
+function Get-ProvisionedMainManifest {
+    <#
+        AppxManifest.xml of the main package behind the provisioned build of $Name, $null
+        when there is none on disk. The provisioned entry can be the bundle, whose version
+        differs in its first part (Snipping Tool: bundle 2022.2607.23.0, main package
+        11.2607.23.0), so the main package is matched on the other three. Registering
+        from it skips the bundle - the step that fails with 0x80070490 when Windows still
+        lists a Store build whose bundle is no longer on the host.
+    #>
+    param([string] $Name)
+    $provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $Name } |
+                     Sort-Object { [version] $_.Version } -Descending) | Select-Object -First 1
+    if (-not $provisioned) { return $null }
+    $want = [version] $provisioned.Version
+    foreach ($pkg in @(Get-AppxPackage -AllUsers -Name $Name -PackageTypeFilter Main -ErrorAction SilentlyContinue)) {
+        $v = [version] $pkg.Version
+        if ($v.Minor -ne $want.Minor -or $v.Build -ne $want.Build -or $v.Revision -ne $want.Revision) { continue }
+        $path = Join-Path ([string] $pkg.InstallLocation) 'AppxManifest.xml'
+        if ($pkg.InstallLocation -and (Test-Path -LiteralPath $path)) { return $path }
+    }
+    return $null
 }
 
 function Get-HostVersion {
@@ -1352,6 +1395,11 @@ function Invoke-Repair {
             } else {
                 $verb    = 're-registered'
                 $command = "Add-AppxPackage -RegisterByFamilyName -MainPackage '$family'"
+                # By family Windows takes the newest build it lists, and fails with
+                # 0x80070490 when that is a Store build whose bundle is gone: then the
+                # provisioned main package, from its own manifest.
+                $fallback = Get-ProvisionedMainManifest $finding.Package
+                if ($fallback) { $command += "; if (-not (Get-AppxPackage -Name '$($finding.Package)')) { Add-AppxPackage -DisableDevelopmentMode -Register '$fallback' }" }
             }
         }
         Write-Step "$($finding.App) for $($session.User): $verb in their session"
