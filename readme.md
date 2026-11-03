@@ -1021,6 +1021,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (4)
+| Change |
+|--------|
+| [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.md#install-m365appswatchdogps1) runs on its own on a session host: without a checkout next to it, it fetches the watchdog, `Repair-AppxPackageStore.ps1`, `Get-M365AppsLog.ps1` and `Repair-M365AppsHost.ps1` from GitHub at a pinned commit (`e500253`) and refuses any file whose SHA-256 does not match. The RDS readme has the block to paste on a host (or run from the RMM) that downloads the installer itself at a pinned commit and hash, then installs and repairs. Before, the installer needed a checkout, which the hosts do not have |
+| Verified: syntax check; in Windows PowerShell 5.1 and PowerShell 7 the installer copied outside the checkout downloads all four files from GitHub and matches every hash, a wrong pinned hash is refused with nothing installed, the download folder is removed afterwards, and from the checkout the local files are used; the paste block end to end with `-WhatIf`. Not yet run on a session host |
 ### 2026-11-03 (3)
 | Change |
 |--------|

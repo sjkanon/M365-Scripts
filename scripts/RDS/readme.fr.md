@@ -624,6 +624,22 @@ transmet chaque paramètre.
 
 Se termine par un tableau sur tous les hôtes : installé, paramètres conservés ou remplacés, webhook, intervalle, et le résultat de `-Then`.
 
+**Sur un hôte sans checkout**
+
+Collez ceci dans un PowerShell élevé sur l'hôte de session, ou exécutez-le depuis le RMM en tant que System. Il télécharge ce seul script à un commit épinglé et vérifie son SHA-256 ; le script récupère ensuite les quatre autres depuis GitHub au commit épinglé en lui, chacun vérifié par SHA-256, les installe en conservant les paramètres de l'hôte, puis répare et teste l'hôte. `-Then Check` au lieu de `-Then Repair` ne fait que regarder ; ajoutez `-Restart` sur un hôte en mode drainage. Un nouvel hôte a aussi besoin de `-WebhookUrl` et `-WebhookToken`.
+
+```powershell
+# Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
+$commit = 'be1d7287f1a3050af89e174a1d5604063d09f0e7'
+$sha256 = 'FDE6FDD6C4320E2DC9E47CA11A47D742FEA83DF89BCE14AEAED1AA101DA5D4E1'
+$file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
+Set-ExecutionPolicy -Scope Process Bypass -Force
+& $file -Then Repair -Confirm:$false
+```
+
 **Paramètres**
 
 | Paramètre | Description |
@@ -652,5 +668,5 @@ Se termine par un tableau sur tous les hôtes : installé, paramètres conservé
 
 **Remarques**
 - Code de sortie `0` installé partout (et `-Then` sain), `1` un hôte a échoué, `2` installé et sain mais un hôte doit redémarrer.
-- Installe ce qui est dans ce checkout, pas un commit épinglé : faites d'abord un pull. Pour un hôte sans checkout ni remoting, voir *Installer depuis GitHub* sous [`Watch-M365Apps.ps1`](#watch-m365appsps1).
+- Depuis un checkout, il installe ce qui s'y trouve : faites d'abord un pull. Seul (sans checkout à côté), il installe les quatre scripts au commit épinglé en lui - déplacez cet épinglage, et celui du bloc ci-dessus, quand ils changent.
 - `-Install` réenregistre la tâche, sa première exécution a donc lieu 2 minutes plus tard.

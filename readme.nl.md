@@ -1021,6 +1021,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (4)
+| Wijziging |
+|--------|
+| [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.nl.md#install-m365appswatchdogps1) draait op zichzelf op een sessiehost: zonder checkout ernaast haalt het de watchdog, `Repair-AppxPackageStore.ps1`, `Get-M365AppsLog.ps1` en `Repair-M365AppsHost.ps1` van GitHub op een vastgepinde commit (`e500253`) en weigert het elk bestand waarvan de SHA-256 niet klopt. De RDS-readme heeft het blok om op een host te plakken (of vanuit de RMM te draaien) dat de installer zelf op een vastgepinde commit en hash downloadt, en daarna installeert en herstelt. Voorheen had de installer een checkout nodig, en die hebben de hosts niet |
+| Geverifieerd: syntaxcontrole; in Windows PowerShell 5.1 en PowerShell 7 downloadt de installer, gekopieerd buiten de checkout, alle vier de bestanden van GitHub en klopt elke hash, een verkeerde vastgepinde hash wordt geweigerd zonder iets te installeren, de downloadmap wordt daarna verwijderd, en vanuit de checkout worden de lokale bestanden gebruikt; het plakblok van begin tot eind met `-WhatIf`. Nog niet gedraaid op een sessiehost |
 ### 2026-11-03 (3)
 | Wijziging |
 |--------|

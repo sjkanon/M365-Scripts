@@ -1021,6 +1021,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (4)
+| Modification |
+|--------|
+| [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.fr.md#install-m365appswatchdogps1) s'exécute seul sur un hôte de session : sans checkout à côté, il récupère le watchdog, `Repair-AppxPackageStore.ps1`, `Get-M365AppsLog.ps1` et `Repair-M365AppsHost.ps1` depuis GitHub à un commit épinglé (`e500253`) et refuse tout fichier dont le SHA-256 ne correspond pas. Le readme RDS contient le bloc à coller sur un hôte (ou à exécuter depuis le RMM) qui télécharge l'installateur lui-même à un commit et un hachage épinglés, puis installe et répare. Auparavant, l'installateur avait besoin d'un checkout, que les hôtes n'ont pas |
+| Vérifié : contrôle de syntaxe ; sous Windows PowerShell 5.1 et PowerShell 7, l'installateur copié hors du checkout télécharge les quatre fichiers depuis GitHub et chaque hachage correspond, un hachage épinglé erroné est refusé sans rien installer, le dossier de téléchargement est supprimé ensuite, et depuis le checkout les fichiers locaux sont utilisés ; le bloc à coller de bout en bout avec `-WhatIf`. Pas encore exécuté sur un hôte de session |
 ### 2026-11-03 (3)
 | Modification |
 |--------|

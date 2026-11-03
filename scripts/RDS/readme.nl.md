@@ -616,6 +616,22 @@ geeft elke instelling door.
 
 Eindigt met één tabel over de hosts: geïnstalleerd, instellingen behouden of vervangen, webhook, interval, en het resultaat van `-Then`.
 
+**Op een host zonder checkout**
+
+Plak dit in een PowerShell met verhoogde rechten op de sessiehost, of draai het vanuit de RMM als System. Het downloadt dit ene script op een vastgepinde commit en controleert de SHA-256; het script haalt daarna de andere vier van GitHub op de commit die erin vastligt, elk gecontroleerd op SHA-256, installeert ze met behoud van de instellingen van de host, en herstelt en test de host. `-Then Check` in plaats van `-Then Repair` kijkt alleen; voeg `-Restart` toe op een host in drain-modus. Een nieuwe host heeft ook `-WebhookUrl` en `-WebhookToken` nodig.
+
+```powershell
+# Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
+$commit = 'be1d7287f1a3050af89e174a1d5604063d09f0e7'
+$sha256 = 'FDE6FDD6C4320E2DC9E47CA11A47D742FEA83DF89BCE14AEAED1AA101DA5D4E1'
+$file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
+Set-ExecutionPolicy -Scope Process Bypass -Force
+& $file -Then Repair -Confirm:$false
+```
+
 **Parameters**
 
 | Parameter | Omschrijving |
@@ -644,5 +660,5 @@ Eindigt met één tabel over de hosts: geïnstalleerd, instellingen behouden of 
 
 **Opmerkingen**
 - Exitcode `0` overal geïnstalleerd (en `-Then` gezond), `1` een host mislukte, `2` geïnstalleerd en gezond maar een host heeft een herstart nodig.
-- Installeert wat in deze checkout staat, geen vastgepinde commit: eerst pullen. Voor een host zonder checkout of remoting, zie *Installeren vanaf GitHub* onder [`Watch-M365Apps.ps1`](#watch-m365appsps1).
+- Vanuit een checkout installeert het wat in de checkout staat: eerst pullen. Op zichzelf (geen checkout ernaast) installeert het de vier scripts op de commit die erin vastligt - verplaats die pin, en die in het blok hierboven, als ze veranderen.
 - `-Install` registreert de taak opnieuw, dus zijn eerste run is 2 minuten later.

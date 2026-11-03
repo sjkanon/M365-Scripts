@@ -610,6 +610,22 @@ on.
 
 Ends with one table across the hosts: installed, settings kept or replaced, webhook, interval, and the result of `-Then`.
 
+**On a host without a checkout**
+
+Paste this in an elevated PowerShell on the session host, or run it from the RMM as System. It downloads this one script at a pinned commit and checks its SHA-256; the script then fetches the other four from GitHub at the commit pinned in it, each checked by SHA-256, installs them keeping the host's settings, and repairs and tests the host. `-Then Check` instead of `-Then Repair` only looks; add `-Restart` on a drained host. A new host also needs `-WebhookUrl` and `-WebhookToken`.
+
+```powershell
+# Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
+$commit = 'be1d7287f1a3050af89e174a1d5604063d09f0e7'
+$sha256 = 'FDE6FDD6C4320E2DC9E47CA11A47D742FEA83DF89BCE14AEAED1AA101DA5D4E1'
+$file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
+if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
+Set-ExecutionPolicy -Scope Process Bypass -Force
+& $file -Then Repair -Confirm:$false
+```
+
 **Parameters**
 
 | Parameter | Description |
@@ -638,5 +654,5 @@ Ends with one table across the hosts: installed, settings kept or replaced, webh
 
 **Notes**
 - Exit code `0` installed everywhere (and `-Then` healthy), `1` a host failed, `2` installed and healthy but a host needs a restart.
-- Installs what is in this checkout, not a pinned commit: pull first. For a host without a checkout or remoting, see *Installing from GitHub* under [`Watch-M365Apps.ps1`](#watch-m365appsps1).
+- From a checkout it installs what is in the checkout: pull first. On its own (no checkout next to it) it installs the four scripts at the commit pinned in it - move that pin, and the one in the block above, when they change.
 - `-Install` registers the task again, so its first run is 2 minutes later.
