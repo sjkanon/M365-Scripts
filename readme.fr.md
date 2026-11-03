@@ -1021,6 +1021,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (11)
+| Modification |
+|--------|
+| Nouveau [`Save-StoreAppPackage.ps1`](scripts/RDS/Save-StoreAppPackage.ps1) : Photos et l'Outil Capture d'écran comme fichiers de package complets signés par Microsoft - le bundle le plus récent et les frameworks nécessaires - depuis le service de distribution de Microsoft, anonymement : ni application Store, ni winget, ni connexion. Chaque fichier est vérifié (taille, SHA-256 publié par Microsoft, signature Microsoft valide), dans `C:\IT\AppWatchdog\Packages`. [`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1) provisionne depuis là quand une application n'est pas provisionnée ou que le dossier contient une build plus récente ; l'installateur l'installe et télécharge avec `-Then Repair -FetchPackages` |
+| Plus de provisionnement depuis un dossier installé ni de suppression pour tous les utilisateurs : `Add-AppxProvisionedPackage -FolderPath` refuse un dossier WindowsApps (« No applicable main package was found »), donc `-FromHost` n'a jamais provisionné - l'Outil Capture d'écran restait non provisionné sur LEM-AVD-4 - et `Remove-AppxPackage -AllUsers` du Photos 11090 incomplet a retiré Photos et l'Outil Capture d'écran du provisionnement de LEM-AVD-6. Les builds plus anciennes ne sont retirées que par utilisateur ; le watchdog ne provisionne que depuis des fichiers de package |
+| Vérifié : sous Windows PowerShell 5.1 le téléchargement de l'Outil Capture d'écran 2022.2608.41 (823 Mo) et de Photos 2026.11090.22001 (1,1 Go) avec leurs frameworks, taille, SHA-256 et signature de chaque fichier conformes ; la décision de l'étape 3 avec des dossiers simulés ; le téléchargement GitHub et les contrôles de hash du bloc à coller. Provisionnement depuis les fichiers pas encore exécuté sur un hôte de session |
 ### 2026-11-03 (10)
 | Modification |
 |--------|

@@ -1021,6 +1021,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (11)
+| Change |
+|--------|
+| New [`Save-StoreAppPackage.ps1`](scripts/RDS/Save-StoreAppPackage.ps1): Photos and Snipping Tool as complete, Microsoft-signed package files - the newest bundle and the frameworks it needs - from Microsoft's delivery service, anonymously: no Store app, winget or sign-in. Each file is checked for size, the SHA-256 Microsoft publishes and a valid Microsoft signature, into `C:\IT\AppWatchdog\Packages`. [`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1) provisions from there when an app is not provisioned or the folder holds a newer build; the installer installs it and fetches with `-Then Repair -FetchPackages` |
+| No more provisioning from an installed folder and no more removal for all users: `Add-AppxProvisionedPackage -FolderPath` refuses a WindowsApps folder ("No applicable main package was found"), so `-FromHost` never provisioned - Snipping Tool stayed unprovisioned on LEM-AVD-4 - and `Remove-AppxPackage -AllUsers` of the half Photos 11090 took Photos and Snipping Tool off LEM-AVD-6's provisioning. Older builds are removed per user only; the watchdog provisions only from package files |
+| Verified: in Windows PowerShell 5.1 the download of Snipping Tool 2022.2608.41 (823 MB) and Photos 2026.11090.22001 (1.1 GB) with their frameworks, every file's size, SHA-256 and signature matching; the step 3 decision against mocked folders; the paste block's GitHub download and hash checks. Provisioning from the files not yet run on a session host |
 ### 2026-11-03 (10)
 | Change |
 |--------|

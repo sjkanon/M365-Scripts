@@ -638,14 +638,14 @@ Collez ceci dans un PowerShell élevé sur l'hôte de session, ou exécutez-le d
 
 ```powershell
 # Install-M365AppsWatchdog.ps1 at a fixed commit - move both lines together
-$commit = 'a6c20215d6eb966522489489d23f31325d293c97'
-$sha256 = '6F64A181E8011FCFA4776CF57B542EBD0DFF9D5ECF45C6CFA295C9A3A294EEC5'
+$commit = '8d7f10083624353d35b90b4217c5891550e3e9d3'
+$sha256 = '9C082D6C220862970747DC6625FA7CA3D0398E5DC2E7C56C39C2452B08109D2A'
 $file   = Join-Path $env:TEMP 'Install-M365AppsWatchdog.ps1'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest "https://raw.githubusercontent.com/sjkanon/M365-Scripts/$commit/scripts/RDS/Install-M365AppsWatchdog.ps1" -OutFile $file -UseBasicParsing
 if ((Get-FileHash $file -Algorithm SHA256).Hash -ne $sha256) { Remove-Item $file; throw 'SHA-256 does not match - not run' }
 Set-ExecutionPolicy -Scope Process Bypass -Force
-& $file -App Teams,Outlook,Copilot,SnippingTool,Photos -Then Repair -StoreLatest -Confirm:$false
+& $file -App Teams,Outlook,Copilot,SnippingTool,Photos -Then Repair -FetchPackages -Confirm:$false
 ```
 
 **Paramètres**

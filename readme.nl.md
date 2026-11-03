@@ -1021,6 +1021,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (11)
+| Wijziging |
+|--------|
+| Nieuw [`Save-StoreAppPackage.ps1`](scripts/RDS/Save-StoreAppPackage.ps1): Foto's en Knipprogramma als complete, door Microsoft ondertekende pakketbestanden - de nieuwste bundle en de frameworks die hij nodig heeft - van Microsofts leveringsdienst, anoniem: geen Store-app, winget of aanmelding. Elk bestand wordt gecontroleerd op grootte, de SHA-256 die Microsoft publiceert en een geldige Microsoft-handtekening, in `C:\IT\AppWatchdog\Packages`. [`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1) zet vanaf daar klaar als een app niet klaargezet is of de map een nieuwere build heeft; de installer installeert het en haalt op met `-Then Repair -FetchPackages` |
+| Niet meer klaarzetten vanuit een geïnstalleerde map en niet meer verwijderen voor alle gebruikers: `Add-AppxProvisionedPackage -FolderPath` weigert een WindowsApps-map ("No applicable main package was found"), dus `-FromHost` zette nooit klaar - Knipprogramma bleef niet klaargezet op LEM-AVD-4 - en `Remove-AppxPackage -AllUsers` van de halve Foto's 11090 haalde Foto's en Knipprogramma uit de klaarzetting van LEM-AVD-6. Oudere builds worden alleen per gebruiker verwijderd; de watchdog zet alleen klaar vanuit pakketbestanden |
+| Geverifieerd: in Windows PowerShell 5.1 de download van Knipprogramma 2022.2608.41 (823 MB) en Foto's 2026.11090.22001 (1,1 GB) met hun frameworks, van elk bestand grootte, SHA-256 en handtekening kloppend; de keuze in stap 3 tegen nagebootste mappen; de GitHub-download en hashcontroles van het plakblok. Klaarzetten vanuit de bestanden nog niet gedraaid op een sessiehost |
 ### 2026-11-03 (10)
 | Wijziging |
 |--------|
