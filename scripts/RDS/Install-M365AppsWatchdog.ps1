@@ -145,12 +145,12 @@ function Get-Sha256 {
 # scripts come from GitHub at this commit, each refused unless its SHA-256 matches.
 # Move the commit and the hashes together.
 $Pin = @{
-    Commit = '6e5f35f5ff8d988caef5df2d5e88e12b656095fb'
+    Commit = '7826d4472a6a1094af201e410db80b5c7ca40005'
     Files  = [ordered]@{
         'Watch-M365Apps.ps1'          = @{ Path = 'scripts/RDS/Watch-M365Apps.ps1';             Hash = '1C2396D17EAAFB795E9DAB7838AE5B29AB75264A15F71F80A7E22B1864753016' }
         'Repair-AppxPackageStore.ps1' = @{ Path = 'scripts/Device/Repair-AppxPackageStore.ps1'; Hash = 'B512C5EE1B438AD1BE6D9CF6817F098C41FBEFD1B12EC8810D502D0679126897' }
         'Get-M365AppsLog.ps1'         = @{ Path = 'scripts/RDS/Get-M365AppsLog.ps1';            Hash = '7A77015B171FFFBBDCA60BACE23DD017DE1ED337D8AA2311F5E84CB8F359FA4F' }
-        'Repair-M365AppsHost.ps1'     = @{ Path = 'scripts/RDS/Repair-M365AppsHost.ps1';        Hash = 'DDC7864CEF5B5F0C79415F435674944C8AC6A4854EB55C8464FE7B6B1A7A0336' }
+        'Repair-M365AppsHost.ps1'     = @{ Path = 'scripts/RDS/Repair-M365AppsHost.ps1';        Hash = 'FDF1F84FA209CD07E8B8E2BED3FBB8DFC7FA7A7C9646973433B3887F8C286627' }
     }
 }
 $Sources = [ordered]@{}
