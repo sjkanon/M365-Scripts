@@ -30,8 +30,9 @@
                     with -Latest -Provision (the newest build, signature-checked);
                     Photos and Snipping Tool without -Provision - their store is cleaned,
                     no Store download (that needs an Entra admin) - or, when one is not
-                    provisioned, -Provision -FromHost: provisioned again from the
-                    Microsoft-signed build already on the host. -StoreLatest: both
+                    provisioned, -Provision -StoreFolder from the Microsoft-signed package
+                    files in -PackageFolder (never from the installed folder: Windows
+                    refuses that). -StoreLatest: both
                     with -Provision instead, at the current Microsoft Store build,
                     downloaded complete (bundle, frameworks, license) after an Entra
                     sign-in, and registered for everyone signed in; Copilot, when the
@@ -89,6 +90,12 @@
 .PARAMETER WorkingDir
     The watchdog's folder. Default C:\IT\AppWatchdog.
 
+.PARAMETER PackageFolder
+    Microsoft-signed package files for Photos and Snipping Tool, one subfolder per
+    package (Microsoft.Windows.Photos, Microsoft.ScreenSketch) with the .msixbundle /
+    .appx, its frameworks and the license, as winget download lays them out. Step 3
+    provisions an app that is not provisioned from there. Default <WorkingDir>\Packages.
+
 .EXAMPLE
     # What would be repaired, and is a restart due? Changes nothing.
     .\Repair-M365AppsHost.ps1 -CheckOnly
@@ -123,7 +130,8 @@ param (
     [switch] $Restart,
     [ValidateRange(5, 120)]
     [int]    $WaitMinutes = 20,
-    [string] $WorkingDir = 'C:\IT\AppWatchdog'
+    [string] $WorkingDir = 'C:\IT\AppWatchdog',
+    [string] $PackageFolder
 )
 
 Set-StrictMode -Version Latest
@@ -536,9 +544,12 @@ function Get-UserAppState {
 
 function Remove-OlderBuild {
     <#
-        Every build of this app older than the one the host provisions, gone: for every
-        user who has it (Remove-AppxPackage -AllUsers, else per user) and as an older
-        provisioned copy. Each registration of the app made Windows update the
+        Every build of this app older than the one the host provisions, gone for every
+        user who has it - per user (Remove-AppxPackage -User). Never -AllUsers, never
+        Remove-AppxProvisionedPackage: either takes the whole family off the host's
+        provisioning and leaves a Deprovisioned marker - on LEM-AVD-6, removing Photos
+        11090 with -AllUsers left Photos and Snipping Tool provisioned for nobody, and new
+        sign-ins without them. Each registration of the app made Windows update the
         signed-off users still on an older build too, failed on them with 0x80070490
         ("Failure in the Resolved state handler") and took the whole registration down -
         new Outlook would not start for itceadmin. Main package against main package:
@@ -561,30 +572,14 @@ function Remove-OlderBuild {
             Add-Action "$($Entry.App): $($pkg.PackageFullName) left, still in use by $($online -join ', ')"
             continue
         }
-        if (-not $PSCmdlet.ShouldProcess($pkg.PackageFullName, 'Remove-AppxPackage -AllUsers (older build)')) { continue }
-        try {
-            Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
-            Write-Ok "Removed the older $($pkg.PackageFullName) for every user"
-            Add-Action "$($Entry.App): older $($pkg.PackageFullName) removed for every user"
-        } catch {
-            Write-Warn ("{0} for all users: {1} - per user" -f $pkg.PackageFullName, (($_.Exception.Message -split '\r?\n' | Where-Object { $_.Trim() }) -join ' '))
-            foreach ($holder in @($pkg.PackageUserInformation)) {
-                $who = if ($holder.UserSecurityId.Username) { [string] $holder.UserSecurityId.Username } else { [string] $holder.UserSecurityId.Sid }
-                try {
-                    Remove-AppxPackage -Package $pkg.PackageFullName -User ([string] $holder.UserSecurityId.Sid) -ErrorAction Stop
-                    Write-Ok "  removed for $who"; Add-Action "$($Entry.App): older $($pkg.PackageFullName) removed for $who"
-                } catch { Write-Warn "  still there for ${who}: $($_.Exception.Message)" }
-            }
+        if (-not $PSCmdlet.ShouldProcess($pkg.PackageFullName, 'Remove-AppxPackage -User, per user who has it (older build)')) { continue }
+        foreach ($holder in @($pkg.PackageUserInformation)) {
+            $who = if ($holder.UserSecurityId.Username) { [string] $holder.UserSecurityId.Username } else { [string] $holder.UserSecurityId.Sid }
+            try {
+                Remove-AppxPackage -Package $pkg.PackageFullName -User ([string] $holder.UserSecurityId.Sid) -ErrorAction Stop
+                Write-Ok "Removed the older $($pkg.PackageFullName) for $who"; Add-Action "$($Entry.App): older $($pkg.PackageFullName) removed for $who"
+            } catch { Write-Warn "$($pkg.PackageFullName) still there for ${who}: $($_.Exception.Message)" }
         }
-    }
-    # Older provisioned copies - the provisioned entry can be the bundle, so on the version tail.
-    $keepTail = Get-VersionTail $keep
-    foreach ($prov in @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $Entry.Package -and (Get-VersionTail $_.Version) -lt $keepTail })) {
-        if (-not $PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online (older build)')) { continue }
-        try {
-            Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
-            Write-Ok "Deprovisioned the older $($prov.PackageName)"; Add-Action "$($Entry.App): older provisioned $($prov.PackageName) removed"
-        } catch { Write-Warn "Could not deprovision $($prov.PackageName): $($_.Exception.Message)" }
     }
     # Read back. Left for someone signed in is expected, not a failure.
     $left = @(Get-AppxPackage -AllUsers -Name $Entry.Package -PackageTypeFilter Main -ErrorAction SilentlyContinue |
@@ -633,6 +628,7 @@ try { Add-AppxPackage -DisableDevelopmentMode -Register '$($build.Manifest)' -Er
 }
 
 # -- One run -------------------------------------------------------------------------
+if (-not $PackageFolder) { $PackageFolder = Join-Path $WorkingDir 'Packages' }
 $watchdog = Join-Path $WorkingDir 'Watch-M365Apps.ps1'
 $repair   = Join-Path $WorkingDir 'Repair-AppxPackageStore.ps1'
 foreach ($path in $watchdog, $repair) {
@@ -745,16 +741,25 @@ try {
             # otherwise only their store cleaned.
             # -StoreLatest: from the Store, complete, whatever the host has.
             $storeApps = @(if ($StoreLatest) { @{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App } | ForEach-Object { $_.Value } })
-            $newest    = @(foreach ($e in @($UserApps | Where-Object { $_.App -in $Apps.App })) {
-                             $b = @(Get-MainBuild $e)
-                             if ($e.App -in $missingOnHost -or ($b.Count -gt 0 -and -not $b[0].Provisioned)) { $e.App }
-                         })
-            $fromHost  = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -in $newest -and $_.Value -notin $storeApps } | ForEach-Object { $_.Value })
-            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -notin $newest -and $_.Value -notin $storeApps } | ForEach-Object { $_.Value })
+            # Not provisioned: from the Microsoft-signed package files in -PackageFolder
+            # (one subfolder per package). Never from the installed folder in WindowsApps -
+            # Add-AppxProvisionedPackage -FolderPath refuses that ("No applicable main
+            # package was found") - so without the files only the store is cleaned.
+            $pkgOf      = @{ Photos = 'Microsoft.Windows.Photos'; SnippingTool = 'Microsoft.ScreenSketch' }
+            $nameOf     = @{ Photos = 'photos'; SnippingTool = 'snippingtool' }
+            $fromFolder = @(); $storeOnly = @()
+            foreach ($e in @($UserApps | Where-Object { $_.App -in $Apps.App -and $nameOf[$_.App] -notin $storeApps })) {
+                $files = @(Get-ChildItem -LiteralPath (Join-Path $PackageFolder $pkgOf[$e.App]) -File -Recurse -Include '*.msixbundle', '*.appxbundle', '*.msix', '*.appx' -ErrorAction SilentlyContinue)
+                if ($e.App -in $missingOnHost -and $files.Count -gt 0) { $fromFolder += $nameOf[$e.App] }
+                else {
+                    $storeOnly += $nameOf[$e.App]
+                    if ($e.App -in $missingOnHost) { Write-Warn "$($e.App) is not provisioned and $PackageFolder\$($pkgOf[$e.App]) has no package files - new profiles do not get it until they are there" }
+                }
+            }
             foreach ($call in @(
                 if ($latest.Count) { [ordered]@{ Name = $latest; Latest = $true; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 if ($storeApps.Count) { [ordered]@{ Name = $storeApps; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
-                if ($fromHost.Count) { [ordered]@{ Name = $fromHost; Provision = $true; FromHost = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
+                if ($fromFolder.Count) { [ordered]@{ Name = $fromFolder; Provision = $true; StoreFolder = $PackageFolder; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 if ($storeOnly.Count) { [ordered]@{ Name = $storeOnly; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 # Only when the unified app is not there: -Provision writes Edge Update's install policy.
                 if ('Copilot' -in $Apps.App -and 'Copilot' -in $missingOnHost) { [ordered]@{ Name = @('copilot'); Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }

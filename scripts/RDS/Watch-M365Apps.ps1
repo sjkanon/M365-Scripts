@@ -72,10 +72,11 @@
                      more customers: Repair-AppxPackageStore.ps1 -Provision (Microsoft's
                      installers, signature-checked), at most once per
                      -RepairCooldownHours. Snipping Tool and Photos have no installer:
-                     when one is not provisioned it is provisioned again from the Microsoft-signed
-                     build already on the host (WindowsApps, still registered for a
-                     user) with Add-AppxProvisionedPackage -FolderPath, after removing
-                     a Deprovisioned marker (backed up to .reg). Then per user, in
+                     when one is not provisioned it is provisioned again from the
+                     Microsoft-signed package files in <WorkingDir>\Packages (signature
+                     checked, a Deprovisioned marker backed up to .reg and removed) -
+                     never from the installed folder, which Windows refuses; without
+                     the files it says where they go. Then per user, in
                      that user's own session
                      (a one-off task running a headless console, so nothing appears):
                      a package that is not registered, is broken or would not open is
@@ -256,8 +257,8 @@ $ErrorActionPreference = 'Stop'
 # has no package of its own to provision; Packages is filled at run time with the
 # identity package it registers for its users, when this host has one (Get-UnifiedCopilot).
 # Latest: provisioned at the newest build by Update-HostApp. FromDisk: no installer, so a
-# host that does not provision it is provisioned again from the build already in
-# WindowsApps (Add-ProvisionFromDisk). Snipping Tool and Photos are that case: the Store
+# host that does not provision it is provisioned again from the package files in
+# <WorkingDir>\Packages (Add-ProvisionFromDisk). Snipping Tool and Photos are that case: the Store
 # keeps them current, winget has them only from the msstore source (9MZ95KL8MR0L,
 # 9WZDNCRFJBH4), whose download needs an Entra admin, and Repair-AppxPackageStore.ps1
 # has no feed or installer for them. Photos is the default app for .jpg: when it does
@@ -1229,54 +1230,27 @@ function Get-Finding {
 # -- Repair --------------------------------------------------------------------------
 function Add-ProvisionFromDisk {
     <#
-        Provision an app that has no installer (Snipping Tool, Photos) again from the build that
-        is already on this host: a user still has it registered, so its Microsoft-signed
-        files sit in WindowsApps - which only TrustedInstaller can write to. A
-        Deprovisioned marker (how a removal is remembered) is backed up to .reg and
-        removed first, or Windows would keep it from new profiles. The bundle is tried
-        before the main package, newest build first, each with
-        Add-AppxProvisionedPackage -FolderPath; the provisioned list is read back.
-        Returns one line for the report.
+        Provision an app that has no installer (Snipping Tool, Photos) again from
+        Microsoft-signed package files in <WorkingDir>\Packages\<package name> - the
+        .msixbundle / .appx, its frameworks and the license, as winget download lays them
+        out - through Repair-AppxPackageStore.ps1 -Provision -StoreFolder, which checks
+        each file's signature and removes a Deprovisioned marker only then. Never from the
+        installed folder in WindowsApps: Add-AppxProvisionedPackage -FolderPath refuses
+        that ("No applicable main package was found for this platform"). Without the
+        files it only says where they go. Returns one line for the report.
     #>
     param($Entry)
     $name   = $Entry.Packages[0]
-    $family = '{0}_{1}' -f $name, $PublisherId
-    $marker = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Deprovisioned\$family"
-    $notes  = [System.Collections.Generic.List[string]]::new()
-    if (Test-Path $marker) {
-        $backupDir = Join-Path $WorkingDir 'Repair'
-        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-        $backup = Join-Path $backupDir ('Deprovisioned_{0}_{1:yyyyMMdd_HHmmss}.reg' -f $family, (Get-Date))
-        & reg.exe export ($marker -replace '^HKLM:\\', 'HKLM\') $backup /y | Out-Null
-        if ($LASTEXITCODE -ne 0) { return "$($Entry.App): Deprovisioned marker not backed up - not provisioned" }
-        Remove-Item -Path $marker -Recurse -Force
-        Write-Ok "Deprovisioned marker for $family removed (backup $backup)"
-        $notes.Add("Deprovisioned marker removed, backup $backup")
+    $folder = Join-Path $WorkingDir 'Packages'
+    $files  = @(Get-ChildItem -LiteralPath (Join-Path $folder $name) -File -Recurse -Include '*.msixbundle', '*.appxbundle', '*.msix', '*.appx' -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) {
+        return "$($Entry.App): not provisioned - no package files in $folder\$name; copy the Microsoft-signed package, its frameworks and license there and the next run provisions it"
     }
-    $candidates = @(
-        @(Get-AppxPackage -AllUsers -Name $name -PackageTypeFilter Bundle -ErrorAction SilentlyContinue) +
-        @(Get-AppxPackage -AllUsers -Name $name -PackageTypeFilter Main -ErrorAction SilentlyContinue) |
-        Where-Object { $_.InstallLocation -and (Test-Path -LiteralPath (Join-Path $_.InstallLocation 'AppxSignature.p7x')) } |
-        Sort-Object { [version] $_.Version } -Descending
-    )
-    if ($candidates.Count -eq 0) {
-        return "$($Entry.App): not provisioned - no signed build of $name in WindowsApps to provision from (no user has it); install it from the Store, then the next run provisions it"
-    }
-    foreach ($pkg in $candidates) {
-        try {
-            Add-AppxProvisionedPackage -Online -FolderPath $pkg.InstallLocation -SkipLicense -ErrorAction Stop | Out-Null
-        } catch {
-            Write-Warn "$($pkg.PackageFullName): $($_.Exception.Message)"
-            $notes.Add("$($pkg.PackageFullName): $($_.Exception.Message)")
-            continue
-        }
-        if (@(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $name }).Count -gt 0) {
-            Write-Ok "$($Entry.App) provisioned for all users from $($pkg.InstallLocation)"
-            return ('{0}: provisioned for all users from the build on the host ({1}){2}' -f $Entry.App, $pkg.PackageFullName, $(if ($notes.Count) { ' - ' + ($notes -join '; ') } else { '' }))
-        }
-        $notes.Add("$($pkg.PackageFullName): accepted, but not in the provisioned list afterwards")
-    }
-    return ('{0}: not provisioned - {1}' -f $Entry.App, ($notes -join '; '))
+    $repairDir = Join-Path $WorkingDir 'Repair'
+    $code = Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = @($name); Provision = $true; StoreFolder = $folder; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false })
+    $now  = @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $name } | ForEach-Object { [string] $_.Version })
+    if ($now.Count -gt 0) { return "$($Entry.App): provisioned for all users from $folder\$name ($($now -join ', '))" }
+    return "$($Entry.App): not provisioned - Repair-AppxPackageStore -StoreFolder exited with $code"
 }
 
 function Invoke-Repair {
@@ -1322,11 +1296,11 @@ function Invoke-Repair {
                 $code = Invoke-Helper 'Repair-AppxPackageStore.ps1' ([ordered]@{ Name = @('copilot'); Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false })
                 $actions.Add("Repair-AppxPackageStore -Name copilot -Provision: exit code $code")
             }
-            # No installer: provisioned again from the build on the host, after the store
-            # repair above has cleared what was damaged.
+            # No installer: provisioned again from the package files in <WorkingDir>\Packages,
+            # after the store repair above has cleared what was damaged.
             foreach ($entry in @($Apps | Where-Object { $_.FromDisk })) {
                 if (@($Found | Where-Object { $_.App -eq $entry.App -and $_.Problem -eq 'NotProvisioned' }).Count -eq 0) { continue }
-                Write-Step "$($entry.App): provisioning it again from the build on the host"
+                Write-Step "$($entry.App): provisioning it again from the package files in $(Join-Path $WorkingDir 'Packages')"
                 $actions.Add((Add-ProvisionFromDisk -Entry $entry))
             }
             $State.LastRepair = (Get-Date).ToString('o')
