@@ -833,6 +833,28 @@ $menu = @(
             }
         }
     }
+    [PSCustomObject]@{ Key='='; FKey=$null; Category='Device'
+        Label='M365AppsInstall     — install or update the watchdog on session hosts from this checkout, keeping their settings'
+        Script="$ROOT\scripts\RDS\Install-M365AppsWatchdog.ps1"
+        Params={
+            $a = @{ Confirm = $false }   # answered here, don't ask twice
+            $hosts = Read-Host '  Session hosts (empty = this machine)'
+            if ($hosts) { $a['ComputerName'] = @($hosts -split '[,;\s]' | Where-Object { $_ }) }
+            $url = Read-Host '  n8n webhook URL (empty = keep what each host has)'
+            if ($url) {
+                $a['WebhookUrl'] = $url
+                $token = Read-Host '  Webhook token (empty = keep)'
+                if ($token) { $a['WebhookToken'] = $token }
+            }
+            Write-Host '  Then: 1 nothing   2 check only   3 repair and test   4 repair, test and restart when due'
+            switch (Read-Host '  Choice [1]') {
+                '2' { $a['Then'] = 'Check' }
+                '3' { $a['Then'] = 'Repair' }
+                '4' { $a['Then'] = 'Repair'; $a['Restart'] = $true }
+            }
+            return $a
+        }
+    }
     [PSCustomObject]@{ Key='V'; FKey=$null; Category='Device'
         Label='Init-TempDisk       — restore the temp disk (D:) and keep the pagefile on it'
         Script="$ROOT\scripts\Device\TempDisk\Init-TempDisk.ps1"

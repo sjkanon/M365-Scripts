@@ -20,6 +20,7 @@ Scripts voor diagnose, monitoring en het klaarmaken van RDP- / RD Web Access-inf
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (geplande taak) — test de nieuwe Teams, de nieuwe Outlook, Copilot, Knipprogramma (Snipping Tool) en Foto's (Photos) met ons eigen account (`itceadmin`) op een sessiehost, herstelt wat stuk is voordat een klant er last van heeft, en meldt het aan n8n |
 | [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Verzamelt, alleen lezend, wat er met de nieuwe Teams, de nieuwe Outlook, Copilot, Knipprogramma (Snipping Tool) en Foto's (Photos) op een sessiehost gebeurd is — per gebruiker wat er geregistreerd is en draait, de events, en wat de watchdog deed en zou concluderen, met zijn blinde vlekken — in één zip |
 | [`Repair-M365AppsHost.ps1`](Repair-M365AppsHost.ps1) ([docs](#repair-m365appshostps1)) | Herstelt en test in één keer alles wat de watchdog op een sessiehost blijft melden - FSLogix speelt geen AppX-pakketten meer af, de package store, Teams en Outlook op de nieuwste build, daarna een watchdog-run als test - en zegt of de host een herstart nodig heeft |
+| [`Install-M365AppsWatchdog.ps1`](Install-M365AppsWatchdog.ps1) ([docs](#install-m365appswatchdogps1)) | Installeert of werkt de watchdog bij op een of meer sessiehosts vanuit deze checkout, met behoud van de instellingen van elke host (webhook, accounts, apps, interval), en controleert of herstelt ze desgewenst daarna |
 
 ---
 
@@ -396,6 +397,10 @@ met elk daarvan mee. `Problem` is `NotProvisioned` (host), `NotRegistered`,
 (POST, Header Auth op `X-Watchdog-Token`), daarna routeren op `{{$json.body.event}}` naar
 Teams, mail of een ticket.
 
+**Installeren of bijwerken vanuit een checkout**
+
+[`Install-M365AppsWatchdog.ps1`](#install-m365appswatchdogps1) installeert deze checkout op één host of de hele pool via remoting en behoudt de `config.json` en het interval van elke host - `-Install` zelf zou een config schrijven met alleen de parameters die het meekreeg.
+
 **Installeren vanaf GitHub**
 
 Een sessiehost heeft geen kopie van de repo nodig: download dit ene bestand en draai
@@ -592,3 +597,52 @@ Alleen de apps in `config.json` van de watchdog worden bekeken: een app die bewu
 - Draai het op elke host in de pool, en zet `InstallAppxPackages = 0` ook in het GPO- / Intune-beleid: één host die nog afspeelt blijft de oude fouten geven voor wie zich daar aanmeldt.
 - `Failed24h` kijkt 24 uur terug, dus het daalt pas naarmate er aanmeldingen zonder fouten bijkomen - vergelijk het de volgende dag.
 - De log is `C:\IT\AppWatchdog\Logs\Repair-M365AppsHost_<datum>_<tijd>.log`; de regels van de watchdog-run zelf staan in zijn daglog.
+
+### Install-M365AppsWatchdog.ps1
+
+Installeert of werkt de app-watchdog bij op een of meer sessiehosts vanuit deze checkout, **met
+behoud van de instellingen van elke host**, en controleert of herstelt de hosts desgewenst meteen
+daarna. `Watch-M365Apps.ps1 -Install` leest de bestaande `config.json` niet - opnieuw gedraaid zonder
+`-WebhookUrl` schrijft het een config zonder webhook - dus dit script leest hem eerst, op de host, en
+geeft elke instelling door.
+
+| Stap | Wat |
+|------|-----|
+| 1. Afschermen | `-WorkingDir` (`C:\IT\AppWatchdog`) afgeschermd voor System en Administrators voordat er iets in gekopieerd wordt |
+| 2. Kopiëren | [`Watch-M365Apps.ps1`](#watch-m365appsps1), [`Repair-AppxPackageStore.ps1`](../Device/readme.nl.md#repair-appxpackagestoreps1), [`Get-M365AppsLog.ps1`](#get-m365appslogps1) en [`Repair-M365AppsHost.ps1`](#repair-m365appshostps1) uit deze checkout - via PowerShell remoting met `-ComputerName` - en op de host gecontroleerd op SHA-256 tegen de checkout |
+| 3. Installeren | `Watch-M365Apps.ps1 -Install` vanuit de geïnstalleerde kopie, met alles wat `config.json` van de host bevat en het interval van zijn bestaande taak; een parameter die hier gegeven wordt wint. Het token wordt op de host gelezen en verlaat hem nooit. De status van de watchdog (wat hij meldde, zijn afkoelperiodes) blijft behouden |
+| 4. Controleren | De taak bestaat, staat aan en draait de geïnstalleerde kopie |
+| 5. Daarna | `-Then Check`: `Repair-M365AppsHost.ps1 -CheckOnly`. `-Then Repair`: het volledige herstel en de test, met `-Restart` als die gegeven is. De ene host na de andere, zodat een herstart nooit de hele pool tegelijk platlegt |
+
+Eindigt met één tabel over de hosts: geïnstalleerd, instellingen behouden of vervangen, webhook, interval, en het resultaat van `-Then`.
+
+**Parameters**
+
+| Parameter | Omschrijving |
+|-----------|--------------|
+| `-ComputerName` | Sessiehosts, bv. `lem-avd-4,lem-avd-5,lem-avd-6`, via WinRM (standaard: deze machine) |
+| `-Credential` | Referenties voor de remoting-sessies |
+| `-WebhookUrl` / `-WebhookToken` | n8n-webhook en token - nodig op een host zonder `config.json`, anders vervangen ze wat er staat |
+| `-Account` / `-App` | De accounts / apps in `config.json` vervangen |
+| `-IntervalMinutes` | Hoe vaak de taak draait (standaard: het interval van de bestaande taak, anders `30`) |
+| `-Then` | `None` (standaard), `Check` of `Repair` |
+| `-Restart` | Met `-Then Repair`: een host herstarten als dat nodig is en er niemand is aangemeld |
+| `-WorkingDir` | De map van de watchdog op de hosts (standaard: `C:\IT\AppWatchdog`) |
+
+**Voorbeelden**
+
+```powershell
+# De hele pool bijwerken, met behoud van webhook en instellingen van elke host, en kijken
+.\Install-M365AppsWatchdog.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Then Check -Confirm:$false
+
+# Een nieuwe host
+.\Install-M365AppsWatchdog.ps1 -ComputerName lem-avd-7 -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false
+
+# De pool in drain-modus bijwerken en herstellen, elke host herstarten als dat nodig is
+.\Install-M365AppsWatchdog.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Then Repair -Restart -Confirm:$false
+```
+
+**Opmerkingen**
+- Exitcode `0` overal geïnstalleerd (en `-Then` gezond), `1` een host mislukte, `2` geïnstalleerd en gezond maar een host heeft een herstart nodig.
+- Installeert wat in deze checkout staat, geen vastgepinde commit: eerst pullen. Voor een host zonder checkout of remoting, zie *Installeren vanaf GitHub* onder [`Watch-M365Apps.ps1`](#watch-m365appsps1).
+- `-Install` registreert de taak opnieuw, dus zijn eerste run is 2 minuten later.

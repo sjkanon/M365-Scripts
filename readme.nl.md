@@ -195,6 +195,7 @@ De launcher ([`menu.ps1`](menu.ps1)) dekt alle tools in deze repo. Druk op een t
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: Teams, Outlook, Copilot, Knipprogramma en Foto's testen met de IT-accounts, herstellen, melden aan n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — verzamel wat er per gebruiker met Teams, Outlook, Copilot, Knipprogramma en Foto's gebeurde, en wat de watchdog deed |
 | `+` | Device | [Repair-M365AppsHost](scripts/RDS/Repair-M365AppsHost.ps1) — Teams, Outlook en Foto's op deze sessiehost in één keer herstellen en testen, en zeggen of hij een herstart nodig heeft |
+| `=` | Device | [Install-M365AppsWatchdog](scripts/RDS/Install-M365AppsWatchdog.ps1) — de watchdog op sessiehosts installeren of bijwerken vanuit deze checkout, met behoud van hun instellingen |
 | `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers van GitHub + printers vanuit een JSON-bestand) of [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (printers, instellingen en drivers van deze machine naar een zip) of [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (één AD- of Entra ID-groep per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — de vereiste modules controleren/bijwerken, desgewenst ook alle andere geïnstalleerde modules |
@@ -486,6 +487,7 @@ Audit- en diagnosescripts, ingedeeld per workload. Maken waar van toepassing zel
 
 - App-logverzamelaar ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — alleen lezend, na een klacht: per gebruiker wat er geregistreerd is en draait, de AppX-/AppReadiness-/FSLogix-events, register en logs, en de taak, status en logs van de watchdog — afgezet tegen waar de watchdog op zou uitkomen, met zijn blinde vlekken (zoals de unified Copilot-app); één zip
 - Hostherstel in één keer ([`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1)) — op een host met de watchdog: FSLogix `InstallAppxPackages = 0` (met back-up), de package store en Teams / Outlook op de nieuwste build, een watchdog-run als test, een voor/na per app en gebruiker, en of een herstart nodig is (`-Restart` als er niemand is aangemeld)
+- Watchdog-installer ([`Install-M365AppsWatchdog.ps1`](scripts/RDS/Install-M365AppsWatchdog.ps1)) — installeert of werkt de watchdog, zijn hulpscripts en `Repair-M365AppsHost.ps1` bij op één host of de pool via remoting, met behoud van de webhook en instellingen van elke host, bestanden gecontroleerd op SHA-256; desgewenst daarna een controle of herstel per host
 
 ---
 
@@ -870,6 +872,7 @@ Elke map heeft een eigen [`readme.md`](readme.md) — deze boom is een plattegro
     │   ├── <a href="scripts/RDS/readme.nl.md">readme.md</a>
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← diagnose van FSLogix- / Azure Files-profielen
     │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← logverzamelaar: apps per gebruiker vs. de watchdog
+    │   ├── <a href="scripts/RDS/Install-M365AppsWatchdog.ps1">Install-M365AppsWatchdog.ps1</a>      ← watchdog op de pool installeren/bijwerken, instellingen behouden
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← FSLogix-profielschijven verkleinen, compressie controleren
     │   ├── <a href="scripts/RDS/Repair-M365AppsHost.ps1">Repair-M365AppsHost.ps1</a>           ← M365-apps op een host herstellen + testen, herstartoordeel
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← diagnose van mislukte RDP-/RDWeb-aanmeldingen
@@ -1018,6 +1021,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (3)
+| Wijziging |
+|--------|
+| Nieuw [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.nl.md#install-m365appswatchdogps1): installeert of werkt de watchdog, `Repair-AppxPackageStore.ps1`, `Get-M365AppsLog.ps1` en `Repair-M365AppsHost.ps1` bij vanuit deze checkout op één host of de pool via remoting. `Watch-M365Apps.ps1 -Install` leest de bestaande `config.json` niet, dus opnieuw installeren zonder `-WebhookUrl` was de webhook kwijt; de installer leest de config en het taakinterval van elke host op de host zelf (het token verlaat hem nooit) en geeft ze door, een gegeven parameter wint. De map wordt afgeschermd voordat er iets gekopieerd wordt, elk bestand op de host gecontroleerd op SHA-256, de taak daarna gecontroleerd, en `-Then Check` / `-Then Repair` (`-Restart`) draait `Repair-M365AppsHost.ps1` host na host. Menutoets `=` |
+| Geverifieerd: syntaxcontrole; in PowerShell 7 en Windows PowerShell 5.1 de installatiestap tegen een nagebootste `Watch-M365Apps.ps1` en taak - elke instelling uit `config.json` en het interval van 45 minuten van de taak doorgegeven, `-Account` vervangt alleen de accounts, een bestand met een andere hash geweigerd; `-WhatIf` voor de hele run. Nog niet gedraaid tegen een sessiehost: remoting, het kopiëren en de echte `-Install` zijn niet getest |
 ### 2026-11-03 (2)
 | Wijziging |
 |--------|

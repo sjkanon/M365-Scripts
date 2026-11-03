@@ -195,6 +195,7 @@ The launcher ([`menu.ps1`](menu.ps1)) covers all tools in this repo. Press a key
 | `Y` | Device | [Watch-M365Apps](scripts/RDS/Watch-M365Apps.ps1) — watchdog: test Teams, Outlook, Copilot, Snipping Tool and Photos with the IT accounts, repair, report to n8n |
 | `Q` | Device | [Get-M365AppsLog](scripts/RDS/Get-M365AppsLog.ps1) — collect what happened with Teams, Outlook, Copilot, Snipping Tool and Photos per user, and what the watchdog did |
 | `+` | Device | [Repair-M365AppsHost](scripts/RDS/Repair-M365AppsHost.ps1) — repair and test Teams, Outlook and Photos on this session host in one go, and say whether it needs a restart |
+| `=` | Device | [Install-M365AppsWatchdog](scripts/RDS/Install-M365AppsWatchdog.ps1) — install or update the watchdog on session hosts from this checkout, keeping their settings |
 | `N` | Device | Printers — [Install-Printer](scripts/Device/Printer/Install-Printer.ps1) (drivers from GitHub + printers from a JSON file) or [Export-Printer](scripts/Device/Printer/Export-Printer.ps1) (this machine's printers, settings and drivers to a zip) or [New-PrinterGroup](scripts/Device/Printer/New-PrinterGroup.ps1) (one AD or Entra ID group per printer) |
 | `9` / `F9` | Startup | [Install-Modules](scripts/Startup/Install-Modules.ps1) |
 | `U` | Startup | [Update-Modules](scripts/Startup/Update-Modules.ps1) — check/update the required modules, optionally every other installed module too |
@@ -486,6 +487,7 @@ Audit and diagnostic scripts, organised by workload. Self-connecting where appli
 
 - App log collector ([`Get-M365AppsLog.ps1`](scripts/RDS/Get-M365AppsLog.ps1)) — read only, after a complaint: per user what is registered and running, the AppX/AppReadiness/FSLogix events, registry and logs, and the watchdog's task, state and logs — set against what the watchdog would conclude, with its blind spots (e.g. the unified Copilot app); one zip
 - Host repair in one go ([`Repair-M365AppsHost.ps1`](scripts/RDS/Repair-M365AppsHost.ps1)) — on a host with the watchdog: FSLogix `InstallAppxPackages = 0` (backed up), the package store and Teams / Outlook at the newest build, a watchdog run as the test, a before/after per app and user, and whether a restart is due (`-Restart` when nobody is signed in)
+- Watchdog installer ([`Install-M365AppsWatchdog.ps1`](scripts/RDS/Install-M365AppsWatchdog.ps1)) — installs or updates the watchdog, its helpers and `Repair-M365AppsHost.ps1` on one host or the pool over remoting, keeping each host's webhook and settings, files checked by SHA-256; optionally a check or repair per host after it
 
 ---
 
@@ -870,6 +872,7 @@ Every folder has its own [`readme.md`](readme.md) — this tree is a map; follow
     │   ├── <a href="scripts/RDS/readme.md">readme.md</a>
     │   ├── <a href="scripts/RDS/Get-FSlogix-errors.ps1">Get-FSlogix-errors.ps1</a>            ← FSLogix / Azure Files profile diagnostics
     │   ├── <a href="scripts/RDS/Get-M365AppsLog.ps1">Get-M365AppsLog.ps1</a>               ← log collector: apps per user vs. the watchdog
+    │   ├── <a href="scripts/RDS/Install-M365AppsWatchdog.ps1">Install-M365AppsWatchdog.ps1</a>      ← install/update the watchdog on the pool, settings kept
     │   ├── <a href="scripts/RDS/Invoke-FSLogixShrink.ps1">Invoke-FSLogixShrink.ps1</a>          ← shrink FSLogix profile disks, check compaction
     │   ├── <a href="scripts/RDS/Repair-M365AppsHost.ps1">Repair-M365AppsHost.ps1</a>           ← repair + test the M365 apps on a host, restart verdict
     │   ├── <a href="scripts/RDS/Test-RDSDiagnostics.ps1">Test-RDSDiagnostics.ps1</a>           ← RDP/RDWeb login failure diagnostics
@@ -1018,6 +1021,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (3)
+| Change |
+|--------|
+| New [`Install-M365AppsWatchdog.ps1`](scripts/RDS/readme.md#install-m365appswatchdogps1): installs or updates the watchdog, `Repair-AppxPackageStore.ps1`, `Get-M365AppsLog.ps1` and `Repair-M365AppsHost.ps1` from this checkout on one host or the pool over remoting. `Watch-M365Apps.ps1 -Install` does not read the existing `config.json`, so installing again without `-WebhookUrl` lost the webhook; the installer reads each host's config and task interval on the host (the token never leaves it) and passes them on, a parameter given wins. The folder is locked before anything is copied, every file is checked by SHA-256 on the host, the task is verified afterwards, and `-Then Check` / `-Then Repair` (`-Restart`) runs `Repair-M365AppsHost.ps1` host after host. Menu key `=` |
+| Verified: syntax check; in PowerShell 7 and Windows PowerShell 5.1 the install step against a stub `Watch-M365Apps.ps1` and a mocked task - every setting from `config.json` and the task's 45-minute interval passed on, `-Account` replacing only the accounts, a file with another hash refused; `-WhatIf` for the whole run. Not yet run against a session host: remoting, the copy and the real `-Install` are untested |
 ### 2026-11-03 (2)
 | Change |
 |--------|

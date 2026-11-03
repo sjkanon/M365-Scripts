@@ -20,6 +20,7 @@ Diagnostic, monitoring and preparation scripts for RDP / RD Web Access and AVD s
 | [`Watch-M365Apps.ps1`](Watch-M365Apps.ps1) ([docs](#watch-m365appsps1)) | Watchdog (scheduled task) — tests new Teams, new Outlook, Copilot, Snipping Tool and Photos with our own account (`itceadmin`) on a session host, repairs what is broken before a customer runs into it, and reports to n8n |
 | [`Get-M365AppsLog.ps1`](Get-M365AppsLog.ps1) ([docs](#get-m365appslogps1)) | Collects, read only, what happened with new Teams, new Outlook, Copilot, Snipping Tool and Photos on a session host — per user what is registered and running, the events, and what the watchdog did and would conclude, with its blind spots — into one zip |
 | [`Repair-M365AppsHost.ps1`](Repair-M365AppsHost.ps1) ([docs](#repair-m365appshostps1)) | Repairs and tests in one go everything the watchdog keeps reporting on a session host - FSLogix stops replaying AppX packages, the package store, Teams and Outlook at the newest build, then a watchdog run as the test - and says whether the host needs a restart |
+| [`Install-M365AppsWatchdog.ps1`](Install-M365AppsWatchdog.ps1) ([docs](#install-m365appswatchdogps1)) | Installs or updates the watchdog on one or more session hosts from this checkout, keeping each host's settings (webhook, accounts, apps, interval), then optionally checks or repairs them |
 
 ---
 
@@ -394,6 +395,10 @@ along with any of them. `Problem` is `NotProvisioned` (host), `NotRegistered`,
 Header Auth on `X-Watchdog-Token`), then route on `{{$json.body.event}}` to Teams, mail or
 a ticket.
 
+**Installing or updating from a checkout**
+
+[`Install-M365AppsWatchdog.ps1`](#install-m365appswatchdogps1) installs this checkout on one host or the whole pool over remoting and keeps each host's `config.json` and interval - `-Install` itself would write a config with only the parameters given to it.
+
 **Installing from GitHub**
 
 A session host needs no copy of the repo: download this one file and run `-Install`.
@@ -586,3 +591,52 @@ Only the apps in the watchdog's `config.json` are looked at: one left out on pur
 - Run it on every host in the pool, and set `InstallAppxPackages = 0` in the GPO / Intune policy as well: one host that still replays keeps the old errors coming for whoever signs in there.
 - `Failed24h` looks back 24 hours, so it only drops as sign-ins without failures come in - compare it the next day.
 - The log is `C:\IT\AppWatchdog\Logs\Repair-M365AppsHost_<date>_<time>.log`; the watchdog run's own lines are in its daily log.
+
+### Install-M365AppsWatchdog.ps1
+
+Installs or updates the app watchdog on one or more session hosts from this checkout, **keeping
+each host's settings**, and optionally checks or repairs the hosts straight after. `Watch-M365Apps.ps1
+-Install` does not read the existing `config.json` - run again without `-WebhookUrl` it writes a
+config without the webhook - so this script reads it first, on the host, and passes every setting
+on.
+
+| Step | What |
+|------|------|
+| 1. Lock | `-WorkingDir` (`C:\IT\AppWatchdog`) locked to System and Administrators before anything is copied into it |
+| 2. Copy | [`Watch-M365Apps.ps1`](#watch-m365appsps1), [`Repair-AppxPackageStore.ps1`](../Device/readme.md#repair-appxpackagestoreps1), [`Get-M365AppsLog.ps1`](#get-m365appslogps1) and [`Repair-M365AppsHost.ps1`](#repair-m365appshostps1) from this checkout - over PowerShell remoting with `-ComputerName` - and checked on the host by SHA-256 against the checkout |
+| 3. Install | `Watch-M365Apps.ps1 -Install` from the installed copy, with everything the host's `config.json` holds and the interval of its existing task; a parameter given here wins. The token is read on the host and never leaves it. The watchdog's state (what it reported, its cooldowns) is kept |
+| 4. Verify | The task is there, enabled, and runs the installed copy |
+| 5. Then | `-Then Check`: `Repair-M365AppsHost.ps1 -CheckOnly`. `-Then Repair`: the full repair and test, with `-Restart` when given. One host after the other, so a restart never takes the whole pool down at once |
+
+Ends with one table across the hosts: installed, settings kept or replaced, webhook, interval, and the result of `-Then`.
+
+**Parameters**
+
+| Parameter | Description |
+|-----------|-------------|
+| `-ComputerName` | Session hosts, e.g. `lem-avd-4,lem-avd-5,lem-avd-6`, over WinRM (default: this machine) |
+| `-Credential` | Credential for the remoting sessions |
+| `-WebhookUrl` / `-WebhookToken` | n8n webhook and token - needed on a host without a `config.json`, otherwise they replace what is there |
+| `-Account` / `-App` | Replace the accounts / apps in `config.json` |
+| `-IntervalMinutes` | How often the task runs (default: the interval of the existing task, else `30`) |
+| `-Then` | `None` (default), `Check` or `Repair` |
+| `-Restart` | With `-Then Repair`: restart a host when a restart is due and nobody is signed in |
+| `-WorkingDir` | The watchdog's folder on the hosts (default: `C:\IT\AppWatchdog`) |
+
+**Examples**
+
+```powershell
+# Update the whole pool, keeping every host's webhook and settings, and look
+.\Install-M365AppsWatchdog.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Then Check -Confirm:$false
+
+# A new host
+.\Install-M365AppsWatchdog.ps1 -ComputerName lem-avd-7 -WebhookUrl 'https://n8n.example.com/webhook/m365-apps' -WebhookToken '<token>' -Confirm:$false
+
+# Update and repair the drained pool, restarting each host when that is due
+.\Install-M365AppsWatchdog.ps1 -ComputerName lem-avd-4,lem-avd-5,lem-avd-6 -Then Repair -Restart -Confirm:$false
+```
+
+**Notes**
+- Exit code `0` installed everywhere (and `-Then` healthy), `1` a host failed, `2` installed and healthy but a host needs a restart.
+- Installs what is in this checkout, not a pinned commit: pull first. For a host without a checkout or remoting, see *Installing from GitHub* under [`Watch-M365Apps.ps1`](#watch-m365appsps1).
+- `-Install` registers the task again, so its first run is 2 minutes later.
