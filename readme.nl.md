@@ -1021,6 +1021,12 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (8)
+| Wijziging |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.nl.md#watch-m365appsps1) start of sluit geen apps meer waar niemand om vroeg. De starttest startte elke run elke app van ons eigen account die niet draaide - in een sessie waarin iemand werkt kwam alles wat die had gesloten elke 30 minuten terug - en een update sloot een draaiende app. Nu wordt een app die niet draait alleen gestart met een reden (deze run heeft hem bijgewerkt of hersteld, of Windows weigerde sinds de vorige run een poging van hen om hem te openen), en wat de test startte wordt weer gesloten tenzij ze hem probeerden te openen; een open app wordt nooit gesloten voor een update, hij wordt bijgewerkt bij een run waarin hij dicht is. De update-stap vergeleek ook het hoofdpakket van Knipprogramma (11.2607) met de klaargezette bundle (2022.2607) en "werkte het elke run bij" naar dezelfde build; nu hoofdpakket met hoofdpakket |
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.nl.md#repair-m365appshostps1): een app die in orde is wordt niet meer gestart om hem te testen; na een herstel van een app van ons eigen account sluit de starttest wat hij startte |
+| Geverifieerd: syntaxcontrole; in Windows PowerShell 5.1 de startbeslissingen tegen nagebootste pakketten - geen reden: niet gestart; bijgewerkt: gestart en gesloten; geprobeerd te openen: gestart en open gelaten; de volgende ronde start niets. Het sluiten van wat de test startte is niet geverifieerd op een echte app: de test op dit werkstation opende Rekenmachine op het scherm van de gebruiker en is gestopt |
 ### 2026-11-03 (7)
 | Wijziging |
 |--------|

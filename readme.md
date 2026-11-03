@@ -1021,6 +1021,12 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (8)
+| Change |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.md#watch-m365appsps1) no longer starts or closes apps nobody asked for. The launch test started every app of our own account that was not running, every run - in a session someone works in, everything they had closed came back every 30 minutes - and an update closed a running app. Now an app that is not running is only started with a reason (this run updated or repaired it, or Windows refused an open of theirs since the last run), and what the test started is closed again unless they had tried to open it; an open app is never closed for an update, it is updated at a run where it is closed. The update step also compared Snipping Tool's main package (11.2607) with the provisioned bundle (2022.2607) and "updated" it to the same build every run; it now compares main package with main package |
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.md#repair-m365appshostps1): an app that is fine is no longer started to test it; after a repair of our own account's app the start test closes what it started |
+| Verified: syntax check; in Windows PowerShell 5.1 the launch decisions against mocked packages - no reason: not started; updated: started and closed; tried to open: started and left open; the next pass starts nothing. Closing what the test started is not verified on a real app: the test on this workstation opened Calculator on the user's screen and was stopped |
 ### 2026-11-03 (7)
 | Change |
 |--------|

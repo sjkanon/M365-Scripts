@@ -38,8 +38,10 @@
       4. Test       The watchdog task itself is started - as System, with its own
                     config.json, so it is exactly the run that happens every 30 minutes:
                     every signed-in user is checked, repaired in their session where
-                    needed, and our own account (itceadmin) has each app started. Its
-                    exit code and what it still reports are shown.
+                    needed, and an app of our own account (itceadmin) that this run
+                    updated or repaired is started once and closed again - nothing
+                    that is fine is started. Its exit code and what it still reports
+                    are shown.
       5. After      The snapshot of step 1 again, side by side with before, and whether
                     a restart is due: Repair-AppxPackageStore edited the package store
                     since the last boot (it asks for a restart so the deployment engine
@@ -515,15 +517,23 @@ function Get-UserAppState {
 }
 
 function Test-UserAppStart {
-    <# Start the app in this user's session; it has to come up and still run 10 seconds later. #>
+    <#
+        After a repair, for our own account only: start the app in their session; it has
+        to come up and still run 10 seconds later. Then what the test started is closed
+        again - only those processes - so nothing stays open that nobody asked for.
+    #>
     param([string] $Sid, $Entry)
     $session = Get-SessionId $Sid
     if ($null -eq $session) { return $false }
+    $mine = { @(Get-Process -Name $Entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }) }
+    $had  = @(& $mine | ForEach-Object { $_.Id })
     Start-UserTask -Sid $Sid -Execute 'explorer.exe' -Argument "shell:AppsFolder\$($Entry.Aumid)" -WaitSeconds 30 | Out-Null
     $deadline = (Get-Date).AddSeconds(45)
-    while ((Get-Date) -lt $deadline -and @(Get-Process -Name $Entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -eq 0) { Start-Sleep -Seconds 3 }
+    while ((Get-Date) -lt $deadline -and @(& $mine).Count -eq 0) { Start-Sleep -Seconds 3 }
     Start-Sleep -Seconds 10
-    return @(Get-Process -Name $Entry.Exe -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $session }).Count -gt 0
+    $ok = @(& $mine).Count -gt 0
+    & $mine | Where-Object { $_.Id -notin $had } | Stop-Process -Force -ErrorAction SilentlyContinue
+    return $ok
 }
 
 function Repair-UserApp {
@@ -709,15 +719,7 @@ try {
                 foreach ($state in $states) {
                     $ours = & $isOurs $state.User
                     $row  = [ordered]@{ user = $state.User; app = $entry.App; before = $state.Version; why = $state.Why; result = '' }
-                    if (-not $state.Why -and $ours) {
-                        # Registered and Ok - and does it start? Only ever tested for our own account.
-                        if (Test-UserAppStart -Sid $state.Sid -Entry $entry) {
-                            Write-Ok "$($entry.App) for $($state.User): $($state.Version), starts"
-                            $row.result = 'ok, starts'; $Report.users.Add($row); continue
-                        }
-                        $state.Why = 'registered and Ok, but it does not start'
-                        $row.why   = $state.Why
-                    }
+                    # Registered and Ok: left alone, not started - closed or not in use is their choice.
                     if (-not $state.Why) {
                         Write-Ok "$($entry.App) for $($state.User): $($state.Version)"
                         $row.result = 'ok'; $Report.users.Add($row); continue

@@ -1021,6 +1021,12 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (8)
+| Modification |
+|--------|
+| [`Watch-M365Apps.ps1`](scripts/RDS/readme.fr.md#watch-m365appsps1) ne lance ni ne ferme plus d'applications que personne n'a demandées. Le test de lancement lançait à chaque exécution chaque application de notre propre compte qui ne tournait pas - dans une session où quelqu'un travaille, tout ce qu'il avait fermé revenait toutes les 30 minutes - et une mise à jour fermait une application ouverte. Désormais une application qui ne tourne pas n'est lancée qu'avec une raison (cette exécution l'a mise à jour ou réparée, ou Windows a refusé depuis l'exécution précédente une ouverture de sa part), et ce que le test a lancé est refermé sauf s'il avait essayé de l'ouvrir ; une application ouverte n'est jamais fermée pour une mise à jour, elle est mise à jour lors d'une exécution où elle est fermée. L'étape de mise à jour comparait aussi le package principal de l'Outil Capture d'écran (11.2607) avec le bundle provisionné (2022.2607) et le « mettait à jour » vers la même build à chaque exécution ; elle compare maintenant package principal avec package principal |
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.fr.md#repair-m365appshostps1) : une application en ordre n'est plus lancée pour la tester ; après la réparation d'une application de notre propre compte, le test de lancement referme ce qu'il a lancé |
+| Vérifié : contrôle de syntaxe ; sous Windows PowerShell 5.1 les décisions de lancement avec des packages simulés - pas de raison : non lancée ; mise à jour : lancée et refermée ; ouverture tentée : lancée et laissée ouverte ; le passage suivant ne lance rien. La fermeture de ce que le test a lancé n'est pas vérifiée sur une vraie application : le test sur ce poste a ouvert la Calculatrice sur l'écran de l'utilisateur et a été arrêté |
 ### 2026-11-03 (7)
 | Modification |
 |--------|

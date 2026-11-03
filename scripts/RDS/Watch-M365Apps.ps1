@@ -29,10 +29,12 @@
                      newest build seen on this host or in a profile - only ever newer,
                      signature-checked), and Edge Update is asked to check now for the
                      unified Copilot app. Every run: when our own account has an older
-                     build than the host provisions, the app is closed in our session
-                     and registered again from the provisioned build, so step 2 starts
-                     the new build - a build that does not run is found by us, not by a
-                     customer at their next sign-in. Customers are never updated by the
+                     build than the host provisions and the app is closed, it is
+                     registered again from the provisioned main package in our session,
+                     and step 2 starts the new build once and closes it again - a build
+                     that does not run is found by us, not by a customer at their next
+                     sign-in. An app that is open is not closed for it: it is updated
+                     at a run where it is closed. Customers are never updated by the
                      watchdog: Windows gives them the new build at their next sign-in.
                      A new build on the host - from this step or on its own - is
                      reported once, with what it was before. Snipping Tool and Photos
@@ -42,11 +44,15 @@
                      explorer.exe), per app: the package is registered for that user,
                      its files are there and its status is Ok - for Copilot its
                      identity package, when the host has one (its files are
-                     machine-wide). Then the app has to be
-                     running in that session; when it is not, it is started there
-                     (shell:AppsFolder\<AUMID>, or copilotapp.exe itself, through a
-                     one-off task in the user's own session) and must still be running
-                     15 seconds later.
+                     machine-wide). An app that is not running is started there only
+                     with a reason - this run updated or repaired it, or Windows
+                     refused an open of theirs since the last run - (shell:AppsFolder\
+                     <AUMID>, or copilotapp.exe itself, through a one-off task in the
+                     user's own session), must still be running 15 seconds later, and
+                     is closed again unless they had tried to open it. Without a
+                     reason it was closed or is not in use, and is left closed: the
+                     account may be someone's working session. Nothing that runs is
+                     ever closed, for an update either.
       2b. Users      Every other signed-in user (customers), once signed in for 10
                      minutes: the same registration check, without starting anything.
                      And every attempt since the last run, by any user, to open one of
@@ -686,21 +692,39 @@ function Test-UserPackage {
     return $false
 }
 
+# Why our own account's app may be started this run, per "SID|App": 'updated' or
+# 'repaired' (by this run), or 'opened by them' (Windows refused an open of theirs since
+# the last run). An app that is not running without one of these was closed or is not
+# in use, and is not started: the account may be someone's working session.
+$script:launchReasons = @{}
+function Set-LaunchReason {
+    <# 'opened by them' wins: then the app stays open after the test, as they wanted it. #>
+    param([string] $Sid, [string] $App, [string] $Reason)
+    if ($Reason -eq 'opened by them' -or -not $script:launchReasons.ContainsKey("$Sid|$App")) { $script:launchReasons["$Sid|$App"] = $Reason }
+}
+function Get-LaunchReason { param($Session, [string] $App) return $script:launchReasons[('{0}|{1}' -f $Session.Sid, $App)] }
+function Clear-LaunchReason { param($Session, [string] $App) $script:launchReasons.Remove(('{0}|{1}' -f $Session.Sid, $App)) }
+
 function Test-AppStart {
     <#
         Start the app in the user's session; it has to come up and still be there 15
         seconds later. By its AUMID, or by its executable when the entry has a Path
-        (the unified Copilot app without an identity package).
+        (the unified Copilot app without an identity package). -Close: what the test
+        started is closed again afterwards - only those processes, not one the user had
+        open - so a test does not leave an app open that nobody asked for.
     #>
-    param($Session, $Entry)
+    param($Session, $Entry, [switch] $Close)
     $path   = Get-PropertyValue $Entry 'Path'
     $target = if ($path) { '"{0}"' -f $path } else { "shell:AppsFolder\$($Entry.Aumid)" }
+    $had    = @(Get-SessionProcess $Session $Entry.Exe | ForEach-Object { $_.Id })
     Invoke-AsUser -Session $Session -Execute 'explorer.exe' -Argument $target -WaitSeconds 30 | Out-Null
     $deadline = (Get-Date).AddSeconds($LaunchSeconds)
     while ((Get-Date) -lt $deadline -and @(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { Start-Sleep -Seconds 3 }
     if (@(Get-SessionProcess $Session $Entry.Exe).Count -eq 0) { return $false }
     Start-Sleep -Seconds 15
-    return @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
+    $ok = @(Get-SessionProcess $Session $Entry.Exe).Count -gt 0
+    if ($Close) { Get-SessionProcess $Session $Entry.Exe | Where-Object { $_.Id -notin $had } | Stop-Process -Force -ErrorAction SilentlyContinue }
+    return $ok
 }
 
 function Get-ProcessVersion {
@@ -747,14 +771,14 @@ function Get-ProvisionedBuild {
     return $builds
 }
 
-function Get-ProvisionedMainManifest {
+function Get-ProvisionedMainPackage {
     <#
-        AppxManifest.xml of the main package behind the provisioned build of $Name, $null
-        when there is none on disk. The provisioned entry can be the bundle, whose version
-        differs in its first part (Snipping Tool: bundle 2022.2607.23.0, main package
-        11.2607.23.0), so the main package is matched on the other three. Registering
-        from it skips the bundle - the step that fails with 0x80070490 when Windows still
-        lists a Store build whose bundle is no longer on the host.
+        The main package behind the provisioned build of $Name - its version and its
+        AppxManifest.xml - or $null when it is not on disk. The provisioned entry can be
+        the bundle, whose version differs in its first part (Snipping Tool: bundle
+        2022.2607.23.0, main package 11.2607.23.0), so the main package is matched on the
+        other three. Registering from it skips the bundle - the step that fails with
+        0x80070490 when Windows still lists a Store build whose bundle is gone.
     #>
     param([string] $Name)
     $provisioned = @(Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq $Name } |
@@ -765,8 +789,16 @@ function Get-ProvisionedMainManifest {
         $v = [version] $pkg.Version
         if ($v.Minor -ne $want.Minor -or $v.Build -ne $want.Build -or $v.Revision -ne $want.Revision) { continue }
         $path = Join-Path ([string] $pkg.InstallLocation) 'AppxManifest.xml'
-        if ($pkg.InstallLocation -and (Test-Path -LiteralPath $path)) { return $path }
+        if ($pkg.InstallLocation -and (Test-Path -LiteralPath $path)) { return [PSCustomObject]@{ Version = $v; Manifest = $path } }
     }
+    return $null
+}
+
+function Get-ProvisionedMainManifest {
+    <# The AppxManifest.xml of Get-ProvisionedMainPackage, or $null. #>
+    param([string] $Name)
+    $main = Get-ProvisionedMainPackage $Name
+    if ($main) { return $main.Manifest }
     return $null
 }
 
@@ -822,59 +854,58 @@ function Update-HostApp {
 function Update-AccountApp {
     <#
         Our own accounts onto the build the host provisions, when theirs is older: the
-        app closed in that session - ours, never a customer's - and registered again
-        from the provisioned manifest, then the version read back. The launch test in
-        Get-Finding then starts the new build. A package that is not registered at all
-        is left to Test-UserApp, which reports and repairs it.
+        app registered again from the provisioned main package in that session - ours,
+        never a customer's - then the version read back, and the launch test in
+        Get-Finding starts the new build once and closes it again. Never while it runs:
+        the account may be someone's working session, so an open app is left alone and
+        updated at a run where it is closed. A package that is not registered at all is
+        left to Test-UserApp, which reports and repairs it.
     #>
     param($Sessions, $State)
     $actions = [System.Collections.Generic.List[string]]::new()
-    $builds  = Get-ProvisionedBuild
     $copilot = if (@($Apps | Where-Object { $_.App -eq 'Copilot' }).Count -gt 0) { Get-UnifiedCopilot -Refresh } else { $null }
     foreach ($session in @($Sessions | Where-Object { $_.Watched })) {
         # The unified Copilot app updates in place through Edge Update; a copilotapp.exe
-        # still running from an older build is closed in our session, so the launch
-        # test starts the new one. Once per build and account: while customers keep the
-        # old build open, Windows may start the old one for us again.
+        # still running from an older build is not closed - it moves to the new one when
+        # it is closed. Said once per build and account.
         if ($copilot -and $copilot.Path) {
             $running = @(Get-SessionProcess $session ([IO.Path]::GetFileNameWithoutExtension($CopilotExe)))
             $have    = Get-ProcessVersion $running
-            $closed  = '{0}|{1}' -f $session.Sid, $copilot.Version
-            if ($have -and $have -lt [version] $copilot.Version -and $State.CopilotClosed -ne $closed) {
-                $State.CopilotClosed = $closed
-                Write-Step "Copilot for $($session.User): running $have, Edge Update installed $($copilot.Version) - closing it for the test below"
-                $running | Stop-Process -Force -ErrorAction SilentlyContinue
-                $actions.Add("Update: $($session.Account) Copilot $have closed - the test starts $($copilot.Version)")
+            $noted   = '{0}|{1}' -f $session.Sid, $copilot.Version
+            if ($have -and $have -lt [version] $copilot.Version -and $State.CopilotClosed -ne $noted) {
+                $State.CopilotClosed = $noted
+                Write-Skip "Copilot for $($session.User): running $have, Edge Update installed $($copilot.Version) - not closed, it moves on when they close it"
             }
         }
         foreach ($entry in $Apps) {
-            foreach ($name in @($entry.Packages | Where-Object { $builds.ContainsKey($_) })) {
+            foreach ($name in @($entry.Packages)) {
+                # Main package against main package: the provisioned entry can be the
+                # bundle, whose version differs (Snipping Tool: 2022.2607 vs 11.2607) -
+                # compared with it, every run "updated" Snipping Tool to the same build.
+                $provisioned = Get-ProvisionedMainPackage $name
+                if (-not $provisioned) { continue }
                 $mine = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
                         Sort-Object { [version] $_.Version } -Descending | Select-Object -First 1
                 if (-not $mine) { continue }
                 $have = [version] $mine.Version
-                $want = $builds[$name].Version
+                $want = $provisioned.Version
                 if ($have -ge $want) { continue }
 
-                Write-Step "$($entry.App) for $($session.User): $have, the host provisions $want - updating"
                 $exes = @($entry.Exe | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_) })
                 $appEntry = Get-AppEntry $mine
                 if ($appEntry) { $exes += $appEntry.Exe }
-                foreach ($exe in @($exes | Sort-Object -Unique)) {
-                    Get-SessionProcess $session $exe | Stop-Process -Force -ErrorAction SilentlyContinue
+                if (@($exes | Sort-Object -Unique | ForEach-Object { Get-SessionProcess $session $_ }).Count -gt 0) {
+                    Write-Skip "$($entry.App) for $($session.User): $have, the host provisions $want - open, so not updated now: at a run where it is closed"
+                    continue
                 }
-                $manifest = $builds[$name].Manifest
-                $command  = if ($manifest -and (Test-Path -LiteralPath $manifest)) {
-                                "Add-AppxPackage -Register '$manifest' -DisableDevelopmentMode -ForceApplicationShutdown"
-                            } else {
-                                "Add-AppxPackage -RegisterByFamilyName -MainPackage '${name}_$PublisherId' -ForceApplicationShutdown"
-                            }
-                Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null
+                Write-Step "$($entry.App) for $($session.User): $have, the host provisions $want - updating"
+                Invoke-PowerShellAsUser -Session $session -Command "Add-AppxPackage -Register '$($provisioned.Manifest)' -DisableDevelopmentMode" | Out-Null
 
                 $now = @(Get-AppxPackage -User $session.User -Name $name -ErrorAction SilentlyContinue) |
                        ForEach-Object { [version] $_.Version } | Sort-Object -Descending | Select-Object -First 1
                 if ($now -and $now -ge $want) {
-                    Write-Ok "$($entry.App) $now registered for $($session.Account) - started by the test below"
+                    Write-Ok "$($entry.App) $now registered for $($session.Account) - tested below, then closed again"
+                    Set-LaunchReason $session.Sid $entry.App 'updated'
                     $actions.Add("Update: $($session.Account) $($entry.App) $have -> $now")
                 } else {
                     Write-Warn "$($entry.App) for $($session.Account) is still $now after registering $want"
@@ -1116,7 +1147,13 @@ function Test-UserApp {
     if (-not $appEntry) { Write-Warn "$($Entry.App) $($pkg.Version) registered, but its manifest names no executable - not started"; return }
     if (@(Get-SessionProcess $Session $appEntry.Exe).Count -gt 0) { Write-Ok "$($Entry.App) $($pkg.Version) running"; return }
     if ($SkipLaunchTest) { Write-Ok "$($Entry.App) $($pkg.Version) registered (not running, launch test off)"; return }
-    if (Test-AppStart $Session $appEntry) { Write-Ok "$($Entry.App) $($pkg.Version) started"; return }
+    $reason = Get-LaunchReason $Session $Entry.App
+    if (-not $reason) { Write-Ok "$($Entry.App) $($pkg.Version) registered, not running - not started: closed or not in use"; return }
+    if (Test-AppStart $Session $appEntry -Close:($reason -ne 'opened by them')) {
+        Write-Ok "$($Entry.App) $($pkg.Version) starts ($reason)$(if ($reason -ne 'opened by them') { ' - closed again' })"
+        Clear-LaunchReason $Session $Entry.App
+        return
+    }
     New-Finding $Session.Account $Entry.App 'WontStart' "$($pkg.Version) is registered but $($appEntry.Exe).exe did not start or did not stay up" $pkg.Name -Sid $Session.Sid
 }
 
@@ -1152,9 +1189,12 @@ function Test-UserCopilot {
     $running = @(Get-SessionProcess $Session $exe)
     if ($running.Count -gt 0) { Write-Ok "Copilot $(Get-ProcessVersion $running) running"; return }
     if ($SkipLaunchTest) { Write-Ok "Copilot $($copilot.Version) installed (not running, launch test off)"; return }
+    $reason = Get-LaunchReason $Session 'Copilot'
+    if (-not $reason) { Write-Ok "Copilot $($copilot.Version) installed, not running - not started: closed or not in use"; return }
     $appEntry = Get-LaunchEntry $Session ([PSCustomObject]@{ App = 'Copilot'; Packages = @($copilot.Package | Where-Object { $_ }) })
-    if ($appEntry -and (Test-AppStart $Session $appEntry)) {
-        Write-Ok "Copilot $(Get-ProcessVersion @(Get-SessionProcess $Session $exe)) started"
+    if ($appEntry -and (Test-AppStart $Session $appEntry -Close:($reason -ne 'opened by them'))) {
+        Write-Ok "Copilot $($copilot.Version) starts ($reason)$(if ($reason -ne 'opened by them') { ' - closed again' })"
+        Clear-LaunchReason $Session 'Copilot'
         return
     }
     New-Finding $Session.Account 'Copilot' 'WontStart' "unified app $($copilot.Version) is installed but $CopilotExe did not start or did not stay up" $copilot.Package -Family $copilot.Family -Sid $Session.Sid
@@ -1406,6 +1446,8 @@ function Invoke-Repair {
         if ($command) { Invoke-PowerShellAsUser -Session $session -Command $command | Out-Null }
         # Also for our own account: Get-OpenFailure leaves out what this repair itself logs.
         $State.UserRepairs[$key] = (Get-Date).ToString('o')
+        # Our own account: the read-back starts it once to see the repair work, then closes it.
+        if (-not $finding.Customer) { Set-LaunchReason $finding.Sid $finding.App 'repaired' }
 
         # The headless console does not pass the exit code on: the package itself says
         # whether it worked. A reset or restart is judged by the launch test in the read-back.
@@ -1901,6 +1943,8 @@ try {
     Write-Step ('Apps users could not open since {0:yyyy-MM-dd HH:mm}' -f $since)
     $openFailures = @(Get-OpenFailure -Since $since -Until $until -Sessions $sessions -OwnRepairs $state.UserRepairs)
     if ($openFailures.Count -eq 0) { Write-Ok 'None' }
+    # Our own account tried to open it: the launch test may start it, and leaves it open.
+    foreach ($f in @($openFailures | Where-Object { $_.Problem -eq 'WontOpen' -and $_.Sid -and -not $_.Customer })) { Set-LaunchReason $f.Sid $f.App 'opened by them' }
 
     $crashes = @()
     if ($CrashThreshold -gt 0) {
