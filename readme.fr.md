@@ -1021,6 +1021,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-03 (9)
+| Modification |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.fr.md#repair-m365appshostps1) met chaque application sur une seule build, la plus récente : Photos et l'Outil Capture d'écran sont provisionnés depuis la build la plus récente de l'hôte quand elle est plus récente que celle provisionnée, les utilisateurs connectés passent sur la build provisionnée (aussi depuis une plus ancienne), et une nouvelle étape 3c retire chaque build plus ancienne de Teams, Outlook, Photos et l'Outil Capture d'écran - pour les utilisateurs déconnectés et comme copie provisionnée plus ancienne - en ne laissant qu'une build sur laquelle un utilisateur connecté se trouve encore. Cause trouvée sur LEM-AVD-6 : chaque inscription du nouvel Outlook faisait mettre à jour par Windows deux utilisateurs déconnectés restés sur 1.2026.1001.200, ce qui échouait pour eux avec `0x80070490` et faisait échouer l'inscription, donc Outlook ne démarrait pas pour itceadmin ; avec 1001.200 retiré à la main, il s'est ouvert à nouveau. Package principal comparé avec package principal : `-RemoveOld` de l'outil de réparation compare avec l'entrée provisionnée - le bundle pour l'Outil Capture d'écran - et retirerait chaque build |
+| Vérifié : sur LEM-AVD-6 à la main, la build Outlook plus ancienne retirée et 1.2026.1013.100 réinscrit pour itceadmin - Outlook s'ouvre. Contrôle de syntaxe ; sous Windows PowerShell 5.1 le nettoyage avec des builds simulées de l'Outil Capture d'écran - la 11.2608 provisionnée gardée bien que l'entrée provisionnée soit le bundle 2022.2608, 11.2607 gardée pour un utilisateur connecté, la 11.2606 des utilisateurs déconnectés retirée, le bundle provisionné plus ancien 2022.2607 déprovisionné. Le script lui-même pas encore exécuté sur un hôte de session |
 ### 2026-11-03 (8)
 | Modification |
 |--------|

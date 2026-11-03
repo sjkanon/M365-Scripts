@@ -1021,6 +1021,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-03 (9)
+| Change |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.md#repair-m365appshostps1) puts every app on one build, the newest: Photos and Snipping Tool are provisioned from the newest build on the host when it is newer than the provisioned one, signed-in users are moved onto the provisioned build (also from an older one), and a new step 3c removes every older build of Teams, Outlook, Photos and Snipping Tool - for signed-off users and as older provisioned copies - leaving only a build someone signed in is still on. Cause found on LEM-AVD-6: each registration of new Outlook made Windows update two signed-off users still on 1.2026.1001.200, failed on them with `0x80070490` and took the registration down, so Outlook would not start for itceadmin; with 1001.200 removed by hand it opened again. Main package is compared with main package: the repair helper's `-RemoveOld` compares with the provisioned entry - the bundle for Snipping Tool - and would remove every build |
+| Verified: on LEM-AVD-6 by hand, removing the older Outlook build and registering 1.2026.1013.100 again for itceadmin - Outlook opens. Syntax check; in Windows PowerShell 5.1 the cleanup against mocked Snipping Tool builds - the provisioned 11.2608 kept although the provisioned entry is bundle 2022.2608, 11.2607 kept for a signed-in user, the signed-off users' 11.2606 removed, the older provisioned bundle 2022.2607 deprovisioned. The script itself not yet run on a session host |
 ### 2026-11-03 (8)
 | Change |
 |--------|

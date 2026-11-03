@@ -511,9 +511,70 @@ function Get-UserAppState {
         elseif (-not ($mine.InstallLocation -and (Test-Path -LiteralPath $mine.InstallLocation))) { $why = 'its files are gone' }
         elseif ([string] $mine.Status -and [string] $mine.Status -ne 'Ok') { $why = "status $($mine.Status)" }
         elseif ($provTail -and (Get-VersionTail $mine.Version) -gt $provTail -and (Get-VersionTail $mine.Version) -notin $bundles) { $why = "Store build $($mine.Version), newer than the host provisions, its bundle gone from the host" }
+        elseif ($provTail -and (Get-VersionTail $mine.Version) -lt $provTail) { $why = "$($mine.Version), older than the build the host provisions" }
         elseif ($failed.ContainsKey($sid)) { $why = 'a registration of it failed for them' }
         [PSCustomObject]@{ Sid = $sid; User = $Users[$sid]; App = $Entry.App; Version = if ($mine) { [string] $mine.Version } else { '' }; Why = $why }
     }
+}
+
+function Remove-OlderBuild {
+    <#
+        Every build of this app older than the one the host provisions, gone: for every
+        user who has it (Remove-AppxPackage -AllUsers, else per user) and as an older
+        provisioned copy. Each registration of the app made Windows update the
+        signed-off users still on an older build too, failed on them with 0x80070490
+        ("Failure in the Resolved state handler") and took the whole registration down -
+        new Outlook would not start for itceadmin. Main package against main package:
+        the repair helper's -RemoveOld compares with the provisioned entry, which for
+        Snipping Tool is the bundle (2022.2607 against main packages 11.x), and would
+        take every build. A build someone signed in is still on is left: it may be open
+        for them, and a later run moves them on. Returns $true when no older build is left.
+    #>
+    param($Entry, [hashtable] $Users)
+    $target = @(Get-MainBuild $Entry | Where-Object { $_.Provisioned }) | Select-Object -First 1
+    if (-not $target) { Write-Skip "$($Entry.App): no provisioned build on disk - nothing removed"; return $true }
+    $keep  = [version] $target.Package.Version
+    $inUse = @()
+    foreach ($pkg in @(Get-AppxPackage -AllUsers -Name $Entry.Package -PackageTypeFilter Main -ErrorAction SilentlyContinue | Where-Object { [version] $_.Version -lt $keep })) {
+        $online = @($pkg.PackageUserInformation | Where-Object { $Users.ContainsKey([string] $_.UserSecurityId.Sid) -and [string] $_.InstallState -eq 'Installed' } |
+                    ForEach-Object { $Users[[string] $_.UserSecurityId.Sid] })
+        if ($online.Count -gt 0) {
+            $inUse += $pkg.PackageFullName
+            Write-Skip "$($pkg.PackageFullName): still in use by $($online -join ', ') - left, a later run moves them on"
+            Add-Action "$($Entry.App): $($pkg.PackageFullName) left, still in use by $($online -join ', ')"
+            continue
+        }
+        if (-not $PSCmdlet.ShouldProcess($pkg.PackageFullName, 'Remove-AppxPackage -AllUsers (older build)')) { continue }
+        try {
+            Remove-AppxPackage -Package $pkg.PackageFullName -AllUsers -ErrorAction Stop
+            Write-Ok "Removed the older $($pkg.PackageFullName) for every user"
+            Add-Action "$($Entry.App): older $($pkg.PackageFullName) removed for every user"
+        } catch {
+            Write-Warn ("{0} for all users: {1} - per user" -f $pkg.PackageFullName, (($_.Exception.Message -split '\r?\n' | Where-Object { $_.Trim() }) -join ' '))
+            foreach ($holder in @($pkg.PackageUserInformation)) {
+                $who = if ($holder.UserSecurityId.Username) { [string] $holder.UserSecurityId.Username } else { [string] $holder.UserSecurityId.Sid }
+                try {
+                    Remove-AppxPackage -Package $pkg.PackageFullName -User ([string] $holder.UserSecurityId.Sid) -ErrorAction Stop
+                    Write-Ok "  removed for $who"; Add-Action "$($Entry.App): older $($pkg.PackageFullName) removed for $who"
+                } catch { Write-Warn "  still there for ${who}: $($_.Exception.Message)" }
+            }
+        }
+    }
+    # Older provisioned copies - the provisioned entry can be the bundle, so on the version tail.
+    $keepTail = Get-VersionTail $keep
+    foreach ($prov in @(Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -eq $Entry.Package -and (Get-VersionTail $_.Version) -lt $keepTail })) {
+        if (-not $PSCmdlet.ShouldProcess($prov.PackageName, 'Remove-AppxProvisionedPackage -Online (older build)')) { continue }
+        try {
+            Remove-AppxProvisionedPackage -Online -PackageName $prov.PackageName -ErrorAction Stop | Out-Null
+            Write-Ok "Deprovisioned the older $($prov.PackageName)"; Add-Action "$($Entry.App): older provisioned $($prov.PackageName) removed"
+        } catch { Write-Warn "Could not deprovision $($prov.PackageName): $($_.Exception.Message)" }
+    }
+    # Read back. Left for someone signed in is expected, not a failure.
+    $left = @(Get-AppxPackage -AllUsers -Name $Entry.Package -PackageTypeFilter Main -ErrorAction SilentlyContinue |
+              Where-Object { [version] $_.Version -lt $keep -and $_.PackageFullName -notin $inUse })
+    if ($left.Count -eq 0) { Write-Ok "$($Entry.App): nothing older than $keep left$(if ($inUse) { ' but what signed-in users are still on' })"; return $true }
+    Write-Warn "$($Entry.App): still older on the host: $(@($left | ForEach-Object { $_.PackageFullName }) -join ', ')"
+    return $false
 }
 
 function Repair-UserApp {
@@ -661,10 +722,16 @@ try {
             $repairDir = Join-Path $WorkingDir 'Repair'
             $missingOnHost = @($before | Where-Object { $_.Provisioned -like 'NOT *' } | ForEach-Object { $_.App })
             $latest    = @(@{ Teams = 'teams'; Outlook = 'outlook' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App } | ForEach-Object { $_.Value })
-            # No installer: provisioned again from the build on the host when it is not
-            # provisioned, otherwise only their store cleaned.
-            $fromHost  = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -in $missingOnHost } | ForEach-Object { $_.Value })
-            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -notin $missingOnHost } | ForEach-Object { $_.Value })
+            # No installer: provisioned from the newest Microsoft-signed build on the host
+            # when it is not provisioned or a newer build than the provisioned one is
+            # there (a Store update of a user's) - so everyone ends on the newest - and
+            # otherwise only their store cleaned.
+            $newest    = @(foreach ($e in @($UserApps | Where-Object { $_.App -in $Apps.App })) {
+                             $b = @(Get-MainBuild $e)
+                             if ($e.App -in $missingOnHost -or ($b.Count -gt 0 -and -not $b[0].Provisioned)) { $e.App }
+                         })
+            $fromHost  = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -in $newest } | ForEach-Object { $_.Value })
+            $storeOnly = @(@{ Photos = 'photos'; SnippingTool = 'snippingtool' }.GetEnumerator() | Where-Object { $_.Key -in $Apps.App -and $_.Key -notin $newest } | ForEach-Object { $_.Value })
             foreach ($call in @(
                 if ($latest.Count) { [ordered]@{ Name = $latest; Latest = $true; Provision = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
                 if ($fromHost.Count) { [ordered]@{ Name = $fromHost; Provision = $true; FromHost = $true; Days = 1; WorkingDir = $repairDir; LogPath = $repairDir; Confirm = $false } }
@@ -726,6 +793,22 @@ try {
                     Add-Action "$($state.User) $($entry.App): $($row.result) ($($row.before) -> $($row.after))"
                     $Report.users.Add($row)
                 }
+            }
+        }
+
+        # -- 3c. Older builds -----------------------------------------------------
+        # After 3b moved the signed-in users on: what is left of older builds belongs to
+        # signed-off users, and makes every registration of the app fail for everyone.
+        Write-Step '3c. Older builds - every app on one build, the newest the host provisions'
+        $Report.olderBuilds = [ordered]@{}
+        if ($NoUserRepair) {
+            Write-Skip '-NoUserRepair: older builds left, users were not moved on'
+        } else {
+            $usersNow = Get-SignedInUser
+            foreach ($entry in @($Apps | Where-Object { $_.Package })) {
+                $clean = Remove-OlderBuild -Entry $entry -Users $usersNow
+                $Report.olderBuilds[$entry.App] = if ($clean) { 'none left' } else { 'some left' }
+                if (-not $clean) { $exitCode = 1 }
             }
         }
 

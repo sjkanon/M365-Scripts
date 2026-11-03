@@ -1021,6 +1021,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-03 (9)
+| Wijziging |
+|--------|
+| [`Repair-M365AppsHost.ps1`](scripts/RDS/readme.nl.md#repair-m365appshostps1) zet elke app op één build, de nieuwste: Foto's en Knipprogramma worden klaargezet vanaf de nieuwste build op de host als die nieuwer is dan de klaargezette, aangemelde gebruikers gaan naar de klaargezette build (ook vanaf een oudere), en een nieuwe stap 3c verwijdert elke oudere build van Teams, Outlook, Foto's en Knipprogramma - bij afgemelde gebruikers en als oudere klaargezette kopie - en laat alleen een build staan waar een aangemelde gebruiker nog op zit. Oorzaak gevonden op LEM-AVD-6: elke registratie van de nieuwe Outlook liet Windows twee afgemelde gebruikers op 1.2026.1001.200 bijwerken, dat faalde bij hen met `0x80070490` en trok de registratie mee, dus startte Outlook niet voor itceadmin; met 1001.200 met de hand verwijderd opende hij weer. Hoofdpakket wordt met hoofdpakket vergeleken: `-RemoveOld` van het hersteltool vergelijkt met de klaargezette vermelding - bij Knipprogramma de bundle - en zou elke build weghalen |
+| Geverifieerd: op LEM-AVD-6 met de hand, de oudere Outlook-build verwijderd en 1.2026.1013.100 opnieuw geregistreerd voor itceadmin - Outlook opent. Syntaxcontrole; in Windows PowerShell 5.1 het opruimen tegen nagebootste Knipprogramma-builds - de klaargezette 11.2608 blijft hoewel de klaargezette vermelding bundle 2022.2608 is, 11.2607 blijft voor een aangemelde gebruiker, 11.2606 van afgemelde gebruikers verwijderd, de oudere klaargezette bundle 2022.2607 weggehaald. Het script zelf nog niet gedraaid op een sessiehost |
 ### 2026-11-03 (8)
 | Wijziging |
 |--------|
