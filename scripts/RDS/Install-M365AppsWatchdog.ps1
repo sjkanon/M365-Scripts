@@ -6,7 +6,7 @@
     straight after.
 
 .DESCRIPTION
-    Puts four scripts in -WorkingDir (C:\IT\AppWatchdog) on each host and registers the
+    Puts five scripts in -WorkingDir (C:\IT\AppWatchdog) on each host and registers the
     watchdog task with Watch-M365Apps.ps1 -Install. From the checkout this script is
     in; downloaded on its own to a session host - no checkout - from GitHub at the
     commit pinned below, each file refused unless its SHA-256 matches:
@@ -15,12 +15,13 @@
       Repair-AppxPackageStore.ps1  its host repair (scripts\Device)
       Get-M365AppsLog.ps1          its evidence collector
       Repair-M365AppsHost.ps1      repair and test the host in one go, by hand
+      Save-StoreAppPackage.ps1     Photos / Snipping Tool package files from Microsoft
 
     Per host, in order:
 
       1. Lock      -WorkingDir is locked to System and Administrators before anything
                    is copied into it - System runs what is there.
-      2. Copy      The four scripts, over PowerShell remoting with -ComputerName, and
+      2. Copy      The five scripts, over PowerShell remoting with -ComputerName, and
                    read back by SHA-256 against this checkout.
       3. Install   Watch-M365Apps.ps1 -Install, from the installed copy. -Install does
                    not read the existing config.json - run without -WebhookUrl, it
@@ -70,6 +71,13 @@
 .PARAMETER Restart
     With -Then Repair: restart a host when a restart is due and nobody is signed in.
 
+.PARAMETER FetchPackages
+    With -Then Repair: first Save-StoreAppPackage.ps1 on each host - Photos and
+    Snipping Tool as complete, Microsoft-signed package files from Microsoft's delivery
+    service, no Store app, winget or sign-in - into <WorkingDir>\Packages. The repair
+    then provisions them where they are not provisioned or newer than what the host
+    provisions, so every host ends on the newest build.
+
 .PARAMETER StoreLatest
     With -Then Repair: Photos and Snipping Tool at the current Microsoft Store build,
     provisioned complete on each host (Repair-M365AppsHost.ps1 -StoreLatest). winget
@@ -115,6 +123,7 @@ param (
     [string]       $Then = 'None',
     [switch]       $Restart,
     [switch]       $StoreLatest,
+    [switch]       $FetchPackages,
     [string]       $WorkingDir = 'C:\IT\AppWatchdog'
 )
 
@@ -151,6 +160,7 @@ $Pin = @{
         'Repair-AppxPackageStore.ps1' = @{ Path = 'scripts/Device/Repair-AppxPackageStore.ps1'; Hash = 'B512C5EE1B438AD1BE6D9CF6817F098C41FBEFD1B12EC8810D502D0679126897' }
         'Get-M365AppsLog.ps1'         = @{ Path = 'scripts/RDS/Get-M365AppsLog.ps1';            Hash = '7A77015B171FFFBBDCA60BACE23DD017DE1ED337D8AA2311F5E84CB8F359FA4F' }
         'Repair-M365AppsHost.ps1'     = @{ Path = 'scripts/RDS/Repair-M365AppsHost.ps1';        Hash = 'FDF1F84FA209CD07E8B8E2BED3FBB8DFC7FA7A7C9646973433B3887F8C286627' }
+        'Save-StoreAppPackage.ps1'    = @{ Path = 'scripts/RDS/Save-StoreAppPackage.ps1';       Hash = '' }
     }
 }
 $Sources = [ordered]@{}
@@ -258,7 +268,11 @@ $InstallBlock = {
 }
 
 $ThenBlock = {
-    param([string] $WorkingDir, [string] $Then, [bool] $Restart, [bool] $StoreLatest)
+    param([string] $WorkingDir, [string] $Then, [bool] $Restart, [bool] $StoreLatest, [bool] $FetchPackages)
+    if ($Then -eq 'Repair' -and $FetchPackages) {
+        & (Join-Path $WorkingDir 'Save-StoreAppPackage.ps1') -OutputFolder (Join-Path $WorkingDir 'Packages') | Out-Host
+        if ($LASTEXITCODE -ne 0) { Write-Host '  [WARN] Not every package could be fetched - the repair uses what is there' -ForegroundColor Yellow }
+    }
     $params = @{}
     if ($Then -eq 'Check') { $params['CheckOnly'] = $true } else { $params['Confirm'] = $false; if ($Restart) { $params['Restart'] = $true }; if ($StoreLatest) { $params['StoreLatest'] = $true } }
     & (Join-Path $WorkingDir 'Repair-M365AppsHost.ps1') @params | Out-Host
@@ -271,6 +285,7 @@ Write-Host ''
 Write-Host ("  M365 app watchdog - install from {0}{1} - {2}" -f $PSScriptRoot, $(if ($Commit) { " ($Commit)" } else { '' }), ($targets -join ', ')) -ForegroundColor Cyan
 if ($Restart -and $Then -ne 'Repair') { Write-Warn '-Restart only counts with -Then Repair - ignored' }
 if ($StoreLatest -and $Then -ne 'Repair') { Write-Warn '-StoreLatest only counts with -Then Repair - ignored' }
+if ($FetchPackages -and $Then -ne 'Repair') { Write-Warn '-FetchPackages only counts with -Then Repair - ignored' }
 if ($StoreLatest -and $ComputerName) {
     if ($staging) { Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false }
     Write-Error '-StoreLatest needs an Entra sign-in nobody can answer over remoting - run it on each host, or Repair-AppxPackageStore.ps1 -ComputerName ... -Name snippingtool,photos -Provision from here'
@@ -330,7 +345,7 @@ foreach ($target in $targets) {
 
         if ($Then -ne 'None') {
             Write-Step "5. Then - $Then"
-            $code = & $run $ThenBlock @($WorkingDir, $Then, [bool] $Restart, [bool] $StoreLatest)
+            $code = & $run $ThenBlock @($WorkingDir, $Then, [bool] $Restart, [bool] $StoreLatest, [bool] $FetchPackages)
             $row.Then = switch ($code) { 0 { 'healthy' } 2 { 'healthy, restart due' } default { "exit $code" } }
         }
     } catch {

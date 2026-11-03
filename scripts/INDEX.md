@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-196 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+197 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -144,6 +144,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Restore-RecycleBinItems.ps1`](SharePoint/Restore-RecycleBinItems.ps1) | [`SharePoint/`](SharePoint/readme.md) | Restore deleted files and folders from SharePoint or OneDrive recycle bins - one site, or every SharePoint site in a tenant - with interactive admin sign-in. |
 | [`Revoke-SharePointUserAccess.ps1`](SharePoint/Revoke-SharePointUserAccess.ps1) | [`SharePoint/`](SharePoint/readme.md) | Revoke one user's access to SharePoint Online everywhere it is granted — site collection admin, role assignments at every level, SharePoint group membership an… |
 | [`Rollback-InternalMic.ps1`](Device/audio/Rollback-InternalMic.ps1) | [`Device/audio/`](Device/audio/readme.md) | Rollback: Re-enable Internal Microphone |
+| [`Save-StoreAppPackage.ps1`](RDS/Save-StoreAppPackage.ps1) | [`RDS/`](RDS/readme.md) | Download Photos and Snipping Tool as complete, Microsoft-signed package files - the bundle and the frameworks it needs - for provisioning on session hosts, wit… |
 | [`Search-AADDSUserActivity.ps1`](Azure/Search-AADDSUserActivity.ps1) | [`Azure/`](Azure/readme.md) | Search all Azure AD Domain Services audit tables in Log Analytics for a single user in one query. |
 | [`Search-MailboxAuditLog.ps1`](Office365Toolkit/Exchange/Search-MailboxAuditLog.ps1) | [`Office365Toolkit/Exchange/`](Office365Toolkit/Exchange/readme.md) | Search the Microsoft 365 Unified Audit Log for sign-in and mailbox access events. |
 | [`Search-SharePointContent.ps1`](SharePoint/Search-SharePointContent.ps1) | [`SharePoint/`](SharePoint/readme.md) | Search SharePoint and OneDrive content through Microsoft Graph - signed in as you by default, or app-only tenant-wide - and report the permissions on every hit. |

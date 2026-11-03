@@ -750,7 +750,16 @@ try {
             $fromFolder = @(); $storeOnly = @()
             foreach ($e in @($UserApps | Where-Object { $_.App -in $Apps.App -and $nameOf[$_.App] -notin $storeApps })) {
                 $files = @(Get-ChildItem -LiteralPath (Join-Path $PackageFolder $pkgOf[$e.App]) -File -Recurse -Include '*.msixbundle', '*.appxbundle', '*.msix', '*.appx' -ErrorAction SilentlyContinue)
-                if ($e.App -in $missingOnHost -and $files.Count -gt 0) { $fromFolder += $nameOf[$e.App] }
+                # The bundle in the folder newer than what the host provisions (on the version
+                # tail - the provisioned entry can be the bundle or the main package): so
+                # every host ends on the build Save-StoreAppPackage.ps1 fetched.
+                $inFolder = @($files | Where-Object { $_.Name -like "$($pkgOf[$e.App])_*bundle" } | ForEach-Object { try { [version] ($_.Name -split '_')[1] } catch { } } | Sort-Object -Descending) | Select-Object -First 1
+                $provided = [string] @($before | Where-Object { $_.App -eq $e.App } | ForEach-Object { $_.Provisioned })[0]
+                $newer    = $inFolder -and $provided -match '^\d+(\.\d+){1,3}$' -and (Get-VersionTail $inFolder) -gt (Get-VersionTail $provided)
+                if ($files.Count -gt 0 -and ($e.App -in $missingOnHost -or $newer)) {
+                    $fromFolder += $nameOf[$e.App]
+                    if ($newer) { Write-Ok "$($e.App): $inFolder in $PackageFolder is newer than the provisioned $provided - provisioning it" }
+                }
                 else {
                     $storeOnly += $nameOf[$e.App]
                     if ($e.App -in $missingOnHost) { Write-Warn "$($e.App) is not provisioned and $PackageFolder\$($pkgOf[$e.App]) has no package files - new profiles do not get it until they are there" }
