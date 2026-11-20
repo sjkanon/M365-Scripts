@@ -22,6 +22,7 @@ and the recycle bin, which Graph has no API for; Exchange Online for the audit l
 
 | Script | Description |
 |--------|-------------|
+| [`Add-OneDriveShortcut.ps1`](Add-OneDriveShortcut.ps1) ([docs](#add-onedriveshortcutps1)) | Put a shortcut to one SharePoint folder in the OneDrive of a list of users ("Add shortcut to My files") — via a temporary app, like the other SharePoint scripts. Reports by default, creates with `-Apply` |
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Search a whole site (name, path, type, size, date or full text) and report the permissions on every hit — PnP/CSOM, signs in as you |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | The same question through Microsoft Graph, one site or tenant-wide — signed in as you, or app-only (`-AppOnly`) to see everything — files and folders |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restore deleted files/folders from a site or OneDrive recycle bin (dry-run by default) |
@@ -820,6 +821,56 @@ another script already cached for the tenant is reused. `-ClientId` skips app re
 - Not yet verified on a tenant: whether owners who only hold Full Control on the folders (not
   on the site) can open the group page to manage membership. If they cannot, the site Owners
   manage it, or the owners get Read on the site.
+
+---
+
+### Add-OneDriveShortcut.ps1
+
+Puts a shortcut to one SharePoint folder in the root of each user's OneDrive — what a user gets with **Add shortcut to My files**, done for many people at once. Users come from `-UserPrincipalName`, a CSV with a `UserPrincipalName` column and/or an Entra group (nested members included, disabled accounts skipped).
+
+Reporting is the default: per user `AlreadyThere`, `WouldCreate`, `UserNotFound`, `NoOneDrive` or `Failed`. With `-Apply` the missing shortcuts are created (`Created`). Running it again is safe — a user who already has a shortcut to this folder is skipped, whatever it is called.
+
+**Sign-in** works like the other SharePoint scripts: you sign in delegated as Global Administrator or Application Administrator (the GDAP customer per `load.config.ps1`), the script creates a temporary App Registration `OneDrive-Shortcut-Temp-<timestamp>` with only the application permissions this run needs, works app-only with it, and deletes it at the end — also after an error or Ctrl+C. A delegated admin cannot write into someone else's OneDrive, which is why the app is needed.
+
+| Run | Permissions on the temporary app |
+|-----|----------------------------------|
+| Report | `Files.Read.All`, `Sites.Read.All`, `User.Read.All` |
+| `-Apply` | `Files.ReadWrite.All` instead of `Files.Read.All` |
+| `-GroupId` | + `GroupMember.Read.All` |
+
+**Parameters**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `-FolderUrl` | string | — | URL of the folder in SharePoint: the folder URL, the library view in the address bar (`.../Forms/AllItems.aspx?id=...`) or a "Copy link" link. Required unless `-DriveId`/`-ItemId` |
+| `-DriveId` / `-ItemId` | string | — | The folder by drive and item id instead of by URL |
+| `-ShortcutName` | string | folder name | Name of the shortcut in OneDrive |
+| `-UserPrincipalName` | string[] | — | One or more users |
+| `-CsvPath` | string | — | CSV with a `UserPrincipalName` column |
+| `-GroupId` | string[] | — | One or more Entra groups by object id or mail address; every enabled user in them, nested included. A shared mailbox is not a group |
+| `-TenantId` | string | GDAP customer | Tenant id or domain |
+| `-AppOnly` | switch | off | Use the app for the tenant in `graph.appid.json` instead of a temporary app |
+| `-ClientId` / `-CertificateThumbprint` | string | — | Use an app of your own instead of a temporary app |
+| `-Apply` | switch | off | Create the shortcuts. Without it nothing changes in any OneDrive |
+| `-OutputPath` | string | `C:\Temp\OneDriveShortcut_<ts>.csv` | CSV with one row per user |
+
+**Examples**
+
+```powershell
+# Report
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com `
+    -FolderUrl 'https://contoso.sharepoint.com/sites/Team/Shared Documents/Projects' -GroupId <group-id>
+
+# One user first, check their OneDrive, then the rest
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com -FolderUrl $url -UserPrincipalName jan@contoso.com -Apply
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com -FolderUrl $url -GroupId <group-id> -Apply
+```
+
+**Notes**
+
+- The script does not grant access to the folder. A user without access gets a shortcut that leads nowhere.
+- The OneDrive must exist (the user has signed in at least once); otherwise `NoOneDrive`.
+- If the temporary app cannot be deleted, the script prints its object id and the `Remove-MgApplication` command to remove it by hand.
 
 ---
 

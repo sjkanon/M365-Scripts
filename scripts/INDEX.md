@@ -4,7 +4,7 @@
 
 Every script in this repository, A-Z, with the folder it lives in. Use your browser's find (Ctrl+F) — this page exists so you do not have to guess which workload folder a script is under.
 
-197 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
+198 scripts across 57 folders. Regenerate with `pwsh -File scripts/Startup/Update-ScriptIndex.ps1` after adding, renaming or removing one.
 
 > Looking for what a category contains rather than a specific script? Start at the [folder overview](readme.md).
 
@@ -18,6 +18,7 @@ Every script in this repository, A-Z, with the folder it lives in. Use your brow
 | [`Add-M365GroupMember.ps1`](LegacyUtilities/Entra/Add-M365GroupMember.ps1) | [`LegacyUtilities/Entra/`](LegacyUtilities/Entra/readme.md) | Add or remove one or more members of a Microsoft 365 / security group via Microsoft Graph. |
 | [`Add-MailboxDelegateAccess.ps1`](LegacyUtilities/Exchange/Add-MailboxDelegateAccess.ps1) | [`LegacyUtilities/Exchange/`](LegacyUtilities/Exchange/readme.md) | Grant Full Access and/or Send As delegate rights on one mailbox, a CSV list of mailboxes, or every mailbox in the tenant. |
 | [`Add-NetworkPrinterConnection.ps1`](TenantOnboarding/AppDeployment/Add-NetworkPrinterConnection.ps1) | [`TenantOnboarding/AppDeployment/`](TenantOnboarding/AppDeployment/readme.md) | Add a network printer connection by IP-based port and driver name. |
+| [`Add-OneDriveShortcut.ps1`](SharePoint/Add-OneDriveShortcut.ps1) | [`SharePoint/`](SharePoint/readme.md) | Put a shortcut to one SharePoint folder in the OneDrive of every listed user ("Add shortcut to My files"). Reports by default, creates with -Apply. |
 | [`Add-SharePointHelpPage.ps1`](SharePoint/Provisioning/Add-SharePointHelpPage.ps1) | [`SharePoint/Provisioning/`](SharePoint/Provisioning/readme.md) | Put the end-user explanation on the team site itself, as a SharePoint page built from the same configuration the structure was built from. Supports -WhatIf. |
 | [`add-shortcut-lock.ps1`](Intune/Desktop/Add%20Lockscreen%20to%20start%20and%20desktop/add-shortcut-lock.ps1) | [`Intune/Desktop/Add Lockscreen to start and desktop/`](Intune/Desktop/Add%20Lockscreen%20to%20start%20and%20desktop/readme.md) | Pin a file to the Windows taskbar from a script. |
 | [`Add-UserToFeatureGroup.ps1`](TenantOnboarding/UserManagement/Add-UserToFeatureGroup.ps1) | [`TenantOnboarding/UserManagement/`](TenantOnboarding/UserManagement/readme.md) | Add or remove a user from a named Entra ID group, to gate access to an add-on feature. |

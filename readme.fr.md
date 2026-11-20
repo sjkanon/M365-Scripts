@@ -368,6 +368,10 @@ Opérations sur le contenu des sites SharePoint Online et de OneDrive via PnP Po
 
 **[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — « chacun n'accède qu'à son propre sous-dossier » : une config JSON nomme les owners, les sous-dossiers d'un dossier et qui appartient à chacun. Il crée un groupe de sécurité Entra par sous-dossier plus un groupe Owners (Contrôle total partout ; les owners sont propriétaires de chaque groupe, pour que les chefs d'équipe gèrent eux-mêmes les membres dans Mes groupes), crée les dossiers manquants et, au besoin, un dossier personnel par personne, donne à chaque groupe lecture/écriture sur son sous-dossier et Lecture sur le parent, réserve tout le reste du parent aux owners, et retire tous les autres - Membres, Visiteurs, anciennes attributions, liens de partage. Rapport par défaut, modifie avec `-Apply`, relit le résultat et écrit un CSV.
 
+#### Raccourci OneDrive vers un dossier
+
+**[Add-OneDriveShortcut.ps1](scripts/SharePoint/Add-OneDriveShortcut.ps1)** — « Ajouter un raccourci à Mes fichiers » pour une liste d'utilisateurs à la fois : un raccourci vers un dossier SharePoint à la racine du OneDrive de chacun, utilisateurs depuis des UPN, un CSV ou un groupe Entra. Connexion déléguée, travaille via une inscription d'application temporaire avec uniquement les permissions nécessaires et la supprime ensuite. Rapport par défaut, création avec `-Apply`, ignore qui en a déjà un.
+
 #### Restauration de la corbeille
 
 Restaurer des fichiers et dossiers supprimés depuis la corbeille d'un site ou de OneDrive — essai à blanc par défaut, `-Apply` pour restaurer réellement.
@@ -1021,6 +1025,11 @@ Ces scripts sont fournis en l'état. Testez toujours dans un environnement hors 
 
 > Remarque : les entrées plus anciennes peuvent faire référence à d'anciens noms de dossiers tels que [`Custom Scripts/`](scripts/Custom%20Scripts/readme.fr.md) et `Testing Scripts/`. Ces noms de chemins reflètent la structure du dépôt au moment de la modification concernée.
 
+### 2026-11-17
+| Modification |
+|--------|
+| Nouveau [`Add-OneDriveShortcut.ps1`](scripts/SharePoint/readme.fr.md#add-onedriveshortcutps1) : place un raccourci vers un dossier SharePoint dans le OneDrive d'une liste d'utilisateurs (UPN, CSV ou groupe Entra) - ce que fait « Ajouter un raccourci à Mes fichiers », pour beaucoup de personnes à la fois. Connexion comme les autres scripts SharePoint : en délégué comme admin, une inscription d'application temporaire avec uniquement les permissions Graph nécessaires (`Files.Read.All` pour un rapport, `Files.ReadWrite.All` avec `-Apply`), supprimée à la fin. Rapport par défaut, création avec `-Apply`, ignore un utilisateur qui a déjà un raccourci vers le dossier |
+| Vérifié : uniquement le contrôle de syntaxe. Pas encore exécuté sur un tenant - d'abord `-Apply` pour un utilisateur et vérifier le raccourci dans son OneDrive |
 ### 2026-11-03 (11)
 | Modification |
 |--------|

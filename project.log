@@ -2,6 +2,20 @@ M365-Scripts — projectlog
 ===========================
 Nieuwste bovenaan. Per wijziging: datum, onderwerp, wat/waarom, bestanden, commit.
 
+2026-11-17 — Nieuw: Add-OneDriveShortcut.ps1 (snelkoppeling naar SharePoint-map in OneDrive)
+  - Wat: zet bij een lijst gebruikers (UPN's, CSV of Entra-groep) een "Snelkoppeling toevoegen aan
+    Mijn bestanden" naar één map in de root van hun OneDrive. Rapporteert standaard, maakt aan met
+    -Apply; slaat over wie al een snelkoppeling naar die map heeft.
+  - Aanmelden zoals de andere SharePoint-scripts: gedelegeerd als admin, tijdelijke app-registratie
+    OneDrive-Shortcut-Temp-<ts> met alleen de nodige Graph-rechten (Files.Read.All bij rapport,
+    Files.ReadWrite.All met -Apply, + Sites.Read.All, User.Read.All, GroupMember.Read.All bij
+    -GroupId), secret 1 dag, aan het eind verwijderd (finally). -AppOnly/-ClientId slaan de
+    tijdelijke app over. Gedelegeerd zelf kan niet in andermans OneDrive schrijven.
+  - Niet getest tegen een tenant: alleen syntaxcheck en linkcheck. Eerst -Apply bij één gebruiker.
+  - Geen menu.ps1-item: alle lettertoetsen zijn bezet.
+  - Bestanden: scripts/SharePoint/Add-OneDriveShortcut.ps1, scripts/SharePoint/readme{,.nl,.fr}.md,
+    readme{,.nl,.fr}.md, scripts/INDEX.md
+
 2026-10-16 — Watchdog zet Knipprogramma zelf klaar; geen melding meer elke run tijdens cooldown
   - Waarom: LEM-AVD-4 meldde SnippingTool NotProvisioned, en elke 30 min opnieuw "herstel mislukt".
   - Commits: 6b3dfc4 (watchdog); downloadpin naar 6b3dfc4 + SHA-256

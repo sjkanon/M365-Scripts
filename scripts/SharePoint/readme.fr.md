@@ -23,6 +23,7 @@ Graph n'a pas d'API ; Exchange Online pour le journal d'audit.
 
 | Script | Description |
 |--------|-------------|
+| [`Add-OneDriveShortcut.ps1`](Add-OneDriveShortcut.ps1) ([docs](#add-onedriveshortcutps1)) | Placer un raccourci vers un dossier SharePoint dans le OneDrive d'une liste d'utilisateurs (« Ajouter un raccourci à Mes fichiers ») — via une application temporaire, comme les autres scripts SharePoint. Rapport par défaut, création avec `-Apply` |
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Rechercher dans tout un site (nom, chemin, type, taille, date ou texte intégral) et indiquer les autorisations de chaque résultat — PnP/CSOM, se connecte avec votre compte |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | La même question via Microsoft Graph, un site ou tout le tenant — connecté avec votre compte, ou en app-only (`-AppOnly`) pour tout voir — fichiers et dossiers |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Restaurer des fichiers/dossiers supprimés depuis la corbeille d'un site ou d'un OneDrive (essai à blanc par défaut) |
@@ -857,6 +858,56 @@ l'enregistrement de l'application.
 - Pas encore vérifié sur un tenant : si des owners qui n'ont le Contrôle total que sur les
   dossiers (pas sur le site) peuvent ouvrir la page du groupe pour gérer les membres. Sinon, les
   propriétaires du site s'en chargent, ou les owners reçoivent la Lecture sur le site.
+
+---
+
+### Add-OneDriveShortcut.ps1
+
+Place à la racine du OneDrive de chaque utilisateur un raccourci vers un dossier SharePoint — ce qu'un utilisateur obtient avec **Ajouter un raccourci à Mes fichiers**, pour beaucoup de personnes à la fois. Les utilisateurs viennent de `-UserPrincipalName`, d'un CSV avec une colonne `UserPrincipalName` et/ou d'un groupe Entra (membres imbriqués inclus, comptes désactivés ignorés).
+
+Le rapport est le comportement par défaut : par utilisateur `AlreadyThere`, `WouldCreate`, `UserNotFound`, `NoOneDrive` ou `Failed`. Avec `-Apply`, les raccourcis manquants sont créés (`Created`). Relancer est sans risque — un utilisateur qui a déjà un raccourci vers ce dossier est ignoré, quel que soit son nom.
+
+**Connexion** comme pour les autres scripts SharePoint : vous vous connectez en délégué comme Global Administrator ou Application Administrator (le client GDAP selon `load.config.ps1`), le script crée une inscription d'application temporaire `OneDrive-Shortcut-Temp-<horodatage>` avec uniquement les permissions d'application nécessaires à cette exécution, travaille en app-only avec elle, et la supprime à la fin — aussi après une erreur ou Ctrl+C. Un admin délégué ne peut pas écrire dans le OneDrive d'un autre ; d'où l'application.
+
+| Exécution | Permissions de l'application temporaire |
+|-----------|-----------------------------------------|
+| Rapport | `Files.Read.All`, `Sites.Read.All`, `User.Read.All` |
+| `-Apply` | `Files.ReadWrite.All` au lieu de `Files.Read.All` |
+| `-GroupId` | + `GroupMember.Read.All` |
+
+**Paramètres**
+
+| Paramètre | Type | Défaut | Description |
+|-----------|------|--------|-------------|
+| `-FolderUrl` | string | — | URL du dossier dans SharePoint : l'URL du dossier, la vue de bibliothèque dans la barre d'adresse (`.../Forms/AllItems.aspx?id=...`) ou un lien « Copier le lien ». Obligatoire sauf avec `-DriveId`/`-ItemId` |
+| `-DriveId` / `-ItemId` | string | — | Le dossier par identifiants de drive et d'élément plutôt que par URL |
+| `-ShortcutName` | string | nom du dossier | Nom du raccourci dans OneDrive |
+| `-UserPrincipalName` | string[] | — | Un ou plusieurs utilisateurs |
+| `-CsvPath` | string | — | CSV avec une colonne `UserPrincipalName` |
+| `-GroupId` | string[] | — | Un ou plusieurs groupes Entra, par object id ou adresse mail ; chaque utilisateur activé, imbriqués inclus. Une boîte partagée n'est pas un groupe |
+| `-TenantId` | string | client GDAP | Id ou domaine du tenant |
+| `-AppOnly` | switch | désactivé | L'application du tenant dans `graph.appid.json` au lieu d'une application temporaire |
+| `-ClientId` / `-CertificateThumbprint` | string | — | Votre propre application au lieu d'une application temporaire |
+| `-Apply` | switch | désactivé | Crée les raccourcis. Sans lui, aucun OneDrive ne change |
+| `-OutputPath` | string | `C:\Temp\OneDriveShortcut_<ts>.csv` | CSV avec une ligne par utilisateur |
+
+**Exemples**
+
+```powershell
+# Rapport
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com `
+    -FolderUrl 'https://contoso.sharepoint.com/sites/Team/Documents partages/Projets' -GroupId <id-groupe>
+
+# D'abord un utilisateur, vérifier son OneDrive, puis le reste
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com -FolderUrl $url -UserPrincipalName jan@contoso.com -Apply
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com -FolderUrl $url -GroupId <id-groupe> -Apply
+```
+
+**Remarques**
+
+- Le script ne donne pas accès au dossier. Un utilisateur sans accès obtient un raccourci qui ne mène nulle part.
+- Le OneDrive doit exister (l'utilisateur s'est connecté au moins une fois) ; sinon `NoOneDrive`.
+- Si l'application temporaire ne peut pas être supprimée, le script affiche son object id et la commande `Remove-MgApplication` pour la supprimer à la main.
 
 ---
 

@@ -23,6 +23,7 @@ Exchange Online voor het auditlogboek.
 
 | Script | Omschrijving |
 |--------|-------------|
+| [`Add-OneDriveShortcut.ps1`](Add-OneDriveShortcut.ps1) ([docs](#add-onedriveshortcutps1)) | Zet bij een lijst gebruikers een snelkoppeling naar één SharePoint-map in hun OneDrive ("Snelkoppeling toevoegen aan Mijn bestanden") — via een tijdelijke app, zoals de andere SharePoint-scripts. Rapporteert standaard, maakt aan met `-Apply` |
 | [`Find-SiteContent.ps1`](Find-SiteContent.ps1) ([docs](#find-sitecontentps1)) | Doorzoek een hele site (naam, pad, type, grootte, datum of volledige tekst) en rapporteer de rechten op elke treffer — PnP/CSOM, meldt zich aan als jou |
 | [`Search-SharePointContent.ps1`](Search-SharePointContent.ps1) ([docs](#search-sharepointcontentps1)) | Dezelfde vraag via Microsoft Graph, één site of tenantbreed — aangemeld als jij, of app-only (`-AppOnly`) om alles te zien — bestanden en mappen |
 | [`Restore-RecycleBinItems.ps1`](Restore-RecycleBinItems.ps1) ([docs](#restore-recyclebinitemsps1)) | Verwijderde bestanden/mappen terugzetten uit de prullenbak van een site of OneDrive (standaard een proefdraai) |
@@ -835,6 +836,56 @@ hergebruikt. `-ClientId` slaat de app-registratie over.
 - Nog niet geverifieerd op een tenant: of owners die alleen Volledig beheer op de mappen hebben
   (niet op de site) de groepspagina kunnen openen om leden te beheren. Lukt dat niet, dan
   beheren de site-eigenaren het, of krijgen de owners Lezen op de site.
+
+---
+
+### Add-OneDriveShortcut.ps1
+
+Zet in de root van de OneDrive van elke gebruiker een snelkoppeling naar één SharePoint-map — wat een gebruiker zelf krijgt met **Snelkoppeling toevoegen aan Mijn bestanden**, maar voor veel mensen tegelijk. Gebruikers komen uit `-UserPrincipalName`, een CSV met een kolom `UserPrincipalName` en/of een Entra-groep (inclusief geneste leden, uitgeschakelde accounts worden overgeslagen).
+
+Rapporteren is de standaard: per gebruiker `AlreadyThere`, `WouldCreate`, `UserNotFound`, `NoOneDrive` of `Failed`. Met `-Apply` worden de ontbrekende snelkoppelingen aangemaakt (`Created`). Opnieuw draaien kan zonder risico — wie al een snelkoppeling naar deze map heeft wordt overgeslagen, hoe die ook heet.
+
+**Aanmelden** gaat zoals bij de andere SharePoint-scripts: je meldt je gedelegeerd aan als Global Administrator of Application Administrator (de GDAP-klant volgens `load.config.ps1`), het script maakt een tijdelijke app-registratie `OneDrive-Shortcut-Temp-<tijdstempel>` met alleen de application permissions die deze run nodig heeft, werkt daarmee app-only, en verwijdert hem aan het eind — ook na een fout of Ctrl+C. Een gedelegeerde admin kan niet in andermans OneDrive schrijven; daarom is de app nodig.
+
+| Run | Rechten op de tijdelijke app |
+|-----|------------------------------|
+| Rapport | `Files.Read.All`, `Sites.Read.All`, `User.Read.All` |
+| `-Apply` | `Files.ReadWrite.All` in plaats van `Files.Read.All` |
+| `-GroupId` | + `GroupMember.Read.All` |
+
+**Parameters**
+
+| Parameter | Type | Standaard | Omschrijving |
+|-----------|------|-----------|--------------|
+| `-FolderUrl` | string | — | URL van de map in SharePoint: de map-URL, de bibliotheekweergave in de adresbalk (`.../Forms/AllItems.aspx?id=...`) of een "Link kopiëren"-link. Verplicht tenzij `-DriveId`/`-ItemId` |
+| `-DriveId` / `-ItemId` | string | — | De map via drive- en item-id in plaats van via de URL |
+| `-ShortcutName` | string | mapnaam | Naam van de snelkoppeling in OneDrive |
+| `-UserPrincipalName` | string[] | — | Een of meer gebruikers |
+| `-CsvPath` | string | — | CSV met een kolom `UserPrincipalName` |
+| `-GroupId` | string[] | — | Een of meer Entra-groepen, op object-id of mailadres; elke ingeschakelde gebruiker erin, ook genest. Een gedeelde mailbox is geen groep |
+| `-TenantId` | string | GDAP-klant | Tenant-id of domein |
+| `-AppOnly` | switch | uit | De app voor de tenant uit `graph.appid.json` in plaats van een tijdelijke app |
+| `-ClientId` / `-CertificateThumbprint` | string | — | Een eigen app in plaats van een tijdelijke app |
+| `-Apply` | switch | uit | Maak de snelkoppelingen aan. Zonder verandert er in geen enkele OneDrive iets |
+| `-OutputPath` | string | `C:\Temp\OneDriveShortcut_<ts>.csv` | CSV met één regel per gebruiker |
+
+**Voorbeelden**
+
+```powershell
+# Rapport
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com `
+    -FolderUrl 'https://contoso.sharepoint.com/sites/Team/Gedeelde documenten/Projecten' -GroupId <groep-id>
+
+# Eerst één gebruiker, OneDrive controleren, dan de rest
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com -FolderUrl $url -UserPrincipalName jan@contoso.com -Apply
+.\Add-OneDriveShortcut.ps1 -TenantId contoso.onmicrosoft.com -FolderUrl $url -GroupId <groep-id> -Apply
+```
+
+**Opmerkingen**
+
+- Het script geeft geen toegang tot de map. Een gebruiker zonder toegang krijgt een snelkoppeling die nergens heen gaat.
+- De OneDrive moet bestaan (gebruiker is minstens één keer aangemeld); anders `NoOneDrive`.
+- Lukt het verwijderen van de tijdelijke app niet, dan toont het script het object-id en de `Remove-MgApplication`-opdracht om hem met de hand op te ruimen.
 
 ---
 

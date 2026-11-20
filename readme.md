@@ -368,6 +368,10 @@ Content operations on SharePoint Online sites and OneDrive via PnP PowerShell.
 
 **[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "people may only reach their own subfolder": one JSON config names the owners, the subfolders of a folder and who belongs in each. It creates an Entra security group per subfolder plus an Owners group (Full Control everywhere; the owners own every group, so the team leads manage membership themselves in My Groups), creates missing folders and optional personal folders per person, gives each group read/write on its subfolder and Read on the parent, locks anything else in the parent to the owners, and removes everyone else - Members, Visitors, old grants, sharing links. Reports by default, changes with `-Apply`, reads the result back and writes a CSV.
 
+#### OneDrive Shortcut to a Folder
+
+**[Add-OneDriveShortcut.ps1](scripts/SharePoint/Add-OneDriveShortcut.ps1)** — "Add shortcut to My files" for a list of users at once: a shortcut to one SharePoint folder in the root of each user's OneDrive, users from UPNs, a CSV or an Entra group. Signs in delegated, works through a temporary App Registration with only the permissions the run needs and deletes it again. Reports by default, creates with `-Apply`, skips who already has one.
+
 #### Recycle Bin Restore
 
 Restore deleted files and folders from a site or OneDrive recycle bin — dry-run by default, `-Apply` to actually restore.
@@ -1021,6 +1025,11 @@ These scripts are provided as-is. Always test in a non-production environment be
 
 > Note: Older entries can reference historical folder names such as [`Custom Scripts/`](scripts/Custom%20Scripts/readme.md) and `Testing Scripts/`. These path names reflect the repository structure at the time of that change.
 
+### 2026-11-17
+| Change |
+|--------|
+| New [`Add-OneDriveShortcut.ps1`](scripts/SharePoint/readme.md#add-onedriveshortcutps1): puts a shortcut to one SharePoint folder in the OneDrive of a list of users (UPNs, CSV or Entra group) - what "Add shortcut to My files" does, for many people at once. Sign-in like the other SharePoint scripts: delegated as admin, a temporary App Registration with only the Graph permissions the run needs (`Files.Read.All` for a report, `Files.ReadWrite.All` with `-Apply`), deleted at the end. Reports by default, creates with `-Apply`, skips a user who already has a shortcut to the folder |
+| Verified: syntax check only. Not yet run against a tenant - run `-Apply` for one user first and check the shortcut in their OneDrive |
 ### 2026-11-03 (11)
 | Change |
 |--------|

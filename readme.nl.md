@@ -368,6 +368,10 @@ Contentbewerkingen op SharePoint Online-sites en OneDrive via PnP PowerShell.
 
 **[Set-SharePointFolderAccess.ps1](scripts/SharePoint/Set-SharePointFolderAccess.ps1)** — "mensen mogen alleen bij hun eigen submap": één JSON-config noemt de owners, de submappen van een map en wie in elke submap hoort. Het maakt per submap een Entra-beveiligingsgroep plus een Owners-groep (Volledig beheer overal; de owners zijn eigenaar van elke groep, zodat de teamleads het lidmaatschap zelf beheren in Mijn groepen), maakt ontbrekende mappen en eventueel persoonlijke mappen per persoon aan, geeft elke groep lezen/schrijven op zijn submap en Lezen op de bovenliggende map, sluit al het andere in de bovenliggende map af voor de owners, en verwijdert iedereen anders - Leden, Bezoekers, oude toekenningen, deellinks. Rapporteert standaard, wijzigt met `-Apply`, leest het resultaat terug en schrijft een CSV.
 
+#### OneDrive-snelkoppeling naar een map
+
+**[Add-OneDriveShortcut.ps1](scripts/SharePoint/Add-OneDriveShortcut.ps1)** — "Snelkoppeling toevoegen aan Mijn bestanden" voor een lijst gebruikers tegelijk: een snelkoppeling naar één SharePoint-map in de root van ieders OneDrive, gebruikers uit UPN's, een CSV of een Entra-groep. Meldt je gedelegeerd aan, werkt via een tijdelijke app-registratie met alleen de rechten die de run nodig heeft en verwijdert die weer. Rapporteert standaard, maakt aan met `-Apply`, slaat over wie er al een heeft.
+
 #### Prullenbak terugzetten
 
 Verwijderde bestanden en mappen terugzetten uit de prullenbak van een site of OneDrive — standaard een proefdraai, `-Apply` om echt terug te zetten.
@@ -1021,6 +1025,11 @@ Deze scripts worden geleverd zoals ze zijn. Test altijd in een niet-productieomg
 
 > Opmerking: oudere vermeldingen kunnen verwijzen naar historische mapnamen zoals [`Custom Scripts/`](scripts/Custom%20Scripts/readme.nl.md) en `Testing Scripts/`. Die padnamen geven de structuur van de repository weer op het moment van die wijziging.
 
+### 2026-11-17
+| Wijziging |
+|--------|
+| Nieuw [`Add-OneDriveShortcut.ps1`](scripts/SharePoint/readme.nl.md#add-onedriveshortcutps1): zet bij een lijst gebruikers (UPN's, CSV of Entra-groep) een snelkoppeling naar één SharePoint-map in hun OneDrive - wat "Snelkoppeling toevoegen aan Mijn bestanden" doet, voor veel mensen tegelijk. Aanmelden zoals bij de andere SharePoint-scripts: gedelegeerd als admin, een tijdelijke app-registratie met alleen de Graph-rechten die de run nodig heeft (`Files.Read.All` voor een rapport, `Files.ReadWrite.All` met `-Apply`), aan het eind verwijderd. Rapporteert standaard, maakt aan met `-Apply`, slaat een gebruiker over die al een snelkoppeling naar de map heeft |
+| Gecontroleerd: alleen de syntaxcheck. Nog niet tegen een tenant gedraaid - eerst `-Apply` voor één gebruiker en de snelkoppeling in diens OneDrive controleren |
 ### 2026-11-03 (11)
 | Wijziging |
 |--------|
